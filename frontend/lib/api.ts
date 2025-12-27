@@ -402,6 +402,14 @@ class ApiClient {
         }>(`/library/tracks?${new URLSearchParams(params as any).toString()}`);
     }
 
+    async getShuffledTracks(limit?: number) {
+        const params = limit ? `?limit=${limit}` : "";
+        return this.request<{
+            tracks: any[];
+            total: number;
+        }>(`/library/tracks/shuffle${params}`);
+    }
+
     async deleteTrack(trackId: string) {
         return this.request<{ message: string }>(`/library/tracks/${trackId}`, {
             method: "DELETE",

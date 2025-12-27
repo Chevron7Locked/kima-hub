@@ -112,21 +112,17 @@ export default function LibraryPage() {
         playTracks(formattedTracks, startIndex);
     };
 
-    // Shuffle entire library - fetches all tracks for true shuffle
+    // Shuffle entire library - uses server-side shuffle for large libraries
     const handleShuffleLibrary = async () => {
         try {
-            // Fetch a large batch of tracks for shuffling
-            const { tracks: allTracks } = await api.getTracks({
-                limit: 10000,
-            });
+            // Use server-side shuffle endpoint for better performance with large libraries
+            const { tracks: shuffledTracks } = await api.getShuffledTracks(500);
 
-            if (allTracks.length === 0) {
+            if (shuffledTracks.length === 0) {
                 return;
             }
 
-            // Shuffle the tracks
-            const shuffled = [...allTracks].sort(() => Math.random() - 0.5);
-            const formattedTracks = formatTracksForAudio(shuffled);
+            const formattedTracks = formatTracksForAudio(shuffledTracks);
             playTracks(formattedTracks, 0);
         } catch (error) {
             console.error("Failed to shuffle library:", error);
