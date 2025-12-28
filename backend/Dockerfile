@@ -48,15 +48,14 @@ RUN mkdir -p /app/cache/covers /app/cache/transcodes /app/logs && \
     # Remove download/network utilities (prevents downloading malware)
     rm -f /usr/bin/wget /usr/bin/curl /bin/wget /bin/curl 2>/dev/null || true && \
     rm -f /usr/bin/nc /bin/nc /usr/bin/ncat /usr/bin/netcat 2>/dev/null || true && \
-    rm -f /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet 2>/dev/null || true
+    rm -f /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet 2>/dev/null || true && \
+    chmod -R a+rw /app
 
 EXPOSE 3006
 
 # Health check using Node.js (no wget needed)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD ["node", "healthcheck.js"]
-
-RUN chmod -R a+rw /app
 
 # Use tini for proper signal handling
 ENTRYPOINT ["/usr/bin/tini", "--", "docker-entrypoint.sh"]
