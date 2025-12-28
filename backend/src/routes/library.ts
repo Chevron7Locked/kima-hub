@@ -25,6 +25,9 @@ import { dataCacheService } from "../services/dataCache";
 
 const router = Router();
 
+// Maximum items per request to prevent DoS attacks while supporting large libraries
+const MAX_LIMIT = 10000;
+
 const applyCoverArtCorsHeaders = (res: Response, origin?: string) => {
     if (origin) {
         res.setHeader("Access-Control-Allow-Origin", origin);
@@ -693,7 +696,7 @@ router.get("/artists", async (req, res) => {
             offset: offsetParam = "0",
             filter = "owned", // owned (default), discovery, all
         } = req.query;
-        const limit = parseInt(limitParam as string, 10) || 500; // No max cap - support unlimited pagination
+        const limit = Math.min(parseInt(limitParam as string, 10) || 500, MAX_LIMIT);
         const offset = parseInt(offsetParam as string, 10) || 0;
 
         // Build where clause based on filter
@@ -790,6 +793,9 @@ router.get("/artists", async (req, res) => {
                         },
                         select: {
                             id: true,
+                            _count: {
+                                select: { tracks: true },
+                            },
                         },
                     },
                 },
@@ -804,6 +810,11 @@ router.get("/artists", async (req, res) => {
 
         const artistsWithImages = artistsWithAlbums.map((artist) => {
             const coverArt = imageMap.get(artist.id) || artist.heroUrl || null;
+            // Sum up track counts from all albums
+            const trackCount = artist.albums.reduce(
+                (sum, album) => sum + (album._count?.tracks || 0),
+                0
+            );
             return {
                 id: artist.id,
                 mbid: artist.mbid,
@@ -811,6 +822,7 @@ router.get("/artists", async (req, res) => {
                 heroUrl: coverArt,
                 coverArt, // Alias for frontend consistency
                 albumCount: artist.albums.length,
+                trackCount,
             };
         });
 
@@ -1577,7 +1589,7 @@ router.get("/albums", async (req, res) => {
             offset: offsetParam = "0",
             filter = "owned", // owned (default), discovery, all
         } = req.query;
-        const limit = parseInt(limitParam as string, 10) || 500; // No max cap - support unlimited pagination
+        const limit = Math.min(parseInt(limitParam as string, 10) || 500, MAX_LIMIT);
         const offset = parseInt(offsetParam as string, 10) || 0;
 
         let where: any = {
@@ -1725,7 +1737,7 @@ router.get("/albums/:id", async (req, res) => {
 router.get("/tracks", async (req, res) => {
     try {
         const { albumId, limit: limitParam = "100", offset: offsetParam = "0" } = req.query;
-        const limit = parseInt(limitParam as string, 10) || 100;
+        const limit = Math.min(parseInt(limitParam as string, 10) || 100, MAX_LIMIT);
         const offset = parseInt(offsetParam as string, 10) || 0;
 
         const where: any = {};
@@ -1768,6 +1780,100 @@ router.get("/tracks", async (req, res) => {
     } catch (error) {
         console.error("Get tracks error:", error);
         res.status(500).json({ error: "Failed to fetch tracks" });
+    }
+});
+
+// GET /library/tracks/shuffle?limit=100 - Get random tracks for shuffle play
+router.get("/tracks/shuffle", async (req, res) => {
+    try {
+        const { limit: limitParam = "100" } = req.query;
+        const limit = Math.min(parseInt(limitParam as string, 10) || 100, MAX_LIMIT);
+
+        // Get total count of tracks
+        const totalTracks = await prisma.track.count();
+
+        if (totalTracks === 0) {
+            return res.json({ tracks: [], total: 0 });
+        }
+
+        // For small libraries, fetch all and shuffle in memory
+        // For large libraries, use random offset sampling for better performance
+        let tracksData;
+        if (totalTracks <= limit) {
+            // Fetch all tracks and shuffle
+            tracksData = await prisma.track.findMany({
+                include: {
+                    album: {
+                        include: {
+                            artist: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+            // Fisher-Yates shuffle
+            for (let i = tracksData.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [tracksData[i], tracksData[j]] = [tracksData[j], tracksData[i]];
+            }
+        } else {
+            // For large libraries, sample random tracks using multiple random offsets
+            // This provides good randomization without loading entire library
+            const sampleSize = Math.min(limit, totalTracks);
+            const offsets = new Set<number>();
+
+            // Generate unique random offsets
+            while (offsets.size < sampleSize) {
+                offsets.add(Math.floor(Math.random() * totalTracks));
+            }
+
+            // Fetch tracks at random offsets (batch for efficiency)
+            const offsetArray = Array.from(offsets);
+            tracksData = await prisma.track.findMany({
+                skip: 0,
+                take: totalTracks, // We'll filter by our offsets
+                include: {
+                    album: {
+                        include: {
+                            artist: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            // Pick tracks at our random indices and shuffle
+            const selectedTracks = offsetArray.map(idx => tracksData[idx]).filter(Boolean);
+            tracksData = selectedTracks;
+
+            // Fisher-Yates shuffle
+            for (let i = tracksData.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [tracksData[i], tracksData[j]] = [tracksData[j], tracksData[i]];
+            }
+        }
+
+        // Add coverArt field to albums
+        const tracks = tracksData.slice(0, limit).map((track) => ({
+            ...track,
+            album: {
+                ...track.album,
+                coverArt: track.album.coverUrl,
+            },
+        }));
+
+        res.json({ tracks, total: totalTracks });
+    } catch (error) {
+        console.error("Shuffle tracks error:", error);
+        res.status(500).json({ error: "Failed to shuffle tracks" });
     }
 });
 
