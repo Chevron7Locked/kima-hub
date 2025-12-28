@@ -287,6 +287,8 @@ The unified Lidify container handles most configuration automatically. Here are 
 | `SESSION_SECRET`      | Auto-generated                     | Session encryption key (recommended to set for persistence across restarts) |
 | `TZ`                  | `UTC`                              | Timezone for the container                                                  |
 | `LIDIFY_CALLBACK_URL` | `http://host.docker.internal:3030` | URL for Lidarr webhook callbacks (see [Lidarr integration](#lidarr))        |
+| `NUM_WORKERS`         | Auto-generated (50% of CPU Cores)  | Limit the amount of workers being used in Auto Analysis.                    |
+
 
 The music library path is configured via Docker volume mount (`-v /path/to/music:/music`).
 
