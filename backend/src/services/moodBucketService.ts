@@ -272,7 +272,7 @@ export class MoodBucketService {
 
     /**
      * NEW: Calculate mood scores from moodTags array
-     * This is the fix for your database where moodTags is populated but individual fields are null
+     * Addresses database moodTags populated, but individual fields are null
      */
     private calculateMoodScoresFromTags(moodTags: string[]): Record<MoodType, number> {
         const scores: Record<MoodType, number> = {
