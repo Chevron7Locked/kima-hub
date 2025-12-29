@@ -9,6 +9,16 @@
  * When individual mood fields are null, parse the moodTags array instead
  */
 
+/**
+ * FIXED Mood Bucket Service
+ *
+ * This version supports BOTH:
+ * 1. Enhanced mode with individual mood fields (moodHappy, moodSad, etc.)
+ * 2. Standard mode with moodTags array parsing
+ *
+ * The key fix: When individual mood fields are null, parse the moodTags array instead
+ */
+
 import { prisma } from "../utils/db";
 
 // Mood configuration with scoring rules
@@ -272,7 +282,7 @@ export class MoodBucketService {
 
     /**
      * NEW: Calculate mood scores from moodTags array
-     * Addresses database moodTags populated, but individual fields are null
+     * Fixes scenario where database MoodTags are populated, but individual fields are null
      */
     private calculateMoodScoresFromTags(moodTags: string[]): Record<MoodType, number> {
         const scores: Record<MoodType, number> = {
@@ -312,46 +322,83 @@ export class MoodBucketService {
     }
 
     /**
-     * Evaluate mood rules (unchanged from original)
+     * Evaluate mood rules against track features
+     * Returns a score 0-1 based on how well the track matches the rules
+     * Uses gradient scoring for partial credit (preserved from original)
      */
     private evaluateMoodRules(
         track: TrackWithAnalysis,
         rules: Record<string, any>
     ): number {
-        let matchingRules = 0;
-        let totalRules = 0;
+        let totalScore = 0;
+        let ruleCount = 0;
 
-        for (const [field, conditions] of Object.entries(rules)) {
-            totalRules++;
+        for (const [field, constraints] of Object.entries(rules)) {
             const value = track[field as keyof TrackWithAnalysis];
 
+            // Skip if value is null
             if (value === null || value === undefined) {
                 continue;
             }
 
-            let matches = false;
+            ruleCount++;
 
-            if (typeof conditions === "string") {
-                matches = value === conditions;
-            } else if (typeof conditions === "object") {
-                const min = conditions.min;
-                const max = conditions.max;
-
-                const numValue = Number(value);
-                if (isNaN(numValue)) continue;
-
-                const meetsMin = min === undefined || numValue >= min;
-                const meetsMax = max === undefined || numValue <= max;
-                matches = meetsMin && meetsMax;
+            // Handle string equality (e.g., keyScale: "minor")
+            if (typeof constraints === "string") {
+                totalScore += value === constraints ? 1 : 0;
+                continue;
             }
 
-            if (matches) {
-                matchingRules++;
+            // Handle numeric range constraints
+            const numValue = value as number;
+            const { min, max } = constraints as { min?: number; max?: number };
+
+            // Calculate how well the value matches the constraint
+            let fieldScore = 0;
+
+            if (min !== undefined && max !== undefined) {
+                // Range constraint - value should be between min and max
+                if (numValue >= min && numValue <= max) {
+                    // Perfect match in range
+                    fieldScore = 1;
+                } else if (numValue < min) {
+                    // Below range - linearly decrease score
+                    fieldScore = Math.max(0, 1 - (min - numValue) * 2);
+                } else {
+                    // Above range - linearly decrease score
+                    fieldScore = Math.max(0, 1 - (numValue - max) * 2);
+                }
+            } else if (min !== undefined) {
+                // Minimum constraint - higher is better
+                if (numValue >= min) {
+                    // Score increases with value above threshold
+                    fieldScore = Math.min(1, 0.5 + (numValue - min) * 0.5);
+                } else {
+                    // Below minimum - partial credit
+                    fieldScore = Math.max(0, (numValue / min) * 0.5);
+                }
+            } else if (max !== undefined) {
+                // Maximum constraint - lower is better
+                if (numValue <= max) {
+                    // Score increases as value decreases below threshold
+                    fieldScore = Math.min(1, 0.5 + (max - numValue) * 0.5);
+                } else {
+                    // Above maximum - partial credit
+                    fieldScore = Math.max(
+                        0,
+                        ((1 - numValue) / (1 - max)) * 0.5
+                    );
+                }
             }
+
+            totalScore += fieldScore;
         }
 
-        if (totalRules === 0) return 0;
-        return matchingRules / totalRules;
+        // No rules matched (missing data)
+        if (ruleCount === 0) return 0;
+
+        // Return average score across all rules
+        return totalScore / ruleCount;
     }
 
     /**
