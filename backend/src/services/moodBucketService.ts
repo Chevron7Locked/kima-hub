@@ -9,16 +9,6 @@
  * When individual mood fields are null, parse the moodTags array instead
  */
 
-/**
- * FIXED Mood Bucket Service
- *
- * This version supports BOTH:
- * 1. Enhanced mode with individual mood fields (moodHappy, moodSad, etc.)
- * 2. Standard mode with moodTags array parsing
- *
- * The key fix: When individual mood fields are null, parse the moodTags array instead
- */
-
 import { prisma } from "../utils/db";
 
 // Mood configuration with scoring rules
@@ -282,7 +272,6 @@ export class MoodBucketService {
 
     /**
      * NEW: Calculate mood scores from moodTags array
-     * Fixes scenario where database MoodTags are populated, but individual fields are null
      */
     private calculateMoodScoresFromTags(moodTags: string[]): Record<MoodType, number> {
         const scores: Record<MoodType, number> = {
@@ -397,8 +386,41 @@ export class MoodBucketService {
         // No rules matched (missing data)
         if (ruleCount === 0) return 0;
 
-        // Return average score across all rules
-        return totalScore / ruleCount;
+        // Average score across all rules, with minimum threshold
+        const avgScore = totalScore / ruleCount;
+
+        // Only assign to mood if score is above 0.5 threshold
+        return avgScore >= 0.5 ? avgScore : 0;
+    }
+
+    /**
+     * Get mood presets with track counts for the UI
+     */
+    async getMoodPresets(): Promise<
+        {
+            id: string;
+            name: string;
+            color: string;
+            icon: string;
+            trackCount: number;
+        }[]
+    > {
+        // Count tracks per mood in parallel
+        const countPromises = VALID_MOODS.map(async (mood) => {
+            const count = await prisma.moodBucket.count({
+                where: { mood, score: { gte: 0.5 } },
+            });
+            const config = MOOD_CONFIG[mood];
+            return {
+                id: mood,
+                name: config.name,
+                color: config.color,
+                icon: config.icon,
+                trackCount: count,
+            };
+        });
+
+        return Promise.all(countPromises);
     }
 
     /**
@@ -442,20 +464,23 @@ export class MoodBucketService {
 
         const config = MOOD_CONFIG[mood];
 
-        // Get top-scoring tracks for this mood (2x limit for better randomization)
+        // Get top tracks for this mood, randomly sampled
+        // First get IDs with high scores, then randomly select
         const moodBuckets = await prisma.moodBucket.findMany({
-            where: { mood },
-            orderBy: { score: "desc" },
-            take: limit * 2,
+            where: { mood, score: { gte: 0.5 } },
             select: { trackId: true, score: true },
+            orderBy: { score: "desc" },
+            take: 100, // Pool to sample from
         });
 
-        if (moodBuckets.length === 0) {
-            console.log(`[MoodBucket] No tracks found for mood: ${mood}`);
+        if (moodBuckets.length < 8) {
+            console.log(
+                `[MoodBucket] Not enough tracks for mood ${mood}: ${moodBuckets.length}`
+            );
             return null;
         }
 
-        // Randomly select tracks from the top-scoring ones
+        // Randomly sample from the pool
         const shuffled = [...moodBuckets].sort(() => Math.random() - 0.5);
         const selectedIds = shuffled.slice(0, limit).map((b) => b.trackId);
 
