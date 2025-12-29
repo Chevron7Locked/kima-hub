@@ -1,7 +1,7 @@
 import { Router } from "express";
+import { z } from "zod";
 import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
-import { z } from "zod";
 import { sessionLog } from "../utils/playlistLogger";
 
 const router = Router();
@@ -132,6 +132,10 @@ router.get("/:id", async (req, res) => {
                         username: true,
                     },
                 },
+                hiddenByUsers: {
+                    where: { userId },
+                    select: { id: true },
+                },
                 items: {
                     include: {
                         track: {
@@ -203,6 +207,7 @@ router.get("/:id", async (req, res) => {
         res.json({
             ...playlist,
             isOwner: playlist.userId === userId,
+            isHidden: playlist.hiddenByUsers.length > 0,
             trackCount: playlist.items.length,
             pendingCount: playlist.pendingTracks.length,
             items: formattedItems,
