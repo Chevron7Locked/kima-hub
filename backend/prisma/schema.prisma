@@ -19,6 +19,8 @@ model User {
   twoFactorRecoveryCodes String? // Recovery codes (encrypted, comma-separated hashed codes)
   moodMixParams          Json? // Saved mood mix parameters for "Your Mood Mix"
   createdAt              DateTime @default(now())
+  oidcId                 String? // The OIDC provider id
+  oidcUid                String? // The OIDC-specific user ID
 
   plays                Play[]
   playlists            Playlist[]
@@ -121,27 +123,27 @@ model SystemSettings {
 
   // === Download Preferences ===
   // Primary download source: "soulseek" (per-track) or "lidarr" (full albums)
-  downloadSource     String @default("soulseek")
+  downloadSource   String @default("soulseek")
   // When soulseek is primary and fails: "none" (skip) or "lidarr" (download full album)
-  soulseekFallback   String @default("none")
+  soulseekFallback String @default("none")
 
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
 }
 
 model Artist {
-  id                   String                   @id @default(cuid())
-  mbid                 String                   @unique
-  name                 String
-  normalizedName       String                   @default("") // Lowercase version for case-insensitive matching
-  summary              String?                  @db.Text
-  heroUrl              String?
-  genres               Json? // Array of genre strings from Last.fm/MusicBrainz
-  similarArtistsJson   Json? // Full Last.fm similar artists data [{name, mbid, match, image}]
-  lastSynced           DateTime                 @default(now())
-  lastEnriched         DateTime?
-  enrichmentStatus     String                   @default("pending") // pending, enriching, completed, failed
-  searchVector         Unsupported("tsvector")?
+  id                 String                   @id @default(cuid())
+  mbid               String                   @unique
+  name               String
+  normalizedName     String                   @default("") // Lowercase version for case-insensitive matching
+  summary            String?                  @db.Text
+  heroUrl            String?
+  genres             Json? // Array of genre strings from Last.fm/MusicBrainz
+  similarArtistsJson Json? // Full Last.fm similar artists data [{name, mbid, match, image}]
+  lastSynced         DateTime                 @default(now())
+  lastEnriched       DateTime?
+  enrichmentStatus   String                   @default("pending") // pending, enriching, completed, failed
+  searchVector       Unsupported("tsvector")?
 
   albums      Album[]
   similarFrom SimilarArtist[] @relation("FromArtist")
@@ -195,7 +197,7 @@ model Track {
   bpm        Float? // Beats per minute (e.g., 120.5)
   beatsCount Int? // Total beats in track
 
-  // Tonality  
+  // Tonality
   key         String? // Musical key (e.g., "C", "F#", "Bb")
   keyScale    String? // "major" or "minor"
   keyStrength Float? // Confidence 0-1
@@ -235,13 +237,13 @@ model Track {
   lastfmTags String[] // ["chill", "workout", "sad", "90s"]
 
   // Analysis Metadata
-  analysisStatus  String    @default("pending") // pending, processing, completed, failed
-  analysisVersion String? // Essentia version used
-  analysisMode    String? // 'standard' or 'enhanced'
-  analyzedAt      DateTime?
-  analysisError   String? // Error message if failed
-  analysisRetryCount Int @default(0) // Number of retry attempts
-  updatedAt       DateTime  @updatedAt
+  analysisStatus     String    @default("pending") // pending, processing, completed, failed
+  analysisVersion    String? // Essentia version used
+  analysisMode       String? // 'standard' or 'enhanced'
+  analyzedAt         DateTime?
+  analysisError      String? // Error message if failed
+  analysisRetryCount Int       @default(0) // Number of retry attempts
+  updatedAt          DateTime  @updatedAt
 
   album           Album            @relation(fields: [albumId], references: [id], onDelete: Cascade)
   plays           Play[]
@@ -314,15 +316,15 @@ model Playlist {
   name      String
   isPublic  Boolean  @default(false)
   createdAt DateTime @default(now())
-  
-  // Spotify import metadata
-  spotifyPlaylistId  String?  // Original Spotify playlist ID
-  spotifyPlaylistUrl String?  // Original Spotify URL for re-import
 
-  user           User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items          PlaylistItem[]
-  pendingTracks  PlaylistPendingTrack[]
-  hiddenByUsers  HiddenPlaylist[]
+  // Spotify import metadata
+  spotifyPlaylistId  String? // Original Spotify playlist ID
+  spotifyPlaylistUrl String? // Original Spotify URL for re-import
+
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items         PlaylistItem[]
+  pendingTracks PlaylistPendingTrack[]
+  hiddenByUsers HiddenPlaylist[]
 
   @@unique([userId, mixId])
   @@index([userId])
@@ -361,13 +363,13 @@ model PlaylistItem {
 model PlaylistPendingTrack {
   id               String   @id @default(cuid())
   playlistId       String
-  spotifyArtist    String   // Original artist name from Spotify
-  spotifyTitle     String   // Original track title from Spotify
-  spotifyAlbum     String   // Original album name from Spotify
-  albumMbid        String?  // MusicBrainz album ID if resolved
-  artistMbid       String?  // MusicBrainz artist ID if resolved
-  deezerPreviewUrl String?  // Deezer 30s preview URL for playback while pending
-  sort             Int      // Position in original playlist
+  spotifyArtist    String // Original artist name from Spotify
+  spotifyTitle     String // Original track title from Spotify
+  spotifyAlbum     String // Original album name from Spotify
+  albumMbid        String? // MusicBrainz album ID if resolved
+  artistMbid       String? // MusicBrainz artist ID if resolved
+  deezerPreviewUrl String? // Deezer 30s preview URL for playback while pending
+  sort             Int // Position in original playlist
   createdAt        DateTime @default(now())
 
   playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
@@ -380,22 +382,22 @@ model PlaylistPendingTrack {
 
 // Spotify Import Jobs - tracks import progress and state
 model SpotifyImportJob {
-  id                  String   @id
-  userId              String
-  spotifyPlaylistId   String
-  playlistName        String
-  status              String   // pending, downloading, scanning, creating_playlist, completed, failed, cancelled
-  progress            Int      @default(0) // 0-100
-  albumsTotal         Int
-  albumsCompleted     Int      @default(0)
-  tracksTotal         Int
-  tracksMatched       Int      @default(0)
-  tracksDownloadable  Int      @default(0)
-  createdPlaylistId   String?
-  error               String?
-  pendingTracks       Json     // Array of pending track objects
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                 String   @id
+  userId             String
+  spotifyPlaylistId  String
+  playlistName       String
+  status             String // pending, downloading, scanning, creating_playlist, completed, failed, cancelled
+  progress           Int      @default(0) // 0-100
+  albumsTotal        Int
+  albumsCompleted    Int      @default(0)
+  tracksTotal        Int
+  tracksMatched      Int      @default(0)
+  tracksDownloadable Int      @default(0)
+  createdPlaylistId  String?
+  error              String?
+  pendingTracks      Json // Array of pending track objects
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -464,12 +466,12 @@ model DownloadJob {
   discoveryBatchId String? // Links to Discovery Weekly batch if part of discovery
 
   // Release iteration tracking (for exhaustive retry)
-  triedReleases    String[]  @default([]) // GUIDs of releases we've tried
-  releaseIndex     Int       @default(0)   // Current position in release list
-  artistMbid       String?   // Artist MBID for same-artist fallback
-  cleared          Boolean   @default(false) // User dismissed from history
+  triedReleases String[] @default([]) // GUIDs of releases we've tried
+  releaseIndex  Int      @default(0) // Current position in release list
+  artistMbid    String? // Artist MBID for same-artist fallback
+  cleared       Boolean  @default(false) // User dismissed from history
 
-  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   discoveryBatch DiscoveryBatch? @relation(fields: [discoveryBatchId], references: [id], onDelete: SetNull)
 
   @@index([userId, status])
@@ -785,8 +787,8 @@ model DiscoverExclusion {
   id              String   @id @default(cuid())
   userId          String
   albumMbid       String // MusicBrainz release group ID
-  artistName      String?  // For display purposes
-  albumTitle      String?  // For display purposes
+  artistName      String? // For display purposes
+  albumTitle      String? // For display purposes
   lastSuggestedAt DateTime @default(now())
   expiresAt       DateTime // 6 months from lastSuggestedAt
 
@@ -904,8 +906,8 @@ model DeviceLinkCode {
 model MoodBucket {
   id        String   @id @default(cuid())
   trackId   String
-  mood      String   // happy, sad, chill, energetic, party, focus, melancholy, aggressive, acoustic
-  score     Float    // Confidence score 0-1
+  mood      String // happy, sad, chill, energetic, party, focus, melancholy, aggressive, acoustic
+  score     Float // Confidence score 0-1
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -921,7 +923,7 @@ model MoodBucket {
 model UserMoodMix {
   id          String   @id @default(cuid())
   userId      String   @unique
-  mood        String   // The selected mood (happy, sad, etc.)
+  mood        String // The selected mood (happy, sad, etc.)
   trackIds    String[] // Cached track IDs for the mix
   coverUrls   String[] // Cached cover URLs for display
   generatedAt DateTime // When this mix was generated
@@ -962,10 +964,10 @@ enum AlbumLocation {
 model Notification {
   id        String   @id @default(cuid())
   userId    String
-  type      String   // system, download_complete, playlist_ready, error, import_complete
+  type      String // system, download_complete, playlist_ready, error, import_complete
   title     String
   message   String?
-  metadata  Json?    // { playlistId, albumId, artistId, etc. }
+  metadata  Json? // { playlistId, albumId, artistId, etc. }
   read      Boolean  @default(false)
   cleared   Boolean  @default(false)
   createdAt DateTime @default(now())
