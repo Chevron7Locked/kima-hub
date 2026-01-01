@@ -63,6 +63,14 @@ except ImportError as e:
 TF_MODELS_AVAILABLE = False
 TensorflowPredictMusiCNN = None
 try:
+    import tensorflow as tf
+    # Limit TensorFlow memory usage (CPU & GPU)
+    try:
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except Exception:
+        pass
     from essentia.standard import TensorflowPredictMusiCNN
     TF_MODELS_AVAILABLE = True
     logger.info("TensorflowPredictMusiCNN available - Enhanced mode enabled")
