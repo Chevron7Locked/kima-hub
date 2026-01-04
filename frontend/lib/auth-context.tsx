@@ -31,7 +31,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const publicPaths = ["/login", "/register", "/onboarding", "/sync"];
+const publicPaths = ["/login", "/login/credentials", "/register", "/onboarding", "/sync"];
 
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -43,6 +43,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         // Check if user has valid session on mount ONLY
         const checkAuth = async () => {
+            // If we're on the OIDC callback page, or if URL has OIDC callback params, don't check auth yet.
+            // Let the callback page handle the token exchange first
+            if (typeof window !== "undefined") {
+                const urlParams = new URLSearchParams(window.location.search);
+                const hasOidcCallback = urlParams.has("code") || urlParams.has("state");
+
+                // Accept provider-specific callback paths like /auth/callback/:id
+                if ((pathname && pathname.startsWith("/auth/callback")) || hasOidcCallback) {
+                    setIsLoading(false);
+                    return;
+                }
+            }
+
             // Check for token in URL (from redirect after login)
             if (typeof window !== "undefined") {
                 const urlParams = new URLSearchParams(window.location.search);
@@ -84,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
 
                 // If not on a public path, check if we need onboarding
-                if (!publicPaths.includes(pathname)) {
+                if (!publicPaths.includes(pathname) || (pathname && pathname.startsWith("/auth/callback/"))) {
                     // Check if any users exist in the system
                     try {
                         const status = await api.get<{ hasAccount: boolean }>(

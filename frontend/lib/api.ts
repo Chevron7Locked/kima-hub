@@ -159,6 +159,7 @@ class ApiClient {
         if (typeof window !== "undefined") {
             localStorage.setItem(AUTH_TOKEN_KEY, token);
         }
+        this.tokenInitialized = true;
     }
 
     // Clear JWT token

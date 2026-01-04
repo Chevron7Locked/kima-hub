@@ -25,6 +25,7 @@
     "howler": "^2.2.4",
     "lucide-react": "^0.552.0",
     "next": "^16.0.10",
+    "oidc-client-ts": "^3.4.1",
     "qrcode.react": "^4.2.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",

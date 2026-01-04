@@ -1,14 +1,158 @@
 import { Router } from "express";
 import bcrypt from "bcrypt";
-import { prisma } from "../utils/db";
+import { createUser, prisma, updateUserRole } from "../utils/db";
 import { z } from "zod";
 import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import crypto from "crypto";
-import { requireAuth, requireAdmin, generateToken } from "../middleware/auth";
-import { encrypt, decrypt } from "../utils/encryption";
+import { generateToken, requireAdmin, requireAuth } from "../middleware/auth";
+import { decrypt, encrypt } from "../utils/encryption";
+import { AUTH_PROVIDERS, AuthType, OidcProvider } from "../utils/auth";
+import jwt from 'jsonwebtoken';
+import axios from "axios";
 
 const router = Router();
+
+interface Provider {
+    id: string;
+    name: string;
+    type: string;
+    oidcIssuer?: string;
+    oidcClientId?: string;
+}
+
+// GET /auth/providers - Public endpoint to get configured auth providers
+router.get("/providers", async (req, res) => {
+    try {
+        let providers: Array<Provider> = [];
+
+        AUTH_PROVIDERS.forEach((provider, id) => {
+            if (provider.type === AuthType.OIDC) {
+                providers.push({
+                    id: id,
+                    name: provider.name,
+                    type: "oidc",
+                    oidcIssuer: (provider as OidcProvider).issuer,
+                    oidcClientId: (provider as OidcProvider).clientId
+                });
+            } else if (provider.type === AuthType.CREDENTIALS) {
+                providers.push({
+                    id: id,
+                    name: provider.name,
+                    type: "credentials"
+                });
+            } else {
+                console.warn(`Unknown auth provider type for id ${id}`);
+            }
+        })
+
+        res.json({ providers });
+    } catch (error) {
+        console.error("Get auth providers error:", error);
+        res.status(500).json({ error: "Failed to get auth providers" });
+    }
+});
+
+AUTH_PROVIDERS.forEach((provider, id) => {
+    if (provider.type !== AuthType.OIDC) return;
+
+    const oidcProvider = provider as OidcProvider;
+
+    const envPrefix = `OIDC_${id.toUpperCase()}_`;
+    const issuer = process.env[`${envPrefix}ISSUER`]!!;
+    const clientId = process.env[`${envPrefix}CLIENT_ID`]!!;
+    const clientSecret = process.env[`${envPrefix}CLIENT_SECRET`]!!;
+
+    // POST /auth/oidc/login/:id - Accept id_token/access_token OR authorization code + code_verifier from SPA
+    router.post('/oidc/login/' + id, async (req, res) => {
+        try {
+            const { id_token, access_token, code, codeVerifier, redirectUri } = req.body;
+
+            // If code is provided, perform server-side PKCE token exchange
+            let finalIdToken: string | undefined = id_token;
+            let finalAccessToken: string | undefined = access_token;
+
+            const discoveryResp = await axios.get(`${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`, { timeout: 5000 });
+            const discovery = discoveryResp.data || {};
+            const tokenEndpoint = discovery.token_endpoint;
+            const userinfoEndpoint = discovery.userinfo_endpoint;
+
+            if (code) {
+                if (!tokenEndpoint) return res.status(500).json({ error: 'Provider token endpoint not found' });
+                // Exchange code for tokens using client_secret (confidential server)
+                const params = new URLSearchParams();
+                params.append('grant_type', 'authorization_code');
+                params.append('code', code);
+                params.append('redirect_uri', redirectUri);
+                params.append('client_id', clientId);
+                if (codeVerifier) params.append('code_verifier', codeVerifier);
+
+                const headers: any = { 'Content-Type': 'application/x-www-form-urlencoded' };
+                if (clientSecret) headers['Authorization'] = 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
+                const tokenResp = await axios.post(tokenEndpoint, params.toString(), { headers, timeout: 5000 });
+                const tokenData = tokenResp.data || {};
+                finalIdToken = tokenData.id_token;
+                finalAccessToken = tokenData.access_token;
+            }
+
+            // Extract claims from id_token or userinfo
+            let idClaims: any = {};
+            let userinfo: any = {};
+
+            if (finalIdToken) {
+                try {
+                    idClaims = jwt.decode(finalIdToken) || {};
+                } catch (e) {
+                    console.warn('Failed to decode id_token:', (e as any)?.message || e);
+                }
+            }
+
+            if ((!idClaims || !idClaims.sub) && finalAccessToken && userinfoEndpoint) {
+                try {
+                    const ui = await axios.get(userinfoEndpoint, { headers: { Authorization: `Bearer ${finalAccessToken}` }, timeout: 5000 });
+                    userinfo = ui.data || {};
+                } catch (e) {
+                    console.warn('Failed to fetch userinfo with access_token:', (e as any)?.message || e);
+                }
+            }
+
+            const merged = { ...idClaims, ...userinfo };
+            if (!merged.sub) return res.status(400).json({ error: 'No user identifier (sub) returned by provider' });
+            if (!merged.email) return res.status(400).json({ error: 'No email returned by provider' });
+
+            const uid = merged.sub;
+            const email = merged.email;
+            let role = 'user';
+            if (oidcProvider.roleField) {
+                const roleValue = merged[oidcProvider.roleField];
+                if (!roleValue) return res.status(400).json({ error: `No field '${oidcProvider.roleField}' provided for role in OIDC scope` });
+                if (Array.isArray(roleValue) && roleValue.length === 1) role = roleValue[0];
+                else if (typeof roleValue === 'string') role = roleValue;
+                else return res.status(400).json({ error: `Invalid role value '${roleValue}' provided for role in OIDC scope` });
+            }
+
+            // Find or create user
+            const username = merged.preferred_username || email;
+            let user = await prisma.user.findFirst({ where: { OR: [{ username }] } });
+            if (!user) {
+                const unusablePassword = crypto.randomBytes(32).toString('hex');
+                const unusablePasswordHash = await bcrypt.hash(unusablePassword, 10);
+                user = await createUser(username, unusablePasswordHash, role, id, uid);
+            } else if (user.oidcId !== id || user.oidcUid !== uid) {
+                return res.status(400).json({ error: `User '${username}' exists with different OIDC identity` });
+            } else if (user.role !== role) {
+                await updateUserRole(username, role);
+            }
+
+            const jwtToken = generateToken({ id: user.id, username: user.username, role: user.role });
+            return res.json({ token: jwtToken });
+        } catch (err) {
+            console.error('OIDC token login error:', err);
+            return res.status(500).json({ error: 'OIDC login failed', details: (err as any)?.message });
+        }
+    });
+})
 
 const loginSchema = z.object({
     username: z.string().min(1),
@@ -291,27 +435,7 @@ router.post("/create-user", requireAuth, requireAdmin, async (req, res) => {
             return res.status(400).json({ error: "Username already taken" });
         }
 
-        // Create user
-        const passwordHash = await bcrypt.hash(password, 10);
-        const user = await prisma.user.create({
-            data: {
-                username,
-                passwordHash,
-                role: role || "user",
-                onboardingComplete: true, // Skip onboarding for created users
-            },
-        });
-
-        // Create default user settings
-        await prisma.userSettings.create({
-            data: {
-                userId: user.id,
-                playbackQuality: "original",
-                wifiOnly: false,
-                offlineEnabled: false,
-                maxCacheSizeMb: 10240,
-            },
-        });
+        const user = await createUser(username, password, role);
 
         res.json({
             id: user.id,

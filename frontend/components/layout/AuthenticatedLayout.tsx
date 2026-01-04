@@ -19,7 +19,7 @@ import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { useIsTV } from "@/lib/tv-utils";
 import { useActivityPanel } from "@/hooks/useActivityPanel";
 
-const publicPaths = ["/login", "/register", "/onboarding", "/sync"];
+const publicPaths = ["/login", "/login/credentials", "/register", "/onboarding", "/sync"];
 
 export function AuthenticatedLayout({ children }: { children: ReactNode }) {
     const { isAuthenticated, isLoading } = useAuth();
@@ -59,7 +59,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
         };
     }, [activityPanel]);
 
-    const isPublicPage = publicPaths.includes(pathname);
+    const isPublicPage = publicPaths.includes(pathname) || pathname.startsWith("/auth/callback/");
 
     // Show loading state only on protected pages
     if (!isPublicPage && isLoading) {
