@@ -9,8 +9,9 @@ interface DiscoverHeroProps {
 
 export function DiscoverHero({ playlist, config }: DiscoverHeroProps) {
     // Calculate total duration
-    const totalDuration = playlist?.tracks?.reduce((sum, t) => sum + (t.duration || 0), 0) || 0;
-    
+    const totalDuration =
+        playlist?.tracks?.reduce((sum, t) => sum + (t.duration || 0), 0) || 0;
+
     const formatTotalDuration = (seconds: number) => {
         const hours = Math.floor(seconds / 3600);
         const mins = Math.floor((seconds % 3600) / 60);
@@ -37,26 +38,25 @@ export function DiscoverHero({ playlist, config }: DiscoverHeroProps) {
                         Discover Weekly
                     </h1>
                     <p className="text-sm text-white/60 mb-2 line-clamp-2">
-                        Your personalized playlist of new music, curated based on your listening history.
+                        Your personalized playlist of new music, curated based
+                        on your listening history.
                     </p>
                     <div className="flex flex-wrap items-center gap-1 text-sm text-white/70">
                         {playlist && (
                             <>
                                 <span>
-                                    Week of {format(new Date(playlist.weekStart), "MMM d, yyyy")}
+                                    Week of{" "}
+                                    {format(
+                                        new Date(playlist.weekStart),
+                                        "MMM d, yyyy"
+                                    )}
                                 </span>
                                 <span className="mx-1">•</span>
                                 <span>{playlist.totalCount} songs</span>
                                 {totalDuration > 0 && (
-                                    <span>, {formatTotalDuration(totalDuration)}</span>
-                                )}
-                                {playlist.unavailableCount > 0 && (
-                                    <>
-                                        <span className="mx-1">•</span>
-                                        <span className="text-orange-400">
-                                            {playlist.unavailableCount} unavailable
-                                        </span>
-                                    </>
+                                    <span>
+                                        , {formatTotalDuration(totalDuration)}
+                                    </span>
                                 )}
                             </>
                         )}
@@ -64,7 +64,11 @@ export function DiscoverHero({ playlist, config }: DiscoverHeroProps) {
                             <>
                                 <span className="mx-1">•</span>
                                 <span>
-                                    Updated {format(new Date(config.lastGeneratedAt), "MMM d")}
+                                    Updated{" "}
+                                    {format(
+                                        new Date(config.lastGeneratedAt),
+                                        "MMM d"
+                                    )}
                                 </span>
                             </>
                         )}

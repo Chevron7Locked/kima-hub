@@ -1,11 +1,13 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import bcrypt from "bcrypt";
 import { prisma } from "../utils/db";
 import { z } from "zod";
 import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import crypto from "crypto";
-import { requireAuth, requireAdmin, generateToken } from "../middleware/auth";
+import jwt from "jsonwebtoken";
+import { requireAuth, requireAdmin, generateToken, generateRefreshToken } from "../middleware/auth";
 import { encrypt, decrypt } from "../utils/encryption";
 
 const router = Router();
@@ -119,15 +121,21 @@ router.post("/login", async (req, res) => {
             }
         }
 
-        // Generate JWT token
+        // Generate JWT tokens
         const jwtToken = generateToken({
             id: user.id,
             username: user.username,
             role: user.role,
+            tokenVersion: user.tokenVersion,
+        });
+        const refreshToken = generateRefreshToken({
+            id: user.id,
+            tokenVersion: user.tokenVersion,
         });
 
         res.json({
             token: jwtToken,
+            refreshToken: refreshToken,
             user: {
                 id: user.id,
                 username: user.username,
@@ -138,7 +146,7 @@ router.post("/login", async (req, res) => {
         if (err instanceof z.ZodError) {
             return res.status(400).json({ error: "Invalid request", details: err.errors });
         }
-        console.error("Login error:", err);
+        logger.error("Login error:", err);
         res.status(500).json({ error: "Internal error" });
     }
 });
@@ -148,6 +156,47 @@ router.post("/logout", (req, res) => {
     // With JWT, logout is handled by client removing the token
     // No server-side session to destroy
     res.json({ message: "Logged out" });
+});
+
+// POST /auth/refresh - Refresh access token using refresh token
+router.post("/refresh", async (req, res) => {
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken) {
+        return res.status(400).json({ error: "Refresh token required" });
+    }
+    
+    try {
+        const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET || process.env.SESSION_SECRET!) as any;
+        
+        if (decoded.type !== "refresh") {
+            return res.status(401).json({ error: "Invalid refresh token" });
+        }
+        
+        const user = await prisma.user.findUnique({
+            where: { id: decoded.userId },
+            select: { id: true, username: true, role: true, tokenVersion: true }
+        });
+        
+        if (!user) {
+            return res.status(401).json({ error: "User not found" });
+        }
+        
+        // Validate tokenVersion
+        if (decoded.tokenVersion !== user.tokenVersion) {
+            return res.status(401).json({ error: "Token invalidated" });
+        }
+        
+        const newAccessToken = generateToken(user);
+        const newRefreshToken = generateRefreshToken(user);
+        
+        return res.json({
+            token: newAccessToken,
+            refreshToken: newRefreshToken
+        });
+    } catch (error) {
+        return res.status(401).json({ error: "Invalid refresh token" });
+    }
 });
 
 /**
@@ -226,16 +275,19 @@ router.post("/change-password", requireAuth, async (req, res) => {
                 .json({ error: "Current password is incorrect" });
         }
 
-        // Update password
+        // Update password and increment tokenVersion to invalidate all existing tokens
         const newPasswordHash = await bcrypt.hash(newPassword, 10);
         await prisma.user.update({
             where: { id: req.user!.id },
-            data: { passwordHash: newPasswordHash },
+            data: {
+                passwordHash: newPasswordHash,
+                tokenVersion: { increment: 1 }
+            },
         });
 
         res.json({ message: "Password changed successfully" });
     } catch (error) {
-        console.error("Change password error:", error);
+        logger.error("Change password error:", error);
         res.status(500).json({ error: "Failed to change password" });
     }
 });
@@ -256,7 +308,7 @@ router.get("/users", requireAuth, requireAdmin, async (req, res) => {
 
         res.json(users);
     } catch (error) {
-        console.error("Get users error:", error);
+        logger.error("Get users error:", error);
         res.status(500).json({ error: "Failed to get users" });
     }
 });
@@ -320,7 +372,7 @@ router.post("/create-user", requireAuth, requireAdmin, async (req, res) => {
             createdAt: user.createdAt,
         });
     } catch (error) {
-        console.error("Create user error:", error);
+        logger.error("Create user error:", error);
         res.status(500).json({ error: "Failed to create user" });
     }
 });
@@ -344,7 +396,7 @@ router.delete("/users/:id", requireAuth, requireAdmin, async (req, res) => {
 
         res.json({ message: "User deleted successfully" });
     } catch (error: any) {
-        console.error("Delete user error:", error);
+        logger.error("Delete user error:", error);
         if (error.code === "P2025") {
             return res.status(404).json({ error: "User not found" });
         }
@@ -382,7 +434,7 @@ router.post("/2fa/setup", requireAuth, async (req, res) => {
             qrCode: qrCodeDataUrl,
         });
     } catch (error) {
-        console.error("2FA setup error:", error);
+        logger.error("2FA setup error:", error);
         res.status(500).json({ error: "Failed to setup 2FA" });
     }
 });
@@ -448,7 +500,7 @@ router.post("/2fa/enable", requireAuth, async (req, res) => {
             recoveryCodes: recoveryCodes,
         });
     } catch (error) {
-        console.error("2FA enable error:", error);
+        logger.error("2FA enable error:", error);
         res.status(500).json({ error: "Failed to enable 2FA" });
     }
 });
@@ -505,7 +557,7 @@ router.post("/2fa/disable", requireAuth, async (req, res) => {
 
         res.json({ message: "2FA disabled successfully" });
     } catch (error) {
-        console.error("2FA disable error:", error);
+        logger.error("2FA disable error:", error);
         res.status(500).json({ error: "Failed to disable 2FA" });
     }
 });
@@ -524,7 +576,7 @@ router.get("/2fa/status", requireAuth, async (req, res) => {
 
         res.json({ enabled: user.twoFactorEnabled });
     } catch (error) {
-        console.error("2FA status error:", error);
+        logger.error("2FA status error:", error);
         res.status(500).json({ error: "Failed to get 2FA status" });
     }
 });

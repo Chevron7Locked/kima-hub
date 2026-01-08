@@ -1,4 +1,5 @@
 import axios from "axios";
+import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { rateLimiter } from "./rateLimiter";
 
@@ -13,7 +14,7 @@ class CoverArtService {
             if (cached === "NOT_FOUND") return null; // Cached negative result
             if (cached) return cached;
         } catch (err) {
-            console.warn("Redis get error:", err);
+            logger.warn("Redis get error:", err);
         }
 
         try {
@@ -35,7 +36,7 @@ class CoverArtService {
                 try {
                     await redisClient.setEx(cacheKey, 2592000, coverUrl); // 30 days
                 } catch (err) {
-                    console.warn("Redis set error:", err);
+                    logger.warn("Redis set error:", err);
                 }
 
                 return coverUrl;
@@ -57,7 +58,7 @@ class CoverArtService {
                 }
                 return null;
             }
-            console.error(`Cover art error for ${rgMbid}:`, error.message);
+            logger.error(`Cover art error for ${rgMbid}:`, error.message);
         }
 
         return null;

@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from "axios";
+import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 
 interface ItunesPodcast {
@@ -51,7 +52,7 @@ class ItunesService {
                 return JSON.parse(cached);
             }
         } catch (err) {
-            console.warn("Redis get error:", err);
+            logger.warn("Redis get error:", err);
         }
 
         await this.rateLimit();
@@ -60,7 +61,7 @@ class ItunesService {
         try {
             await redisClient.setEx(cacheKey, ttlSeconds, JSON.stringify(data));
         } catch (err) {
-            console.warn("Redis set error:", err);
+            logger.warn("Redis set error:", err);
         }
 
         return data;
@@ -234,13 +235,13 @@ class ItunesService {
         const keywords = this.extractSearchKeywords(title, description, author);
 
         if (keywords.length === 0) {
-            console.log(
+            logger.debug(
                 "No keywords extracted for similar podcast search, falling back to title"
             );
             return this.searchPodcasts(title, limit);
         }
 
-        console.log(
+        logger.debug(
             ` Searching for similar podcasts using keywords: ${keywords.join(", ")}`
         );
 
@@ -275,31 +276,31 @@ class ItunesService {
         genreId: number,
         limit = 20
     ): Promise<ItunesPodcast[]> {
-        console.log(`[iTunes SERVICE] getTopPodcastsByGenre called with genre=${genreId}, limit=${limit}`);
+        logger.debug(`[iTunes SERVICE] getTopPodcastsByGenre called with genre=${genreId}, limit=${limit}`);
         const cacheKey = `itunes:genre:${genreId}:${limit}`;
-        console.log(`[iTunes SERVICE] Cache key: ${cacheKey}`);
+        logger.debug(`[iTunes SERVICE] Cache key: ${cacheKey}`);
 
         const result = await this.cachedRequest(
             cacheKey,
             async () => {
                 try {
-                    console.log(`[iTunes] Fetching genre ${genreId} from RSS feed...`);
+                    logger.debug(`[iTunes] Fetching genre ${genreId} from RSS feed...`);
 
                     // Use iTunes RSS feed for top podcasts by genre
                     const response = await this.client.get(
                         `/us/rss/toppodcasts/genre=${genreId}/limit=${limit}/json`
                     );
 
-                console.log(`[iTunes] Response status: ${response.status}`);
-                console.log(`[iTunes] Has feed data: ${!!response.data?.feed}`);
-                console.log(`[iTunes] Entries count: ${response.data?.feed?.entry?.length || 0}`);
+                logger.debug(`[iTunes] Response status: ${response.status}`);
+                logger.debug(`[iTunes] Has feed data: ${!!response.data?.feed}`);
+                logger.debug(`[iTunes] Entries count: ${response.data?.feed?.entry?.length || 0}`);
 
                 const entries = response.data?.feed?.entry || [];
 
                 // If only one entry, it might not be an array
                 const entriesArray = Array.isArray(entries) ? entries : [entries];
 
-                console.log(`[iTunes] Processing ${entriesArray.length} entries`);
+                logger.debug(`[iTunes] Processing ${entriesArray.length} entries`);
 
                 // Convert RSS feed format to our podcast format
                 const podcasts = entriesArray.map((entry: any) => {
@@ -315,21 +316,21 @@ class ItunesService {
                         primaryGenreName: entry.category?.attributes?.label,
                         collectionViewUrl: entry.link?.attributes?.href,
                     };
-                    console.log(`[iTunes] Mapped podcast: ${podcast.collectionName} (ID: ${podcast.collectionId})`);
+                    logger.debug(`[iTunes] Mapped podcast: ${podcast.collectionName} (ID: ${podcast.collectionId})`);
                     return podcast;
                 }).filter((p: any) => p.collectionId > 0); // Filter out invalid entries
 
-                    console.log(`[iTunes] Returning ${podcasts.length} valid podcasts`);
+                    logger.debug(`[iTunes] Returning ${podcasts.length} valid podcasts`);
                     return podcasts;
                 } catch (error) {
-                    console.error(`[iTunes] ERROR in requestFn:`, error);
+                    logger.error(`[iTunes] ERROR in requestFn:`, error);
                     return [];
                 }
             },
             2592000 // 30 days
         );
 
-        console.log(`[iTunes SERVICE] cachedRequest returned ${result.length} podcasts`);
+        logger.debug(`[iTunes SERVICE] cachedRequest returned ${result.length} podcasts`);
         return result;
     }
 }

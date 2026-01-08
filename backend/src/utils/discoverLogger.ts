@@ -1,15 +1,16 @@
 import { writeFileSync, appendFileSync } from "fs";
+import { logger } from "./logger";
 import { join } from "path";
 
 /**
  * Logger for Discover Weekly generation that writes to both console and file
- * Uses monkey-patching to intercept all console.log/error calls
+ * Uses monkey-patching to intercept all logger.debug/error calls
  */
 class DiscoverLogger {
     private logFilePath: string;
     private isLogging: boolean = false;
-    private originalConsoleLog: typeof console.log;
-    private originalConsoleError: typeof console.error;
+    private originalConsoleLog: (...args: any[]) => void;
+    private originalConsoleError: (...args: any[]) => void;
 
     constructor() {
         // Create log file with timestamp
@@ -24,8 +25,8 @@ class DiscoverLogger {
         );
 
         // Store original console methods
-        this.originalConsoleLog = console.log;
-        this.originalConsoleError = console.error;
+        this.originalConsoleLog = logger.debug;
+        this.originalConsoleError = logger.error;
     }
 
     /**
@@ -44,8 +45,8 @@ Started: ${new Date().toISOString()}
         writeFileSync(this.logFilePath, header, "utf-8");
         this.originalConsoleLog(` Logging to: ${this.logFilePath}`);
 
-        // Monkey-patch console.log
-        console.log = (...args: any[]) => {
+        // Monkey-patch logger.debug
+        logger.debug = (...args: any[]) => {
             this.originalConsoleLog(...args);
             if (this.isLogging) {
                 const timestamp = new Date().toISOString().slice(11, 19); // HH:MM:SS
@@ -64,8 +65,8 @@ Started: ${new Date().toISOString()}
             }
         };
 
-        // Monkey-patch console.error
-        console.error = (...args: any[]) => {
+        // Monkey-patch logger.error
+        logger.error = (...args: any[]) => {
             this.originalConsoleError(...args);
             if (this.isLogging) {
                 const timestamp = new Date().toISOString().slice(11, 19); // HH:MM:SS
@@ -99,8 +100,8 @@ Ended: ${new Date().toISOString()}
             appendFileSync(this.logFilePath, footer, "utf-8");
 
             // Restore original console methods
-            console.log = this.originalConsoleLog;
-            console.error = this.originalConsoleError;
+            logger.debug = this.originalConsoleLog;
+            logger.error = this.originalConsoleError;
 
             this.originalConsoleLog(`\nFull log saved to: ${this.logFilePath}`);
             this.isLogging = false;

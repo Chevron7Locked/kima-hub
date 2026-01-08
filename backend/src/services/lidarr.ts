@@ -1,6 +1,54 @@
 import axios, { AxiosInstance } from "axios";
+import { logger } from "../utils/logger";
 import { config } from "../config";
 import { getSystemSettings } from "../utils/systemSettings";
+
+// ============================================
+// STRUCTURED ERROR TYPES
+// ============================================
+
+/**
+ * Error types for music acquisition failures
+ * Used to determine fallback strategies
+ */
+export enum AcquisitionErrorType {
+    ARTIST_NOT_FOUND = "ARTIST_NOT_FOUND",
+    ALBUM_NOT_FOUND = "ALBUM_NOT_FOUND",
+    NO_INDEXER_RESULTS = "NO_INDEXER_RESULTS",
+    NO_RELEASES_AVAILABLE = "NO_RELEASES_AVAILABLE",
+    INDEXER_TIMEOUT = "INDEXER_TIMEOUT",
+    METADATA_ERROR = "METADATA_ERROR",
+    NETWORK_ERROR = "NETWORK_ERROR",
+    UNKNOWN = "UNKNOWN",
+}
+
+/**
+ * Structured error class for acquisition failures
+ * Includes error type and recoverability flag for fallback logic
+ */
+export class AcquisitionError extends Error {
+    public readonly type: AcquisitionErrorType;
+    public readonly isRecoverable: boolean;
+    public readonly originalError?: Error;
+
+    constructor(
+        message: string,
+        type: AcquisitionErrorType,
+        isRecoverable: boolean = true,
+        originalError?: Error
+    ) {
+        super(message);
+        this.name = "AcquisitionError";
+        this.type = type;
+        this.isRecoverable = isRecoverable;
+        this.originalError = originalError;
+        
+        // Maintain proper stack trace
+        if (Error.captureStackTrace) {
+            Error.captureStackTrace(this, AcquisitionError);
+        }
+    }
+}
 
 interface LidarrArtist {
     id: number;
@@ -8,6 +56,22 @@ interface LidarrArtist {
     foreignArtistId: string; // MusicBrainz ID
     monitored: boolean;
     tags?: number[]; // Tag IDs
+    artistType?: string;
+    qualityProfileId?: number;
+    metadataProfileId?: number;
+    rootFolderPath?: string;
+    statistics?: {
+        albumCount?: number;
+        trackFileCount?: number;
+        trackCount?: number;
+        totalTrackCount?: number;
+        sizeOnDisk?: number;
+        percentOfTracks?: number;
+    };
+    ratings?: {
+        votes?: number;
+        value?: number;
+    };
 }
 
 interface LidarrTag {
@@ -62,7 +126,7 @@ class LidarrService {
                 const apiKey = settings.lidarrApiKey || config.lidarr?.apiKey;
 
                 if (url && apiKey) {
-                    console.log("Lidarr configured from database");
+                    logger.debug("Lidarr configured from database");
                     this.client = axios.create({
                         baseURL: url,
                         timeout: 30000,
@@ -72,19 +136,19 @@ class LidarrService {
                     });
                     this.enabled = true;
                 } else {
-                    console.warn("  Lidarr enabled but missing URL or API key");
+                    logger.warn("  Lidarr enabled but missing URL or API key");
                     this.enabled = false;
                 }
             } else if (config.lidarr) {
                 // Fallback to .env
-                console.log("Lidarr configured from .env");
+                logger.debug("Lidarr configured from .env");
                 this.enabled = true;
             } else {
-                console.log("  Lidarr not enabled");
+                logger.debug("  Lidarr not enabled");
                 this.enabled = false;
             }
         } catch (error) {
-            console.error("Failed to load Lidarr settings:", error);
+            logger.error("Failed to load Lidarr settings:", error);
             // Keep .env config if database fails
         }
 
@@ -112,7 +176,7 @@ class LidarrService {
             const rootFolders = response.data;
 
             if (rootFolders.length === 0) {
-                console.warn("  No root folders configured in Lidarr!");
+                logger.warn("  No root folders configured in Lidarr!");
                 return requestedPath;
             }
 
@@ -127,11 +191,11 @@ class LidarrService {
 
             // Fallback to first available root folder
             const fallback = rootFolders[0].path;
-            console.log(`  Root folder "${requestedPath}" not found in Lidarr`);
-            console.log(`   Using fallback: "${fallback}"`);
+            logger.debug(`  Root folder "${requestedPath}" not found in Lidarr`);
+            logger.debug(`   Using fallback: "${fallback}"`);
             return fallback;
         } catch (error) {
-            console.error("Error checking root folders:", error);
+            logger.error("Error checking root folders:", error);
             return requestedPath; // Return requested path and let Lidarr error if needed
         }
     }
@@ -141,6 +205,11 @@ class LidarrService {
         mbid?: string
     ): Promise<LidarrArtist[]> {
         await this.ensureInitialized();
+
+        // DEBUG: Log exact parameters received
+        logger.debug(
+            `[LIDARR_SEARCH_ARTIST] artistName="${artistName}", mbid="${mbid}"`
+        );
 
         if (!this.enabled || !this.client) {
             throw new Error("Lidarr not enabled");
@@ -161,16 +230,24 @@ class LidarrService {
             // FALLBACK: Lidarr's metadata server may be having issues
             // If we have an MBID, create a minimal artist object from our own MusicBrainz data
             if (mbid) {
-                console.log(`   [FALLBACK] Lidarr lookup failed, using direct MusicBrainz data for MBID: ${mbid}`);
-                
+                logger.debug(
+                    `   [FALLBACK] Lidarr lookup failed, using direct MusicBrainz data for MBID: ${mbid}`
+                );
+
                 try {
                     // Import MusicBrainz service dynamically to avoid circular deps
-                    const { musicBrainzService } = await import("./musicbrainz");
-                    
+                    const { musicBrainzService } = await import(
+                        "./musicbrainz"
+                    );
+
                     // Get artist info from MusicBrainz directly
-                    const mbArtists = await musicBrainzService.searchArtist(artistName, 5);
-                    const mbArtist = mbArtists?.find(a => a.id === mbid) || mbArtists?.[0];
-                    
+                    const mbArtists = await musicBrainzService.searchArtist(
+                        artistName,
+                        5
+                    );
+                    const mbArtist =
+                        mbArtists?.find((a: any) => a.id === mbid) || mbArtists?.[0];
+
                     if (mbArtist) {
                         // Create a minimal Lidarr-compatible artist object
                         const fallbackArtist: LidarrArtist = {
@@ -183,29 +260,42 @@ class LidarrService {
                             metadataProfileId: 1,
                             rootFolderPath: "/music",
                             tags: [],
-                            statistics: { albumCount: 0 }
+                            statistics: { albumCount: 0 },
                         };
-                        
-                        console.log(`   [FALLBACK] Created artist from MusicBrainz: ${fallbackArtist.artistName}`);
+
+                        logger.debug(
+                            `   [FALLBACK] Created artist from MusicBrainz: ${fallbackArtist.artistName}`
+                        );
                         return [fallbackArtist];
                     }
                 } catch (mbError: any) {
-                    console.error(`   [FALLBACK] MusicBrainz lookup also failed:`, mbError.message);
+                    logger.error(
+                        `   [FALLBACK] MusicBrainz lookup also failed:`,
+                        mbError.message
+                    );
                 }
             }
 
             return response.data || [];
         } catch (error) {
-            console.error("Lidarr artist search error:", error);
-            
+            logger.error("Lidarr artist search error:", error);
+
             // FALLBACK on error too
             if (mbid) {
-                console.log(`   [FALLBACK] Lidarr error, trying MusicBrainz for MBID: ${mbid}`);
+                logger.debug(
+                    `   [FALLBACK] Lidarr error, trying MusicBrainz for MBID: ${mbid}`
+                );
                 try {
-                    const { musicBrainzService } = await import("./musicbrainz");
-                    const mbArtists = await musicBrainzService.searchArtist(artistName, 5);
-                    const mbArtist = mbArtists?.find(a => a.id === mbid) || mbArtists?.[0];
-                    
+                    const { musicBrainzService } = await import(
+                        "./musicbrainz"
+                    );
+                    const mbArtists = await musicBrainzService.searchArtist(
+                        artistName,
+                        5
+                    );
+                    const mbArtist =
+                        mbArtists?.find((a: any) => a.id === mbid) || mbArtists?.[0];
+
                     if (mbArtist) {
                         const fallbackArtist: LidarrArtist = {
                             id: 0,
@@ -217,16 +307,21 @@ class LidarrService {
                             metadataProfileId: 1,
                             rootFolderPath: "/music",
                             tags: [],
-                            statistics: { albumCount: 0 }
+                            statistics: { albumCount: 0 },
                         };
-                        console.log(`   [FALLBACK] Created artist from MusicBrainz: ${fallbackArtist.artistName}`);
+                        logger.debug(
+                            `   [FALLBACK] Created artist from MusicBrainz: ${fallbackArtist.artistName}`
+                        );
                         return [fallbackArtist];
                     }
                 } catch (mbError: any) {
-                    console.error(`   [FALLBACK] MusicBrainz also failed:`, mbError.message);
+                    logger.error(
+                        `   [FALLBACK] MusicBrainz also failed:`,
+                        mbError.message
+                    );
                 }
             }
-            
+
             return [];
         }
     }
@@ -241,6 +336,11 @@ class LidarrService {
     ): Promise<LidarrArtist | null> {
         await this.ensureInitialized();
 
+        // DEBUG: Log exact parameters received
+        logger.debug(
+            `[LIDARR_ADD_ARTIST] artistName="${artistName}", mbid="${mbid}"`
+        );
+
         if (!this.enabled || !this.client) {
             throw new Error("Lidarr not enabled");
         }
@@ -250,7 +350,9 @@ class LidarrService {
         if (isDiscovery) {
             discoveryTagId = await this.getOrCreateDiscoveryTag();
             if (discoveryTagId) {
-                console.log(`[LIDARR] Will apply discovery tag (ID: ${discoveryTagId}) to artist`);
+                logger.debug(
+                    `[LIDARR] Will apply discovery tag (ID: ${discoveryTagId}) to artist`
+                );
             }
         }
 
@@ -260,22 +362,22 @@ class LidarrService {
                 rootFolderPath
             );
 
-            console.log(
+            logger.debug(
                 ` Searching Lidarr for artist: "${artistName}"${
                     mbid ? ` (MBID: ${mbid})` : " (no MBID - using name search)"
                 }`
             );
-            console.log(`   Root folder: ${validRootFolder}`);
+            logger.debug(`   Root folder: ${validRootFolder}`);
 
             // Search for artist (by MBID if available, otherwise by name)
             const searchResults = await this.searchArtist(artistName, mbid);
 
             if (searchResults.length === 0) {
-                console.error(` Artist not found in Lidarr: ${artistName}`);
+                logger.error(` Artist not found in Lidarr: ${artistName}`);
                 return null;
             }
 
-            console.log(`   Found ${searchResults.length} results from Lidarr`);
+            logger.debug(`   Found ${searchResults.length} results from Lidarr`);
 
             let artistData: LidarrArtist;
 
@@ -286,10 +388,10 @@ class LidarrService {
                 );
 
                 if (!exactMatch) {
-                    console.error(
+                    logger.error(
                         ` No exact MBID match found for: ${artistName} (${mbid})`
                     );
-                    console.log(
+                    logger.debug(
                         "   Available results:",
                         searchResults.map((a) => ({
                             name: a.artistName,
@@ -306,7 +408,7 @@ class LidarrService {
                     exactMatch.artistType === "Group" &&
                     (exactMatch.statistics?.albumCount || 0) === 0
                 ) {
-                    console.log(
+                    logger.debug(
                         ` Exact MBID match is a Group with 0 albums - checking for better match...`
                     );
 
@@ -322,7 +424,7 @@ class LidarrService {
                     );
 
                     if (betterMatch) {
-                        console.log(
+                        logger.debug(
                             `   Found better match: "${
                                 betterMatch.artistName
                             }" (Type: ${betterMatch.artistType}, Albums: ${
@@ -331,13 +433,13 @@ class LidarrService {
                         );
                         artistData = betterMatch;
                     } else {
-                        console.log(
+                        logger.debug(
                             ` No better match found, using Group entry`
                         );
                         artistData = exactMatch;
                     }
                 } else {
-                    console.log(
+                    logger.debug(
                         `Exact match found: "${exactMatch.artistName}" (Type: ${
                             exactMatch.artistType
                         }, Albums: ${exactMatch.statistics?.albumCount || 0})`
@@ -346,7 +448,7 @@ class LidarrService {
                 }
             } else {
                 // FALLBACK: No MBID - Use smart filtering for best match
-                console.log(" No MBID available - using smart selection...");
+                logger.debug(" No MBID available - using smart selection...");
 
                 // Filter and score results
                 const scoredResults = searchResults.map((artist) => {
@@ -399,9 +501,9 @@ class LidarrService {
                 scoredResults.sort((a, b) => b.score - a.score);
 
                 // Log candidates for debugging
-                console.log("   Candidates:");
+                logger.debug("   Candidates:");
                 scoredResults.slice(0, 3).forEach((item, i) => {
-                    console.log(
+                    logger.debug(
                         `     ${i + 1}. "${item.artist.artistName}" - Type: ${
                             item.artist.artistType || "Unknown"
                         } - Albums: ${
@@ -422,20 +524,22 @@ class LidarrService {
             );
 
             if (exists) {
-                console.log(`Artist already in Lidarr: ${artistName}`);
+                logger.debug(`Artist already in Lidarr: ${artistName}`);
 
                 // If this is a discovery add and artist doesn't have discovery tag, add it
                 if (isDiscovery && discoveryTagId) {
                     const existingTags = exists.tags || [];
                     if (!existingTags.includes(discoveryTagId)) {
-                        console.log(`   Adding discovery tag to existing artist...`);
+                        logger.debug(
+                            `   Adding discovery tag to existing artist...`
+                        );
                         await this.addTagsToArtist(exists.id, [discoveryTagId]);
                     }
                 }
 
                 // If monitorAllAlbums is true, update the artist to monitor all albums
                 if (monitorAllAlbums) {
-                    console.log(`   Updating artist to monitor all albums...`);
+                    logger.debug(`   Updating artist to monitor all albums...`);
                     try {
                         // Update artist settings
                         const updated = await this.client.put(
@@ -453,7 +557,7 @@ class LidarrService {
                         );
                         const albums = albumsResponse.data;
 
-                        console.log(
+                        logger.debug(
                             `   Found ${albums.length} albums to monitor`
                         );
 
@@ -472,7 +576,7 @@ class LidarrService {
 
                         // Trigger search for all albums if requested
                         if (searchForMissingAlbums && albums.length > 0) {
-                            console.log(
+                            logger.debug(
                                 `   Triggering search for ${albums.length} albums...`
                             );
                             await this.client.post("/api/v1/command", {
@@ -481,12 +585,12 @@ class LidarrService {
                             });
                         }
 
-                        console.log(
+                        logger.debug(
                             `   Updated existing artist and monitored all albums`
                         );
                         return updated.data;
                     } catch (error: any) {
-                        console.error(
+                        logger.error(
                             `   Failed to update artist:`,
                             error.message
                         );
@@ -518,26 +622,35 @@ class LidarrService {
                 artistPayload.tags = [discoveryTagId];
             }
 
-            const response = await this.client.post("/api/v1/artist", artistPayload);
+            const response = await this.client.post(
+                "/api/v1/artist",
+                artistPayload
+            );
 
-            console.log(`Added artist to Lidarr: ${artistName}${isDiscovery ? " (tagged as discovery)" : ""}`);
-            
+            logger.debug(
+                `Added artist to Lidarr: ${artistName}${
+                    isDiscovery ? " (tagged as discovery)" : ""
+                }`
+            );
+
             // Trigger metadata refresh to ensure album catalog is populated
             if (!searchForMissingAlbums) {
-                console.log(`   Triggering metadata refresh for new artist...`);
+                logger.debug(`   Triggering metadata refresh for new artist...`);
                 try {
                     await this.client.post("/api/v1/command", {
                         name: "RefreshArtist",
                         artistId: response.data.id,
                     });
                 } catch (refreshError) {
-                    console.warn(`   Metadata refresh command failed (non-blocking)`);
+                    logger.warn(
+                        `   Metadata refresh command failed (non-blocking)`
+                    );
                 }
             }
-            
+
             return response.data;
         } catch (error: any) {
-            console.error(
+            logger.error(
                 "Lidarr add artist error:",
                 error.response?.data || error.message
             );
@@ -560,7 +673,7 @@ class LidarrService {
             const searchTerm = rgMbid
                 ? `lidarr:${rgMbid}`
                 : `${artistName} ${albumTitle}`;
-            console.log(`   Searching Lidarr for album: ${searchTerm}`);
+            logger.debug(`   Searching Lidarr for album: ${searchTerm}`);
 
             const response = await this.client.get("/api/v1/album/lookup", {
                 params: {
@@ -568,15 +681,41 @@ class LidarrService {
                 },
             });
 
-            console.log(`   Found ${response.data.length} album result(s)`);
+            logger.debug(`   Found ${response.data.length} album result(s)`);
             return response.data;
         } catch (error: any) {
-            console.error(`   ✗ Lidarr album search error: ${error.message}`);
+            logger.error(`Lidarr album search error: ${error.message}`);
             if (error.response?.data) {
-                console.error(`   Response:`, error.response.data);
+                logger.error(`   Response:`, error.response.data);
             }
             return [];
         }
+    }
+
+    /**
+     * Extract base album title by removing edition markers
+     * E.g., "Abbey Road (Remastered)" → "Abbey Road"
+     */
+    private extractBaseTitle(title: string): string {
+        return (
+            title
+                // Remove parenthetical edition markers
+                .replace(
+                    /\s*\([^)]*(?:remaster|deluxe|expanded|anniversary|bonus|special|limited|collector|platinum|japan|uk|us|import|super deluxe)[^)]*\)\s*/gi,
+                    ""
+                )
+                // Remove bracketed edition markers
+                .replace(
+                    /\s*\[[^\]]*(?:remaster|deluxe|expanded|anniversary|bonus|special|limited|collector|platinum|japan|uk|us|import|super deluxe)[^\]]*\]\s*/gi,
+                    ""
+                )
+                // Remove trailing edition markers with dash
+                .replace(
+                    /\s*[-–—]\s*(remaster|deluxe|expanded|anniversary|bonus|special|limited|collector|platinum|japan|uk|us|import|super deluxe).*$/gi,
+                    ""
+                )
+                .trim()
+        );
     }
 
     /**
@@ -585,7 +724,7 @@ class LidarrService {
      */
     async getArtistAlbums(artistMbid: string): Promise<LidarrAlbum[]> {
         if (!this.client) {
-            console.warn("Lidarr not enabled");
+            logger.warn("Lidarr not enabled");
             return [];
         }
 
@@ -597,17 +736,56 @@ class LidarrService {
             );
 
             if (!artist) {
-                console.log(`   Artist not found in Lidarr: ${artistMbid}`);
+                logger.debug(`   Artist not found in Lidarr: ${artistMbid}`);
                 return [];
             }
 
             // Get albums for this artist
-            const albumsResponse = await this.client.get(`/api/v1/album?artistId=${artist.id}`);
+            const albumsResponse = await this.client.get(
+                `/api/v1/album?artistId=${artist.id}`
+            );
             return albumsResponse.data || [];
         } catch (error: any) {
-            console.error(`   Failed to get artist albums: ${error.message}`);
+            logger.error(`   Failed to get artist albums: ${error.message}`);
             return [];
         }
+    }
+
+    /**
+     * Wait for a Lidarr command to complete
+     * @param commandId The command ID to poll
+     * @param timeoutMs Maximum time to wait (default: 30s)
+     * @param pollIntervalMs Time between polls (default: 2s)
+     * @returns The completed command status
+     */
+    private async waitForCommand(
+        commandId: number,
+        timeoutMs: number = 30000,
+        pollIntervalMs: number = 2000
+    ): Promise<{ status: string; message: string }> {
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < timeoutMs) {
+            const response = await this.client!.get(
+                `/api/v1/command/${commandId}`
+            );
+            const { status, message, body } = response.data;
+
+            // Check if command finished (completed, failed, aborted)
+            if (status !== "started" && status !== "queued") {
+                logger.debug(
+                    `   Command ${commandId} completed with status: ${status}`
+                );
+                return {
+                    status,
+                    message: message || body?.records?.[0]?.message || "",
+                };
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+        }
+
+        throw new Error(`Command ${commandId} timed out after ${timeoutMs}ms`);
     }
 
     async addAlbum(
@@ -625,9 +803,13 @@ class LidarrService {
         }
 
         try {
-            console.log(`   Adding album: ${albumTitle} by ${artistName}${isDiscovery ? " (discovery)" : ""}`);
-            console.log(`   Album MBID: ${rgMbid}`);
-            console.log(`   Artist MBID: ${artistMbid || "none"}`);
+            logger.debug(
+                `   Adding album: ${albumTitle} by ${artistName}${
+                    isDiscovery ? " (discovery)" : ""
+                }`
+            );
+            logger.debug(`   Album MBID: ${rgMbid}`);
+            logger.debug(`   Artist MBID: ${artistMbid || "none"}`);
 
             // NEW APPROACH: Add artist first, then find album in their catalog
             // This avoids the broken external album search API
@@ -647,14 +829,16 @@ class LidarrService {
                 if (discoveryTagId) {
                     const existingTags = artist.tags || [];
                     if (!existingTags.includes(discoveryTagId)) {
-                        console.log(`   Adding discovery tag to existing artist...`);
+                        logger.debug(
+                            `   Adding discovery tag to existing artist...`
+                        );
                         await this.addTagsToArtist(artist.id, [discoveryTagId]);
                     }
                 }
             }
 
             if (!artist && artistMbid) {
-                console.log(`   Adding artist first: ${artistName}`);
+                logger.debug(`   Adding artist first: ${artistName}`);
 
                 // Add artist WITHOUT searching for all albums
                 // Pass isDiscovery to tag the artist appropriately
@@ -668,64 +852,76 @@ class LidarrService {
                 );
 
                 if (!artist) {
-                    console.error(`   ✗ Failed to add artist`);
+                    logger.error(` Failed to add artist`);
                     return null;
                 }
 
                 justAddedArtist = true;
-                console.log(
+                logger.debug(
                     `   Artist added: ${artist.artistName} (ID: ${artist.id})`
                 );
-                console.log(
+                logger.debug(
                     `   Waiting for Lidarr to populate album catalog...`
                 );
             } else if (!artist) {
-                console.error(`   ✗ Artist not found and no MBID provided`);
+                logger.error(` Artist not found and no MBID provided`);
                 return null;
             } else {
-                console.log(
+                logger.debug(
                     `   Artist already exists: ${artist.artistName} (ID: ${artist.id})`
                 );
             }
 
             // Get artist's albums from Lidarr
             let artistAlbums: LidarrAlbum[] = [];
-            
+
             // First check - get current album list
             const artistAlbumsResponse = await this.client.get(
                 `/api/v1/album?artistId=${artist.id}`
             );
             artistAlbums = artistAlbumsResponse.data;
-            
+
             // If we just added the artist and no albums yet, wait for metadata to populate
             if (artistAlbums.length === 0 && justAddedArtist) {
-                console.log(`   Waiting for Lidarr to fetch album metadata...`);
+                logger.debug(`   Waiting for Lidarr to fetch album metadata...`);
 
-                // Increased timeout: 15 attempts * 3 seconds = 45 seconds total
+                // Increased timeout: 20 attempts * 3 seconds = 60 seconds total
                 // Large artist catalogs (e.g., prolific bands) need more time
-                const maxAttempts = 15;
+                const maxAttempts = 20;
                 const retryDelay = 3000; // 3 seconds between retries
-                
+
                 for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-                    await new Promise((resolve) => setTimeout(resolve, retryDelay));
-                    
+                    await new Promise((resolve) =>
+                        setTimeout(resolve, retryDelay)
+                    );
+
                     const retryResponse = await this.client.get(
                         `/api/v1/album?artistId=${artist.id}`
                     );
                     artistAlbums = retryResponse.data;
-                    
+
                     if (artistAlbums.length > 0) {
-                        console.log(`   Albums loaded after ${attempt * 3}s`);
+                        logger.debug(`   Albums loaded after ${attempt * 3}s`);
                         break;
                     }
-                    
+
                     if (attempt < maxAttempts) {
-                        console.log(`   Attempt ${attempt}/${maxAttempts}: Still waiting...`);
+                        logger.debug(
+                            `   Attempt ${attempt}/${maxAttempts}: Still waiting...`
+                        );
+                    } else {
+                        logger.warn(
+                            ` Timeout reached after ${
+                                maxAttempts * 3
+                            }s - artist catalog may still be populating`
+                        );
                     }
                 }
             } else if (artistAlbums.length === 0 && !justAddedArtist) {
                 // Artist exists but has 0 albums - try refreshing metadata once
-                console.log(`   Artist exists but has 0 albums - refreshing metadata...`);
+                logger.debug(
+                    `   Artist exists but has 0 albums - refreshing metadata...`
+                );
                 try {
                     await this.client.post("/api/v1/command", {
                         name: "RefreshArtist",
@@ -733,17 +929,17 @@ class LidarrService {
                     });
                     // Wait for refresh to complete
                     await new Promise((resolve) => setTimeout(resolve, 5000));
-                    
+
                     const retryResponse = await this.client.get(
                         `/api/v1/album?artistId=${artist.id}`
                     );
                     artistAlbums = retryResponse.data;
                 } catch (refreshError) {
-                    console.warn(`   Metadata refresh failed`);
+                    logger.warn(`   Metadata refresh failed`);
                 }
             }
 
-            console.log(
+            logger.debug(
                 `   Found ${artistAlbums.length} albums for ${artist.artistName}`
             );
 
@@ -756,7 +952,7 @@ class LidarrService {
             // IMPORTANT: We removed loose matching (base name, first word) because it caused
             // wrong albums to be downloaded (e.g., "A Trip To The Mystery Planet" matching "A Funk Odyssey")
             if (!albumData) {
-                console.log(
+                logger.debug(
                     `   Album MBID not found, trying STRICT name match for: ${albumTitle}`
                 );
 
@@ -766,20 +962,25 @@ class LidarrService {
                         .toLowerCase()
                         .replace(/\(.*?\)/g, "") // Remove parenthetical content (deluxe edition, remaster, etc.)
                         .replace(/\[.*?\]/g, "") // Remove bracketed content
-                        .replace(/[-–—]\s*(deluxe|remaster|bonus|special|anniversary|expanded|limited|collector).*$/i, "") // Remove edition suffixes
+                        .replace(
+                            /[-–—]\s*(deluxe|remaster|bonus|special|anniversary|expanded|limited|collector).*$/i,
+                            ""
+                        ) // Remove edition suffixes
                         .replace(/[^\w\s]/g, "") // Remove remaining punctuation
                         .replace(/\s+/g, " ") // Normalize whitespace
                         .trim();
 
                 const targetTitle = normalizeTitle(albumTitle);
-                console.log(`   Normalized target: "${targetTitle}"`);
+                logger.debug(`   Normalized target: "${targetTitle}"`);
 
                 // Try exact normalized match first
                 albumData = artistAlbums.find(
                     (a: LidarrAlbum) => normalizeTitle(a.title) === targetTitle
                 );
                 if (albumData) {
-                    console.log(`   ✓ Matched exact normalized: "${albumData.title}"`);
+                    logger.debug(
+                        ` Matched exact normalized: "${albumData.title}"`
+                    );
                 }
 
                 // Try partial match ONLY if one contains the other completely
@@ -789,15 +990,26 @@ class LidarrService {
                         const normalized = normalizeTitle(a.title);
                         // Only match if one is a substring of the other AND they share significant content
                         // The shorter one must be at least 60% of the longer one's length
-                        const shorter = normalized.length < targetTitle.length ? normalized : targetTitle;
-                        const longer = normalized.length >= targetTitle.length ? normalized : targetTitle;
-                        if (longer.includes(shorter) && shorter.length >= longer.length * 0.6) {
+                        const shorter =
+                            normalized.length < targetTitle.length
+                                ? normalized
+                                : targetTitle;
+                        const longer =
+                            normalized.length >= targetTitle.length
+                                ? normalized
+                                : targetTitle;
+                        if (
+                            longer.includes(shorter) &&
+                            shorter.length >= longer.length * 0.6
+                        ) {
                             return true;
                         }
                         return false;
                     });
                     if (albumData) {
-                        console.log(`   ✓ Matched partial (contained): "${albumData.title}"`);
+                        logger.debug(
+                            ` Matched partial (contained): "${albumData.title}"`
+                        );
                     }
                 }
 
@@ -807,64 +1019,86 @@ class LidarrService {
                 // and let the discovery system find a different album
 
                 if (albumData) {
-                    console.log(
+                    logger.debug(
                         `   Final match: "${albumData.title}" (MBID: ${albumData.foreignAlbumId})`
                     );
                 } else {
-                    console.log(`   ✗ No strict match found - will NOT use loose matching to avoid wrong albums`);
+                    logger.debug(
+                        ` No strict match found - will NOT use loose matching to avoid wrong albums`
+                    );
                 }
             }
 
             if (!albumData) {
-                console.error(
+                logger.error(
                     `   ✗ Album "${albumTitle}" not found in artist's ${artistAlbums.length} albums`
                 );
                 if (artistAlbums.length > 0) {
-                    console.log(`   Looking for: "${albumTitle}" (MBID: ${rgMbid})`);
-                    console.log(`   Available albums in Lidarr (showing up to 10):`);
+                    logger.debug(
+                        `   Looking for: "${albumTitle}" (MBID: ${rgMbid})`
+                    );
+                    logger.debug(
+                        `   Available albums in Lidarr (showing up to 10):`
+                    );
                     artistAlbums.slice(0, 10).forEach((a: LidarrAlbum) => {
-                        console.log(`     - "${a.title}" (${a.foreignAlbumId})`);
+                        logger.debug(
+                            `     - "${a.title}" (${a.foreignAlbumId})`
+                        );
                     });
                 }
-                // Return null - let the caller handle replacement logic
-                // We should NOT download a random album that isn't what was requested
-                return null;
+                // Throw structured error - allows fallback to Soulseek
+                throw new AcquisitionError(
+                    `Album "${albumTitle}" not found in Lidarr catalog for ${artistName}`,
+                    AcquisitionErrorType.ALBUM_NOT_FOUND,
+                    true // isRecoverable - Soulseek can try
+                );
             }
 
-            console.log(`   Found album in catalog: ${albumData.title} (ID: ${albumData.id})`);
+            logger.debug(
+                `   Found album in catalog: ${albumData.title} (ID: ${albumData.id})`
+            );
 
             // Ensure artist is monitored (might have been added with monitoring disabled)
             if (!artist.monitored) {
-                console.log(`   Enabling artist monitoring...`);
+                logger.debug(`   Enabling artist monitoring...`);
                 await this.client.put(`/api/v1/artist/${artist.id}`, {
                     ...artist,
                     monitored: true,
                 });
-                console.log(`   Artist monitoring enabled`);
+                logger.debug(`   Artist monitoring enabled`);
             } else {
-                console.log(`   Artist already monitored`);
+                logger.debug(`   Artist already monitored`);
             }
 
             // CRITICAL: Fetch the FULL album data from Lidarr
             // The album list endpoint may return incomplete data
-            console.log(`   Fetching full album data from Lidarr...`);
-            const fullAlbumResponse = await this.client.get(`/api/v1/album/${albumData.id}`);
+            logger.debug(`   Fetching full album data from Lidarr...`);
+            const fullAlbumResponse = await this.client.get(
+                `/api/v1/album/${albumData.id}`
+            );
             const fullAlbumData = fullAlbumResponse.data;
-            
-            console.log(`   Full album data retrieved:`, JSON.stringify({
-                id: fullAlbumData.id,
-                title: fullAlbumData.title,
-                monitored: fullAlbumData.monitored,
-                foreignAlbumId: fullAlbumData.foreignAlbumId,
-                anyReleaseOk: fullAlbumData.anyReleaseOk,
-                profileId: fullAlbumData.profileId,
-                releases: fullAlbumData.releases?.length || 0,
-            }, null, 2));
+
+            logger.debug(
+                `   Full album data retrieved:`,
+                JSON.stringify(
+                    {
+                        id: fullAlbumData.id,
+                        title: fullAlbumData.title,
+                        monitored: fullAlbumData.monitored,
+                        foreignAlbumId: fullAlbumData.foreignAlbumId,
+                        anyReleaseOk: fullAlbumData.anyReleaseOk,
+                        profileId: fullAlbumData.profileId,
+                        releases: fullAlbumData.releases?.length || 0,
+                    },
+                    null,
+                    2
+                )
+            );
 
             // ALWAYS monitor and search for the album, even if already monitored
             // This ensures Lidarr picks up the request
             // Preserve user's anyReleaseOk setting - we'll only change it if search fails later
-            console.log(`   Setting album monitoring to true...`);
+            logger.debug(`   Setting album monitoring to true...`);
 
             const updateResponse = await this.client.put(
                 `/api/v1/album/${fullAlbumData.id}`,
@@ -874,27 +1108,84 @@ class LidarrService {
                 }
             );
 
-            console.log(`   PUT response monitored: ${updateResponse.data.monitored}`);
-            
+            logger.debug(
+                `   PUT response monitored: ${updateResponse.data.monitored}`
+            );
+
             // CRITICAL: Re-fetch the album to verify the change actually persisted
-            const verifyResponse = await this.client.get(`/api/v1/album/${fullAlbumData.id}`);
+            const verifyResponse = await this.client.get(
+                `/api/v1/album/${fullAlbumData.id}`
+            );
             const verifiedMonitored = verifyResponse.data.monitored;
-            
-            console.log(`   Album monitoring VERIFIED after re-fetch: ${verifiedMonitored}`);
-            
+
+            logger.debug(
+                `   Album monitoring VERIFIED after re-fetch: ${verifiedMonitored}`
+            );
+
             if (!verifiedMonitored) {
-                console.error(`   ✗ CRITICAL: Album monitoring failed to persist!`);
-                console.error(`   Full album data we sent:`, JSON.stringify(fullAlbumData, null, 2).slice(0, 500));
-                console.error(`   Response from GET after PUT:`, JSON.stringify(verifyResponse.data, null, 2).slice(0, 500));
+                logger.error(` CRITICAL: Album monitoring failed to persist!`);
+                logger.error(
+                    `   Full album data we sent:`,
+                    JSON.stringify(fullAlbumData, null, 2).slice(0, 500)
+                );
+                logger.error(
+                    `   Response from GET after PUT:`,
+                    JSON.stringify(verifyResponse.data, null, 2).slice(0, 500)
+                );
             }
 
             // Use the verified album data
             const updatedAlbum = verifyResponse.data;
 
+            // ============================================================
+            // PHASE 2.1: Proactive anyReleaseOk for edition variants
+            // ============================================================
+            const editionPatterns = [
+                /\(remaster/i,
+                /\(deluxe/i,
+                /\(expanded/i,
+                /\(anniversary/i,
+                /\(bonus/i,
+                /\(special/i,
+                /\(limited/i,
+                /\(collector/i,
+                /\(super deluxe/i,
+                /\(platinum/i,
+                /\(japan/i,
+                /\(uk/i,
+                /\(us/i,
+                /\(import/i,
+                /\[remaster/i,
+                /\[deluxe/i,
+            ];
+            const isEditionVariant = editionPatterns.some((p) =>
+                p.test(albumTitle)
+            );
+            const foundAlbumIsEdition = editionPatterns.some((p) =>
+                p.test(updatedAlbum.title || "")
+            );
+            const needsAnyReleaseOk = isEditionVariant || foundAlbumIsEdition;
+
+            if (needsAnyReleaseOk && !updatedAlbum.anyReleaseOk) {
+                logger.debug(
+                    `   Edition variant detected ("${albumTitle}") - enabling anyReleaseOk proactively`
+                );
+
+                await this.client.put(`/api/v1/album/${updatedAlbum.id}`, {
+                    ...updatedAlbum,
+                    anyReleaseOk: true,
+                });
+
+                updatedAlbum.anyReleaseOk = true;
+                logger.debug(
+                    `   anyReleaseOk enabled - Lidarr will accept any release of this album`
+                );
+            }
+
             // Check if album has releases - if not, refresh artist metadata from MusicBrainz
             const releaseCount = updatedAlbum.releases?.length || 0;
             if (releaseCount === 0) {
-                console.warn(
+                logger.warn(
                     ` Album has 0 releases - refreshing artist metadata from MusicBrainz...`
                 );
 
@@ -904,7 +1195,7 @@ class LidarrService {
                     artistId: artist.id,
                 });
 
-                console.log(`   Waiting for metadata refresh to complete...`);
+                logger.debug(`   Waiting for metadata refresh to complete...`);
                 // Wait for refresh to complete (Lidarr processes this asynchronously)
                 await new Promise((resolve) => setTimeout(resolve, 5000));
 
@@ -915,82 +1206,255 @@ class LidarrService {
                 const refreshedAlbum = refreshedAlbumResponse.data;
                 const newReleaseCount = refreshedAlbum.releases?.length || 0;
 
-                console.log(
+                logger.debug(
                     `   After refresh: ${newReleaseCount} releases found`
                 );
 
                 if (newReleaseCount === 0) {
-                    console.warn(` Still no releases after refresh!`);
-                    console.warn(
+                    logger.warn(` Still no releases after refresh!`);
+                    logger.warn(
                         `   This album may not be properly indexed in MusicBrainz yet.`
                     );
-                    console.warn(`   Download will be attempted but may fail.`);
+                    logger.warn(`   Download will be attempted but may fail.`);
                 }
             }
 
             // ALWAYS trigger search to download the album
-            console.log(`   Triggering album search command for album ID ${updatedAlbum.id}...`);
+            logger.debug(
+                `   Triggering album search command for album ID ${updatedAlbum.id}...`
+            );
             const searchResponse = await this.client.post("/api/v1/command", {
                 name: "AlbumSearch",
                 albumIds: [updatedAlbum.id],
             });
-            console.log(
+            logger.debug(
                 `   Search command sent (Command ID: ${searchResponse.data.id})`
             );
 
-            // Wait a moment and check if search found anything
-            await new Promise((resolve) => setTimeout(resolve, 3000));
-            const commandStatus = await this.client.get(`/api/v1/command/${searchResponse.data.id}`);
-            console.log(`   Search result: ${commandStatus.data.message || 'pending'}`);
-            
-            if (commandStatus.data.message?.includes('0 reports')) {
-                // Check if anyReleaseOk is already true - if not, try enabling it
-                if (!updatedAlbum.anyReleaseOk) {
-                    console.log(`   [RETRY] No results with strict matching. Trying with anyReleaseOk=true...`);
-                    
-                    // Re-fetch album to ensure we have latest data
-                    const refetchResponse = await this.client.get(`/api/v1/album/${updatedAlbum.id}`);
-                    const refetchedAlbum = refetchResponse.data;
-                    
-                    // Enable anyReleaseOk
-                    await this.client.put(`/api/v1/album/${updatedAlbum.id}`, {
-                        ...refetchedAlbum,
-                        anyReleaseOk: true,
-                    });
-                    console.log(`   Set anyReleaseOk=true for album`);
-                    
-                    // Retry search
-                    console.log(`   Retrying album search...`);
-                    const retryResponse = await this.client.post("/api/v1/command", {
-                        name: "AlbumSearch",
-                        albumIds: [updatedAlbum.id],
-                    });
-                    
-                    // Wait and check retry result
-                    await new Promise((resolve) => setTimeout(resolve, 3000));
-                    const retryStatus = await this.client.get(`/api/v1/command/${retryResponse.data.id}`);
-                    console.log(`   Retry search result: ${retryStatus.data.message || 'pending'}`);
-                    
-                    if (retryStatus.data.message?.includes('0 reports')) {
-                        console.warn(`   [FAIL] Still no releases found even with anyReleaseOk=true.`);
-                        throw new Error("No releases available - indexers found no matching downloads");
-                    } else {
-                        console.log(`   ✓ Found releases after enabling anyReleaseOk`);
-                    }
-                } else {
-                    console.warn(`   [FAIL] No releases grabbed automatically (anyReleaseOk already true).`);
-                    throw new Error("No releases available - indexers found no matching downloads");
-                }
-            }
+            // Wait for search to complete (with 30s timeout)
+            try {
+                const result = await this.waitForCommand(
+                    searchResponse.data.id,
+                    30000
+                );
 
-            console.log(`   Album download started: ${updatedAlbum.title}`);
-            return updatedAlbum;
+                if (result.message?.includes("0 reports")) {
+                    // ============================================================
+                    // PHASE 2.3: Enhanced diagnostics for 0 reports
+                    // ============================================================
+                    try {
+                        const albumDetails = await this.client.get(
+                            `/api/v1/album/${updatedAlbum.id}`
+                        );
+                        const releaseCount =
+                            albumDetails.data.releases?.length || 0;
+                        const anyReleaseOkStatus =
+                            albumDetails.data.anyReleaseOk;
+
+                        logger.debug(
+                            `   [DIAGNOSTIC] Initial search returned 0 reports`
+                        );
+                        logger.debug(
+                            `   [DIAGNOSTIC] Album "${updatedAlbum.title}" has ${releaseCount} releases defined in Lidarr`
+                        );
+                        logger.debug(
+                            `   [DIAGNOSTIC] anyReleaseOk: ${anyReleaseOkStatus}`
+                        );
+                        logger.debug(
+                            `   [DIAGNOSTIC] Album MBID: ${updatedAlbum.foreignAlbumId}`
+                        );
+
+                        if (releaseCount === 0) {
+                            logger.warn(
+                                `   [DIAGNOSTIC] ⚠️ Album has 0 releases in Lidarr - metadata may be incomplete`
+                            );
+                        }
+
+                        if (!this._indexerCountLogged) {
+                            try {
+                                const indexers = await this.client.get(
+                                    "/api/v1/indexer"
+                                );
+                                const enabledIndexers = indexers.data.filter(
+                                    (i: any) =>
+                                        i.enableRss || i.enableAutomaticSearch
+                                );
+                                logger.debug(
+                                    `   [DIAGNOSTIC] ${enabledIndexers.length} enabled indexers configured in Lidarr`
+                                );
+
+                                if (enabledIndexers.length === 0) {
+                                    logger.error(
+                                        `   [DIAGNOSTIC] ❌ No enabled indexers - Lidarr cannot search for releases`
+                                    );
+                                }
+                                this._indexerCountLogged = true;
+                            } catch (indexerError) {
+                                // Ignore indexer check errors
+                            }
+                        }
+                    } catch (diagError) {
+                        // Ignore diagnostic errors
+                    }
+
+                    // No sources found - try anyReleaseOk if not already enabled
+                    if (!updatedAlbum.anyReleaseOk) {
+                        logger.debug(
+                            `   No results with strict matching. Trying anyReleaseOk=true...`
+                        );
+
+                        // Enable anyReleaseOk and retry
+                        await this.client.put(
+                            `/api/v1/album/${updatedAlbum.id}`,
+                            {
+                                ...updatedAlbum,
+                                anyReleaseOk: true,
+                            }
+                        );
+
+                        const retryResponse = await this.client.post(
+                            "/api/v1/command",
+                            {
+                                name: "AlbumSearch",
+                                albumIds: [updatedAlbum.id],
+                            }
+                        );
+
+                        const retryResult = await this.waitForCommand(
+                            retryResponse.data.id,
+                            30000
+                        );
+
+                        if (retryResult.message?.includes("0 reports")) {
+                            // ============================================================
+                            // PHASE 2.2: Fallback to base album title
+                            // ============================================================
+                            const baseAlbumTitle = this.extractBaseTitle(albumTitle);
+
+                            if (baseAlbumTitle !== albumTitle && baseAlbumTitle.length > 2) {
+                                logger.debug(
+                                    `   Trying base album title fallback: "${albumTitle}" → "${baseAlbumTitle}"`
+                                );
+
+                                const normalizeForMatch = (s: string) =>
+                                    s.toLowerCase().replace(/[^\w\s]/g, "").trim();
+                                const normalizedBase = normalizeForMatch(baseAlbumTitle);
+
+                                const baseMatch = artistAlbums.find((a: LidarrAlbum) => {
+                                    const normalizedAlbumTitle = normalizeForMatch(a.title);
+
+                                    if (normalizedAlbumTitle === normalizedBase) return true;
+
+                                    const shorter =
+                                        normalizedAlbumTitle.length < normalizedBase.length
+                                            ? normalizedAlbumTitle
+                                            : normalizedBase;
+                                    const longer =
+                                        normalizedAlbumTitle.length >= normalizedBase.length
+                                            ? normalizedAlbumTitle
+                                            : normalizedBase;
+                                    if (
+                                        longer.includes(shorter) &&
+                                        shorter.length >= longer.length * 0.7
+                                    ) {
+                                        return true;
+                                    }
+
+                                    return false;
+                                });
+
+                                if (baseMatch && baseMatch.id !== updatedAlbum.id) {
+                                    logger.debug(
+                                        `   Found base album: "${baseMatch.title}" (ID: ${baseMatch.id})`
+                                    );
+                                    logger.debug(`   Attempting download of base album instead...`);
+
+                                    await this.client.put(`/api/v1/album/${baseMatch.id}`, {
+                                        ...baseMatch,
+                                        monitored: true,
+                                        anyReleaseOk: true,
+                                    });
+
+                                    const baseSearchResponse = await this.client.post(
+                                        "/api/v1/command",
+                                        {
+                                            name: "AlbumSearch",
+                                            albumIds: [baseMatch.id],
+                                        }
+                                    );
+
+                                    try {
+                                        const baseResult = await this.waitForCommand(
+                                            baseSearchResponse.data.id,
+                                            30000
+                                        );
+
+                                        if (baseResult.message?.includes("0 reports")) {
+                                            logger.warn(
+                                                `   Base album "${baseMatch.title}" also has no releases`
+                                            );
+                                            throw new Error(
+                                                `No releases available for "${albumTitle}" or base album "${baseMatch.title}" - ` +
+                                                    `check indexer configuration and album availability`
+                                            );
+                                        }
+
+                                        logger.debug(`   Base album download started: ${baseMatch.title}`);
+                                        return baseMatch;
+                                    } catch (baseError: any) {
+                                        if (baseError.message?.includes("No releases")) {
+                                            throw baseError;
+                                        }
+                                        if (baseError.message?.includes("timed out")) {
+                                            logger.warn(
+                                                `   Base album search timed out, may still be searching`
+                                            );
+                                            return baseMatch;
+                                        }
+                                        throw baseError;
+                                    }
+                                } else {
+                                    logger.debug(
+                                        `   No base album match found in artist catalog (${artistAlbums.length} albums)`
+                                    );
+                                }
+                            }
+
+                            throw new AcquisitionError(
+                                `No releases available for "${albumTitle}" - indexers found no matching downloads. ` +
+                                    `Album may not be available on configured indexers, or MBID mismatch between Lidarr and indexers.`,
+                                AcquisitionErrorType.NO_RELEASES_AVAILABLE,
+                                true
+                            );
+                        }
+                    } else {
+                        throw new Error(
+                            "No releases available - indexers found no matching downloads"
+                        );
+                    }
+                }
+
+                logger.debug(`   Album download started: ${updatedAlbum.title}`);
+                return updatedAlbum;
+            } catch (error: any) {
+                if (error.message?.includes("No releases available")) {
+                    throw error; // Re-throw for startDownload to handle
+                }
+                if (error.message?.includes("timed out")) {
+                    // Command timed out - album might still be searching
+                    logger.warn(
+                        `   Search command timed out, album may still be searching`
+                    );
+                    return updatedAlbum; // Return album, let timeout handling catch it later
+                }
+                throw error;
+            }
         } catch (error: any) {
             // Re-throw our own errors (like "No releases available")
             if (error.message?.includes("No releases available")) {
                 throw error;
             }
-            console.error(
+            logger.error(
                 "Lidarr add album error:",
                 error.response?.data || error.message
             );
@@ -1010,9 +1474,9 @@ class LidarrService {
                 name: "RescanFolders",
             });
 
-            console.log("Triggered Lidarr library rescan");
+            logger.debug("Triggered Lidarr library rescan");
         } catch (error) {
-            console.error("Lidarr rescan error:", error);
+            logger.error("Lidarr rescan error:", error);
             throw error;
         }
     }
@@ -1028,7 +1492,7 @@ class LidarrService {
             const response = await this.client.get("/api/v1/artist");
             return response.data;
         } catch (error) {
-            console.error("Lidarr get artists error:", error);
+            logger.error("Lidarr get artists error:", error);
             return [];
         }
     }
@@ -1044,7 +1508,10 @@ class LidarrService {
         await this.ensureInitialized();
 
         if (!this.enabled || !this.client) {
-            return { success: false, message: "Lidarr not enabled or configured" };
+            return {
+                success: false,
+                message: "Lidarr not enabled or configured",
+            };
         }
 
         if (!mbid || mbid.startsWith("temp-")) {
@@ -1054,14 +1521,24 @@ class LidarrService {
         try {
             // Find artist in Lidarr by foreignArtistId (MBID)
             const artists = await this.getArtists();
-            const lidarrArtist = artists.find(a => a.foreignArtistId === mbid);
+            const lidarrArtist = artists.find(
+                (a) => a.foreignArtistId === mbid
+            );
 
             if (!lidarrArtist) {
-                console.log(`[LIDARR] Artist with MBID ${mbid} not found in Lidarr`);
-                return { success: true, message: "Artist not in Lidarr (already removed or never added)" };
+                logger.debug(
+                    `[LIDARR] Artist with MBID ${mbid} not found in Lidarr`
+                );
+                return {
+                    success: true,
+                    message:
+                        "Artist not in Lidarr (already removed or never added)",
+                };
             }
 
-            console.log(`[LIDARR] Deleting artist: ${lidarrArtist.artistName} (ID: ${lidarrArtist.id})`);
+            logger.debug(
+                `[LIDARR] Deleting artist: ${lidarrArtist.artistName} (ID: ${lidarrArtist.id})`
+            );
 
             // Delete the artist from Lidarr (with timeout to prevent hanging)
             await this.client.delete(`/api/v1/artist/${lidarrArtist.id}`, {
@@ -1072,11 +1549,22 @@ class LidarrService {
                 timeout: 30000, // 30 second timeout
             });
 
-            console.log(`[LIDARR] Successfully deleted artist: ${lidarrArtist.artistName}`);
-            return { success: true, message: `Deleted ${lidarrArtist.artistName} from Lidarr` };
+            logger.debug(
+                `[LIDARR] Successfully deleted artist: ${lidarrArtist.artistName}`
+            );
+            return {
+                success: true,
+                message: `Deleted ${lidarrArtist.artistName} from Lidarr`,
+            };
         } catch (error: any) {
-            console.error("[LIDARR] Delete artist error:", error?.message || error);
-            return { success: false, message: error?.message || "Failed to delete from Lidarr" };
+            logger.error(
+                "[LIDARR] Delete artist error:",
+                error?.message || error
+            );
+            return {
+                success: false,
+                message: error?.message || "Failed to delete from Lidarr",
+            };
         }
     }
 
@@ -1091,36 +1579,48 @@ class LidarrService {
         await this.ensureInitialized();
 
         if (!this.enabled || !this.client) {
-            return { success: false, message: "Lidarr not enabled or configured" };
+            return {
+                success: false,
+                message: "Lidarr not enabled or configured",
+            };
         }
 
         try {
-            console.log(`[LIDARR] Deleting album ID: ${lidarrAlbumId}`);
+            logger.debug(`[LIDARR] Deleting album ID: ${lidarrAlbumId}`);
 
             // First get the album to check for track files
-            const albumResponse = await this.client.get(`/api/v1/album/${lidarrAlbumId}`);
+            const albumResponse = await this.client.get(
+                `/api/v1/album/${lidarrAlbumId}`
+            );
             const album = albumResponse.data;
             const artistId = album.artistId;
             const albumTitle = album.title || "Unknown";
 
             if (deleteFiles) {
                 // Get track files for this album
-                const trackFilesResponse = await this.client.get("/api/v1/trackFile", {
-                    params: { albumId: lidarrAlbumId },
-                });
-                
+                const trackFilesResponse = await this.client.get(
+                    "/api/v1/trackFile",
+                    {
+                        params: { albumId: lidarrAlbumId },
+                    }
+                );
+
                 const trackFiles = trackFilesResponse.data;
-                
+
                 if (trackFiles && trackFiles.length > 0) {
                     // Delete each track file
                     for (const trackFile of trackFiles) {
                         try {
-                            await this.client.delete(`/api/v1/trackFile/${trackFile.id}`);
+                            await this.client.delete(
+                                `/api/v1/trackFile/${trackFile.id}`
+                            );
                         } catch (e) {
                             // Ignore individual file deletion errors
                         }
                     }
-                    console.log(`[LIDARR] Deleted ${trackFiles.length} track files for album: ${albumTitle}`);
+                    logger.debug(
+                        `[LIDARR] Deleted ${trackFiles.length} track files for album: ${albumTitle}`
+                    );
                 }
             }
 
@@ -1130,11 +1630,22 @@ class LidarrService {
                 monitored: false,
             });
 
-            console.log(`[LIDARR] Successfully unmonitored album: ${albumTitle}`);
-            return { success: true, message: `Deleted files and unmonitored ${albumTitle}` };
+            logger.debug(
+                `[LIDARR] Successfully unmonitored album: ${albumTitle}`
+            );
+            return {
+                success: true,
+                message: `Deleted files and unmonitored ${albumTitle}`,
+            };
         } catch (error: any) {
-            console.error("[LIDARR] Delete album error:", error?.message || error);
-            return { success: false, message: error?.message || "Failed to delete album from Lidarr" };
+            logger.error(
+                "[LIDARR] Delete album error:",
+                error?.message || error
+            );
+            return {
+                success: false,
+                message: error?.message || "Failed to delete album from Lidarr",
+            };
         }
     }
 
@@ -1177,7 +1688,7 @@ class LidarrService {
             if (error.response?.status === 404) {
                 return false;
             }
-            console.error("Lidarr album check error:", error.message);
+            logger.error("Lidarr album check error:", error.message);
             return false;
         }
     }
@@ -1186,7 +1697,10 @@ class LidarrService {
      * Check if an album exists in Lidarr by artist name and album title
      * Handles MBID mismatches between MusicBrainz and Lidarr
      */
-    async isAlbumAvailableByTitle(artistName: string, albumTitle: string): Promise<boolean> {
+    async isAlbumAvailableByTitle(
+        artistName: string,
+        albumTitle: string
+    ): Promise<boolean> {
         await this.ensureInitialized();
 
         if (!this.enabled || !this.client) {
@@ -1202,9 +1716,10 @@ class LidarrService {
             const artists = artistsResponse.data || [];
 
             // Find matching artist by name
-            const matchingArtist = artists.find((a: any) => 
-                a.artistName?.toLowerCase().trim() === normalizedArtist ||
-                a.sortName?.toLowerCase().trim() === normalizedArtist
+            const matchingArtist = artists.find(
+                (a: any) =>
+                    a.artistName?.toLowerCase().trim() === normalizedArtist ||
+                    a.sortName?.toLowerCase().trim() === normalizedArtist
             );
 
             if (!matchingArtist) {
@@ -1220,7 +1735,10 @@ class LidarrService {
             // Check if any album matches the title and has files
             for (const album of albums) {
                 const albumTitleNorm = album.title?.toLowerCase().trim() || "";
-                if (albumTitleNorm === normalizedAlbum || albumTitleNorm.includes(normalizedAlbum)) {
+                if (
+                    albumTitleNorm === normalizedAlbum ||
+                    albumTitleNorm.includes(normalizedAlbum)
+                ) {
                     const hasFiles = album.statistics?.percentOfTracks > 0;
                     if (hasFiles) {
                         return true;
@@ -1230,7 +1748,7 @@ class LidarrService {
 
             return false;
         } catch (error: any) {
-            console.error("Lidarr album check by title error:", error.message);
+            logger.error("Lidarr album check by title error:", error.message);
             return false;
         }
     }
@@ -1272,7 +1790,7 @@ class LidarrService {
             const response = await this.client.get("/api/v1/tag");
             return response.data || [];
         } catch (error: any) {
-            console.error("[LIDARR] Failed to get tags:", error.message);
+            logger.error("[LIDARR] Failed to get tags:", error.message);
             return [];
         }
     }
@@ -1289,10 +1807,12 @@ class LidarrService {
 
         try {
             const response = await this.client.post("/api/v1/tag", { label });
-            console.log(`[LIDARR] Created tag: ${label} (ID: ${response.data.id})`);
+            logger.debug(
+                `[LIDARR] Created tag: ${label} (ID: ${response.data.id})`
+            );
             return response.data;
         } catch (error: any) {
-            console.error("[LIDARR] Failed to create tag:", error.message);
+            logger.error("[LIDARR] Failed to create tag:", error.message);
             return null;
         }
     }
@@ -1302,6 +1822,7 @@ class LidarrService {
      * Returns the tag ID, caching it for subsequent calls
      */
     private discoveryTagId: number | null = null;
+    private _indexerCountLogged: boolean = false;
 
     async getOrCreateDiscoveryTag(): Promise<number | null> {
         await this.ensureInitialized();
@@ -1318,10 +1839,14 @@ class LidarrService {
         try {
             // Check if tag already exists
             const tags = await this.getTags();
-            const existingTag = tags.find(t => t.label === DISCOVERY_TAG_LABEL);
+            const existingTag = tags.find(
+                (t) => t.label === DISCOVERY_TAG_LABEL
+            );
 
             if (existingTag) {
-                console.log(`[LIDARR] Found existing discovery tag (ID: ${existingTag.id})`);
+                logger.debug(
+                    `[LIDARR] Found existing discovery tag (ID: ${existingTag.id})`
+                );
                 this.discoveryTagId = existingTag.id;
                 return existingTag.id;
             }
@@ -1335,7 +1860,10 @@ class LidarrService {
 
             return null;
         } catch (error: any) {
-            console.error("[LIDARR] Failed to get/create discovery tag:", error.message);
+            logger.error(
+                "[LIDARR] Failed to get/create discovery tag:",
+                error.message
+            );
             return null;
         }
     }
@@ -1343,7 +1871,10 @@ class LidarrService {
     /**
      * Add tags to an artist
      */
-    async addTagsToArtist(artistId: number, tagIds: number[]): Promise<boolean> {
+    async addTagsToArtist(
+        artistId: number,
+        tagIds: number[]
+    ): Promise<boolean> {
         await this.ensureInitialized();
 
         if (!this.enabled || !this.client) {
@@ -1352,7 +1883,9 @@ class LidarrService {
 
         try {
             // Get current artist data
-            const response = await this.client.get(`/api/v1/artist/${artistId}`);
+            const response = await this.client.get(
+                `/api/v1/artist/${artistId}`
+            );
             const artist = response.data;
 
             // Merge new tags with existing (avoid duplicates)
@@ -1365,10 +1898,15 @@ class LidarrService {
                 tags: mergedTags,
             });
 
-            console.log(`[LIDARR] Added tags ${tagIds} to artist ${artist.artistName}`);
+            logger.debug(
+                `[LIDARR] Added tags ${tagIds} to artist ${artist.artistName}`
+            );
             return true;
         } catch (error: any) {
-            console.error("[LIDARR] Failed to add tags to artist:", error.message);
+            logger.error(
+                "[LIDARR] Failed to add tags to artist:",
+                error.message
+            );
             return false;
         }
     }
@@ -1376,7 +1914,10 @@ class LidarrService {
     /**
      * Remove tags from an artist
      */
-    async removeTagsFromArtist(artistId: number, tagIds: number[]): Promise<boolean> {
+    async removeTagsFromArtist(
+        artistId: number,
+        tagIds: number[]
+    ): Promise<boolean> {
         await this.ensureInitialized();
 
         if (!this.enabled || !this.client) {
@@ -1385,12 +1926,16 @@ class LidarrService {
 
         try {
             // Get current artist data
-            const response = await this.client.get(`/api/v1/artist/${artistId}`);
+            const response = await this.client.get(
+                `/api/v1/artist/${artistId}`
+            );
             const artist = response.data;
 
             // Remove specified tags
             const existingTags = artist.tags || [];
-            const filteredTags = existingTags.filter((t: number) => !tagIds.includes(t));
+            const filteredTags = existingTags.filter(
+                (t: number) => !tagIds.includes(t)
+            );
 
             // Update artist with filtered tags
             await this.client.put(`/api/v1/artist/${artistId}`, {
@@ -1398,10 +1943,15 @@ class LidarrService {
                 tags: filteredTags,
             });
 
-            console.log(`[LIDARR] Removed tags ${tagIds} from artist ${artist.artistName}`);
+            logger.debug(
+                `[LIDARR] Removed tags ${tagIds} from artist ${artist.artistName}`
+            );
             return true;
         } catch (error: any) {
-            console.error("[LIDARR] Failed to remove tags from artist:", error.message);
+            logger.error(
+                "[LIDARR] Failed to remove tags from artist:",
+                error.message
+            );
             return false;
         }
     }
@@ -1421,9 +1971,12 @@ class LidarrService {
             const artists: LidarrArtist[] = response.data;
 
             // Filter artists that have the specified tag
-            return artists.filter(artist => artist.tags?.includes(tagId));
+            return artists.filter((artist) => artist.tags?.includes(tagId));
         } catch (error: any) {
-            console.error("[LIDARR] Failed to get artists by tag:", error.message);
+            logger.error(
+                "[LIDARR] Failed to get artists by tag:",
+                error.message
+            );
             return [];
         }
     }
@@ -1458,22 +2011,31 @@ class LidarrService {
 
             // Find artist by MBID
             const artists = await this.getArtists();
-            const artist = artists.find(a => a.foreignArtistId === artistMbid);
+            const artist = artists.find(
+                (a) => a.foreignArtistId === artistMbid
+            );
 
             if (!artist) {
-                console.log(`[LIDARR] Artist ${artistMbid} not found in Lidarr`);
+                logger.debug(
+                    `[LIDARR] Artist ${artistMbid} not found in Lidarr`
+                );
                 return true; // Not an error - artist might not be in Lidarr
             }
 
             // Check if artist has the discovery tag
             if (!artist.tags?.includes(tagId)) {
-                console.log(`[LIDARR] Artist ${artist.artistName} doesn't have discovery tag`);
+                logger.debug(
+                    `[LIDARR] Artist ${artist.artistName} doesn't have discovery tag`
+                );
                 return true; // Already doesn't have tag
             }
 
             return await this.removeTagsFromArtist(artist.id, [tagId]);
         } catch (error: any) {
-            console.error("[LIDARR] Failed to remove discovery tag:", error.message);
+            logger.error(
+                "[LIDARR] Failed to remove discovery tag:",
+                error.message
+            );
             return false;
         }
     }
@@ -1505,7 +2067,7 @@ class LidarrService {
             if (error.response?.status === 404) {
                 return { success: true, message: "Artist already removed" };
             }
-            console.error("[LIDARR] Delete artist by ID error:", error.message);
+            logger.error("[LIDARR] Delete artist by ID error:", error.message);
             return { success: false, message: error.message };
         }
     }
@@ -1526,14 +2088,18 @@ class LidarrService {
         }
 
         try {
-            console.log(`[LIDARR] Fetching releases for album ID: ${lidarrAlbumId}`);
+            logger.debug(
+                `[LIDARR] Fetching releases for album ID: ${lidarrAlbumId}`
+            );
             const response = await this.client.get("/api/v1/release", {
                 params: { albumId: lidarrAlbumId },
                 timeout: 60000, // 60s timeout for indexer searches
             });
 
             const releases: LidarrRelease[] = response.data || [];
-            console.log(`[LIDARR] Found ${releases.length} releases from indexers`);
+            logger.debug(
+                `[LIDARR] Found ${releases.length} releases from indexers`
+            );
 
             // Sort by preferred criteria (Lidarr already sorts by quality/preferred words)
             // but we can add seeders as a secondary sort for torrents
@@ -1553,7 +2119,7 @@ class LidarrService {
 
             return releases;
         } catch (error: any) {
-            console.error(`[LIDARR] Failed to fetch releases:`, error.message);
+            logger.error(`[LIDARR] Failed to fetch releases:`, error.message);
             return [];
         }
     }
@@ -1570,20 +2136,25 @@ class LidarrService {
         }
 
         try {
-            console.log(`[LIDARR] Grabbing release: ${release.title}`);
-            console.log(`   GUID: ${release.guid}`);
-            console.log(`   Indexer: ${release.indexer || 'unknown'}`);
-            console.log(`   Size: ${Math.round((release.size || 0) / 1024 / 1024)} MB`);
+            logger.debug(`[LIDARR] Grabbing release: ${release.title}`);
+            logger.debug(`   GUID: ${release.guid}`);
+            logger.debug(`   Indexer: ${release.indexer || "unknown"}`);
+            logger.debug(
+                `   Size: ${Math.round((release.size || 0) / 1024 / 1024)} MB`
+            );
 
             await this.client.post("/api/v1/release", {
                 guid: release.guid,
                 indexerId: release.indexerId || 0,
             });
 
-            console.log(`[LIDARR] Release grabbed successfully`);
+            logger.debug(`[LIDARR] Release grabbed successfully`);
             return true;
         } catch (error: any) {
-            console.error(`[LIDARR] Failed to grab release:`, error.response?.data || error.message);
+            logger.error(
+                `[LIDARR] Failed to grab release:`,
+                error.response?.data || error.message
+            );
             return false;
         }
     }
@@ -1610,11 +2181,15 @@ class LidarrService {
             );
 
             if (!queueItem) {
-                console.log(`[LIDARR] Download ${downloadId} not found in queue (may already be removed)`);
+                logger.debug(
+                    `[LIDARR] Download ${downloadId} not found in queue (may already be removed)`
+                );
                 return true; // Consider it success if not in queue
             }
 
-            console.log(`[LIDARR] Blocklisting and removing: ${queueItem.title}`);
+            logger.debug(
+                `[LIDARR] Blocklisting and removing: ${queueItem.title}`
+            );
 
             await this.client.delete(`/api/v1/queue/${queueItem.id}`, {
                 params: {
@@ -1624,10 +2199,15 @@ class LidarrService {
                 },
             });
 
-            console.log(`[LIDARR] Successfully blocklisted: ${queueItem.title}`);
+            logger.debug(
+                `[LIDARR] Successfully blocklisted: ${queueItem.title}`
+            );
             return true;
         } catch (error: any) {
-            console.error(`[LIDARR] Failed to blocklist:`, error.response?.data || error.message);
+            logger.error(
+                `[LIDARR] Failed to blocklist:`,
+                error.response?.data || error.message
+            );
             return false;
         }
     }
@@ -1647,11 +2227,13 @@ class LidarrService {
                 params: { page: 1, pageSize: 100 },
             });
 
-            return response.data.records.find(
-                (item: any) => item.downloadId === downloadId
-            ) || null;
+            return (
+                response.data.records.find(
+                    (item: any) => item.downloadId === downloadId
+                ) || null
+            );
         } catch (error: any) {
-            console.error(`[LIDARR] Failed to find queue item:`, error.message);
+            logger.error(`[LIDARR] Failed to find queue item:`, error.message);
             return null;
         }
     }
@@ -1660,44 +2242,54 @@ class LidarrService {
      * Get upcoming and recent releases from Lidarr calendar
      * Returns albums releasing within the specified date range for monitored artists
      */
-    async getCalendar(startDate: Date, endDate: Date): Promise<CalendarRelease[]> {
+    async getCalendar(
+        startDate: Date,
+        endDate: Date
+    ): Promise<CalendarRelease[]> {
         await this.ensureInitialized();
-        
+
         if (!this.client) {
-            console.log("[LIDARR] Not configured - cannot fetch calendar");
+            logger.debug("[LIDARR] Not configured - cannot fetch calendar");
             return [];
         }
 
         try {
-            const start = startDate.toISOString().split('T')[0];
-            const end = endDate.toISOString().split('T')[0];
-            
+            const start = startDate.toISOString().split("T")[0];
+            const end = endDate.toISOString().split("T")[0];
+
             const response = await this.client.get(`/api/v1/calendar`, {
                 params: {
                     start,
                     end,
                     includeArtist: true,
-                }
+                },
             });
 
-            const releases: CalendarRelease[] = response.data.map((album: any) => ({
-                id: album.id,
-                title: album.title,
-                artistName: album.artist?.artistName || 'Unknown Artist',
-                artistId: album.artist?.id,
-                artistMbid: album.artist?.foreignArtistId,
-                albumMbid: album.foreignAlbumId,
-                releaseDate: album.releaseDate,
-                monitored: album.monitored,
-                grabbed: album.grabbed || false,
-                hasFile: album.statistics?.percentOfTracks === 100,
-                coverUrl: album.images?.find((img: any) => img.coverType === 'cover')?.remoteUrl || null,
-            }));
+            const releases: CalendarRelease[] = response.data.map(
+                (album: any) => ({
+                    id: album.id,
+                    title: album.title,
+                    artistName: album.artist?.artistName || "Unknown Artist",
+                    artistId: album.artist?.id,
+                    artistMbid: album.artist?.foreignArtistId,
+                    albumMbid: album.foreignAlbumId,
+                    releaseDate: album.releaseDate,
+                    monitored: album.monitored,
+                    grabbed: album.grabbed || false,
+                    hasFile: album.statistics?.percentOfTracks === 100,
+                    coverUrl:
+                        album.images?.find(
+                            (img: any) => img.coverType === "cover"
+                        )?.remoteUrl || null,
+                })
+            );
 
-            console.log(`[LIDARR] Calendar: Found ${releases.length} releases between ${start} and ${end}`);
+            logger.debug(
+                `[LIDARR] Calendar: Found ${releases.length} releases between ${start} and ${end}`
+            );
             return releases;
         } catch (error: any) {
-            console.error(`[LIDARR] Failed to fetch calendar:`, error.message);
+            logger.error(`[LIDARR] Failed to fetch calendar:`, error.message);
             return [];
         }
     }
@@ -1705,9 +2297,11 @@ class LidarrService {
     /**
      * Get all monitored artists from Lidarr
      */
-    async getMonitoredArtists(): Promise<{ id: number; name: string; mbid: string }[]> {
+    async getMonitoredArtists(): Promise<
+        { id: number; name: string; mbid: string }[]
+    > {
         await this.ensureInitialized();
-        
+
         if (!this.client) {
             return [];
         }
@@ -1722,7 +2316,10 @@ class LidarrService {
                     mbid: artist.foreignArtistId,
                 }));
         } catch (error: any) {
-            console.error(`[LIDARR] Failed to fetch monitored artists:`, error.message);
+            logger.error(
+                `[LIDARR] Failed to fetch monitored artists:`,
+                error.message
+            );
             return [];
         }
     }
@@ -1776,6 +2373,8 @@ interface QueueItem {
     trackedDownloadStatus: string;
     trackedDownloadState: string;
     statusMessages: { title: string; messages: string[] }[];
+    sizeleft?: number;
+    size?: number;
 }
 
 interface QueueResponse {
@@ -1818,7 +2417,6 @@ const FAILED_IMPORT_PATTERNS = [
     "No files found are eligible for import",
     "Not an upgrade for existing",
     "Not a Custom Format upgrade",
-    "Has missing tracks", // Individual tracks from discography packs
     "missing tracks",
     "Album match is not close enough", // Lidarr matching threshold failure
     "Artist name mismatch", // Manual import required - artist doesn't match
@@ -1864,7 +2462,7 @@ export async function cleanStuckDownloads(
             }
         );
 
-        console.log(
+        logger.debug(
             ` Queue cleaner: checking ${response.data.records.length} items`
         );
 
@@ -1874,12 +2472,12 @@ export async function cleanStuckDownloads(
                 item.statusMessages?.flatMap((sm) => sm.messages) || [];
 
             // Log ALL items to understand what states we're seeing
-            console.log(`   - ${item.title}`);
-            console.log(
+            logger.debug(`   - ${item.title}`);
+            logger.debug(
                 `      Status: ${item.status}, TrackedStatus: ${item.trackedDownloadStatus}, State: ${item.trackedDownloadState}`
             );
             if (allMessages.length > 0) {
-                console.log(`      Messages: ${allMessages.join("; ")}`);
+                logger.debug(`      Messages: ${allMessages.join("; ")}`);
             }
 
             // Check for pattern matches in messages
@@ -1899,7 +2497,8 @@ export async function cleanStuckDownloads(
             // Don't wait for timeout, clean up immediately
             const isImportFailed = item.trackedDownloadState === "importFailed";
 
-            const shouldRemove = hasFailedPattern || isStuckWarning || isImportFailed;
+            const shouldRemove =
+                hasFailedPattern || isStuckWarning || isImportFailed;
 
             if (shouldRemove) {
                 const reason = isImportFailed
@@ -1907,7 +2506,7 @@ export async function cleanStuckDownloads(
                     : hasFailedPattern
                     ? "failed pattern match"
                     : "stuck warning state";
-                console.log(`   [REMOVE] Removing ${item.title} (${reason})`);
+                logger.debug(`   [REMOVE] Removing ${item.title} (${reason})`);
 
                 try {
                     // Remove from queue, blocklist the release, trigger new search
@@ -1921,11 +2520,11 @@ export async function cleanStuckDownloads(
                     });
 
                     removed.push(item.title);
-                    console.log(`   Removed and blocklisted: ${item.title}`);
+                    logger.debug(`   Removed and blocklisted: ${item.title}`);
                 } catch (deleteError: any) {
                     // Item might already be gone - that's fine
                     if (deleteError.response?.status !== 404) {
-                        console.error(
+                        logger.error(
                             `    Failed to remove ${item.title}:`,
                             deleteError.message
                         );
@@ -1935,14 +2534,14 @@ export async function cleanStuckDownloads(
         }
 
         if (removed.length > 0) {
-            console.log(
+            logger.debug(
                 ` Queue cleaner: removed ${removed.length} stuck item(s)`
             );
         }
 
         return { removed: removed.length, items: removed };
     } catch (error: any) {
-        console.error("Queue clean failed:", error.message);
+        logger.error("Queue clean failed:", error.message);
         throw error;
     }
 }
@@ -1977,7 +2576,7 @@ export async function getRecentCompletedDownloads(
             return new Date(record.date) >= cutoff;
         });
     } catch (error: any) {
-        console.error("Failed to fetch Lidarr history:", error.message);
+        logger.error("Failed to fetch Lidarr history:", error.message);
         throw error;
     }
 }
@@ -2002,8 +2601,42 @@ export async function getQueueCount(
         );
         return response.data.totalRecords;
     } catch (error: any) {
-        console.error("Failed to get queue count:", error.message);
+        logger.error("Failed to get queue count:", error.message);
         return 0;
+    }
+}
+
+/**
+ * Get the full Lidarr queue
+ * Returns all items currently in the download queue
+ */
+export async function getQueue(): Promise<QueueItem[]> {
+    const settings = await getSystemSettings();
+    if (
+        !settings?.lidarrEnabled ||
+        !settings.lidarrUrl ||
+        !settings.lidarrApiKey
+    ) {
+        return [];
+    }
+
+    try {
+        const response = await axios.get<QueueResponse>(
+            `${settings.lidarrUrl}/api/v1/queue`,
+            {
+                params: {
+                    page: 1,
+                    pageSize: 100,
+                    includeUnknownArtistItems: true,
+                },
+                headers: { "X-Api-Key": settings.lidarrApiKey },
+            }
+        );
+
+        return response.data.records || [];
+    } catch (error: any) {
+        logger.error("Failed to get Lidarr queue:", error.message);
+        return [];
     }
 }
 
@@ -2015,7 +2648,11 @@ export async function isDownloadActive(
     downloadId: string
 ): Promise<{ active: boolean; status?: string; progress?: number }> {
     const settings = await getSystemSettings();
-    if (!settings?.lidarrEnabled || !settings.lidarrUrl || !settings.lidarrApiKey) {
+    if (
+        !settings?.lidarrEnabled ||
+        !settings.lidarrUrl ||
+        !settings.lidarrApiKey
+    ) {
         return { active: false };
     }
 
@@ -2032,26 +2669,30 @@ export async function isDownloadActive(
             }
         );
 
-        const item = response.data.records.find(r => r.downloadId === downloadId);
-        
+        const item = response.data.records.find(
+            (r) => r.downloadId === downloadId
+        );
+
         if (!item) {
             return { active: false, status: "not_found" };
         }
 
         // Check if it's actively downloading (not stuck in warning/failed state)
-        const isActivelyDownloading = 
-            item.status === "downloading" || 
-            (item.trackedDownloadState === "downloading" && item.trackedDownloadStatus !== "warning");
+        const isActivelyDownloading =
+            item.status === "downloading" ||
+            (item.trackedDownloadState === "downloading" &&
+                item.trackedDownloadStatus !== "warning");
 
         return {
             active: isActivelyDownloading,
             status: item.trackedDownloadState || item.status,
-            progress: item.sizeleft && item.size 
-                ? Math.round((1 - item.sizeleft / item.size) * 100) 
-                : undefined
+            progress:
+                item.sizeleft && item.size
+                    ? Math.round((1 - item.sizeleft / item.size) * 100)
+                    : undefined,
         };
     } catch (error: any) {
-        console.error("Failed to check download status:", error.message);
+        logger.error("Failed to check download status:", error.message);
         return { active: false };
     }
 }

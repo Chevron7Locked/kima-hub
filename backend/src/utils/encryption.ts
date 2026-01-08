@@ -1,28 +1,33 @@
 import crypto from "crypto";
+import { logger } from "./logger";
 
 const ALGORITHM = "aes-256-cbc";
 
-// Default key for development - users should set their own for production
-const DEFAULT_ENCRYPTION_KEY = "default-encryption-key-change-me";
-
-// Track if we've warned about using the default key
-let hasWarnedAboutDefaultKey = false;
+// Insecure default that must not be used in production
+const INSECURE_DEFAULT = "default-encryption-key-change-me";
 
 /**
- * Get the encryption key from environment, properly sized for AES-256
- * Falls back to a default key for development but logs a warning
+ * Get and validate the encryption key from environment
+ * Throws error if not set or using insecure default
  */
 function getEncryptionKey(): Buffer {
-    let key = process.env.SETTINGS_ENCRYPTION_KEY;
+    // Support both SETTINGS_ENCRYPTION_KEY (primary) and ENCRYPTION_KEY (compatibility)
+    const key = process.env.SETTINGS_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
 
-    if (!key || key === DEFAULT_ENCRYPTION_KEY) {
-        if (!hasWarnedAboutDefaultKey) {
-            console.warn(
-                "[SECURITY] Using default encryption key. Set SETTINGS_ENCRYPTION_KEY in production."
-            );
-            hasWarnedAboutDefaultKey = true;
-        }
-        key = DEFAULT_ENCRYPTION_KEY;
+    if (!key) {
+        throw new Error(
+            "CRITICAL: SETTINGS_ENCRYPTION_KEY or ENCRYPTION_KEY environment variable must be set.\n" +
+            "This key is required to encrypt sensitive data (API keys, passwords, 2FA secrets).\n" +
+            "Generate a secure key with: openssl rand -base64 32"
+        );
+    }
+
+    if (key === INSECURE_DEFAULT) {
+        throw new Error(
+            "CRITICAL: Encryption key is set to the insecure default value.\n" +
+            "You must set a unique SETTINGS_ENCRYPTION_KEY or ENCRYPTION_KEY.\n" +
+            "Generate a secure key with: openssl rand -base64 32"
+        );
     }
 
     if (key.length < 32) {
@@ -33,6 +38,9 @@ function getEncryptionKey(): Buffer {
     return Buffer.from(key.slice(0, 32));
 }
 
+// Validate encryption key on module load to fail fast
+const ENCRYPTION_KEY = getEncryptionKey();
+
 /**
  * Encrypt a string using AES-256-CBC
  * Returns empty string for empty/null input
@@ -40,7 +48,7 @@ function getEncryptionKey(): Buffer {
 export function encrypt(text: string): string {
     if (!text) return "";
     const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv(ALGORITHM, getEncryptionKey(), iv);
+    const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
     let encrypted = cipher.update(text);
     encrypted = Buffer.concat([encrypted, cipher.final()]);
     return iv.toString("hex") + ":" + encrypted.toString("hex");
@@ -63,7 +71,7 @@ export function decrypt(text: string): string {
         const encryptedText = Buffer.from(parts.slice(1).join(":"), "hex");
         const decipher = crypto.createDecipheriv(
             ALGORITHM,
-            getEncryptionKey(),
+            ENCRYPTION_KEY,
             iv
         );
         let decrypted = decipher.update(encryptedText);
@@ -75,7 +83,7 @@ export function decrypt(text: string): string {
             throw error;
         }
         // For other errors, log and return original (might be unencrypted)
-        console.error("Decryption error:", error);
+        logger.error("Decryption error:", error);
         return text;
     }
 }

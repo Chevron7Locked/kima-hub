@@ -8,6 +8,7 @@
  * 4. Last.fm (fallback, often missing)
  */
 
+import { logger } from "../utils/logger";
 import axios from "axios";
 
 export interface ImageSearchOptions {
@@ -36,7 +37,7 @@ export class ImageProviderService {
     ): Promise<ImageResult | null> {
         const { timeout = 5000 } = options;
 
-        console.log(`[IMAGE] Searching for artist image: ${artistName}`);
+        logger.debug(`[IMAGE] Searching for artist image: ${artistName}`);
 
         // Try Deezer first (most reliable)
         try {
@@ -45,11 +46,11 @@ export class ImageProviderService {
                 timeout
             );
             if (deezerImage) {
-                console.log(`  Found image from Deezer`);
+                logger.debug(`  Found image from Deezer`);
                 return deezerImage;
             }
         } catch (error) {
-            console.log(
+            logger.debug(
                 `    Deezer failed: ${
                     error instanceof Error ? error.message : "Unknown error"
                 }`
@@ -64,11 +65,11 @@ export class ImageProviderService {
                     timeout
                 );
                 if (fanartImage) {
-                    console.log(`  Found image from Fanart.tv`);
+                    logger.debug(`  Found image from Fanart.tv`);
                     return fanartImage;
                 }
             } catch (error) {
-                console.log(
+                logger.debug(
                     `Fanart.tv failed: ${
                         error instanceof Error ? error.message : "Unknown error"
                     }`
@@ -84,11 +85,11 @@ export class ImageProviderService {
                     timeout
                 );
                 if (mbImage) {
-                    console.log(`  Found image from MusicBrainz`);
+                    logger.debug(`  Found image from MusicBrainz`);
                     return mbImage;
                 }
             } catch (error) {
-                console.log(
+                logger.debug(
                     `MusicBrainz failed: ${
                         error instanceof Error ? error.message : "Unknown error"
                     }`
@@ -96,7 +97,7 @@ export class ImageProviderService {
             }
         }
 
-        console.log(`  ✗ No artist image found from any source`);
+        logger.debug(` No artist image found from any source`);
         return null;
     }
 
@@ -111,7 +112,7 @@ export class ImageProviderService {
     ): Promise<ImageResult | null> {
         const { timeout = 5000 } = options;
 
-        console.log(
+        logger.debug(
             `[IMAGE] Searching for album cover: ${artistName} - ${albumTitle}`
         );
 
@@ -123,11 +124,11 @@ export class ImageProviderService {
                 timeout
             );
             if (deezerCover) {
-                console.log(`  Found cover from Deezer`);
+                logger.debug(`  Found cover from Deezer`);
                 return deezerCover;
             }
         } catch (error) {
-            console.log(
+            logger.debug(
                 `    Deezer failed: ${
                     error instanceof Error ? error.message : "Unknown error"
                 }`
@@ -142,11 +143,11 @@ export class ImageProviderService {
                     timeout
                 );
                 if (mbCover) {
-                    console.log(`  Found cover from MusicBrainz`);
+                    logger.debug(`  Found cover from MusicBrainz`);
                     return mbCover;
                 }
             } catch (error) {
-                console.log(
+                logger.debug(
                     `MusicBrainz failed: ${
                         error instanceof Error ? error.message : "Unknown error"
                     }`
@@ -162,11 +163,11 @@ export class ImageProviderService {
                     timeout
                 );
                 if (fanartCover) {
-                    console.log(`  Found cover from Fanart.tv`);
+                    logger.debug(`  Found cover from Fanart.tv`);
                     return fanartCover;
                 }
             } catch (error) {
-                console.log(
+                logger.debug(
                     `Fanart.tv failed: ${
                         error instanceof Error ? error.message : "Unknown error"
                     }`
@@ -174,7 +175,7 @@ export class ImageProviderService {
             }
         }
 
-        console.log(`  ✗ No album cover found from any source`);
+        logger.debug(` No album cover found from any source`);
         return null;
     }
 
@@ -407,7 +408,7 @@ export class ImageProviderService {
                 }
             }
         } catch (error) {
-            console.log(
+            logger.debug(
                 `Last.fm failed: ${
                     error instanceof Error ? error.message : "Unknown error"
                 }`

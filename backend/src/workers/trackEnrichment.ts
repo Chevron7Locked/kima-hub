@@ -1,4 +1,5 @@
 import { prisma } from "../utils/db";
+import { logger } from "../utils/logger";
 import { lastFmService } from "../services/lastfm";
 
 // Configuration
@@ -61,9 +62,9 @@ function filterMoodTags(tags: string[]): string[] {
  * Start the track enrichment worker
  */
 export async function startTrackEnrichmentWorker() {
-    console.log("[Track Enrichment] Starting worker...");
-    console.log(`   - Batch size: ${TRACK_ENRICHMENT_BATCH_SIZE}`);
-    console.log(`   - Interval: ${TRACK_ENRICHMENT_INTERVAL_MS / 1000}s`);
+    logger.debug("[Track Enrichment] Starting worker...");
+    logger.debug(`   - Batch size: ${TRACK_ENRICHMENT_BATCH_SIZE}`);
+    logger.debug(`   - Interval: ${TRACK_ENRICHMENT_INTERVAL_MS / 1000}s`);
 
     // Run immediately
     await enrichNextTrackBatch();
@@ -81,7 +82,7 @@ export function stopTrackEnrichmentWorker() {
     if (trackEnrichmentInterval) {
         clearInterval(trackEnrichmentInterval);
         trackEnrichmentInterval = null;
-        console.log("[Track Enrichment] Worker stopped");
+        logger.debug("[Track Enrichment] Worker stopped");
     }
 }
 
@@ -129,7 +130,7 @@ async function enrichNextTrackBatch() {
             return;
         }
 
-        console.log(`[Track Enrichment] Processing ${tracks.length} tracks...`);
+        logger.debug(`[Track Enrichment] Processing ${tracks.length} tracks...`);
 
         // Process tracks with rate limiting (Last.fm has rate limits)
         for (const track of tracks) {
@@ -148,14 +149,14 @@ async function enrichNextTrackBatch() {
                             where: { id: track.id },
                             data: { lastfmTags: moodTags },
                         });
-                        console.log(`   ✓ ${artistName} - ${track.title}: [${moodTags.join(", ")}]`);
+                        logger.debug(` ${artistName} - ${track.title}: [${moodTags.join(", ")}]`);
                     } else {
                         // Mark as processed even if no mood tags found (use empty array marker)
                         await prisma.track.update({
                             where: { id: track.id },
                             data: { lastfmTags: ["_no_mood_tags"] },
                         });
-                        console.log(`   - ${artistName} - ${track.title}: no mood tags`);
+                        logger.debug(`   - ${artistName} - ${track.title}: no mood tags`);
                     }
                 } else {
                     // No tags from Last.fm
@@ -168,15 +169,15 @@ async function enrichNextTrackBatch() {
                 // Small delay between requests to respect rate limits
                 await new Promise(resolve => setTimeout(resolve, 200));
             } catch (error: any) {
-                console.error(`   ✗ ${track.title}: ${error?.message || error}`);
+                logger.error(` ${track.title}: ${error?.message || error}`);
             }
         }
 
         // Log progress
         const progress = await getTrackEnrichmentProgress();
-        console.log(`[Track Enrichment] ${progress.enriched}/${progress.total} tracks enriched`);
+        logger.debug(`[Track Enrichment] ${progress.enriched}/${progress.total} tracks enriched`);
     } catch (error) {
-        console.error("[Track Enrichment] Batch error:", error);
+        logger.error("[Track Enrichment] Batch error:", error);
     } finally {
         isEnrichingTracks = false;
     }
@@ -228,7 +229,7 @@ export async function enrichTracksForAlbum(albumId: string) {
         },
     });
 
-    console.log(`[Track Enrichment] Enriching ${tracks.length} tracks for album ${albumId}`);
+    logger.debug(`[Track Enrichment] Enriching ${tracks.length} tracks for album ${albumId}`);
 
     for (const track of tracks) {
         try {
@@ -249,7 +250,7 @@ export async function enrichTracksForAlbum(albumId: string) {
             
             await new Promise(resolve => setTimeout(resolve, 200));
         } catch (error) {
-            console.error(`Failed to enrich track ${track.title}:`, error);
+            logger.error(`Failed to enrich track ${track.title}:`, error);
         }
     }
 }

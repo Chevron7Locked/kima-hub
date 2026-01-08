@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { logger } from "./logger";
 import * as path from 'path';
 
 /**
@@ -28,7 +29,7 @@ function ensureLogsDir(): void {
     try {
         fs.mkdirSync(LOGS_DIR, { recursive: true });
     } catch (error) {
-        console.error('Failed to create playlist logs directory:', {
+        logger.error('Failed to create playlist logs directory:', {
             logsDir: LOGS_DIR,
             error,
         });
@@ -51,7 +52,7 @@ function initSessionLog(): void {
     try {
         fs.writeFileSync(SESSION_LOG, header);
     } catch (error) {
-        console.error('Failed to initialize session log:', error);
+        logger.error('Failed to initialize session log:', error);
     }
 }
 
@@ -100,9 +101,9 @@ export function sessionLog(component: string, message: string, level: 'INFO' | '
     // Also log to console with component prefix
     const prefix = `[${component}]`;
     if (level === 'ERROR') {
-        console.error(prefix, message);
+        logger.error(prefix, message);
     } else {
-        console.log(prefix, message);
+        logger.debug(prefix, message);
     }
 }
 
@@ -139,9 +140,9 @@ class PlaylistLogger {
 
         // Also log to console
         if (level === 'ERROR') {
-            console.error(`[Playlist Logger] ${message}`);
+            logger.error(`[Playlist Logger] ${message}`);
         } else {
-            console.log(`[Playlist Logger] ${message}`);
+            logger.debug(`[Playlist Logger] ${message}`);
         }
 
         // Flush to file
@@ -153,7 +154,7 @@ class PlaylistLogger {
             fs.appendFileSync(this.logFile, this.buffer.join(''));
             this.buffer = [];
         } catch (error) {
-            console.error(`[Playlist Logger] Failed to write to ${this.logFile}:`, error);
+            logger.error(`[Playlist Logger] Failed to write to ${this.logFile}:`, error);
         }
     }
 
@@ -288,12 +289,12 @@ export function logPlaylistEvent(message: string): void {
     const line = formatLogLine('INFO', message);
     const eventsFile = path.join(LOGS_DIR, 'events.log');
     
-    console.log(`[Playlist] ${message}`);
+    logger.debug(`[Playlist] ${message}`);
     
     try {
         fs.appendFileSync(eventsFile, line);
     } catch (error) {
-        console.error(`Failed to write to events log:`, error);
+        logger.error(`Failed to write to events log:`, error);
     }
 }
 

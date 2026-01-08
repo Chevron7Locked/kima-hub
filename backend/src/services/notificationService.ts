@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { logger } from "../utils/logger";
 
 const prisma = new PrismaClient();
 
@@ -35,7 +36,7 @@ class NotificationService {
             },
         });
 
-        console.log(
+        logger.debug(
             `[NOTIFICATION] Created: ${type} - ${title} for user ${userId}`
         );
         return notification;
@@ -124,7 +125,7 @@ class NotificationService {
         });
 
         if (result.count > 0) {
-            console.log(
+            logger.debug(
                 `[NOTIFICATION] Cleaned up ${result.count} old notifications`
             );
         }

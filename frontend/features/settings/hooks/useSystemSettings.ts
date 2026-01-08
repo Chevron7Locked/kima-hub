@@ -12,6 +12,7 @@ const defaultSystemSettings: SystemSettings = {
     openaiModel: "gpt-4",
     fanartEnabled: false,
     fanartApiKey: "",
+    lastfmApiKey: "",
     audiobookshelfEnabled: false,
     audiobookshelfUrl: "http://localhost:13378",
     audiobookshelfApiKey: "",
@@ -25,9 +26,11 @@ const defaultSystemSettings: SystemSettings = {
     maxCacheSizeMb: 10240,
     autoSync: true,
     autoEnrichMetadata: true,
+    audioAnalyzerWorkers: 2,
+    soulseekConcurrentDownloads: 4,
     // Download preferences
     downloadSource: "soulseek",
-    soulseekFallback: "none",
+    primaryFailureFallback: "none",
 };
 
 export function useSystemSettings() {
@@ -166,6 +169,9 @@ export function useSystemSettings() {
                     break;
                 case "fanart":
                     result = await api.testFanart(systemSettings.fanartApiKey);
+                    break;
+                case "lastfm":
+                    result = await api.testLastfm(systemSettings.lastfmApiKey);
                     break;
                 case "audiobookshelf":
                     result = await api.testAudiobookshelf(

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { audiobookshelfService } from "../services/audiobookshelf";
@@ -33,7 +34,7 @@ router.use(requireAuth);
  *         name: type
  *         schema:
  *           type: string
- *           enum: [all, artists, albums, tracks, audiobooks, podcasts]
+ *           enum: [all, artists, albums, tracks, audiobooks, podcasts, episodes]
  *         description: Type of content to search
  *         default: all
  *       - in: query
@@ -102,11 +103,13 @@ router.get("/", async (req, res) => {
         }
 
         // Check cache for library search (short TTL since library can change)
-        const cacheKey = `search:library:${type}:${genre || ""}:${query}:${searchLimit}`;
+        const cacheKey = `search:library:${type}:${
+            genre || ""
+        }:${query}:${searchLimit}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
-                console.log(`[SEARCH] Cache hit for query="${query}"`);
+                logger.debug(`[SEARCH] Cache hit for query="${query}"`);
                 return res.json(JSON.parse(cached));
             }
         } catch (err) {
@@ -119,6 +122,7 @@ router.get("/", async (req, res) => {
             tracks: [],
             audiobooks: [],
             podcasts: [],
+            episodes: [],
         };
 
         // Search artists using full-text search (only show artists with actual albums in library)
@@ -246,38 +250,45 @@ router.get("/", async (req, res) => {
             }
         }
 
-        // Search audiobooks
+        // Search audiobooks using FTS
         if (type === "all" || type === "audiobooks") {
             try {
-                const audiobooks = await audiobookshelfService.searchAudiobooks(
-                    query
-                );
-                results.audiobooks = audiobooks.slice(0, searchLimit);
+                const audiobooks = await searchService.searchAudiobooksFTS({
+                    query,
+                    limit: searchLimit,
+                });
+                results.audiobooks = audiobooks;
             } catch (error) {
-                console.error("Audiobook search error:", error);
+                logger.error("Audiobook search error:", error);
                 results.audiobooks = [];
             }
         }
 
-        // Search podcasts (search through owned podcasts)
+        // Search podcasts using FTS
         if (type === "all" || type === "podcasts") {
             try {
-                const allPodcasts =
-                    await audiobookshelfService.getAllPodcasts();
-                results.podcasts = allPodcasts
-                    .filter(
-                        (p) =>
-                            p.media?.metadata?.title
-                                ?.toLowerCase()
-                                .includes(query.toLowerCase()) ||
-                            p.media?.metadata?.author
-                                ?.toLowerCase()
-                                .includes(query.toLowerCase())
-                    )
-                    .slice(0, searchLimit);
+                const podcasts = await searchService.searchPodcastsFTS({
+                    query,
+                    limit: searchLimit,
+                });
+                results.podcasts = podcasts;
             } catch (error) {
-                console.error("Podcast search error:", error);
+                logger.error("Podcast search error:", error);
                 results.podcasts = [];
+            }
+        }
+
+        // Search podcast episodes
+        if (type === "all" || type === "episodes") {
+            try {
+                const episodes = await searchService.searchEpisodes({
+                    query,
+                    limit: searchLimit,
+                });
+                results.episodes = episodes;
+            } catch (error) {
+                logger.error("Episode search error:", error);
+                results.episodes = [];
             }
         }
 
@@ -290,7 +301,7 @@ router.get("/", async (req, res) => {
 
         res.json(results);
     } catch (error) {
-        console.error("Search error:", error);
+        logger.error("Search error:", error);
         res.status(500).json({ error: "Search failed" });
     }
 });
@@ -315,7 +326,7 @@ router.get("/genres", async (req, res) => {
             }))
         );
     } catch (error) {
-        console.error("Get genres error:", error);
+        logger.error("Get genres error:", error);
         res.status(500).json({ error: "Failed to get genres" });
     }
 });
@@ -339,13 +350,13 @@ router.get("/discover", async (req, res) => {
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
-                console.log(
+                logger.debug(
                     `[SEARCH DISCOVER] Cache hit for query="${query}" type=${type}`
                 );
                 return res.json(JSON.parse(cached));
             }
         } catch (err) {
-            console.warn("[SEARCH DISCOVER] Redis read error:", err);
+            logger.warn("[SEARCH DISCOVER] Redis read error:", err);
         }
 
         const results: any[] = [];
@@ -353,27 +364,56 @@ router.get("/discover", async (req, res) => {
         if (type === "music" || type === "all") {
             // Search Last.fm for artists AND tracks
             try {
-                // Search for artists
+                // Check if query is a potential alias
+                let searchQuery = query;
+                let aliasInfo: any = null;
+
+                try {
+                    const correction = await lastFmService.getArtistCorrection(query);
+                    if (correction?.corrected) {
+                        // Query is an alias - search for canonical name instead
+                        searchQuery = correction.canonicalName;
+                        aliasInfo = {
+                            type: "alias_resolution",
+                            original: query,
+                            canonical: correction.canonicalName,
+                            mbid: correction.mbid,
+                        };
+                        logger.debug(
+                            `[SEARCH DISCOVER] Alias resolved: "${query}" → "${correction.canonicalName}"`
+                        );
+                    }
+                } catch (correctionError) {
+                    logger.warn("[SEARCH DISCOVER] Correction check failed:", correctionError);
+                }
+
+                // Search for artists (using potentially corrected query)
                 const lastfmArtistResults = await lastFmService.searchArtists(
-                    query,
+                    searchQuery,
                     searchLimit
                 );
-                console.log(
+                logger.debug(
                     `[SEARCH ENDPOINT] Found ${lastfmArtistResults.length} artist results`
                 );
+
+                // Add alias info to response if applicable
+                if (aliasInfo) {
+                    results.push(aliasInfo);
+                }
+
                 results.push(...lastfmArtistResults);
 
-                // Search for tracks (songs)
+                // Search for tracks (songs) - use corrected query for consistency
                 const lastfmTrackResults = await lastFmService.searchTracks(
-                    query,
+                    searchQuery,
                     searchLimit
                 );
-                console.log(
+                logger.debug(
                     `[SEARCH ENDPOINT] Found ${lastfmTrackResults.length} track results`
                 );
                 results.push(...lastfmTrackResults);
             } catch (error) {
-                console.error("Last.fm search error:", error);
+                logger.error("Last.fm search error:", error);
             }
         }
 
@@ -410,7 +450,7 @@ router.get("/discover", async (req, res) => {
 
                 results.push(...podcasts);
             } catch (error) {
-                console.error("iTunes podcast search error:", error);
+                logger.error("iTunes podcast search error:", error);
             }
         }
 
@@ -419,12 +459,12 @@ router.get("/discover", async (req, res) => {
         try {
             await redisClient.setEx(cacheKey, 900, JSON.stringify(payload));
         } catch (err) {
-            console.warn("[SEARCH DISCOVER] Redis write error:", err);
+            logger.warn("[SEARCH DISCOVER] Redis write error:", err);
         }
 
         res.json(payload);
     } catch (error) {
-        console.error("Discovery search error:", error);
+        logger.error("Discovery search error:", error);
         res.status(500).json({ error: "Discovery search failed" });
     }
 });

@@ -54,8 +54,8 @@ services:
         image: lscr.io/linuxserver/lidarr:latest
         container_name: lidify_lidarr
         environment:
-            - PUID=1000
-            - PGID=1000
+            - PUID=${PUID:-1000}
+            - PGID=${PGID:-1000}
             - TZ=${TZ:-UTC}
         volumes:
             - lidarr_config:/config
@@ -70,8 +70,8 @@ services:
         image: lscr.io/linuxserver/prowlarr:latest
         container_name: lidify_prowlarr
         environment:
-            - PUID=1000
-            - PGID=1000
+            - PUID=${PUID:-1000}
+            - PGID=${PGID:-1000}
             - TZ=${TZ:-UTC}
         volumes:
             - prowlarr_config:/config
@@ -114,7 +114,7 @@ services:
     soularr:
         image: mrusse08/soularr:latest
         container_name: lidify_soularr
-        user: "1000:1000"
+        user: "${PUID:-1000}:${PGID:-1000}"
         environment:
             - TZ=${TZ:-UTC}
             - SCRIPT_INTERVAL=300
@@ -131,8 +131,8 @@ services:
         image: lscr.io/linuxserver/qbittorrent:latest
         container_name: lidify_qbittorrent
         environment:
-            - PUID=1000
-            - PGID=1000
+            - PUID=${PUID:-1000}
+            - PGID=${PGID:-1000}
             - TZ=${TZ:-UTC}
             - WEBUI_PORT=8080
         volumes:
@@ -150,8 +150,8 @@ services:
         image: lscr.io/linuxserver/nzbget:latest
         container_name: lidify_nzbget
         environment:
-            - PUID=1000
-            - PGID=1000
+            - PUID=${PUID:-1000}
+            - PGID=${PGID:-1000}
             - TZ=${TZ:-UTC}
         volumes:
             - nzbget_config:/config

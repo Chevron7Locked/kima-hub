@@ -5,6 +5,7 @@
  * so users have fresh music waiting Monday morning.
  */
 
+import { logger } from "../utils/logger";
 import cron, { ScheduledTask } from "node-cron";
 import { prisma } from "../utils/db";
 import { discoverQueue } from "./queues";
@@ -17,13 +18,13 @@ export function startDiscoverWeeklyCron() {
     // "0 20 * * 0" = At 20:00 on Sunday
     const schedule = "0 20 * * 0";
 
-    console.log(
+    logger.debug(
         `Scheduling Discover Weekly to run: ${schedule} (Sundays at 8 PM)`
     );
 
     cronTask = cron.schedule(schedule, async () => {
-        console.log(`\n === Discover Weekly Cron Triggered ===`);
-        console.log(`   Time: ${new Date().toLocaleString()}`);
+        logger.debug(`\n === Discover Weekly Cron Triggered ===`);
+        logger.debug(`   Time: ${new Date().toLocaleString()}`);
 
         try {
             // Get all users with Discover Weekly enabled
@@ -37,31 +38,31 @@ export function startDiscoverWeeklyCron() {
                 },
             });
 
-            console.log(
+            logger.debug(
                 `   Found ${configs.length} users with Discover Weekly enabled`
             );
 
             for (const config of configs) {
-                console.log(`   Queueing job for user ${config.userId}...`);
+                logger.debug(`   Queueing job for user ${config.userId}...`);
 
                 await discoverQueue.add("discover-weekly", {
                     userId: config.userId,
                 });
             }
 
-            console.log(`   Queued ${configs.length} Discover Weekly jobs`);
+            logger.debug(`   Queued ${configs.length} Discover Weekly jobs`);
         } catch (error: any) {
-            console.error(`   ✗ Discover Weekly cron error:`, error.message);
+            logger.error(` Discover Weekly cron error:`, error.message);
         }
     });
 
-    console.log("Discover Weekly cron scheduler started");
+    logger.debug("Discover Weekly cron scheduler started");
 }
 
 export function stopDiscoverWeeklyCron() {
     if (cronTask) {
         cronTask.stop();
         cronTask = null;
-        console.log("Discover Weekly cron scheduler stopped");
+        logger.debug("Discover Weekly cron scheduler stopped");
     }
 }

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { useAudio } from "@/lib/audio-context";
 import { api } from "@/lib/api";
 
@@ -27,6 +27,37 @@ export function useMediaSession() {
         currentTime,
     } = useAudio();
 
+    // Track if this device has initiated playback locally
+    // Prevents cross-device media session interference from state sync
+    const hasPlayedLocallyRef = useRef(false);
+
+    // Set flag when playback starts on this device
+    useEffect(() => {
+        if (isPlaying) {
+            hasPlayedLocallyRef.current = true;
+        }
+    }, [isPlaying]);
+
+    // Reset flag when all media is cleared
+    useEffect(() => {
+        if (!currentTrack && !currentAudiobook && !currentPodcast) {
+            hasPlayedLocallyRef.current = false;
+        }
+    }, [currentTrack, currentAudiobook, currentPodcast]);
+
+    // Convert relative URLs to absolute (required for iOS)
+    const getAbsoluteUrl = useCallback((url: string): string => {
+        if (!url) return "";
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            return url;
+        }
+        // Construct absolute URL
+        if (typeof window !== "undefined") {
+            return `${window.location.origin}${url}`;
+        }
+        return url;
+    }, []);
+
     useEffect(() => {
         // Check if Media Session API is supported
         if (!("mediaSession" in navigator)) {
@@ -34,10 +65,19 @@ export function useMediaSession() {
             return;
         }
 
+        // Only set metadata if this device has initiated playback
+        // Prevents cross-device interference from state sync
+        if (!hasPlayedLocallyRef.current) {
+            navigator.mediaSession.metadata = null;
+            return;
+        }
+
         // Update metadata when track/audiobook/podcast changes
         if (playbackType === "track" && currentTrack) {
             const coverUrl = currentTrack.album?.coverArt
-                ? api.getCoverArtUrl(currentTrack.album.coverArt, 512)
+                ? getAbsoluteUrl(
+                      api.getCoverArtUrl(currentTrack.album.coverArt, 512)
+                  )
                 : undefined;
 
             navigator.mediaSession.metadata = new MediaMetadata({
@@ -77,7 +117,9 @@ export function useMediaSession() {
             });
         } else if (playbackType === "audiobook" && currentAudiobook) {
             const coverUrl = currentAudiobook.coverUrl
-                ? api.getCoverArtUrl(currentAudiobook.coverUrl, 512)
+                ? getAbsoluteUrl(
+                      api.getCoverArtUrl(currentAudiobook.coverUrl, 512)
+                  )
                 : undefined;
 
             navigator.mediaSession.metadata = new MediaMetadata({
@@ -119,7 +161,9 @@ export function useMediaSession() {
             });
         } else if (playbackType === "podcast" && currentPodcast) {
             const coverUrl = currentPodcast.coverUrl
-                ? api.getCoverArtUrl(currentPodcast.coverUrl, 512)
+                ? getAbsoluteUrl(
+                      api.getCoverArtUrl(currentPodcast.coverUrl, 512)
+                  )
                 : undefined;
 
             navigator.mediaSession.metadata = new MediaMetadata({
@@ -174,6 +218,12 @@ export function useMediaSession() {
 
     useEffect(() => {
         if (!("mediaSession" in navigator)) return;
+
+        // Only register handlers if this device has initiated playback
+        // Prevents cross-device interference from state sync
+        if (!hasPlayedLocallyRef.current) {
+            return;
+        }
 
         // Register action handlers
         navigator.mediaSession.setActionHandler("play", () => {
@@ -296,5 +346,5 @@ export function useMediaSession() {
                 );
             }
         }
-    }, [currentTime, currentTrack, currentAudiobook, currentPodcast]);
+    }, [currentTime, currentTrack, currentAudiobook, currentPodcast, getAbsoluteUrl]);
 }

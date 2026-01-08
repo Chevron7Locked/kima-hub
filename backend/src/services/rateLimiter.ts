@@ -6,6 +6,7 @@
  */
 
 import PQueue from "p-queue";
+import { logger } from "../utils/logger";
 
 interface RateLimitConfig {
     /** Requests per interval */
@@ -81,6 +82,7 @@ class GlobalRateLimiter {
     private circuitBreakers: Map<ServiceName, CircuitState> = new Map();
     private globalPaused = false;
     private globalPauseUntil = 0;
+    private concurrencyMultiplier = 1; // 1-5 multiplier for user-configurable speed
 
     constructor() {
         // Initialize queues for each service
@@ -103,7 +105,7 @@ class GlobalRateLimiter {
             });
         }
 
-        console.log("Global rate limiter initialized");
+        logger.debug("Global rate limiter initialized");
     }
 
     /**
@@ -127,7 +129,7 @@ class GlobalRateLimiter {
         // Check global pause
         if (this.globalPaused && Date.now() < this.globalPauseUntil) {
             const waitTime = this.globalPauseUntil - Date.now();
-            console.log(`Global rate limit pause - waiting ${waitTime}ms`);
+            logger.debug(`Global rate limit pause - waiting ${waitTime}ms`);
             await this.sleep(waitTime);
         }
 
@@ -138,7 +140,7 @@ class GlobalRateLimiter {
             if (elapsed < circuit.resetAfterMs) {
                 // Circuit is open, wait or throw
                 const waitTime = circuit.resetAfterMs - elapsed;
-                console.log(
+                logger.debug(
                     `Circuit breaker open for ${service} - waiting ${waitTime}ms`
                 );
                 await this.sleep(waitTime);
@@ -183,7 +185,7 @@ class GlobalRateLimiter {
                         config.baseDelay,
                         error
                     );
-                    console.warn(
+                    logger.warn(
                         `Rate limited by ${service} (attempt ${attempt + 1}/${
                             maxRetries + 1
                         }) - backing off ${delay}ms`
@@ -197,7 +199,7 @@ class GlobalRateLimiter {
                             60000,
                             circuit.resetAfterMs * 2
                         );
-                        console.warn(
+                        logger.warn(
                             `Circuit breaker opened for ${service} - will reset in ${circuit.resetAfterMs}ms`
                         );
                     }
@@ -245,7 +247,7 @@ class GlobalRateLimiter {
     pauseAll(durationMs: number) {
         this.globalPaused = true;
         this.globalPauseUntil = Date.now() + durationMs;
-        console.warn(`Global rate limiter paused for ${durationMs}ms`);
+        logger.warn(`Global rate limiter paused for ${durationMs}ms`);
     }
 
     /**
@@ -254,7 +256,7 @@ class GlobalRateLimiter {
     resume() {
         this.globalPaused = false;
         this.globalPauseUntil = 0;
-        console.log("Global rate limiter resumed");
+        logger.debug("Global rate limiter resumed");
     }
 
     /**
@@ -290,6 +292,39 @@ class GlobalRateLimiter {
         }
     }
 
+    /**
+     * Update concurrency multiplier for parallel enrichment processing
+     * This allows power users to increase enrichment speed while respecting API rate limits
+     * @param multiplier 1-5, where 1 is conservative and 5 is maximum
+     */
+    updateConcurrencyMultiplier(multiplier: number) {
+        const clampedMultiplier = Math.max(1, Math.min(5, multiplier));
+        this.concurrencyMultiplier = clampedMultiplier;
+        
+        logger.debug(`[Rate Limiter] Updating concurrency multiplier to ${clampedMultiplier}`);
+        
+        // Update all service queues with new concurrency
+        for (const [service, config] of Object.entries(SERVICE_CONFIGS)) {
+            const queue = this.queues.get(service as ServiceName);
+            if (queue) {
+                // Scale concurrency by multiplier, but never exceed intervalCap (rate limit)
+                const newConcurrency = Math.min(
+                    config.concurrency * clampedMultiplier,
+                    config.intervalCap
+                );
+                queue.concurrency = newConcurrency;
+                logger.debug(`  → ${service}: ${config.concurrency} → ${newConcurrency}`);
+            }
+        }
+    }
+
+    /**
+     * Get current concurrency multiplier
+     */
+    getConcurrencyMultiplier(): number {
+        return this.concurrencyMultiplier;
+    }
+
     private sleep(ms: number): Promise<void> {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
@@ -300,4 +335,3 @@ export const rateLimiter = new GlobalRateLimiter();
 
 // Export types for use in other services
 export type { ServiceName, RateLimitConfig };
-

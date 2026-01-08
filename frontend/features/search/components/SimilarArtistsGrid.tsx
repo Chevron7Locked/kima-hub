@@ -4,6 +4,7 @@ import { Music } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { DiscoverResult } from "../types";
 import { api } from "@/lib/api";
+import { formatListeners } from "@/lib/format";
 
 interface SimilarArtistsGridProps {
     discoverResults: DiscoverResult[];
@@ -29,7 +30,10 @@ export function SimilarArtistsGrid({
             <h2 className="text-2xl font-bold text-white mb-6">
                 Similar Artists
             </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 3xl:grid-cols-10 gap-4" data-tv-section="search-results-artists">
+            <div
+                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 3xl:grid-cols-10 gap-4"
+                data-tv-section="search-results-artists"
+            >
                 {artistResults.slice(1, 7).map((result, index) => {
                     const artistId =
                         result.mbid || encodeURIComponent(result.name);
@@ -61,7 +65,9 @@ export function SimilarArtistsGrid({
                                 <h3 className="text-base font-bold text-white line-clamp-1 mb-1">
                                     {result.name}
                                 </h3>
-                                <p className="text-sm text-[#b3b3b3]">Artist</p>
+                                <p className="text-sm text-[#b3b3b3]">
+                                    {formatListeners(result.listeners)}
+                                </p>
                             </div>
                         </Link>
                     );

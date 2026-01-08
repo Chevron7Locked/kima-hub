@@ -1,0 +1,232 @@
+import { prisma } from "../utils/db";
+import { logger } from "../utils/logger";
+import { enrichmentFailureService } from "./enrichmentFailureService";
+
+const STALE_THRESHOLD_MINUTES = 5;
+const MAX_RETRIES = 3;
+const CIRCUIT_BREAKER_THRESHOLD = 30; // Increased from 10 to handle batch operations
+const CIRCUIT_BREAKER_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+
+type CircuitState = 'closed' | 'open' | 'half-open';
+
+class AudioAnalysisCleanupService {
+    private state: CircuitState = 'closed';
+    private failureCount = 0;
+    private lastFailureTime: Date | null = null;
+
+    /**
+     * Check if we should attempt to transition from open to half-open
+     */
+    private shouldAttemptReset(): boolean {
+        if (!this.lastFailureTime) return false;
+        const timeSinceFailure = Date.now() - this.lastFailureTime.getTime();
+        return timeSinceFailure >= CIRCUIT_BREAKER_WINDOW_MS;
+    }
+
+    /**
+     * Handle successful operation - close circuit if in half-open state
+     */
+    private onSuccess(): void {
+        if (this.state === 'half-open') {
+            logger.info(
+                `[AudioAnalysisCleanup] Circuit breaker CLOSED - recovery successful after ${this.failureCount} failures`
+            );
+            this.state = 'closed';
+            this.failureCount = 0;
+            this.lastFailureTime = null;
+        } else if (this.state === 'closed' && this.failureCount > 0) {
+            // Reset failure counter on success while closed
+            logger.debug(
+                "[AudioAnalysisCleanup] Resetting failure counter on success"
+            );
+            this.failureCount = 0;
+            this.lastFailureTime = null;
+        }
+    }
+
+    /**
+     * Handle failed operation - update state and counts
+     */
+    private onFailure(resetCount: number, permanentlyFailedCount: number): void {
+        const totalFailures = resetCount + permanentlyFailedCount;
+        this.failureCount += totalFailures;
+        this.lastFailureTime = new Date();
+
+        if (this.state === 'half-open') {
+            // Failed during half-open - reopen circuit
+            this.state = 'open';
+            logger.warn(
+                `[AudioAnalysisCleanup] Circuit breaker REOPENED - recovery attempt failed (${this.failureCount} total failures)`
+            );
+        } else if (this.failureCount >= CIRCUIT_BREAKER_THRESHOLD) {
+            // Exceeded threshold - open circuit
+            this.state = 'open';
+            logger.warn(
+                `[AudioAnalysisCleanup] Circuit breaker OPEN - ${this.failureCount} failures in window. ` +
+                    `Pausing audio analysis queuing until analyzer shows signs of life.`
+            );
+        }
+    }
+
+    /**
+     * Check if circuit breaker is open (too many consecutive failures)
+     * Automatically transitions to half-open after cooldown period
+     */
+    isCircuitOpen(): boolean {
+        if (this.state === 'open' && this.shouldAttemptReset()) {
+            this.state = 'half-open';
+            logger.info(
+                `[AudioAnalysisCleanup] Circuit breaker HALF-OPEN - attempting recovery after ${
+                    CIRCUIT_BREAKER_WINDOW_MS / 60000
+                } minute cooldown`
+            );
+        }
+        return this.state === 'open';
+    }
+
+    /**
+     * Record success for external callers (maintains backward compatibility)
+     */
+    recordSuccess(): void {
+        this.onSuccess();
+    }
+
+    /**
+     * Clean up tracks stuck in "processing" state
+     * Returns number of tracks reset and permanently failed
+     */
+    async cleanupStaleProcessing(): Promise<{
+        reset: number;
+        permanentlyFailed: number;
+    }> {
+        const cutoff = new Date(
+            Date.now() - STALE_THRESHOLD_MINUTES * 60 * 1000
+        );
+
+        // Find tracks stuck in processing
+        const staleTracks = await prisma.track.findMany({
+            where: {
+                analysisStatus: "processing",
+                OR: [
+                    { analysisStartedAt: { lt: cutoff } },
+                    {
+                        analysisStartedAt: null,
+                        updatedAt: { lt: cutoff },
+                    },
+                ],
+            },
+            include: {
+                album: {
+                    include: {
+                        artist: { select: { name: true } },
+                    },
+                },
+            },
+        });
+
+        if (staleTracks.length === 0) {
+            return { reset: 0, permanentlyFailed: 0 };
+        }
+
+        logger.debug(
+            `[AudioAnalysisCleanup] Found ${staleTracks.length} stale tracks (processing > ${STALE_THRESHOLD_MINUTES} min)`
+        );
+
+        let resetCount = 0;
+        let permanentlyFailedCount = 0;
+
+        for (const track of staleTracks) {
+            const newRetryCount = (track.analysisRetryCount || 0) + 1;
+            const trackName = `${track.album.artist.name} - ${track.title}`;
+
+            if (newRetryCount >= MAX_RETRIES) {
+                // Permanently failed - mark as failed and record
+                await prisma.track.update({
+                    where: { id: track.id },
+                    data: {
+                        analysisStatus: "failed",
+                        analysisError: `Exceeded ${MAX_RETRIES} retry attempts (stale processing)`,
+                        analysisRetryCount: newRetryCount,
+                        analysisStartedAt: null,
+                    },
+                });
+
+                // Record in EnrichmentFailure for user visibility
+                await enrichmentFailureService.recordFailure({
+                    entityType: "audio",
+                    entityId: track.id,
+                    entityName: trackName,
+                    errorMessage: `Analysis timed out ${MAX_RETRIES} times - track may be corrupted or unsupported`,
+                    errorCode: "MAX_RETRIES_EXCEEDED",
+                    metadata: {
+                        filePath: track.filePath,
+                        retryCount: newRetryCount,
+                    },
+                });
+
+                logger.warn(
+                    `[AudioAnalysisCleanup] Permanently failed: ${trackName}`
+                );
+                permanentlyFailedCount++;
+            } else {
+                // Reset to pending for retry
+                await prisma.track.update({
+                    where: { id: track.id },
+                    data: {
+                        analysisStatus: "pending",
+                        analysisStartedAt: null,
+                        analysisRetryCount: newRetryCount,
+                        analysisError: `Reset after stale processing (attempt ${newRetryCount}/${MAX_RETRIES})`,
+                    },
+                });
+
+                logger.debug(
+                    `[AudioAnalysisCleanup] Reset for retry (${newRetryCount}/${MAX_RETRIES}): ${trackName}`
+                );
+                resetCount++;
+            }
+        }
+
+        // Update circuit breaker state
+        if (resetCount > 0 || permanentlyFailedCount > 0) {
+            this.onFailure(resetCount, permanentlyFailedCount);
+            logger.debug(
+                `[AudioAnalysisCleanup] Cleanup complete: ${resetCount} reset, ${permanentlyFailedCount} permanently failed`
+            );
+        }
+
+        return { reset: resetCount, permanentlyFailed: permanentlyFailedCount };
+    }
+
+    /**
+     * Get current analysis statistics
+     */
+    async getStats(): Promise<{
+        pending: number;
+        processing: number;
+        completed: number;
+        failed: number;
+        circuitOpen: boolean;
+        circuitState: CircuitState;
+        failureCount: number;
+    }> {
+        const [pending, processing, completed, failed] = await Promise.all([
+            prisma.track.count({ where: { analysisStatus: "pending" } }),
+            prisma.track.count({ where: { analysisStatus: "processing" } }),
+            prisma.track.count({ where: { analysisStatus: "completed" } }),
+            prisma.track.count({ where: { analysisStatus: "failed" } }),
+        ]);
+
+        return {
+            pending,
+            processing,
+            completed,
+            failed,
+            circuitOpen: this.state === 'open',
+            circuitState: this.state,
+            failureCount: this.failureCount,
+        };
+    }
+}
+
+export const audioAnalysisCleanupService = new AudioAnalysisCleanupService();

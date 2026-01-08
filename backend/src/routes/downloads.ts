@@ -1,15 +1,89 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { config } from "../config";
 import { lidarrService } from "../services/lidarr";
 import { musicBrainzService } from "../services/musicbrainz";
+import { lastFmService } from "../services/lastfm";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import crypto from "crypto";
 
 const router = Router();
 
 router.use(requireAuthOrToken);
+
+/**
+ * Verify and potentially correct artist name before download
+ * Uses multiple sources for canonical name resolution:
+ * 1. MusicBrainz (if MBID provided) - most authoritative
+ * 2. LastFM correction API - handles aliases and misspellings
+ * 3. Original name - fallback
+ *
+ * @returns Object with verified name and whether correction was applied
+ */
+async function verifyArtistName(
+    artistName: string,
+    artistMbid?: string
+): Promise<{
+    verifiedName: string;
+    wasCorrected: boolean;
+    source: "musicbrainz" | "lastfm" | "original";
+    originalName: string;
+}> {
+    const originalName = artistName;
+
+    // Strategy 1: If we have MBID, use MusicBrainz as authoritative source
+    if (artistMbid) {
+        try {
+            const mbArtist = await musicBrainzService.getArtist(artistMbid);
+            if (mbArtist?.name) {
+                return {
+                    verifiedName: mbArtist.name,
+                    wasCorrected:
+                        mbArtist.name.toLowerCase() !==
+                        artistName.toLowerCase(),
+                    source: "musicbrainz",
+                    originalName,
+                };
+            }
+        } catch (error) {
+            logger.warn(
+                `MusicBrainz lookup failed for MBID ${artistMbid}:`,
+                error
+            );
+        }
+    }
+
+    // Strategy 2: Use LastFM correction API
+    try {
+        const correction = await lastFmService.getArtistCorrection(artistName);
+        if (correction?.corrected) {
+            logger.debug(
+                `[VERIFY] LastFM correction: "${artistName}" → "${correction.canonicalName}"`
+            );
+            return {
+                verifiedName: correction.canonicalName,
+                wasCorrected: true,
+                source: "lastfm",
+                originalName,
+            };
+        }
+    } catch (error) {
+        logger.warn(
+            `LastFM correction lookup failed for "${artistName}":`,
+            error
+        );
+    }
+
+    // Strategy 3: Return original name
+    return {
+        verifiedName: artistName,
+        wasCorrected: false,
+        source: "original",
+        originalName,
+    };
+}
 
 // POST /downloads - Create download job
 router.post("/", async (req, res) => {
@@ -75,6 +149,18 @@ router.post("/", async (req, res) => {
             });
         }
 
+        // Single album download - verify artist name before proceeding
+        let verifiedArtistName = artistName;
+        if (type === "album" && artistName) {
+            const verification = await verifyArtistName(artistName, mbid);
+            if (verification.wasCorrected) {
+                logger.debug(
+                    `[DOWNLOAD] Artist name verified: "${artistName}" → "${verification.verifiedName}" (source: ${verification.source})`
+                );
+                verifiedArtistName = verification.verifiedName;
+            }
+        }
+
         // Single album download - check for existing job first
         const existingJob = await prisma.downloadJob.findFirst({
             where: {
@@ -84,7 +170,9 @@ router.post("/", async (req, res) => {
         });
 
         if (existingJob) {
-            console.log(`[DOWNLOAD] Job already exists for ${mbid}: ${existingJob.id} (${existingJob.status})`);
+            logger.debug(
+                `[DOWNLOAD] Job already exists for ${mbid}: ${existingJob.id} (${existingJob.status})`
+            );
             return res.json({
                 id: existingJob.id,
                 status: existingJob.status,
@@ -105,13 +193,13 @@ router.post("/", async (req, res) => {
                 metadata: {
                     downloadType,
                     rootFolderPath,
-                    artistName,
+                    artistName: verifiedArtistName,
                     albumTitle,
                 },
             },
         });
 
-        console.log(
+        logger.debug(
             `[DOWNLOAD] Triggering Lidarr: ${type} "${subject}" -> ${rootFolderPath}`
         );
 
@@ -122,10 +210,10 @@ router.post("/", async (req, res) => {
             mbid,
             subject,
             rootFolderPath,
-            artistName,
+            verifiedArtistName,
             albumTitle
         ).catch((error) => {
-            console.error(
+            logger.error(
                 `Download processing failed for job ${job.id}:`,
                 error
             );
@@ -139,7 +227,7 @@ router.post("/", async (req, res) => {
             message: "Download job created. Processing in background.",
         });
     } catch (error) {
-        console.error("Create download job error:", error);
+        logger.error("Create download job error:", error);
         res.status(500).json({ error: "Failed to create download job" });
     }
 });
@@ -154,27 +242,66 @@ async function processArtistDownload(
     rootFolderPath: string,
     downloadType: string
 ): Promise<{ id: string; subject: string }[]> {
-    console.log(`\n Processing artist download: ${artistName}`);
-    console.log(`   Artist MBID: ${artistMbid}`);
+    logger.debug(`\n Processing artist download: ${artistName}`);
+    logger.debug(`   Artist MBID: ${artistMbid}`);
 
     // Generate a batch ID to group all album downloads
     const batchId = crypto.randomUUID();
-    console.log(`   Batch ID: ${batchId}`);
+    logger.debug(`   Batch ID: ${batchId}`);
+
+    // CRITICAL FIX: Resolve canonical artist name from MusicBrainz
+    // Last.fm may return aliases (e.g., "blink" for "blink-182")
+    // Lidarr needs the official name to find the correct artist
+    let canonicalArtistName = artistName;
+    try {
+        logger.debug(`   Resolving canonical artist name from MusicBrainz...`);
+        const mbArtist = await musicBrainzService.getArtist(artistMbid);
+        if (mbArtist && mbArtist.name) {
+            canonicalArtistName = mbArtist.name;
+            if (canonicalArtistName !== artistName) {
+                logger.debug(
+                    `   ✓ Canonical name resolved: "${artistName}" → "${canonicalArtistName}"`
+                );
+            } else {
+                logger.debug(
+                    `   ✓ Name matches canonical: "${canonicalArtistName}"`
+                );
+            }
+        }
+    } catch (mbError: any) {
+        logger.warn(`   ⚠ MusicBrainz lookup failed: ${mbError.message}`);
+        // Fallback to LastFM correction
+        try {
+            const correction = await lastFmService.getArtistCorrection(
+                artistName
+            );
+            if (correction?.canonicalName) {
+                canonicalArtistName = correction.canonicalName;
+                logger.debug(
+                    `   ✓ Name resolved via LastFM: "${artistName}" → "${canonicalArtistName}"`
+                );
+            }
+        } catch (lfmError) {
+            logger.warn(
+                `   ⚠ LastFM correction also failed, using original name`
+            );
+        }
+    }
 
     try {
         // First, add the artist to Lidarr (this monitors all albums)
         const lidarrArtist = await lidarrService.addArtist(
             artistMbid,
-            artistName,
+            canonicalArtistName,
             rootFolderPath
         );
 
         if (!lidarrArtist) {
-            console.log(`   Failed to add artist to Lidarr`);
+            logger.debug(`   Failed to add artist to Lidarr`);
             throw new Error("Failed to add artist to Lidarr");
         }
 
-        console.log(`   Artist added to Lidarr (ID: ${lidarrArtist.id})`);
+        logger.debug(`   Artist added to Lidarr (ID: ${lidarrArtist.id})`);
 
         // Fetch albums from MusicBrainz
         const releaseGroups = await musicBrainzService.getReleaseGroups(
@@ -183,12 +310,12 @@ async function processArtistDownload(
             100
         );
 
-        console.log(
+        logger.debug(
             `   Found ${releaseGroups.length} albums/EPs from MusicBrainz`
         );
 
         if (releaseGroups.length === 0) {
-            console.log(`   No albums found for artist`);
+            logger.debug(`   No albums found for artist`);
             return [];
         }
 
@@ -206,49 +333,84 @@ async function processArtistDownload(
             });
 
             if (existingAlbum) {
-                console.log(`   Skipping "${albumTitle}" - already in library`);
+                logger.debug(`   Skipping "${albumTitle}" - already in library`);
                 continue;
             }
 
-            // Check if there's already a pending/processing job for this album
-            const existingJob = await prisma.downloadJob.findFirst({
-                where: {
-                    targetMbid: albumMbid,
-                    status: { in: ["pending", "processing"] },
-                },
+            // Use transaction to prevent race conditions when creating jobs
+            const jobResult = await prisma.$transaction(async (tx) => {
+                // Check for existing active job
+                const existingJob = await tx.downloadJob.findFirst({
+                    where: {
+                        targetMbid: albumMbid,
+                        status: { in: ["pending", "processing"] },
+                    },
+                });
+
+                if (existingJob) {
+                    return {
+                        skipped: true,
+                        job: existingJob,
+                        reason: "already_queued",
+                    };
+                }
+
+                // Also check for recently failed job (within last 30 seconds) to prevent spam retries
+                const recentFailed = await tx.downloadJob.findFirst({
+                    where: {
+                        targetMbid: albumMbid,
+                        status: "failed",
+                        completedAt: { gte: new Date(Date.now() - 30000) },
+                    },
+                });
+
+                if (recentFailed) {
+                    return {
+                        skipped: true,
+                        job: recentFailed,
+                        reason: "recently_failed",
+                    };
+                }
+
+                // Create new job inside transaction
+                const now = new Date();
+                const job = await tx.downloadJob.create({
+                    data: {
+                        userId,
+                        subject: albumSubject,
+                        type: "album",
+                        targetMbid: albumMbid,
+                        status: "pending",
+                        metadata: {
+                            downloadType,
+                            rootFolderPath,
+                            artistName,
+                            artistMbid,
+                            albumTitle,
+                            batchId, // Link all albums in this artist download
+                            batchArtist: artistName,
+                            createdAt: now.toISOString(), // Track when job was created for timeout
+                        },
+                    },
+                });
+
+                return { skipped: false, job };
             });
 
-            if (existingJob) {
-                console.log(
-                    `   Skipping "${albumTitle}" - already in download queue`
+            if (jobResult.skipped) {
+                logger.debug(
+                    `   Skipping "${albumTitle}" - ${
+                        jobResult.reason === "recently_failed"
+                            ? "recently failed"
+                            : "already in download queue"
+                    }`
                 );
                 continue;
             }
 
-            // Create download job for this album
-            const now = new Date();
-            const job = await prisma.downloadJob.create({
-                data: {
-                    userId,
-                    subject: albumSubject,
-                    type: "album",
-                    targetMbid: albumMbid,
-                    status: "pending",
-                    metadata: {
-                        downloadType,
-                        rootFolderPath,
-                        artistName,
-                        artistMbid,
-                        albumTitle,
-                        batchId, // Link all albums in this artist download
-                        batchArtist: artistName,
-                        createdAt: now.toISOString(), // Track when job was created for timeout
-                    },
-                },
-            });
-
+            const job = jobResult.job;
             jobs.push({ id: job.id, subject: albumSubject });
-            console.log(`   [JOB] Created job for: ${albumSubject}`);
+            logger.debug(`   [JOB] Created job for: ${albumSubject}`);
 
             // Start the download in background
             processDownload(
@@ -260,14 +422,14 @@ async function processArtistDownload(
                 artistName,
                 albumTitle
             ).catch((error) => {
-                console.error(`Download failed for ${albumSubject}:`, error);
+                logger.error(`Download failed for ${albumSubject}:`, error);
             });
         }
 
-        console.log(`   Created ${jobs.length} album download jobs`);
+        logger.debug(`   Created ${jobs.length} album download jobs`);
         return jobs;
     } catch (error: any) {
-        console.error(`   Failed to process artist download:`, error.message);
+        logger.error(`   Failed to process artist download:`, error.message);
         throw error;
     }
 }
@@ -284,7 +446,7 @@ async function processDownload(
 ) {
     const job = await prisma.downloadJob.findUnique({ where: { id: jobId } });
     if (!job) {
-        console.error(`Job ${jobId} not found`);
+        logger.error(`Job ${jobId} not found`);
         return;
     }
 
@@ -304,7 +466,7 @@ async function processDownload(
             }
         }
 
-        console.log(`Parsed: Artist="${parsedArtist}", Album="${parsedAlbum}"`);
+        logger.debug(`Parsed: Artist="${parsedArtist}", Album="${parsedAlbum}"`);
 
         // Use simple download manager for album downloads
         const result = await simpleDownloadManager.startDownload(
@@ -316,7 +478,7 @@ async function processDownload(
         );
 
         if (!result.success) {
-            console.error(`Failed to start download: ${result.error}`);
+            logger.error(`Failed to start download: ${result.error}`);
         }
     }
 }
@@ -335,12 +497,12 @@ router.delete("/clear-all", async (req, res) => {
 
         const result = await prisma.downloadJob.deleteMany({ where });
 
-        console.log(
+        logger.debug(
             ` Cleared ${result.count} download jobs for user ${userId}`
         );
         res.json({ success: true, deleted: result.count });
     } catch (error) {
-        console.error("Clear downloads error:", error);
+        logger.error("Clear downloads error:", error);
         res.status(500).json({ error: "Failed to clear downloads" });
     }
 });
@@ -355,7 +517,7 @@ router.post("/clear-lidarr-queue", async (req, res) => {
             errors: result.errors,
         });
     } catch (error: any) {
-        console.error("Clear Lidarr queue error:", error);
+        logger.error("Clear Lidarr queue error:", error);
         res.status(500).json({ error: "Failed to clear Lidarr queue" });
     }
 });
@@ -373,7 +535,7 @@ router.get("/failed", async (req, res) => {
 
         res.json(failedAlbums);
     } catch (error) {
-        console.error("List failed albums error:", error);
+        logger.error("List failed albums error:", error);
         res.status(500).json({ error: "Failed to list failed albums" });
     }
 });
@@ -399,7 +561,7 @@ router.delete("/failed/:id", async (req, res) => {
 
         res.json({ success: true });
     } catch (error) {
-        console.error("Delete failed album error:", error);
+        logger.error("Delete failed album error:", error);
         res.status(500).json({ error: "Failed to delete failed album" });
     }
 });
@@ -423,7 +585,7 @@ router.get("/:id", async (req, res) => {
 
         res.json(job);
     } catch (error) {
-        console.error("Get download job error:", error);
+        logger.error("Get download job error:", error);
         res.status(500).json({ error: "Failed to get download job" });
     }
 });
@@ -456,7 +618,7 @@ router.patch("/:id", async (req, res) => {
 
         res.json(updated);
     } catch (error) {
-        console.error("Update download job error:", error);
+        logger.error("Update download job error:", error);
         res.status(500).json({ error: "Failed to update download job" });
     }
 });
@@ -479,8 +641,8 @@ router.delete("/:id", async (req, res) => {
         // Return success even if nothing was deleted (idempotent delete)
         res.json({ success: true, deleted: result.count > 0 });
     } catch (error: any) {
-        console.error("Delete download job error:", error);
-        console.error("Error details:", error.message, error.stack);
+        logger.error("Delete download job error:", error);
+        logger.error("Error details:", error.message, error.stack);
         res.status(500).json({
             error: "Failed to delete download job",
             details: error.message,
@@ -492,7 +654,12 @@ router.delete("/:id", async (req, res) => {
 router.get("/", async (req, res) => {
     try {
         const userId = req.user!.id;
-        const { status, limit = "50", includeDiscovery = "false", includeCleared = "false" } = req.query;
+        const {
+            status,
+            limit = "50",
+            includeDiscovery = "false",
+            includeCleared = "false",
+        } = req.query;
 
         const where: any = { userId };
         if (status) {
@@ -521,7 +688,7 @@ router.get("/", async (req, res) => {
 
         res.json(filteredJobs);
     } catch (error) {
-        console.error("List download jobs error:", error);
+        logger.error("List download jobs error:", error);
         res.status(500).json({ error: "Failed to list download jobs" });
     }
 });
@@ -580,7 +747,7 @@ router.post("/keep-track", async (req, res) => {
                 "Track marked as kept. Please add the full album manually to your /music folder.",
         });
     } catch (error) {
-        console.error("Keep track error:", error);
+        logger.error("Keep track error:", error);
         res.status(500).json({ error: "Failed to keep track" });
     }
 });

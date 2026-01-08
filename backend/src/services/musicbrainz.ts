@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from "axios";
+import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { rateLimiter } from "./rateLimiter";
 
@@ -27,7 +28,7 @@ class MusicBrainzService {
                 return JSON.parse(cached);
             }
         } catch (err) {
-            console.warn("Redis get error:", err);
+            logger.warn("Redis get error:", err);
         }
 
         // Use global rate limiter instead of local rate limiting
@@ -39,7 +40,7 @@ class MusicBrainzService {
             const actualTtl = data === null ? 3600 : ttlSeconds;
             await redisClient.setEx(cacheKey, actualTtl, JSON.stringify(data));
         } catch (err) {
-            console.warn("Redis set error:", err);
+            logger.warn("Redis set error:", err);
         }
 
         return data;
@@ -343,10 +344,10 @@ class MusicBrainzService {
 
                 const allRecordings = response.data.recordings || [];
 
-                console.log(
+                logger.debug(
                     `[MusicBrainz] Query: "${trackTitle}" by "${artistName}"`
                 );
-                console.log(
+                logger.debug(
                     `[MusicBrainz] Found ${allRecordings.length} total recordings`
                 );
 
@@ -358,7 +359,7 @@ class MusicBrainzService {
                         .slice(0, 2)
                         .map((r: any) => r["release-group"]?.title || "?")
                         .join(", ");
-                    console.log(
+                    logger.debug(
                         `   ${i + 1}. [${disambig}] → ${
                             albumNames || "(no albums)"
                         }`
@@ -378,7 +379,7 @@ class MusicBrainzService {
                     return true;
                 });
 
-                console.log(
+                logger.debug(
                     `[MusicBrainz] After filtering live/demo: ${recordings.length} studio recordings`
                 );
 
@@ -425,20 +426,28 @@ class MusicBrainzService {
                     const strippedArtist = this.stripPunctuation(artistName);
 
                     if (strippedTitle !== normalizedTitle) {
-                        console.log(`[MusicBrainz] Trying punctuation-stripped search: "${strippedTitle}" by ${strippedArtist}`);
+                        logger.debug(
+                            `[MusicBrainz] Trying punctuation-stripped search: "${strippedTitle}" by ${strippedArtist}`
+                        );
 
                         const strippedQuery = `${strippedTitle} AND artist:${strippedArtist}`;
-                        const strippedResponse = await this.client.get("/recording", {
-                            params: {
-                                query: strippedQuery,
-                                limit: 10,
-                                fmt: "json",
-                                inc: "releases+release-groups+artists",
-                            },
-                        });
+                        const strippedResponse = await this.client.get(
+                            "/recording",
+                            {
+                                params: {
+                                    query: strippedQuery,
+                                    limit: 10,
+                                    fmt: "json",
+                                    inc: "releases+release-groups+artists",
+                                },
+                            }
+                        );
 
-                        const strippedRecordings = strippedResponse.data.recordings || [];
-                        console.log(`[MusicBrainz] Punctuation-stripped search found ${strippedRecordings.length} recordings`);
+                        const strippedRecordings =
+                            strippedResponse.data.recordings || [];
+                        logger.debug(
+                            `[MusicBrainz] Punctuation-stripped search found ${strippedRecordings.length} recordings`
+                        );
 
                         for (const rec of strippedRecordings) {
                             const recArtist =
@@ -448,11 +457,18 @@ class MusicBrainzService {
                             if (
                                 recArtist
                                     .toLowerCase()
-                                    .includes(strippedArtist.toLowerCase().split(" ")[0])
+                                    .includes(
+                                        strippedArtist
+                                            .toLowerCase()
+                                            .split(" ")[0]
+                                    )
                             ) {
-                                const result = this.extractAlbumFromRecording(rec);
+                                const result =
+                                    this.extractAlbumFromRecording(rec);
                                 if (result) {
-                                    console.log(`[MusicBrainz] ✓ Found via punctuation-stripped search: ${result.albumName}`);
+                                    logger.debug(
+                                        `[MusicBrainz] Found via punctuation-stripped search: ${result.albumName}`
+                                    );
                                     return result;
                                 }
                             }
@@ -464,34 +480,45 @@ class MusicBrainzService {
 
                 // Try each recording until we find one with a good (non-bootleg) album
                 for (const rec of recordings) {
-                    const disambig = rec.disambiguation || "(no disambiguation)";
-                    console.log(`[MusicBrainz] Trying recording: "${rec.title}" [${disambig}]`);
+                    const disambig =
+                        rec.disambiguation || "(no disambiguation)";
+                    logger.debug(
+                        `[MusicBrainz] Trying recording: "${rec.title}" [${disambig}]`
+                    );
                     const result = this.extractAlbumFromRecording(rec, false);
                     if (result) {
-                        console.log(`[MusicBrainz] ✓ Found album: "${result.albumName}" (MBID: ${result.albumMbid})`);
+                        logger.debug(
+                            `[MusicBrainz] Found album: "${result.albumName}" (MBID: ${result.albumMbid})`
+                        );
                         return result; // Found a good album
                     } else {
-                        console.log(`[MusicBrainz] ✗ No valid album found for this recording`);
+                        logger.debug(
+                            `[MusicBrainz] No valid album found for this recording`
+                        );
                     }
                 }
 
                 // Fallback: Try again accepting Singles/EPs as last resort
-                console.log(`[MusicBrainz] No official albums found, trying to find Singles/EPs...`);
+                logger.debug(
+                    `[MusicBrainz] No official albums found, trying to find Singles/EPs...`
+                );
                 for (const rec of recordings) {
                     const result = this.extractAlbumFromRecording(rec, true);
                     if (result) {
-                        console.log(`[MusicBrainz] ✓ Found Single/EP: "${result.albumName}" (MBID: ${result.albumMbid})`);
+                        logger.debug(
+                            `[MusicBrainz] Found Single/EP: "${result.albumName}" (MBID: ${result.albumMbid})`
+                        );
                         return result;
                     }
                 }
 
                 // No good albums found in any recording
-                console.log(
+                logger.debug(
                     `[MusicBrainz] No official albums or singles found for "${trackTitle}" by ${artistName} (checked ${recordings.length} recordings)`
                 );
                 return null;
             } catch (error: any) {
-                console.error(
+                logger.error(
                     "MusicBrainz recording search error:",
                     error.message
                 );
@@ -505,7 +532,10 @@ class MusicBrainzService {
      * Prioritizes studio albums and filters out compilations, live albums, and bootlegs
      * @param allowSingles - If true, accepts Singles/EPs as a fallback (lower threshold)
      */
-    private extractAlbumFromRecording(recording: any, allowSingles: boolean = false): {
+    private extractAlbumFromRecording(
+        recording: any,
+        allowSingles: boolean = false
+    ): {
         albumName: string;
         albumMbid: string;
         artistMbid: string;
@@ -582,10 +612,12 @@ class MusicBrainzService {
                     r.release["release-group"]?.title || r.release.title;
                 return `"${title}" (${r.score})`;
             });
-            console.log(
+            logger.debug(
                 `[MusicBrainz] Skipping recording - no ${modeText} found in ${
                     releases.length
-                } releases (threshold: ${threshold}). Top scores: ${topScores.join(", ")}`
+                } releases (threshold: ${threshold}). Top scores: ${topScores.join(
+                    ", "
+                )}`
             );
             return null;
         }
@@ -597,7 +629,7 @@ class MusicBrainzService {
             return null;
         }
 
-        console.log(
+        logger.debug(
             `[MusicBrainz] Selected "${releaseGroup.title}" (score: ${bestResult.score}) from ${releases.length} releases`
         );
 
@@ -614,14 +646,19 @@ class MusicBrainzService {
      * Clear cached recording search result
      * Useful for retrying failed lookups
      */
-    async clearRecordingCache(trackTitle: string, artistName: string): Promise<boolean> {
+    async clearRecordingCache(
+        trackTitle: string,
+        artistName: string
+    ): Promise<boolean> {
         const cacheKey = `mb:search:recording:${artistName}:${trackTitle}`;
         try {
             await redisClient.del(cacheKey);
-            console.log(`[MusicBrainz] Cleared cache for: "${trackTitle}" by ${artistName}`);
+            logger.debug(
+                `[MusicBrainz] Cleared cache for: "${trackTitle}" by ${artistName}`
+            );
             return true;
         } catch (err) {
-            console.warn("Redis del error:", err);
+            logger.warn("Redis del error:", err);
             return false;
         }
     }
@@ -644,12 +681,90 @@ class MusicBrainzService {
                 }
             }
 
-            console.log(`[MusicBrainz] Cleared ${cleared} stale null cache entries`);
+            logger.debug(
+                `[MusicBrainz] Cleared ${cleared} stale null cache entries`
+            );
             return cleared;
         } catch (err) {
-            console.error("Error clearing stale caches:", err);
+            logger.error("Error clearing stale caches:", err);
             return 0;
         }
+    }
+
+    /**
+     * Get track list for an album by release group MBID
+     * Uses the first official release from the release group
+     */
+    async getAlbumTracks(
+        rgMbid: string
+    ): Promise<Array<{ title: string; position?: number; duration?: number }>> {
+        const cacheKey = `mb:albumtracks:${rgMbid}`;
+
+        return this.cachedRequest(cacheKey, async () => {
+            try {
+                // Step 1: Get releases from the release group
+                const rgResponse = await this.client.get(
+                    `/release-group/${rgMbid}`,
+                    {
+                        params: {
+                            inc: "releases",
+                            fmt: "json",
+                        },
+                    }
+                );
+
+                const releases = rgResponse.data?.releases || [];
+                if (releases.length === 0) {
+                    logger.debug(
+                        `[MusicBrainz] No releases found for release group ${rgMbid}`
+                    );
+                    return [];
+                }
+
+                // Prefer official releases
+                const release =
+                    releases.find((r: any) => r.status === "Official") ||
+                    releases[0];
+
+                // Step 2: Get full release details with recordings
+                const releaseResponse = await this.client.get(
+                    `/release/${release.id}`,
+                    {
+                        params: {
+                            inc: "recordings",
+                            fmt: "json",
+                        },
+                    }
+                );
+
+                const media = releaseResponse.data?.media || [];
+                const tracks: Array<{
+                    title: string;
+                    position?: number;
+                    duration?: number;
+                }> = [];
+
+                for (const medium of media) {
+                    for (const track of medium.tracks || []) {
+                        tracks.push({
+                            title: track.title || track.recording?.title,
+                            position: track.position,
+                            duration: track.length || track.recording?.length,
+                        });
+                    }
+                }
+
+                logger.debug(
+                    `[MusicBrainz] Found ${tracks.length} tracks for release group ${rgMbid}`
+                );
+                return tracks;
+            } catch (error: any) {
+                logger.error(
+                    `MusicBrainz getAlbumTracks error: ${error.message}`
+                );
+                return [];
+            }
+        });
     }
 }
 

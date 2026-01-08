@@ -150,7 +150,8 @@ export default function QueuePage() {
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <h3 className="text-sm font-medium text-purple-400 truncate">
-                                        {currentTrack.title}
+                                        {currentTrack.displayTitle ??
+                                            currentTrack.title}
                                     </h3>
                                     <p className="text-sm text-gray-400 truncate">
                                         {currentTrack.artist?.name}
@@ -218,7 +219,8 @@ export default function QueuePage() {
                                             {/* Track Info */}
                                             <div className="flex-1 min-w-0">
                                                 <h3 className="text-sm font-medium text-white truncate">
-                                                    {track.title}
+                                                    {track.displayTitle ??
+                                                        track.title}
                                                 </h3>
                                                 <p className="text-sm text-gray-400 truncate">
                                                     {track.artist?.name}

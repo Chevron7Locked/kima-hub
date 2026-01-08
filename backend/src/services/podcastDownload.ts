@@ -1,4 +1,5 @@
 import { prisma } from "../utils/db";
+import { logger } from "../utils/logger";
 import { config } from "../config";
 import fs from "fs/promises";
 import path from "path";
@@ -53,7 +54,7 @@ export function getDownloadProgress(episodeId: string): { progress: number; down
 export async function getCachedFilePath(episodeId: string): Promise<string | null> {
     // Don't return cache path if still downloading - file may be incomplete
     if (downloadingEpisodes.has(episodeId)) {
-        console.log(`[PODCAST-DL] Episode ${episodeId} is still downloading, not using cache`);
+        logger.debug(`[PODCAST-DL] Episode ${episodeId} is still downloading, not using cache`);
         return null;
     }
     
@@ -78,7 +79,7 @@ export async function getCachedFilePath(episodeId: string): Promise<string | nul
                     const actual = stats.size;
                     const variance = Math.abs(actual - expected) / expected;
                     if (variance > 0.01) {
-                        console.log(
+                        logger.debug(
                             `[PODCAST-DL] Episode size mismatch vs episode.fileSize for ${episodeId}: actual ${actual} vs expected ${expected} (variance ${Math.round(
                                 variance * 100
                             )}%), deleting cache`
@@ -101,7 +102,7 @@ export async function getCachedFilePath(episodeId: string): Promise<string | nul
             
             // If no DB record, file might be incomplete or stale
             if (!dbRecord) {
-                console.log(`[PODCAST-DL] No DB record for ${episodeId}, deleting stale cache file`);
+                logger.debug(`[PODCAST-DL] No DB record for ${episodeId}, deleting stale cache file`);
                 await fs.unlink(cachedPath).catch(() => {});
                 return null;
             }
@@ -112,7 +113,7 @@ export async function getCachedFilePath(episodeId: string): Promise<string | nul
             const variance = Math.abs(actualSize - expectedSize) / expectedSize;
             
             if (expectedSize > 0 && variance > 0.01) {
-                console.log(`[PODCAST-DL] Size mismatch for ${episodeId}: actual ${actualSize} vs expected ${Math.round(expectedSize)}, deleting`);
+                logger.debug(`[PODCAST-DL] Size mismatch for ${episodeId}: actual ${actualSize} vs expected ${Math.round(expectedSize)}, deleting`);
                 await fs.unlink(cachedPath).catch(() => {});
                 await prisma.podcastDownload.deleteMany({ where: { episodeId } });
                 return null;
@@ -124,7 +125,7 @@ export async function getCachedFilePath(episodeId: string): Promise<string | nul
                 data: { lastAccessedAt: new Date() }
             });
             
-            console.log(`[PODCAST-DL] Cache valid for ${episodeId}: ${stats.size} bytes`);
+            logger.debug(`[PODCAST-DL] Cache valid for ${episodeId}: ${stats.size} bytes`);
             return cachedPath;
         }
         return null;
@@ -144,7 +145,7 @@ export function downloadInBackground(
 ): void {
     // Skip if already downloading
     if (downloadingEpisodes.has(episodeId)) {
-        console.log(`[PODCAST-DL] Already downloading episode ${episodeId}, skipping`);
+        logger.debug(`[PODCAST-DL] Already downloading episode ${episodeId}, skipping`);
         return;
     }
     
@@ -154,7 +155,7 @@ export function downloadInBackground(
     // Start download in background (don't await)
     performDownload(episodeId, audioUrl, userId)
         .catch(err => {
-            console.error(`[PODCAST-DL] Background download failed for ${episodeId}:`, err.message);
+            logger.error(`[PODCAST-DL] Background download failed for ${episodeId}:`, err.message);
         })
         .finally(() => {
             downloadingEpisodes.delete(episodeId);
@@ -171,7 +172,7 @@ async function performDownload(
     attempt: number = 1
 ): Promise<void> {
     const maxAttempts = 3;
-    console.log(`[PODCAST-DL] Starting background download for episode ${episodeId} (attempt ${attempt}/${maxAttempts})`);
+    logger.debug(`[PODCAST-DL] Starting background download for episode ${episodeId} (attempt ${attempt}/${maxAttempts})`);
     
     const cacheDir = getPodcastCacheDir();
     
@@ -187,7 +188,7 @@ async function performDownload(
         const existingCached = await getCachedFilePath(episodeId);
         downloadingEpisodes.add(episodeId); // Re-add
         if (existingCached) {
-            console.log(`[PODCAST-DL] Episode ${episodeId} already cached, skipping download`);
+            logger.debug(`[PODCAST-DL] Episode ${episodeId} already cached, skipping download`);
             return;
         }
         
@@ -247,7 +248,7 @@ async function performDownload(
             } catch {}
         }
 
-        console.log(
+        logger.debug(
             `[PODCAST-DL] Downloading ${episodeId} (${expectedBytes > 0 ? Math.round(expectedBytes / 1024 / 1024) : 0}MB)`
         );
         
@@ -271,7 +272,7 @@ async function performDownload(
                 const now = Date.now();
                 if (now - lastLogTime > 30000) {
                     const percent = contentLength > 0 ? Math.round((bytesDownloaded / contentLength) * 100) : 0;
-                    console.log(`[PODCAST-DL] Download progress ${episodeId}: ${percent}% (${Math.round(bytesDownloaded / 1024 / 1024)}MB)`);
+                    logger.debug(`[PODCAST-DL] Download progress ${episodeId}: ${percent}% (${Math.round(bytesDownloaded / 1024 / 1024)}MB)`);
                     lastLogTime = now;
                 }
             });
@@ -312,7 +313,7 @@ async function performDownload(
             const variance = Math.abs(stats.size - expectedBytes) / expectedBytes;
             if (variance > 0.01) {
             const percentComplete = Math.round((stats.size / expectedBytes) * 100);
-            console.error(`[PODCAST-DL] Incomplete download for ${episodeId}: ${stats.size}/${expectedBytes} bytes (${percentComplete}%)`);
+            logger.error(`[PODCAST-DL] Incomplete download for ${episodeId}: ${stats.size}/${expectedBytes} bytes (${percentComplete}%)`);
             await fs.unlink(tempPath).catch(() => {});
             throw new Error(`Download incomplete: got ${stats.size} bytes, expected ${expectedBytes}`);
             }
@@ -344,7 +345,7 @@ async function performDownload(
             }
         });
         
-        console.log(`[PODCAST-DL] Successfully cached episode ${episodeId} (${fileSizeMb.toFixed(1)}MB)`);
+        logger.debug(`[PODCAST-DL] Successfully cached episode ${episodeId} (${fileSizeMb.toFixed(1)}MB)`);
         
         // Clean up progress tracking
         downloadProgress.delete(episodeId);
@@ -356,7 +357,7 @@ async function performDownload(
         
         // Retry on failure
         if (attempt < maxAttempts) {
-            console.log(`[PODCAST-DL] Download failed (attempt ${attempt}), retrying in 5s: ${error.message}`);
+            logger.debug(`[PODCAST-DL] Download failed (attempt ${attempt}), retrying in 5s: ${error.message}`);
             await new Promise(resolve => setTimeout(resolve, 5000));
             return performDownload(episodeId, audioUrl, userId, attempt + 1);
         }
@@ -370,7 +371,7 @@ async function performDownload(
  * Should be called periodically (e.g., daily)
  */
 export async function cleanupExpiredCache(): Promise<{ deleted: number; freedMb: number }> {
-    console.log('[PODCAST-DL] Starting cache cleanup...');
+    logger.debug('[PODCAST-DL] Starting cache cleanup...');
     
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -398,13 +399,13 @@ export async function cleanupExpiredCache(): Promise<{ deleted: number; freedMb:
             deleted++;
             freedMb += download.fileSizeMb;
             
-            console.log(`[PODCAST-DL] Deleted expired cache: ${path.basename(download.localPath)}`);
+            logger.debug(`[PODCAST-DL] Deleted expired cache: ${path.basename(download.localPath)}`);
         } catch (err: any) {
-            console.error(`[PODCAST-DL] Failed to delete ${download.localPath}:`, err.message);
+            logger.error(`[PODCAST-DL] Failed to delete ${download.localPath}:`, err.message);
         }
     }
     
-    console.log(`[PODCAST-DL] Cleanup complete: ${deleted} files deleted, ${freedMb.toFixed(1)}MB freed`);
+    logger.debug(`[PODCAST-DL] Cleanup complete: ${deleted} files deleted, ${freedMb.toFixed(1)}MB freed`);
     
     return { deleted, freedMb };
 }

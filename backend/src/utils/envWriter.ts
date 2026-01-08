@@ -1,4 +1,5 @@
 import fs from "fs";
+import { logger } from "./logger";
 import path from "path";
 
 /**
@@ -29,7 +30,7 @@ export async function writeEnvFile(
             }
         });
     } catch (error) {
-        console.log("No existing .env file, creating new one");
+        logger.debug("No existing .env file, creating new one");
     }
 
     // Update with new values
@@ -100,5 +101,5 @@ export async function writeEnvFile(
 
     // Write to file
     fs.writeFileSync(envPath, lines.join("\n"), "utf-8");
-    console.log(`.env file updated with ${existingVars.size} variables`);
+    logger.debug(`.env file updated with ${existingVars.size} variables`);
 }

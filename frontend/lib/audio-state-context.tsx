@@ -9,6 +9,7 @@ import {
     useMemo,
 } from "react";
 import { api } from "@/lib/api";
+import type { Episode } from "@/features/podcast/types";
 
 function queueDebugEnabled(): boolean {
     try {
@@ -56,6 +57,10 @@ export interface Track {
     album: { title: string; coverArt?: string; id?: string };
     duration: number;
     filePath?: string;
+    // Metadata override fields
+    displayTitle?: string | null;
+    displayTrackNo?: number | null;
+    hasUserOverrides?: boolean;
     // Audio features for vibe mode visualization
     audioFeatures?: {
         bpm?: number | null;
@@ -122,6 +127,7 @@ interface AudioStateContextType {
     repeatMode: "off" | "one" | "all";
     isRepeat: boolean;
     shuffleIndices: number[];
+    podcastEpisodeQueue: Episode[] | null;
 
     // UI state
     playerMode: PlayerMode;
@@ -151,6 +157,7 @@ interface AudioStateContextType {
     setIsShuffle: (shuffle: SetStateAction<boolean>) => void;
     setRepeatMode: (mode: SetStateAction<"off" | "one" | "all">) => void;
     setShuffleIndices: (indices: SetStateAction<number[]>) => void;
+    setPodcastEpisodeQueue: (queue: SetStateAction<Episode[] | null>) => void;
     setPlayerMode: (mode: SetStateAction<PlayerMode>) => void;
     setPreviousPlayerMode: (mode: SetStateAction<PlayerMode>) => void;
     setVolume: (volume: SetStateAction<number>) => void;
@@ -158,7 +165,9 @@ interface AudioStateContextType {
     setLastServerSync: (date: SetStateAction<Date | null>) => void;
     setRepeatOneCount: (count: SetStateAction<number>) => void;
     setVibeMode: (mode: SetStateAction<boolean>) => void;
-    setVibeSourceFeatures: (features: SetStateAction<AudioFeatures | null>) => void;
+    setVibeSourceFeatures: (
+        features: SetStateAction<AudioFeatures | null>
+    ) => void;
     setVibeQueueIds: (ids: SetStateAction<string[]>) => void;
 }
 
@@ -179,6 +188,7 @@ const STORAGE_KEYS = {
     PLAYER_MODE: "lidify_player_mode",
     VOLUME: "lidify_volume",
     IS_MUTED: "lidify_muted",
+    PODCAST_EPISODE_QUEUE: "lidify_podcast_episode_queue",
 };
 
 export function AudioStateProvider({ children }: { children: ReactNode }) {
@@ -196,6 +206,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     const [shuffleIndices, setShuffleIndices] = useState<number[]>([]);
     const [repeatMode, setRepeatMode] = useState<"off" | "one" | "all">("off");
     const [repeatOneCount, setRepeatOneCount] = useState(0);
+    const [podcastEpisodeQueue, setPodcastEpisodeQueue] = useState<Episode[] | null>(null);
     const [playerMode, setPlayerMode] = useState<PlayerMode>("full");
     const [previousPlayerMode, setPreviousPlayerMode] =
         useState<PlayerMode>("full");
@@ -203,10 +214,11 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     const [isMuted, setIsMuted] = useState(false);
     const [isHydrated, setIsHydrated] = useState(false);
     const [lastServerSync, setLastServerSync] = useState<Date | null>(null);
-    
+
     // Vibe mode state
     const [vibeMode, setVibeMode] = useState(false);
-    const [vibeSourceFeatures, setVibeSourceFeatures] = useState<AudioFeatures | null>(null);
+    const [vibeSourceFeatures, setVibeSourceFeatures] =
+        useState<AudioFeatures | null>(null);
     const [vibeQueueIds, setVibeQueueIds] = useState<string[]>([]);
 
     // Restore state from localStorage on mount
@@ -229,6 +241,9 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             const savedShuffle = localStorage.getItem(STORAGE_KEYS.IS_SHUFFLE);
             const savedRepeatMode = localStorage.getItem(
                 STORAGE_KEYS.REPEAT_MODE
+            );
+            const savedPodcastQueue = localStorage.getItem(
+                STORAGE_KEYS.PODCAST_EPISODE_QUEUE
             );
             const savedPlayerMode = localStorage.getItem(
                 STORAGE_KEYS.PLAYER_MODE
@@ -297,6 +312,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             if (savedShuffle) setIsShuffle(savedShuffle === "true");
             if (savedRepeatMode)
                 setRepeatMode(savedRepeatMode as "off" | "one" | "all");
+            if (savedPodcastQueue) setPodcastEpisodeQueue(JSON.parse(savedPodcastQueue));
             if (savedVolume) setVolume(parseFloat(savedVolume));
             if (savedMuted) setIsMuted(savedMuted === "true");
             if (savedPlayerMode) setPlayerMode(savedPlayerMode as PlayerMode);
@@ -420,6 +436,14 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             );
             localStorage.setItem(STORAGE_KEYS.IS_SHUFFLE, isShuffle.toString());
             localStorage.setItem(STORAGE_KEYS.REPEAT_MODE, repeatMode);
+            if (podcastEpisodeQueue) {
+                localStorage.setItem(
+                    STORAGE_KEYS.PODCAST_EPISODE_QUEUE,
+                    JSON.stringify(podcastEpisodeQueue)
+                );
+            } else {
+                localStorage.removeItem(STORAGE_KEYS.PODCAST_EPISODE_QUEUE);
+            }
             localStorage.setItem(STORAGE_KEYS.PLAYER_MODE, playerMode);
             localStorage.setItem(STORAGE_KEYS.VOLUME, volume.toString());
             localStorage.setItem(STORAGE_KEYS.IS_MUTED, isMuted.toString());
@@ -435,6 +459,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         currentIndex,
         isShuffle,
         repeatMode,
+        podcastEpisodeQueue,
         playerMode,
         volume,
         isMuted,
@@ -669,6 +694,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             repeatMode,
             isRepeat: repeatMode !== "off",
             shuffleIndices,
+            podcastEpisodeQueue,
             playerMode,
             previousPlayerMode,
             volume,
@@ -688,6 +714,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             setIsShuffle,
             setRepeatMode,
             setShuffleIndices,
+            setPodcastEpisodeQueue,
             setPlayerMode,
             setPreviousPlayerMode,
             setVolume,
@@ -708,6 +735,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             isShuffle,
             repeatMode,
             shuffleIndices,
+            podcastEpisodeQueue,
             playerMode,
             previousPlayerMode,
             volume,

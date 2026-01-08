@@ -16,6 +16,12 @@ export interface Artist {
     albums?: Album[];
     topTracks?: Track[];
     similarArtists?: SimilarArtist[];
+    // User overrides (non-destructive edits)
+    displayName?: string | null;
+    userSummary?: string | null;
+    userHeroUrl?: string | null;
+    userGenres?: string[];
+    hasUserOverrides?: boolean;
 }
 
 export interface Album {
@@ -31,6 +37,14 @@ export interface Album {
     mbid?: string;
     rgMbid?: string;
     availability?: string;
+    genres?: string[];
+    lastSynced?: string;
+    // User overrides (non-destructive edits)
+    displayTitle?: string | null;
+    displayYear?: number | null;
+    userCoverUrl?: string | null;
+    userGenres?: string[];
+    hasUserOverrides?: boolean;
 }
 
 export interface Track {
@@ -45,6 +59,11 @@ export interface Track {
         title?: string;
         coverArt?: string;
     };
+    trackNo?: number;
+    // User overrides (non-destructive edits)
+    displayTitle?: string | null;
+    displayTrackNo?: number | null;
+    hasUserOverrides?: boolean;
 }
 
 export interface SimilarArtist {

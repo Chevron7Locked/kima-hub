@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { logger } from "../utils/logger";
 import * as path from "path";
 import * as crypto from "crypto";
 import { prisma } from "../utils/db";
@@ -50,7 +51,7 @@ export class AudioStreamingService {
         // Start cache eviction timer (every 6 hours)
         this.evictionInterval = setInterval(() => {
             this.evictCache(this.transcodeCacheMaxGb).catch((err) => {
-                console.error("Cache eviction failed:", err);
+                logger.error("Cache eviction failed:", err);
             });
         }, 6 * 60 * 60 * 1000);
     }
@@ -64,12 +65,12 @@ export class AudioStreamingService {
         sourceModified: Date,
         sourceAbsolutePath: string
     ): Promise<StreamFileInfo> {
-        console.log(`[AudioStreaming] Request: trackId=${trackId}, quality=${quality}, source=${path.basename(sourceAbsolutePath)}`);
+        logger.debug(`[AudioStreaming] Request: trackId=${trackId}, quality=${quality}, source=${path.basename(sourceAbsolutePath)}`);
         
         // If original quality requested, return source file
         if (quality === "original") {
             const mimeType = this.getMimeType(sourceAbsolutePath);
-            console.log(`[AudioStreaming] Serving original: mimeType=${mimeType}`);
+            logger.debug(`[AudioStreaming] Serving original: mimeType=${mimeType}`);
             return {
                 filePath: sourceAbsolutePath,
                 mimeType,
@@ -84,7 +85,7 @@ export class AudioStreamingService {
         );
 
         if (cachedPath) {
-            console.log(
+            logger.debug(
                 `[STREAM] Using cached transcode: ${quality} (${cachedPath})`
             );
             return {
@@ -103,7 +104,7 @@ export class AudioStreamingService {
                     : null;
 
                 if (sourceBitrate && sourceBitrate <= targetBitrate) {
-                    console.log(
+                    logger.debug(
                         `[STREAM] Source bitrate (${sourceBitrate}kbps) <= target (${targetBitrate}kbps), serving original`
                     );
                     return {
@@ -112,7 +113,7 @@ export class AudioStreamingService {
                     };
                 }
             } catch (err) {
-                console.warn(
+                logger.warn(
                     `[STREAM] Failed to read source metadata, will transcode anyway:`,
                     err
                 );
@@ -122,7 +123,7 @@ export class AudioStreamingService {
         // Need to transcode - check cache size first
         const currentSize = await this.getCacheSize();
         if (currentSize > this.transcodeCacheMaxGb * 0.9) {
-            console.log(
+            logger.debug(
                 `[STREAM] Cache near full (${currentSize.toFixed(
                     2
                 )}GB), evicting to 80%...`
@@ -131,7 +132,7 @@ export class AudioStreamingService {
         }
 
         // Transcode to cache
-        console.log(
+        logger.debug(
             `[STREAM] Transcoding to ${quality} quality: ${sourceAbsolutePath}`
         );
         const transcodedPath = await this.transcodeToCache(
@@ -166,7 +167,7 @@ export class AudioStreamingService {
 
         // Invalidate if source file was modified after transcode was created
         if (cached.sourceModified < sourceModified) {
-            console.log(
+            logger.debug(
                 `[STREAM] Cache stale for track ${trackId}, removing...`
             );
             await prisma.transcodedFile.delete({ where: { id: cached.id } });
@@ -191,7 +192,7 @@ export class AudioStreamingService {
 
         // Verify file exists
         if (!fs.existsSync(fullPath)) {
-            console.log(`[STREAM] Cache file missing: ${fullPath}`);
+            logger.debug(`[STREAM] Cache file missing: ${fullPath}`);
             await prisma.transcodedFile.delete({ where: { id: cached.id } });
             return null;
         }
@@ -274,7 +275,7 @@ export class AudioStreamingService {
                                 },
                             });
 
-                            console.log(
+                            logger.debug(
                                 `[STREAM] Transcode complete: ${cacheFileName} (${(
                                     stats.size /
                                     1024 /
@@ -322,13 +323,13 @@ export class AudioStreamingService {
      * Evict cache using LRU until size is below target
      */
     async evictCache(targetGb: number): Promise<void> {
-        console.log(`[CACHE] Starting eviction, target: ${targetGb}GB`);
+        logger.debug(`[CACHE] Starting eviction, target: ${targetGb}GB`);
 
         let currentSize = await this.getCacheSize();
-        console.log(`[CACHE] Current size: ${currentSize.toFixed(2)}GB`);
+        logger.debug(`[CACHE] Current size: ${currentSize.toFixed(2)}GB`);
 
         if (currentSize <= targetGb) {
-            console.log("[CACHE] Below target, no eviction needed");
+            logger.debug("[CACHE] Below target, no eviction needed");
             return;
         }
 
@@ -346,7 +347,7 @@ export class AudioStreamingService {
             try {
                 await fs.promises.unlink(fullPath);
             } catch (err) {
-                console.warn(`[CACHE] Failed to delete ${fullPath}:`, err);
+                logger.warn(`[CACHE] Failed to delete ${fullPath}:`, err);
             }
 
             // Delete from database
@@ -356,7 +357,7 @@ export class AudioStreamingService {
             evicted++;
         }
 
-        console.log(
+        logger.debug(
             `[CACHE] Evicted ${evicted} files, new size: ${currentSize.toFixed(
                 2
             )}GB`

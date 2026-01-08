@@ -1,4 +1,5 @@
 import { prisma } from "../utils/db";
+import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import {
     cleanStuckDownloads,
@@ -14,19 +15,45 @@ class QueueCleanerService {
     private maxEmptyChecks = 3; // Stop after 3 consecutive empty checks
     private timeoutId?: NodeJS.Timeout;
 
+    // Cached dynamic imports (lazy-loaded once, reused on subsequent calls)
+    private discoverWeeklyService: typeof import("../services/discoverWeekly")["discoverWeeklyService"] | null = null;
+    private matchAlbum: typeof import("../utils/fuzzyMatch")["matchAlbum"] | null = null;
+
+    /**
+     * Get discoverWeeklyService (lazy-loaded and cached)
+     */
+    private async getDiscoverWeeklyService() {
+        if (!this.discoverWeeklyService) {
+            const module = await import("../services/discoverWeekly");
+            this.discoverWeeklyService = module.discoverWeeklyService;
+        }
+        return this.discoverWeeklyService;
+    }
+
+    /**
+     * Get matchAlbum function (lazy-loaded and cached)
+     */
+    private async getMatchAlbum() {
+        if (!this.matchAlbum) {
+            const module = await import("../utils/fuzzyMatch");
+            this.matchAlbum = module.matchAlbum;
+        }
+        return this.matchAlbum;
+    }
+
     /**
      * Start the polling loop
      * Safe to call multiple times - won't create duplicate loops
      */
     async start() {
         if (this.isRunning) {
-            console.log(" Queue cleaner already running");
+            logger.debug(" Queue cleaner already running");
             return;
         }
 
         this.isRunning = true;
         this.emptyQueueChecks = 0;
-        console.log(" Queue cleaner started (checking every 30s)");
+        logger.debug(" Queue cleaner started (checking every 30s)");
 
         await this.runCleanup();
     }
@@ -40,7 +67,7 @@ class QueueCleanerService {
             this.timeoutId = undefined;
         }
         this.isRunning = false;
-        console.log(" Queue cleaner stopped (queue empty)");
+        logger.debug(" Queue cleaner stopped (queue empty)");
     }
 
     /**
@@ -54,7 +81,7 @@ class QueueCleanerService {
             const settings = await getSystemSettings();
 
             if (!settings?.lidarrUrl || !settings?.lidarrApiKey) {
-                console.log(" Lidarr not configured, stopping queue cleaner");
+                logger.debug(" Lidarr not configured, stopping queue cleaner");
                 this.stop();
                 return;
             }
@@ -63,7 +90,7 @@ class QueueCleanerService {
             const staleCount =
                 await simpleDownloadManager.markStaleJobsAsFailed();
             if (staleCount > 0) {
-                console.log(`⏰ Cleaned up ${staleCount} stale download(s)`);
+                logger.debug(`⏰ Cleaned up ${staleCount} stale download(s)`);
                 this.emptyQueueChecks = 0; // Reset counter
             }
 
@@ -71,20 +98,37 @@ class QueueCleanerService {
             const reconcileResult =
                 await simpleDownloadManager.reconcileWithLidarr();
             if (reconcileResult.reconciled > 0) {
-                console.log(
+                logger.debug(
                     `✓ Reconciled ${reconcileResult.reconciled} job(s) with Lidarr`
                 );
                 this.emptyQueueChecks = 0; // Reset counter
             }
 
+            // PART 0.26: Sync with Lidarr queue (detect cancelled downloads)
+            const queueSyncResult = await simpleDownloadManager.syncWithLidarrQueue();
+            if (queueSyncResult.cancelled > 0) {
+                logger.debug(
+                    `✓ Synced ${queueSyncResult.cancelled} job(s) with Lidarr queue (cancelled/completed)`
+                );
+                this.emptyQueueChecks = 0; // Reset counter
+            }
+
+            // PART 0.3: Reconcile processing jobs with local library (critical fix for #31)
+            // Check if albums already exist in Lidify's database even if Lidarr webhooks were missed
+            const localReconcileResult = await this.reconcileWithLocalLibrary();
+            if (localReconcileResult.reconciled > 0) {
+                logger.debug(
+                    `✓ Reconciled ${localReconcileResult.reconciled} job(s) with local library`
+                );
+                this.emptyQueueChecks = 0; // Reset counter
+            }
+
             // PART 0.5: Check for stuck discovery batches (batch-level timeout)
-            const { discoverWeeklyService } = await import(
-                "../services/discoverWeekly"
-            );
+            const discoverWeeklyService = await this.getDiscoverWeeklyService();
             const stuckBatchCount =
                 await discoverWeeklyService.checkStuckBatches();
             if (stuckBatchCount > 0) {
-                console.log(
+                logger.debug(
                     `⏰ Force-completed ${stuckBatchCount} stuck discovery batch(es)`
                 );
                 this.emptyQueueChecks = 0; // Reset counter
@@ -97,7 +141,7 @@ class QueueCleanerService {
             );
 
             if (cleanResult.removed > 0) {
-                console.log(
+                logger.debug(
                     `[CLEANUP] Removed ${cleanResult.removed} stuck download(s) - searching for alternatives`
                 );
                 this.emptyQueueChecks = 0; // Reset counter - queue had activity
@@ -143,7 +187,7 @@ class QueueCleanerService {
                                 },
                             });
 
-                            console.log(
+                            logger.debug(
                                 `   Updated job ${job.id}: retry ${
                                     currentRetryCount + 1
                                 }`
@@ -187,10 +231,10 @@ class QueueCleanerService {
                     const artistName =
                         download.artist?.name || "Unknown Artist";
                     const albumTitle = download.album?.title || "Unknown Album";
-                    console.log(
+                    logger.debug(
                         `Recovered orphaned job: ${artistName} - ${albumTitle}`
                     );
-                    console.log(`   Download ID: ${download.downloadId}`);
+                    logger.debug(`   Download ID: ${download.downloadId}`);
                     this.emptyQueueChecks = 0; // Reset counter - found work to do
                     recoveredCount += orphanedJobs.length;
 
@@ -219,11 +263,9 @@ class QueueCleanerService {
                     }
 
                     if (discoveryBatchIds.size > 0) {
-                        const { discoverWeeklyService } = await import(
-                            "../services/discoverWeekly"
-                        );
+                        const discoverWeeklyService = await this.getDiscoverWeeklyService();
                         for (const batchId of discoveryBatchIds) {
-                            console.log(
+                            logger.debug(
                                 `    Checking Discovery batch completion: ${batchId}`
                             );
                             await discoverWeeklyService.checkBatchCompletion(
@@ -238,7 +280,7 @@ class QueueCleanerService {
                             !j.discoveryBatchId
                     );
                     if (nonDiscoveryJobs.length > 0) {
-                        console.log(
+                        logger.debug(
                             `    Triggering library scan for recovered job(s)...`
                         );
                         await scanQueue.add("scan", {
@@ -250,12 +292,12 @@ class QueueCleanerService {
             }
 
             if (recoveredCount > 0) {
-                console.log(`Recovered ${recoveredCount} orphaned job(s)`);
+                logger.debug(`Recovered ${recoveredCount} orphaned job(s)`);
             }
 
             // Only log skipped count occasionally to reduce noise
             if (skippedCount > 0 && this.emptyQueueChecks === 0) {
-                console.log(
+                logger.debug(
                     `   (Skipped ${skippedCount} incomplete download records)`
                 );
             }
@@ -272,12 +314,12 @@ class QueueCleanerService {
 
             if (!hadActivity) {
                 this.emptyQueueChecks++;
-                console.log(
+                logger.debug(
                     ` Queue empty (${this.emptyQueueChecks}/${this.maxEmptyChecks})`
                 );
 
                 if (this.emptyQueueChecks >= this.maxEmptyChecks) {
-                    console.log(
+                    logger.debug(
                         ` No activity for ${this.maxEmptyChecks} checks - stopping cleaner`
                     );
                     this.stop();
@@ -293,13 +335,178 @@ class QueueCleanerService {
                 this.checkInterval
             );
         } catch (error) {
-            console.error(" Queue cleanup error:", error);
+            logger.error(" Queue cleanup error:", error);
             // Still schedule next check even on error
             this.timeoutId = setTimeout(
                 () => this.runCleanup(),
                 this.checkInterval
             );
         }
+    }
+
+    /**
+     * Reconcile processing jobs with local library (Phase 1 & 3 fix for #31)
+     * Checks if albums already exist in Lidify's database and marks matching jobs as complete
+     * This handles cases where:
+     * - Lidarr webhooks were missed
+     * - MBID mismatches between MusicBrainz and Lidarr
+     * - Album/artist name differences prevent webhook matching
+     *
+     * Phase 3 enhancement: Uses fuzzy matching to catch more name variations
+     *
+     * PUBLIC: Called by periodic reconciliation in workers/index.ts
+     */
+    async reconcileWithLocalLibrary(): Promise<{ reconciled: number }> {
+        const processingJobs = await prisma.downloadJob.findMany({
+            where: { status: { in: ["pending", "processing"] } },
+        });
+
+        if (processingJobs.length === 0) {
+            return { reconciled: 0 };
+        }
+
+        logger.debug(
+            `[LOCAL-RECONCILE] Checking ${processingJobs.length} job(s) against local library...`
+        );
+
+        let reconciled = 0;
+
+        for (const job of processingJobs) {
+            const metadata = (job.metadata as any) || {};
+            const artistName = metadata?.artistName;
+            const albumTitle = metadata?.albumTitle;
+
+            if (!artistName || !albumTitle) {
+                continue;
+            }
+
+            try {
+                // First try: Exact/contains match (fast)
+                let localAlbum = await prisma.album.findFirst({
+                    where: {
+                        AND: [
+                            {
+                                artist: {
+                                    name: {
+                                        contains: artistName,
+                                        mode: "insensitive",
+                                    },
+                                },
+                            },
+                            {
+                                title: {
+                                    contains: albumTitle,
+                                    mode: "insensitive",
+                                },
+                            },
+                        ],
+                    },
+                    include: {
+                        tracks: {
+                            select: { id: true },
+                            take: 1,
+                        },
+                        artist: {
+                            select: { name: true },
+                        },
+                    },
+                });
+
+                // Second try: Fuzzy match if exact match failed (slower but more thorough)
+                if (!localAlbum || localAlbum.tracks.length === 0) {
+                    const matchAlbum = await this.getMatchAlbum();
+
+                    // Get all albums from artists with similar names
+                    const candidateAlbums = await prisma.album.findMany({
+                        where: {
+                            artist: {
+                                name: {
+                                    contains: artistName.substring(0, 5),
+                                    mode: "insensitive",
+                                },
+                            },
+                        },
+                        include: {
+                            tracks: {
+                                select: { id: true },
+                                take: 1,
+                            },
+                            artist: {
+                                select: { name: true },
+                            },
+                        },
+                        take: 50, // Limit to prevent performance issues
+                    });
+
+                    // Find best fuzzy match
+                    const fuzzyMatch = candidateAlbums.find(
+                        (album) =>
+                            album.tracks.length > 0 &&
+                            matchAlbum(
+                                artistName,
+                                albumTitle,
+                                album.artist.name,
+                                album.title,
+                                0.75
+                            )
+                    );
+
+                    if (fuzzyMatch) {
+                        localAlbum = fuzzyMatch;
+                    }
+
+                    if (localAlbum) {
+                        logger.debug(
+                            `[LOCAL-RECONCILE] Fuzzy matched "${artistName} - ${albumTitle}" to "${localAlbum.artist.name} - ${localAlbum.title}"`
+                        );
+                    }
+                }
+
+                if (localAlbum && localAlbum.tracks.length > 0) {
+                    logger.debug(
+                        `[LOCAL-RECONCILE] ✓ Found "${localAlbum.artist.name} - ${localAlbum.title}" in library for job ${job.id}`
+                    );
+
+                    // Album exists with tracks - mark job complete
+                    await prisma.downloadJob.update({
+                        where: { id: job.id },
+                        data: {
+                            status: "completed",
+                            completedAt: new Date(),
+                            error: null,
+                            metadata: {
+                                ...metadata,
+                                completedAt: new Date().toISOString(),
+                                reconciledFromLocalLibrary: true,
+                            },
+                        },
+                    });
+
+                    reconciled++;
+
+                    // Check batch completion for discovery jobs
+                    if (job.discoveryBatchId) {
+                        const discoverWeeklyService = await this.getDiscoverWeeklyService();
+                        await discoverWeeklyService.checkBatchCompletion(
+                            job.discoveryBatchId
+                        );
+                    }
+                }
+            } catch (error: any) {
+                logger.error(
+                    `[LOCAL-RECONCILE] Error checking job ${job.id}:`,
+                    error.message
+                );
+            }
+        }
+
+        if (reconciled > 0) {
+            logger.debug(
+                `[LOCAL-RECONCILE] Marked ${reconciled} job(s) complete from local library`
+            );
+        }
+
+        return { reconciled };
     }
 
     /**

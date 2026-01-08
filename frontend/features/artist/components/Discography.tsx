@@ -9,17 +9,41 @@ interface DiscographyProps {
     albums: Album[];
     colors: any;
     onPlayAlbum: (albumId: string, albumTitle: string) => Promise<void>;
+    sortBy: "year" | "dateAdded";
+    onSortChange: (sortBy: "year" | "dateAdded") => void;
 }
 
-export function Discography({ albums, colors, onPlayAlbum }: DiscographyProps) {
+export function Discography({
+    albums,
+    colors,
+    onPlayAlbum,
+    sortBy,
+    onSortChange,
+}: DiscographyProps) {
     if (!albums || albums.length === 0) {
         return null;
     }
 
     return (
         <section>
-            <h2 className="text-xl font-bold mb-4">Discography</h2>
-            <div data-tv-section="discography" className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold">Discography</h2>
+                {/* Sort Dropdown */}
+                <select
+                    value={sortBy}
+                    onChange={(e) =>
+                        onSortChange(e.target.value as "year" | "dateAdded")
+                    }
+                    className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-white text-xs focus:outline-none focus:border-white/20 [&>option]:bg-[#1a1a1a] [&>option]:text-white"
+                >
+                    <option value="year">Year (Newest)</option>
+                    <option value="dateAdded">Date Added (Recent)</option>
+                </select>
+            </div>
+            <div
+                data-tv-section="discography"
+                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4"
+            >
                 {albums.map((album, index) => {
                     const subtitle = [
                         album.year,

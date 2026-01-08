@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
@@ -40,7 +41,7 @@ router.post("/", async (req, res) => {
                 .status(400)
                 .json({ error: "Invalid request", details: error.errors });
         }
-        console.error("Create play error:", error);
+        logger.error("Create play error:", error);
         res.status(500).json({ error: "Failed to log play" });
     }
 });
@@ -76,7 +77,7 @@ router.get("/", async (req, res) => {
 
         res.json(plays);
     } catch (error) {
-        console.error("Get plays error:", error);
+        logger.error("Get plays error:", error);
         res.status(500).json({ error: "Failed to get plays" });
     }
 });

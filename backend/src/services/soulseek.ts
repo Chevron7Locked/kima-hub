@@ -52,9 +52,21 @@ class SoulseekService {
     private connecting = false;
     private connectPromise: Promise<void> | null = null;
     private lastConnectAttempt = 0;
+    private lastFailedAttempt = 0;
     private readonly RECONNECT_COOLDOWN = 30000; // 30 seconds between reconnect attempts
-    private readonly DOWNLOAD_TIMEOUT = 180000; // 3 minutes per download attempt
-    private readonly MAX_DOWNLOAD_RETRIES = 3; // Try up to 3 different users
+    private readonly FAILED_RECONNECT_COOLDOWN = 5000; // 5 seconds after failed attempt
+    private readonly DOWNLOAD_TIMEOUT_INITIAL = 60000; // 1 minute for first attempt
+    private readonly DOWNLOAD_TIMEOUT_RETRY = 30000; // 30 seconds for retries
+    private readonly MAX_DOWNLOAD_RETRIES = 5; // Try up to 5 different users (more retries with shorter timeouts)
+
+    // Circuit breaker for failing users
+    private failedUsers = new Map<string, { failures: number; lastFailure: Date }>();
+    private readonly FAILURE_THRESHOLD = 3; // Block after 3 failures
+    private readonly FAILURE_WINDOW = 300000; // 5 minute window
+
+    // Concurrency tracking
+    private activeDownloads = 0;
+    private maxConcurrentDownloads = 0;
 
     // Connection health tracking
     private connectedAt: Date | null = null;
@@ -72,12 +84,12 @@ class SoulseekService {
     private normalizeTrackTitle(title: string): string {
         // First, normalize Unicode characters to ASCII equivalents for better search matching
         let normalized = title
-            .replace(/…/g, "")           // Remove ellipsis (U+2026) - files don't have this
-            .replace(/[''′`]/g, "'")     // Smart apostrophes → ASCII apostrophe
-            .replace(/[""]/g, '"')       // Smart quotes → ASCII quotes
-            .replace(/\//g, " ")         // Slash → space (file names can't have /)
-            .replace(/[–—]/g, "-")       // En/em dash → hyphen
-            .replace(/[×]/g, "x");       // Multiplication sign → x
+            .replace(/…/g, "") // Remove ellipsis (U+2026) - files don't have this
+            .replace(/[''′`]/g, "'") // Smart apostrophes → ASCII apostrophe
+            .replace(/[""]/g, '"') // Smart quotes → ASCII quotes
+            .replace(/\//g, " ") // Slash → space (file names can't have /)
+            .replace(/[–—]/g, "-") // En/em dash → hyphen
+            .replace(/[×]/g, "x"); // Multiplication sign → x
 
         // Remove content in parentheses that contains live/remaster/remix info
         const livePatterns =
@@ -178,21 +190,42 @@ class SoulseekService {
             return this.connectPromise;
         }
 
-        // Cooldown between reconnect attempts (skip if forced)
+        // Short cooldown after FAILED attempts (5s), longer after SUCCESS (30s)
         const now = Date.now();
-        if (!force && now - this.lastConnectAttempt < this.RECONNECT_COOLDOWN) {
+        
+        // If last successful connection was recent, respect cooldown
+        if (!force && this.lastConnectAttempt > 0 &&
+            now - this.lastConnectAttempt < this.RECONNECT_COOLDOWN) {
             throw new Error(
                 "Connection cooldown - please wait before retrying"
             );
         }
+        
+        // If last FAILED attempt was very recent (5s), wait briefly
+        if (!force && this.lastFailedAttempt > 0 &&
+            now - this.lastFailedAttempt < this.FAILED_RECONNECT_COOLDOWN) {
+            throw new Error(
+                "Connection recently failed - please wait before retrying"
+            );
+        }
 
         this.connecting = true;
-        this.lastConnectAttempt = now;
 
-        this.connectPromise = this.connect().finally(() => {
-            this.connecting = false;
-            this.connectPromise = null;
-        });
+        this.connectPromise = this.connect()
+            .then(() => {
+                // Only set lastConnectAttempt on SUCCESS
+                this.lastConnectAttempt = Date.now();
+                this.lastFailedAttempt = 0; // Clear failed tracking
+            })
+            .catch((err) => {
+                // Track failed attempt separately (shorter cooldown)
+                this.lastFailedAttempt = Date.now();
+                throw err;
+            })
+            .finally(() => {
+                this.connecting = false;
+                this.connectPromise = null;
+            });
 
         return this.connectPromise;
     }
@@ -451,8 +484,74 @@ class SoulseekService {
     }
 
     /**
+     * Check if a user should be blocked due to recent failures
+     */
+    private isUserBlocked(username: string): boolean {
+        const record = this.failedUsers.get(username);
+        if (!record) return false;
+
+        // Clear old failures outside the window
+        if (Date.now() - record.lastFailure.getTime() > this.FAILURE_WINDOW) {
+            this.failedUsers.delete(username);
+            return false;
+        }
+
+        return record.failures >= this.FAILURE_THRESHOLD;
+    }
+
+    /**
+     * Record a user failure for circuit breaker
+     */
+    private recordUserFailure(username: string): void {
+        const record = this.failedUsers.get(username) || {
+            failures: 0,
+            lastFailure: new Date(),
+        };
+        record.failures++;
+        record.lastFailure = new Date();
+        this.failedUsers.set(username, record);
+
+        if (record.failures >= this.FAILURE_THRESHOLD) {
+            sessionLog(
+                "SOULSEEK",
+                `User ${username} blocked: ${record.failures} failures in ${Math.round(
+                    this.FAILURE_WINDOW / 60000
+                )}min window`,
+                "WARN"
+            );
+        }
+    }
+
+    /**
+     * Categorize download errors for smarter retry behavior
+     */
+    private categorizeError(error: Error): {
+        type: "user_offline" | "timeout" | "connection" | "file_not_found" | "unknown";
+        skipUser: boolean;
+    } {
+        const message = error.message.toLowerCase();
+
+        if (message.includes("user not exist") || message.includes("user offline")) {
+            return { type: "user_offline", skipUser: true };
+        }
+        if (message.includes("timed out") || message.includes("timeout")) {
+            return { type: "timeout", skipUser: true };
+        }
+        if (
+            message.includes("connection refused") ||
+            message.includes("connection reset")
+        ) {
+            return { type: "connection", skipUser: true };
+        }
+        if (message.includes("file not found") || message.includes("no such file")) {
+            return { type: "file_not_found", skipUser: true };
+        }
+        return { type: "unknown", skipUser: false };
+    }
+
+    /**
      * Rank all search results and return sorted matches (best first)
-     * Filters out matches below minimum score threshold
+     * Filters out matches below minimum score threshold and blocked users
      */
     private rankAllResults(
         results: SearchResult[],
@@ -462,9 +561,11 @@ class SoulseekService {
         // Normalize search terms for matching
         const normalizedArtist = artistName
             .toLowerCase()
+            .replace(/\s*&\s*/g, " and ")
             .replace(/[^a-z0-9\s]/g, "");
         const normalizedTitle = trackTitle
             .toLowerCase()
+            .replace(/\s*&\s*/g, " and ")
             .replace(/[^a-z0-9\s]/g, "")
             .replace(/^\d+\s*[-.]?\s*/, ""); // Remove leading track numbers
 
@@ -476,15 +577,24 @@ class SoulseekService {
             .filter((w) => w.length > 2)
             .slice(0, 3);
 
-        const scored = results.map((file) => {
+        // Filter out blocked users first
+        const availableResults = results.filter(
+            (file) => !this.isUserBlocked(file.user)
+        );
+
+        const scored = availableResults.map((file) => {
             const filename = (file.file || "").toLowerCase();
             const normalizedFilename = filename.replace(/[^a-z0-9]/g, "");
             const shortFilename = filename.split(/[/\\]/).pop() || filename;
 
             let score = 0;
 
-            // Prefer files with slots available (+20)
-            if (file.slots) score += 20;
+            // Strongly prefer files with slots available (+40)
+            if (file.slots) score += 40;
+
+            // Prefer high-speed peers
+            if (file.speed > 1000000) score += 15; // >1MB/s
+            else if (file.speed > 500000) score += 5; // >500KB/s
 
             // Check if filename contains artist (full or first word)
             if (
@@ -561,8 +671,25 @@ class SoulseekService {
      */
     async downloadTrack(
         match: TrackMatch,
-        destPath: string
+        destPath: string,
+        attemptNumber: number = 0
     ): Promise<{ success: boolean; error?: string }> {
+        // Track active downloads for concurrency monitoring
+        this.activeDownloads++;
+        this.maxConcurrentDownloads = Math.max(
+            this.maxConcurrentDownloads,
+            this.activeDownloads
+        );
+        sessionLog(
+            "SOULSEEK",
+            `Active downloads: ${this.activeDownloads}/${this.maxConcurrentDownloads} max`
+        );
+
+        // Use shorter timeout for retries
+        const timeout =
+            attemptNumber === 0
+                ? this.DOWNLOAD_TIMEOUT_INITIAL
+                : this.DOWNLOAD_TIMEOUT_RETRY;
         try {
             await this.ensureConnected();
         } catch (err: any) {
@@ -587,17 +714,20 @@ class SoulseekService {
         return new Promise((resolve) => {
             let resolved = false;
 
-            // Timeout handler - 3 minutes max per download attempt
+            // Timeout handler - progressive timeout based on attempt number
             const timeoutId = setTimeout(() => {
                 if (!resolved) {
                     resolved = true;
+                    this.activeDownloads--;
                     sessionLog(
                         "SOULSEEK",
-                        `Download timed out after ${
-                            this.DOWNLOAD_TIMEOUT / 1000
-                        }s: ${match.filename}`,
+                        `Download timed out after ${timeout / 1000}s: ${
+                            match.filename
+                        }`,
                         "WARN"
                     );
+                    // Record user failure for circuit breaker
+                    this.recordUserFailure(match.username);
                     // Clean up partial file if it exists
                     if (fs.existsSync(destPath)) {
                         try {
@@ -608,7 +738,7 @@ class SoulseekService {
                     }
                     resolve({ success: false, error: "Download timed out" });
                 }
-            }, this.DOWNLOAD_TIMEOUT);
+            }, timeout);
 
             // Create a SearchResult object for the download
             const downloadFile: SearchResult = {
@@ -629,13 +759,21 @@ class SoulseekService {
                     if (resolved) return; // Already timed out
                     resolved = true;
                     clearTimeout(timeoutId);
+                    this.activeDownloads--;
 
                     if (err) {
+                        const errorInfo = this.categorizeError(err);
                         sessionLog(
                             "SOULSEEK",
-                            `Download failed: ${err.message}`,
+                            `Download failed (${errorInfo.type}): ${err.message}`,
                             "ERROR"
                         );
+                        
+                        // Record user failure if error indicates user issue
+                        if (errorInfo.skipUser) {
+                            this.recordUserFailure(match.username);
+                        }
+                        
                         return resolve({ success: false, error: err.message });
                     }
 
@@ -952,7 +1090,7 @@ class SoulseekService {
                 sanitize(match.filename)
             );
 
-            const result = await this.downloadTrack(match, destPath);
+            const result = await this.downloadTrack(match, destPath, attempt);
             if (result.success) {
                 if (attempt > 0) {
                     sessionLog(

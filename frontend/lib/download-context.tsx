@@ -54,23 +54,28 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         // Remove pending downloads that have completed or failed
         setPendingDownloads((prev) => {
             return prev.filter((pending) => {
-                // Check if this MBID has a job that's completed or failed
+                // Check if this MBID has an active job being tracked by API
+                const hasActiveJob = downloadStatus.activeDownloads.some(
+                    (job) => job.targetMbid === pending.mbid
+                );
+
+                // If job is now being tracked by the API, remove from local pending
+                if (hasActiveJob) {
+                    return false;
+                }
+
+                // Check if this MBID has completed or failed
                 const matchingJob = [
-                    ...downloadStatus.activeDownloads,
                     ...downloadStatus.recentDownloads,
                     ...downloadStatus.failedDownloads,
                 ].find((job) => job.targetMbid === pending.mbid);
 
                 // If job is completed or failed, remove from pending
-                if (
-                    matchingJob &&
-                    (matchingJob.status === "completed" ||
-                        matchingJob.status === "failed")
-                ) {
+                if (matchingJob) {
                     return false;
                 }
 
-                // Keep if still pending/processing or no job found yet
+                // Keep if no job found yet
                 return true;
             });
         });
@@ -79,6 +84,28 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         downloadStatus.recentDownloads,
         downloadStatus.failedDownloads,
     ]);
+
+    // Cleanup pending downloads older than 2 minutes
+    // This handles cases where jobs fail immediately and don't appear in any API response
+    useEffect(() => {
+        const STALE_THRESHOLD = 2 * 60 * 1000; // 2 minutes
+
+        const cleanup = setInterval(() => {
+            setPendingDownloads((prev) => {
+                const now = Date.now();
+                const filtered = prev.filter((pending) => {
+                    const age = now - pending.timestamp;
+                    if (age > STALE_THRESHOLD) {
+                        return false;
+                    }
+                    return true;
+                });
+                return filtered;
+            });
+        }, 30000); // Check every 30 seconds
+
+        return () => clearInterval(cleanup);
+    }, []);
 
     const addPendingDownload = (
         type: "artist" | "album",

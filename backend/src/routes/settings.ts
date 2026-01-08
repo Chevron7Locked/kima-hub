@@ -1,7 +1,9 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
+import { staleJobCleanupService } from "../services/staleJobCleanup";
 
 const router = Router();
 
@@ -38,7 +40,7 @@ router.get("/", async (req, res) => {
 
         res.json(settings);
     } catch (error) {
-        console.error("Get settings error:", error);
+        logger.error("Get settings error:", error);
         res.status(500).json({ error: "Failed to get settings" });
     }
 });
@@ -65,8 +67,29 @@ router.post("/", async (req, res) => {
                 .status(400)
                 .json({ error: "Invalid settings", details: error.errors });
         }
-        console.error("Update settings error:", error);
+        logger.error("Update settings error:", error);
         res.status(500).json({ error: "Failed to update settings" });
+    }
+});
+
+// POST /settings/cleanup-stale-jobs
+router.post("/cleanup-stale-jobs", async (req, res) => {
+    try {
+        const result = await staleJobCleanupService.cleanupAll();
+
+        res.json({
+            success: true,
+            cleaned: {
+                discoveryBatches: result.discoveryBatches,
+                downloadJobs: result.downloadJobs,
+                spotifyImportJobs: result.spotifyImportJobs,
+                bullQueues: result.bullQueues,
+            },
+            totalCleaned: result.totalCleaned,
+        });
+    } catch (error) {
+        logger.error("Stale job cleanup error:", error);
+        res.status(500).json({ error: "Failed to cleanup stale jobs" });
     }
 });
 

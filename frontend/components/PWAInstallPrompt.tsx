@@ -13,6 +13,14 @@ export function PWAInstallPrompt() {
     const [showPrompt, setShowPrompt] = useState(false);
     const [isIOS, setIsIOS] = useState(false);
 
+    const isDismissedRecently = (): boolean => {
+        const dismissedAt = localStorage.getItem("pwa-prompt-dismissed");
+        if (!dismissedAt) return false;
+        const dismissedTime = parseInt(dismissedAt, 10);
+        const sevenDays = 7 * 24 * 60 * 60 * 1000;
+        return Date.now() - dismissedTime < sevenDays;
+    };
+
     useEffect(() => {
         // Check if already installed as PWA
         if (window.matchMedia("(display-mode: standalone)").matches) {
@@ -20,13 +28,8 @@ export function PWAInstallPrompt() {
         }
 
         // Check if dismissed recently (within 7 days)
-        const dismissedAt = localStorage.getItem("pwa-prompt-dismissed");
-        if (dismissedAt) {
-            const dismissedTime = parseInt(dismissedAt, 10);
-            const sevenDays = 7 * 24 * 60 * 60 * 1000;
-            if (Date.now() - dismissedTime < sevenDays) {
-                return;
-            }
+        if (isDismissedRecently()) {
+            return;
         }
 
         // Check for iOS
@@ -38,14 +41,22 @@ export function PWAInstallPrompt() {
             e.preventDefault();
             setDeferredPrompt(e as BeforeInstallPromptEvent);
             // Show prompt after a short delay
-            setTimeout(() => setShowPrompt(true), 3000);
+            setTimeout(() => {
+                if (!isDismissedRecently()) {
+                    setShowPrompt(true);
+                }
+            }, 3000);
         };
 
         window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
 
         // For iOS, show instructions after delay if on mobile
         if (isIOSDevice) {
-            setTimeout(() => setShowPrompt(true), 5000);
+            setTimeout(() => {
+                if (!isDismissedRecently()) {
+                    setShowPrompt(true);
+                }
+            }, 5000);
         }
 
         return () => {

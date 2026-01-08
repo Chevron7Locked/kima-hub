@@ -27,23 +27,32 @@ export default function LibraryPage() {
     // Get active tab from URL params, default to "artists"
     const activeTab = (searchParams.get("tab") as Tab) || "artists";
 
+    // Read page from URL params
+    const urlPage = parseInt(searchParams.get("page") || "1", 10);
+
     // Filter state (owned = your library, discovery = discovery weekly artists)
     const [filter, setFilter] = useState<LibraryFilter>("owned");
 
     // Sort and pagination state
     const [sortBy, setSortBy] = useState<SortOption>("name");
-    const [itemsPerPage, setItemsPerPage] = useState<number>(50);
-    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState<number>(40);
+    const [currentPage, setCurrentPage] = useState(urlPage);
     const [showFilters, setShowFilters] = useState(false);
 
+    // Sync currentPage with URL changes (browser back/forward)
+    useEffect(() => {
+        setCurrentPage(urlPage);
+    }, [urlPage]);
+
     // Use custom hooks with server-side pagination
-    const { artists, albums, tracks, isLoading, reloadData, pagination } = useLibraryData({
-        activeTab,
-        filter,
-        sortBy,
-        itemsPerPage,
-        currentPage,
-    });
+    const { artists, albums, tracks, isLoading, reloadData, pagination } =
+        useLibraryData({
+            activeTab,
+            filter,
+            sortBy,
+            itemsPerPage,
+            currentPage,
+        });
     const {
         playArtist,
         playAlbum,
@@ -83,6 +92,15 @@ export default function LibraryPage() {
     // Change tab function
     const changeTab = (tab: Tab) => {
         router.push(`/library?tab=${tab}`, { scroll: false });
+    };
+
+    // Update page with URL state and scroll to top
+    const updatePage = (page: number) => {
+        const params = new URLSearchParams();
+        params.set("tab", activeTab);
+        params.set("page", String(page));
+        router.push(`/library?${params.toString()}`, { scroll: false });
+        window.scrollTo({ top: 0, behavior: "smooth" });
     };
 
     // Helper to convert library Track to audio context Track format
@@ -248,7 +266,9 @@ export default function LibraryPage() {
                         {/* Sort Dropdown */}
                         <select
                             value={sortBy}
-                            onChange={(e) => setSortBy(e.target.value as SortOption)}
+                            onChange={(e) =>
+                                setSortBy(e.target.value as SortOption)
+                            }
                             className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-white text-xs focus:outline-none focus:border-white/20 [&>option]:bg-[#1a1a1a] [&>option]:text-white"
                         >
                             <option value="name">Name (A-Z)</option>
@@ -264,13 +284,15 @@ export default function LibraryPage() {
                         {/* Items per page */}
                         <select
                             value={itemsPerPage}
-                            onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                            onChange={(e) =>
+                                setItemsPerPage(Number(e.target.value))
+                            }
                             className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-white text-xs focus:outline-none focus:border-white/20 [&>option]:bg-[#1a1a1a] [&>option]:text-white"
                         >
-                            <option value={25}>25 per page</option>
-                            <option value={50}>50 per page</option>
-                            <option value={100}>100 per page</option>
-                            <option value={250}>250 per page</option>
+                            <option value={24}>24 per page</option>
+                            <option value={40}>40 per page</option>
+                            <option value={80}>80 per page</option>
+                            <option value={200}>200 per page</option>
                         </select>
                     </div>
                 )}
@@ -330,7 +352,7 @@ export default function LibraryPage() {
                 {totalPages > 1 && (
                     <div className="flex items-center justify-center gap-2 mt-8 pt-4 border-t border-white/5">
                         <button
-                            onClick={() => setCurrentPage(1)}
+                            onClick={() => updatePage(1)}
                             disabled={currentPage === 1 || isLoading}
                             className="px-3 py-1.5 text-xs text-gray-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                         >
@@ -338,7 +360,7 @@ export default function LibraryPage() {
                         </button>
                         <button
                             onClick={() =>
-                                setCurrentPage((p) => Math.max(1, p - 1))
+                                updatePage(Math.max(1, currentPage - 1))
                             }
                             disabled={currentPage === 1 || isLoading}
                             className="px-3 py-1.5 text-xs text-gray-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
@@ -350,8 +372,8 @@ export default function LibraryPage() {
                         </span>
                         <button
                             onClick={() =>
-                                setCurrentPage((p) =>
-                                    Math.min(totalPages, p + 1)
+                                updatePage(
+                                    Math.min(totalPages, currentPage + 1)
                                 )
                             }
                             disabled={currentPage === totalPages || isLoading}
@@ -360,7 +382,7 @@ export default function LibraryPage() {
                             Next
                         </button>
                         <button
-                            onClick={() => setCurrentPage(totalPages)}
+                            onClick={() => updatePage(totalPages)}
                             disabled={currentPage === totalPages || isLoading}
                             className="px-3 py-1.5 text-xs text-gray-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                         >

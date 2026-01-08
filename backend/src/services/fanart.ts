@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from "axios";
+import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { getSystemSettings } from "../utils/systemSettings";
 
@@ -38,7 +39,7 @@ class FanartService {
             const settings = await getSystemSettings();
             if (settings?.fanartEnabled && settings?.fanartApiKey) {
                 this.apiKey = settings.fanartApiKey;
-                console.log("Fanart.tv configured from database");
+                logger.debug("Fanart.tv configured from database");
                 this.initialized = true;
                 return;
             }
@@ -49,7 +50,7 @@ class FanartService {
         // Fallback to .env
         if (process.env.FANART_API_KEY) {
             this.apiKey = process.env.FANART_API_KEY;
-            console.log("Fanart.tv configured from .env");
+            logger.debug("Fanart.tv configured from .env");
         }
         // Note: Not logging "not configured" here - it's optional and logs are spammy
         this.initialized = true;
@@ -73,7 +74,7 @@ class FanartService {
             if (redisClient.isOpen) {
                 const cached = await redisClient.get(cacheKey);
                 if (cached) {
-                    console.log(`  Fanart.tv: Using cached image`);
+                    logger.debug(`  Fanart.tv: Using cached image`);
                     return cached;
                 }
             }
@@ -82,7 +83,7 @@ class FanartService {
         }
 
         try {
-            console.log(`  Fetching from Fanart.tv...`);
+            logger.debug(`  Fetching from Fanart.tv...`);
             const response = await this.client.get(`/music/${mbid}`, {
                 params: { api_key: this.apiKey },
             });
@@ -98,39 +99,39 @@ class FanartService {
                 // If it's just a filename, construct the full URL
                 if (rawUrl && !rawUrl.startsWith("http")) {
                     rawUrl = `https://assets.fanart.tv/fanart/music/${mbid}/artistbackground/${rawUrl}`;
-                    console.log(
+                    logger.debug(
                         `  Fanart.tv: Constructed full URL from filename`
                     );
                 }
 
                 imageUrl = rawUrl;
-                console.log(`  Fanart.tv: Found artist background`);
+                logger.debug(`  Fanart.tv: Found artist background`);
             } else if (data.artistthumb && data.artistthumb.length > 0) {
                 let rawUrl = data.artistthumb[0].url;
 
                 // If it's just a filename, construct the full URL
                 if (rawUrl && !rawUrl.startsWith("http")) {
                     rawUrl = `https://assets.fanart.tv/fanart/music/${mbid}/artistthumb/${rawUrl}`;
-                    console.log(
+                    logger.debug(
                         `  Fanart.tv: Constructed full URL from filename`
                     );
                 }
 
                 imageUrl = rawUrl;
-                console.log(`  Fanart.tv: Found artist thumbnail`);
+                logger.debug(`  Fanart.tv: Found artist thumbnail`);
             } else if (data.hdmusiclogo && data.hdmusiclogo.length > 0) {
                 let rawUrl = data.hdmusiclogo[0].url;
 
                 // If it's just a filename, construct the full URL
                 if (rawUrl && !rawUrl.startsWith("http")) {
                     rawUrl = `https://assets.fanart.tv/fanart/music/${mbid}/hdmusiclogo/${rawUrl}`;
-                    console.log(
+                    logger.debug(
                         `  Fanart.tv: Constructed full URL from filename`
                     );
                 }
 
                 imageUrl = rawUrl;
-                console.log(`  Fanart.tv: Found HD logo`);
+                logger.debug(`  Fanart.tv: Found HD logo`);
             }
 
             // Cache for 7 days
@@ -149,9 +150,9 @@ class FanartService {
             return imageUrl;
         } catch (error: any) {
             if (error.response?.status === 404) {
-                console.log(`Fanart.tv: No images found`);
+                logger.debug(`Fanart.tv: No images found`);
             } else {
-                console.error(`   Fanart.tv error:`, error.message);
+                logger.error(`   Fanart.tv error:`, error.message);
             }
             return null;
         }

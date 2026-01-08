@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from "axios";
+import { logger } from "../utils/logger";
 import { config } from "../config";
 
 interface PlaylistTrack {
@@ -131,14 +132,14 @@ Return ONLY valid JSON, no markdown formatting.`;
 
             return result.tracks || [];
         } catch (error: any) {
-            console.error(
+            logger.error(
                 "OpenAI API error:",
                 error.response?.data || error.message
             );
 
             // Log the raw response content for debugging
             if (error instanceof SyntaxError) {
-                console.error("Failed to parse JSON response");
+                logger.error("Failed to parse JSON response");
             }
 
             throw new Error("Failed to generate playlist with AI");
@@ -175,7 +176,7 @@ Be concise and engaging (max 15 words).`;
 
             return response.data.choices[0].message.content.trim();
         } catch (error) {
-            console.error("OpenAI enhancement error:", error);
+            logger.error("OpenAI enhancement error:", error);
             return "Recommended based on your listening history";
         }
     }

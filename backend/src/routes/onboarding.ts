@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import bcrypt from "bcrypt";
 import { z } from "zod";
@@ -49,14 +50,14 @@ async function ensureEncryptionKey(): Promise<void> {
         process.env.SETTINGS_ENCRYPTION_KEY !==
             "default-encryption-key-change-me"
     ) {
-        console.log("[ONBOARDING] Encryption key already exists");
+        logger.debug("[ONBOARDING] Encryption key already exists");
         return;
     }
 
     // Generate a secure 32-byte encryption key
     const encryptionKey = crypto.randomBytes(32).toString("base64");
 
-    console.log(
+    logger.debug(
         "[ONBOARDING] Generating encryption key for settings security..."
     );
 
@@ -69,9 +70,9 @@ async function ensureEncryptionKey(): Promise<void> {
         // Update the process environment so it's available immediately
         process.env.SETTINGS_ENCRYPTION_KEY = encryptionKey;
 
-        console.log("[ONBOARDING] Encryption key generated and saved to .env");
+        logger.debug("[ONBOARDING] Encryption key generated and saved to .env");
     } catch (error) {
-        console.error("[ONBOARDING] ✗ Failed to save encryption key:", error);
+        logger.error("[ONBOARDING] Failed to save encryption key:", error);
         throw new Error("Failed to generate encryption key");
     }
 }
@@ -82,7 +83,7 @@ async function ensureEncryptionKey(): Promise<void> {
  */
 router.post("/register", async (req, res) => {
     try {
-        console.log("[ONBOARDING] Register attempt for user:", req.body?.username);
+        logger.debug("[ONBOARDING] Register attempt for user:", req.body?.username);
         const { username, password } = registerSchema.parse(req.body);
 
         // Check if any user exists (first user becomes admin)
@@ -100,7 +101,7 @@ router.post("/register", async (req, res) => {
         });
 
         if (existing) {
-            console.log("[ONBOARDING] Username already taken:", username);
+            logger.debug("[ONBOARDING] Username already taken:", username);
             return res.status(400).json({ error: "Username already taken" });
         }
 
@@ -131,9 +132,10 @@ router.post("/register", async (req, res) => {
             id: user.id,
             username: user.username,
             role: user.role,
+            tokenVersion: user.tokenVersion,
         });
 
-        console.log("[ONBOARDING] User created successfully:", user.username);
+        logger.debug("[ONBOARDING] User created successfully:", user.username);
         res.json({
             token,
             user: {
@@ -145,12 +147,12 @@ router.post("/register", async (req, res) => {
         });
     } catch (err: any) {
         if (err instanceof z.ZodError) {
-            console.error("[ONBOARDING] Validation error:", err.errors);
+            logger.error("[ONBOARDING] Validation error:", err.errors);
             return res
                 .status(400)
                 .json({ error: "Invalid request", details: err.errors });
         }
-        console.error("Registration error:", err);
+        logger.error("Registration error:", err);
         res.status(500).json({ error: "Failed to create account" });
     }
 });
@@ -189,10 +191,10 @@ router.post("/lidarr", requireAuth, async (req, res) => {
 
                 if (response.status === 200) {
                     connectionTested = true;
-                    console.log("Lidarr connection test successful");
+                    logger.debug("Lidarr connection test successful");
                 }
             } catch (error: any) {
-                console.warn(
+                logger.warn(
                     "  Lidarr connection test failed (saved anyway):",
                     error.message
                 );
@@ -229,7 +231,7 @@ router.post("/lidarr", requireAuth, async (req, res) => {
                 .status(400)
                 .json({ error: "Invalid request", details: err.errors });
         }
-        console.error("Lidarr config error:", err);
+        logger.error("Lidarr config error:", err);
         res.status(500).json({ error: "Failed to save configuration" });
     }
 });
@@ -265,10 +267,10 @@ router.post("/audiobookshelf", requireAuth, async (req, res) => {
 
                 if (response.status === 200) {
                     connectionTested = true;
-                    console.log("Audiobookshelf connection test successful");
+                    logger.debug("Audiobookshelf connection test successful");
                 }
             } catch (error: any) {
-                console.warn(
+                logger.warn(
                     "  Audiobookshelf connection test failed (saved anyway):",
                     error.message
                 );
@@ -305,7 +307,7 @@ router.post("/audiobookshelf", requireAuth, async (req, res) => {
                 .status(400)
                 .json({ error: "Invalid request", details: err.errors });
         }
-        console.error("Audiobookshelf config error:", err);
+        logger.error("Audiobookshelf config error:", err);
         res.status(500).json({ error: "Failed to save configuration" });
     }
 });
@@ -363,7 +365,7 @@ router.post("/soulseek", requireAuth, async (req, res) => {
                 .status(400)
                 .json({ error: "Invalid request", details: err.errors });
         }
-        console.error("Soulseek config error:", err);
+        logger.error("Soulseek config error:", err);
         res.status(500).json({ error: "Failed to save configuration" });
     }
 });
@@ -394,7 +396,7 @@ router.post("/enrichment", requireAuth, async (req, res) => {
                 .status(400)
                 .json({ error: "Invalid request", details: err.errors });
         }
-        console.error("Enrichment config error:", err);
+        logger.error("Enrichment config error:", err);
         res.status(500).json({ error: "Failed to save configuration" });
     }
 });
@@ -410,10 +412,10 @@ router.post("/complete", requireAuth, async (req, res) => {
             data: { onboardingComplete: true },
         });
 
-        console.log("[ONBOARDING] User completed onboarding:", req.user!.id);
+        logger.debug("[ONBOARDING] User completed onboarding:", req.user!.id);
         res.json({ success: true });
     } catch (err: any) {
-        console.error("Onboarding complete error:", err);
+        logger.error("Onboarding complete error:", err);
         res.status(500).json({ error: "Failed to complete onboarding" });
     }
 });
@@ -467,7 +469,7 @@ router.get("/status", async (req, res) => {
             });
         }
     } catch (err: any) {
-        console.error("Onboarding status error:", err);
+        logger.error("Onboarding status error:", err);
         res.status(500).json({ error: "Failed to check status" });
     }
 });

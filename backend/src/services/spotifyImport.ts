@@ -1,7 +1,6 @@
 import { spotifyService, SpotifyTrack, SpotifyPlaylist } from "./spotify";
+import { logger } from "../utils/logger";
 import { musicBrainzService } from "./musicbrainz";
-import { lidarrService } from "./lidarr";
-import { soulseekService } from "./soulseek";
 import { deezerService } from "./deezer";
 import {
     createPlaylistLogger,
@@ -12,8 +11,8 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import PQueue from "p-queue";
-// Note: We DON'T use simpleDownloadManager here because it has same-artist fallback logic
-// For Spotify Import, we need EXACT album matching - no substitutions
+import { acquisitionService } from "./acquisitionService";
+import { extractPrimaryArtist } from "../utils/artistNormalization";
 
 // Store loggers for each job
 const jobLoggers = new Map<string, ReturnType<typeof createPlaylistLogger>>();
@@ -146,7 +145,7 @@ async function saveImportJob(job: ImportJob): Promise<void> {
             JSON.stringify(job)
         );
     } catch (error) {
-        console.warn(
+        logger?.warn(
             `⚠️  Failed to cache import job ${job.id} in Redis:`,
             error
         );
@@ -166,7 +165,7 @@ async function getImportJob(importJobId: string): Promise<ImportJob | null> {
             return JSON.parse(cached);
         }
     } catch (error) {
-        console.warn(
+        logger?.warn(
             `⚠️  Failed to read import job ${importJobId} from Redis:`,
             error
         );
@@ -208,7 +207,7 @@ async function getImportJob(importJobId: string): Promise<ImportJob | null> {
             JSON.stringify(job)
         );
     } catch (error) {
-        console.warn(
+        logger?.warn(
             `⚠️  Failed to cache import job ${importJobId} in Redis:`,
             error
         );
@@ -325,12 +324,16 @@ class SpotifyImportService {
         const normalizedArtist = normalizeString(spotifyTrack.artist);
         const normalizedAlbum = normalizeString(spotifyTrack.album);
 
-        // Strategy 1: Exact match by artist + album + title
-        const exactMatch = await prisma.track.findFirst({
+        // Extract primary artist for better matching (handles "Artist feat. Someone")
+        const primaryArtist = extractPrimaryArtist(spotifyTrack.artist);
+        const normalizedPrimaryArtist = normalizeString(primaryArtist);
+
+        // Strategy 1: Exact match by primary artist + album + title
+        let exactMatch = await prisma.track.findFirst({
             where: {
                 album: {
                     artist: {
-                        normalizedName: normalizedArtist,
+                        normalizedName: normalizedPrimaryArtist,
                     },
                     title: {
                         mode: "insensitive",
@@ -351,6 +354,34 @@ class SpotifyImportService {
             },
         });
 
+        // Fallback: Try with full artist name if primary artist didn't match
+        if (!exactMatch && primaryArtist !== spotifyTrack.artist) {
+            exactMatch = await prisma.track.findFirst({
+                where: {
+                    album: {
+                        artist: {
+                            normalizedName: normalizedArtist,
+                        },
+                        title: {
+                            mode: "insensitive",
+                            equals: spotifyTrack.album,
+                        },
+                    },
+                    title: {
+                        mode: "insensitive",
+                        equals: spotifyTrack.title,
+                    },
+                },
+                include: {
+                    album: {
+                        include: {
+                            artist: true,
+                        },
+                    },
+                },
+            });
+        }
+
         if (exactMatch) {
             return {
                 spotifyTrack,
@@ -366,13 +397,13 @@ class SpotifyImportService {
             };
         }
 
-        // Strategy 2: Fuzzy match by artist + title (any album)
-        const fuzzyMatches = await prisma.track.findMany({
+        // Strategy 2: Fuzzy match by primary artist + title (any album)
+        let fuzzyMatches = await prisma.track.findMany({
             where: {
                 album: {
                     artist: {
                         normalizedName: {
-                            contains: normalizedArtist.split(" ")[0], // First word of artist
+                            contains: normalizedPrimaryArtist.split(" ")[0], // First word of primary artist
                         },
                     },
                 },
@@ -387,7 +418,30 @@ class SpotifyImportService {
             take: 50, // Limit for performance
         });
 
-        let bestMatch: typeof exactMatch | null = null;
+        // Fallback: Try with full artist name if primary artist didn't find matches
+        if (fuzzyMatches.length === 0 && primaryArtist !== spotifyTrack.artist) {
+            fuzzyMatches = await prisma.track.findMany({
+                where: {
+                    album: {
+                        artist: {
+                            normalizedName: {
+                                contains: normalizedArtist.split(" ")[0], // First word of full artist
+                            },
+                        },
+                    },
+                },
+                include: {
+                    album: {
+                        include: {
+                            artist: true,
+                        },
+                    },
+                },
+                take: 50,
+            });
+        }
+
+        let bestMatch: any = null;
         let bestScore = 0;
 
         for (const track of fuzzyMatches) {
@@ -396,8 +450,9 @@ class SpotifyImportService {
                 normalizeTrackTitle(spotifyTrack.title),
                 normalizeTrackTitle(track.title)
             );
+            // Compare against primary artist for better matching
             const artistSim = stringSimilarity(
-                spotifyTrack.artist,
+                primaryArtist,
                 track.album.artist.name
             );
 
@@ -414,11 +469,11 @@ class SpotifyImportService {
             return {
                 spotifyTrack,
                 localTrack: {
-                    id: bestMatch.id,
-                    title: bestMatch.title,
-                    albumId: bestMatch.albumId,
-                    albumTitle: bestMatch.album.title,
-                    artistName: bestMatch.album.artist.name,
+                    id: bestMatch!.id,
+                    title: bestMatch!.title,
+                    albumId: bestMatch!.albumId,
+                    albumTitle: bestMatch!.album.title,
+                    artistName: bestMatch!.album.artist.name,
                 },
                 matchType: "fuzzy",
                 matchConfidence: Math.round(bestScore),
@@ -476,7 +531,7 @@ class SpotifyImportService {
 
             return { artistMbid, albumMbid: null };
         } catch (error) {
-            console.error("MusicBrainz lookup error:", error);
+            logger?.error("MusicBrainz lookup error:", error);
             return { artistMbid: null, albumMbid: null };
         }
     }
@@ -523,10 +578,10 @@ class SpotifyImportService {
             let artistMbid: string | null = null;
             let albumMbid: string | null = null;
 
-            console.log(
+            logger?.debug(
                 `\n${logPrefix} ========================================`
             );
-            console.log(
+            logger?.debug(
                 `${logPrefix} Looking up: "${artistName}" - "${albumName}"`
             );
 
@@ -535,11 +590,11 @@ class SpotifyImportService {
                 const normalizedAlbumName = stripTrackSuffix(albumName);
                 const wasNormalized = normalizedAlbumName !== albumName;
 
-                console.log(
+                logger?.debug(
                     `${logPrefix} Searching for album "${albumName}" by ${artistName}...`
                 );
                 if (wasNormalized) {
-                    console.log(
+                    logger?.debug(
                         `${logPrefix}   → Normalized to: "${normalizedAlbumName}"`
                     );
                 }
@@ -552,14 +607,14 @@ class SpotifyImportService {
                 albumMbid = mbResult.albumMbid;
 
                 if (albumMbid) {
-                    console.log(
+                    logger?.debug(
                         `${logPrefix} ✓ Found album directly: "${albumName}" (MBID: ${albumMbid})`
                     );
                 }
             }
 
             if (!albumMbid) {
-                console.log(
+                logger?.debug(
                     `${logPrefix} Album not found, trying track-based search...`
                 );
                 for (const track of albumTracks) {
@@ -567,11 +622,11 @@ class SpotifyImportService {
                     const normalizedTrackTitle = stripTrackSuffix(track.title);
                     const wasNormalized = normalizedTrackTitle !== track.title;
 
-                    console.log(
+                    logger?.debug(
                         `${logPrefix}   Searching for track "${track.title}"...`
                     );
                     if (wasNormalized) {
-                        console.log(
+                        logger?.debug(
                             `${logPrefix}     → Normalized to: "${normalizedTrackTitle}"`
                         );
                     }
@@ -587,7 +642,7 @@ class SpotifyImportService {
                         artistMbid = recordingInfo.artistMbid;
                         albumMbid = recordingInfo.albumMbid;
 
-                        console.log(
+                        logger?.debug(
                             `${logPrefix} ✓ Found via track: "${resolvedAlbumName}" (MBID: ${albumMbid})`
                         );
                         break;
@@ -596,11 +651,11 @@ class SpotifyImportService {
             }
 
             if (!albumMbid) {
-                console.log(
+                logger?.debug(
                     `${logPrefix} ✗ Could not find album MBID for ${artistName} - "${resolvedAlbumName}"`
                 );
                 if (albumName === "Unknown Album") {
-                    console.log(
+                    logger?.debug(
                         `${logPrefix} ℹ But can still download via Soulseek (track-based search)`
                     );
                 }
@@ -617,28 +672,28 @@ class SpotifyImportService {
                 tracksNeeded: albumTracks,
             };
 
-            console.log(`${logPrefix} Download strategy:`);
+            logger?.debug(`${logPrefix} Download strategy:`);
             if (albumMbid) {
-                console.log(`   Will request album from Lidarr/Soulseek:`);
-                console.log(
+                logger?.debug(`   Will request album from Lidarr/Soulseek:`);
+                logger?.debug(
                     `   Artist: "${artistName}" (MBID: ${artistMbid || "NONE"})`
                 );
-                console.log(
+                logger?.debug(
                     `   Album: "${resolvedAlbumName}" (MBID: ${albumMbid})`
                 );
             } else {
                 // No MBID - will try Soulseek track-based search
-                console.log(
+                logger?.debug(
                     `   Will request individual tracks via Soulseek (no MBID):`
                 );
-                console.log(`   Artist: "${artistName}"`);
-                console.log(
+                logger?.debug(`   Artist: "${artistName}"`);
+                logger?.debug(
                     `   Tracks: ${albumTracks
                         .map((t) => `"${t.title}"`)
                         .join(", ")}`
                 );
             }
-            console.log(
+            logger?.debug(
                 `${logPrefix} ========================================\n`
             );
 
@@ -716,7 +771,7 @@ class SpotifyImportService {
         // Clear any stale null cache entries before processing
         await musicBrainzService.clearStaleRecordingCaches();
 
-        console.log(
+        logger?.debug(
             "[Deezer Debug] Sample track from Deezer:",
             JSON.stringify(deezerPlaylist.tracks[0], null, 2)
         );
@@ -737,7 +792,7 @@ class SpotifyImportService {
             })
         );
 
-        console.log(
+        logger?.debug(
             "[Deezer Debug] Sample converted track:",
             JSON.stringify(spotifyTracks[0], null, 2)
         );
@@ -766,18 +821,30 @@ class SpotifyImportService {
         albumMbidsToDownload: string[],
         preview: ImportPreview
     ): Promise<ImportJob> {
+        // Validate userId to prevent NaN/invalid values from entering the system
+        if (!userId || typeof userId !== 'string' || userId === 'NaN' || userId === 'undefined' || userId === 'null') {
+            logger?.error(
+                `[Spotify Import] Invalid userId provided to startImport: ${JSON.stringify({
+                    userId,
+                    typeofUserId: typeof userId,
+                    playlistName
+                })}`
+            );
+            throw new Error(`Invalid userId provided: ${userId}`);
+        }
+
         const jobId = `import_${Date.now()}_${Math.random()
             .toString(36)
             .substring(7)}`;
 
         // Create dedicated logger for this job
-        const logger = createPlaylistLogger(jobId);
-        jobLoggers.set(jobId, logger);
+        const jobLogger = createPlaylistLogger(jobId);
+        jobLoggers.set(jobId, jobLogger);
 
-        logger.logJobStart(playlistName, preview.summary.total, userId);
-        logger.info(`Playlist ID: ${spotifyPlaylistId}`);
-        logger.info(`Albums to download: ${albumMbidsToDownload.length}`);
-        logger.info(`Tracks already in library: ${preview.summary.inLibrary}`);
+        jobLogger.logJobStart(playlistName, preview.summary.total, userId);
+        jobLogger?.info(`Playlist ID: ${spotifyPlaylistId}`);
+        jobLogger?.info(`Albums to download: ${albumMbidsToDownload.length}`);
+        jobLogger?.info(`Tracks already in library: ${preview.summary.inLibrary}`);
 
         // Calculate tracks that will come from downloads
         const tracksFromDownloads = preview.albumsToDownload
@@ -841,7 +908,7 @@ class SpotifyImportService {
                 job.error = error.message;
                 job.updatedAt = new Date();
                 await saveImportJob(job);
-                logger.logJobFailed(error.message);
+                jobLogger?.logJobFailed(error.message);
             }
         );
 
@@ -850,7 +917,7 @@ class SpotifyImportService {
 
     /**
      * Process the import (download albums, create playlist)
-     * Uses simpleDownloadManager for proper webhook tracking and Lidarr release iteration
+     * Now uses AcquisitionService for unified download handling
      */
     private async processImport(
         job: ImportJob,
@@ -859,13 +926,8 @@ class SpotifyImportService {
     ): Promise<void> {
         const logger = jobLoggers.get(job.id);
 
-        // Import simpleDownloadManager here to avoid circular deps
-        const { simpleDownloadManager } = await import(
-            "./simpleDownloadManager"
-        );
-
         try {
-            // Phase 1: Download albums based on user's download preferences
+            // Phase 1: Download albums using AcquisitionService
             if (albumMbidsToDownload.length > 0) {
                 job.status = "downloading";
                 job.updatedAt = new Date();
@@ -873,67 +935,17 @@ class SpotifyImportService {
 
                 logger?.logAlbumDownloadStart(albumMbidsToDownload.length);
 
-                // Get download preferences from system settings
-                const settings = await getSystemSettings();
-                const downloadSource = settings?.downloadSource || "soulseek";
-                const soulseekFallback = settings?.soulseekFallback || "none";
-
-                console.log(
-                    `[Spotify Import] Download source: ${downloadSource}, Soulseek fallback: ${soulseekFallback}`
+                logger?.debug(
+                    `[Spotify Import] Processing ${albumMbidsToDownload.length} albums via AcquisitionService`
                 );
                 logger?.info(
-                    `Download source: ${downloadSource}${
-                        downloadSource === "soulseek"
-                            ? `, fallback: ${soulseekFallback}`
-                            : ""
-                    }`
+                    `Processing ${albumMbidsToDownload.length} albums via AcquisitionService`
                 );
-
-                // Check service availability based on download source
-                const lidarrEnabled = await lidarrService.isEnabled();
-                const soulseekAvailable = await soulseekService.isAvailable();
-
-                logger?.info(
-                    `Service availability: lidarr=${
-                        lidarrEnabled ? "yes" : "no"
-                    }, soulseek=${soulseekAvailable ? "yes" : "no"}`
-                );
-                if (settings?.musicPath) {
-                    logger?.info(`System musicPath: ${settings.musicPath}`);
-                }
-
-                if (downloadSource === "lidarr" && !lidarrEnabled) {
-                    throw new Error(
-                        "Lidarr is not configured. Cannot download missing albums."
-                    );
-                }
-                if (downloadSource === "soulseek" && !soulseekAvailable) {
-                    if (soulseekFallback === "lidarr" && lidarrEnabled) {
-                        console.log(
-                            `[Spotify Import] Soulseek not available, using Lidarr as fallback`
-                        );
-                        logger?.info(
-                            `Soulseek not available, using Lidarr for downloads`
-                        );
-                    } else {
-                        throw new Error(
-                            "Soulseek is not available. Cannot download missing tracks."
-                        );
-                    }
-                }
 
                 // Process albums in parallel with concurrency limit
-                const albumConcurrency = downloadSource === "soulseek" ? 4 : 2;
                 const albumQueue = new PQueue({
-                    concurrency: albumConcurrency,
+                    concurrency: 4,
                 });
-
-                console.log(
-                    `[Spotify Import] Processing ${albumMbidsToDownload.length} albums with concurrency ${albumConcurrency}`
-                );
-                logger?.info(
-                    `Processing ${albumMbidsToDownload.length} albums in parallel (concurrency: ${albumConcurrency})`
-                );
 
                 const albumPromises = albumMbidsToDownload.map(
                     (albumIdentifier) =>
@@ -947,10 +959,6 @@ class SpotifyImportService {
                             if (!album) return;
 
                             try {
-                                // Create a DownloadJob record for tracking
-                                const downloadJobId = `spotify_${job.id}_${albumIdentifier}`;
-
-                                // For Unknown Album tracks, we only support Soulseek (track-based download)
                                 const isUnknownAlbum =
                                     album.albumName === "Unknown Album" ||
                                     !album.albumMbid;
@@ -964,284 +972,106 @@ class SpotifyImportService {
                                             : " [Unknown Album]"
                                     } (tracksNeeded=${
                                         album.tracksNeeded.length
-                                    }, downloadJobId=${downloadJobId})`
+                                    })`
                                 );
 
-                                // Check if job already exists (in case of retry)
-                                const existingJob =
-                                    await prisma.downloadJob.findUnique({
-                                        where: { id: downloadJobId },
-                                    });
-
-                                if (!existingJob) {
-                                    await prisma.downloadJob.create({
-                                        data: {
-                                            id: downloadJobId,
-                                            userId: job.userId,
-                                            subject: `${album.artistName} - ${album.albumName}`,
-                                            type: "album",
-                                            targetMbid: album.albumMbid || null,
-                                            status: "pending",
-                                            artistMbid: album.artistMbid,
-                                            metadata: {
-                                                spotifyImportJobId: job.id,
-                                                albumName: album.albumName,
-                                                artistName: album.artistName,
-                                                albumTitle: album.albumName,
-                                                downloadType: "spotify_import",
-                                                downloadSource: downloadSource,
-                                                noFallback: true,
-                                                isUnknownAlbum,
-                                                spotifyAlbumId:
-                                                    album.spotifyAlbumId,
-                                            },
-                                        },
-                                    });
-                                }
-
-                                console.log(
+                                logger?.debug(
                                     `[Spotify Import] Requesting: ${album.artistName} - ${album.albumName}`
                                 );
-                                logger?.info(
-                                    `Requesting: ${album.artistName} - ${
-                                        album.albumName
-                                    }${
-                                        album.albumMbid
-                                            ? ` [MBID: ${album.albumMbid}]`
-                                            : " [Unknown Album]"
-                                    }`
-                                );
 
-                                let downloadSuccess = false;
+                                // Validate userId before creating acquisition context
+                                if (!job.userId || typeof job.userId !== 'string' || job.userId === 'NaN' || job.userId === 'undefined' || job.userId === 'null') {
+                                    logger?.error(
+                                        `[Spotify Import] Invalid userId in job: ${JSON.stringify({
+                                            jobId: job.id,
+                                            userId: job.userId,
+                                            typeofUserId: typeof job.userId
+                                        })}`
+                                    );
+                                    throw new Error(`Invalid userId in import job: ${job.userId}`);
+                                }
 
-                                // For Unknown Album, force Soulseek (track-based download)
+                                // Acquisition context for tracking
+                                const context = {
+                                    userId: job.userId,
+                                    spotifyImportJobId: job.id,
+                                };
+
+                                let result;
+
                                 if (isUnknownAlbum) {
-                                    console.log(
-                                        `[Spotify Import] Unknown Album detected - using Soulseek track-based download`
+                                    // Unknown Album: Use track-based acquisition
+                                    logger?.debug(
+                                        `[Spotify Import] Unknown Album detected - using track acquisition`
                                     );
 
-                                    if (!soulseekAvailable) {
-                                        throw new Error(
-                                            "Soulseek is required for Unknown Album tracks but is not available"
-                                        );
-                                    }
+                                    const trackRequests =
+                                        album.tracksNeeded.map((track) => ({
+                                            trackTitle: track.title,
+                                            artistName: track.artist,
+                                            albumTitle: album.albumName,
+                                        }));
 
-                                    const soulseekResult =
-                                        await this.trySoulseekDownload(
-                                            job,
-                                            album,
-                                            downloadJobId,
-                                            logger
+                                    const trackResults =
+                                        await acquisitionService.acquireTracks(
+                                            trackRequests,
+                                            context
                                         );
 
-                                    if (soulseekResult.success) {
-                                        downloadSuccess = true;
-                                        console.log(
-                                            `[Spotify Import] ✓ Soulseek completed: ${album.tracksNeeded
-                                                .map((t) => t.title)
-                                                .join(", ")}`
-                                        );
-                                        logger?.info(
-                                            `Unknown Album tracks success via Soulseek: ${
-                                                album.artistName
-                                            } - ${
-                                                album.tracksNeeded.length
-                                            } tracks (${
-                                                soulseekResult.tracksFound ?? 0
-                                            } downloaded)`
-                                        );
-                                    } else {
-                                        console.log(
-                                            `[Spotify Import] ✗ Failed to download Unknown Album tracks: ${soulseekResult.error}`
-                                        );
-                                    }
-                                } else if (downloadSource === "soulseek") {
-                                    // === SOULSEEK PRIMARY: Per-track downloads ===
-                                    console.log(
-                                        `[Spotify Import] Using Soulseek for per-track download`
+                                    // Check if at least 50% succeeded
+                                    const successCount = trackResults.filter(
+                                        (r) => r.success
+                                    ).length;
+                                    const successThreshold = Math.ceil(
+                                        trackRequests.length * 0.5
                                     );
 
-                                    const soulseekResult =
-                                        await this.trySoulseekDownload(
-                                            job,
-                                            album,
-                                            downloadJobId,
-                                            logger
-                                        );
+                                    result = {
+                                        success:
+                                            successCount >= successThreshold,
+                                        tracksDownloaded: successCount,
+                                        tracksTotal: trackRequests.length,
+                                    };
 
-                                    if (soulseekResult.success) {
-                                        downloadSuccess = true;
-                                        console.log(
-                                            `[Spotify Import] ✓ Soulseek queued: ${album.albumName}`
-                                        );
+                                    if (result.success) {
                                         logger?.info(
-                                            `Album success via Soulseek: ${
-                                                album.artistName
-                                            } - ${
-                                                album.albumName
-                                            } (tracksDownloaded=${
-                                                soulseekResult.tracksFound ?? 0
-                                            }/${album.tracksNeeded.length})`
+                                            `Unknown Album tracks success: ${album.artistName} - ${successCount}/${trackRequests.length} tracks`
                                         );
-                                    } else if (
-                                        soulseekFallback === "lidarr" &&
-                                        lidarrEnabled
-                                    ) {
-                                        // Soulseek failed, try Lidarr as fallback for full album
-                                        console.log(
-                                            `[Spotify Import] Soulseek failed, trying Lidarr for full album: ${album.albumName}`
-                                        );
-                                        logger?.info(
-                                            `Soulseek failed, falling back to Lidarr for full album`
-                                        );
-
-                                        const lidarrResult =
-                                            await simpleDownloadManager.startDownload(
-                                                downloadJobId,
-                                                album.artistName,
-                                                album.albumName,
-                                                album.albumMbid!,
-                                                job.userId,
-                                                false
-                                            );
-
-                                        if (lidarrResult.success) {
-                                            downloadSuccess = true;
-                                            console.log(
-                                                `[Spotify Import] ✓ Lidarr fallback queued: ${album.albumName}`
-                                            );
-                                            logger?.logAlbumQueued(
-                                                album.albumName,
-                                                album.artistName,
-                                                album.albumMbid!,
-                                                0
-                                            );
-                                        } else {
-                                            logger?.warn(
-                                                `Lidarr fallback failed to queue: ${
-                                                    album.artistName
-                                                } - ${album.albumName} (${
-                                                    lidarrResult.error ||
-                                                    "unknown error"
-                                                })`
-                                            );
-                                        }
-                                    }
-
-                                    if (!downloadSuccess) {
-                                        const errorMsg =
-                                            soulseekResult.error ||
-                                            "No download sources available";
-                                        console.log(
-                                            `[Spotify Import] ✗ Failed: ${album.albumName} - ${errorMsg}`
-                                        );
-                                        logger?.logAlbumFailed(
-                                            album.albumName,
-                                            album.artistName,
-                                            errorMsg
-                                        );
-
-                                        // Update download job to failed status
-                                        await prisma.downloadJob
-                                            .update({
-                                                where: { id: downloadJobId },
-                                                data: {
-                                                    status: "failed",
-                                                    error: errorMsg,
-                                                    completedAt: new Date(),
-                                                },
-                                            })
-                                            .catch(() => {});
                                     }
                                 } else {
-                                    // === LIDARR PRIMARY: Full album downloads ===
-                                    const result =
-                                        await simpleDownloadManager.startDownload(
-                                            downloadJobId,
-                                            album.artistName,
-                                            album.albumName,
-                                            album.albumMbid!,
-                                            job.userId,
-                                            false
+                                    // Regular album: Use album-based acquisition
+                                    result =
+                                        await acquisitionService.acquireAlbum(
+                                            {
+                                                albumTitle: album.albumName,
+                                                artistName: album.artistName,
+                                                mbid: album.albumMbid!,
+                                                requestedTracks: album.tracksNeeded.map(t => ({
+                                                    title: t.title
+                                                })),
+                                            },
+                                            context
                                         );
 
                                     if (result.success) {
-                                        downloadSuccess = true;
-                                        console.log(
-                                            `[Spotify Import] ✓ Queued: ${album.albumName}`
+                                        logger?.info(
+                                            `Album acquisition success: ${album.artistName} - ${album.albumName} via ${result.source}`
                                         );
-                                        logger?.logAlbumQueued(
-                                            album.albumName,
-                                            album.artistName,
-                                            album.albumMbid!,
-                                            0
-                                        );
-                                    } else if (soulseekAvailable) {
-                                        logger?.warn(
-                                            `Lidarr failed to queue/find album, trying Soulseek fallback: ${
-                                                album.artistName
-                                            } - ${album.albumName} (${
-                                                result.error || "unknown error"
-                                            })`
-                                        );
-                                        // Lidarr failed - try Soulseek as fallback
-                                        const soulseekFallbackResult =
-                                            await this.trySoulseekDownload(
-                                                job,
-                                                album,
-                                                downloadJobId,
-                                                logger
-                                            );
-
-                                        if (soulseekFallbackResult.success) {
-                                            downloadSuccess = true;
-                                            logger?.info(
-                                                `Album success via Soulseek fallback: ${
-                                                    album.artistName
-                                                } - ${
-                                                    album.albumName
-                                                } (tracksDownloaded=${
-                                                    soulseekFallbackResult.tracksFound ??
-                                                    0
-                                                }/${album.tracksNeeded.length})`
-                                            );
-                                        } else {
-                                            logger?.warn(
-                                                `Soulseek fallback failed: ${
-                                                    album.artistName
-                                                } - ${album.albumName} (${
-                                                    soulseekFallbackResult.error ||
-                                                    "no results"
-                                                })`
-                                            );
-                                        }
                                     }
+                                }
 
-                                    if (!downloadSuccess) {
-                                        const errorMsg =
-                                            result.error ||
-                                            "No download sources available";
-                                        console.log(
-                                            `[Spotify Import] ✗ Failed: ${album.albumName} - ${errorMsg}`
-                                        );
-                                        logger?.logAlbumFailed(
-                                            album.albumName,
-                                            album.artistName,
-                                            errorMsg
-                                        );
-
-                                        // Update download job to failed status
-                                        await prisma.downloadJob
-                                            .update({
-                                                where: { id: downloadJobId },
-                                                data: {
-                                                    status: "failed",
-                                                    error: errorMsg,
-                                                    completedAt: new Date(),
-                                                },
-                                            })
-                                            .catch(() => {});
-                                    }
+                                if (!result.success) {
+                                    const errorMsg =
+                                        result.error ||
+                                        "No download sources available";
+                                    logger?.debug(
+                                        `[Spotify Import] ✗ Failed: ${album.albumName} - ${errorMsg}`
+                                    );
+                                    logger?.logAlbumFailed(
+                                        album.albumName,
+                                        album.artistName,
+                                        errorMsg
+                                    );
                                 }
 
                                 job.albumsCompleted++;
@@ -1254,56 +1084,39 @@ class SpotifyImportService {
                                 logger?.debug(
                                     `Album done: ${album.artistName} - ${
                                         album.albumName
-                                    } (queuedOrDownloaded=${
-                                        downloadSuccess ? "yes" : "no"
+                                    } (success=${
+                                        result.success ? "yes" : "no"
                                     })`
                                 );
                             } catch (error: any) {
-                                console.error(
-                                    `[Spotify Import] Failed: ${album.artistName} - ${album.albumName}:`,
-                                    error.message
+                                logger?.error(
+                                    `[Spotify Import] Failed: ${album.artistName} - ${album.albumName}: ${error.message}`
                                 );
                                 logger?.logAlbumFailed(
                                     album.albumName,
                                     album.artistName,
                                     error.message
                                 );
-
-                                const downloadJobId = `spotify_${job.id}_${albumMbid}`;
-                                await prisma.downloadJob
-                                    .update({
-                                        where: { id: downloadJobId },
-                                        data: {
-                                            status: "failed",
-                                            error: error.message,
-                                            completedAt: new Date(),
-                                        },
-                                    })
-                                    .catch(() => {});
                             }
                         })
                 );
 
-                // Wait for all album downloads to complete
+                // Wait for all album acquisitions to complete
                 await Promise.all(albumPromises);
 
                 logger?.info(
-                    `Initial queueing phase finished for ${albumMbidsToDownload.length} album(s). Checking completion state...`
+                    `Initial acquisition phase finished for ${albumMbidsToDownload.length} album(s). Checking completion state...`
                 );
 
-                // Check if we can complete immediately (all failed to queue)
+                // Check if we can complete immediately
                 await this.checkImportCompletion(job.id);
 
-                // If still downloading, wait for webhooks/organization
+                // If still downloading, wait for completion
                 if (job.status === "downloading") {
-                    const waitingFor =
-                        downloadSource === "soulseek" ? "Soulseek" : "Lidarr";
-                    console.log(
-                        `[Spotify Import] Job ${job.id}: Waiting for ${waitingFor} downloads...`
+                    logger?.debug(
+                        `[Spotify Import] Job ${job.id}: Waiting for downloads to complete...`
                     );
-                    logger?.info(
-                        `Waiting for ${waitingFor} downloads to complete...`
-                    );
+                    logger?.info(`Waiting for downloads to complete...`);
                 }
                 return;
             }
@@ -1320,157 +1133,30 @@ class SpotifyImportService {
     }
 
     /**
-     * Try Soulseek for downloading tracks
-     * Uses TRACK-based searching (more effective on Soulseek than album search)
-     * Downloads directly to Singles/Artist/Album/ using slsk-client
-     */
-    private async trySoulseekDownload(
-        job: ImportJob,
-        album: AlbumToDownload,
-        downloadJobId: string,
-        logger: ReturnType<typeof createPlaylistLogger> | undefined
-    ): Promise<{ success: boolean; error?: string; tracksFound?: number }> {
-        // Check if Soulseek is available
-        const soulseekAvailable = await soulseekService.isAvailable();
-        if (!soulseekAvailable) {
-            console.log(
-                `[Spotify Import] Soulseek not available, skipping fallback`
-            );
-            return { success: false, error: "Soulseek not configured" };
-        }
-
-        console.log(
-            `[Spotify Import] Trying Soulseek for: ${album.artistName} - ${album.albumName}`
-        );
-        console.log(
-            `[Spotify Import] Searching for ${album.tracksNeeded.length} individual track(s)`
-        );
-        logger?.logSlskdFallbackStart(album.albumName, album.artistName);
-
-        // Get music path for direct download
-        const settings = await getSystemSettings();
-        const musicPath = settings?.musicPath;
-        if (!musicPath) {
-            return { success: false, error: "Music path not configured" };
-        }
-
-        try {
-            // Prepare track list for batch download - normalize titles for better search results
-            const tracks = album.tracksNeeded.map((track) => ({
-                artist: track.artist,
-                title: stripTrackSuffix(track.title), // Remove live/remaster suffixes
-                album: album.albumName,
-            }));
-
-            // Log individual track searches for debugging
-            console.log(
-                `[Spotify Import] Soulseek: Searching for ${tracks.length} track(s):`
-            );
-            album.tracksNeeded.forEach((t, i) => {
-                const normalized = stripTrackSuffix(t.title);
-                if (normalized !== t.title) {
-                    console.log(
-                        `   ${i + 1}. "${t.artist}" - "${
-                            t.title
-                        }" → "${normalized}"`
-                    );
-                } else {
-                    console.log(`   ${i + 1}. "${t.artist}" - "${t.title}"`);
-                }
-            });
-
-            // Use parallel batch download (4 concurrent by default)
-            const result = await soulseekService.searchAndDownloadBatch(
-                tracks,
-                musicPath,
-                4 // concurrency
-            );
-
-            if (result.successful === 0) {
-                console.log(`[Spotify Import] Soulseek: No tracks downloaded`);
-                logger?.logSlskdSearchResult(false);
-                return { success: false, error: "No tracks found on Soulseek" };
-            }
-
-            // Calculate total size of downloaded files
-            const fs = await import("fs");
-            const totalSizeMB = result.files.reduce((sum, file) => {
-                try {
-                    const stats = fs.statSync(file);
-                    return sum + stats.size / 1024 / 1024;
-                } catch {
-                    return sum;
-                }
-            }, 0);
-
-            console.log(
-                `[Spotify Import] ✓ Soulseek: Downloaded ${result.successful}/${
-                    album.tracksNeeded.length
-                } tracks (${Math.round(totalSizeMB)}MB)`
-            );
-            logger?.logSlskdSearchResult(
-                true,
-                "Mixed",
-                "direct",
-                result.successful,
-                Math.round(totalSizeMB)
-            );
-            logger?.logSlskdDownloadQueued(result.successful, "direct");
-
-            // Mark download job as completed immediately - files are already in place!
-            await prisma.downloadJob
-                .update({
-                    where: { id: downloadJobId },
-                    data: {
-                        status: "completed",
-                        completedAt: new Date(),
-                        error: null,
-                        metadata: {
-                            spotifyImportJobId: job.id,
-                            artistName: album.artistName,
-                            albumTitle: album.albumName,
-                            downloadType: "spotify_import",
-                            source: "soulseek_direct",
-                            tracksDownloaded: result.successful,
-                            totalNeeded: album.tracksNeeded.length,
-                            files: result.files,
-                        },
-                    },
-                })
-                .catch(() => {});
-
-            return { success: true, tracksFound: result.successful };
-        } catch (error: any) {
-            console.error(`[Spotify Import] Soulseek error:`, error.message);
-            logger?.logAlbumFailed(
-                album.albumName,
-                album.artistName,
-                `Soulseek error: ${error.message}`
-            );
-            return { success: false, error: error.message };
-        }
-    }
-
-    /**
      * Check if all downloads for this import are complete (called by webhook handler)
      */
     async checkImportCompletion(importJobId: string): Promise<void> {
-        console.log(
+        logger?.debug(
             `\n[Spotify Import] Checking completion for job ${importJobId}...`
         );
 
         const job = await getImportJob(importJobId);
         if (!job) {
-            console.log(`   Job not found`);
+            logger?.debug(`   Job not found`);
             return;
         }
 
-        const logger = jobLoggers.get(importJobId);
+        const jobLogger = jobLoggers.get(importJobId);
 
         // Check download jobs for this import
+        // NOTE: Jobs are created with auto-generated CUIDs, not prefixed IDs
+        // The spotifyImportJobId is stored in metadata.spotifyImportJobId
         const downloadJobs = await prisma.downloadJob.findMany({
             where: {
-                id: { startsWith: `spotify_${importJobId}_` },
+                metadata: {
+                    path: ['spotifyImportJobId'],
+                    equals: importJobId,
+                },
             },
         });
 
@@ -1484,8 +1170,8 @@ class SpotifyImportService {
         if (total === 0 && job.albumsTotal > 0) {
             const message =
                 "No download jobs were created for this import. This usually means the import preview did not include the selected albums.";
-            console.log(`   ${message}`);
-            logger?.warn(message);
+            logger?.debug(`   ${message}`);
+            jobLogger?.warn(message);
 
             job.status = "failed";
             job.error = message;
@@ -1494,10 +1180,10 @@ class SpotifyImportService {
             return;
         }
 
-        console.log(
+        logger?.debug(
             `   Download status: ${completed}/${total} completed, ${failed} failed, ${pending} pending`
         );
-        logger?.logDownloadProgress(completed, failed, pending);
+        jobLogger?.logDownloadProgress(completed, failed, pending);
 
         // Update progress
         job.progress =
@@ -1524,25 +1210,28 @@ class SpotifyImportService {
             // After 10 minutes of waiting, proceed anyway to avoid stuck jobs
             if (waitTimeMs < 600000) {
                 // 10 minutes
-                console.log(
+                logger?.debug(
                     `   Still waiting for ${pending} downloads... (${waitTimeMins} min elapsed)`
                 );
-                logger?.info(`Waiting for Soulseek downloads to complete...`);
+                jobLogger?.info(`Waiting for Soulseek downloads to complete...`);
                 await saveImportJob(job);
                 return;
             }
 
-            console.log(
+            logger?.debug(
                 `   Timeout: ${pending} downloads still pending after ${waitTimeMins} minutes, proceeding anyway`
             );
-            logger?.warn(
+            jobLogger?.warn(
                 `Download timeout: ${pending} pending after ${waitTimeMins}m, proceeding with available tracks`
             );
 
             // Mark stale pending jobs as failed
             await prisma.downloadJob.updateMany({
                 where: {
-                    id: { startsWith: `spotify_${importJobId}_` },
+                    metadata: {
+                        path: ['spotifyImportJobId'],
+                        equals: importJobId,
+                    },
                     status: { in: ["pending", "processing"] },
                 },
                 data: {
@@ -1554,8 +1243,8 @@ class SpotifyImportService {
         }
 
         // All downloads finished (completed or failed)
-        console.log(`   All downloads finished! Triggering library scan...`);
-        logger?.info(
+        logger?.debug(`   All downloads finished! Triggering library scan...`);
+        jobLogger?.info(
             `All ${total} download jobs finished (${completed} completed, ${failed} failed)`
         );
 
@@ -1567,7 +1256,7 @@ class SpotifyImportService {
             spotifyImportJobId: importJobId,
         });
 
-        logger?.info(
+        jobLogger?.info(
             `Queued library scan (bullJobId=${scanJob.id ?? "unknown"})`
         );
 
@@ -1581,13 +1270,13 @@ class SpotifyImportService {
      * Build playlist after library scan completes (called by scan worker)
      */
     async buildPlaylistAfterScan(importJobId: string): Promise<void> {
-        console.log(
+        logger?.debug(
             `\n[Spotify Import] Building playlist for job ${importJobId}...`
         );
 
         const job = await getImportJob(importJobId);
         if (!job) {
-            console.log(`   Job not found`);
+            logger?.debug(`   Job not found`);
             return;
         }
 
@@ -1625,7 +1314,7 @@ class SpotifyImportService {
                 });
                 if (existingTrack) {
                     matchedTrackIds.push(existingTrack.id);
-                    console.log(
+                    logger?.debug(
                         `   ✓ Pre-matched: "${pendingTrack.title}" -> track ${existingTrack.id}`
                     );
                     logger?.logTrackMatch(
@@ -1802,7 +1491,7 @@ class SpotifyImportService {
 
                     if (score >= 70) {
                         localTrack = candidate;
-                        console.log(
+                        logger?.debug(
                             `      (preview-style match: ${score.toFixed(0)}%)`
                         );
                         break;
@@ -1899,7 +1588,7 @@ class SpotifyImportService {
 
                     if (bestMatch) {
                         localTrack = bestMatch;
-                        console.log(
+                        logger?.debug(
                             `      (fuzzy match: score ${bestScore.toFixed(
                                 0
                             )}% with "${bestMatch.title}" by ${
@@ -1960,7 +1649,7 @@ class SpotifyImportService {
                             bestTitleMatch.album.artist.name
                         }`
                     );
-                    console.log(
+                    logger?.debug(
                         `      (title-only match: ${bestTitleScore.toFixed(
                             0
                         )}% - note: artist metadata mismatch, wanted "${
@@ -1972,7 +1661,7 @@ class SpotifyImportService {
 
             if (localTrack) {
                 matchedTrackIds.push(localTrack.id);
-                console.log(
+                logger?.debug(
                     `   ✓ Matched: "${pendingTrack.title}" -> track ${localTrack.id}`
                 );
                 logger?.logTrackMatch(
@@ -1995,11 +1684,11 @@ class SpotifyImportService {
                     select: { name: true, normalizedName: true },
                 });
                 if (artistExists) {
-                    console.log(
+                    logger?.debug(
                         `   ✗ No match: "${pendingTrack.title}" by ${pendingTrack.artist} (artist "${artistExists.name}" exists but track not found)`
                     );
                 } else {
-                    console.log(
+                    logger?.debug(
                         `   ✗ No match: "${pendingTrack.title}" by ${pendingTrack.artist} (artist not in library)`
                     );
                 }
@@ -2016,7 +1705,7 @@ class SpotifyImportService {
         const uniqueTrackIds = Array.from(new Set(matchedTrackIds));
         if (uniqueTrackIds.length < matchedTrackIds.length) {
             const removed = matchedTrackIds.length - uniqueTrackIds.length;
-            console.log(
+            logger?.debug(
                 `   Removed ${removed} duplicate track references before playlist creation`
             );
             logger?.info(
@@ -2024,7 +1713,7 @@ class SpotifyImportService {
             );
         }
 
-        console.log(
+        logger?.debug(
             `   Matched ${uniqueTrackIds.length}/${job.tracksTotal} tracks`
         );
         logger?.info(
@@ -2102,10 +1791,10 @@ class SpotifyImportService {
             });
 
         if (pendingTracksToSave.length > 0) {
-            console.log(
+            logger?.debug(
                 `   Saving ${pendingTracksToSave.length} pending tracks for future auto-matching`
             );
-            console.log(
+            logger?.debug(
                 `   Fetching Deezer preview URLs for pending tracks...`
             );
             logger?.info(
@@ -2134,7 +1823,7 @@ class SpotifyImportService {
             const previewsFound = pendingTracksWithPreviews.filter(
                 (t) => t.deezerPreviewUrl
             ).length;
-            console.log(
+            logger?.debug(
                 `   Found ${previewsFound}/${pendingTracksToSave.length} Deezer preview URLs`
             );
             logger?.info(
@@ -2161,9 +1850,9 @@ class SpotifyImportService {
         job.updatedAt = new Date();
         await saveImportJob(job);
 
-        console.log(`[Spotify Import] Job ${job.id} completed:`);
-        console.log(`   Playlist created: ${playlist.id}`);
-        console.log(
+        logger?.debug(`[Spotify Import] Job ${job.id} completed:`);
+        logger?.debug(`   Playlist created: ${playlist.id}`);
+        logger?.debug(
             `   Tracks matched: ${matchedTrackIds.length}/${job.tracksTotal}`
         );
 
@@ -2188,7 +1877,7 @@ class SpotifyImportService {
                 job.tracksTotal
             );
         } catch (notifError) {
-            console.error("Failed to send import notification:", notifError);
+            logger?.error(`Failed to send import notification: ${notifError}`);
         }
     }
 
@@ -2247,7 +1936,7 @@ class SpotifyImportService {
                     data: {
                         playlistId: job.createdPlaylistId,
                         trackId: localTrack.id,
-                        position: nextPosition++,
+                        sort: nextPosition++,
                     },
                 });
                 existingTrackIds.add(localTrack.id);
@@ -2258,7 +1947,7 @@ class SpotifyImportService {
         job.tracksMatched += added;
         job.updatedAt = new Date();
 
-        console.log(
+        logger?.debug(
             `[Spotify Import] Refresh job ${jobId}: added ${added} newly downloaded tracks`
         );
         logger?.info(
@@ -2322,7 +2011,7 @@ class SpotifyImportService {
         }
 
         const logger = jobLoggers.get(jobId);
-        console.log(`[Spotify Import] Cancelling job ${jobId}...`);
+        logger?.debug(`[Spotify Import] Cancelling job ${jobId}...`);
         logger?.info(`Job cancelled by user`);
 
         // If already completed, cancelled, or failed, nothing to do
@@ -2341,7 +2030,10 @@ class SpotifyImportService {
         // Mark any pending download jobs as cancelled
         await prisma.downloadJob.updateMany({
             where: {
-                id: { startsWith: `spotify_${jobId}_` },
+                metadata: {
+                    path: ['spotifyImportJobId'],
+                    equals: jobId,
+                },
                 status: { in: ["pending", "processing"] },
             },
             data: {
@@ -2372,7 +2064,7 @@ class SpotifyImportService {
         playlistsUpdated: number;
         tracksAdded: number;
     }> {
-        console.log(
+        logger?.debug(
             `\n[Spotify Import] Reconciling pending tracks across all playlists...`
         );
 
@@ -2391,11 +2083,11 @@ class SpotifyImportService {
         });
 
         if (allPendingTracks.length === 0) {
-            console.log(`   No pending tracks to reconcile`);
+            logger?.debug(`   No pending tracks to reconcile`);
             return { playlistsUpdated: 0, tracksAdded: 0 };
         }
 
-        console.log(
+        logger?.debug(
             `   Found ${allPendingTracks.length} pending tracks across playlists`
         );
 
@@ -2438,10 +2130,10 @@ class SpotifyImportService {
                 );
                 const cleanedTitle = normalizeTrackTitle(strippedTitle);
 
-                console.log(
+                logger?.debug(
                     `   Trying to match: "${pendingTrack.spotifyTitle}" by ${pendingTrack.spotifyArtist}`
                 );
-                console.log(
+                logger?.debug(
                     `      strippedTitle: "${strippedTitle}", artistFirstWord: "${artistFirstWord}"`
                 );
 
@@ -2473,18 +2165,18 @@ class SpotifyImportService {
                     take: 5,
                 });
                 if (artistTracks.length > 0) {
-                    console.log(
+                    logger?.debug(
                         `      DEBUG: Found ${artistTracks.length}+ tracks for artist containing "${artistFirstWord}"`
                     );
                     artistTracks
                         .slice(0, 3)
                         .forEach((t) =>
-                            console.log(
+                            logger?.debug(
                                 `         - "${t.title}" (artist: ${t.album.artist.name}, normalized: ${t.album.artist.normalizedName})`
                             )
                         );
                 } else {
-                    console.log(
+                    logger?.debug(
                         `      DEBUG: NO tracks found for artist containing "${artistFirstWord}"`
                     );
                 }
@@ -2506,7 +2198,7 @@ class SpotifyImportService {
                     select: { id: true, title: true },
                 });
 
-                console.log(
+                logger?.debug(
                     `      Strategy 1 result: ${
                         localTrack ? "FOUND" : "not found"
                     }`
@@ -2518,7 +2210,7 @@ class SpotifyImportService {
                         .split(" ")
                         .slice(0, 4)
                         .join(" ");
-                    console.log(
+                    logger?.debug(
                         `      Strategy 2: Contains search for "${searchTerm}"`
                     );
                     const candidates = await prisma.track.findMany({
@@ -2540,7 +2232,7 @@ class SpotifyImportService {
                         take: 10,
                     });
 
-                    console.log(
+                    logger?.debug(
                         `      Strategy 2: Found ${candidates.length} candidates`
                     );
                     for (const candidate of candidates) {
@@ -2551,7 +2243,7 @@ class SpotifyImportService {
                             cleanedTitle,
                             candidateNormalized
                         );
-                        console.log(
+                        logger?.debug(
                             `         "${candidate.title}" by ${
                                 candidate.album.artist.name
                             }: ${sim.toFixed(0)}%`
@@ -2573,7 +2265,7 @@ class SpotifyImportService {
                             libraryNorm.startsWith(spotifyNorm) ||
                             spotifyNorm.startsWith(libraryNorm)
                         ) {
-                            console.log(
+                            logger?.debug(
                                 `         Found via containment: "${cleanedTitle}" starts "${candidateNormalized}"`
                             );
                             localTrack = {
@@ -2586,12 +2278,12 @@ class SpotifyImportService {
                 }
 
                 if (!localTrack)
-                    console.log(`      Strategy 2 result: not found`);
+                    logger?.debug(`      Strategy 2 result: not found`);
 
                 // Strategy 3: Fuzzy match on title + artist similarity
                 if (!localTrack) {
                     const firstWord = strippedTitle.split(" ")[0];
-                    console.log(
+                    logger?.debug(
                         `      Strategy 3: Fuzzy search for title containing "${firstWord}" and artist containing "${artistFirstWord}"`
                     );
                     const candidates = await prisma.track.findMany({
@@ -2610,7 +2302,7 @@ class SpotifyImportService {
                         take: 20,
                     });
 
-                    console.log(
+                    logger?.debug(
                         `      Strategy 3: Found ${candidates.length} candidates`
                     );
                     for (const candidate of candidates) {
@@ -2624,7 +2316,7 @@ class SpotifyImportService {
                         );
                         const combinedScore =
                             titleScore * 0.6 + artistScore * 0.4;
-                        console.log(
+                        logger?.debug(
                             `         "${candidate.title}" by ${
                                 candidate.album.artist.name
                             }: title=${titleScore.toFixed(
@@ -2659,7 +2351,7 @@ class SpotifyImportService {
                     totalTracksAdded++;
                     playlistsWithAdditions.add(playlistId);
 
-                    console.log(
+                    logger?.debug(
                         `   ✓ Matched: "${pendingTrack.spotifyTitle}" by ${pendingTrack.spotifyArtist}`
                     );
                 }
@@ -2710,7 +2402,7 @@ class SpotifyImportService {
             }
         }
 
-        console.log(
+        logger?.debug(
             `   Reconciliation complete: ${totalTracksAdded} tracks added to ${playlistsWithAdditions.size} playlists`
         );
 

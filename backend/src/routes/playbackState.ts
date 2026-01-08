@@ -1,5 +1,6 @@
 import express from "express";
-import { prisma } from "../utils/db";
+import { logger } from "../utils/logger";
+import { prisma, Prisma } from "../utils/db";
 import { requireAuth } from "../middleware/auth";
 
 const router = express.Router();
@@ -19,7 +20,7 @@ router.get("/", requireAuth, async (req, res) => {
 
         res.json(playbackState);
     } catch (error) {
-        console.error("Get playback state error:", error);
+        logger.error("Get playback state error:", error);
         res.status(500).json({ error: "Failed to get playback state" });
     }
 });
@@ -46,7 +47,7 @@ router.post("/", requireAuth, async (req, res) => {
         // Validate playback type
         const validPlaybackTypes = ["track", "audiobook", "podcast"];
         if (!validPlaybackTypes.includes(playbackType)) {
-            console.warn(`[PlaybackState] Invalid playbackType: ${playbackType}`);
+            logger.warn(`[PlaybackState] Invalid playbackType: ${playbackType}`);
             return res.status(400).json({ error: "Invalid playbackType" });
         }
 
@@ -79,7 +80,7 @@ router.post("/", requireAuth, async (req, res) => {
                     safeQueue = null;
                 }
             } catch (sanitizeError: any) {
-                console.error("[PlaybackState] Queue sanitization failed:", sanitizeError?.message);
+                logger.error("[PlaybackState] Queue sanitization failed:", sanitizeError?.message);
                 safeQueue = null; // Fall back to null queue
             }
         }
@@ -96,7 +97,7 @@ router.post("/", requireAuth, async (req, res) => {
                 trackId: trackId || null,
                 audiobookId: audiobookId || null,
                 podcastId: podcastId || null,
-                queue: safeQueue,
+                queue: safeQueue === null ? Prisma.DbNull : safeQueue,
                 currentIndex: safeCurrentIndex,
                 isShuffle: isShuffle || false,
             },
@@ -106,7 +107,7 @@ router.post("/", requireAuth, async (req, res) => {
                 trackId: trackId || null,
                 audiobookId: audiobookId || null,
                 podcastId: podcastId || null,
-                queue: safeQueue,
+                queue: safeQueue === null ? Prisma.DbNull : safeQueue,
                 currentIndex: safeCurrentIndex,
                 isShuffle: isShuffle || false,
             },
@@ -114,13 +115,13 @@ router.post("/", requireAuth, async (req, res) => {
 
         res.json(playbackState);
     } catch (error: any) {
-        console.error("[PlaybackState] Error saving state:", error?.message || error);
-        console.error("[PlaybackState] Full error:", JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+        logger.error("[PlaybackState] Error saving state:", error?.message || error);
+        logger.error("[PlaybackState] Full error:", JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
         if (error?.code) {
-            console.error("[PlaybackState] Error code:", error.code);
+            logger.error("[PlaybackState] Error code:", error.code);
         }
         if (error?.meta) {
-            console.error("[PlaybackState] Prisma meta:", error.meta);
+            logger.error("[PlaybackState] Prisma meta:", error.meta);
         }
         // Return more specific error for debugging
         res.status(500).json({ 
@@ -141,7 +142,7 @@ router.delete("/", requireAuth, async (req, res) => {
 
         res.json({ success: true });
     } catch (error) {
-        console.error("Delete playback state error:", error);
+        logger.error("Delete playback state error:", error);
         res.status(500).json({ error: "Failed to delete playback state" });
     }
 });

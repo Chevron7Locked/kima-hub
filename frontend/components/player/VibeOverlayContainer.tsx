@@ -1,8 +1,10 @@
 "use client";
 
 import { useAudioState } from "@/lib/audio-state-context";
-import { EnhancedVibeOverlay } from "./VibeOverlayEnhanced";
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
+
+// Lazy load VibeOverlayEnhanced - only loads when vibe mode is active
+const EnhancedVibeOverlay = lazy(() => import("./VibeOverlayEnhanced").then(mod => ({ default: mod.EnhancedVibeOverlay })));
 
 /**
  * Container component that manages the floating EnhancedVibeOverlay.
@@ -31,10 +33,12 @@ export function VibeOverlayContainer() {
     if (!vibeMode || isDismissed || !isVisible) return null;
 
     return (
-        <EnhancedVibeOverlay
-            currentTrackFeatures={currentTrackFeatures}
-            variant="floating"
-            onClose={() => setIsDismissed(true)}
-        />
+        <Suspense fallback={null}>
+            <EnhancedVibeOverlay
+                currentTrackFeatures={currentTrackFeatures}
+                variant="floating"
+                onClose={() => setIsDismissed(true)}
+            />
+        </Suspense>
     );
 }

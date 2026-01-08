@@ -147,7 +147,10 @@ export function PodcastPlayer({
                     false
                 );
             } catch (error) {
-                console.error("Failed to save podcast progress on pause:", error);
+                console.error(
+                    "Failed to save podcast progress on pause:",
+                    error
+                );
             }
         }
     };
@@ -229,9 +232,7 @@ export function PodcastPlayer({
     };
 
     const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
-    const streamUrl = `${
-        process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3006"
-    }/podcasts/${podcastId}/episodes/${episode.id}/stream`;
+    const streamUrl = api.getPodcastEpisodeStreamUrl(podcastId, episode.id);
 
     return (
         <>

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import crypto from "crypto";
@@ -64,7 +65,7 @@ router.post("/generate", requireAuthOrToken, async (req, res) => {
             expiresIn: 300, // 5 minutes in seconds
         });
     } catch (error) {
-        console.error("Generate device link code error:", error);
+        logger.error("Generate device link code error:", error);
         res.status(500).json({ error: "Failed to generate device link code" });
     }
 });
@@ -123,7 +124,7 @@ router.post("/verify", async (req, res) => {
             username: linkCode.user.username,
         });
     } catch (error) {
-        console.error("Verify device link code error:", error);
+        logger.error("Verify device link code error:", error);
         res.status(500).json({ error: "Failed to verify device link code" });
     }
 });
@@ -161,7 +162,7 @@ router.get("/status/:code", async (req, res) => {
             expiresAt: linkCode.expiresAt,
         });
     } catch (error) {
-        console.error("Check device link status error:", error);
+        logger.error("Check device link status error:", error);
         res.status(500).json({ error: "Failed to check status" });
     }
 });
@@ -184,7 +185,7 @@ router.get("/devices", requireAuthOrToken, async (req, res) => {
 
         res.json(apiKeys);
     } catch (error) {
-        console.error("Get devices error:", error);
+        logger.error("Get devices error:", error);
         res.status(500).json({ error: "Failed to get devices" });
     }
 });
@@ -209,7 +210,7 @@ router.delete("/devices/:id", requireAuthOrToken, async (req, res) => {
 
         res.json({ success: true });
     } catch (error) {
-        console.error("Revoke device error:", error);
+        logger.error("Revoke device error:", error);
         res.status(500).json({ error: "Failed to revoke device" });
     }
 });

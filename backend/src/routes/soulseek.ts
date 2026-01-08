@@ -1,3 +1,5 @@
+import { logger } from "../utils/logger";
+
 /**
  * Soulseek routes - Direct connection via slsk-client
  * Simplified API for status and manual search/download
@@ -23,7 +25,7 @@ async function requireSoulseekConfigured(req: any, res: any, next: any) {
 
         next();
     } catch (error) {
-        console.error("Error checking Soulseek settings:", error);
+        logger.error("Error checking Soulseek settings:", error);
         res.status(500).json({ error: "Failed to check settings" });
     }
 }
@@ -52,7 +54,7 @@ router.get("/status", requireAuth, async (req, res) => {
             username: status.username,
         });
     } catch (error: any) {
-        console.error("Soulseek status error:", error.message);
+        logger.error("Soulseek status error:", error.message);
         res.status(500).json({
             error: "Failed to get Soulseek status",
             details: error.message,
@@ -73,7 +75,7 @@ router.post("/connect", requireAuth, requireSoulseekConfigured, async (req, res)
             message: "Connected to Soulseek network",
         });
     } catch (error: any) {
-        console.error("Soulseek connect error:", error.message);
+        logger.error("Soulseek connect error:", error.message);
         res.status(500).json({
             error: "Failed to connect to Soulseek",
             details: error.message,
@@ -95,7 +97,7 @@ router.post("/search", requireAuth, requireSoulseekConfigured, async (req, res) 
             });
         }
 
-        console.log(`[Soulseek] Searching: "${artist} - ${title}"`);
+        logger.debug(`[Soulseek] Searching: "${artist} - ${title}"`);
 
         const result = await soulseekService.searchTrack(artist, title);
 
@@ -117,7 +119,7 @@ router.post("/search", requireAuth, requireSoulseekConfigured, async (req, res) 
             });
         }
     } catch (error: any) {
-        console.error("Soulseek search error:", error.message);
+        logger.error("Soulseek search error:", error.message);
         res.status(500).json({
             error: "Search failed",
             details: error.message,
@@ -148,7 +150,7 @@ router.post("/download", requireAuth, requireSoulseekConfigured, async (req, res
             });
         }
 
-        console.log(`[Soulseek] Downloading: "${artist} - ${title}"`);
+        logger.debug(`[Soulseek] Downloading: "${artist} - ${title}"`);
 
         const result = await soulseekService.searchAndDownload(
             artist,
@@ -169,7 +171,7 @@ router.post("/download", requireAuth, requireSoulseekConfigured, async (req, res
             });
         }
     } catch (error: any) {
-        console.error("Soulseek download error:", error.message);
+        logger.error("Soulseek download error:", error.message);
         res.status(500).json({
             error: "Download failed",
             details: error.message,

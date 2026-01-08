@@ -36,9 +36,7 @@ export function NotificationsTab() {
     } = useQuery<Notification[]>({
         queryKey: ["notifications"],
         queryFn: async () => {
-            console.log("[NotificationsTab] Fetching notifications...");
             const result = await api.getNotifications();
-            console.log("[NotificationsTab] Got notifications:", result);
             return result;
         },
         refetchInterval: 30000, // Poll every 30 seconds
@@ -58,9 +56,6 @@ export function NotificationsTab() {
                     notification.type === "playlist_ready" ||
                     notification.type === "import_complete"
                 ) {
-                    console.log(
-                        "[NotificationsTab] New playlist notification, dispatching event"
-                    );
                     window.dispatchEvent(new CustomEvent("playlist-created"));
                 }
             }

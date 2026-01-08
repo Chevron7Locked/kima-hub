@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { spotifyService } from "../services/spotify";
 import { deezerService, DeezerPlaylistPreview, DeezerRadioStation } from "../services/deezer";
@@ -68,10 +69,10 @@ function deezerRadioToUnified(radio: DeezerRadioStation): PlaylistPreview {
 router.get("/playlists/featured", async (req, res) => {
     try {
         const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
-        console.log(`[Browse] Fetching featured playlists (limit: ${limit})...`);
+        logger.debug(`[Browse] Fetching featured playlists (limit: ${limit})...`);
 
         const playlists = await deezerService.getFeaturedPlaylists(limit);
-        console.log(`[Browse] Got ${playlists.length} Deezer playlists`);
+        logger.debug(`[Browse] Got ${playlists.length} Deezer playlists`);
 
         res.json({
             playlists: playlists.map(deezerPlaylistToUnified),
@@ -79,7 +80,7 @@ router.get("/playlists/featured", async (req, res) => {
             source: "deezer",
         });
     } catch (error: any) {
-        console.error("Browse featured playlists error:", error);
+        logger.error("Browse featured playlists error:", error);
         res.status(500).json({ error: error.message || "Failed to fetch playlists" });
     }
 });
@@ -96,10 +97,10 @@ router.get("/playlists/search", async (req, res) => {
         }
 
         const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
-        console.log(`[Browse] Searching playlists for "${query}"...`);
+        logger.debug(`[Browse] Searching playlists for "${query}"...`);
 
         const playlists = await deezerService.searchPlaylists(query, limit);
-        console.log(`[Browse] Search "${query}": ${playlists.length} results`);
+        logger.debug(`[Browse] Search "${query}": ${playlists.length} results`);
 
         res.json({
             playlists: playlists.map(deezerPlaylistToUnified),
@@ -108,7 +109,7 @@ router.get("/playlists/search", async (req, res) => {
             source: "deezer",
         });
     } catch (error: any) {
-        console.error("Browse search playlists error:", error);
+        logger.error("Browse search playlists error:", error);
         res.status(500).json({ error: error.message || "Failed to search playlists" });
     }
 });
@@ -132,7 +133,7 @@ router.get("/playlists/:id", async (req, res) => {
             url: `https://www.deezer.com/playlist/${id}`,
         });
     } catch (error: any) {
-        console.error("Playlist fetch error:", error);
+        logger.error("Playlist fetch error:", error);
         res.status(500).json({ error: error.message || "Failed to fetch playlist" });
     }
 });
@@ -147,7 +148,7 @@ router.get("/playlists/:id", async (req, res) => {
  */
 router.get("/radios", async (req, res) => {
     try {
-        console.log("[Browse] Fetching radio stations...");
+        logger.debug("[Browse] Fetching radio stations...");
         const radios = await deezerService.getRadioStations();
 
         res.json({
@@ -156,7 +157,7 @@ router.get("/radios", async (req, res) => {
             source: "deezer",
         });
     } catch (error: any) {
-        console.error("Browse radios error:", error);
+        logger.error("Browse radios error:", error);
         res.status(500).json({ error: error.message || "Failed to fetch radios" });
     }
 });
@@ -167,7 +168,7 @@ router.get("/radios", async (req, res) => {
  */
 router.get("/radios/by-genre", async (req, res) => {
     try {
-        console.log("[Browse] Fetching radios by genre...");
+        logger.debug("[Browse] Fetching radios by genre...");
         const genresWithRadios = await deezerService.getRadiosByGenre();
 
         // Transform to include unified format
@@ -183,7 +184,7 @@ router.get("/radios/by-genre", async (req, res) => {
             source: "deezer",
         });
     } catch (error: any) {
-        console.error("Browse radios by genre error:", error);
+        logger.error("Browse radios by genre error:", error);
         res.status(500).json({ error: error.message || "Failed to fetch radios" });
     }
 });
@@ -195,7 +196,7 @@ router.get("/radios/by-genre", async (req, res) => {
 router.get("/radios/:id", async (req, res) => {
     try {
         const { id } = req.params;
-        console.log(`[Browse] Fetching radio ${id} tracks...`);
+        logger.debug(`[Browse] Fetching radio ${id} tracks...`);
         
         const radioPlaylist = await deezerService.getRadioTracks(id);
 
@@ -209,7 +210,7 @@ router.get("/radios/:id", async (req, res) => {
             type: "radio",
         });
     } catch (error: any) {
-        console.error("Radio tracks error:", error);
+        logger.error("Radio tracks error:", error);
         res.status(500).json({ error: error.message || "Failed to fetch radio tracks" });
     }
 });
@@ -224,7 +225,7 @@ router.get("/radios/:id", async (req, res) => {
  */
 router.get("/genres", async (req, res) => {
     try {
-        console.log("[Browse] Fetching genres...");
+        logger.debug("[Browse] Fetching genres...");
         const genres = await deezerService.getGenres();
 
         res.json({
@@ -233,7 +234,7 @@ router.get("/genres", async (req, res) => {
             source: "deezer",
         });
     } catch (error: any) {
-        console.error("Browse genres error:", error);
+        logger.error("Browse genres error:", error);
         res.status(500).json({ error: error.message || "Failed to fetch genres" });
     }
 });
@@ -249,7 +250,7 @@ router.get("/genres/:id", async (req, res) => {
             return res.status(400).json({ error: "Invalid genre ID" });
         }
 
-        console.log(`[Browse] Fetching content for genre ${genreId}...`);
+        logger.debug(`[Browse] Fetching content for genre ${genreId}...`);
         const content = await deezerService.getEditorialContent(genreId);
 
         res.json({
@@ -259,7 +260,7 @@ router.get("/genres/:id", async (req, res) => {
             source: "deezer",
         });
     } catch (error: any) {
-        console.error("Genre content error:", error);
+        logger.error("Genre content error:", error);
         res.status(500).json({ error: error.message || "Failed to fetch genre content" });
     }
 });
@@ -290,7 +291,7 @@ router.get("/genres/:id/playlists", async (req, res) => {
             source: "deezer",
         });
     } catch (error: any) {
-        console.error("Genre playlists error:", error);
+        logger.error("Genre playlists error:", error);
         res.status(500).json({ error: error.message || "Failed to fetch genre playlists" });
     }
 });
@@ -337,7 +338,7 @@ router.post("/playlists/parse", async (req, res) => {
             error: "Invalid or unsupported URL. Please provide a Spotify or Deezer playlist URL." 
         });
     } catch (error: any) {
-        console.error("Parse URL error:", error);
+        logger.error("Parse URL error:", error);
         res.status(500).json({ error: error.message || "Failed to parse URL" });
     }
 });
@@ -353,7 +354,7 @@ router.post("/playlists/parse", async (req, res) => {
  */
 router.get("/all", async (req, res) => {
     try {
-        console.log("[Browse] Fetching browse content (playlists + genres)...");
+        logger.debug("[Browse] Fetching browse content (playlists + genres)...");
 
         // Only fetch playlists and genres - radios are now internal library-based
         const [playlists, genres] = await Promise.all([
@@ -369,7 +370,7 @@ router.get("/all", async (req, res) => {
             source: "deezer",
         });
     } catch (error: any) {
-        console.error("Browse all error:", error);
+        logger.error("Browse all error:", error);
         res.status(500).json({ error: error.message || "Failed to fetch browse content" });
     }
 });

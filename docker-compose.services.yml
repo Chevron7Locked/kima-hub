@@ -8,139 +8,139 @@
 # Note: You can configure these services through the Lidify web UI after starting them.
 
 services:
-  # Lidarr - Music collection manager
-  lidarr:
-    image: lscr.io/linuxserver/lidarr:latest
-    container_name: lidify_lidarr
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=${TZ:-UTC}
-    volumes:
-      - lidarr_config:/config
-      - ${MUSIC_PATH:-./music}:/music
-      - ${DOWNLOAD_PATH:-./downloads}:/downloads
-    ports:
-      - "8686:8686"
-    restart: unless-stopped
-    networks:
-      - lidify_network
+    # Lidarr - Music collection manager
+    lidarr:
+        image: lscr.io/linuxserver/lidarr:latest
+        container_name: lidify_lidarr
+        environment:
+            - PUID=${PUID:-1000}
+            - PGID=${PGID:-1000}
+            - TZ=${TZ:-UTC}
+        volumes:
+            - lidarr_config:/config
+            - ${MUSIC_PATH:-./music}:/music
+            - ${DOWNLOAD_PATH:-./downloads}:/downloads
+        ports:
+            - "8686:8686"
+        restart: unless-stopped
+        networks:
+            - lidify_network
 
-  # Prowlarr - Indexer manager
-  prowlarr:
-    image: lscr.io/linuxserver/prowlarr:latest
-    container_name: lidify_prowlarr
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=${TZ:-UTC}
-    volumes:
-      - prowlarr_config:/config
-    ports:
-      - "9696:9696"
-    restart: unless-stopped
-    networks:
-      - lidify_network
+    # Prowlarr - Indexer manager
+    prowlarr:
+        image: lscr.io/linuxserver/prowlarr:latest
+        container_name: lidify_prowlarr
+        environment:
+            - PUID=${PUID:-1000}
+            - PGID=${PGID:-1000}
+            - TZ=${TZ:-UTC}
+        volumes:
+            - prowlarr_config:/config
+        ports:
+            - "9696:9696"
+        restart: unless-stopped
+        networks:
+            - lidify_network
 
-  # FlareSolverr - Cloudflare bypass for Prowlarr
-  flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:latest
-    container_name: lidify_flaresolverr
-    environment:
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - LOG_HTML=${LOG_HTML:-false}
-      - CAPTCHA_SOLVER=${CAPTCHA_SOLVER:-none}
-      - TZ=${TZ:-UTC}
-    ports:
-      - "8191:8191"
-    restart: unless-stopped
-    networks:
-      - lidify_network
+    # FlareSolverr - Cloudflare bypass for Prowlarr
+    flaresolverr:
+        image: ghcr.io/flaresolverr/flaresolverr:latest
+        container_name: lidify_flaresolverr
+        environment:
+            - LOG_LEVEL=${LOG_LEVEL:-info}
+            - LOG_HTML=${LOG_HTML:-false}
+            - CAPTCHA_SOLVER=${CAPTCHA_SOLVER:-none}
+            - TZ=${TZ:-UTC}
+        ports:
+            - "8191:8191"
+        restart: unless-stopped
+        networks:
+            - lidify_network
 
-  # Slskd - Soulseek client
-  slskd:
-    image: slskd/slskd:latest
-    container_name: lidify_slskd
-    environment:
-      - TZ=${TZ:-UTC}
-      - SLSKD_REMOTE_CONFIGURATION=true
-      - SLSKD_SOULSEEK_USERNAME=${SLSKD_USERNAME:-}
-      - SLSKD_SOULSEEK_PASSWORD=${SLSKD_PASSWORD:-}
-    ports:
-      - "5030:5030"  # Web UI
-      - "5031:5031"  # File server
-    volumes:
-      - slskd_config:/app
-      - ${MUSIC_PATH:-./music}:/music
-      - ${MUSIC_PATH:-./music}/Soulseek:/downloads
-    restart: unless-stopped
-    networks:
-      - lidify_network
+    # Slskd - Soulseek client
+    slskd:
+        image: slskd/slskd:latest
+        container_name: lidify_slskd
+        environment:
+            - TZ=${TZ:-UTC}
+            - SLSKD_REMOTE_CONFIGURATION=true
+            - SLSKD_SOULSEEK_USERNAME=${SLSKD_USERNAME:-}
+            - SLSKD_SOULSEEK_PASSWORD=${SLSKD_PASSWORD:-}
+        ports:
+            - "5030:5030" # Web UI
+            - "5031:5031" # File server
+        volumes:
+            - slskd_config:/app
+            - ${MUSIC_PATH:-./music}:/music
+            - ${MUSIC_PATH:-./music}/Soulseek:/downloads
+        restart: unless-stopped
+        networks:
+            - lidify_network
 
-  # Soularr - Lidarr + Soulseek integration
-  soularr:
-    image: mrusse08/soularr:latest
-    container_name: lidify_soularr
-    user: "1000:1000"
-    environment:
-      - TZ=${TZ:-UTC}
-      - SCRIPT_INTERVAL=300
-    volumes:
-      - ${MUSIC_PATH:-./music}/Soulseek:/downloads
-      - ./soularr:/data
-    restart: unless-stopped
-    depends_on:
-      - slskd
-      - lidarr
-    networks:
-      - lidify_network
+    # Soularr - Lidarr + Soulseek integration
+    soularr:
+        image: mrusse08/soularr:latest
+        container_name: lidify_soularr
+        user: "${PUID:-1000}:${PGID:-1000}"
+        environment:
+            - TZ=${TZ:-UTC}
+            - SCRIPT_INTERVAL=300
+        volumes:
+            - ${MUSIC_PATH:-./music}/Soulseek:/downloads
+            - ./soularr:/data
+        restart: unless-stopped
+        depends_on:
+            - slskd
+            - lidarr
+        networks:
+            - lidify_network
 
-  # qBittorrent - Torrent client
-  qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
-    container_name: lidify_qbittorrent
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=${TZ:-UTC}
-      - WEBUI_PORT=8080
-    volumes:
-      - qbittorrent_config:/config
-      - ${MUSIC_PATH:-./music}/torrents:/music/torrents
-      - ${DOWNLOAD_PATH:-./downloads}:/downloads
-    ports:
-      - "8080:8080"
-      - "6881:6881"
-      - "6881:6881/udp"
-    restart: unless-stopped
-    networks:
-      - lidify_network
+    # qBittorrent - Torrent client
+    qbittorrent:
+        image: lscr.io/linuxserver/qbittorrent:latest
+        container_name: lidify_qbittorrent
+        environment:
+            - PUID=${PUID:-1000}
+            - PGID=${PGID:-1000}
+            - TZ=${TZ:-UTC}
+            - WEBUI_PORT=8080
+        volumes:
+            - qbittorrent_config:/config
+            - ${MUSIC_PATH:-./music}/torrents:/music/torrents
+            - ${DOWNLOAD_PATH:-./downloads}:/downloads
+        ports:
+            - "8080:8080"
+            - "6881:6881"
+            - "6881:6881/udp"
+        restart: unless-stopped
+        networks:
+            - lidify_network
 
-  # NZBGet - Usenet client
-  nzbget:
-    image: lscr.io/linuxserver/nzbget:latest
-    container_name: lidify_nzbget
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=${TZ:-UTC}
-    volumes:
-      - nzbget_config:/config
-      - ${MUSIC_PATH:-./music}/usenet:/music/usenet
-      - ${DOWNLOAD_PATH:-./downloads}:/downloads
-    ports:
-      - "6789:6789"
-    restart: unless-stopped
-    networks:
-      - lidify_network
+    # NZBGet - Usenet client
+    nzbget:
+        image: lscr.io/linuxserver/nzbget:latest
+        container_name: lidify_nzbget
+        environment:
+            - PUID=${PUID:-1000}
+            - PGID=${PGID:-1000}
+            - TZ=${TZ:-UTC}
+        volumes:
+            - nzbget_config:/config
+            - ${MUSIC_PATH:-./music}/usenet:/music/usenet
+            - ${DOWNLOAD_PATH:-./downloads}:/downloads
+        ports:
+            - "6789:6789"
+        restart: unless-stopped
+        networks:
+            - lidify_network
 
 volumes:
-  lidarr_config:
-  prowlarr_config:
-  slskd_config:
-  qbittorrent_config:
-  nzbget_config:
+    lidarr_config:
+    prowlarr_config:
+    slskd_config:
+    qbittorrent_config:
+    nzbget_config:
 
 networks:
-  lidify_network:
-    external: true
+    lidify_network:
+        external: true

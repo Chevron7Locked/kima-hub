@@ -1,5 +1,7 @@
 import axios, { AxiosInstance } from "axios";
+import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
+import { prisma } from "../utils/db";
 
 /**
  * Audiobookshelf API Service
@@ -33,13 +35,13 @@ class AudiobookshelfService {
                 this.baseUrl = settings.audiobookshelfUrl.replace(/\/$/, ""); // Remove trailing slash
                 this.apiKey = settings.audiobookshelfApiKey;
                 this.client = axios.create({
-                    baseURL: this.baseUrl,
+                    baseURL: this.baseUrl as string,
                     headers: {
                         Authorization: `Bearer ${this.apiKey}`,
                     },
                     timeout: 30000, // 30 seconds for remote server
                 });
-                console.log("Audiobookshelf configured from database");
+                logger.debug("Audiobookshelf configured from database");
                 this.initialized = true;
                 return;
             }
@@ -47,7 +49,7 @@ class AudiobookshelfService {
             if (error.message === "Audiobookshelf is disabled in settings") {
                 throw error;
             }
-            console.log(
+            logger.debug(
                 "  Could not load Audiobookshelf from database, checking .env"
             );
         }
@@ -66,7 +68,7 @@ class AudiobookshelfService {
                 },
                 timeout: 30000, // 30 seconds for remote server
             });
-            console.log("Audiobookshelf configured from .env");
+            logger.debug("Audiobookshelf configured from .env");
             this.initialized = true;
         } else {
             throw new Error("Audiobookshelf not configured");
@@ -82,7 +84,7 @@ class AudiobookshelfService {
             const response = await this.client!.get("/api/libraries");
             return response.status === 200;
         } catch (error) {
-            console.error("Audiobookshelf connection failed:", error);
+            logger.error("Audiobookshelf connection failed:", error);
             return false;
         }
     }
@@ -122,16 +124,22 @@ class AudiobookshelfService {
 
                 // DEBUG: Log the structure of the first item with series
                 if (items.length > 0) {
-                    const itemsWithSeries = items.filter((item: any) => 
-                        item.media?.metadata?.series || item.media?.metadata?.seriesName
+                    const itemsWithSeries = items.filter(
+                        (item: any) =>
+                            item.media?.metadata?.series ||
+                            item.media?.metadata?.seriesName
                     );
                     if (itemsWithSeries.length > 0) {
-                        console.log(
+                        logger.debug(
                             "[AUDIOBOOKSHELF DEBUG] Sample item WITH series:",
-                            JSON.stringify(itemsWithSeries[0], null, 2).substring(0, 2000)
+                            JSON.stringify(
+                                itemsWithSeries[0],
+                                null,
+                                2
+                            ).substring(0, 2000)
                         );
                     } else {
-                        console.log(
+                        logger.debug(
                             "[AUDIOBOOKSHELF DEBUG] No items with series found! Sample item:",
                             JSON.stringify(items[0], null, 2).substring(0, 1000)
                         );
@@ -169,7 +177,7 @@ class AudiobookshelfService {
                 try {
                     return await this.getLibraryItems(library.id);
                 } catch (error) {
-                    console.error(
+                    logger.error(
                         `Audiobookshelf: failed to load podcast library ${library.id}`,
                         error
                     );
@@ -329,6 +337,119 @@ class AudiobookshelfService {
             `/api/search/books?q=${encodeURIComponent(query)}`
         );
         return response.data.book || [];
+    }
+
+    /**
+     * Sync audiobooks from Audiobookshelf to local database cache
+     * This populates the Audiobook table for full-text search
+     */
+    async syncAudiobooksToCache() {
+        await this.ensureInitialized();
+        logger.debug("[AUDIOBOOKSHELF] Starting audiobook sync to cache...");
+
+        try {
+            // Fetch all audiobooks from Audiobookshelf API
+            const audiobooks = await this.getAllAudiobooks();
+            logger.debug(
+                `[AUDIOBOOKSHELF] Found ${audiobooks.length} audiobooks to sync`
+            );
+
+            // Map and upsert each audiobook to database
+            let syncedCount = 0;
+            for (const item of audiobooks) {
+                try {
+                    const metadata = item.media?.metadata || {};
+                    
+                    // Extract series information (check both possible formats)
+                    let series: string | null = null;
+                    let seriesSequence: string | null = null;
+                    
+                    if (metadata.series && Array.isArray(metadata.series) && metadata.series.length > 0) {
+                        series = metadata.series[0].name || null;
+                        seriesSequence = metadata.series[0].sequence || null;
+                    } else if (metadata.seriesName) {
+                        series = metadata.seriesName;
+                        seriesSequence = metadata.seriesSequence || null;
+                    }
+
+                    await prisma.audiobook.upsert({
+                        where: { id: item.id },
+                        update: {
+                            title: metadata.title || "Untitled",
+                            author: metadata.authorName || metadata.author || null,
+                            narrator: metadata.narratorName || metadata.narrator || null,
+                            description: metadata.description || null,
+                            publishedYear: metadata.publishedYear
+                                ? parseInt(metadata.publishedYear, 10)
+                                : null,
+                            publisher: metadata.publisher || null,
+                            series,
+                            seriesSequence,
+                            duration: item.media?.duration || null,
+                            numTracks: item.media?.numTracks || null,
+                            numChapters: item.media?.numChapters || null,
+                            size: item.media?.size
+                                ? BigInt(item.media.size)
+                                : null,
+                            isbn: metadata.isbn || null,
+                            asin: metadata.asin || null,
+                            language: metadata.language || null,
+                            genres: metadata.genres || [],
+                            tags: item.media?.tags || [],
+                            coverUrl: metadata.coverPath
+                                ? `${this.baseUrl}${metadata.coverPath}`
+                                : null,
+                            audioUrl: `${this.baseUrl}/api/items/${item.id}/play`,
+                            libraryId: item.libraryId || null,
+                            lastSyncedAt: new Date(),
+                        },
+                        create: {
+                            id: item.id,
+                            title: metadata.title || "Untitled",
+                            author: metadata.authorName || metadata.author || null,
+                            narrator: metadata.narratorName || metadata.narrator || null,
+                            description: metadata.description || null,
+                            publishedYear: metadata.publishedYear
+                                ? parseInt(metadata.publishedYear, 10)
+                                : null,
+                            publisher: metadata.publisher || null,
+                            series,
+                            seriesSequence,
+                            duration: item.media?.duration || null,
+                            numTracks: item.media?.numTracks || null,
+                            numChapters: item.media?.numChapters || null,
+                            size: item.media?.size
+                                ? BigInt(item.media.size)
+                                : null,
+                            isbn: metadata.isbn || null,
+                            asin: metadata.asin || null,
+                            language: metadata.language || null,
+                            genres: metadata.genres || [],
+                            tags: item.media?.tags || [],
+                            coverUrl: metadata.coverPath
+                                ? `${this.baseUrl}${metadata.coverPath}`
+                                : null,
+                            audioUrl: `${this.baseUrl}/api/items/${item.id}/play`,
+                            libraryId: item.libraryId || null,
+                        },
+                    });
+                    syncedCount++;
+                } catch (error) {
+                    logger.error(
+                        `[AUDIOBOOKSHELF] Failed to sync audiobook ${item.id}:`,
+                        error
+                    );
+                }
+            }
+
+            logger.debug(
+                `[AUDIOBOOKSHELF] Successfully synced ${syncedCount}/${audiobooks.length} audiobooks to cache`
+            );
+            return { synced: syncedCount, total: audiobooks.length };
+        } catch (error) {
+            logger.error("[AUDIOBOOKSHELF] Audiobook sync failed:", error);
+            throw error;
+        }
     }
 }
 

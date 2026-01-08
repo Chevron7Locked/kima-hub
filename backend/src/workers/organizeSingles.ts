@@ -7,6 +7,7 @@
  * 2. Legacy SLSKD job cleanup (if any remain from before migration)
  */
 
+import { logger } from "../utils/logger";
 import path from "path";
 import fs from "fs";
 import { sessionLog } from "../utils/playlistLogger";
@@ -254,12 +255,12 @@ export async function organizeSingles(): Promise<void> {
  * With direct slsk-client, this is a simple one-shot task
  */
 export async function queueOrganizeSingles(): Promise<void> {
-    console.log("[ORGANIZE] Running organization task...");
+    logger.debug("[ORGANIZE] Running organization task...");
 
     try {
         await organizeSingles();
-        console.log("[ORGANIZE] Organization complete");
+        logger.debug("[ORGANIZE] Organization complete");
     } catch (err: any) {
-        console.error("[ORGANIZE] Organization failed:", err.message);
+        logger.error("[ORGANIZE] Organization failed:", err.message);
     }
 }

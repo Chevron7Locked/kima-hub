@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 /**
  * GalaxyBackground Component
@@ -21,6 +22,11 @@ interface GalaxyBackgroundProps {
 }
 
 export function GalaxyBackground({ primaryColor, secondaryColor }: GalaxyBackgroundProps = {}) {
+    // Performance optimization: disable animations on mobile and for reduced-motion preference
+    const isMobile = useMediaQuery("(max-width: 768px)");
+    const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+    const shouldDisableAnimations = isMobile || prefersReducedMotion;
+
     // Convert hex color to RGB values for opacity control
     const hexToRgb = (hex: string) => {
         const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -89,6 +95,9 @@ export function GalaxyBackground({ primaryColor, secondaryColor }: GalaxyBackgro
                 </>
             )}
 
+            {/* Floating Star Particles - only render on desktop with motion enabled */}
+            {!shouldDisableAnimations && (
+                <>
             {/* Floating Star Particles - more concentrated at bottom */}
             {/* Bottom layer - most prominent */}
             {particles.bottom.map((p, i) => (
@@ -171,6 +180,8 @@ export function GalaxyBackground({ primaryColor, secondaryColor }: GalaxyBackgro
                     }}
                 />
             ))}
+                </>
+            )}
         </div>
     );
 }

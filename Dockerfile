@@ -48,34 +48,72 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     psycopg2-binary
 
 # Download Essentia ML models (~200MB total) - these enable Enhanced vibe matching
+# IMPORTANT: Using MusiCNN models to match analyzer.py expectations
 RUN echo "Downloading Essentia ML models for Enhanced vibe matching..." && \
-    # Base embedding model (required for all predictions)
-    curl -L --progress-bar -o /app/models/discogs-effnet-bs64-1.pb \
-        "https://essentia.upf.edu/models/feature-extractors/discogs-effnet/discogs-effnet-bs64-1.pb" && \
-    # Mood models
-    curl -L --progress-bar -o /app/models/mood_happy-discogs-effnet-1.pb \
-        "https://essentia.upf.edu/models/classification-heads/mood_happy/mood_happy-discogs-effnet-1.pb" && \
-    curl -L --progress-bar -o /app/models/mood_sad-discogs-effnet-1.pb \
-        "https://essentia.upf.edu/models/classification-heads/mood_sad/mood_sad-discogs-effnet-1.pb" && \
-    curl -L --progress-bar -o /app/models/mood_relaxed-discogs-effnet-1.pb \
-        "https://essentia.upf.edu/models/classification-heads/mood_relaxed/mood_relaxed-discogs-effnet-1.pb" && \
-    curl -L --progress-bar -o /app/models/mood_aggressive-discogs-effnet-1.pb \
-        "https://essentia.upf.edu/models/classification-heads/mood_aggressive/mood_aggressive-discogs-effnet-1.pb" && \
-    # Arousal and Valence (key for vibe matching)
-    curl -L --progress-bar -o /app/models/mood_arousal-discogs-effnet-1.pb \
-        "https://essentia.upf.edu/models/classification-heads/mood_arousal/mood_arousal-discogs-effnet-1.pb" && \
-    curl -L --progress-bar -o /app/models/mood_valence-discogs-effnet-1.pb \
-        "https://essentia.upf.edu/models/classification-heads/mood_valence/mood_valence-discogs-effnet-1.pb" && \
-    # Danceability and Voice/Instrumental
-    curl -L --progress-bar -o /app/models/danceability-discogs-effnet-1.pb \
-        "https://essentia.upf.edu/models/classification-heads/danceability/danceability-discogs-effnet-1.pb" && \
-    curl -L --progress-bar -o /app/models/voice_instrumental-discogs-effnet-1.pb \
-        "https://essentia.upf.edu/models/classification-heads/voice_instrumental/voice_instrumental-discogs-effnet-1.pb" && \
+    # Base MusiCNN embedding model (required for all predictions)
+    curl -L --progress-bar -o /app/models/msd-musicnn-1.pb \
+        "https://essentia.upf.edu/models/autotagging/msd/msd-musicnn-1.pb" && \
+    # Mood classification heads (using MusiCNN architecture)
+    curl -L --progress-bar -o /app/models/mood_happy-msd-musicnn-1.pb \
+        "https://essentia.upf.edu/models/classification-heads/mood_happy/mood_happy-msd-musicnn-1.pb" && \
+    curl -L --progress-bar -o /app/models/mood_sad-msd-musicnn-1.pb \
+        "https://essentia.upf.edu/models/classification-heads/mood_sad/mood_sad-msd-musicnn-1.pb" && \
+    curl -L --progress-bar -o /app/models/mood_relaxed-msd-musicnn-1.pb \
+        "https://essentia.upf.edu/models/classification-heads/mood_relaxed/mood_relaxed-msd-musicnn-1.pb" && \
+    curl -L --progress-bar -o /app/models/mood_aggressive-msd-musicnn-1.pb \
+        "https://essentia.upf.edu/models/classification-heads/mood_aggressive/mood_aggressive-msd-musicnn-1.pb" && \
+    curl -L --progress-bar -o /app/models/mood_party-msd-musicnn-1.pb \
+        "https://essentia.upf.edu/models/classification-heads/mood_party/mood_party-msd-musicnn-1.pb" && \
+    curl -L --progress-bar -o /app/models/mood_acoustic-msd-musicnn-1.pb \
+        "https://essentia.upf.edu/models/classification-heads/mood_acoustic/mood_acoustic-msd-musicnn-1.pb" && \
+    curl -L --progress-bar -o /app/models/mood_electronic-msd-musicnn-1.pb \
+        "https://essentia.upf.edu/models/classification-heads/mood_electronic/mood_electronic-msd-musicnn-1.pb" && \
+    # Other classification heads
+    curl -L --progress-bar -o /app/models/danceability-msd-musicnn-1.pb \
+        "https://essentia.upf.edu/models/classification-heads/danceability/danceability-msd-musicnn-1.pb" && \
+    curl -L --progress-bar -o /app/models/voice_instrumental-msd-musicnn-1.pb \
+        "https://essentia.upf.edu/models/classification-heads/voice_instrumental/voice_instrumental-msd-musicnn-1.pb" && \
     echo "ML models downloaded successfully" && \
     ls -lh /app/models/
 
 # Copy audio analyzer script
 COPY services/audio-analyzer/analyzer.py /app/audio-analyzer/
+
+# Create database readiness check script
+RUN cat > /app/wait-for-db.sh << 'EOF'
+#!/bin/bash
+TIMEOUT=${1:-120}
+COUNTER=0
+
+echo "[wait-for-db] Waiting for database schema (timeout: ${TIMEOUT}s)..."
+
+# Quick check for schema ready flag
+if [ -f /data/.schema_ready ]; then
+    echo "[wait-for-db] Schema ready flag found, verifying connection..."
+fi
+
+while [ $COUNTER -lt $TIMEOUT ]; do
+    if PGPASSWORD=lidify psql -h localhost -U lidify -d lidify -c "SELECT 1 FROM \"Track\" LIMIT 1" > /dev/null 2>&1; then
+        echo "[wait-for-db] ✓ Database is ready and schema exists!"
+        exit 0
+    fi
+    
+    if [ $((COUNTER % 15)) -eq 0 ]; then
+        echo "[wait-for-db] Still waiting... (${COUNTER}s elapsed)"
+    fi
+    
+    sleep 1
+    COUNTER=$((COUNTER + 1))
+done
+
+echo "[wait-for-db] ERROR: Database schema not ready after ${TIMEOUT}s"
+echo "[wait-for-db] Listing available tables:"
+PGPASSWORD=lidify psql -h localhost -U lidify -d lidify -c "\dt" 2>&1 || echo "Could not list tables"
+exit 1
+EOF
+
+RUN chmod +x /app/wait-for-db.sh && \
+    sed -i 's/\r$//' /app/wait-for-db.sh
 
 # ============================================
 # BACKEND BUILD
@@ -164,9 +202,11 @@ stderr_logfile_maxbytes=0
 priority=20
 
 [program:backend]
-command=/bin/bash -c "sleep 5 && cd /app/backend && npx tsx src/index.ts"
+command=/bin/bash -c "/app/wait-for-db.sh 120 && cd /app/backend && npx tsx src/index.ts"
 autostart=true
-autorestart=true
+autorestart=unexpected
+startretries=3
+startsecs=10
 stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
@@ -186,9 +226,11 @@ environment=NODE_ENV="production",BACKEND_URL="http://localhost:3006",PORT="3030
 priority=40
 
 [program:audio-analyzer]
-command=/bin/bash -c "sleep 15 && cd /app/audio-analyzer && python3 analyzer.py"
+command=/bin/bash -c "/app/wait-for-db.sh 120 && cd /app/audio-analyzer && python3 analyzer.py"
 autostart=true
-autorestart=true
+autorestart=unexpected
+startretries=3
+startsecs=10
 stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
@@ -271,32 +313,53 @@ MIGRATIONS_EXIST=$(gosu postgres psql -d lidify -tAc "SELECT EXISTS (SELECT FROM
 # Check if User table exists (indicates existing data)
 USER_TABLE_EXIST=$(gosu postgres psql -d lidify -tAc "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'User')" 2>/dev/null || echo "f")
 
+# Handle rename migration for existing databases
+echo "Checking if rename migration needs to be marked as applied..."
+if gosu postgres psql -d lidify -tAc "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='SystemSettings' AND column_name='soulseekFallback');" 2>/dev/null | grep -q 't'; then
+    echo "Old column exists, marking migration as applied..."
+    gosu postgres psql -d lidify -c "INSERT INTO \"_prisma_migrations\" (id, checksum, finished_at, migration_name, logs, rolled_back_at, started_at, applied_steps_count) VALUES (gen_random_uuid(), '', NOW(), '20250101000000_rename_soulseek_fallback', '', NULL, NOW(), 1) ON CONFLICT DO NOTHING;" 2>/dev/null || true
+fi
+
 if [ "$MIGRATIONS_EXIST" = "t" ]; then
     # Normal migration flow - migrations table exists
     echo "Migration history found, running migrate deploy..."
-    npx prisma migrate deploy 2>&1 || {
-        echo "WARNING: Migration failed, but database preserved."
-        echo "You may need to manually resolve migration issues."
-    }
+    if ! npx prisma migrate deploy 2>&1; then
+        echo "FATAL: Database migration failed! Check logs above."
+        exit 1
+    fi
 elif [ "$USER_TABLE_EXIST" = "t" ]; then
     # Database has data but no migrations table - needs baseline
     echo "Existing database detected without migration history."
     echo "Creating baseline from current schema..."
     # Mark the init migration as already applied (baseline)
-    npx prisma migrate resolve --applied 20251130000000_init 2>&1 || true
+    npx prisma migrate resolve --applied 20241130000000_init 2>&1 || true
     # Now run any subsequent migrations
-    npx prisma migrate deploy 2>&1 || {
-        echo "WARNING: Migration after baseline failed."
-        echo "Database preserved - check migration status manually."
-    }
+    if ! npx prisma migrate deploy 2>&1; then
+        echo "FATAL: Migration after baseline failed!"
+        exit 1
+    fi
 else
     # Fresh database - run migrations normally
     echo "Fresh database detected, running initial migrations..."
-    npx prisma migrate deploy 2>&1 || {
-        echo "WARNING: Initial migration failed."
-        echo "Check database connection and schema."
-    }
+    if ! npx prisma migrate deploy 2>&1; then
+        echo "FATAL: Initial migration failed. Check database connection and schema."
+        exit 1
+    fi
 fi
+echo "✓ Migrations completed successfully"
+
+# Verify schema exists before starting services
+echo "Verifying database schema..."
+if ! gosu postgres psql -d lidify -c "SELECT 1 FROM \"Track\" LIMIT 1" >/dev/null 2>&1; then
+    echo "FATAL: Track table does not exist after migration!"
+    echo "Database schema verification failed. Container will exit."
+    exit 1
+fi
+echo "✓ Schema verification passed"
+
+# Create flag file for wait-for-db.sh
+touch /data/.schema_ready
+echo "✓ Schema ready flag created"
 
 # Stop PostgreSQL (supervisord will start it)
 gosu postgres $PG_BIN/pg_ctl -D /data/postgres -w stop
@@ -338,7 +401,12 @@ SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY
 ENVEOF
 
 echo "Starting Lidify..."
-exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+exec env \
+    NODE_ENV=production \
+    DATABASE_URL="postgresql://lidify:lidify@localhost:5432/lidify" \
+    SESSION_SECRET="$SESSION_SECRET" \
+    SETTINGS_ENCRYPTION_KEY="$SETTINGS_ENCRYPTION_KEY" \
+    /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
 EOF
 
 # Fix Windows line endings (CRLF -> LF) and make executable

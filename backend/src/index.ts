@@ -6,6 +6,7 @@ import helmet from "helmet";
 import { config } from "./config";
 import { redisClient } from "./utils/redis";
 import { prisma } from "./utils/db";
+import { logger } from "./utils/logger";
 
 import authRoutes from "./routes/auth";
 import onboardingRoutes from "./routes/onboarding";
@@ -38,6 +39,7 @@ import analysisRoutes from "./routes/analysis";
 import releasesRoutes from "./routes/releases";
 import { dataCacheService } from "./services/dataCache";
 import { errorHandler } from "./middleware/errorHandler";
+import { requireAuth, requireAdmin } from "./middleware/auth";
 import {
     authLimiter,
     apiLimiter,
@@ -80,7 +82,7 @@ app.use(
                 } else {
                     // For self-hosted: allow anyway but log it
                     // Users shouldn't have to configure CORS for their own app
-                    console.log(
+                    logger.debug(
                         `[CORS] Origin ${origin} not in allowlist, allowing anyway (self-hosted)`
                     );
                     callback(null, true);
@@ -111,10 +113,8 @@ app.use(
         proxy: true, // Trust the reverse proxy
         cookie: {
             httpOnly: true,
-            // For self-hosted apps: allow HTTP access (common for LAN deployments)
-            // If behind HTTPS reverse proxy, the proxy should handle security
-            secure: false,
-            sameSite: "lax",
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
             maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         },
     })
@@ -167,8 +167,15 @@ app.get("/api/health", (req, res) => {
 });
 
 // Swagger API Documentation
+// In production: require auth unless DOCS_PUBLIC=true
+// In development: always public for easier testing
+const docsMiddleware = config.nodeEnv === "production" && process.env.DOCS_PUBLIC !== "true"
+    ? [requireAuth]
+    : [];
+
 app.use(
     "/api/docs",
+    ...docsMiddleware,
     swaggerUi.serve,
     swaggerUi.setup(swaggerSpec, {
         customCss: ".swagger-ui .topbar { display: none }",
@@ -177,15 +184,60 @@ app.use(
 );
 
 // Serve raw OpenAPI spec
-app.get("/api/docs.json", (req, res) => {
+app.get("/api/docs.json", ...docsMiddleware, (req, res) => {
     res.json(swaggerSpec);
 });
 
 // Error handler
 app.use(errorHandler);
 
+// Health check functions
+async function checkPostgresConnection() {
+    try {
+        await prisma.$queryRaw`SELECT 1`;
+        logger.debug("✓ PostgreSQL connection verified");
+    } catch (error) {
+        logger.error("✗ PostgreSQL connection failed:", {
+            error: error instanceof Error ? error.message : String(error),
+            databaseUrl: config.databaseUrl?.replace(/:[^:@]+@/, ':***@') // Hide password
+        });
+        logger.error("Unable to connect to PostgreSQL. Please ensure:");
+        logger.error("  1. PostgreSQL is running on the correct port (default: 5433)");
+        logger.error("  2. DATABASE_URL in .env is correct");
+        logger.error("  3. Database credentials are valid");
+        process.exit(1);
+    }
+}
+
+async function checkRedisConnection() {
+    try {
+        // Check if Redis client is actually connected
+        // The redis client has automatic reconnection, so we need to check status first
+        if (!redisClient.isReady) {
+            throw new Error("Redis client is not ready - connection failed or still connecting");
+        }
+        
+        // If connected, verify with ping
+        await redisClient.ping();
+        logger.debug("✓ Redis connection verified");
+    } catch (error) {
+        logger.error("✗ Redis connection failed:", {
+            error: error instanceof Error ? error.message : String(error),
+            redisUrl: config.redisUrl?.replace(/:[^:@]+@/, ':***@') // Hide password if any
+        });
+        logger.error("Unable to connect to Redis. Please ensure:");
+        logger.error("  1. Redis is running on the correct port (default: 6380)");
+        logger.error("  2. REDIS_URL in .env is correct");
+        process.exit(1);
+    }
+}
+
 app.listen(config.port, "0.0.0.0", async () => {
-    console.log(
+    // Verify database connections before proceeding
+    await checkPostgresConnection();
+    await checkRedisConnection();
+
+    logger.debug(
         `Lidify API running on port ${config.port} (accessible on all network interfaces)`
     );
 
@@ -224,8 +276,8 @@ app.listen(config.port, "0.0.0.0", async () => {
         serverAdapter,
     });
 
-    app.use("/api/admin/queues", serverAdapter.getRouter());
-    console.log("Bull Board dashboard available at /api/admin/queues");
+    app.use("/api/admin/queues", requireAuth, requireAdmin, serverAdapter.getRouter());
+    logger.debug("Bull Board dashboard available at /api/admin/queues (admin-only)");
 
     // Note: Native library scanning is now triggered manually via POST /library/scan
     // No automatic sync on startup - user must manually scan their music folder
@@ -233,7 +285,7 @@ app.listen(config.port, "0.0.0.0", async () => {
     // Enrichment worker enabled for OWNED content only
     // - Background enrichment: Genres, MBIDs, similar artists for owned albums/artists
     // - On-demand fetching: Artist images, bios when browsing (cached in Redis 7 days)
-    console.log(
+    logger.debug(
         "Background enrichment enabled for owned content (genres, MBIDs, etc.)"
     );
 
@@ -241,7 +293,7 @@ app.listen(config.port, "0.0.0.0", async () => {
     // This populates Redis with existing artist images and album covers
     // so first page loads are instant instead of waiting for cache population
     dataCacheService.warmupCache().catch((err) => {
-        console.error("Cache warmup failed:", err);
+        logger.error("Cache warmup failed:", err);
     });
 
     // Podcast cache cleanup - runs daily to remove cached episodes older than 30 days
@@ -249,17 +301,62 @@ app.listen(config.port, "0.0.0.0", async () => {
 
     // Run cleanup on startup (async, don't block)
     cleanupExpiredCache().catch((err) => {
-        console.error("Podcast cache cleanup failed:", err);
+        logger.error("Podcast cache cleanup failed:", err);
     });
 
     // Schedule daily cleanup (every 24 hours)
     const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
     setInterval(() => {
         cleanupExpiredCache().catch((err) => {
-            console.error("Scheduled podcast cache cleanup failed:", err);
+            logger.error("Scheduled podcast cache cleanup failed:", err);
         });
     }, TWENTY_FOUR_HOURS);
-    console.log("Podcast cache cleanup scheduled (daily, 30-day expiry)");
+    logger.debug("Podcast cache cleanup scheduled (daily, 30-day expiry)");
+
+    // Auto-sync audiobooks on startup if cache is empty
+    // This prevents "disappeared" audiobooks after container rebuilds
+    (async () => {
+        try {
+            const { getSystemSettings } = await import("./utils/systemSettings");
+            const settings = await getSystemSettings();
+
+            // Only proceed if Audiobookshelf is configured and enabled
+            if (settings?.audiobookshelfEnabled && settings?.audiobookshelfUrl) {
+                // Check if cache is empty
+                const cachedCount = await prisma.audiobook.count();
+
+                if (cachedCount === 0) {
+                    logger.debug(
+                        "[STARTUP] Audiobook cache is empty - auto-syncing from Audiobookshelf..."
+                    );
+                    const { audiobookCacheService } = await import(
+                        "./services/audiobookCache"
+                    );
+                    const result = await audiobookCacheService.syncAll();
+                    logger.debug(
+                        `[STARTUP] Audiobook auto-sync complete: ${result.synced} audiobooks cached`
+                    );
+                } else {
+                    logger.debug(
+                        `[STARTUP] Audiobook cache has ${cachedCount} entries - skipping auto-sync`
+                    );
+                }
+            }
+        } catch (err) {
+            logger.error("[STARTUP] Audiobook auto-sync failed:", err);
+            // Non-fatal - user can manually sync later
+        }
+    })();
+
+    // Reconcile download queue state with database
+    const { downloadQueueManager } = await import("./services/downloadQueue");
+    try {
+        const result = await downloadQueueManager.reconcileOnStartup();
+        logger.debug(`Download queue reconciled: ${result.loaded} active, ${result.failed} marked failed`);
+    } catch (err) {
+        logger.error("Download queue reconciliation failed:", err);
+        // Non-fatal - queue will start fresh
+    }
 });
 
 // Graceful shutdown handling
@@ -267,12 +364,12 @@ let isShuttingDown = false;
 
 async function gracefulShutdown(signal: string) {
     if (isShuttingDown) {
-        console.log("Shutdown already in progress...");
+        logger.debug("Shutdown already in progress...");
         return;
     }
 
     isShuttingDown = true;
-    console.log(`\nReceived ${signal}. Starting graceful shutdown...`);
+    logger.debug(`\nReceived ${signal}. Starting graceful shutdown...`);
 
     try {
         // Shutdown workers (intervals, crons, queues)
@@ -280,17 +377,17 @@ async function gracefulShutdown(signal: string) {
         await shutdownWorkers();
 
         // Close Redis connection
-        console.log("Closing Redis connection...");
+        logger.debug("Closing Redis connection...");
         await redisClient.quit();
 
         // Close Prisma connection
-        console.log("Closing database connection...");
+        logger.debug("Closing database connection...");
         await prisma.$disconnect();
 
-        console.log("Graceful shutdown complete");
+        logger.debug("Graceful shutdown complete");
         process.exit(0);
     } catch (error) {
-        console.error("Error during shutdown:", error);
+        logger.error("Error during shutdown:", error);
         process.exit(1);
     }
 }

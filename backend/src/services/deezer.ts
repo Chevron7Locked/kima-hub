@@ -1,4 +1,5 @@
 import axios from "axios";
+import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 
 /**
@@ -91,7 +92,7 @@ class DeezerService {
      */
     private async setCache(key: string, value: string): Promise<void> {
         try {
-            await redisClient.setex(`${this.cachePrefix}${key}`, this.cacheTTL, value);
+            await redisClient.setEx(`${this.cachePrefix}${key}`, this.cacheTTL, value);
         } catch {
             // Ignore cache errors
         }
@@ -121,7 +122,7 @@ class DeezerService {
             await this.setCache(cacheKey, imageUrl || "null");
             return imageUrl;
         } catch (error: any) {
-            console.error(`Deezer artist image error for ${artistName}:`, error.message);
+            logger.error(`Deezer artist image error for ${artistName}:`, error.message);
             return null;
         }
     }
@@ -157,7 +158,7 @@ class DeezerService {
             await this.setCache(cacheKey, coverUrl || "null");
             return coverUrl;
         } catch (error: any) {
-            console.error(`Deezer album cover error for ${artistName} - ${albumName}:`, error.message);
+            logger.error(`Deezer album cover error for ${artistName} - ${albumName}:`, error.message);
             return null;
         }
     }
@@ -182,7 +183,7 @@ class DeezerService {
             await this.setCache(cacheKey, previewUrl || "null");
             return previewUrl;
         } catch (error: any) {
-            console.error(`Deezer track preview error for ${artistName} - ${trackName}:`, error.message);
+            logger.error(`Deezer track preview error for ${artistName} - ${trackName}:`, error.message);
             return null;
         }
     }
@@ -218,7 +219,7 @@ class DeezerService {
      */
     async getPlaylist(playlistId: string): Promise<DeezerPlaylist | null> {
         try {
-            console.log(`Deezer: Fetching playlist ${playlistId}...`);
+            logger.debug(`Deezer: Fetching playlist ${playlistId}...`);
 
             const response = await axios.get(`${DEEZER_API}/playlist/${playlistId}`, {
                 timeout: 15000,
@@ -226,7 +227,7 @@ class DeezerService {
 
             const data = response.data;
             if (data.error) {
-                console.error("Deezer API error:", data.error);
+                logger.error("Deezer API error:", data.error);
                 return null;
             }
 
@@ -242,7 +243,7 @@ class DeezerService {
                 coverUrl: track.album?.cover_medium || track.album?.cover || null,
             }));
 
-            console.log(`Deezer: Fetched playlist "${data.title}" with ${tracks.length} tracks`);
+            logger.debug(`Deezer: Fetched playlist "${data.title}" with ${tracks.length} tracks`);
 
             return {
                 id: String(data.id),
@@ -255,7 +256,7 @@ class DeezerService {
                 isPublic: data.public ?? true,
             };
         } catch (error: any) {
-            console.error("Deezer playlist fetch error:", error.message);
+            logger.error("Deezer playlist fetch error:", error.message);
             return null;
         }
     }
@@ -280,7 +281,7 @@ class DeezerService {
                 fans: playlist.fans || 0,
             }));
         } catch (error: any) {
-            console.error("Deezer chart playlists error:", error.message);
+            logger.error("Deezer chart playlists error:", error.message);
             return [];
         }
     }
@@ -305,7 +306,7 @@ class DeezerService {
                 fans: 0,
             }));
         } catch (error: any) {
-            console.error("Deezer playlist search error:", error.message);
+            logger.error("Deezer playlist search error:", error.message);
             return [];
         }
     }
@@ -319,7 +320,7 @@ class DeezerService {
         const cacheKey = `playlists:featured:${limit}`;
         const cached = await this.getCached(cacheKey);
         if (cached) {
-            console.log("Deezer: Returning cached featured playlists");
+            logger.debug("Deezer: Returning cached featured playlists");
             return JSON.parse(cached);
         }
 
@@ -328,7 +329,7 @@ class DeezerService {
             const seenIds = new Set<string>();
 
             // 1. Get chart playlists (max 99 available)
-            console.log("Deezer: Fetching chart playlists from API...");
+            logger.debug("Deezer: Fetching chart playlists from API...");
             const chartPlaylists = await this.getChartPlaylists(Math.min(limit, 99));
             for (const p of chartPlaylists) {
                 if (!seenIds.has(p.id)) {
@@ -336,7 +337,7 @@ class DeezerService {
                     allPlaylists.push(p);
                 }
             }
-            console.log(`Deezer: Got ${chartPlaylists.length} chart playlists`);
+            logger.debug(`Deezer: Got ${chartPlaylists.length} chart playlists`);
 
             // 2. If we need more, search for popular genre playlists
             if (allPlaylists.length < limit) {
@@ -360,11 +361,11 @@ class DeezerService {
             }
 
             const result = allPlaylists.slice(0, limit);
-            console.log(`Deezer: Caching ${result.length} featured playlists`);
+            logger.debug(`Deezer: Caching ${result.length} featured playlists`);
             await this.setCache(cacheKey, JSON.stringify(result));
             return result;
         } catch (error: any) {
-            console.error("Deezer featured playlists error:", error.message);
+            logger.error("Deezer featured playlists error:", error.message);
             return [];
         }
     }
@@ -380,12 +381,12 @@ class DeezerService {
         const cacheKey = "genres:all";
         const cached = await this.getCached(cacheKey);
         if (cached) {
-            console.log("Deezer: Returning cached genres");
+            logger.debug("Deezer: Returning cached genres");
             return JSON.parse(cached);
         }
 
         try {
-            console.log("Deezer: Fetching genres from API...");
+            logger.debug("Deezer: Fetching genres from API...");
             const response = await axios.get(`${DEEZER_API}/genre`, {
                 timeout: 10000,
             });
@@ -398,11 +399,11 @@ class DeezerService {
                     imageUrl: genre.picture_medium || genre.picture || null,
                 }));
 
-            console.log(`Deezer: Caching ${genres.length} genres`);
+            logger.debug(`Deezer: Caching ${genres.length} genres`);
             await this.setCache(cacheKey, JSON.stringify(genres));
             return genres;
         } catch (error: any) {
-            console.error("Deezer genres error:", error.message);
+            logger.error("Deezer genres error:", error.message);
             return [];
         }
     }
@@ -426,12 +427,12 @@ class DeezerService {
         const cacheKey = "radio:stations";
         const cached = await this.getCached(cacheKey);
         if (cached) {
-            console.log("Deezer: Returning cached radio stations");
+            logger.debug("Deezer: Returning cached radio stations");
             return JSON.parse(cached);
         }
 
         try {
-            console.log("Deezer: Fetching radio stations from API...");
+            logger.debug("Deezer: Fetching radio stations from API...");
             const response = await axios.get(`${DEEZER_API}/radio`, {
                 timeout: 10000,
             });
@@ -444,11 +445,11 @@ class DeezerService {
                 type: "radio" as const,
             }));
 
-            console.log(`Deezer: Got ${stations.length} radio stations, caching...`);
+            logger.debug(`Deezer: Got ${stations.length} radio stations, caching...`);
             await this.setCache(cacheKey, JSON.stringify(stations));
             return stations;
         } catch (error: any) {
-            console.error("Deezer radio stations error:", error.message);
+            logger.error("Deezer radio stations error:", error.message);
             return [];
         }
     }
@@ -464,12 +465,12 @@ class DeezerService {
         const cacheKey = "radio:by-genre";
         const cached = await this.getCached(cacheKey);
         if (cached) {
-            console.log("Deezer: Returning cached radios by genre");
+            logger.debug("Deezer: Returning cached radios by genre");
             return JSON.parse(cached);
         }
 
         try {
-            console.log("Deezer: Fetching radios by genre from API...");
+            logger.debug("Deezer: Fetching radios by genre from API...");
             const response = await axios.get(`${DEEZER_API}/radio/genres`, {
                 timeout: 10000,
             });
@@ -486,11 +487,11 @@ class DeezerService {
                 })),
             }));
 
-            console.log(`Deezer: Got ${genres.length} genre categories with radios, caching...`);
+            logger.debug(`Deezer: Got ${genres.length} genre categories with radios, caching...`);
             await this.setCache(cacheKey, JSON.stringify(genres));
             return genres;
         } catch (error: any) {
-            console.error("Deezer radios by genre error:", error.message);
+            logger.error("Deezer radios by genre error:", error.message);
             return [];
         }
     }
@@ -500,7 +501,7 @@ class DeezerService {
      */
     async getRadioTracks(radioId: string): Promise<DeezerPlaylist | null> {
         try {
-            console.log(`Deezer: Fetching radio ${radioId} tracks...`);
+            logger.debug(`Deezer: Fetching radio ${radioId} tracks...`);
 
             // First get radio info
             const infoResponse = await axios.get(`${DEEZER_API}/radio/${radioId}`, {
@@ -526,7 +527,7 @@ class DeezerService {
                 coverUrl: track.album?.cover_medium || track.album?.cover || null,
             }));
 
-            console.log(`Deezer: Fetched radio "${radioInfo.title}" with ${tracks.length} tracks`);
+            logger.debug(`Deezer: Fetched radio "${radioInfo.title}" with ${tracks.length} tracks`);
 
             return {
                 id: `radio-${radioId}`,
@@ -539,7 +540,7 @@ class DeezerService {
                 isPublic: true,
             };
         } catch (error: any) {
-            console.error("Deezer radio tracks error:", error.message);
+            logger.error("Deezer radio tracks error:", error.message);
             return null;
         }
     }
@@ -578,7 +579,7 @@ class DeezerService {
 
             return { playlists, radios };
         } catch (error: any) {
-            console.error("Deezer editorial content error:", error.message);
+            logger.error("Deezer editorial content error:", error.message);
             return { playlists: [], radios: [] };
         }
     }

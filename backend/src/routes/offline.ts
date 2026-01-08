@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
@@ -19,12 +20,12 @@ router.post("/albums/:id/download", async (req, res) => {
         const { quality } = downloadAlbumSchema.parse(req.body);
 
         // Get user's default quality if not specified
-        let selectedQuality = quality;
-        if (!selectedQuality) {
+        let selectedQuality: "original" | "high" | "medium" | "low" = quality || "medium";
+        if (!quality) {
             const settings = await prisma.userSettings.findUnique({
                 where: { userId },
             });
-            selectedQuality = (settings?.playbackQuality as any) || "medium";
+            selectedQuality = (settings?.playbackQuality as "original" | "high" | "medium" | "low") || "medium";
         }
 
         // Get album with tracks
@@ -103,7 +104,7 @@ router.post("/albums/:id/download", async (req, res) => {
                 .status(400)
                 .json({ error: "Invalid request", details: error.errors });
         }
-        console.error("Create download job error:", error);
+        logger.error("Create download job error:", error);
         res.status(500).json({ error: "Failed to create download job" });
     }
 });
@@ -145,7 +146,7 @@ router.post("/tracks/:id/complete", async (req, res) => {
 
         res.json(cachedTrack);
     } catch (error) {
-        console.error("Complete track download error:", error);
+        logger.error("Complete track download error:", error);
         res.status(500).json({ error: "Failed to complete download" });
     }
 });
@@ -209,7 +210,7 @@ router.get("/albums", async (req, res) => {
 
         res.json(albums);
     } catch (error) {
-        console.error("Get cached albums error:", error);
+        logger.error("Get cached albums error:", error);
         res.status(500).json({ error: "Failed to get cached albums" });
     }
 });
@@ -245,7 +246,7 @@ router.delete("/albums/:id", async (req, res) => {
             deletedCount: cachedTracks.length,
         });
     } catch (error) {
-        console.error("Delete cached album error:", error);
+        logger.error("Delete cached album error:", error);
         res.status(500).json({ error: "Failed to delete cached album" });
     }
 });
@@ -278,7 +279,7 @@ router.get("/stats", async (req, res) => {
             trackCount,
         });
     } catch (error) {
-        console.error("Get cache stats error:", error);
+        logger.error("Get cache stats error:", error);
         res.status(500).json({ error: "Failed to get cache stats" });
     }
 });

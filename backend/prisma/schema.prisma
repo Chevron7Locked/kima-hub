@@ -18,6 +18,7 @@ model User {
   twoFactorSecret        String? // TOTP secret (encrypted)
   twoFactorRecoveryCodes String? // Recovery codes (encrypted, comma-separated hashed codes)
   moodMixParams          Json? // Saved mood mix parameters for "Your Mood Mix"
+  tokenVersion           Int      @default(0) // Incremented on password change to invalidate tokens
   createdAt              DateTime @default(now())
 
   plays                Play[]
@@ -77,9 +78,10 @@ model SystemSettings {
 
   // === Download Services ===
   // Lidarr
-  lidarrEnabled Boolean @default(true)
-  lidarrUrl     String? @default("http://localhost:8686")
-  lidarrApiKey  String? // Encrypted
+  lidarrEnabled     Boolean @default(true)
+  lidarrUrl         String? @default("http://localhost:8686")
+  lidarrApiKey      String? // Encrypted
+  lidarrWebhookSecret String? // Encrypted - Shared secret for webhook verification
 
   // === AI Services ===
   // OpenAI (for future AI features)
@@ -91,6 +93,9 @@ model SystemSettings {
   // Fanart.tv (for high-quality images - optional)
   fanartEnabled Boolean @default(false)
   fanartApiKey  String? // Encrypted
+
+  // Last.fm (optional user override - app ships with default key)
+  lastfmApiKey  String? // Encrypted
 
   // === Media Services ===
   // Audiobookshelf
@@ -118,12 +123,15 @@ model SystemSettings {
   maxConcurrentDownloads Int @default(3)
   downloadRetryAttempts  Int @default(3)
   transcodeCacheMaxGb    Int @default(10) // Transcode cache size limit in GB
+  enrichmentConcurrency  Int @default(1)  // 1-5, number of parallel enrichment workers
+  audioAnalyzerWorkers   Int @default(2)  // 1-8, number of parallel audio analysis workers
+  soulseekConcurrentDownloads Int @default(4)  // 1-10, concurrent Soulseek downloads
 
   // === Download Preferences ===
   // Primary download source: "soulseek" (per-track) or "lidarr" (full albums)
-  downloadSource     String @default("soulseek")
-  // When soulseek is primary and fails: "none" (skip) or "lidarr" (download full album)
-  soulseekFallback   String @default("none")
+  downloadSource          String @default("soulseek")
+  // Fallback when primary source fails: "none" (skip), "lidarr" (full album), or "soulseek" (track-based)
+  primaryFailureFallback  String @default("none")
 
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
@@ -143,6 +151,13 @@ model Artist {
   enrichmentStatus     String                   @default("pending") // pending, enriching, completed, failed
   searchVector         Unsupported("tsvector")?
 
+  // User overrides (optional, takes display precedence)
+  displayName      String? // User-provided display name
+  userSummary      String? @db.Text // User-provided bio
+  userHeroUrl      String? // User-uploaded/linked image
+  userGenres       Json? // User-modified genres (array of strings)
+  hasUserOverrides Boolean @default(false) // Quick check flag
+
   albums      Album[]
   similarFrom SimilarArtist[] @relation("FromArtist")
   similarTo   SimilarArtist[] @relation("ToArtist")
@@ -151,6 +166,7 @@ model Artist {
   @@index([name])
   @@index([normalizedName])
   @@index([searchVector], type: Gin)
+  @@index([hasUserOverrides])
 }
 
 model Album {
@@ -158,7 +174,8 @@ model Album {
   rgMbid       String                   @unique // release group MBID
   artistId     String
   title        String
-  year         Int?
+  year         Int? // File metadata date (may be remaster)
+  originalYear Int? // Original release date from MusicBrainz
   coverUrl     String?
   primaryType  String // Album, EP, Single, Live, Compilation
   label        String? // Record label (from MusicBrainz)
@@ -167,6 +184,13 @@ model Album {
   location     AlbumLocation            @default(LIBRARY) // LIBRARY or DISCOVER
   searchVector Unsupported("tsvector")?
 
+  // User overrides (optional, takes display precedence)
+  displayTitle     String? // User-provided display title
+  displayYear      Int? // User-provided year
+  userCoverUrl     String? // User-uploaded/linked cover
+  userGenres       Json? // User-modified genres (array of strings)
+  hasUserOverrides Boolean @default(false) // Quick check flag
+
   artist Artist  @relation(fields: [artistId], references: [id], onDelete: Cascade)
   tracks Track[]
 
@@ -174,6 +198,7 @@ model Album {
   @@index([location])
   @@index([title])
   @@index([searchVector], type: Gin)
+  @@index([hasUserOverrides])
 }
 
 model Track {
@@ -189,6 +214,11 @@ model Track {
   filePath     String   @unique // Relative path: "Artist/Album/track.flac"
   fileModified DateTime // mtime for change detection
   fileSize     Int // File size in bytes
+
+  // User overrides (optional, takes display precedence)
+  displayTitle     String? // User-provided display title
+  displayTrackNo   Int? // User-provided track number
+  hasUserOverrides Boolean @default(false) // Quick check flag
 
   // === Audio Analysis (Essentia) ===
   // Rhythm
@@ -235,13 +265,14 @@ model Track {
   lastfmTags String[] // ["chill", "workout", "sad", "90s"]
 
   // Analysis Metadata
-  analysisStatus  String    @default("pending") // pending, processing, completed, failed
-  analysisVersion String? // Essentia version used
-  analysisMode    String? // 'standard' or 'enhanced'
-  analyzedAt      DateTime?
-  analysisError   String? // Error message if failed
-  analysisRetryCount Int @default(0) // Number of retry attempts
-  updatedAt       DateTime  @updatedAt
+  analysisStatus     String    @default("pending") // pending, processing, completed, failed
+  analysisStartedAt  DateTime? // When processing began (for timeout detection)
+  analysisVersion    String?   // Essentia version used
+  analysisMode       String?   // 'standard' or 'enhanced'
+  analyzedAt         DateTime?
+  analysisError      String?   // Error message if failed
+  analysisRetryCount Int       @default(0) // Number of retry attempts
+  updatedAt          DateTime  @updatedAt
 
   album           Album            @relation(fields: [albumId], references: [id], onDelete: Cascade)
   plays           Play[]
@@ -272,6 +303,7 @@ model Track {
   @@index([arousal])
   @@index([acousticness])
   @@index([instrumentalness])
+  @@index([hasUserOverrides])
 }
 
 // Transcoded file cache for audio streaming
@@ -479,6 +511,7 @@ model DownloadJob {
   @@index([startedAt])
   @@index([lidarrRef])
   @@index([artistMbid])
+  @@index([targetMbid])
 }
 
 model ListeningState {
@@ -640,6 +673,9 @@ model Audiobook {
   audioUrl       String // Audiobookshelf streaming URL
   libraryId      String? // Audiobookshelf library ID
 
+  // Full-text search
+  searchVector Unsupported("tsvector")?
+
   // Timestamps
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -649,6 +685,7 @@ model Audiobook {
   @@index([author])
   @@index([series])
   @@index([lastSyncedAt])
+  @@index([searchVector], type: Gin)
 }
 
 model PodcastRecommendation {
@@ -676,46 +713,49 @@ model PodcastRecommendation {
 // ============================================
 
 model Podcast {
-  id              String   @id @default(cuid())
-  feedUrl         String   @unique
+  id              String                   @id @default(cuid())
+  feedUrl         String                   @unique
   title           String
   author          String?
-  description     String?  @db.Text
-  imageUrl        String? // Original feed image URL
-  localCoverPath  String? // Local cached cover image path
-  itunesId        String?  @unique
+  description     String?                  @db.Text
+  imageUrl        String?                  // Original feed image URL
+  localCoverPath  String?                  // Local cached cover image path
+  itunesId        String?                  @unique
   language        String?
-  explicit        Boolean  @default(false)
-  episodeCount    Int      @default(0)
-  lastRefreshed   DateTime @default(now())
-  refreshInterval Int      @default(3600) // seconds (1 hour default)
-  autoRefresh     Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  explicit        Boolean                  @default(false)
+  episodeCount    Int                      @default(0)
+  lastRefreshed   DateTime                 @default(now())
+  refreshInterval Int                      @default(3600) // seconds (1 hour default)
+  autoRefresh     Boolean                  @default(true)
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  searchVector    Unsupported("tsvector")?
 
   episodes      PodcastEpisode[]
   subscriptions PodcastSubscription[]
 
   @@index([itunesId])
   @@index([lastRefreshed])
+  @@index([searchVector], type: Gin)
 }
 
 model PodcastEpisode {
-  id             String   @id @default(cuid())
+  id             String                   @id @default(cuid())
   podcastId      String
-  guid           String // RSS GUID (unique per feed)
+  guid           String                   // RSS GUID (unique per feed)
   title          String
-  description    String?  @db.Text
-  audioUrl       String // Direct MP3/audio URL from RSS
-  duration       Int      @default(0) // seconds
+  description    String?                  @db.Text
+  audioUrl       String                   // Direct MP3/audio URL from RSS
+  duration       Int                      @default(0) // seconds
   publishedAt    DateTime
   episodeNumber  Int?
   season         Int?
-  imageUrl       String? // Episode-specific image URL
-  localCoverPath String? // Local cached episode cover
-  fileSize       Int? // bytes
-  mimeType       String?  @default("audio/mpeg")
-  createdAt      DateTime @default(now())
+  imageUrl       String?                  // Episode-specific image URL
+  localCoverPath String?                  // Local cached episode cover
+  fileSize       Int?                     // bytes
+  mimeType       String?                  @default("audio/mpeg")
+  createdAt      DateTime                 @default(now())
+  searchVector   Unsupported("tsvector")?
 
   podcast   Podcast           @relation(fields: [podcastId], references: [id], onDelete: Cascade)
   progress  PodcastProgress[]
@@ -723,6 +763,7 @@ model PodcastEpisode {
 
   @@unique([podcastId, guid])
   @@index([podcastId, publishedAt])
+  @@index([searchVector], type: Gin)
 }
 
 // User podcast subscriptions
@@ -975,4 +1016,31 @@ model Notification {
   @@index([userId, cleared])
   @@index([userId, read])
   @@index([createdAt])
+}
+
+// ============================================
+// Enrichment Failure Tracking
+// ============================================
+
+model EnrichmentFailure {
+  id             String    @id @default(cuid())
+  entityType     String    // artist, track, audio
+  entityId       String    // Artist/Track ID
+  entityName     String?   // Display name
+  errorMessage   String?   // Human-readable error
+  errorCode      String?   // Machine-readable code
+  retryCount     Int       @default(0)
+  maxRetries     Int       @default(3)
+  firstFailedAt  DateTime  @default(now())
+  lastFailedAt   DateTime  @default(now())
+  skipped        Boolean   @default(false)
+  skippedAt      DateTime?
+  resolved       Boolean   @default(false)
+  resolvedAt     DateTime?
+  metadata       Json?     // Additional context (filePath, etc.)
+
+  @@unique([entityType, entityId])
+  @@index([entityType, resolved])
+  @@index([skipped])
+  @@index([lastFailedAt])
 }

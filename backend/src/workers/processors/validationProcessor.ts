@@ -1,4 +1,5 @@
 import { Job } from 'bull';
+import { logger } from "../../utils/logger";
 import { FileValidatorService } from '../../services/fileValidator';
 
 export interface ValidationJobData {
@@ -13,7 +14,7 @@ export interface ValidationJobResult {
 }
 
 export async function processValidation(job: Job<ValidationJobData>): Promise<ValidationJobResult> {
-  console.log(`[ValidationJob ${job.id}] Starting file validation`);
+  logger.debug(`[ValidationJob ${job.id}] Starting file validation`);
 
   await job.progress(0);
 
@@ -22,7 +23,7 @@ export async function processValidation(job: Job<ValidationJobData>): Promise<Va
 
   await job.progress(100);
 
-  console.log(`[ValidationJob ${job.id}] Validation complete: ${result.tracksRemoved} tracks removed`);
+  logger.debug(`[ValidationJob ${job.id}] Validation complete: ${result.tracksRemoved} tracks removed`);
 
   return result;
 }

@@ -19,6 +19,15 @@ interface MetadataEditorProps {
         rgMbid?: string;
         coverUrl?: string;
         heroUrl?: string;
+        // Original values for comparison (when user overrides exist)
+        _originalName?: string;
+        _originalBio?: string | null;
+        _originalGenres?: string[];
+        _originalHeroUrl?: string | null;
+        _originalTitle?: string;
+        _originalYear?: number | null;
+        _originalCoverUrl?: string | null;
+        _hasUserOverrides?: boolean;
     };
     onSave?: (updatedData: any) => void;
 }
@@ -36,7 +45,9 @@ export function MetadataEditor({
 }: MetadataEditorProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [isResetting, setIsResetting] = useState(false);
     const [formData, setFormData] = useState(currentData);
+    const hasOverrides = currentData._hasUserOverrides ?? false;
 
     const handleOpen = () => {
         setFormData(currentData);
@@ -46,6 +57,35 @@ export function MetadataEditor({
     const handleClose = () => {
         setIsOpen(false);
         setFormData(currentData);
+    };
+
+    const handleReset = async () => {
+        if (
+            !confirm(
+                "Reset all metadata to original values? This cannot be undone."
+            )
+        ) {
+            return;
+        }
+
+        setIsResetting(true);
+        try {
+            if (type === "artist") {
+                await api.resetArtistMetadata(id);
+            } else if (type === "album") {
+                await api.resetAlbumMetadata(id);
+            } else {
+                await api.resetTrackMetadata(id);
+            }
+
+            toast.success("Metadata reset to original values");
+            onSave?.(null);
+            setIsOpen(false);
+        } catch (error: any) {
+            toast.error(error.message || "Failed to reset metadata");
+        } finally {
+            setIsResetting(false);
+        }
     };
 
     const handleSave = async () => {
@@ -144,6 +184,24 @@ export function MetadataEditor({
                                     }
                                     className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none"
                                 />
+                                {type === "artist" &&
+                                    currentData._originalName &&
+                                    currentData._originalName !==
+                                        (formData.name || "") && (
+                                        <p className="mt-1 text-xs text-gray-500">
+                                            Original:{" "}
+                                            {currentData._originalName}
+                                        </p>
+                                    )}
+                                {type !== "artist" &&
+                                    currentData._originalTitle &&
+                                    currentData._originalTitle !==
+                                        (formData.title || "") && (
+                                        <p className="mt-1 text-xs text-gray-500">
+                                            Original:{" "}
+                                            {currentData._originalTitle}
+                                        </p>
+                                    )}
                             </div>
 
                             {/* Bio (Artist only) */}
@@ -160,6 +218,18 @@ export function MetadataEditor({
                                         rows={6}
                                         className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none resize-none"
                                     />
+                                    {currentData._originalBio &&
+                                        currentData._originalBio !==
+                                            (formData.bio || "") && (
+                                            <p className="mt-1 text-xs text-gray-500">
+                                                Original:{" "}
+                                                {currentData._originalBio.substring(
+                                                    0,
+                                                    100
+                                                )}
+                                                ...
+                                            </p>
+                                        )}
                                 </div>
                             )}
 
@@ -180,6 +250,14 @@ export function MetadataEditor({
                                         }
                                         className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none"
                                     />
+                                    {currentData._originalYear &&
+                                        currentData._originalYear !==
+                                            (formData.year || null) && (
+                                            <p className="mt-1 text-xs text-gray-500">
+                                                Original:{" "}
+                                                {currentData._originalYear}
+                                            </p>
+                                        )}
                                 </div>
                             )}
 
@@ -206,6 +284,21 @@ export function MetadataEditor({
                                     placeholder="Rock, Alternative, Indie"
                                     className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none"
                                 />
+                                {currentData._originalGenres &&
+                                    currentData._originalGenres.length > 0 &&
+                                    JSON.stringify(
+                                        currentData._originalGenres.sort()
+                                    ) !==
+                                        JSON.stringify(
+                                            (formData.genres || []).sort()
+                                        ) && (
+                                        <p className="mt-1 text-xs text-gray-500">
+                                            Original:{" "}
+                                            {currentData._originalGenres.join(
+                                                ", "
+                                            )}
+                                        </p>
+                                    )}
                             </div>
 
                             {/* MusicBrainz ID */}
@@ -268,6 +361,24 @@ export function MetadataEditor({
                                     placeholder="https://..."
                                     className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none text-sm"
                                 />
+                                {type === "artist" &&
+                                    currentData._originalHeroUrl &&
+                                    currentData._originalHeroUrl !==
+                                        (formData.heroUrl || "") && (
+                                        <p className="mt-1 text-xs text-gray-500 truncate">
+                                            Original:{" "}
+                                            {currentData._originalHeroUrl}
+                                        </p>
+                                    )}
+                                {type === "album" &&
+                                    currentData._originalCoverUrl &&
+                                    currentData._originalCoverUrl !==
+                                        (formData.coverUrl || "") && (
+                                        <p className="mt-1 text-xs text-gray-500 truncate">
+                                            Original:{" "}
+                                            {currentData._originalCoverUrl}
+                                        </p>
+                                    )}
                                 {/* Image Preview */}
                                 {(formData.heroUrl || formData.coverUrl) && (
                                     <div className="mt-2">
@@ -295,6 +406,17 @@ export function MetadataEditor({
 
                         {/* Footer */}
                         <div className="flex items-center justify-end gap-3 p-6 border-t border-white/10">
+                            {hasOverrides && (
+                                <button
+                                    onClick={handleReset}
+                                    disabled={isSaving || isResetting}
+                                    className="px-6 py-2 rounded-full bg-red-500/20 hover:bg-red-500/30 text-red-400 font-bold transition-all border border-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {isResetting
+                                        ? "Resetting..."
+                                        : "Reset to Original"}
+                                </button>
+                            )}
                             <button
                                 onClick={handleClose}
                                 className="px-6 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white font-bold transition-all"

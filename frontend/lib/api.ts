@@ -664,6 +664,21 @@ class ApiClient {
         });
     }
 
+    async cleanupStaleJobs() {
+        return this.request<{
+            success: boolean;
+            cleaned: {
+                discoveryBatches: { cleaned: number; ids: string[] };
+                downloadJobs: { cleaned: number; ids: string[] };
+                spotifyImportJobs: { cleaned: number; ids: string[] };
+                bullQueues: { cleaned: number; queues: string[] };
+            };
+            totalCleaned: number;
+        }>("/settings/cleanup-stale-jobs", {
+            method: "POST",
+        });
+    }
+
     // System Settings Tests
     async testLidarr(url: string, apiKey: string) {
         return this.request<any>("/system-settings/test-lidarr", {
@@ -686,10 +701,10 @@ class ApiClient {
         });
     }
 
-    async testLastfm(apiKey: string, apiSecret: string) {
+    async testLastfm(apiKey: string) {
         return this.request<any>("/system-settings/test-lastfm", {
             method: "POST",
-            body: JSON.stringify({ apiKey, apiSecret }),
+            body: JSON.stringify({ lastfmApiKey: apiKey }),
         });
     }
 
@@ -1347,6 +1362,20 @@ class ApiClient {
         );
     }
 
+    async syncLibraryEnrichment() {
+        return this.request<{
+            message: string;
+            description: string;
+            result: {
+                artists: number;
+                tracks: number;
+                audioQueued: number;
+            };
+        }>("/enrichment/sync", {
+            method: "POST",
+        });
+    }
+
     async getEnrichmentProgress() {
         return this.request<{
             artists: {
@@ -1421,6 +1450,27 @@ class ApiClient {
             method: "PUT",
             body: JSON.stringify(data),
         });
+    }
+
+    async resetArtistMetadata(artistId: string) {
+        return this.request<{ message: string; artist: any }>(
+            `/enrichment/artists/${artistId}/reset`,
+            { method: "POST" }
+        );
+    }
+
+    async resetAlbumMetadata(albumId: string) {
+        return this.request<{ message: string; album: any }>(
+            `/enrichment/albums/${albumId}/reset`,
+            { method: "POST" }
+        );
+    }
+
+    async resetTrackMetadata(trackId: string) {
+        return this.request<{ message: string; track: any }>(
+            `/enrichment/tracks/${trackId}/reset`,
+            { method: "POST" }
+        );
     }
 
     // Homepage

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { z } from "zod";
 import { spotifyService } from "../services/spotify";
@@ -51,7 +52,7 @@ router.post("/parse", async (req, res) => {
             url: `https://open.spotify.com/playlist/${parsed.id}`,
         });
     } catch (error: any) {
-        console.error("Spotify parse error:", error);
+        logger.error("Spotify parse error:", error);
         if (error.name === "ZodError") {
             return res.status(400).json({ error: "Invalid request body" });
         }
@@ -67,7 +68,7 @@ router.post("/preview", async (req, res) => {
     try {
         const { url } = parseUrlSchema.parse(req.body);
 
-        console.log(`[Playlist Import] Generating preview for: ${url}`);
+        logger.debug(`[Playlist Import] Generating preview for: ${url}`);
 
         // Detect if it's a Deezer URL
         if (url.includes("deezer.com")) {
@@ -94,7 +95,7 @@ router.post("/preview", async (req, res) => {
                     deezerPlaylist
                 );
 
-            console.log(
+            logger.debug(
                 `[Playlist Import] Deezer preview generated: ${preview.summary.total} tracks, ${preview.summary.inLibrary} in library`
             );
             res.json(preview);
@@ -102,13 +103,13 @@ router.post("/preview", async (req, res) => {
             // Handle Spotify URL
             const preview = await spotifyImportService.generatePreview(url);
 
-            console.log(
+            logger.debug(
                 `[Spotify Import] Preview generated: ${preview.summary.total} tracks, ${preview.summary.inLibrary} in library`
             );
             res.json(preview);
         }
     } catch (error: any) {
-        console.error("Playlist preview error:", error);
+        logger.error("Playlist preview error:", error);
         if (error.name === "ZodError") {
             return res.status(400).json({ error: "Invalid request body" });
         }
@@ -124,6 +125,9 @@ router.post("/preview", async (req, res) => {
  */
 router.post("/import", async (req, res) => {
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const { spotifyPlaylistId, url, playlistName, albumMbidsToDownload } =
             importSchema.parse(req.body);
         const userId = req.user.id;
@@ -155,10 +159,10 @@ router.post("/import", async (req, res) => {
             preview = await spotifyImportService.generatePreview(effectiveUrl);
         }
 
-        console.log(
+        logger.debug(
             `[Spotify Import] Starting import for user ${userId}: ${playlistName}`
         );
-        console.log(
+        logger.debug(
             `[Spotify Import] Downloading ${albumMbidsToDownload.length} albums`
         );
 
@@ -176,7 +180,7 @@ router.post("/import", async (req, res) => {
             message: "Import started",
         });
     } catch (error: any) {
-        console.error("Spotify import error:", error);
+        logger.error("Spotify import error:", error);
         if (error.name === "ZodError") {
             return res.status(400).json({ error: "Invalid request body" });
         }
@@ -192,6 +196,9 @@ router.post("/import", async (req, res) => {
  */
 router.get("/import/:jobId/status", async (req, res) => {
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const { jobId } = req.params;
         const userId = req.user.id;
 
@@ -209,7 +216,7 @@ router.get("/import/:jobId/status", async (req, res) => {
 
         res.json(job);
     } catch (error: any) {
-        console.error("Spotify job status error:", error);
+        logger.error("Spotify job status error:", error);
         res.status(500).json({
             error: error.message || "Failed to get job status",
         });
@@ -222,11 +229,14 @@ router.get("/import/:jobId/status", async (req, res) => {
  */
 router.get("/imports", async (req, res) => {
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const userId = req.user.id;
         const jobs = await spotifyImportService.getUserJobs(userId);
         res.json(jobs);
     } catch (error: any) {
-        console.error("Spotify imports error:", error);
+        logger.error("Spotify imports error:", error);
         res.status(500).json({
             error: error.message || "Failed to get imports",
         });
@@ -240,6 +250,7 @@ router.get("/imports", async (req, res) => {
 router.post("/import/:jobId/refresh", async (req, res) => {
     try {
         const { jobId } = req.params;
+        if (!req.user) return res.status(401).json({ error: "Unauthorized" });
         const userId = req.user.id;
 
         const job = await spotifyImportService.getJob(jobId);
@@ -265,7 +276,7 @@ router.post("/import/:jobId/refresh", async (req, res) => {
             total: result.total,
         });
     } catch (error: any) {
-        console.error("Spotify refresh error:", error);
+        logger.error("Spotify refresh error:", error);
         res.status(500).json({
             error: error.message || "Failed to refresh tracks",
         });
@@ -279,7 +290,7 @@ router.post("/import/:jobId/refresh", async (req, res) => {
 router.post("/import/:jobId/cancel", async (req, res) => {
     try {
         const { jobId } = req.params;
-        const userId = req.user.id;
+        const userId = req.user!.id;
 
         const job = await spotifyImportService.getJob(jobId);
         if (!job) {
@@ -303,7 +314,7 @@ router.post("/import/:jobId/cancel", async (req, res) => {
             tracksMatched: result.tracksMatched,
         });
     } catch (error: any) {
-        console.error("Spotify cancel error:", error);
+        logger.error("Spotify cancel error:", error);
         res.status(500).json({
             error: error.message || "Failed to cancel import",
         });
@@ -324,7 +335,7 @@ router.get("/import/session-log", async (req, res) => {
             content: log,
         });
     } catch (error: any) {
-        console.error("Session log error:", error);
+        logger.error("Session log error:", error);
         res.status(500).json({
             error: error.message || "Failed to read session log",
         });

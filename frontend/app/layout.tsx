@@ -8,6 +8,7 @@ import { ConditionalAudioProvider } from "@/components/providers/ConditionalAudi
 import { AuthenticatedLayout } from "@/components/layout/AuthenticatedLayout";
 import { QueryProvider } from "@/lib/query-client";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
+import { GlobalErrorBoundary } from "@/components/providers/GlobalErrorBoundary";
 
 const montserrat = Montserrat({
     weight: ["300", "400", "500", "600", "700", "800"],
@@ -55,20 +56,22 @@ export default function RootLayout({
                 className={`${montserrat.variable} antialiased`}
                 style={{ fontFamily: "var(--font-montserrat)" }}
             >
-                <ServiceWorkerRegistration />
-                <AuthProvider>
-                    <QueryProvider>
-                        <DownloadProvider>
-                            <ConditionalAudioProvider>
-                                <ToastProvider>
-                                    <AuthenticatedLayout>
-                                        {children}
-                                    </AuthenticatedLayout>
-                                </ToastProvider>
-                            </ConditionalAudioProvider>
-                        </DownloadProvider>
-                    </QueryProvider>
-                </AuthProvider>
+                <GlobalErrorBoundary>
+                    <ServiceWorkerRegistration />
+                    <AuthProvider>
+                        <QueryProvider>
+                            <DownloadProvider>
+                                <ConditionalAudioProvider>
+                                    <ToastProvider>
+                                        <AuthenticatedLayout>
+                                            {children}
+                                        </AuthenticatedLayout>
+                                    </ToastProvider>
+                                </ConditionalAudioProvider>
+                            </DownloadProvider>
+                        </QueryProvider>
+                    </AuthProvider>
+                </GlobalErrorBoundary>
             </body>
         </html>
     );

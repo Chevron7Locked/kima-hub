@@ -16,6 +16,7 @@ import {
     Pause,
     Trash2,
     Shuffle,
+    Eye,
     EyeOff,
     ListPlus,
     ListMusic,
@@ -195,10 +196,18 @@ export default function PlaylistDetailPage() {
             } else {
                 await api.hidePlaylist(playlistId);
             }
+
+            // Update local state immediately
+            queryClient.setQueryData(["playlist", playlistId], (old: any) => ({
+                ...old,
+                isHidden: !playlist.isHidden,
+            }));
+
             // Dispatch event to update sidebar and other components
             window.dispatchEvent(
                 new CustomEvent("playlist-updated", { detail: { playlistId } })
             );
+
             // Optionally navigate away if hiding
             if (!playlist.isHidden) {
                 router.push("/playlists");
@@ -532,7 +541,11 @@ export default function PlaylistDetailPage() {
                                 : "Hide playlist"
                         }
                     >
-                        <EyeOff className="w-5 h-5" />
+                        {playlist.isHidden ? (
+                            <Eye className="w-5 h-5" />
+                        ) : (
+                            <EyeOff className="w-5 h-5" />
+                        )}
                     </button>
 
                     {/* Delete Button */}

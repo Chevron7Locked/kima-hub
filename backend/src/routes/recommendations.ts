@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { lastFmService } from "../services/lastfm";
@@ -93,7 +94,7 @@ router.get("/for-you", async (req, res) => {
         });
         const ownedArtistIds = new Set(ownedArtists.map((a) => a.artistId));
 
-        console.log(
+        logger.debug(
             `Filtering recommendations: ${ownedArtistIds.size} owned artists to exclude`
         );
 
@@ -158,11 +159,11 @@ router.get("/for-you", async (req, res) => {
             };
         });
 
-        console.log(
+        logger.debug(
             `Recommendations: Found ${artistsWithMetadata.length} new artists`
         );
         artistsWithMetadata.forEach((a) => {
-            console.log(
+            logger.debug(
                 `  ${a.name}: coverArt=${a.coverArt ? "YES" : "NO"}, albums=${
                     a.albumCount
                 }`
@@ -171,7 +172,7 @@ router.get("/for-you", async (req, res) => {
 
         res.json({ artists: artistsWithMetadata });
     } catch (error) {
-        console.error("Get recommendations for you error:", error);
+        logger.error("Get recommendations for you error:", error);
         res.status(500).json({ error: "Failed to get recommendations" });
     }
 });
@@ -244,7 +245,7 @@ router.get("/", async (req, res) => {
             recommendations,
         });
     } catch (error) {
-        console.error("Get recommendations error:", error);
+        logger.error("Get recommendations error:", error);
         res.status(500).json({ error: "Failed to get recommendations" });
     }
 });
@@ -363,7 +364,7 @@ router.get("/albums", async (req, res) => {
             recommendations,
         });
     } catch (error) {
-        console.error("Get album recommendations error:", error);
+        logger.error("Get album recommendations error:", error);
         res.status(500).json({
             error: "Failed to get album recommendations",
         });
@@ -459,7 +460,7 @@ router.get("/tracks", async (req, res) => {
             recommendations,
         });
     } catch (error) {
-        console.error("Get track recommendations error:", error);
+        logger.error("Get track recommendations error:", error);
         res.status(500).json({
             error: "Failed to get track recommendations",
         });

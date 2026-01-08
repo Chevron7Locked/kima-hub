@@ -1,4 +1,5 @@
 import Bull from "bull";
+import { logger } from "../utils/logger";
 import { config } from "../config";
 
 // Parse Redis URL for Bull configuration
@@ -33,4 +34,4 @@ export const analysisQueue = new Bull("audio-analysis", {
 export const queues = [scanQueue, discoverQueue, imageQueue, validationQueue, analysisQueue];
 
 // Log queue initialization
-console.log("Bull queues initialized");
+logger.debug("Bull queues initialized");

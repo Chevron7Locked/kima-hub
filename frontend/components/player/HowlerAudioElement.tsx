@@ -6,6 +6,7 @@ import { useAudioControls } from "@/lib/audio-controls-context";
 import { api } from "@/lib/api";
 import { howlerEngine } from "@/lib/howler-engine";
 import { audioSeekEmitter } from "@/lib/audio-seek-emitter";
+import { dispatchQueryEvent } from "@/lib/query-events";
 import {
     useEffect,
     useLayoutEffect,
@@ -71,7 +72,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
     } = useAudioPlayback();
 
     // Controls context
-    const { pause, next } = useAudioControls();
+    const { pause, next, nextPodcastEpisode } = useAudioControls();
 
     // Refs
     const lastTrackIdRef = useRef<string | null>(null);
@@ -130,8 +131,12 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                 savePodcastProgress(true);
             }
 
-            // Handle track advancement based on repeat mode
-            if (playbackType === "track") {
+            // Handle track advancement based on playback type
+            if (playbackType === "podcast") {
+                nextPodcastEpisode(); // Auto-advance to next episode
+            } else if (playbackType === "audiobook") {
+                pause();
+            } else if (playbackType === "track") {
                 if (repeatMode === "one") {
                     howlerEngine.seek(0);
                     howlerEngine.play();
@@ -208,7 +213,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             howlerEngine.off("play", handlePlay);
             howlerEngine.off("pause", handlePause);
         };
-    }, [playbackType, currentTrack, currentAudiobook, currentPodcast, repeatMode, next, pause, setCurrentTimeFromEngine, setDuration, setIsPlaying, queue, setCurrentTrack, setCurrentAudiobook, setCurrentPodcast, setPlaybackType]);
+    }, [playbackType, currentTrack, currentAudiobook, currentPodcast, repeatMode, next, nextPodcastEpisode, pause, setCurrentTimeFromEngine, setDuration, setIsPlaying, queue, setCurrentTrack, setCurrentAudiobook, setCurrentPodcast, setPlaybackType]);
 
     // Save audiobook progress
     const saveAudiobookProgress = useCallback(
@@ -245,6 +250,8 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                         lastPlayedAt: new Date(),
                     },
                 });
+                
+                dispatchQueryEvent("audiobook-progress-updated");
             } catch (err) {
                 console.error(
                     "[HowlerAudioElement] Failed to save audiobook progress:",
@@ -277,6 +284,8 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                     duration,
                     isFinished
                 );
+                
+                dispatchQueryEvent("podcast-progress-updated");
             } catch (err) {
                 console.error(
                     "[HowlerAudioElement] Failed to save podcast progress:",

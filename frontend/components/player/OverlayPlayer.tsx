@@ -17,13 +17,16 @@ import {
     Repeat1,
     AudioWaveform,
     Loader2,
+    RotateCcw,
+    RotateCw,
 } from "lucide-react";
-import { formatTime } from "@/utils/formatTime";
+import { formatTime, clampTime, formatTimeRemaining } from "@/utils/formatTime";
 import { cn } from "@/utils/cn";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { toast } from "sonner";
 import { VibeComparisonArt } from "./VibeOverlay";
 import { useAudioState } from "@/lib/audio-state-context";
+import { SeekSlider } from "./SeekSlider";
 
 export function OverlayPlayer() {
     const {
@@ -46,6 +49,8 @@ export function OverlayPlayer() {
         previous,
         returnToPreviousMode,
         seek,
+        skipForward,
+        skipBackward,
         toggleShuffle,
         toggleRepeat,
         setUpcoming,
@@ -53,14 +58,14 @@ export function OverlayPlayer() {
         stopVibeMode,
         duration: playbackDuration,
     } = useAudio();
-    
+
     // Get current track's audio features for vibe comparison
     const currentTrackFeatures = queue[currentIndex]?.audioFeatures || null;
-    
+
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;
-    
+
     // Swipe state for track skipping
     const touchStartX = useRef<number | null>(null);
     const [swipeOffset, setSwipeOffset] = useState(0);
@@ -85,27 +90,35 @@ export function OverlayPlayer() {
     if (!currentTrack && !currentAudiobook && !currentPodcast) return null;
 
     const displayTime = (() => {
-        if (currentTime > 0) return currentTime;
-        if (playbackType === "audiobook" && currentAudiobook?.progress?.currentTime) {
-            return currentAudiobook.progress.currentTime;
+        let time = currentTime;
+        
+        if (time <= 0) {
+            if (
+                playbackType === "audiobook" &&
+                currentAudiobook?.progress?.currentTime
+            ) {
+                time = currentAudiobook.progress.currentTime;
+            } else if (
+                playbackType === "podcast" &&
+                currentPodcast?.progress?.currentTime
+            ) {
+                time = currentPodcast.progress.currentTime;
+            }
         }
-        if (playbackType === "podcast" && currentPodcast?.progress?.currentTime) {
-            return currentPodcast.progress.currentTime;
-        }
-        return currentTime;
+        
+        // CRITICAL: Clamp to duration to prevent display of invalid times
+        return clampTime(time, duration);
     })();
 
-    const progress = duration > 0 ? Math.min(100, Math.max(0, (displayTime / duration) * 100)) : 0;
+    const progress =
+        duration > 0
+            ? Math.min(100, Math.max(0, (displayTime / duration) * 100))
+            : 0;
     const seekEnabled = canSeek;
     const canSkip = playbackType === "track";
+    const hasMedia = !!(currentTrack || currentAudiobook || currentPodcast);
 
-    const handleSeek = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
-        if (!canSeek) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-        const x = clientX - rect.left;
-        const percentage = x / rect.width;
-        const time = percentage * duration;
+    const handleSeek = (time: number) => {
         seek(time);
     };
 
@@ -122,7 +135,7 @@ export function OverlayPlayer() {
 
     const handleTouchEnd = () => {
         if (touchStartX.current === null) return;
-        
+
         if (canSkip) {
             if (swipeOffset > 60) {
                 previous();
@@ -130,7 +143,7 @@ export function OverlayPlayer() {
                 next();
             }
         }
-        
+
         setSwipeOffset(0);
         touchStartX.current = null;
     };
@@ -138,17 +151,21 @@ export function OverlayPlayer() {
     // Handle Vibe toggle
     const handleVibeToggle = async () => {
         if (!currentTrack?.id) return;
-        
+
         if (vibeMode) {
             stopVibeMode();
             toast.success("Vibe mode off");
             return;
         }
-        
+
         setIsVibeLoading(true);
         try {
-            const response = await api.getRadioTracks("vibe", currentTrack.id, 50);
-            
+            const response = await api.getRadioTracks(
+                "vibe",
+                currentTrack.id,
+                50
+            );
+
             if (response.tracks && response.tracks.length > 0) {
                 const sf = (response as any).sourceFeatures;
                 const sourceFeatures = {
@@ -170,10 +187,13 @@ export function OverlayPlayer() {
                     moodElectronic: sf?.moodElectronic,
                 };
 
-                const queueIds = [currentTrack.id, ...response.tracks.map((t: any) => t.id)];
+                const queueIds = [
+                    currentTrack.id,
+                    ...response.tracks.map((t: any) => t.id),
+                ];
                 startVibeMode(sourceFeatures, queueIds);
                 setUpcoming(response.tracks, true); // preserveOrder=true for vibe mode
-                
+
                 toast.success(`Vibe mode on`, {
                     description: `${response.tracks.length} matching tracks queued`,
                     icon: <AudioWaveform className="w-4 h-4 text-[#f5c518]" />,
@@ -203,8 +223,12 @@ export function OverlayPlayer() {
         coverUrl = currentTrack.album?.coverArt
             ? api.getCoverArtUrl(currentTrack.album.coverArt, 500)
             : null;
-        albumLink = currentTrack.album?.id ? `/album/${currentTrack.album.id}` : null;
-        artistLink = currentTrack.artist?.id ? `/artist/${currentTrack.artist.mbid || currentTrack.artist.id}` : null;
+        albumLink = currentTrack.album?.id
+            ? `/album/${currentTrack.album.id}`
+            : null;
+        artistLink = currentTrack.artist?.id
+            ? `/artist/${currentTrack.artist.mbid || currentTrack.artist.id}`
+            : null;
         mediaLink = albumLink;
     } else if (playbackType === "audiobook" && currentAudiobook) {
         title = currentAudiobook.title;
@@ -224,16 +248,16 @@ export function OverlayPlayer() {
     }
 
     return (
-        <div 
+        <div
             className="fixed inset-0 bg-gradient-to-b from-[#1a1a2e] via-[#121218] to-[#000000] z-[9999] flex flex-col overflow-hidden"
             onTouchStart={isMobileOrTablet ? handleTouchStart : undefined}
             onTouchMove={isMobileOrTablet ? handleTouchMove : undefined}
             onTouchEnd={isMobileOrTablet ? handleTouchEnd : undefined}
         >
             {/* Header with close button */}
-            <div 
+            <div
                 className="flex items-center justify-between px-4 py-3 flex-shrink-0"
-                style={{ paddingTop: 'calc(12px + env(safe-area-inset-top))' }}
+                style={{ paddingTop: "calc(12px + env(safe-area-inset-top))" }}
             >
                 <button
                     onClick={(e) => {
@@ -246,38 +270,39 @@ export function OverlayPlayer() {
                 >
                     <ChevronDown className="w-7 h-7" />
                 </button>
-                
                 {/* Now Playing indicator */}
                 <span className="text-xs text-gray-500 uppercase tracking-widest font-medium">
                     Now Playing
                 </span>
-                
                 <div className="w-11" /> {/* Spacer for centering */}
             </div>
 
             {/* Main Content - Portrait vs Landscape */}
             <div className="flex-1 flex flex-col landscape:flex-row items-center justify-center px-6 pb-6 landscape:px-8 landscape:gap-8 overflow-hidden">
-                
                 {/* Artwork Section */}
-                <div 
-                    className="w-full max-w-[280px] landscape:max-w-[240px] landscape:w-[240px] aspect-square flex-shrink-0 mb-6 landscape:mb-0 relative"
-                    style={{ 
+                <div
+                    className="w-full max-w-[320px] landscape:max-w-[240px] landscape:w-[240px] aspect-square flex-shrink-0 mb-6 landscape:mb-0 relative"
+                    style={{
                         transform: `translateX(${swipeOffset * 0.5}px)`,
-                        opacity: 1 - Math.abs(swipeOffset) / 200
+                        opacity: 1 - Math.abs(swipeOffset) / 200,
                     }}
                 >
                     {/* Glow effect */}
-                    <div className={cn(
-                        "absolute inset-0 rounded-2xl blur-2xl opacity-50",
-                        vibeMode 
-                            ? "bg-gradient-to-br from-brand/30 via-transparent to-purple-500/30" 
-                            : "bg-gradient-to-br from-[#f5c518]/20 via-transparent to-[#a855f7]/20"
-                    )} />
-                    
+                    <div
+                        className={cn(
+                            "absolute inset-0 rounded-2xl blur-2xl opacity-50",
+                            vibeMode
+                                ? "bg-gradient-to-br from-brand/30 via-transparent to-purple-500/30"
+                                : "bg-gradient-to-br from-[#f5c518]/20 via-transparent to-[#a855f7]/20"
+                        )}
+                    />
+
                     {/* Album art OR Vibe Comparison when in vibe mode */}
                     <div className="relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-2xl overflow-hidden shadow-2xl">
                         {vibeMode && currentTrackFeatures ? (
-                            <VibeComparisonArt currentTrackFeatures={currentTrackFeatures} />
+                            <VibeComparisonArt
+                                currentTrackFeatures={currentTrackFeatures}
+                            />
                         ) : coverUrl ? (
                             <Image
                                 key={coverUrl}
@@ -295,20 +320,24 @@ export function OverlayPlayer() {
                             </div>
                         )}
                     </div>
-                    
+
                     {/* Swipe hint indicators */}
-                    {canSkip && isMobileOrTablet && Math.abs(swipeOffset) > 20 && (
-                        <div className={cn(
-                            "absolute top-1/2 -translate-y-1/2 text-white/60",
-                            swipeOffset > 0 ? "-left-8" : "-right-8"
-                        )}>
-                            {swipeOffset > 0 ? (
-                                <SkipBack className="w-6 h-6" />
-                            ) : (
-                                <SkipForward className="w-6 h-6" />
-                            )}
-                        </div>
-                    )}
+                    {canSkip &&
+                        isMobileOrTablet &&
+                        Math.abs(swipeOffset) > 20 && (
+                            <div
+                                className={cn(
+                                    "absolute top-1/2 -translate-y-1/2 text-white/60",
+                                    swipeOffset > 0 ? "-left-8" : "-right-8"
+                                )}
+                            >
+                                {swipeOffset > 0 ? (
+                                    <SkipBack className="w-6 h-6" />
+                                ) : (
+                                    <SkipForward className="w-6 h-6" />
+                                )}
+                            </div>
+                        )}
                 </div>
 
                 {/* Info & Controls Section */}
@@ -316,7 +345,11 @@ export function OverlayPlayer() {
                     {/* Track Info */}
                     <div className="text-center landscape:text-left mb-6">
                         {mediaLink ? (
-                            <Link href={mediaLink} onClick={returnToPreviousMode} className="block hover:underline">
+                            <Link
+                                href={mediaLink}
+                                onClick={returnToPreviousMode}
+                                className="block hover:underline"
+                            >
                                 <h1 className="text-xl font-bold text-white mb-1 truncate">
                                     {title}
                                 </h1>
@@ -327,7 +360,11 @@ export function OverlayPlayer() {
                             </h1>
                         )}
                         {artistLink ? (
-                            <Link href={artistLink} onClick={returnToPreviousMode} className="block hover:underline">
+                            <Link
+                                href={artistLink}
+                                onClick={returnToPreviousMode}
+                                className="block hover:underline"
+                            >
                                 <p className="text-base text-gray-400 truncate">
                                     {subtitle}
                                 </p>
@@ -341,41 +378,50 @@ export function OverlayPlayer() {
 
                     {/* Progress Bar */}
                     <div className="mb-6">
-                        <div
-                            className={cn(
-                                "w-full h-1 bg-white/20 rounded-full mb-2",
-                                seekEnabled ? "cursor-pointer" : "cursor-not-allowed"
-                            )}
-                            onClick={seekEnabled ? handleSeek : undefined}
-                            title={!canSeek 
-                                ? downloadProgress !== null 
-                                    ? `Downloading ${downloadProgress}%...`
-                                    : "Downloading..." 
-                                : "Tap to seek"}
-                        >
-                            <div
-                                className={cn(
-                                    "h-full rounded-full transition-all duration-150",
-                                    seekEnabled 
-                                        ? "bg-gradient-to-r from-[#f5c518] to-[#a855f7]" 
-                                        : "bg-white/40"
-                                )}
-                                style={{ width: `${progress}%` }}
-                            />
-                        </div>
+                        <SeekSlider
+                            progress={progress}
+                            duration={duration}
+                            currentTime={displayTime}
+                            onSeek={handleSeek}
+                            canSeek={canSeek}
+                            hasMedia={hasMedia}
+                            downloadProgress={downloadProgress}
+                            variant="overlay"
+                            showHandle={false}
+                            className="mb-2"
+                        />
                         <div className="flex justify-between text-xs text-gray-500 font-medium tabular-nums">
                             <span>{formatTime(displayTime)}</span>
-                            <span>{formatTime(duration)}</span>
+                            <span>
+                                {playbackType === "podcast" || playbackType === "audiobook"
+                                    ? formatTimeRemaining(Math.max(0, duration - displayTime))
+                                    : formatTime(duration)}
+                            </span>
                         </div>
                     </div>
 
                     {/* Main Controls */}
                     <div className="flex items-center justify-center gap-6 mb-6">
+                        {/* Skip -30s (for audiobooks/podcasts) */}
+                        {!canSkip && (
+                            <button
+                                onClick={() => skipBackward(30)}
+                                className="text-white/80 hover:text-white transition-all hover:scale-110 relative"
+                                title="Rewind 30 seconds"
+                            >
+                                <RotateCcw className="w-7 h-7" />
+                                <span className="absolute text-[9px] font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                                    30
+                                </span>
+                            </button>
+                        )}
+
                         <button
                             onClick={previous}
                             className={cn(
                                 "text-white/80 hover:text-white transition-all hover:scale-110",
-                                !canSkip && "opacity-30 cursor-not-allowed hover:scale-100"
+                                !canSkip &&
+                                    "opacity-30 cursor-not-allowed hover:scale-100"
                             )}
                             disabled={!canSkip}
                             title={canSkip ? "Previous" : "Skip only for music"}
@@ -399,13 +445,28 @@ export function OverlayPlayer() {
                             onClick={next}
                             className={cn(
                                 "text-white/80 hover:text-white transition-all hover:scale-110",
-                                !canSkip && "opacity-30 cursor-not-allowed hover:scale-100"
+                                !canSkip &&
+                                    "opacity-30 cursor-not-allowed hover:scale-100"
                             )}
                             disabled={!canSkip}
                             title={canSkip ? "Next" : "Skip only for music"}
                         >
                             <SkipForward className="w-8 h-8" />
                         </button>
+
+                        {/* Skip +30s (for audiobooks/podcasts) */}
+                        {!canSkip && (
+                            <button
+                                onClick={() => skipForward(30)}
+                                className="text-white/80 hover:text-white transition-all hover:scale-110 relative"
+                                title="Forward 30 seconds"
+                            >
+                                <RotateCw className="w-7 h-7" />
+                                <span className="absolute text-[9px] font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                                    30
+                                </span>
+                            </button>
+                        )}
                     </div>
 
                     {/* Secondary Controls */}
@@ -437,7 +498,13 @@ export function OverlayPlayer() {
                                     ? "text-[#f5c518]"
                                     : "text-gray-500 hover:text-white"
                             )}
-                            title={repeatMode === "one" ? "Repeat One" : repeatMode === "all" ? "Repeat All" : "Repeat Off"}
+                            title={
+                                repeatMode === "one"
+                                    ? "Repeat One"
+                                    : repeatMode === "all"
+                                    ? "Repeat All"
+                                    : "Repeat Off"
+                            }
                         >
                             {repeatMode === "one" ? (
                                 <Repeat1 className="w-5 h-5" />
@@ -457,7 +524,11 @@ export function OverlayPlayer() {
                                     ? "text-[#f5c518]"
                                     : "text-gray-500 hover:text-[#f5c518]"
                             )}
-                            title={vibeMode ? "Turn off vibe mode" : "Match this vibe"}
+                            title={
+                                vibeMode
+                                    ? "Turn off vibe mode"
+                                    : "Match this vibe"
+                            }
                         >
                             {isVibeLoading ? (
                                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -468,9 +539,9 @@ export function OverlayPlayer() {
                     </div>
                 </div>
             </div>
-            
+
             {/* Safe area padding at bottom */}
-            <div style={{ height: 'env(safe-area-inset-bottom)' }} />
+            <div style={{ height: "env(safe-area-inset-bottom)" }} />
         </div>
     );
 }

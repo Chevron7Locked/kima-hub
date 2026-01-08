@@ -19,6 +19,7 @@ CREATE TABLE "User" (
     "twoFactorSecret" TEXT,
     "twoFactorRecoveryCodes" TEXT,
     "moodMixParams" JSONB,
+    "tokenVersion" INTEGER NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
@@ -78,7 +79,7 @@ CREATE TABLE "SystemSettings" (
     "downloadRetryAttempts" INTEGER NOT NULL DEFAULT 3,
     "transcodeCacheMaxGb" INTEGER NOT NULL DEFAULT 10,
     "downloadSource" TEXT NOT NULL DEFAULT 'soulseek',
-    "soulseekFallback" TEXT NOT NULL DEFAULT 'none',
+    "primaryFailureFallback" TEXT NOT NULL DEFAULT 'none',
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -825,6 +826,9 @@ CREATE INDEX "DownloadJob_lidarrRef_idx" ON "DownloadJob"("lidarrRef");
 
 -- CreateIndex
 CREATE INDEX "DownloadJob_artistMbid_idx" ON "DownloadJob"("artistMbid");
+
+-- CreateIndex
+CREATE INDEX "DownloadJob_targetMbid_idx" ON "DownloadJob"("targetMbid");
 
 -- CreateIndex
 CREATE INDEX "ListeningState_userId_idx" ON "ListeningState"("userId");

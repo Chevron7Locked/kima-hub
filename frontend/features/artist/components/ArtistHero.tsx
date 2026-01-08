@@ -2,9 +2,12 @@
 
 import { Music } from "lucide-react";
 import Image from "next/image";
-import { MetadataEditor } from "@/components/MetadataEditor";
 import { Artist, ArtistSource, Album } from "../types";
-import { ReactNode } from "react";
+import { ReactNode, lazy, Suspense } from "react";
+import { useArtistDisplayData } from "@/hooks/useMetadataDisplay";
+
+// Lazy load MetadataEditor - modal component opened on user action
+const MetadataEditor = lazy(() => import("@/components/MetadataEditor").then(mod => ({ default: mod.MetadataEditor })));
 
 interface ArtistHeroProps {
     artist: Artist;
@@ -25,6 +28,7 @@ export function ArtistHero({
     onReload,
     children,
 }: ArtistHeroProps) {
+    const displayData = useArtistDisplayData(artist);
     const ownedAlbums = albums.filter((a) => a.owned);
 
     return (
@@ -35,7 +39,7 @@ export function ArtistHero({
                     <div className="absolute inset-0 scale-110 blur-md opacity-50">
                         <Image
                             src={heroImage}
-                            alt={artist.name}
+                            alt={displayData.name}
                             fill
                             sizes="100vw"
                             className="object-cover"
@@ -73,7 +77,7 @@ export function ArtistHero({
                         {heroImage ? (
                             <Image
                                 src={heroImage}
-                                alt={artist.name}
+                                alt={displayData.name}
                                 fill
                                 sizes="(max-width: 768px) 140px, 192px"
                                 className="object-cover"
@@ -94,29 +98,49 @@ export function ArtistHero({
                         </p>
                         <div className="flex items-center gap-3 group mb-2">
                             <h1 className="text-2xl md:text-4xl lg:text-5xl font-bold text-white leading-tight line-clamp-2">
-                                {artist.name}
+                                {displayData.name}
                             </h1>
+                            {displayData.hasUserOverrides && (
+                                <span className="px-2 py-0.5 text-xs bg-amber-500/20 text-amber-400 rounded-full border border-amber-500/30 shrink-0">
+                                    Edited
+                                </span>
+                            )}
                             {source === "library" && (
-                                <MetadataEditor
-                                    type="artist"
-                                    id={artist.id}
-                                    currentData={{
-                                        name: artist.name,
-                                        bio: artist.summary || artist.bio,
-                                        genres: artist.genres || artist.tags || [],
-                                        mbid: artist.mbid,
-                                        heroUrl: artist.heroUrl || artist.image,
-                                    }}
-                                    onSave={async () => {
-                                        await onReload();
-                                    }}
-                                />
+                                <Suspense fallback={null}>
+                                    <MetadataEditor
+                                        type="artist"
+                                        id={artist.id}
+                                        currentData={{
+                                            name: displayData.name,
+                                            bio: displayData.summary,
+                                            genres: displayData.genres,
+                                            mbid: artist.mbid,
+                                            heroUrl: displayData.heroUrl,
+                                            // Pass originals for reset comparison
+                                            _originalName: artist.name,
+                                            _originalBio:
+                                                artist.summary ?? artist.bio,
+                                            _originalGenres:
+                                                artist.genres ?? artist.tags ?? [],
+                                            _originalHeroUrl:
+                                                artist.heroUrl ?? artist.image,
+                                            _hasUserOverrides:
+                                                displayData.hasUserOverrides,
+                                        }}
+                                        onSave={async () => {
+                                            await onReload();
+                                        }}
+                                    />
+                                </Suspense>
                             )}
                         </div>
                         <div className="flex flex-wrap items-center gap-1 text-sm text-white/70">
                             {artist.listeners && artist.listeners > 0 && (
                                 <>
-                                    <span>{artist.listeners.toLocaleString()} listeners</span>
+                                    <span>
+                                        {artist.listeners.toLocaleString()}{" "}
+                                        listeners
+                                    </span>
                                     <span className="mx-1">•</span>
                                 </>
                             )}
@@ -140,9 +164,7 @@ export function ArtistHero({
 
             {/* Action Bar - Full Width */}
             {children && (
-                <div className="relative px-4 md:px-8 pb-4">
-                    {children}
-                </div>
+                <div className="relative px-4 md:px-8 pb-4">{children}</div>
             )}
         </div>
     );

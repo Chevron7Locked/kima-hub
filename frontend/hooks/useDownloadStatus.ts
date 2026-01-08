@@ -1,15 +1,21 @@
-import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
 
 export interface DownloadJob {
     id: string;
-    type: 'artist' | 'album';
+    type: "artist" | "album";
     subject: string;
     targetMbid: string;
-    status: 'pending' | 'processing' | 'completed' | 'failed';
+    status: "pending" | "processing" | "completed" | "failed";
     createdAt: string;
     completedAt?: string;
     error?: string;
+    metadata?: {
+        statusText?: string;
+        currentSource?: "lidarr" | "soulseek";
+        lidarrAttempts?: number;
+        soulseekAttempts?: number;
+    };
 }
 
 export interface DownloadStatus {
@@ -25,7 +31,10 @@ export interface DownloadStatus {
  * @param pollingInterval - How often to poll in milliseconds (default: 15000)
  * @param isAuthenticated - Whether the user is authenticated (required to prevent polling when logged out)
  */
-export function useDownloadStatus(pollingInterval: number = 15000, isAuthenticated: boolean = false) {
+export function useDownloadStatus(
+    pollingInterval: number = 15000,
+    isAuthenticated: boolean = false
+) {
     const [status, setStatus] = useState<DownloadStatus>({
         activeDownloads: [],
         recentDownloads: [],
@@ -57,17 +66,23 @@ export function useDownloadStatus(pollingInterval: number = 15000, isAuthenticat
                 const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
 
                 const activeDownloads = response.filter(
-                    (job) => job.status === 'pending' || job.status === 'processing'
+                    (job) =>
+                        job.status === "pending" || job.status === "processing"
                 );
 
                 const recentDownloads = response.filter(
                     (job) =>
-                        (job.status === 'completed' || job.status === 'failed') &&
-                        new Date(job.completedAt || job.createdAt) > fiveMinutesAgo
+                        (job.status === "completed" ||
+                            job.status === "failed") &&
+                        new Date(job.completedAt || job.createdAt) >
+                            fiveMinutesAgo
                 );
 
                 const failedDownloads = response.filter(
-                    (job) => job.status === 'failed' && new Date(job.completedAt || job.createdAt) > fiveMinutesAgo
+                    (job) =>
+                        job.status === "failed" &&
+                        new Date(job.completedAt || job.createdAt) >
+                            fiveMinutesAgo
                 );
 
                 setStatus({
@@ -79,23 +94,34 @@ export function useDownloadStatus(pollingInterval: number = 15000, isAuthenticat
 
                 // Continue polling if there are active downloads
                 if (activeDownloads.length > 0) {
-                    pollTimeout = setTimeout(pollDownloads, pollingInterval);
+                    // Poll faster when downloads are active (5 seconds)
+                    pollTimeout = setTimeout(pollDownloads, 5000);
+                } else if (
+                    activeDownloads.length === 0 &&
+                    response.length > 0
+                ) {
+                    // Some jobs exist but none active - check again in 10 seconds
+                    // to catch newly created jobs
+                    pollTimeout = setTimeout(pollDownloads, 10000);
                 } else {
-                    // Check again in longer interval if no active downloads (30 seconds)
+                    // No downloads at all - check again in 30 seconds
                     pollTimeout = setTimeout(pollDownloads, 30000);
                 }
             } catch (error: any) {
-                console.error('Failed to poll download status:', error);
+                console.error("Failed to poll download status:", error);
 
                 // Increment error count
                 errorCount++;
 
                 // Exponential backoff on errors (max 2 minutes)
-                const backoffDelay = Math.min(pollingInterval * Math.pow(2, errorCount), 120000);
+                const backoffDelay = Math.min(
+                    pollingInterval * Math.pow(2, errorCount),
+                    120000
+                );
 
                 // Silently continue on rate limit errors - don't spam console
-                if (error.message !== 'Too Many Requests') {
-                    console.error('Download polling error:', error);
+                if (error.message !== "Too Many Requests") {
+                    console.error("Download polling error:", error);
                 }
 
                 // Retry with backoff
@@ -112,14 +138,20 @@ export function useDownloadStatus(pollingInterval: number = 15000, isAuthenticat
         const handleDownloadStatusChanged = () => {
             pollDownloads();
         };
-        window.addEventListener('download-status-changed', handleDownloadStatusChanged);
+        window.addEventListener(
+            "download-status-changed",
+            handleDownloadStatusChanged
+        );
 
         return () => {
             mounted = false;
             if (pollTimeout) {
                 clearTimeout(pollTimeout);
             }
-            window.removeEventListener('download-status-changed', handleDownloadStatusChanged);
+            window.removeEventListener(
+                "download-status-changed",
+                handleDownloadStatusChanged
+            );
         };
     }, [pollingInterval, isAuthenticated]);
 

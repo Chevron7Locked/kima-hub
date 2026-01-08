@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
@@ -17,7 +18,7 @@ function safeDecrypt(value: string | null): string | null {
     try {
         return decrypt(value);
     } catch (error) {
-        console.warn("[Settings Route] Failed to decrypt field, returning null");
+        logger.warn("[Settings Route] Failed to decrypt field, returning null");
         return null;
     }
 }
@@ -31,6 +32,7 @@ const systemSettingsSchema = z.object({
     lidarrEnabled: z.boolean().optional(),
     lidarrUrl: z.string().optional(),
     lidarrApiKey: z.string().nullable().optional(),
+    lidarrWebhookSecret: z.string().nullable().optional(),
 
     // AI Services
     openaiEnabled: z.boolean().optional(),
@@ -40,6 +42,8 @@ const systemSettingsSchema = z.object({
 
     fanartEnabled: z.boolean().optional(),
     fanartApiKey: z.string().nullable().optional(),
+
+    lastfmApiKey: z.string().nullable().optional(),
 
     // Media Services
     audiobookshelfEnabled: z.boolean().optional(),
@@ -66,10 +70,11 @@ const systemSettingsSchema = z.object({
     maxConcurrentDownloads: z.number().optional(),
     downloadRetryAttempts: z.number().optional(),
     transcodeCacheMaxGb: z.number().optional(),
+    soulseekConcurrentDownloads: z.number().min(1).max(10).optional(),
 
     // Download Preferences
     downloadSource: z.enum(["soulseek", "lidarr"]).optional(),
-    soulseekFallback: z.enum(["none", "lidarr"]).optional(),
+    primaryFailureFallback: z.enum(["none", "lidarr", "soulseek"]).optional(),
 });
 
 // GET /system-settings
@@ -107,8 +112,10 @@ router.get("/", async (req, res) => {
         const decryptedSettings = {
             ...settings,
             lidarrApiKey: safeDecrypt(settings.lidarrApiKey),
+            lidarrWebhookSecret: safeDecrypt(settings.lidarrWebhookSecret),
             openaiApiKey: safeDecrypt(settings.openaiApiKey),
             fanartApiKey: safeDecrypt(settings.fanartApiKey),
+            lastfmApiKey: safeDecrypt(settings.lastfmApiKey),
             audiobookshelfApiKey: safeDecrypt(settings.audiobookshelfApiKey),
             soulseekPassword: safeDecrypt(settings.soulseekPassword),
             spotifyClientSecret: safeDecrypt(settings.spotifyClientSecret),
@@ -116,7 +123,7 @@ router.get("/", async (req, res) => {
 
         res.json(decryptedSettings);
     } catch (error) {
-        console.error("Get system settings error:", error);
+        logger.error("Get system settings error:", error);
         res.status(500).json({ error: "Failed to get system settings" });
     }
 });
@@ -126,8 +133,8 @@ router.post("/", async (req, res) => {
     try {
         const data = systemSettingsSchema.parse(req.body);
 
-        console.log("[SYSTEM SETTINGS] Saving settings...");
-        console.log(
+        logger.debug("[SYSTEM SETTINGS] Saving settings...");
+        logger.debug(
             "[SYSTEM SETTINGS] transcodeCacheMaxGb:",
             data.transcodeCacheMaxGb
         );
@@ -137,10 +144,14 @@ router.post("/", async (req, res) => {
 
         if (data.lidarrApiKey)
             encryptedData.lidarrApiKey = encrypt(data.lidarrApiKey);
+        if (data.lidarrWebhookSecret)
+            encryptedData.lidarrWebhookSecret = encrypt(data.lidarrWebhookSecret);
         if (data.openaiApiKey)
             encryptedData.openaiApiKey = encrypt(data.openaiApiKey);
         if (data.fanartApiKey)
             encryptedData.fanartApiKey = encrypt(data.fanartApiKey);
+        if (data.lastfmApiKey)
+            encryptedData.lastfmApiKey = encrypt(data.lastfmApiKey);
         if (data.audiobookshelfApiKey)
             encryptedData.audiobookshelfApiKey = encrypt(
                 data.audiobookshelfApiKey
@@ -161,19 +172,27 @@ router.post("/", async (req, res) => {
 
         invalidateSystemSettingsCache();
 
+        // Refresh Last.fm API key if it was updated
+        try {
+            const { lastFmService } = await import("../services/lastfm");
+            await lastFmService.refreshApiKey();
+        } catch (err) {
+            logger.warn("Failed to refresh Last.fm API key:", err);
+        }
+
         // If Audiobookshelf was disabled, clear all audiobook-related data
         if (data.audiobookshelfEnabled === false) {
-            console.log(
+            logger.debug(
                 "[CLEANUP] Audiobookshelf disabled - clearing all audiobook data from database"
             );
             try {
                 const deletedProgress =
                     await prisma.audiobookProgress.deleteMany({});
-                console.log(
+                logger.debug(
                     `   Deleted ${deletedProgress.count} audiobook progress entries`
                 );
             } catch (clearError) {
-                console.error("Failed to clear audiobook data:", clearError);
+                logger.error("Failed to clear audiobook data:", clearError);
                 // Don't fail the request
             }
         }
@@ -191,28 +210,28 @@ router.post("/", async (req, res) => {
                 SOULSEEK_USERNAME: data.soulseekUsername || null,
                 SOULSEEK_PASSWORD: data.soulseekPassword || null,
             });
-            console.log(".env file synchronized with database settings");
+            logger.debug(".env file synchronized with database settings");
         } catch (envError) {
-            console.error("Failed to write .env file:", envError);
+            logger.error("Failed to write .env file:", envError);
             // Don't fail the request if .env write fails
         }
 
         // Auto-configure Lidarr webhook if Lidarr is enabled
         if (data.lidarrEnabled && data.lidarrUrl && data.lidarrApiKey) {
             try {
-                console.log("[LIDARR] Auto-configuring webhook...");
+                logger.debug("[LIDARR] Auto-configuring webhook...");
 
                 const axios = (await import("axios")).default;
                 const lidarrUrl = data.lidarrUrl;
                 const apiKey = data.lidarrApiKey;
 
                 // Determine webhook URL
-                // Use LIDIFY_CALLBACK_URL env var if set, otherwise default to host.docker.internal:3030
-                // Port 3030 is the external Nginx port that Lidarr can reach
-                const callbackHost = process.env.LIDIFY_CALLBACK_URL || "http://host.docker.internal:3030";
+                // Use LIDIFY_CALLBACK_URL env var if set, otherwise default to backend:3006
+                // In Docker, services communicate via Docker network names (backend, lidarr, etc.)
+                const callbackHost = process.env.LIDIFY_CALLBACK_URL || "http://backend:3006";
                 const webhookUrl = `${callbackHost}/api/webhooks/lidarr`;
 
-                console.log(`   Webhook URL: ${webhookUrl}`);
+                logger.debug(`   Webhook URL: ${webhookUrl}`);
 
                 // Check if webhook already exists - find by name "Lidify" OR by URL containing "lidify" or "webhooks/lidarr"
                 const notificationsResponse = await axios.get(
@@ -241,10 +260,10 @@ router.post("/", async (req, res) => {
                 
                 if (existingWebhook) {
                     const currentUrl = existingWebhook.fields?.find((f: any) => f.name === "url")?.value;
-                    console.log(`   Found existing webhook: "${existingWebhook.name}" with URL: ${currentUrl}`);
+                    logger.debug(`   Found existing webhook: "${existingWebhook.name}" with URL: ${currentUrl}`);
                     if (currentUrl !== webhookUrl) {
-                        console.log(`   URL needs updating from: ${currentUrl}`);
-                        console.log(`   URL will be updated to: ${webhookUrl}`);
+                        logger.debug(`   URL needs updating from: ${currentUrl}`);
+                        logger.debug(`   URL will be updated to: ${webhookUrl}`);
                     }
                 }
 
@@ -293,7 +312,7 @@ router.post("/", async (req, res) => {
                             timeout: 10000,
                         }
                     );
-                    console.log("   Webhook updated");
+                    logger.debug("   Webhook updated");
                 } else {
                     // Create new webhook (use forceSave to skip test)
                     await axios.post(
@@ -304,22 +323,22 @@ router.post("/", async (req, res) => {
                             timeout: 10000,
                         }
                     );
-                    console.log("   Webhook created");
+                    logger.debug("   Webhook created");
                 }
 
-                console.log("Lidarr webhook configured automatically\n");
+                logger.debug("Lidarr webhook configured automatically\n");
             } catch (webhookError: any) {
-                console.error(
+                logger.error(
                     "Failed to auto-configure webhook:",
                     webhookError.message
                 );
                 if (webhookError.response?.data) {
-                    console.error(
+                    logger.error(
                         "   Lidarr error details:",
                         JSON.stringify(webhookError.response.data, null, 2)
                     );
                 }
-                console.log(
+                logger.debug(
                     " User can configure webhook manually in Lidarr UI\n"
                 );
                 // Don't fail the request if webhook config fails
@@ -338,7 +357,7 @@ router.post("/", async (req, res) => {
                 .status(400)
                 .json({ error: "Invalid settings", details: error.errors });
         }
-        console.error("Update system settings error:", error);
+        logger.error("Update system settings error:", error);
         res.status(500).json({ error: "Failed to update system settings" });
     }
 });
@@ -348,7 +367,7 @@ router.post("/test-lidarr", async (req, res) => {
     try {
         const { url, apiKey } = req.body;
 
-        console.log("[Lidarr Test] Testing connection to:", url);
+        logger.debug("[Lidarr Test] Testing connection to:", url);
 
         if (!url || !apiKey) {
             return res
@@ -368,7 +387,7 @@ router.post("/test-lidarr", async (req, res) => {
             }
         );
 
-        console.log(
+        logger.debug(
             "[Lidarr Test] Connection successful, version:",
             response.data.version
         );
@@ -379,8 +398,8 @@ router.post("/test-lidarr", async (req, res) => {
             version: response.data.version,
         });
     } catch (error: any) {
-        console.error("[Lidarr Test] Error:", error.message);
-        console.error(
+        logger.error("[Lidarr Test] Error:", error.message);
+        logger.error(
             "[Lidarr Test] Details:",
             error.response?.data || error.code
         );
@@ -433,7 +452,7 @@ router.post("/test-openai", async (req, res) => {
             model: response.data.model,
         });
     } catch (error: any) {
-        console.error("OpenAI test error:", error.message);
+        logger.error("OpenAI test error:", error.message);
         res.status(500).json({
             error: "Failed to connect to OpenAI",
             details: error.response?.data?.error?.message || error.message,
@@ -469,7 +488,7 @@ router.post("/test-fanart", async (req, res) => {
             message: "Fanart.tv connection successful",
         });
     } catch (error: any) {
-        console.error("Fanart.tv test error:", error.message);
+        logger.error("Fanart.tv test error:", error.message);
         if (error.response?.status === 401) {
             res.status(401).json({
                 error: "Invalid Fanart.tv API key",
@@ -477,6 +496,59 @@ router.post("/test-fanart", async (req, res) => {
         } else {
             res.status(500).json({
                 error: "Failed to connect to Fanart.tv",
+                details: error.response?.data || error.message,
+            });
+        }
+    }
+});
+
+// Test Last.fm connection
+router.post("/test-lastfm", async (req, res) => {
+    try {
+        const { lastfmApiKey } = req.body;
+
+        if (!lastfmApiKey) {
+            return res.status(400).json({ error: "API key is required" });
+        }
+
+        const axios = require("axios");
+
+        // Test with a known artist (The Beatles)
+        const testArtist = "The Beatles";
+
+        const response = await axios.get(
+            "http://ws.audioscrobbler.com/2.0/",
+            {
+                params: {
+                    method: "artist.getinfo",
+                    artist: testArtist,
+                    api_key: lastfmApiKey,
+                    format: "json",
+                },
+                timeout: 5000,
+            }
+        );
+
+        // If we get here and have artist data, the API key is valid
+        if (response.data.artist) {
+            res.json({
+                success: true,
+                message: "Last.fm connection successful",
+            });
+        } else {
+            res.status(500).json({
+                error: "Unexpected response from Last.fm",
+            });
+        }
+    } catch (error: any) {
+        logger.error("Last.fm test error:", error.message);
+        if (error.response?.status === 403 || error.response?.data?.error === 10) {
+            res.status(401).json({
+                error: "Invalid Last.fm API key",
+            });
+        } else {
+            res.status(500).json({
+                error: "Failed to connect to Last.fm",
                 details: error.response?.data || error.message,
             });
         }
@@ -509,7 +581,7 @@ router.post("/test-audiobookshelf", async (req, res) => {
             libraries: response.data.libraries?.length || 0,
         });
     } catch (error: any) {
-        console.error("Audiobookshelf test error:", error.message);
+        logger.error("Audiobookshelf test error:", error.message);
         if (error.response?.status === 401 || error.response?.status === 403) {
             res.status(401).json({
                 error: "Invalid Audiobookshelf API key",
@@ -534,7 +606,7 @@ router.post("/test-soulseek", async (req, res) => {
             });
         }
 
-        console.log(`[SOULSEEK-TEST] Testing connection as "${username}"...`);
+        logger.debug(`[SOULSEEK-TEST] Testing connection as "${username}"...`);
 
         // Import soulseek service
         const { soulseekService } = await import("../services/soulseek");
@@ -550,10 +622,10 @@ router.post("/test-soulseek", async (req, res) => {
                     { user: username, pass: password },
                     (err: Error | null, client: any) => {
                         if (err) {
-                            console.log(`[SOULSEEK-TEST] Connection failed: ${err.message}`);
+                            logger.debug(`[SOULSEEK-TEST] Connection failed: ${err.message}`);
                             return reject(err);
                         }
-                        console.log(`[SOULSEEK-TEST] Connected successfully`);
+                        logger.debug(`[SOULSEEK-TEST] Connected successfully`);
                         // We don't need to keep the connection open for the test
                         resolve();
                     }
@@ -567,14 +639,14 @@ router.post("/test-soulseek", async (req, res) => {
                 isConnected: true,
             });
         } catch (connectError: any) {
-            console.error(`[SOULSEEK-TEST] Error: ${connectError.message}`);
+            logger.error(`[SOULSEEK-TEST] Error: ${connectError.message}`);
             res.status(401).json({
                 error: "Invalid Soulseek credentials or connection failed",
                 details: connectError.message,
             });
         }
     } catch (error: any) {
-        console.error("[SOULSEEK-TEST] Error:", error.message);
+        logger.error("[SOULSEEK-TEST] Error:", error.message);
         res.status(500).json({
             error: "Failed to test Soulseek connection",
             details: error.message,
@@ -593,22 +665,39 @@ router.post("/test-spotify", async (req, res) => {
             });
         }
 
-        // Import spotifyService to test credentials
-        const { spotifyService } = await import("../services/spotify");
-        const result = await spotifyService.testCredentials(clientId, clientSecret);
+        // Test credentials by trying to get an access token
+        const axios = require("axios");
+        try {
+            const response = await axios.post(
+                "https://accounts.spotify.com/api/token",
+                "grant_type=client_credentials",
+                {
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+                    },
+                    timeout: 10000,
+                }
+            );
 
-        if (result.success) {
-            res.json({
-                success: true,
-                message: "Spotify credentials are valid",
-            });
-        } else {
+            if (response.data.access_token) {
+                res.json({
+                    success: true,
+                    message: "Spotify credentials are valid",
+                });
+            } else {
+                res.status(401).json({
+                    error: "Invalid Spotify credentials",
+                });
+            }
+        } catch (tokenError: any) {
             res.status(401).json({
-                error: result.error || "Invalid Spotify credentials",
+                error: "Invalid Spotify credentials",
+                details: tokenError.response?.data?.error_description || tokenError.message,
             });
         }
     } catch (error: any) {
-        console.error("Spotify test error:", error.message);
+        logger.error("Spotify test error:", error.message);
         res.status(500).json({
             error: "Failed to test Spotify credentials",
             details: error.message,
@@ -661,7 +750,7 @@ router.post("/clear-caches", async (req, res) => {
         );
 
         if (keysToDelete.length > 0) {
-            console.log(
+            logger.debug(
                 `[CACHE] Clearing ${
                     keysToDelete.length
                 } cache entries (excluding ${
@@ -671,7 +760,7 @@ router.post("/clear-caches", async (req, res) => {
             for (const key of keysToDelete) {
                 await redisClient.del(key);
             }
-            console.log(
+            logger.debug(
                 `[CACHE] Successfully cleared ${keysToDelete.length} cache entries`
             );
 
@@ -701,7 +790,7 @@ router.post("/clear-caches", async (req, res) => {
             });
         }
     } catch (error: any) {
-        console.error("Clear caches error:", error);
+        logger.error("Clear caches error:", error);
         res.status(500).json({
             error: "Failed to clear caches",
             details: error.message,

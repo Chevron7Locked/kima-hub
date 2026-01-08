@@ -186,9 +186,6 @@ class HowlerEngine {
                     this.state.currentSrc
                 ) {
                     this.retryCount++;
-                    console.log(
-                        `[HowlerEngine] Retrying load (attempt ${this.retryCount}/${this.maxRetries})...`
-                    );
 
                     // Save src before cleanup
                     const srcToRetry = this.state.currentSrc;

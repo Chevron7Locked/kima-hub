@@ -94,7 +94,7 @@ const TrackRow = memo(function TrackRow({
             "text-sm font-medium truncate",
             isCurrentlyPlaying ? "text-[#ecb200]" : "text-white"
           )}>
-            {track.title}
+            {track.displayTitle ?? track.title}
           </h3>
           <p className="text-xs text-gray-400 truncate">
             {track.album?.artist?.name}

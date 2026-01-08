@@ -135,8 +135,8 @@ services:
         image: lscr.io/linuxserver/lidarr:latest
         container_name: lidify_lidarr
         environment:
-            - PUID=1000
-            - PGID=1000
+            - PUID=${PUID:-1000}
+            - PGID=${PGID:-1000}
             - TZ=${TZ:-UTC}
         volumes:
             - lidarr_config:/config
@@ -151,8 +151,8 @@ services:
         image: lscr.io/linuxserver/prowlarr:latest
         container_name: lidify_prowlarr
         environment:
-            - PUID=1000
-            - PGID=1000
+            - PUID=${PUID:-1000}
+            - PGID=${PGID:-1000}
             - TZ=${TZ:-UTC}
         volumes:
             - prowlarr_config:/config
@@ -181,8 +181,8 @@ services:
         image: lscr.io/linuxserver/qbittorrent:latest
         container_name: lidify_qbittorrent
         environment:
-            - PUID=1000
-            - PGID=1000
+            - PUID=${PUID:-1000}
+            - PGID=${PGID:-1000}
             - TZ=${TZ:-UTC}
             - WEBUI_PORT=8080
         volumes:
@@ -200,8 +200,8 @@ services:
         image: lscr.io/linuxserver/sabnzbd:latest
         container_name: lidify_sabnzbd
         environment:
-            - PUID=1000
-            - PGID=1000
+            - PUID=${PUID:-1000}
+            - PGID=${PGID:-1000}
             - TZ=${TZ:-UTC}
         volumes:
             - sabnzbd_config:/config
@@ -225,16 +225,32 @@ services:
             MUSIC_PATH: /music
             BATCH_SIZE: ${AUDIO_ANALYSIS_BATCH_SIZE:-10}
             SLEEP_INTERVAL: ${AUDIO_ANALYSIS_INTERVAL:-5}
-            NUM_WORKERS: ${AUDIO_ANALYSIS_WORKERS:-8}
+            # Default workers reduced from 8 to 2 for stability (Issue #26 fix)
+            # Each worker requires 1-1.5GB RAM normally, up to 2-3GB peak
+            NUM_WORKERS: ${AUDIO_ANALYSIS_WORKERS:-2}
+            # CPU thread limiting per worker (default 1 for conservative CPU usage)
+            THREADS_PER_WORKER: ${AUDIO_ANALYSIS_THREADS_PER_WORKER:-1}
         volumes:
+            # Music library (read-only)
             - ${MUSIC_PATH:-./music}:/music:ro
-            - audio_analyzer_models:/app/models
+            # NOTE: Models are baked into the Docker image at /app/models
+            # No volume mount needed - previously this caused models to be hidden by empty volume
         depends_on:
             postgres:
                 condition: service_healthy
             redis:
                 condition: service_healthy
         restart: unless-stopped
+        # Memory limits prevent OOM kills (Issue #26 fix)
+        # 6G limit = safe for 2 workers at 2-3GB peak each
+        # 2G reservation = minimum guaranteed memory
+        deploy:
+            resources:
+                limits:
+                    memory: 6G
+                    cpus: '4'
+                reservations:
+                    memory: 2G
         # Disabled by default - enable when needed
         profiles:
             - audio-analysis
@@ -244,8 +260,6 @@ volumes:
     postgres_data:
     backend_cache:
     backend_logs:
-    # Audio analysis
-    audio_analyzer_models:
     # External services
     lidarr_config:
     prowlarr_config:

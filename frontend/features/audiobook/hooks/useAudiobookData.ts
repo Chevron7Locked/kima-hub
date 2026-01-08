@@ -1,14 +1,25 @@
 "use client";
 
+import { useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useAudiobookQuery } from "@/hooks/useQueries";
 import { api } from "@/lib/api";
+import { subscribeQueryEvent } from "@/lib/query-events";
 
 export function useAudiobookData() {
   const params = useParams();
   const audiobookId = params.id as string;
 
   const { data: audiobook, isLoading, refetch } = useAudiobookQuery(audiobookId);
+
+  // Listen for audiobook-progress-updated event (fired when playback starts/updates)
+  useEffect(() => {
+    const unsubscribe = subscribeQueryEvent("audiobook-progress-updated", () => {
+      refetch();
+    });
+
+    return unsubscribe;
+  }, [refetch]);
 
   // Calculate hero image for color extraction
   const heroImage = audiobook?.coverUrl

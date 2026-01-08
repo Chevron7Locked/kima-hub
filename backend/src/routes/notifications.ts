@@ -1,6 +1,7 @@
-import { Router, Response } from "express";
+import { Router, Request, Response } from "express";
+import { logger } from "../utils/logger";
 import { notificationService } from "../services/notificationService";
-import { AuthenticatedRequest, requireAuth } from "../middleware/auth";
+import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 
 const router = Router();
@@ -12,9 +13,9 @@ const router = Router();
 router.get(
     "/",
     requireAuth,
-    async (req: AuthenticatedRequest, res: Response) => {
+    async (req: Request, res: Response) => {
         try {
-            console.log(
+            logger.debug(
                 `[Notifications] Fetching notifications for user ${
                     req.user!.id
                 }`
@@ -22,12 +23,12 @@ router.get(
             const notifications = await notificationService.getForUser(
                 req.user!.id
             );
-            console.log(
+            logger.debug(
                 `[Notifications] Found ${notifications.length} notifications`
             );
             res.json(notifications);
         } catch (error: any) {
-            console.error("Error fetching notifications:", error);
+            logger.error("Error fetching notifications:", error);
             res.status(500).json({ error: "Failed to fetch notifications" });
         }
     }
@@ -40,14 +41,14 @@ router.get(
 router.get(
     "/unread-count",
     requireAuth,
-    async (req: AuthenticatedRequest, res: Response) => {
+    async (req: Request, res: Response) => {
         try {
             const count = await notificationService.getUnreadCount(
                 req.user!.id
             );
             res.json({ count });
         } catch (error: any) {
-            console.error("Error fetching unread count:", error);
+            logger.error("Error fetching unread count:", error);
             res.status(500).json({ error: "Failed to fetch unread count" });
         }
     }
@@ -60,12 +61,12 @@ router.get(
 router.post(
     "/:id/read",
     requireAuth,
-    async (req: AuthenticatedRequest, res: Response) => {
+    async (req: Request, res: Response) => {
         try {
             await notificationService.markAsRead(req.params.id, req.user!.id);
             res.json({ success: true });
         } catch (error: any) {
-            console.error("Error marking notification as read:", error);
+            logger.error("Error marking notification as read:", error);
             res.status(500).json({
                 error: "Failed to mark notification as read",
             });
@@ -80,12 +81,12 @@ router.post(
 router.post(
     "/read-all",
     requireAuth,
-    async (req: AuthenticatedRequest, res: Response) => {
+    async (req: Request, res: Response) => {
         try {
             await notificationService.markAllAsRead(req.user!.id);
             res.json({ success: true });
         } catch (error: any) {
-            console.error("Error marking all notifications as read:", error);
+            logger.error("Error marking all notifications as read:", error);
             res.status(500).json({
                 error: "Failed to mark all notifications as read",
             });
@@ -100,12 +101,12 @@ router.post(
 router.post(
     "/:id/clear",
     requireAuth,
-    async (req: AuthenticatedRequest, res: Response) => {
+    async (req: Request, res: Response) => {
         try {
             await notificationService.clear(req.params.id, req.user!.id);
             res.json({ success: true });
         } catch (error: any) {
-            console.error("Error clearing notification:", error);
+            logger.error("Error clearing notification:", error);
             res.status(500).json({ error: "Failed to clear notification" });
         }
     }
@@ -118,12 +119,12 @@ router.post(
 router.post(
     "/clear-all",
     requireAuth,
-    async (req: AuthenticatedRequest, res: Response) => {
+    async (req: Request, res: Response) => {
         try {
             await notificationService.clearAll(req.user!.id);
             res.json({ success: true });
         } catch (error: any) {
-            console.error("Error clearing all notifications:", error);
+            logger.error("Error clearing all notifications:", error);
             res.status(500).json({
                 error: "Failed to clear all notifications",
             });
@@ -138,11 +139,12 @@ router.post(
 /**
  * GET /notifications/downloads/history
  * Get completed/failed downloads that haven't been cleared
+ * Deduplicated by album subject (shows only most recent entry per album)
  */
 router.get(
     "/downloads/history",
     requireAuth,
-    async (req: AuthenticatedRequest, res: Response) => {
+    async (req: Request, res: Response) => {
         try {
             const downloads = await prisma.downloadJob.findMany({
                 where: {
@@ -151,11 +153,23 @@ router.get(
                     cleared: false,
                 },
                 orderBy: { updatedAt: "desc" },
-                take: 50,
+                take: 100, // Fetch more to account for duplicates
             });
-            res.json(downloads);
+
+            // Deduplicate by subject - keep only the most recent entry per album
+            const seen = new Set<string>();
+            const deduplicated = downloads.filter((download) => {
+                if (seen.has(download.subject)) {
+                    return false; // Skip duplicate
+                }
+                seen.add(download.subject);
+                return true; // Keep first occurrence (most recent due to ordering)
+            });
+
+            // Return top 50 after deduplication
+            res.json(deduplicated.slice(0, 50));
         } catch (error: any) {
-            console.error("Error fetching download history:", error);
+            logger.error("Error fetching download history:", error);
             res.status(500).json({ error: "Failed to fetch download history" });
         }
     }
@@ -168,7 +182,7 @@ router.get(
 router.get(
     "/downloads/active",
     requireAuth,
-    async (req: AuthenticatedRequest, res: Response) => {
+    async (req: Request, res: Response) => {
         try {
             const downloads = await prisma.downloadJob.findMany({
                 where: {
@@ -179,7 +193,7 @@ router.get(
             });
             res.json(downloads);
         } catch (error: any) {
-            console.error("Error fetching active downloads:", error);
+            logger.error("Error fetching active downloads:", error);
             res.status(500).json({ error: "Failed to fetch active downloads" });
         }
     }
@@ -192,7 +206,7 @@ router.get(
 router.post(
     "/downloads/:id/clear",
     requireAuth,
-    async (req: AuthenticatedRequest, res: Response) => {
+    async (req: Request, res: Response) => {
         try {
             await prisma.downloadJob.updateMany({
                 where: {
@@ -203,7 +217,7 @@ router.post(
             });
             res.json({ success: true });
         } catch (error: any) {
-            console.error("Error clearing download:", error);
+            logger.error("Error clearing download:", error);
             res.status(500).json({ error: "Failed to clear download" });
         }
     }
@@ -216,7 +230,7 @@ router.post(
 router.post(
     "/downloads/clear-all",
     requireAuth,
-    async (req: AuthenticatedRequest, res: Response) => {
+    async (req: Request, res: Response) => {
         try {
             await prisma.downloadJob.updateMany({
                 where: {
@@ -228,7 +242,7 @@ router.post(
             });
             res.json({ success: true });
         } catch (error: any) {
-            console.error("Error clearing all downloads:", error);
+            logger.error("Error clearing all downloads:", error);
             res.status(500).json({ error: "Failed to clear all downloads" });
         }
     }
@@ -241,7 +255,7 @@ router.post(
 router.post(
     "/downloads/:id/retry",
     requireAuth,
-    async (req: AuthenticatedRequest, res: Response) => {
+    async (req: Request, res: Response) => {
         try {
             // Get the failed download
             const failedJob = await prisma.downloadJob.findFirst({
@@ -478,11 +492,9 @@ router.post(
                 const albumTitle = metadata.albumTitle as string;
 
                 if (!artistName || !albumTitle) {
-                    return res
-                        .status(400)
-                        .json({
-                            error: "Cannot retry: missing artist/album info",
-                        });
+                    return res.status(400).json({
+                        error: "Cannot retry: missing artist/album info",
+                    });
                 }
 
                 // Mark old job as cleared
@@ -546,13 +558,13 @@ router.post(
                     },
                 ];
 
-                console.log(
+                logger.debug(
                     `[Retry] Trying Soulseek for ${artistName} - ${albumTitle}`
                 );
 
                 // Run Soulseek search async
                 soulseekService
-                    .searchAndDownloadBatch(tracks, musicPath, 4)
+                    .searchAndDownloadBatch(tracks, musicPath, settings?.soulseekConcurrentDownloads || 4)
                     .then(async (result) => {
                         if (result.successful > 0) {
                             await prisma.downloadJob.update({
@@ -569,7 +581,7 @@ router.post(
                                     },
                                 },
                             });
-                            console.log(
+                            logger.debug(
                                 `[Retry] ✓ Soulseek downloaded ${result.successful} tracks for ${artistName} - ${albumTitle}`
                             );
 
@@ -585,7 +597,7 @@ router.post(
                             });
                         } else {
                             // Soulseek failed, try Lidarr if we have an MBID
-                            console.log(
+                            logger.debug(
                                 `[Retry] Soulseek failed, trying Lidarr for ${artistName} - ${albumTitle}`
                             );
 
@@ -631,7 +643,7 @@ router.post(
                         }
                     })
                     .catch(async (error) => {
-                        console.error(`[Retry] Soulseek error:`, error);
+                        logger.error(`[Retry] Soulseek error:`, error);
                         await prisma.downloadJob.update({
                             where: { id: newJobRecord.id },
                             data: {
@@ -676,7 +688,7 @@ router.post(
                     artistMbid: failedJob.artistMbid,
                     subject: failedJob.subject,
                     status: "pending",
-                    metadata: metadata || {},
+                    metadata: (metadata || {}) as any,
                 },
             });
 
@@ -702,7 +714,7 @@ router.post(
                 error: result.error,
             });
         } catch (error: any) {
-            console.error("Error retrying download:", error);
+            logger.error("Error retrying download:", error);
             res.status(500).json({ error: "Failed to retry download" });
         }
     }

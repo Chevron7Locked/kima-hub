@@ -370,6 +370,29 @@ function DownloadJobItem({
         }
     };
 
+    const getSourceColor = () => {
+        if (!job.metadata?.currentSource) return "text-white/60";
+        switch (job.metadata.currentSource) {
+            case "lidarr":
+                return "text-purple-400";
+            case "soulseek":
+                return "text-teal-400";
+            default:
+                return "text-white/60";
+        }
+    };
+
+    const getStatusText = () => {
+        if (job.metadata?.statusText) {
+            return job.metadata.statusText;
+        }
+        // Fallback for backward compatibility
+        if (job.status === "processing" || job.status === "pending") {
+            return "Processing";
+        }
+        return null;
+    };
+
     const handleDelete = async () => {
         try {
             setIsDeleting(true);
@@ -397,7 +420,7 @@ function DownloadJobItem({
                     <p className="text-sm font-medium text-white truncate">
                         {job.subject}
                     </p>
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
                         <span
                             className={cn(
                                 "text-xs font-medium capitalize",
@@ -406,6 +429,19 @@ function DownloadJobItem({
                         >
                             {job.status}
                         </span>
+                        {getStatusText() && (
+                            <>
+                                <span className="text-xs text-white/40">•</span>
+                                <span
+                                    className={cn(
+                                        "text-xs font-medium",
+                                        getSourceColor()
+                                    )}
+                                >
+                                    {getStatusText()}
+                                </span>
+                            </>
+                        )}
                         <span className="text-xs text-white/40">•</span>
                         <span className="text-xs text-white/40 capitalize">
                             {job.type}
@@ -457,13 +493,48 @@ function DownloadJobItemCompact({
         }
     };
 
+    const getSourceColor = () => {
+        if (!job.metadata?.currentSource) return "text-white/60";
+        switch (job.metadata.currentSource) {
+            case "lidarr":
+                return "text-purple-400";
+            case "soulseek":
+                return "text-teal-400";
+            default:
+                return "text-white/60";
+        }
+    };
+
+    const getStatusText = () => {
+        if (job.metadata?.statusText) {
+            return job.metadata.statusText;
+        }
+        // Fallback for backward compatibility
+        if (job.status === "processing" || job.status === "pending") {
+            return "Processing";
+        }
+        return null;
+    };
+
     return (
         <div className="px-3 py-2 flex items-center gap-2">
             <div className="flex-shrink-0">{getStatusIcon()}</div>
-            <p className="flex-1 text-xs font-medium text-white truncate">
-                {job.subject}
-            </p>
-            <span className="text-[10px] text-white/40 capitalize">
+            <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-white truncate">
+                    {job.subject}
+                </p>
+                {getStatusText() && (
+                    <p
+                        className={cn(
+                            "text-[10px] font-medium",
+                            getSourceColor()
+                        )}
+                    >
+                        {getStatusText()}
+                    </p>
+                )}
+            </div>
+            <span className="text-[10px] text-white/40 capitalize shrink-0">
                 {job.status}
             </span>
         </div>

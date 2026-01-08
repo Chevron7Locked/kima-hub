@@ -1,4 +1,5 @@
 import { Artist } from "@prisma/client";
+import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { wikidataService } from "../services/wikidata";
 import { lastFmService } from "../services/lastfm";
@@ -17,7 +18,7 @@ import { redisClient } from "../utils/redis";
  */
 export async function enrichSimilarArtist(artist: Artist): Promise<void> {
     const logPrefix = `[ENRICH ${artist.name}]`;
-    console.log(`${logPrefix} Starting enrichment (MBID: ${artist.mbid})`);
+    logger.debug(`${logPrefix} Starting enrichment (MBID: ${artist.mbid})`);
 
     // Mark as enriching
     await prisma.artist.update({
@@ -32,7 +33,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
     try {
         // If artist has a temp MBID, try to get the real one from MusicBrainz
         if (artist.mbid.startsWith("temp-")) {
-            console.log(
+            logger.debug(
                 `${logPrefix} Temp MBID detected, searching MusicBrainz...`
             );
             try {
@@ -42,7 +43,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                 );
                 if (mbResults.length > 0 && mbResults[0].id) {
                     const realMbid = mbResults[0].id;
-                    console.log(
+                    logger.debug(
                         `${logPrefix} MusicBrainz: Found real MBID: ${realMbid}`
                     );
 
@@ -55,12 +56,12 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                     // Update the local artist object
                     artist.mbid = realMbid;
                 } else {
-                    console.log(
+                    logger.debug(
                         `${logPrefix} MusicBrainz: No match found, keeping temp MBID`
                     );
                 }
             } catch (error: any) {
-                console.log(
+                logger.debug(
                     `${logPrefix} MusicBrainz: FAILED - ${
                         error?.message || error
                     }`
@@ -71,40 +72,42 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
         // Try Wikidata first (only if we have a real MBID)
         let summary = null;
         let heroUrl = null;
+        let genres: string[] = [];
 
         if (!artist.mbid.startsWith("temp-")) {
-            console.log(
+            logger.debug(
                 `${logPrefix} Wikidata: Fetching for MBID ${artist.mbid}...`
             );
             try {
                 const wikidataInfo = await wikidataService.getArtistInfo(
+                    artist.name,
                     artist.mbid
                 );
                 if (wikidataInfo) {
                     summary = wikidataInfo.summary;
-                    heroUrl = wikidataInfo.image;
+                    heroUrl = wikidataInfo.heroUrl;
                     if (summary) summarySource = "wikidata";
                     if (heroUrl) imageSource = "wikidata";
-                    console.log(
+                    logger.debug(
                         `${logPrefix} Wikidata: SUCCESS (image: ${
                             heroUrl ? "yes" : "no"
                         }, summary: ${summary ? "yes" : "no"})`
                     );
                 } else {
-                    console.log(`${logPrefix} Wikidata: No data returned`);
+                    logger.debug(`${logPrefix} Wikidata: No data returned`);
                 }
             } catch (error: any) {
-                console.log(
+                logger.debug(
                     `${logPrefix} Wikidata: FAILED - ${error?.message || error}`
                 );
             }
         } else {
-            console.log(`${logPrefix} Wikidata: Skipped (temp MBID)`);
+            logger.debug(`${logPrefix} Wikidata: Skipped (temp MBID)`);
         }
 
-        // Fallback to Last.fm if Wikidata didn't work
-        if (!summary || !heroUrl) {
-            console.log(
+        // Fetch from Last.fm if we need summary/heroUrl or always try for genres
+        if (!summary || !heroUrl || genres.length === 0) {
+            logger.debug(
                 `${logPrefix} Last.fm: Fetching (need summary: ${!summary}, need image: ${!heroUrl})...`
             );
             try {
@@ -122,13 +125,24 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                         summary = bio.summary || bio.content || null;
                         if (summary) {
                             summarySource = "lastfm";
-                            console.log(`${logPrefix} Last.fm: Got summary`);
+                            logger.debug(`${logPrefix} Last.fm: Got summary`);
+                        }
+                    }
+
+                    // Extract genres from Last.fm tags
+                    if (lastfmInfo.tags?.tag && Array.isArray(lastfmInfo.tags.tag)) {
+                        genres = lastfmInfo.tags.tag
+                            .slice(0, 5)  // Top 5 tags as genres
+                            .map((t: any) => t.name)
+                            .filter(Boolean);
+                        if (genres.length > 0) {
+                            logger.debug(`${logPrefix} Extracted ${genres.length} genres: ${genres.join(', ')}`);
                         }
                     }
 
                     // Try Fanart.tv for image (only with real MBID)
                     if (!heroUrl && !artist.mbid.startsWith("temp-")) {
-                        console.log(
+                        logger.debug(
                             `${logPrefix} Fanart.tv: Fetching for MBID ${artist.mbid}...`
                         );
                         try {
@@ -137,19 +151,19 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                             );
                             if (heroUrl) {
                                 imageSource = "fanart.tv";
-                                console.log(
+                                logger.debug(
                                     `${logPrefix} Fanart.tv: SUCCESS - ${heroUrl.substring(
                                         0,
                                         60
                                     )}...`
                                 );
                             } else {
-                                console.log(
+                                logger.debug(
                                     `${logPrefix} Fanart.tv: No image found`
                                 );
                             }
                         } catch (error: any) {
-                            console.log(
+                            logger.debug(
                                 `${logPrefix} Fanart.tv: FAILED - ${
                                     error?.message || error
                                 }`
@@ -159,7 +173,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
 
                     // Fallback to Deezer
                     if (!heroUrl) {
-                        console.log(
+                        logger.debug(
                             `${logPrefix} Deezer: Fetching for "${artist.name}"...`
                         );
                         try {
@@ -168,19 +182,19 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                             );
                             if (heroUrl) {
                                 imageSource = "deezer";
-                                console.log(
+                                logger.debug(
                                     `${logPrefix} Deezer: SUCCESS - ${heroUrl.substring(
                                         0,
                                         60
                                     )}...`
                                 );
                             } else {
-                                console.log(
+                                logger.debug(
                                     `${logPrefix} Deezer: No image found`
                                 );
                             }
                         } catch (error: any) {
-                            console.log(
+                            logger.debug(
                                 `${logPrefix} Deezer: FAILED - ${
                                     error?.message || error
                                 }`
@@ -211,21 +225,21 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                             ) {
                                 heroUrl = bestImage;
                                 imageSource = "lastfm";
-                                console.log(
+                                logger.debug(
                                     `${logPrefix} Last.fm image: SUCCESS`
                                 );
                             } else {
-                                console.log(
+                                logger.debug(
                                     `${logPrefix} Last.fm image: Placeholder/none`
                                 );
                             }
                         }
                     }
                 } else {
-                    console.log(`${logPrefix} Last.fm: No data returned`);
+                    logger.debug(`${logPrefix} Last.fm: No data returned`);
                 }
             } catch (error: any) {
-                console.log(
+                logger.debug(
                     `${logPrefix} Last.fm: FAILED - ${error?.message || error}`
                 );
             }
@@ -234,8 +248,8 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
         // Get similar artists from Last.fm
         let similarArtists: Array<{
             name: string;
-            mbid: string | null;
-            similarity: number;
+            mbid?: string;
+            match: number;
         }> = [];
         try {
             // Filter out temp MBIDs
@@ -246,11 +260,11 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                 validMbid,
                 artist.name
             );
-            console.log(
+            logger.debug(
                 `${logPrefix} Similar artists: Found ${similarArtists.length}`
             );
         } catch (error: any) {
-            console.log(
+            logger.debug(
                 `${logPrefix} Similar artists: FAILED - ${
                     error?.message || error
                 }`
@@ -258,19 +272,19 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
         }
 
         // Log enrichment summary
-        console.log(
+        logger.debug(
             `${logPrefix} SUMMARY: image=${imageSource}, summary=${summarySource}, heroUrl=${
                 heroUrl ? "set" : "null"
             }`
         );
 
         // Prepare similar artists JSON for storage (full Last.fm data)
-        const similarArtistsJson =
+        const similarArtistsJson: any =
             similarArtists.length > 0
                 ? similarArtists.map((s) => ({
                       name: s.name,
                       mbid: s.mbid || null,
-                      match: s.similarity,
+                      match: s.match,
                   }))
                 : null;
 
@@ -281,6 +295,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                 summary,
                 heroUrl,
                 similarArtistsJson,
+                genres: genres.length > 0 ? genres : undefined,
                 lastEnriched: new Date(),
                 enrichmentStatus: "completed",
             },
@@ -328,16 +343,16 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                         create: {
                             fromArtistId: artist.id,
                             toArtistId: similarArtistRecord.id,
-                            weight: similar.similarity,
+                            weight: similar.match,
                         },
                         update: {
-                            weight: similar.similarity,
+                            weight: similar.match,
                         },
                     });
                 }
             }
 
-            console.log(
+            logger.debug(
                 `${logPrefix} Stored ${similarArtists.length} similar artist relationships`
             );
         }
@@ -359,7 +374,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
             }
         }
     } catch (error: any) {
-        console.error(
+        logger.error(
             `${logPrefix} ENRICHMENT FAILED:`,
             error?.message || error
         );
@@ -397,11 +412,11 @@ async function enrichAlbumCovers(
         });
 
         if (albumsWithoutCovers.length === 0) {
-            console.log(`    All albums already have covers`);
+            logger.debug(`    All albums already have covers`);
             return;
         }
 
-        console.log(
+        logger.debug(
             `    Fetching covers for ${albumsWithoutCovers.length} albums...`
         );
 
@@ -443,17 +458,17 @@ async function enrichAlbumCovers(
                         }
                     } catch (err) {
                         // Cover art fetch failed, continue with next album
-                        console.log(`      No cover found for: ${album.title}`);
+                        logger.debug(`      No cover found for: ${album.title}`);
                     }
                 })
             );
         }
 
-        console.log(
+        logger.debug(
             `    Fetched ${fetchedCount}/${albumsWithoutCovers.length} album covers`
         );
     } catch (error) {
-        console.error(`    Failed to enrich album covers:`, error);
+        logger.error(`    Failed to enrich album covers:`, error);
         // Don't throw - album cover failures shouldn't fail the entire enrichment
     }
 }

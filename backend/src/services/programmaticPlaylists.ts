@@ -1,6 +1,12 @@
 import { prisma } from "../utils/db";
+import { logger } from "../utils/logger";
 import { lastFmService } from "./lastfm";
 import { moodBucketService } from "./moodBucketService";
+import {
+    getDecadeWhereClause,
+    getEffectiveYear,
+    getDecadeFromYear,
+} from "../utils/dateFilters";
 
 export interface ProgrammaticMix {
     id: string;
@@ -109,10 +115,14 @@ function getMixColor(type: string): string {
     return MIX_COLORS[type] || MIX_COLORS["default"];
 }
 
-// Helper to randomly sample from array
+// Helper to randomly sample from array using Fisher-Yates shuffle
 function randomSample<T>(array: T[], count: number): T[] {
-    const shuffled = [...array].sort(() => Math.random() - 0.5);
-    return shuffled.slice(0, count);
+    const result = [...array];
+    for (let i = result.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result.slice(0, count);
 }
 
 // Helper to get seeded random number for daily consistency
@@ -129,7 +139,14 @@ function getSeededRandom(seed: string): number {
 // Type for track with album cover
 type TrackWithAlbumCover = {
     id: string;
-    album: { coverUrl: string | null; genres?: unknown };
+    album: {
+        coverUrl: string | null;
+        genres?: unknown;
+        userGenres?: string[] | null;
+        artist?: {
+            userGenres?: string[] | null;
+        };
+    };
     lastfmTags?: string[];
     essentiaGenres?: string[];
     [key: string]: unknown;
@@ -154,30 +171,71 @@ async function findTracksByGenrePatterns(
                 { essentiaGenres: { hasSome: tagPatterns } },
             ],
         },
-        include: { album: { select: { coverUrl: true, genres: true } } },
+        include: {
+            album: {
+                select: {
+                    coverUrl: true,
+                    genres: true,
+                    userGenres: true,
+                    artist: {
+                        select: {
+                            userGenres: true,
+                        },
+                    },
+                },
+            },
+        },
         take: limit,
     });
 
     if (tracks.length >= 15) {
-        return tracks;
+        return tracks as TrackWithAlbumCover[];
     }
 
-    // Strategy 2: Query albums with non-empty genres and filter in memory
+    // Strategy 2: Query albums with non-empty genres (canonical or user) and filter in memory
     const albumTracks = await prisma.track.findMany({
         where: {
             album: {
-                genres: { not: { equals: null } },
+                OR: [
+                    { genres: { not: { equals: null } } },
+                    { userGenres: { not: { equals: null } } },
+                ],
             },
         },
-        include: { album: { select: { coverUrl: true, genres: true } } },
+        include: {
+            album: {
+                select: {
+                    coverUrl: true,
+                    genres: true,
+                    userGenres: true,
+                    artist: {
+                        select: {
+                            userGenres: true,
+                        },
+                    },
+                },
+            },
+        },
         take: limit * 3, // Get more to filter down
     });
 
     // Filter by genre patterns (case-insensitive partial match)
+    // Merge canonical and user genres from both album and artist
     const genreMatched = albumTracks.filter((t) => {
         const albumGenres = t.album.genres as string[] | null;
-        if (!albumGenres || !Array.isArray(albumGenres)) return false;
-        return albumGenres.some((ag) =>
+        const albumUserGenres = (t.album.userGenres as string[] | null) || [];
+        const artistUserGenres = (t.album.artist?.userGenres as string[] | null) || [];
+
+        // Merge all genres
+        const allGenres = [
+            ...(albumGenres || []),
+            ...albumUserGenres,
+            ...artistUserGenres,
+        ];
+
+        if (allGenres.length === 0) return false;
+
+        return allGenres.some((ag) =>
             genrePatterns.some((gp) =>
                 ag.toLowerCase().includes(gp.toLowerCase())
             )
@@ -191,7 +249,7 @@ async function findTracksByGenrePatterns(
         ...genreMatched.filter((t) => !existingIds.has(t.id)),
     ];
 
-    return merged.slice(0, limit);
+    return merged.slice(0, limit) as TrackWithAlbumCover[];
 }
 
 export class ProgrammaticPlaylistService {
@@ -218,7 +276,7 @@ export class ProgrammaticPlaylistService {
             : `${today}-${userId}`;
         const dateSeed = getSeededRandom(seedString);
 
-        console.log(
+        logger.debug(
             `[MIXES] Generating mixes for user ${userId}, forceRandom: ${forceRandom}, seed: ${dateSeed}`
         );
 
@@ -444,7 +502,7 @@ export class ProgrammaticPlaylistService {
         const selectedIndices: number[] = [];
         let seed = dateSeed;
 
-        console.log(
+        logger.debug(
             `[MIXES] Selecting ${this.DAILY_MIX_COUNT} mixes from ${mixGenerators.length} types...`
         );
 
@@ -453,33 +511,33 @@ export class ProgrammaticPlaylistService {
             const index = seed % mixGenerators.length;
             if (!selectedIndices.includes(index)) {
                 selectedIndices.push(index);
-                console.log(
+                logger.debug(
                     `[MIXES] Selected index ${index}: ${mixGenerators[index].name}`
                 );
             }
         }
 
-        console.log(
+        logger.debug(
             `[MIXES] Final selected indices: [${selectedIndices.join(", ")}]`
         );
 
         // Generate selected mixes
         const mixPromises = selectedIndices.map((i) => {
-            console.log(`[MIXES] Generating ${mixGenerators[i].name}...`);
+            logger.debug(`[MIXES] Generating ${mixGenerators[i].name}...`);
             return mixGenerators[i].fn();
         });
         const mixes = await Promise.all(mixPromises);
 
-        console.log(`[MIXES] Generated ${mixes.length} mixes before filtering`);
+        logger.debug(`[MIXES] Generated ${mixes.length} mixes before filtering`);
         mixes.forEach((mix, i) => {
             if (mix === null) {
-                console.log(
+                logger.debug(
                     `[MIXES] Mix ${i} (${
                         mixGenerators[selectedIndices[i]].name
                     }) returned NULL`
                 );
             } else {
-                console.log(
+                logger.debug(
                     `[MIXES] Mix ${i}: ${mix.name} (${mix.trackCount} tracks)`
                 );
             }
@@ -489,13 +547,13 @@ export class ProgrammaticPlaylistService {
         let finalMixes = mixes.filter(
             (mix): mix is ProgrammaticMix => mix !== null
         );
-        console.log(
+        logger.debug(
             `[MIXES] Returning ${finalMixes.length} mixes after filtering nulls`
         );
 
         // If we don't have 5 mixes, try to fill gaps with successful generators
         if (finalMixes.length < this.DAILY_MIX_COUNT) {
-            console.log(
+            logger.debug(
                 `[MIXES] Only got ${finalMixes.length} mixes, trying to fill gaps...`
             );
 
@@ -510,34 +568,34 @@ export class ProgrammaticPlaylistService {
                 i++
             ) {
                 if (!attemptedIndices.has(i)) {
-                    console.log(
+                    logger.debug(
                         `[MIXES] Attempting fallback: ${mixGenerators[i].name}`
                     );
                     const fallbackMix = await mixGenerators[i].fn();
                     if (fallbackMix && !successfulTypes.has(fallbackMix.type)) {
                         finalMixes.push(fallbackMix);
                         successfulTypes.add(fallbackMix.type);
-                        console.log(
+                        logger.debug(
                             `[MIXES] Fallback succeeded: ${fallbackMix.name}`
                         );
                     }
                 }
             }
 
-            console.log(`[MIXES] After fallbacks: ${finalMixes.length} mixes`);
+            logger.debug(`[MIXES] After fallbacks: ${finalMixes.length} mixes`);
         }
 
         // Check if user has saved mood mix from the new bucket system (fast lookup)
         try {
             const savedMoodMix = await moodBucketService.getUserMoodMix(userId);
             if (savedMoodMix) {
-                console.log(
+                logger.debug(
                     `[MIXES] User has saved mood mix: "${savedMoodMix.name}" with ${savedMoodMix.trackCount} tracks`
                 );
                 finalMixes.push(savedMoodMix);
             }
         } catch (err) {
-            console.error("[MIXES] Error getting user's saved mood mix:", err);
+            logger.error("[MIXES] Error getting user's saved mood mix:", err);
         }
 
         return finalMixes;
@@ -553,13 +611,14 @@ export class ProgrammaticPlaylistService {
         // Get all decades
         const albums = await prisma.album.findMany({
             where: { tracks: { some: {} } },
-            select: { year: true },
+            select: { year: true, originalYear: true, displayYear: true },
         });
 
         const decades = new Set<number>();
         albums.forEach((album) => {
-            if (album.year) {
-                const decade = Math.floor(album.year / 10) * 10;
+            const effectiveYear = getEffectiveYear(album);
+            if (effectiveYear) {
+                const decade = getDecadeFromYear(effectiveYear);
                 decades.add(decade);
             }
         });
@@ -574,9 +633,7 @@ export class ProgrammaticPlaylistService {
         // Get ALL tracks from this decade
         const tracks = await prisma.track.findMany({
             where: {
-                album: {
-                    year: { gte: selectedDecade, lt: selectedDecade + 10 },
-                },
+                album: getDecadeWhereClause(selectedDecade),
             },
             include: {
                 album: { select: { coverUrl: true } },
@@ -622,13 +679,13 @@ export class ProgrammaticPlaylistService {
             take: 20,
         });
 
-        console.log(`[GENRE MIX] Found ${genres.length} genres total`);
+        logger.debug(`[GENRE MIX] Found ${genres.length} genres total`);
         const validGenres = genres.filter((g) => g._count.trackGenres >= 5);
-        console.log(
+        logger.debug(
             `[GENRE MIX] ${validGenres.length} genres have >= 5 tracks`
         );
         if (validGenres.length === 0) {
-            console.log(`[GENRE MIX] FAILED: No genres with enough tracks`);
+            logger.debug(`[GENRE MIX] FAILED: No genres with enough tracks`);
             return null;
         }
 
@@ -684,11 +741,11 @@ export class ProgrammaticPlaylistService {
             take: this.TRACK_LIMIT,
         });
 
-        console.log(
+        logger.debug(
             `[TOP TRACKS MIX] Found ${playStats.length} unique played tracks`
         );
         if (playStats.length < 5) {
-            console.log(
+            logger.debug(
                 `[TOP TRACKS MIX] FAILED: Only ${playStats.length} tracks (need at least 5)`
             );
             return null;
@@ -796,11 +853,11 @@ export class ProgrammaticPlaylistService {
             },
         });
 
-        console.log(
+        logger.debug(
             `[ARTIST SIMILAR MIX] Found ${recentPlays.length} plays in last 7 days`
         );
         if (recentPlays.length === 0) {
-            console.log(`[ARTIST SIMILAR MIX] FAILED: No plays in last 7 days`);
+            logger.debug(`[ARTIST SIMILAR MIX] FAILED: No plays in last 7 days`);
             return null;
         }
 
@@ -824,13 +881,13 @@ export class ProgrammaticPlaylistService {
         });
 
         if (!topArtist || !topArtist.name) {
-            console.log(
+            logger.debug(
                 `[ARTIST SIMILAR MIX] FAILED: Top artist not found or has no name`
             );
             return null;
         }
 
-        console.log(`[ARTIST SIMILAR MIX] Top artist: ${topArtist.name}`);
+        logger.debug(`[ARTIST SIMILAR MIX] Top artist: ${topArtist.name}`);
 
         // Get similar artists from Last.fm
         try {
@@ -839,7 +896,7 @@ export class ProgrammaticPlaylistService {
                 "10"
             );
 
-            console.log(
+            logger.debug(
                 `[ARTIST SIMILAR MIX] Last.fm returned ${similarArtists.length} similar artists`
             );
 
@@ -859,7 +916,7 @@ export class ProgrammaticPlaylistService {
                 },
             });
 
-            console.log(
+            logger.debug(
                 `[ARTIST SIMILAR MIX] Found ${artistsInLibrary.length} similar artists in library`
             );
 
@@ -867,12 +924,12 @@ export class ProgrammaticPlaylistService {
                 artist.albums.flatMap((album) => album.tracks)
             );
 
-            console.log(
+            logger.debug(
                 `[ARTIST SIMILAR MIX] Total tracks from similar artists: ${tracks.length}`
             );
 
             if (tracks.length < 5) {
-                console.log(
+                logger.debug(
                     `[ARTIST SIMILAR MIX] FAILED: Only ${tracks.length} tracks (need at least 5)`
                 );
                 return null;
@@ -895,7 +952,7 @@ export class ProgrammaticPlaylistService {
                 color: getMixColor("artist-similar"),
             };
         } catch (error) {
-            console.error("Failed to generate artist similar mix:", error);
+            logger.error("Failed to generate artist similar mix:", error);
             return null;
         }
     }
@@ -994,7 +1051,7 @@ export class ProgrammaticPlaylistService {
             },
         });
         tracks = genres.flatMap((g) => g.trackGenres.map((tg) => tg.track));
-        console.log(
+        logger.debug(
             `[PARTY MIX] Found ${tracks.length} tracks from Genre table`
         );
 
@@ -1009,7 +1066,7 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...albumGenreTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[PARTY MIX] After album genre fallback: ${tracks.length} tracks`
             );
         }
@@ -1037,13 +1094,13 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...audioTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[PARTY MIX] After audio analysis fallback: ${tracks.length} tracks`
             );
         }
 
         if (tracks.length < 15) {
-            console.log(
+            logger.debug(
                 `[PARTY MIX] FAILED: Only ${tracks.length} tracks found`
             );
             return null;
@@ -1099,11 +1156,11 @@ export class ProgrammaticPlaylistService {
             take: 100,
         });
 
-        console.log(`[CHILL MIX] Enhanced mode: Found ${tracks.length} tracks`);
+        logger.debug(`[CHILL MIX] Enhanced mode: Found ${tracks.length} tracks`);
 
         // Strategy 2: Standard mode fallback
         if (tracks.length < this.MIN_TRACKS_DAILY) {
-            console.log(`[CHILL MIX] Falling back to Standard mode`);
+            logger.debug(`[CHILL MIX] Falling back to Standard mode`);
             tracks = await prisma.track.findMany({
                 where: {
                     analysisStatus: "completed",
@@ -1125,17 +1182,17 @@ export class ProgrammaticPlaylistService {
                 include: { album: { select: { coverUrl: true } } },
                 take: 100,
             });
-            console.log(
+            logger.debug(
                 `[CHILL MIX] Standard mode: Found ${tracks.length} tracks`
             );
         }
 
-        console.log(
+        logger.debug(
             `[CHILL MIX] Total: ${tracks.length} tracks matching criteria`
         );
 
         if (tracks.length < this.MIN_TRACKS_DAILY) {
-            console.log(
+            logger.debug(
                 `[CHILL MIX] FAILED: Only ${tracks.length} tracks (need ${this.MIN_TRACKS_DAILY})`
             );
             return null;
@@ -1222,13 +1279,13 @@ export class ProgrammaticPlaylistService {
             take: 100,
         });
         tracks = enhancedTracks;
-        console.log(
+        logger.debug(
             `[WORKOUT MIX] Enhanced mode: Found ${tracks.length} tracks`
         );
 
         // Strategy 2: Standard mode fallback - audio analysis
         if (tracks.length < 15) {
-            console.log(`[WORKOUT MIX] Falling back to Standard mode`);
+            logger.debug(`[WORKOUT MIX] Falling back to Standard mode`);
             const audioTracks = await prisma.track.findMany({
                 where: {
                     analysisStatus: "completed",
@@ -1259,7 +1316,7 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...audioTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[WORKOUT MIX] Standard mode: Total ${tracks.length} tracks`
             );
         }
@@ -1289,7 +1346,7 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...genreTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[WORKOUT MIX] After Genre table: ${tracks.length} tracks`
             );
         }
@@ -1305,13 +1362,13 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...albumGenreTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[WORKOUT MIX] After album genre fallback: ${tracks.length} tracks`
             );
         }
 
         if (tracks.length < 15) {
-            console.log(
+            logger.debug(
                 `[WORKOUT MIX] FAILED: Only ${tracks.length} tracks found`
             );
             return null;
@@ -1383,7 +1440,7 @@ export class ProgrammaticPlaylistService {
             },
         });
         tracks = genres.flatMap((g) => g.trackGenres.map((tg) => tg.track));
-        console.log(
+        logger.debug(
             `[FOCUS MIX] Found ${tracks.length} tracks from Genre table`
         );
 
@@ -1398,7 +1455,7 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...albumGenreTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[FOCUS MIX] After album genre fallback: ${tracks.length} tracks`
             );
         }
@@ -1419,13 +1476,13 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...audioTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[FOCUS MIX] After audio analysis fallback: ${tracks.length} tracks`
             );
         }
 
         if (tracks.length < 15) {
-            console.log(
+            logger.debug(
                 `[FOCUS MIX] FAILED: Only ${tracks.length} tracks found`
             );
             return null;
@@ -1482,7 +1539,7 @@ export class ProgrammaticPlaylistService {
             take: 100,
         });
         tracks = audioTracks;
-        console.log(
+        logger.debug(
             `[HIGH ENERGY MIX] Found ${tracks.length} tracks from audio analysis`
         );
 
@@ -1507,13 +1564,13 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...albumGenreTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[HIGH ENERGY MIX] After genre fallback: ${tracks.length} tracks`
             );
         }
 
         if (tracks.length < 15) {
-            console.log(
+            logger.debug(
                 `[HIGH ENERGY MIX] FAILED: Only ${tracks.length} tracks found`
             );
             return null;
@@ -1573,13 +1630,13 @@ export class ProgrammaticPlaylistService {
             take: 100,
         });
 
-        console.log(
+        logger.debug(
             `[LATE NIGHT MIX] Enhanced mode: Found ${tracks.length} tracks`
         );
 
         // Fallback to Standard mode if not enough Enhanced tracks
         if (tracks.length < this.MIN_TRACKS_DAILY) {
-            console.log(`[LATE NIGHT MIX] Falling back to Standard mode`);
+            logger.debug(`[LATE NIGHT MIX] Falling back to Standard mode`);
             tracks = await prisma.track.findMany({
                 where: {
                     analysisStatus: "completed",
@@ -1601,18 +1658,18 @@ export class ProgrammaticPlaylistService {
                 include: { album: { select: { coverUrl: true } } },
                 take: 100,
             });
-            console.log(
+            logger.debug(
                 `[LATE NIGHT MIX] Standard mode: Found ${tracks.length} tracks`
             );
         }
 
-        console.log(
+        logger.debug(
             `[LATE NIGHT MIX] Total: ${tracks.length} tracks matching criteria`
         );
 
         // No fallback padding - if not enough truly mellow tracks, don't generate
         if (tracks.length < this.MIN_TRACKS_DAILY) {
-            console.log(
+            logger.debug(
                 `[LATE NIGHT MIX] FAILED: Only ${tracks.length} tracks (need ${this.MIN_TRACKS_DAILY})`
             );
             return null;
@@ -1672,7 +1729,7 @@ export class ProgrammaticPlaylistService {
             take: 100,
         });
         tracks = enhancedTracks;
-        console.log(`[HAPPY MIX] Enhanced mode: Found ${tracks.length} tracks`);
+        logger.debug(`[HAPPY MIX] Enhanced mode: Found ${tracks.length} tracks`);
 
         // Strategy 2: Standard mode fallback - valence/energy heuristics
         if (tracks.length < 15) {
@@ -1690,7 +1747,7 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...standardTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[HAPPY MIX] After Standard fallback: ${tracks.length} tracks`
             );
         }
@@ -1715,13 +1772,13 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...albumGenreTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[HAPPY MIX] After genre fallback: ${tracks.length} tracks`
             );
         }
 
         if (tracks.length < 15) {
-            console.log(
+            logger.debug(
                 `[HAPPY MIX] FAILED: Only ${tracks.length} tracks found`
             );
             return null;
@@ -1774,7 +1831,7 @@ export class ProgrammaticPlaylistService {
             include: { album: { select: { coverUrl: true } } },
             take: 150,
         });
-        console.log(
+        logger.debug(
             `[MELANCHOLY MIX] Enhanced mode: Found ${enhancedTracks.length} tracks`
         );
 
@@ -1782,7 +1839,7 @@ export class ProgrammaticPlaylistService {
             tracks = enhancedTracks;
         } else {
             // Strategy 2: Standard mode fallback
-            console.log(`[MELANCHOLY MIX] Falling back to Standard mode`);
+            logger.debug(`[MELANCHOLY MIX] Falling back to Standard mode`);
             const audioTracks = await prisma.track.findMany({
                 where: {
                     analysisStatus: "completed",
@@ -1792,7 +1849,7 @@ export class ProgrammaticPlaylistService {
                 include: { album: { select: { coverUrl: true } } },
                 take: 150,
             });
-            console.log(
+            logger.debug(
                 `[MELANCHOLY MIX] Standard mode: Found ${audioTracks.length} low-valence tracks`
             );
 
@@ -1820,7 +1877,7 @@ export class ProgrammaticPlaylistService {
                 );
                 return hasMinorKey || hasSadTags || hasLastfmSadTags;
             });
-            console.log(
+            logger.debug(
                 `[MELANCHOLY MIX] After tag filter: ${tracks.length} tracks`
             );
         }
@@ -1844,14 +1901,14 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...albumGenreTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[MELANCHOLY MIX] After genre fallback: ${tracks.length} tracks`
             );
         }
 
         // Require minimum 15 tracks for a meaningful playlist
         if (tracks.length < 15) {
-            console.log(
+            logger.debug(
                 `[MELANCHOLY MIX] FAILED: Only ${tracks.length} tracks found`
             );
             return null;
@@ -1919,7 +1976,7 @@ export class ProgrammaticPlaylistService {
             take: 100,
         });
         tracks = audioTracks;
-        console.log(
+        logger.debug(
             `[DANCE FLOOR MIX] Found ${tracks.length} tracks from audio analysis`
         );
 
@@ -1943,13 +2000,13 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...albumGenreTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[DANCE FLOOR MIX] After genre fallback: ${tracks.length} tracks`
             );
         }
 
         if (tracks.length < 15) {
-            console.log(
+            logger.debug(
                 `[DANCE FLOOR MIX] FAILED: Only ${tracks.length} tracks found`
             );
             return null;
@@ -2002,7 +2059,7 @@ export class ProgrammaticPlaylistService {
             take: 100,
         });
         tracks = audioTracks;
-        console.log(
+        logger.debug(
             `[ACOUSTIC MIX] Found ${tracks.length} tracks from audio analysis`
         );
 
@@ -2024,13 +2081,13 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...albumGenreTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[ACOUSTIC MIX] After genre fallback: ${tracks.length} tracks`
             );
         }
 
         if (tracks.length < 15) {
-            console.log(
+            logger.debug(
                 `[ACOUSTIC MIX] FAILED: Only ${tracks.length} tracks found`
             );
             return null;
@@ -2083,7 +2140,7 @@ export class ProgrammaticPlaylistService {
             take: 100,
         });
         tracks = audioTracks;
-        console.log(
+        logger.debug(
             `[INSTRUMENTAL MIX] Found ${tracks.length} tracks from audio analysis`
         );
 
@@ -2106,13 +2163,13 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...albumGenreTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[INSTRUMENTAL MIX] After genre fallback: ${tracks.length} tracks`
             );
         }
 
         if (tracks.length < 15) {
-            console.log(
+            logger.debug(
                 `[INSTRUMENTAL MIX] FAILED: Only ${tracks.length} tracks found`
             );
             return null;
@@ -2226,7 +2283,7 @@ export class ProgrammaticPlaylistService {
             take: 100,
         });
         tracks = taggedTracks;
-        console.log(`[ROAD TRIP MIX] Found ${tracks.length} tracks from tags`);
+        logger.debug(`[ROAD TRIP MIX] Found ${tracks.length} tracks from tags`);
 
         // Strategy 2: Audio analysis (medium-high energy, good tempo)
         if (tracks.length < 15) {
@@ -2244,7 +2301,7 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...audioTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[ROAD TRIP MIX] After audio fallback: ${tracks.length} tracks`
             );
         }
@@ -2267,13 +2324,13 @@ export class ProgrammaticPlaylistService {
                 ...tracks,
                 ...albumGenreTracks.filter((t) => !existingIds.has(t.id)),
             ];
-            console.log(
+            logger.debug(
                 `[ROAD TRIP MIX] After genre fallback: ${tracks.length} tracks`
             );
         }
 
         if (tracks.length < 15) {
-            console.log(
+            logger.debug(
                 `[ROAD TRIP MIX] FAILED: Only ${tracks.length} tracks found`
             );
             return null;
@@ -3582,7 +3639,7 @@ export class ProgrammaticPlaylistService {
                 useEnhancedMode = true;
             } else {
                 // Not enough enhanced tracks - convert ML mood params to basic audio feature equivalents
-                console.log(
+                logger.debug(
                     `[MoodMixer] Only ${enhancedCount} enhanced tracks, falling back to basic features`
                 );
 

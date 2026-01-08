@@ -1,7 +1,8 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
+import { z } from "zod";
 import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
-import { z } from "zod";
 import { sessionLog } from "../utils/playlistLogger";
 
 const router = Router();
@@ -20,6 +21,9 @@ const addTrackSchema = z.object({
 // GET /playlists
 router.get("/", async (req, res) => {
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const userId = req.user.id;
 
         // Get user's hidden playlists
@@ -74,11 +78,11 @@ router.get("/", async (req, res) => {
         // Debug: log shared playlists with user info
         const sharedPlaylists = playlistsWithCounts.filter((p) => !p.isOwner);
         if (sharedPlaylists.length > 0) {
-            console.log(
+            logger.debug(
                 `[Playlists] Found ${sharedPlaylists.length} shared playlists for user ${userId}:`
             );
             sharedPlaylists.forEach((p) => {
-                console.log(
+                logger.debug(
                     `  - "${p.name}" by ${
                         p.user?.username || "UNKNOWN"
                     } (owner: ${p.userId})`
@@ -88,7 +92,7 @@ router.get("/", async (req, res) => {
 
         res.json(playlistsWithCounts);
     } catch (error) {
-        console.error("Get playlists error:", error);
+        logger.error("Get playlists error:", error);
         res.status(500).json({ error: "Failed to get playlists" });
     }
 });
@@ -96,6 +100,9 @@ router.get("/", async (req, res) => {
 // POST /playlists
 router.post("/", async (req, res) => {
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const userId = req.user.id;
         const data = createPlaylistSchema.parse(req.body);
 
@@ -114,7 +121,7 @@ router.post("/", async (req, res) => {
                 .status(400)
                 .json({ error: "Invalid request", details: error.errors });
         }
-        console.error("Create playlist error:", error);
+        logger.error("Create playlist error:", error);
         res.status(500).json({ error: "Failed to create playlist" });
     }
 });
@@ -122,6 +129,9 @@ router.post("/", async (req, res) => {
 // GET /playlists/:id
 router.get("/:id", async (req, res) => {
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const userId = req.user.id;
 
         const playlist = await prisma.playlist.findUnique({
@@ -131,6 +141,10 @@ router.get("/:id", async (req, res) => {
                     select: {
                         username: true,
                     },
+                },
+                hiddenByUsers: {
+                    where: { userId },
+                    select: { id: true },
                 },
                 items: {
                     include: {
@@ -203,6 +217,7 @@ router.get("/:id", async (req, res) => {
         res.json({
             ...playlist,
             isOwner: playlist.userId === userId,
+            isHidden: playlist.hiddenByUsers.length > 0,
             trackCount: playlist.items.length,
             pendingCount: playlist.pendingTracks.length,
             items: formattedItems,
@@ -210,7 +225,7 @@ router.get("/:id", async (req, res) => {
             mergedItems,
         });
     } catch (error) {
-        console.error("Get playlist error:", error);
+        logger.error("Get playlist error:", error);
         res.status(500).json({ error: "Failed to get playlist" });
     }
 });
@@ -218,6 +233,9 @@ router.get("/:id", async (req, res) => {
 // PUT /playlists/:id
 router.put("/:id", async (req, res) => {
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const userId = req.user.id;
         const data = createPlaylistSchema.parse(req.body);
 
@@ -249,7 +267,7 @@ router.put("/:id", async (req, res) => {
                 .status(400)
                 .json({ error: "Invalid request", details: error.errors });
         }
-        console.error("Update playlist error:", error);
+        logger.error("Update playlist error:", error);
         res.status(500).json({ error: "Failed to update playlist" });
     }
 });
@@ -257,6 +275,9 @@ router.put("/:id", async (req, res) => {
 // POST /playlists/:id/hide - Hide any playlist from your view
 router.post("/:id/hide", async (req, res) => {
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const userId = req.user.id;
         const playlistId = req.params.id;
 
@@ -285,7 +306,7 @@ router.post("/:id/hide", async (req, res) => {
 
         res.json({ message: "Playlist hidden", isHidden: true });
     } catch (error) {
-        console.error("Hide playlist error:", error);
+        logger.error("Hide playlist error:", error);
         res.status(500).json({ error: "Failed to hide playlist" });
     }
 });
@@ -293,6 +314,9 @@ router.post("/:id/hide", async (req, res) => {
 // DELETE /playlists/:id/hide - Unhide a shared playlist
 router.delete("/:id/hide", async (req, res) => {
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const userId = req.user.id;
         const playlistId = req.params.id;
 
@@ -303,7 +327,7 @@ router.delete("/:id/hide", async (req, res) => {
 
         res.json({ message: "Playlist unhidden", isHidden: false });
     } catch (error) {
-        console.error("Unhide playlist error:", error);
+        logger.error("Unhide playlist error:", error);
         res.status(500).json({ error: "Failed to unhide playlist" });
     }
 });
@@ -311,6 +335,9 @@ router.delete("/:id/hide", async (req, res) => {
 // DELETE /playlists/:id
 router.delete("/:id", async (req, res) => {
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const userId = req.user.id;
 
         // Check ownership
@@ -332,7 +359,7 @@ router.delete("/:id", async (req, res) => {
 
         res.json({ message: "Playlist deleted" });
     } catch (error) {
-        console.error("Delete playlist error:", error);
+        logger.error("Delete playlist error:", error);
         res.status(500).json({ error: "Failed to delete playlist" });
     }
 });
@@ -340,6 +367,7 @@ router.delete("/:id", async (req, res) => {
 // POST /playlists/:id/items
 router.post("/:id/items", async (req, res) => {
     try {
+        if (!req.user) return res.status(401).json({ error: "Unauthorized" });
         const userId = req.user.id;
         const parsedBody = addTrackSchema.safeParse(req.body);
         if (!parsedBody.success) {
@@ -425,7 +453,7 @@ router.post("/:id/items", async (req, res) => {
                 .status(400)
                 .json({ error: "Invalid request", details: error.errors });
         }
-        console.error("Add track to playlist error:", error);
+        logger.error("Add track to playlist error:", error);
         res.status(500).json({ error: "Failed to add track to playlist" });
     }
 });
@@ -433,7 +461,7 @@ router.post("/:id/items", async (req, res) => {
 // DELETE /playlists/:id/items/:trackId
 router.delete("/:id/items/:trackId", async (req, res) => {
     try {
-        const userId = req.user.id;
+        const userId = req.user!.id;
 
         // Check ownership
         const playlist = await prisma.playlist.findUnique({
@@ -459,7 +487,7 @@ router.delete("/:id/items/:trackId", async (req, res) => {
 
         res.json({ message: "Track removed from playlist" });
     } catch (error) {
-        console.error("Remove track from playlist error:", error);
+        logger.error("Remove track from playlist error:", error);
         res.status(500).json({ error: "Failed to remove track from playlist" });
     }
 });
@@ -467,7 +495,7 @@ router.delete("/:id/items/:trackId", async (req, res) => {
 // PUT /playlists/:id/items/reorder
 router.put("/:id/items/reorder", async (req, res) => {
     try {
-        const userId = req.user.id;
+        const userId = req.user!.id;
         const { trackIds } = req.body; // Array of track IDs in new order
 
         if (!Array.isArray(trackIds)) {
@@ -504,7 +532,7 @@ router.put("/:id/items/reorder", async (req, res) => {
 
         res.json({ message: "Playlist reordered" });
     } catch (error) {
-        console.error("Reorder playlist error:", error);
+        logger.error("Reorder playlist error:", error);
         res.status(500).json({ error: "Failed to reorder playlist" });
     }
 });
@@ -519,7 +547,7 @@ router.put("/:id/items/reorder", async (req, res) => {
  */
 router.get("/:id/pending", async (req, res) => {
     try {
-        const userId = req.user.id;
+        const userId = req.user!.id;
         const playlistId = req.params.id;
 
         // Check ownership or public access
@@ -553,7 +581,7 @@ router.get("/:id/pending", async (req, res) => {
             spotifyPlaylistId: playlist.spotifyPlaylistId,
         });
     } catch (error) {
-        console.error("Get pending tracks error:", error);
+        logger.error("Get pending tracks error:", error);
         res.status(500).json({ error: "Failed to get pending tracks" });
     }
 });
@@ -564,7 +592,7 @@ router.get("/:id/pending", async (req, res) => {
  */
 router.delete("/:id/pending/:trackId", async (req, res) => {
     try {
-        const userId = req.user.id;
+        const userId = req.user!.id;
         const { id: playlistId, trackId: pendingTrackId } = req.params;
 
         // Check ownership
@@ -589,7 +617,7 @@ router.delete("/:id/pending/:trackId", async (req, res) => {
         if (error.code === "P2025") {
             return res.status(404).json({ error: "Pending track not found" });
         }
-        console.error("Delete pending track error:", error);
+        logger.error("Delete pending track error:", error);
         res.status(500).json({ error: "Failed to delete pending track" });
     }
 });
@@ -632,7 +660,7 @@ router.get("/:id/pending/:trackId/preview", async (req, res) => {
 
         res.json({ previewUrl });
     } catch (error: any) {
-        console.error("Get preview URL error:", error);
+        logger.error("Get preview URL error:", error);
         res.status(500).json({ error: "Failed to get preview URL" });
     }
 });
@@ -644,7 +672,7 @@ router.get("/:id/pending/:trackId/preview", async (req, res) => {
  */
 router.post("/:id/pending/:trackId/retry", async (req, res) => {
     try {
-        const userId = req.user.id;
+        const userId = req.user!.id;
         const { id: playlistId, trackId: pendingTrackId } = req.params;
 
         sessionLog(
@@ -771,7 +799,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
                 ? pendingTrack.spotifyAlbum
                 : pendingTrack.spotifyArtist; // Use artist as fallback folder name
 
-        console.log(
+        logger.debug(
             `[Retry] Starting download for: ${pendingTrack.spotifyArtist} - ${pendingTrack.spotifyTitle}`
         );
         sessionLog(
@@ -787,7 +815,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
         );
 
         if (!searchResult.found || searchResult.allMatches.length === 0) {
-            console.log(`[Retry] ✗ No results found on Soulseek`);
+            logger.debug(`[Retry] No results found on Soulseek`);
             sessionLog("PENDING-RETRY", `No results found on Soulseek`, "INFO");
 
             await prisma.downloadJob.update({
@@ -806,7 +834,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
             });
         }
 
-        console.log(
+        logger.debug(
             `[Retry] ✓ Found ${searchResult.allMatches.length} results, starting download in background`
         );
         sessionLog(
@@ -833,7 +861,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
             )
             .then(async (result) => {
                 if (result.success) {
-                    console.log(
+                    logger.debug(
                         `[Retry] ✓ Download complete: ${result.filePath}`
                     );
                     sessionLog(
@@ -870,7 +898,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
                                 removeOnComplete: true,
                             }
                         );
-                        console.log(
+                        logger.debug(
                             `[Retry] Queued library scan to reconcile pending tracks`
                         );
                         sessionLog(
@@ -880,7 +908,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
                             })`
                         );
                     } catch (scanError) {
-                        console.error(
+                        logger.error(
                             `[Retry] Failed to queue scan:`,
                             scanError
                         );
@@ -893,7 +921,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
                         );
                     }
                 } else {
-                    console.log(`[Retry] ✗ Download failed: ${result.error}`);
+                    logger.debug(`[Retry] Download failed: ${result.error}`);
                     sessionLog(
                         "PENDING-RETRY",
                         `Download failed: ${result.error || "unknown error"}`,
@@ -911,7 +939,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
                 }
             })
             .catch((error) => {
-                console.error(`[Retry] Download error:`, error);
+                logger.error(`[Retry] Download error:`, error);
                 sessionLog(
                     "PENDING-RETRY",
                     `Download exception: ${error?.message || error}`,
@@ -930,7 +958,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
                     .catch(() => undefined);
             });
     } catch (error: any) {
-        console.error("Retry pending track error:", error);
+        logger.error("Retry pending track error:", error);
         sessionLog(
             "PENDING-RETRY",
             `Handler error: ${error?.message || error}`,
@@ -949,7 +977,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
  */
 router.post("/:id/pending/reconcile", async (req, res) => {
     try {
-        const userId = req.user.id;
+        const userId = req.user!.id;
         const playlistId = req.params.id;
 
         // Check ownership
@@ -977,7 +1005,7 @@ router.post("/:id/pending/reconcile", async (req, res) => {
             playlistsUpdated: result.playlistsUpdated,
         });
     } catch (error) {
-        console.error("Reconcile pending tracks error:", error);
+        logger.error("Reconcile pending tracks error:", error);
         res.status(500).json({ error: "Failed to reconcile pending tracks" });
     }
 });

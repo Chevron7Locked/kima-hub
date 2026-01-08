@@ -6,6 +6,7 @@ import { usePodcastQuery } from "@/hooks/useQueries";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
 import { Podcast, PodcastPreview, SimilarPodcast, Episode } from "../types";
+import { subscribeQueryEvent } from "@/lib/query-events";
 
 export function usePodcastData() {
   const params = useParams();
@@ -14,8 +15,17 @@ export function usePodcastData() {
   const podcastId = params.id as string;
 
   // Use React Query hook for podcast
-  const { data: podcast, isLoading: isPodcastLoading } =
+  const { data: podcast, isLoading: isPodcastLoading, refetch } =
     usePodcastQuery(podcastId);
+
+  // Listen for podcast-progress-updated event (fired when playback starts/updates or episode marked complete)
+  useEffect(() => {
+    const unsubscribe = subscribeQueryEvent("podcast-progress-updated", () => {
+      refetch();
+    });
+
+    return unsubscribe;
+  }, [refetch]);
 
   // State for preview mode, subscription, and similar podcasts
   const [previewData, setPreviewData] = useState<PodcastPreview | null>(null);

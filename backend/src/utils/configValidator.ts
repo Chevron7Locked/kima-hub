@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { logger } from "./logger";
 import * as path from "path";
 import { execSync } from "child_process";
 import { AppError, ErrorCode, ErrorCategory } from "./errors";
@@ -18,20 +19,37 @@ export async function validateMusicConfig(): Promise<MusicConfig> {
     // Get system settings to use configured paths
     const settings = await getSystemSettings();
 
-    // Get music path - prefer environment variable if SystemSettings has default value
+    // Priority: Environment variable > Database setting > Default
+    // Env var takes precedence to support Docker deployments where mount point is fixed
     let musicPath = process.env.MUSIC_PATH || settings?.musicPath || "/music";
 
-    // If settings has a non-default path, prefer that over environment
-    if (settings?.musicPath && settings.musicPath !== "/music") {
-        musicPath = settings.musicPath;
+    // Docker safety: If configured path doesn't exist but /music does, use /music
+    // This handles users passing host .env files to Docker with host paths
+    const isDocker = fs.existsSync('/.dockerenv');
+    if (isDocker && !fs.existsSync(musicPath) && fs.existsSync('/music')) {
+        logger.warn(`MUSIC_PATH=${musicPath} not found in container, using /music (Docker mount point)`);
+        musicPath = '/music';
+    }
+
+    // Log if database has a different path than what we're using (helps debug migrations)
+    if (settings?.musicPath && settings.musicPath !== musicPath) {
+        logger.debug(`Database has musicPath=${settings.musicPath}, using ${musicPath} from env/default`);
     }
 
     // VALIDATE MUSIC PATH EXISTS
     if (!fs.existsSync(musicPath)) {
+        const isDocker = fs.existsSync('/.dockerenv') || process.env.NODE_ENV === 'production';
+        const guidance = isDocker
+            ? `Docker users: Ensure your volume mount is correct in docker-compose.yml:
+   volumes:
+     - /path/to/your/music:/music
+   The container expects music at /music, not your host path.`
+            : `Check that MUSIC_PATH in your .env file points to an existing directory.`;
+        
         throw new AppError(
             ErrorCode.MUSIC_PATH_NOT_ACCESSIBLE,
             ErrorCategory.FATAL,
-            `Music path does not exist: ${musicPath}. Please check MUSIC_PATH environment variable or SystemSettings.`
+            `Music path does not exist: ${musicPath}\n\n${guidance}`
         );
     }
 
@@ -56,7 +74,7 @@ export async function validateMusicConfig(): Promise<MusicConfig> {
     if (!fs.existsSync(transcodeCachePath)) {
         try {
             fs.mkdirSync(transcodeCachePath, { recursive: true });
-            console.log(
+            logger.debug(
                 `Created transcode cache directory: ${transcodeCachePath}`
             );
         } catch (err: any) {
@@ -108,21 +126,21 @@ export async function validateMusicConfig(): Promise<MusicConfig> {
             throw new Error("Invalid ffmpeg output");
         }
 
-        console.log(`FFmpeg detected (bundled): ${result.split("\n")[0]}`);
-        console.log(`   FFmpeg path: ${ffmpegPath.path}`);
+        logger.debug(`FFmpeg detected (bundled): ${result.split("\n")[0]}`);
+        logger.debug(`   FFmpeg path: ${ffmpegPath.path}`);
     } catch (err: any) {
-        console.warn(
+        logger.warn(
             "  Bundled FFmpeg not available. Transcoding will not be available."
         );
-        console.warn(`   Error: ${err.message}`);
-        console.warn("   Original quality streaming will still work.");
+        logger.warn(`   Error: ${err.message}`);
+        logger.warn("   Original quality streaming will still work.");
         // Don't throw - allow server to start without FFmpeg
     }
 
-    console.log("Music configuration validated successfully");
-    console.log(`   Music path: ${musicPath}`);
-    console.log(`   Transcode cache: ${transcodeCachePath}`);
-    console.log(`   Cache limit: ${transcodeCacheMaxGb} GB`);
+    logger.debug("Music configuration validated successfully");
+    logger.debug(`   Music path: ${musicPath}`);
+    logger.debug(`   Transcode cache: ${transcodeCachePath}`);
+    logger.debug(`   Cache limit: ${transcodeCacheMaxGb} GB`);
 
     return {
         musicPath,

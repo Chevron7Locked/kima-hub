@@ -40,6 +40,10 @@ export function TrackList({
     onLike,
 }: TrackListProps) {
     const formatDuration = (seconds: number) => {
+        // Defensive handling for invalid/missing duration
+        if (!seconds || isNaN(seconds) || seconds < 0) {
+            return "--:--";
+        }
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
         return `${mins}:${secs.toString().padStart(2, "0")}`;
@@ -78,7 +82,9 @@ export function TrackList({
                                 <span
                                     className={cn(
                                         "text-sm group-hover:hidden",
-                                        isTrackPlaying ? "text-[#ecb200]" : "text-gray-400"
+                                        isTrackPlaying
+                                            ? "text-[#ecb200]"
+                                            : "text-gray-400"
                                     )}
                                 >
                                     {isTrackPlaying && isPlaying ? (
@@ -95,7 +101,10 @@ export function TrackList({
                                 <div className="w-10 h-10 bg-[#282828] rounded shrink-0 overflow-hidden">
                                     {track.coverUrl ? (
                                         <Image
-                                            src={api.getCoverArtUrl(track.coverUrl, 80)}
+                                            src={api.getCoverArtUrl(
+                                                track.coverUrl,
+                                                80
+                                            )}
                                             alt={track.album}
                                             width={40}
                                             height={40}
@@ -112,7 +121,9 @@ export function TrackList({
                                     <p
                                         className={cn(
                                             "text-sm font-medium truncate",
-                                            isTrackPlaying ? "text-[#ecb200]" : "text-white"
+                                            isTrackPlaying
+                                                ? "text-[#ecb200]"
+                                                : "text-white"
                                         )}
                                     >
                                         {track.title}
@@ -153,7 +164,11 @@ export function TrackList({
                                             ? "text-purple-400 hover:text-purple-300"
                                             : "text-gray-400 hover:text-white"
                                     )}
-                                    title={track.isLiked ? "Unlike" : "Keep in library"}
+                                    title={
+                                        track.isLiked
+                                            ? "Unlike"
+                                            : "Keep in library"
+                                    }
                                 >
                                     <Heart
                                         className={cn(

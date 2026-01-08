@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { logger } from "./logger";
 import { encrypt, decrypt, encryptField } from "./encryption";
 
 const CACHE_TTL_MS = 60 * 1000;
@@ -23,7 +24,7 @@ function safeDecrypt(value: string | null, fieldName?: string): string | null {
     try {
         return decrypt(value);
     } catch (error) {
-        console.warn(`[Settings] Failed to decrypt ${fieldName || 'field'}, returning null`);
+        logger.warn(`[Settings] Failed to decrypt ${fieldName || 'field'}, returning null`);
         return null;
     }
 }
@@ -47,17 +48,10 @@ export async function getSystemSettings(forceRefresh = false) {
     // Decrypt sensitive fields - use safeDecrypt to handle corrupted fields gracefully
     const decrypted = {
         ...settings,
-        mullvadPrivateKey: safeDecrypt(settings.mullvadPrivateKey, 'mullvadPrivateKey'),
-        nordvpnPassword: safeDecrypt(settings.nordvpnPassword, 'nordvpnPassword'),
-        protonvpnPassword: safeDecrypt(settings.protonvpnPassword, 'protonvpnPassword'),
-        openvpnConfig: safeDecrypt(settings.openvpnConfig, 'openvpnConfig'),
-        openvpnPassword: safeDecrypt(settings.openvpnPassword, 'openvpnPassword'),
         lidarrApiKey: safeDecrypt(settings.lidarrApiKey, 'lidarrApiKey'),
-        nzbgetPassword: safeDecrypt(settings.nzbgetPassword, 'nzbgetPassword'),
-        qbittorrentPassword: safeDecrypt(settings.qbittorrentPassword, 'qbittorrentPassword'),
+        lidarrWebhookSecret: safeDecrypt(settings.lidarrWebhookSecret, 'lidarrWebhookSecret'),
         openaiApiKey: safeDecrypt(settings.openaiApiKey, 'openaiApiKey'),
         lastfmApiKey: safeDecrypt(settings.lastfmApiKey, 'lastfmApiKey'),
-        lastfmApiSecret: safeDecrypt(settings.lastfmApiSecret, 'lastfmApiSecret'),
         fanartApiKey: safeDecrypt(settings.fanartApiKey, 'fanartApiKey'),
         audiobookshelfApiKey: safeDecrypt(settings.audiobookshelfApiKey, 'audiobookshelfApiKey'),
         soulseekPassword: safeDecrypt(settings.soulseekPassword, 'soulseekPassword'),

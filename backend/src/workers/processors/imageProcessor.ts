@@ -1,4 +1,5 @@
 import { Job } from 'bull';
+import { logger } from "../../utils/logger";
 
 export interface ImageJobData {
   imageUrl: string;
@@ -15,7 +16,7 @@ export interface ImageJobResult {
 export async function processImageOptimization(job: Job<ImageJobData>): Promise<ImageJobResult> {
   const { imageUrl, coverId, type } = job.data;
 
-  console.log(`[ImageJob ${job.id}] Processing ${type} for cover ${coverId}`);
+  logger.debug(`[ImageJob ${job.id}] Processing ${type} for cover ${coverId}`);
 
   await job.progress(0);
 
@@ -25,7 +26,7 @@ export async function processImageOptimization(job: Job<ImageJobData>): Promise<
 
     await job.progress(50);
 
-    console.log(`[ImageJob ${job.id}] Image optimization complete`);
+    logger.debug(`[ImageJob ${job.id}] Image optimization complete`);
 
     await job.progress(100);
 
@@ -34,7 +35,7 @@ export async function processImageOptimization(job: Job<ImageJobData>): Promise<
       paths: [] // Will contain generated file paths
     };
   } catch (error: any) {
-    console.error(`[ImageJob ${job.id}] Optimization failed:`, error);
+    logger.error(`[ImageJob ${job.id}] Optimization failed:`, error);
 
     return {
       success: false,

@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, Pause, Check, ArrowUpDown } from "lucide-react";
+import { Play, Pause, Check, ArrowUpDown, CheckCircle } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { Podcast, Episode } from "../types";
 import { formatDuration, formatDate } from "../utils";
@@ -14,6 +14,7 @@ interface EpisodeListProps {
     isPlaying: boolean;
     onPlayPause: (episode: Episode) => void;
     onPlay: (episode: Episode) => void;
+    onMarkComplete?: (episodeId: string, duration: number) => void;
 }
 
 export function EpisodeList({
@@ -25,6 +26,7 @@ export function EpisodeList({
     isPlaying,
     onPlayPause,
     onPlay,
+    onMarkComplete,
 }: EpisodeListProps) {
     return (
         <section>
@@ -171,6 +173,20 @@ export function EpisodeList({
                                 <span className="text-xs text-white/40 shrink-0">
                                     {formatDuration(episode.duration)}
                                 </span>
+
+                                {/* Complete Button - visible on hover for incomplete episodes */}
+                                {onMarkComplete && !episode.progress?.isFinished && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onMarkComplete(episode.id, episode.duration);
+                                        }}
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity ml-2 p-1.5 rounded-full hover:bg-white/10"
+                                        title="Mark as complete"
+                                    >
+                                        <CheckCircle className="w-4 h-4 text-white/60 hover:text-green-400" />
+                                    </button>
+                                )}
                             </div>
                         </div>
                     );

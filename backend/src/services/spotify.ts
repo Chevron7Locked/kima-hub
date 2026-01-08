@@ -1,4 +1,5 @@
 import axios from "axios";
+import { logger } from "../utils/logger";
 
 /**
  * Spotify Service
@@ -84,7 +85,7 @@ class SpotifyService {
 
         for (const endpoint of endpoints) {
             try {
-                console.log(`Spotify: Fetching anonymous token from ${endpoint.url}...`);
+                logger.debug(`Spotify: Fetching anonymous token from ${endpoint.url}...`);
                 
                 const response = await axios.get(endpoint.url, {
                     params: endpoint.params,
@@ -104,15 +105,15 @@ class SpotifyService {
                     // Anonymous tokens last about an hour
                     this.tokenExpiry = Date.now() + 3600 * 1000;
                     
-                    console.log("Spotify: Got anonymous token");
+                    logger.debug("Spotify: Got anonymous token");
                     return token;
                 }
             } catch (error: any) {
-                console.log(`Spotify: Token endpoint failed (${error.response?.status || error.message})`);
+                logger.debug(`Spotify: Token endpoint failed (${error.response?.status || error.message})`);
             }
         }
 
-        console.error("Spotify: All token endpoints failed - API browsing unavailable");
+        logger.error("Spotify: All token endpoints failed - API browsing unavailable");
         return null;
     }
 
@@ -148,7 +149,7 @@ class SpotifyService {
         }
 
         try {
-            console.log(`Spotify: Fetching playlist ${playlistId}...`);
+            logger.debug(`Spotify: Fetching playlist ${playlistId}...`);
 
             const playlistResponse = await axios.get(
                 `https://api.spotify.com/v1/playlists/${playlistId}`,
@@ -165,7 +166,7 @@ class SpotifyService {
             );
 
             const playlist = playlistResponse.data;
-            console.log(`Spotify: Fetched playlist "${playlist.name}" with ${playlist.tracks?.items?.length || 0} tracks`);
+            logger.debug(`Spotify: Fetched playlist "${playlist.name}" with ${playlist.tracks?.items?.length || 0} tracks`);
             
             const tracks: SpotifyTrack[] = [];
 
@@ -180,7 +181,7 @@ class SpotifyService {
 
                 // Debug log for tracks with Unknown Album
                 if (albumName === "Unknown Album") {
-                    console.log(`Spotify: Track "${track.name}" has no album data:`, JSON.stringify({
+                    logger.debug(`Spotify: Track "${track.name}" has no album data:`, JSON.stringify({
                         trackId: track.id,
                         album: track.album,
                         hasAlbum: !!track.album,
@@ -203,7 +204,7 @@ class SpotifyService {
                 });
             }
 
-            console.log(`Spotify: Processed ${tracks.length} tracks`);
+            logger.debug(`Spotify: Processed ${tracks.length} tracks`);
 
             return {
                 id: playlist.id,
@@ -216,7 +217,7 @@ class SpotifyService {
                 isPublic: playlist.public ?? true,
             };
         } catch (error: any) {
-            console.error("Spotify API error:", error.response?.status, error.response?.data || error.message);
+            logger.error("Spotify API error:", error.response?.status, error.response?.data || error.message);
             
             // Fallback to embed HTML parsing
             return await this.fetchPlaylistViaEmbedHtml(playlistId);
@@ -228,7 +229,7 @@ class SpotifyService {
      */
     private async fetchPlaylistViaEmbedHtml(playlistId: string): Promise<SpotifyPlaylist | null> {
         try {
-            console.log("Spotify: Trying embed HTML parsing...");
+            logger.debug("Spotify: Trying embed HTML parsing...");
             
             const response = await axios.get(
                 `https://open.spotify.com/embed/playlist/${playlistId}`,
@@ -244,7 +245,7 @@ class SpotifyService {
             const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/);
             
             if (!match) {
-                console.error("Spotify: Could not find __NEXT_DATA__ in embed HTML");
+                logger.error("Spotify: Could not find __NEXT_DATA__ in embed HTML");
                 return null;
             }
 
@@ -255,7 +256,7 @@ class SpotifyService {
                 || data.props?.pageProps;
 
             if (!playlistData) {
-                console.error("Spotify: Could not find playlist data in embed JSON");
+                logger.error("Spotify: Could not find playlist data in embed JSON");
                 return null;
             }
 
@@ -278,7 +279,7 @@ class SpotifyService {
 
                 // Debug log for tracks with Unknown Album
                 if (embedAlbumName === "Unknown Album") {
-                    console.log(`Spotify Embed: Track "${trackData.title || trackData.name}" has no album data:`, JSON.stringify({
+                    logger.debug(`Spotify Embed: Track "${trackData.title || trackData.name}" has no album data:`, JSON.stringify({
                         album: trackData.album,
                         albumName: trackData.albumName,
                         hasAlbum: !!trackData.album,
@@ -311,7 +312,7 @@ class SpotifyService {
                 isPublic: true,
             };
         } catch (error: any) {
-            console.error("Spotify embed HTML error:", error.message);
+            logger.error("Spotify embed HTML error:", error.message);
             return null;
         }
     }
@@ -330,7 +331,7 @@ class SpotifyService {
             playlistId = parsed.id;
         }
 
-        console.log("Spotify: Fetching public playlist via anonymous token");
+        logger.debug("Spotify: Fetching public playlist via anonymous token");
         return await this.fetchPlaylistViaAnonymousApi(playlistId);
     }
 
@@ -341,13 +342,13 @@ class SpotifyService {
     async getFeaturedPlaylists(limit: number = 20): Promise<SpotifyPlaylistPreview[]> {
         const token = await this.getAnonymousToken();
         if (!token) {
-            console.error("Spotify: Cannot fetch featured playlists without token");
+            logger.error("Spotify: Cannot fetch featured playlists without token");
             return [];
         }
 
         // Try official API first
         try {
-            console.log("Spotify: Trying featured playlists via official API...");
+            logger.debug("Spotify: Trying featured playlists via official API...");
 
             const response = await axios.get(
                 "https://api.spotify.com/v1/browse/featured-playlists",
@@ -366,7 +367,7 @@ class SpotifyService {
 
             const playlists = response.data?.playlists?.items || [];
             if (playlists.length > 0) {
-                console.log(`Spotify: Got ${playlists.length} featured playlists via official API`);
+                logger.debug(`Spotify: Got ${playlists.length} featured playlists via official API`);
                 return playlists.map((playlist: any) => ({
                     id: playlist.id,
                     name: playlist.name,
@@ -377,12 +378,12 @@ class SpotifyService {
                 }));
             }
         } catch (error: any) {
-            console.log("Spotify: Featured playlists API failed, trying search fallback...", error.response?.status || error.message);
+            logger.debug("Spotify: Featured playlists API failed, trying search fallback...", error.response?.status || error.message);
         }
 
         // Fallback: Search for popular playlists
         try {
-            console.log("Spotify: Trying search fallback for featured playlists...");
+            logger.debug("Spotify: Trying search fallback for featured playlists...");
             
             // Search for popular/curated playlists
             const searches = ["Today's Top Hits", "Hot Hits", "Viral Hits", "All Out", "Rock Classics", "Chill Hits"];
@@ -400,10 +401,10 @@ class SpotifyService {
                 if (allPlaylists.length >= limit) break;
             }
             
-            console.log(`Spotify: Got ${allPlaylists.length} playlists via search fallback`);
+            logger.debug(`Spotify: Got ${allPlaylists.length} playlists via search fallback`);
             return allPlaylists.slice(0, limit);
         } catch (searchError: any) {
-            console.error("Spotify: Search fallback also failed:", searchError.message);
+            logger.error("Spotify: Search fallback also failed:", searchError.message);
             return [];
         }
     }
@@ -418,7 +419,7 @@ class SpotifyService {
         }
 
         try {
-            console.log(`Spotify: Fetching playlists for category ${categoryId}...`);
+            logger.debug(`Spotify: Fetching playlists for category ${categoryId}...`);
 
             const response = await axios.get(
                 `https://api.spotify.com/v1/browse/categories/${categoryId}/playlists`,
@@ -445,7 +446,7 @@ class SpotifyService {
                 trackCount: playlist.tracks?.total || 0,
             }));
         } catch (error: any) {
-            console.error(`Spotify category playlists error for ${categoryId}:`, error.message);
+            logger.error(`Spotify category playlists error for ${categoryId}:`, error.message);
             return [];
         }
     }
@@ -456,12 +457,12 @@ class SpotifyService {
     async searchPlaylists(query: string, limit: number = 20): Promise<SpotifyPlaylistPreview[]> {
         const token = await this.getAnonymousToken();
         if (!token) {
-            console.error("Spotify: Cannot search without token");
+            logger.error("Spotify: Cannot search without token");
             return [];
         }
 
         try {
-            console.log(`Spotify: Searching playlists for "${query}"...`);
+            logger.debug(`Spotify: Searching playlists for "${query}"...`);
 
             const response = await axios.get(
                 "https://api.spotify.com/v1/search",
@@ -482,7 +483,7 @@ class SpotifyService {
             );
 
             const playlists = response.data?.playlists?.items || [];
-            console.log(`Spotify: Found ${playlists.length} playlists for "${query}"`);
+            logger.debug(`Spotify: Found ${playlists.length} playlists for "${query}"`);
 
             return playlists
                 .filter((playlist: any) => playlist && playlist.id) // Filter out null entries
@@ -495,10 +496,10 @@ class SpotifyService {
                     trackCount: playlist.tracks?.total || 0,
                 }));
         } catch (error: any) {
-            console.error("Spotify search playlists error:", error.response?.status, error.response?.data || error.message);
+            logger.error("Spotify search playlists error:", error.response?.status, error.response?.data || error.message);
             // If unauthorized, try refreshing token and retry once
             if (error.response?.status === 401) {
-                console.log("Spotify: Token expired, refreshing...");
+                logger.debug("Spotify: Token expired, refreshing...");
                 this.anonymousToken = null;
                 this.tokenExpiry = 0;
                 const newToken = await this.getAnonymousToken();
@@ -527,7 +528,7 @@ class SpotifyService {
                                 trackCount: p.tracks?.total || 0,
                             }));
                     } catch (retryError) {
-                        console.error("Spotify: Retry also failed");
+                        logger.error("Spotify: Retry also failed");
                     }
                 }
             }
@@ -566,7 +567,7 @@ class SpotifyService {
                 imageUrl: cat.icons?.[0]?.url || null,
             }));
         } catch (error: any) {
-            console.error("Spotify categories error:", error.message);
+            logger.error("Spotify categories error:", error.message);
             return [];
         }
     }

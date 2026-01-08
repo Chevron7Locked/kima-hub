@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { logger } from "./logger";
 
 interface ColorPalette {
     vibrant: string;
@@ -221,7 +222,7 @@ export async function extractColorsFromImage(
             ),
         };
     } catch (error) {
-        console.error("[ColorExtractor] Failed to extract colors:", error);
+        logger.error("[ColorExtractor] Failed to extract colors:", error);
         // Return fallback colors
         return {
             vibrant: "#1db954",

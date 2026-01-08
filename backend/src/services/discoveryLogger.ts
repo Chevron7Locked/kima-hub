@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { logger } from "../utils/logger";
 import * as path from "path";
 
 /**
@@ -59,7 +60,7 @@ class DiscoveryLogger {
         }
         
         // Also write to console for real-time visibility
-        console.log(message);
+        logger.debug(message);
     }
 
     /**

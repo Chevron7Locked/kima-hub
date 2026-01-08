@@ -166,3 +166,144 @@ export function findBestArtistMatch(
 
     return bestMatch;
 }
+
+/**
+ * Extract the primary artist from collaboration strings
+ * Examples:
+ *   "CHVRCHES & Robert Smith" -> "CHVRCHES"
+ *   "Artist feat. Someone" -> "Artist"
+ *   "Artist ft. Someone" -> "Artist"
+ *   "Artist x Someone" -> "Artist"
+ *   "Artist, Someone" -> "Artist"
+ *
+ * But preserves band names:
+ *   "Earth, Wind & Fire" -> "Earth, Wind & Fire" (kept as-is)
+ *   "The Naked and Famous" -> "The Naked and Famous" (kept as-is)
+ *   "Of Mice & Men" -> "Of Mice & Men" (kept as-is)
+ *   "Between the Buried and Me" -> "Between the Buried and Me" (kept as-is)
+ */
+export function extractPrimaryArtist(artistName: string): string {
+    // Empty string check
+    if (!artistName || artistName.trim() === '') {
+        return 'Unknown Artist';
+    }
+
+    // Trim whitespace
+    artistName = artistName.trim();
+
+    // HIGH PRIORITY: These patterns almost always indicate collaborations
+    // (not band names) so we always split on them
+    const definiteCollaborationPatterns = [
+        / feat\.? /i, // "feat." or "feat "
+        / ft\.? /i, // "ft." or "ft "
+        / featuring /i,
+        / x /i, // "Artist x Chromeo" style collaborations
+    ];
+
+    for (const pattern of definiteCollaborationPatterns) {
+        const match = artistName.split(pattern);
+        if (match.length > 1) {
+            return match[0].trim();
+        }
+    }
+
+    // LOWER PRIORITY: These might be band names, so only split if the result
+    // looks like a complete artist name (not truncated)
+    const ambiguousPatterns = [
+        { pattern: / \& /, name: "&" }, // "Earth, Wind & Fire" shouldn't split
+        { pattern: / and /i, name: "and" }, // "The Naked and Famous" shouldn't split
+        { pattern: / with /i, name: "with" },
+        { pattern: /, /, name: "," },
+    ];
+
+    for (const { pattern } of ambiguousPatterns) {
+        const parts = artistName.split(pattern);
+        if (parts.length > 1) {
+            const firstPart = parts[0].trim();
+            const secondPart = parts[1].trim();
+            const lastWord =
+                firstPart.split(/\s+/).pop()?.toLowerCase() || "";
+
+            // Don't split if the first part ends with common incomplete words
+            // These suggest it's a band name, not a collaboration
+            const incompleteEndings = ["the", "a", "an", "and", "of", ","];
+            if (incompleteEndings.includes(lastWord)) {
+                continue; // Skip this pattern, try the next one
+            }
+
+            // Don't split if the first part is very short (likely incomplete)
+            if (firstPart.length < 4) {
+                continue;
+            }
+
+            // Don't split if the second part looks like part of a band name
+            // (short single word that's likely not a full artist name)
+            // Examples: "Of Mice & Men" -> "Men" (1 word, 3 chars) = band name
+            //           "Artist & Robert Smith" -> "Robert Smith" (2 words) = collaborator
+            const secondPartWords = secondPart.split(/\s+/).length;
+            if (secondPartWords < 2 && secondPart.length <= 10) {
+                continue; // Second part too short, likely part of band name
+            }
+
+            // Don't split if the second part contains another separator
+            // This indicates a multi-part band name like "Earth, Wind & Fire"
+            if (
+                secondPart.includes(" & ") ||
+                / and /i.test(secondPart) ||
+                secondPart.includes(", ")
+            ) {
+                continue; // Multi-separator band name, don't split
+            }
+
+            return firstPart;
+        }
+    }
+
+    // No collaboration found, return as-is
+    return artistName;
+}
+
+/**
+ * Parse artist name from folder path patterns
+ * Common patterns:
+ *   "Artist - Album (Year) FLAC" -> "Artist"
+ *   "Artist - Album" -> "Artist"
+ *   "Artist.Name-Album.Name-24BIT-FLAC-2023-GROUP" -> "Artist Name"
+ *
+ * Returns null if no clear artist pattern is found
+ */
+export function parseArtistFromPath(folderName: string): string | null {
+    if (!folderName || folderName.trim() === '') {
+        return null;
+    }
+
+    folderName = folderName.trim();
+
+    // Pattern 1: "Artist - Album" or "Artist - Album (Year)"
+    // Match everything before " - " separator
+    const dashPattern = /^([^-]+)\s*-\s*.+$/;
+    const dashMatch = folderName.match(dashPattern);
+    if (dashMatch && dashMatch[1]) {
+        const artist = dashMatch[1].trim();
+        // Validate: should be at least 2 chars and not look like a track number
+        if (artist.length >= 2 && !/^\d+$/.test(artist)) {
+            return artist;
+        }
+    }
+
+    // Pattern 2: "Artist.Name-Album.Name-FLAC-2023" (scene release format)
+    // Split on "-", first part is artist with dots, convert dots to spaces
+    const scenePattern = /^([^-]+)-/;
+    const sceneMatch = folderName.match(scenePattern);
+    if (sceneMatch && sceneMatch[1]) {
+        const artistPart = sceneMatch[1].trim();
+        // Convert dots to spaces (Artist.Name -> Artist Name)
+        const artist = artistPart.replace(/\./g, ' ').trim();
+        // Validate: should be at least 2 chars and not all caps metadata
+        if (artist.length >= 2 && !/^(FLAC|MP3|WAV|24BIT|WEB|CD)$/i.test(artist)) {
+            return artist;
+        }
+    }
+
+    return null;
+}

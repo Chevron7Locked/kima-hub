@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import Image from "next/image";
+import { dispatchQueryEvent } from "@/lib/query-events";
 
 export default function SyncPage() {
     const router = useRouter();
@@ -57,6 +58,9 @@ export default function SyncPage() {
 
                             // Enrichment runs on-demand from Settings page
                             // Artists get images from Deezer/Fanart when first viewed
+
+                            // Dispatch event to update Recently Added section
+                            dispatchQueryEvent("library-updated");
 
                             setProgress(100);
                             setMessage("All set! Redirecting...");

@@ -9,6 +9,7 @@ import { useAudio } from "@/lib/audio-context";
 import { api } from "@/lib/api";
 import { DPAD_KEYS } from "@/lib/tv-utils";
 import { useTVNavigation } from "@/hooks/useTVNavigation";
+import { formatTime, clampTime, formatTimeRemaining } from "@/utils/formatTime";
 import { RefreshCw, SkipBack, SkipForward, Shuffle, Repeat } from "lucide-react";
 
 const tvNavigation = [
@@ -99,12 +100,8 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
             : null;
     }
 
-    // Format time helper
-    const formatTime = (seconds: number) => {
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    };
+    // CRITICAL: Clamp currentTime to prevent display of invalid times
+    const clampedCurrentTime = clampTime(currentTime, duration);
 
     // Sync library
     const handleSync = async () => {
@@ -260,7 +257,11 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
                     
                     {/* Time counter */}
                     <div className="tv-np-time">
-                        {formatTime(currentTime)} / {formatTime(duration)}
+                        {formatTime(clampedCurrentTime)} / {
+                            playbackType === "podcast" || playbackType === "audiobook"
+                                ? formatTimeRemaining(Math.max(0, duration - clampedCurrentTime))
+                                : formatTime(duration)
+                        }
                     </div>
 
                     {/* Shuffle */}
@@ -309,7 +310,7 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
             )}
 
             {/* Content */}
-            <main ref={contentRef} className="tv-content">
+            <main id="main-content" tabIndex={-1} ref={contentRef} className="tv-content">
                 {children}
             </main>
         </>

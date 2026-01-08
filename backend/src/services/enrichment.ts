@@ -14,6 +14,7 @@
  * - Manual override support
  */
 
+import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { lastFmService } from "./lastfm";
 import { musicBrainzService } from "./musicbrainz";
@@ -171,7 +172,7 @@ export class EnrichmentService {
             throw new Error(`Artist ${artistId} not found`);
         }
 
-        console.log(`Enriching artist: ${artist.name}`);
+        logger.debug(`Enriching artist: ${artist.name}`);
 
         const enrichmentData: ArtistEnrichmentData = {
             confidence: 0,
@@ -190,10 +191,10 @@ export class EnrichmentService {
                 if (mbResults.length > 0) {
                     enrichmentData.mbid = mbResults[0].id;
                     enrichmentData.confidence += 0.4;
-                    console.log(`  Found MBID: ${enrichmentData.mbid}`);
+                    logger.debug(`  Found MBID: ${enrichmentData.mbid}`);
                 }
             } catch (error) {
-                console.error(`  ✗ MusicBrainz lookup failed:`, error);
+                logger.error(` MusicBrainz lookup failed:`, error);
             }
         }
 
@@ -214,7 +215,7 @@ export class EnrichmentService {
                         lastfmInfo.tags?.tag?.map((t: any) => t.name) || [];
                     enrichmentData.genres = enrichmentData.tags?.slice(0, 3); // Top 3 tags as genres
                     enrichmentData.confidence += 0.3;
-                    console.log(
+                    logger.debug(
                         `  Found Last.fm data: ${
                             enrichmentData.tags?.length || 0
                         } tags`
@@ -228,10 +229,10 @@ export class EnrichmentService {
                     enrichmentData.similarArtists = similar.map(
                         (a: any) => a.name
                     );
-                    console.log(`  Found ${similar.length} similar artists`);
+                    logger.debug(`  Found ${similar.length} similar artists`);
                 }
             } catch (error) {
-                console.error(
+                logger.error(
                     `  ✗ Last.fm lookup failed:`,
                     error instanceof Error ? error.message : error
                 );
@@ -251,16 +252,16 @@ export class EnrichmentService {
             if (imageResult) {
                 enrichmentData.heroUrl = imageResult.url;
                 enrichmentData.confidence += 0.2;
-                console.log(`  Found artist image from ${imageResult.source}`);
+                logger.debug(`  Found artist image from ${imageResult.source}`);
             }
         } catch (error) {
-            console.error(
+            logger.error(
                 `  ✗ Artist image lookup failed:`,
                 error instanceof Error ? error.message : error
             );
         }
 
-        console.log(
+        logger.debug(
             `  Enrichment confidence: ${(
                 enrichmentData.confidence * 100
             ).toFixed(0)}%`
@@ -294,7 +295,7 @@ export class EnrichmentService {
             throw new Error(`Album ${albumId} not found`);
         }
 
-        console.log(
+        logger.debug(
             `[Enrichment] Processing album: ${album.artist.name} - ${album.title}`
         );
 
@@ -335,7 +336,7 @@ export class EnrichmentService {
                             ? new Date(match["first-release-date"])
                             : undefined;
                         enrichmentData.confidence += 0.5;
-                        console.log(`  Found MBID: ${enrichmentData.rgMbid}`);
+                        logger.debug(`  Found MBID: ${enrichmentData.rgMbid}`);
 
                         // Try to get label info from first release
                         try {
@@ -355,18 +356,18 @@ export class EnrichmentService {
                                 ) {
                                     enrichmentData.label =
                                         releaseInfo["label-info"][0].label.name;
-                                    console.log(
+                                    logger.debug(
                                         `  Found label: ${enrichmentData.label}`
                                     );
                                 }
                             }
                         } catch (error) {
-                            console.log(`Could not fetch label info`);
+                            logger.debug(`Could not fetch label info`);
                         }
                     }
                 }
             } catch (error) {
-                console.error(`  ✗ MusicBrainz lookup failed:`, error);
+                logger.error(` MusicBrainz lookup failed:`, error);
             }
         }
 
@@ -375,8 +376,7 @@ export class EnrichmentService {
             try {
                 const lastfmInfo = await lastFmService.getAlbumInfo(
                     album.artist.name,
-                    album.title,
-                    enrichmentData.rgMbid
+                    album.title
                 );
 
                 if (lastfmInfo) {
@@ -386,14 +386,14 @@ export class EnrichmentService {
                     enrichmentData.trackCount =
                         lastfmInfo.tracks?.track?.length;
                     enrichmentData.confidence += 0.3;
-                    console.log(
+                    logger.debug(
                         `  Found Last.fm data: ${
                             enrichmentData.tags?.length || 0
                         } tags`
                     );
                 }
             } catch (error) {
-                console.error(`  ✗ Last.fm lookup failed:`, error);
+                logger.error(` Last.fm lookup failed:`, error);
             }
         }
 
@@ -408,16 +408,16 @@ export class EnrichmentService {
             if (coverResult) {
                 enrichmentData.coverUrl = coverResult.url;
                 enrichmentData.confidence += 0.2;
-                console.log(`  Found cover art from ${coverResult.source}`);
+                logger.debug(`  Found cover art from ${coverResult.source}`);
             }
         } catch (error) {
-            console.error(
+            logger.error(
                 `  ✗ Cover art lookup failed:`,
                 error instanceof Error ? error.message : error
             );
         }
 
-        console.log(
+        logger.debug(
             `  Enrichment confidence: ${(
                 enrichmentData.confidence * 100
             ).toFixed(0)}%`
@@ -443,7 +443,7 @@ export class EnrichmentService {
             });
 
             if (existingArtist && existingArtist.id !== artistId) {
-                console.log(
+                logger.debug(
                     `MBID ${data.mbid} already used by "${existingArtist.name}", skipping MBID update`
                 );
             } else {
@@ -462,7 +462,7 @@ export class EnrichmentService {
                 where: { id: artistId },
                 data: updateData,
             });
-            console.log(
+            logger.debug(
                 `   Saved ${data.genres?.length || 0} genres for artist`
             );
         }
@@ -480,6 +480,9 @@ export class EnrichmentService {
         if (data.rgMbid) updateData.rgMbid = data.rgMbid;
         if (data.coverUrl) updateData.coverUrl = data.coverUrl;
         if (data.releaseDate) {
+            // Store original release date in dedicated field
+            updateData.originalYear = data.releaseDate.getFullYear();
+            // Also update year for backward compatibility (but originalYear takes precedence)
             updateData.year = data.releaseDate.getFullYear();
         }
         if (data.label) updateData.label = data.label;
@@ -492,7 +495,7 @@ export class EnrichmentService {
                 where: { id: albumId },
                 data: updateData,
             });
-            console.log(
+            logger.debug(
                 `   Saved album data: ${
                     data.genres?.length || 0
                 } genres, label: ${data.label || "none"}`
@@ -565,7 +568,7 @@ export class EnrichmentService {
             },
         });
 
-        console.log(`Starting enrichment for ${artists.length} artists...`);
+        logger.debug(`Starting enrichment for ${artists.length} artists...`);
 
         for (const artist of artists) {
             try {
@@ -634,7 +637,7 @@ export class EnrichmentService {
                             item: `${artist.name} - ${album.title}`,
                             error: error.message,
                         });
-                        console.error(
+                        logger.error(
                             `  ✗ Failed to enrich ${artist.name} - ${album.title}:`,
                             error
                         );
@@ -649,11 +652,11 @@ export class EnrichmentService {
                     item: artist.name,
                     error: error.message,
                 });
-                console.error(`  ✗ Failed to enrich ${artist.name}:`, error);
+                logger.error(` Failed to enrich ${artist.name}:`, error);
             }
         }
 
-        console.log(
+        logger.debug(
             `Enrichment complete: ${result.itemsEnriched}/${result.itemsProcessed} items enriched`
         );
 

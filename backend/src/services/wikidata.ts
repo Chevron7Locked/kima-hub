@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from "axios";
+import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 
 interface WikidataResult {
@@ -31,7 +32,7 @@ class WikidataService {
                 return JSON.parse(cached);
             }
         } catch (err) {
-            console.warn("Redis get error:", err);
+            logger.warn("Redis get error:", err);
         }
 
         try {
@@ -39,7 +40,7 @@ class WikidataService {
             const wikidataId = await this.getWikidataIdFromMBID(mbid);
 
             if (!wikidataId) {
-                console.log(`No Wikidata entry found for ${artistName}`);
+                logger.debug(`No Wikidata entry found for ${artistName}`);
                 return {};
             }
 
@@ -59,12 +60,12 @@ class WikidataService {
                     JSON.stringify(result)
                 );
             } catch (err) {
-                console.warn("Redis set error:", err);
+                logger.warn("Redis set error:", err);
             }
 
             return result;
         } catch (error) {
-            console.error(`Wikidata fetch failed for ${artistName}:`, error);
+            logger.error(`Wikidata fetch failed for ${artistName}:`, error);
             return {};
         }
     }
@@ -116,7 +117,7 @@ class WikidataService {
 
             return summaryResponse.data.extract;
         } catch (error) {
-            console.error(
+            logger.error(
                 `Failed to get Wikipedia summary for ${wikidataId}:`,
                 error
             );
@@ -152,7 +153,7 @@ class WikidataService {
 
             return url;
         } catch (error) {
-            console.error(
+            logger.error(
                 `Failed to get Wikidata image for ${wikidataId}:`,
                 error
             );

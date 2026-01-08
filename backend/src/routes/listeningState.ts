@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
@@ -46,7 +47,7 @@ router.post("/", async (req, res) => {
                 .status(400)
                 .json({ error: "Invalid request", details: error.errors });
         }
-        console.error("Update listening state error:", error);
+        logger.error("Update listening state error:", error);
         res.status(500).json({ error: "Failed to update listening state" });
     }
 });
@@ -79,7 +80,7 @@ router.get("/", async (req, res) => {
 
         res.json(state);
     } catch (error) {
-        console.error("Get listening state error:", error);
+        logger.error("Get listening state error:", error);
         res.status(500).json({ error: "Failed to get listening state" });
     }
 });
@@ -98,7 +99,7 @@ router.get("/recent", async (req, res) => {
 
         res.json(states);
     } catch (error) {
-        console.error("Get recent listening states error:", error);
+        logger.error("Get recent listening states error:", error);
         res.status(500).json({
             error: "Failed to get recent listening states",
         });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { RefreshCw, AudioWaveform } from "lucide-react";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
@@ -16,7 +16,9 @@ import { PodcastsGrid } from "@/features/home/components/PodcastsGrid";
 import { AudiobooksGrid } from "@/features/home/components/AudiobooksGrid";
 import { FeaturedPlaylistsGrid } from "@/features/home/components/FeaturedPlaylistsGrid";
 import { LibraryRadioStations } from "@/features/home/components/LibraryRadioStations";
-import { MoodMixer } from "@/components/MoodMixer";
+
+// Lazy load MoodMixer - only loads when user opens it
+const MoodMixer = lazy(() => import("@/components/MoodMixer").then(mod => ({ default: mod.MoodMixer })));
 
 // Loading skeleton for playlist cards
 function PlaylistSkeleton() {
@@ -163,8 +165,12 @@ export default function HomePage() {
                 </div>
             </div>
 
-            {/* Mood Mixer Modal */}
-            <MoodMixer isOpen={showMoodMixer} onClose={() => setShowMoodMixer(false)} />
+            {/* Mood Mixer Modal - Lazy loaded */}
+            {showMoodMixer && (
+                <Suspense fallback={null}>
+                    <MoodMixer isOpen={showMoodMixer} onClose={() => setShowMoodMixer(false)} />
+                </Suspense>
+            )}
         </div>
     );
 }

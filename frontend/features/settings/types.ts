@@ -23,6 +23,7 @@ export interface SystemSettings {
     openaiModel: string;
     fanartEnabled: boolean;
     fanartApiKey: string;
+    lastfmApiKey: string;
     // Audiobookshelf
     audiobookshelfEnabled: boolean;
     audiobookshelfUrl: string;
@@ -41,9 +42,11 @@ export interface SystemSettings {
     maxCacheSizeMb: number;
     autoSync: boolean;
     autoEnrichMetadata: boolean;
+    audioAnalyzerWorkers: number;
+    soulseekConcurrentDownloads: number;
     // Download Preferences
     downloadSource: "soulseek" | "lidarr";
-    soulseekFallback: "none" | "lidarr";
+    primaryFailureFallback: "none" | "lidarr" | "soulseek";
 }
 
 export interface ApiKey {

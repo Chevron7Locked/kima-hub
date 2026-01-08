@@ -1,5 +1,9 @@
 import type { NextConfig } from "next";
 
+const withBundleAnalyzer = require('@next/bundle-analyzer')({
+    enabled: process.env.ANALYZE === 'true',
+});
+
 const nextConfig: NextConfig = {
     // Allow dev origins for local network testing
     allowedDevOrigins: [
@@ -66,11 +70,8 @@ const nextConfig: NextConfig = {
         imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
         minimumCacheTTL: 60 * 60 * 24 * 7, // Cache for 7 days
         dangerouslyAllowSVG: true,
-        // Disable image optimization for internal API images
-        // Next.js Image Optimization has issues with proxied API endpoints
-        unoptimized: true,
     },
-    reactStrictMode: false,
+    reactStrictMode: true,
     async headers() {
         return [
             {
@@ -101,4 +102,4 @@ const nextConfig: NextConfig = {
     },
 };
 
-export default nextConfig;
+export default withBundleAnalyzer(nextConfig);

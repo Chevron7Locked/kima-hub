@@ -44,8 +44,11 @@ export function TopBar() {
 
     // Track download status from context (single source of truth)
     const { pendingDownloads, downloadStatus } = useDownloadContext();
-    const hasActiveDownloads =
-        downloadStatus.hasActiveDownloads || pendingDownloads.length > 0;
+    // Only use API-driven state for the icon
+    // pendingDownloads is optimistic local state that can become stale
+    const hasActiveDownloads = downloadStatus.hasActiveDownloads;
+    const hasPendingUploads = pendingDownloads.length > 0 &&
+        pendingDownloads.some(p => Date.now() - p.timestamp < 30000); // Only count recent pending
     const hasFailedDownloads = downloadStatus.failedDownloads.length > 0;
 
     const handleSync = async () => {
@@ -167,6 +170,7 @@ export function TopBar() {
                                 ? "bg-white text-black"
                                 : "bg-[#0a0a0a] text-gray-400 hover:bg-[#1a1a1a] hover:text-white"
                         )}
+                        aria-label="Home"
                         title="Home"
                     >
                         <Home className="w-5 h-5" />
@@ -186,6 +190,7 @@ export function TopBar() {
                                     setSearchQuery(e.target.value)
                                 }
                                 placeholder="Search..."
+                                aria-label="Search"
                                 autoCapitalize="none"
                                 autoCorrect="off"
                                 tabIndex={0}
@@ -241,6 +246,7 @@ export function TopBar() {
                                     ? "bg-white text-black"
                                     : "bg-[#0a0a0a] text-gray-400 hover:bg-[#1a1a1a] hover:text-white hover:scale-105"
                             )}
+                            aria-label="Home"
                             title="Home"
                         >
                             <Home className="w-6 h-6" />
@@ -262,6 +268,7 @@ export function TopBar() {
                                         setSearchQuery(e.target.value)
                                     }
                                     placeholder="What do you want to play?"
+                                    aria-label="Search"
                                     autoCapitalize="none"
                                     autoCorrect="off"
                                     tabIndex={0}
@@ -276,6 +283,17 @@ export function TopBar() {
                         <button
                             onClick={handleSync}
                             disabled={isPolling}
+                            aria-label={
+                                isPolling
+                                    ? "Library scan in progress"
+                                    : hasActiveDownloads
+                                    ? `${downloadStatus.activeDownloads.length} download(s) in progress`
+                                    : hasPendingUploads
+                                    ? `${pendingDownloads.length} download(s) starting`
+                                    : hasFailedDownloads
+                                    ? `${downloadStatus.failedDownloads.length} download(s) failed`
+                                    : "Sync library"
+                            }
                             className={cn(
                                 "flex items-center gap-2 px-3 h-10 rounded-full transition-all text-sm font-medium",
                                 isPolling
@@ -290,10 +308,9 @@ export function TopBar() {
                                 isPolling
                                     ? "Library scan in progress..."
                                     : hasActiveDownloads
-                                    ? `${
-                                          downloadStatus.activeDownloads
-                                              .length + pendingDownloads.length
-                                      } download(s) in progress`
+                                    ? `${downloadStatus.activeDownloads.length} download(s) in progress`
+                                    : hasPendingUploads
+                                    ? `${pendingDownloads.length} download(s) starting...`
                                     : hasFailedDownloads
                                     ? `${downloadStatus.failedDownloads.length} download(s) failed`
                                     : "Sync Library"
@@ -316,6 +333,7 @@ export function TopBar() {
                                     ? "bg-white text-black"
                                     : "text-white/60 hover:text-white"
                             )}
+                            aria-label="Settings"
                             title="Settings"
                         >
                             <Settings className="w-5 h-5" />
@@ -323,6 +341,7 @@ export function TopBar() {
                         <button
                             onClick={handleLogout}
                             className="w-10 h-10 rounded-full flex items-center justify-center transition-all text-red-400 hover:text-red-300"
+                            aria-label="Logout"
                             title="Logout"
                         >
                             <Power className="w-5 h-5" />

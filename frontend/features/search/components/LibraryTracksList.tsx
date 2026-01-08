@@ -25,6 +25,7 @@ export function LibraryTracksList({ tracks }: LibraryTracksListProps) {
         const formattedTracks = tracks.map((t) => ({
             id: t.id,
             title: t.title,
+            displayTitle: t.displayTitle,
             duration: t.duration,
             artist: {
                 id: t.album.artist.id,
@@ -64,9 +65,7 @@ export function LibraryTracksList({ tracks }: LibraryTracksListProps) {
                         key={track.id}
                         className={cn(
                             "flex items-center gap-3 p-2 rounded-md group transition-colors",
-                            isCurrentTrack
-                                ? "bg-white/10"
-                                : "hover:bg-white/5"
+                            isCurrentTrack ? "bg-white/10" : "hover:bg-white/5"
                         )}
                     >
                         {/* Play Button / Track Number */}
@@ -101,7 +100,9 @@ export function LibraryTracksList({ tracks }: LibraryTracksListProps) {
                                 />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center">
-                                    <span className="text-gray-500 text-xs">♪</span>
+                                    <span className="text-gray-500 text-xs">
+                                        ♪
+                                    </span>
                                 </div>
                             )}
                         </div>
@@ -111,14 +112,19 @@ export function LibraryTracksList({ tracks }: LibraryTracksListProps) {
                             <p
                                 className={cn(
                                     "text-sm font-medium truncate",
-                                    isCurrentTrack ? "text-[#ecb200]" : "text-white"
+                                    isCurrentTrack
+                                        ? "text-[#ecb200]"
+                                        : "text-white"
                                 )}
                             >
                                 {track.title}
                             </p>
                             <p className="text-xs text-gray-400 truncate">
                                 <Link
-                                    href={`/artist/${track.album.artist.mbid || track.album.artist.id}`}
+                                    href={`/artist/${
+                                        track.album.artist.mbid ||
+                                        track.album.artist.id
+                                    }`}
                                     className="hover:underline hover:text-white"
                                     onClick={(e) => e.stopPropagation()}
                                 >
@@ -145,5 +151,3 @@ export function LibraryTracksList({ tracks }: LibraryTracksListProps) {
         </div>
     );
 }
-
-

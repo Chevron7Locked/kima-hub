@@ -13,6 +13,7 @@
 .env.test.local
 .env.production.local
 .env.local
+.roomodes
 
 # =============================================================================
 # Dependencies
@@ -35,7 +36,7 @@ ENV/
 **/.venv/
 
 # =============================================================================
-# Build Outputs
+# Build 
 # =============================================================================
 # Frontend (Next.js)
 frontend/.next/
@@ -316,6 +317,17 @@ bower_components
 reset-and-setup.sh
 organize-singles.sh
 
+# AI Context Management (keep locally, don't push to GitHub)
+context_portal/
+
+# Internal Development Documentation (keep locally, don't push to GitHub)
+docs/
+**/docs/
+
+
+# Temporary commit messages
+COMMIT_MESSAGE.txt
+
 # Backend development logs
 backend/logs/
 
@@ -349,6 +361,8 @@ soularr/
 **/.cursor/
 .vscode/
 **/.vscode/
+.roo/
+**/.roo/
 
 # =============================================================================
 # Android Build Artifacts (contains local paths)
@@ -381,3 +395,7 @@ backend/mullvad/
 # Android signing
 lidify.keystore
 keystore.b64
+.aider*
+
+issues/
+plans/

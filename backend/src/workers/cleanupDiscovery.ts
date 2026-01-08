@@ -1,9 +1,10 @@
 import { prisma } from "../utils/db";
+import { logger } from "../utils/logger";
 import fs from "fs/promises";
 import path from "path";
 
 export async function cleanupDiscoveryTracks() {
-    console.log("\nCleaning up old discovery tracks...");
+    logger.debug("\nCleaning up old discovery tracks...");
 
     try {
         const sevenDaysAgo = new Date();
@@ -19,12 +20,12 @@ export async function cleanupDiscoveryTracks() {
             },
         });
 
-        console.log(
+        logger.debug(
             `  Found ${oldDiscoveryAlbums.length} old discovery albums`
         );
 
         if (oldDiscoveryAlbums.length === 0) {
-            console.log("  No cleanup needed");
+            logger.debug("  No cleanup needed");
             return { deletedAlbums: 0, deletedTracks: 0 };
         }
 
@@ -81,7 +82,7 @@ export async function cleanupDiscoveryTracks() {
 
             // If all tracks should be deleted, delete the album
             if (tracksToDelete.length === album.tracks.length) {
-                console.log(
+                logger.debug(
                     `  Deleting album: ${album.albumTitle} by ${album.artistName}`
                 );
 
@@ -92,9 +93,9 @@ export async function cleanupDiscoveryTracks() {
                             recursive: true,
                             force: true,
                         });
-                        console.log(`    Deleted folder: ${album.folderPath}`);
+                        logger.debug(`    Deleted folder: ${album.folderPath}`);
                     } catch (err) {
-                        console.warn(`    Could not delete folder: ${err}`);
+                        logger.warn(`    Could not delete folder: ${err}`);
                     }
                 }
 
@@ -107,7 +108,7 @@ export async function cleanupDiscoveryTracks() {
                 deletedTracks += album.tracks.length;
             } else if (tracksToDelete.length > 0) {
                 // Delete specific tracks only
-                console.log(
+                logger.debug(
                     `  Partial cleanup: ${album.albumTitle} (${tracksToDelete.length}/${album.tracks.length} tracks)`
                 );
 
@@ -116,9 +117,9 @@ export async function cleanupDiscoveryTracks() {
                     if (track.filePath) {
                         try {
                             await fs.unlink(track.filePath);
-                            console.log(`    Deleted: ${track.fileName}`);
+                            logger.debug(`    Deleted: ${track.fileName}`);
                         } catch (err) {
-                            console.warn(`    Could not delete file: ${err}`);
+                            logger.warn(`    Could not delete file: ${err}`);
                         }
                     }
 
@@ -130,19 +131,19 @@ export async function cleanupDiscoveryTracks() {
                     deletedTracks++;
                 }
             } else {
-                console.log(
+                logger.debug(
                     `  Keeping album: ${album.albumTitle} (all tracks in use)`
                 );
             }
         }
 
-        console.log(
+        logger.debug(
             `\n  Cleanup complete: ${deletedAlbums} albums, ${deletedTracks} tracks deleted`
         );
 
         return { deletedAlbums, deletedTracks };
     } catch (error) {
-        console.error("Cleanup discovery tracks error:", error);
+        logger.error("Cleanup discovery tracks error:", error);
         throw error;
     }
 }
@@ -151,14 +152,14 @@ export async function cleanupDiscoveryTracks() {
 if (require.main === module) {
     cleanupDiscoveryTracks()
         .then((result) => {
-            console.log("\nDiscovery cleanup completed successfully");
-            console.log(
+            logger.debug("\nDiscovery cleanup completed successfully");
+            logger.debug(
                 `Deleted: ${result.deletedAlbums} albums, ${result.deletedTracks} tracks`
             );
             process.exit(0);
         })
         .catch((err) => {
-            console.error("\n Failed:", err);
+            logger.error("\n Failed:", err);
             process.exit(1);
         });
 }

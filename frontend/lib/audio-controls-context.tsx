@@ -48,6 +48,7 @@ interface AudioControlsContextType {
 
     // Podcast methods
     playPodcast: (podcast: Podcast) => void;
+    nextPodcastEpisode: () => void;
 
     // Playback controls
     pause: () => void;
@@ -213,6 +214,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setCurrentTrack(track);
             state.setCurrentAudiobook(null);
             state.setCurrentPodcast(null);
+            state.setPodcastEpisodeQueue(null); // Clear podcast queue when playing tracks
             state.setQueue([track]);
             state.setCurrentIndex(0);
             playback.setIsPlaying(true);
@@ -246,6 +248,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setPlaybackType("track");
             state.setCurrentAudiobook(null);
             state.setCurrentPodcast(null);
+            state.setPodcastEpisodeQueue(null); // Clear podcast queue when playing tracks
             state.setQueue(tracks);
             state.setCurrentIndex(startIndex);
             state.setCurrentTrack(tracks[startIndex]);
@@ -275,6 +278,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setCurrentAudiobook(audiobook);
             state.setCurrentTrack(null);
             state.setCurrentPodcast(null);
+            state.setPodcastEpisodeQueue(null); // Clear podcast queue when playing audiobooks
             state.setQueue([]);
             state.setCurrentIndex(0);
             playback.setIsPlaying(true);
@@ -312,6 +316,44 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const pause = useCallback(() => {
         playback.setIsPlaying(false);
     }, [playback]);
+
+    const nextPodcastEpisode = useCallback(() => {
+        if (!state.podcastEpisodeQueue || state.podcastEpisodeQueue.length === 0) {
+            pause();
+            return;
+        }
+
+        if (!state.currentPodcast) {
+            pause();
+            return;
+        }
+
+        // Extract episodeId from currentPodcast.id (format: "podcastId:episodeId")
+        const [podcastId, currentEpisodeId] = state.currentPodcast.id.split(":");
+        
+        // Find current episode index
+        const currentIndex = state.podcastEpisodeQueue.findIndex(
+            (ep) => ep.id === currentEpisodeId
+        );
+
+        // If there's a next episode, play it
+        if (currentIndex >= 0 && currentIndex < state.podcastEpisodeQueue.length - 1) {
+            const nextEpisode = state.podcastEpisodeQueue[currentIndex + 1];
+            // Build the podcast object for playback
+            playPodcast({
+                id: `${podcastId}:${nextEpisode.id}`,
+                title: nextEpisode.title,
+                podcastTitle: state.currentPodcast.podcastTitle,
+                coverUrl: state.currentPodcast.coverUrl,
+                duration: nextEpisode.duration,
+                progress: nextEpisode.progress || null,
+            });
+        } else {
+            // Last episode, pause and clear queue
+            pause();
+            state.setPodcastEpisodeQueue(null);
+        }
+    }, [state.podcastEpisodeQueue, state.currentPodcast, playPodcast, pause, state.setPodcastEpisodeQueue]);
 
     const resume = useCallback(() => {
         playback.setIsPlaying(true);
@@ -809,6 +851,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playTracks,
             playAudiobook,
             playPodcast,
+            nextPodcastEpisode,
             pause,
             resume,
             play,
@@ -836,6 +879,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playTracks,
             playAudiobook,
             playPodcast,
+            nextPodcastEpisode,
             pause,
             resume,
             play,

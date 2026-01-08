@@ -6,6 +6,17 @@ FROM ubuntu:20.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
+# CPU thread limiting for TensorFlow and numerical libraries
+# Prevents each worker from using all CPU cores
+# Override with docker-compose environment variables
+ENV TF_NUM_INTRAOP_THREADS=1 \
+    TF_NUM_INTEROP_THREADS=1 \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    NUMEXPR_MAX_THREADS=1 \
+    THREADS_PER_WORKER=1
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \

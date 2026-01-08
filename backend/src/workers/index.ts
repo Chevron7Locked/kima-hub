@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import {
     scanQueue,
     discoverQueue,
@@ -8,13 +9,23 @@ import { processScan } from "./processors/scanProcessor";
 import { processDiscoverWeekly } from "./processors/discoverProcessor";
 import { processImageOptimization } from "./processors/imageProcessor";
 import { processValidation } from "./processors/validationProcessor";
-import { startUnifiedEnrichmentWorker, stopUnifiedEnrichmentWorker } from "./unifiedEnrichment";
-import { startMoodBucketWorker, stopMoodBucketWorker } from "./moodBucketWorker";
+import {
+    startUnifiedEnrichmentWorker,
+    stopUnifiedEnrichmentWorker,
+} from "./unifiedEnrichment";
+import {
+    startMoodBucketWorker,
+    stopMoodBucketWorker,
+} from "./moodBucketWorker";
 import { downloadQueueManager } from "../services/downloadQueue";
 import { prisma } from "../utils/db";
-import { startDiscoverWeeklyCron, stopDiscoverWeeklyCron } from "./discoverCron";
+import {
+    startDiscoverWeeklyCron,
+    stopDiscoverWeeklyCron,
+} from "./discoverCron";
 import { runDataIntegrityCheck } from "./dataIntegrity";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
+import { queueCleaner } from "../jobs/queueCleaner";
 
 // Track intervals and timeouts for cleanup
 const intervals: NodeJS.Timeout[] = [];
@@ -28,12 +39,12 @@ validationQueue.process(processValidation);
 
 // Register download queue callback for unavailable albums
 downloadQueueManager.onUnavailableAlbum(async (info) => {
-    console.log(
+    logger.debug(
         ` Recording unavailable album: ${info.artistName} - ${info.albumTitle}`
     );
 
     if (!info.userId) {
-        console.log(` No userId provided, skipping database record`);
+        logger.debug(` No userId provided, skipping database record`);
         return;
     }
 
@@ -58,13 +69,13 @@ downloadQueueManager.onUnavailableAlbum(async (info) => {
             },
         });
 
-        console.log(`   Recorded in database`);
+        logger.debug(`   Recorded in database`);
     } catch (error: any) {
         // Handle duplicate entries (album already marked as unavailable)
         if (error.code === "P2002") {
-            console.log(`     Album already marked as unavailable`);
+            logger.debug(`     Album already marked as unavailable`);
         } else {
-            console.error(
+            logger.error(
                 ` Failed to record unavailable album:`,
                 error.message
             );
@@ -75,52 +86,52 @@ downloadQueueManager.onUnavailableAlbum(async (info) => {
 // Start unified enrichment worker
 // Handles: artist metadata, track tags (Last.fm), audio analysis queueing (Essentia)
 startUnifiedEnrichmentWorker().catch((err) => {
-    console.error("Failed to start unified enrichment worker:", err);
+    logger.error("Failed to start unified enrichment worker:", err);
 });
 
 // Start mood bucket worker
 // Assigns newly analyzed tracks to mood buckets for fast mood mix generation
 startMoodBucketWorker().catch((err) => {
-    console.error("Failed to start mood bucket worker:", err);
+    logger.error("Failed to start mood bucket worker:", err);
 });
 
 // Event handlers for scan queue
 scanQueue.on("completed", (job, result) => {
-    console.log(
+    logger.debug(
         `Scan job ${job.id} completed: +${result.tracksAdded} ~${result.tracksUpdated} -${result.tracksRemoved}`
     );
 });
 
 scanQueue.on("failed", (job, err) => {
-    console.error(`✗ Scan job ${job.id} failed:`, err.message);
+    logger.error(`Scan job ${job.id} failed:`, err.message);
 });
 
 scanQueue.on("active", (job) => {
-    console.log(` Scan job ${job.id} started`);
+    logger.debug(` Scan job ${job.id} started`);
 });
 
 // Event handlers for discover queue
 discoverQueue.on("completed", (job, result) => {
     if (result.success) {
-        console.log(
+        logger.debug(
             `Discover job ${job.id} completed: ${result.playlistName} (${result.songCount} songs)`
         );
     } else {
-        console.log(`✗ Discover job ${job.id} failed: ${result.error}`);
+        logger.debug(`Discover job ${job.id} failed: ${result.error}`);
     }
 });
 
 discoverQueue.on("failed", (job, err) => {
-    console.error(`✗ Discover job ${job.id} failed:`, err.message);
+    logger.error(`Discover job ${job.id} failed:`, err.message);
 });
 
 discoverQueue.on("active", (job) => {
-    console.log(` Discover job ${job.id} started for user ${job.data.userId}`);
+    logger.debug(` Discover job ${job.id} started for user ${job.data.userId}`);
 });
 
 // Event handlers for image queue
 imageQueue.on("completed", (job, result) => {
-    console.log(
+    logger.debug(
         `Image job ${job.id} completed: ${
             result.success ? "success" : result.error
         }`
@@ -128,102 +139,126 @@ imageQueue.on("completed", (job, result) => {
 });
 
 imageQueue.on("failed", (job, err) => {
-    console.error(`✗ Image job ${job.id} failed:`, err.message);
+    logger.error(`Image job ${job.id} failed:`, err.message);
 });
 
 // Event handlers for validation queue
 validationQueue.on("completed", (job, result) => {
-    console.log(
+    logger.debug(
         `Validation job ${job.id} completed: ${result.tracksChecked} checked, ${result.tracksRemoved} removed`
     );
 });
 
 validationQueue.on("failed", (job, err) => {
-    console.error(`✗ Validation job ${job.id} failed:`, err.message);
+    logger.error(` Validation job ${job.id} failed:`, err.message);
 });
 
 validationQueue.on("active", (job) => {
-    console.log(` Validation job ${job.id} started`);
+    logger.debug(` Validation job ${job.id} started`);
 });
 
-console.log("Worker processors registered and event handlers attached");
+logger.debug("Worker processors registered and event handlers attached");
 
 // Start Discovery Weekly cron scheduler (Sundays at 8 PM)
 startDiscoverWeeklyCron();
 
 // Run data integrity check on startup and then every 24 hours
 timeouts.push(
-setTimeout(() => {
-    runDataIntegrityCheck().catch((err) => {
-        console.error("Data integrity check failed:", err);
-    });
+    setTimeout(() => {
+        runDataIntegrityCheck().catch((err) => {
+            logger.error("Data integrity check failed:", err);
+        });
     }, 10000) // Run 10 seconds after startup
 );
 
 intervals.push(
-setInterval(() => {
-    runDataIntegrityCheck().catch((err) => {
-        console.error("Data integrity check failed:", err);
-    });
+    setInterval(() => {
+        runDataIntegrityCheck().catch((err) => {
+            logger.error("Data integrity check failed:", err);
+        });
     }, 24 * 60 * 60 * 1000) // Run every 24 hours
 );
 
-console.log("Data integrity check scheduled (every 24 hours)");
+logger.debug("Data integrity check scheduled (every 24 hours)");
 
 // Run stale download cleanup every 2 minutes
 // This catches downloads that timed out even if the queue cleaner isn't running
+// Also runs reconciliation to catch missed webhooks (fix for #31)
 intervals.push(
-setInterval(async () => {
-    try {
-        const staleCount = await simpleDownloadManager.markStaleJobsAsFailed();
-        if (staleCount > 0) {
-            console.log(
-                `⏰ Periodic cleanup: marked ${staleCount} stale download(s) as failed`
+    setInterval(async () => {
+        try {
+            // Mark stale/timed out downloads as failed
+            const staleCount =
+                await simpleDownloadManager.markStaleJobsAsFailed();
+            if (staleCount > 0) {
+                logger.debug(
+                    `⏰ Periodic cleanup: marked ${staleCount} stale download(s) as failed`
+                );
+            }
+
+            // Reconcile with Lidarr (catches missed completion webhooks)
+            const lidarrResult =
+                await simpleDownloadManager.reconcileWithLidarr();
+            if (lidarrResult.reconciled > 0) {
+                logger.debug(
+                    `✓ Periodic reconcile: ${lidarrResult.reconciled} job(s) matched in Lidarr`
+                );
+            }
+
+            // Reconcile with local library (catches direct Soulseek downloads)
+            // Fix for #31: Active downloads not resolving
+            const localResult = await queueCleaner.reconcileWithLocalLibrary();
+            if (localResult.reconciled > 0) {
+                logger.debug(
+                    `✓ Periodic reconcile: ${localResult.reconciled} job(s) matched in local library`
+                );
+            }
+        } catch (err) {
+            logger.error(
+                "Periodic download cleanup/reconciliation failed:",
+                err
             );
         }
-    } catch (err) {
-        console.error("Stale download cleanup failed:", err);
-    }
     }, 2 * 60 * 1000) // Every 2 minutes
 );
 
-console.log("Stale download cleanup scheduled (every 2 minutes)");
+logger.debug("Stale download cleanup scheduled (every 2 minutes)");
 
 // Run Lidarr queue cleanup every 5 minutes
 // This catches stuck/failed imports even if webhooks fail
 intervals.push(
-setInterval(async () => {
-    try {
-        const result = await simpleDownloadManager.clearLidarrQueue();
-        if (result.removed > 0) {
-            console.log(
-                `Periodic Lidarr cleanup: removed ${result.removed} stuck download(s)`
-            );
+    setInterval(async () => {
+        try {
+            const result = await simpleDownloadManager.clearLidarrQueue();
+            if (result.removed > 0) {
+                logger.debug(
+                    `Periodic Lidarr cleanup: removed ${result.removed} stuck download(s)`
+                );
+            }
+        } catch (err) {
+            logger.error("Lidarr queue cleanup failed:", err);
         }
-    } catch (err) {
-        console.error("Lidarr queue cleanup failed:", err);
-    }
     }, 5 * 60 * 1000) // Every 5 minutes
 );
 
-console.log("Lidarr queue cleanup scheduled (every 5 minutes)");
+logger.debug("Lidarr queue cleanup scheduled (every 5 minutes)");
 
 // Run initial Lidarr cleanup 30 seconds after startup (to catch any stuck items)
 timeouts.push(
-setTimeout(async () => {
-    try {
-        console.log("Running initial Lidarr queue cleanup...");
-        const result = await simpleDownloadManager.clearLidarrQueue();
-        if (result.removed > 0) {
-            console.log(
-                `Initial cleanup: removed ${result.removed} stuck download(s)`
-            );
-        } else {
-            console.log("Initial cleanup: queue is clean");
+    setTimeout(async () => {
+        try {
+            logger.debug("Running initial Lidarr queue cleanup...");
+            const result = await simpleDownloadManager.clearLidarrQueue();
+            if (result.removed > 0) {
+                logger.debug(
+                    `Initial cleanup: removed ${result.removed} stuck download(s)`
+                );
+            } else {
+                logger.debug("Initial cleanup: queue is clean");
+            }
+        } catch (err) {
+            logger.error("Initial Lidarr cleanup failed:", err);
         }
-    } catch (err) {
-        console.error("Initial Lidarr cleanup failed:", err);
-    }
     }, 30 * 1000) // 30 seconds after startup
 );
 
@@ -231,7 +266,7 @@ setTimeout(async () => {
  * Gracefully shutdown all workers and cleanup resources
  */
 export async function shutdownWorkers(): Promise<void> {
-    console.log("Shutting down workers...");
+    logger.debug("Shutting down workers...");
 
     // Stop unified enrichment worker
     stopUnifiedEnrichmentWorker();
@@ -271,7 +306,7 @@ export async function shutdownWorkers(): Promise<void> {
         validationQueue.close(),
     ]);
 
-    console.log("Workers shutdown complete");
+    logger.debug("Workers shutdown complete");
 }
 
 // Export queues for use in other modules

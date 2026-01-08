@@ -26,9 +26,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/utils/cn";
-import { useState, useRef, useEffect } from "react";
+import { clampTime } from "@/utils/formatTime";
+import { useState, useRef, useEffect, lazy, Suspense } from "react";
 import { KeyboardShortcutsTooltip } from "./KeyboardShortcutsTooltip";
-import { EnhancedVibeOverlay } from "./VibeOverlayEnhanced";
+import { SeekSlider } from "./SeekSlider";
+
+// Lazy load VibeOverlayEnhanced - only loads when vibe mode is active
+const EnhancedVibeOverlay = lazy(() => import("./VibeOverlayEnhanced").then(mod => ({ default: mod.EnhancedVibeOverlay })));
 
 export function MiniPlayer() {
     const {
@@ -80,12 +84,19 @@ export function MiniPlayer() {
         currentTrack?.id || currentAudiobook?.id || currentPodcast?.id;
 
     useEffect(() => {
-        if (currentMediaId && currentMediaId !== lastMediaIdRef.current) {
-            lastMediaIdRef.current = currentMediaId;
-            setIsDismissed(false);
-            setIsMinimized(false);
+        // Reset dismissed state when new media loads OR when same media starts playing again
+        if (currentMediaId) {
+            if (currentMediaId !== lastMediaIdRef.current) {
+                // Different media - reset everything
+                lastMediaIdRef.current = currentMediaId;
+                setIsDismissed(false);
+                setIsMinimized(false);
+            } else if (isDismissed && isPlaying) {
+                // Same media but user started playing again - show the player
+                setIsDismissed(false);
+            }
         }
-    }, [currentMediaId]);
+    }, [currentMediaId, isDismissed, isPlaying]);
 
     // Handle Vibe Match toggle - finds tracks that sound like the current track
     const handleVibeToggle = async () => {
@@ -210,19 +221,18 @@ export function MiniPlayer() {
             0
         );
     })();
+
+    // CRITICAL: Clamp currentTime to prevent invalid progress display
+    const clampedCurrentTime = clampTime(currentTime, duration);
+
     const progress =
         duration > 0
-            ? Math.min(100, Math.max(0, (currentTime / duration) * 100))
+            ? Math.min(100, Math.max(0, (clampedCurrentTime / duration) * 100))
             : 0;
 
-    // Handle progress bar click
-    const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
-        if (!canSeek) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const percentage = x / rect.width;
-        const newTime = percentage * duration;
-        seek(newTime);
+    // Handle progress bar seek
+    const handleSeek = (time: number) => {
+        seek(time);
     };
 
     const seekEnabled = hasMedia && canSeek;
@@ -277,34 +287,59 @@ export function MiniPlayer() {
             return null;
         }
 
-        // Minimized tab - small pill on RIGHT to bring player back
+        // Minimized tab - matches full player height, slides from right
         if (isMinimized) {
             return (
                 <button
                     onClick={() => setIsMinimized(false)}
-                    className="fixed right-0 z-50 bg-gradient-to-l from-[#f5c518] via-[#e6a700] to-[#a855f7] rounded-l-full pl-3 pr-2 py-2 shadow-lg flex items-center gap-2 transition-transform hover:scale-105 active:scale-95"
+                    className="fixed right-0 z-50 shadow-2xl transition-transform hover:scale-105 active:scale-95"
                     style={{
-                        bottom: "calc(56px + env(safe-area-inset-bottom, 0px) + 16px)",
+                        bottom: "calc(56px + env(safe-area-inset-bottom, 0px) + 8px)",
                     }}
+                    aria-label="Show player"
                     title="Show player"
                 >
-                    <ChevronLeft className="w-4 h-4 text-black" />
-                    {coverUrl ? (
-                        <div className="relative w-8 h-8 rounded-full overflow-hidden ring-2 ring-black/20">
-                            <Image
-                                src={coverUrl}
-                                alt={title}
-                                fill
-                                sizes="32px"
-                                className="object-cover"
-                                unoptimized
-                            />
+                    <div
+                        className="rounded-l-xl p-[2px]"
+                        style={{
+                            background: "linear-gradient(90deg, #a855f7 0%, #f5c518 100%)",
+                        }}
+                    >
+                        <div className="rounded-l-[10px] overflow-hidden">
+                            <div className="relative bg-gradient-to-r from-[#2d1847] to-[#1a1a2e]">
+                                <div className="absolute inset-0 bg-gradient-to-r from-[#a855f7]/40 to-[#f5c518]/30" />
+                                
+                                {/* Progress bar at top */}
+                                <div className="relative h-[2px] bg-white/20 w-full">
+                                    <div
+                                        className="h-full bg-gradient-to-r from-[#a855f7] to-[#f5c518] transition-all duration-150"
+                                        style={{ width: `${progress}%` }}
+                                    />
+                                </div>
+                                
+                                {/* Content */}
+                                <div className="relative flex items-center gap-2 pl-3 pr-2 py-3">
+                                    <ChevronLeft className="w-4 h-4 text-white flex-shrink-0" />
+                                    {coverUrl ? (
+                                        <div className="relative w-12 h-12 rounded-lg overflow-hidden">
+                                            <Image
+                                                src={coverUrl}
+                                                alt={title}
+                                                fill
+                                                sizes="48px"
+                                                className="object-cover"
+                                                unoptimized
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div className="w-12 h-12 rounded-lg bg-black/30 flex items-center justify-center">
+                                            <MusicIcon className="w-5 h-5 text-gray-400" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                         </div>
-                    ) : (
-                        <div className="w-8 h-8 rounded-full bg-black/30 flex items-center justify-center">
-                            <MusicIcon className="w-4 h-4 text-white" />
-                        </div>
-                    )}
+                    </div>
                 </button>
             );
         }
@@ -314,128 +349,155 @@ export function MiniPlayer() {
 
         return (
             <div
-                className="fixed left-2 right-2 z-50 rounded-xl overflow-hidden shadow-xl"
+                className="fixed left-2 right-2 z-50 shadow-2xl"
                 style={{
                     bottom: "calc(56px + env(safe-area-inset-bottom, 0px) + 8px)",
                     transform: `translateX(${swipeOffset}px)`,
                     opacity: swipeOpacity,
-                    transition: swipeOffset === 0 ? 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
+                    transition:
+                        swipeOffset === 0
+                            ? "transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1)"
+                            : "none",
                 }}
                 onTouchStart={handleTouchStart}
                 onTouchMove={handleTouchMove}
                 onTouchEnd={handleTouchEnd}
             >
-                {/* Gradient background - richer, more vibrant colors */}
-                <div className="absolute inset-0 bg-gradient-to-r from-[#1a1a2e] via-[#2d1847] to-[#1a1a2e]" />
-                <div className="absolute inset-0 bg-gradient-to-r from-[#f5c518]/30 via-[#a855f7]/40 to-[#f5c518]/30" />
-                {/* Edge glow effects */}
-                <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-[#f5c518] via-[#e6a700] to-[#f5c518]" />
-                <div className="absolute inset-y-0 right-0 w-1 bg-gradient-to-b from-[#a855f7] via-[#7c3aed] to-[#a855f7]" />
-
-                {/* Progress bar at top */}
-                <div className="relative h-[2px] bg-white/20 w-full">
-                    <div
-                        className="h-full bg-gradient-to-r from-[#f5c518] via-[#e6a700] to-[#a855f7] transition-all duration-150"
-                        style={{ width: `${progress}%` }}
-                    />
-                </div>
-
-                {/* Player content - more spacious padding */}
+                {/* Gradient border container - uses padding technique for gradient border */}
                 <div
-                    className="relative flex items-center gap-3 px-3 py-3 cursor-pointer"
-                    onClick={() => setPlayerMode("overlay")}
+                    className="rounded-[14px] p-[2px]"
+                    style={{
+                        background: "linear-gradient(90deg, #f5c518 0%, #a855f7 50%, #f5c518 100%)",
+                    }}
                 >
-                    {/* Album Art - slightly larger */}
-                    <div className="relative w-12 h-12 flex-shrink-0 rounded-lg overflow-hidden bg-black/30 shadow-md">
-                        {coverUrl ? (
-                            <Image
-                                src={coverUrl}
-                                alt={title}
-                                fill
-                                sizes="48px"
-                                className="object-cover"
-                                unoptimized
-                            />
-                        ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                                <MusicIcon className="w-5 h-5 text-gray-400" />
+                    {/* Inner container with overflow hidden for proper clipping */}
+                    <div className="rounded-[12px] overflow-hidden">
+                        {/* Single solid background with gradient overlay - prevents corner bleed */}
+                        <div className="relative bg-gradient-to-r from-[#2a1a3f] via-[#3d2060] to-[#2a1a3f]">
+                            <div className="absolute inset-0 bg-gradient-to-r from-[#f5c518]/25 via-[#a855f7]/35 to-[#f5c518]/25" />
+
+                            {/* Progress bar at top - inside the clipped container */}
+                            <div className="relative h-[2px] bg-white/20 w-full">
+                                <div
+                                    className="h-full bg-gradient-to-r from-[#f5c518] via-[#e6a700] to-[#a855f7] transition-all duration-150"
+                                    style={{ width: `${progress}%` }}
+                                />
                             </div>
-                        )}
-                    </div>
 
-                    {/* Track Info */}
-                    <div className="flex-1 min-w-0">
-                        <p className="text-white text-sm font-medium truncate leading-tight">
-                            {title}
-                        </p>
-                        <p className="text-gray-300/70 text-xs truncate leading-tight mt-0.5">
-                            {subtitle}
-                        </p>
-                    </div>
+                            {/* Player content - more spacious padding */}
+                            <div
+                                className="relative flex items-center gap-3 px-3 py-3 cursor-pointer"
+                                onClick={() => setPlayerMode("overlay")}
+                            >
+                                {/* Album Art - slightly larger */}
+                                <div className="relative w-12 h-12 flex-shrink-0 rounded-lg overflow-hidden bg-black/30 shadow-md">
+                                    {coverUrl ? (
+                                        <Image
+                                            src={coverUrl}
+                                            alt={title}
+                                            fill
+                                            sizes="48px"
+                                            className="object-cover"
+                                            unoptimized
+                                        />
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center">
+                                            <MusicIcon className="w-5 h-5 text-gray-400" />
+                                        </div>
+                                    )}
+                                </div>
 
-                    {/* Controls - Vibe & Play/Pause */}
-                    <div
-                        className="flex items-center gap-1.5 flex-shrink-0"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        {/* Vibe Button */}
-                        <button
-                            onClick={handleVibeToggle}
-                            disabled={!canSkip || isVibeLoading}
-                            className={cn(
-                                "w-10 h-10 flex items-center justify-center rounded-full transition-colors",
-                                !canSkip
-                                    ? "text-gray-600"
-                                    : vibeMode
-                                    ? "text-[#f5c518]"
-                                    : "text-white/80 hover:text-[#f5c518]"
-                            )}
-                            title={
-                                vibeMode
-                                    ? "Turn off vibe mode"
-                                    : "Match this vibe"
-                            }
-                        >
-                            {isVibeLoading ? (
-                                <Loader2 className="w-5 h-5 animate-spin" />
-                            ) : (
-                                <AudioWaveform className="w-5 h-5" />
-                            )}
-                        </button>
+                                {/* Track Info */}
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-white text-sm font-medium truncate leading-tight">
+                                        {title}
+                                    </p>
+                                    <p className="text-gray-300/70 text-xs truncate leading-tight mt-0.5">
+                                        {subtitle}
+                                    </p>
+                                </div>
 
-                        {/* Play/Pause */}
-                        <button
-                            onClick={() => {
-                                if (!isBuffering) {
-                                    if (isPlaying) {
-                                        pause();
-                                    } else {
-                                        resume();
-                                    }
-                                }
-                            }}
-                            className={cn(
-                                "w-10 h-10 rounded-full flex items-center justify-center transition shadow-md",
-                                isBuffering
-                                    ? "bg-white/80 text-black"
-                                    : "bg-white text-black hover:scale-105"
-                            )}
-                            title={
-                                isBuffering
-                                    ? "Buffering..."
-                                    : isPlaying
-                                    ? "Pause"
-                                    : "Play"
-                            }
-                        >
-                            {isBuffering ? (
-                                <Loader2 className="w-5 h-5 animate-spin" />
-                            ) : isPlaying ? (
-                                <Pause className="w-5 h-5" />
-                            ) : (
-                                <Play className="w-5 h-5 ml-0.5" />
-                            )}
-                        </button>
+                                {/* Controls - Vibe button (for music only) & Play/Pause */}
+                                <div
+                                    className="flex items-center gap-1.5 flex-shrink-0"
+                                    onClick={(e) => e.stopPropagation()}
+                                    role="group"
+                                    aria-label="Playback controls"
+                                >
+                                    {/* Vibe button - only for music tracks */}
+                                    {canSkip && (
+                                        <button
+                                            onClick={handleVibeToggle}
+                                            disabled={isVibeLoading}
+                                            className={cn(
+                                                "w-10 h-10 flex items-center justify-center rounded-full transition-colors",
+                                                vibeMode
+                                                    ? "text-[#f5c518]"
+                                                    : "text-white/80 hover:text-[#f5c518]"
+                                            )}
+                                            aria-label={
+                                                vibeMode
+                                                    ? "Turn off vibe mode"
+                                                    : "Match this vibe"
+                                            }
+                                            aria-pressed={vibeMode}
+                                            title={
+                                                vibeMode
+                                                    ? "Turn off vibe mode"
+                                                    : "Match this vibe"
+                                            }
+                                        >
+                                            {isVibeLoading ? (
+                                                <Loader2 className="w-5 h-5 animate-spin" />
+                                            ) : (
+                                                <AudioWaveform className="w-5 h-5" />
+                                            )}
+                                        </button>
+                                    )}
+
+                                    {/* Play/Pause */}
+                                    <button
+                                        onClick={() => {
+                                            if (!isBuffering) {
+                                                if (isPlaying) {
+                                                    pause();
+                                                } else {
+                                                    resume();
+                                                }
+                                            }
+                                        }}
+                                        className={cn(
+                                            "w-10 h-10 rounded-full flex items-center justify-center transition shadow-md",
+                                            isBuffering
+                                                ? "bg-white/80 text-black"
+                                                : "bg-white text-black hover:scale-105"
+                                        )}
+                                        aria-label={
+                                            isBuffering
+                                                ? "Buffering..."
+                                                : isPlaying
+                                                ? "Pause"
+                                                : "Play"
+                                        }
+                                        title={
+                                            isBuffering
+                                                ? "Buffering..."
+                                                : isPlaying
+                                                ? "Pause"
+                                                : "Play"
+                                        }
+                                    >
+                                        {isBuffering ? (
+                                            <Loader2 className="w-5 h-5 animate-spin" />
+                                        ) : isPlaying ? (
+                                            <Pause className="w-5 h-5" />
+                                        ) : (
+                                            <Play className="w-5 h-5 ml-0.5" />
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -456,11 +518,13 @@ export function MiniPlayer() {
                     )}
                 >
                     <div className="bg-[#121212]">
-                        <EnhancedVibeOverlay
-                            currentTrackFeatures={currentTrackFeatures}
-                            variant="inline"
-                            onClose={() => setIsVibePanelExpanded(false)}
-                        />
+                        <Suspense fallback={<div className="p-4 text-center text-white/50">Loading vibe analysis...</div>}>
+                            <EnhancedVibeOverlay
+                                currentTrackFeatures={currentTrackFeatures}
+                                variant="inline"
+                                onClose={() => setIsVibePanelExpanded(false)}
+                            />
+                        </Suspense>
                     </div>
                 </div>
             )}
@@ -478,6 +542,8 @@ export function MiniPlayer() {
                             ? "text-brand"
                             : "text-white/70 hover:text-brand"
                     )}
+                    aria-label={isVibePanelExpanded ? "Hide vibe analysis" : "Show vibe analysis"}
+                    aria-expanded={isVibePanelExpanded}
                 >
                     <AudioWaveform className="w-3.5 h-3.5" />
                     <span>Vibe Analysis</span>
@@ -494,40 +560,17 @@ export function MiniPlayer() {
                 <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
 
                 {/* Progress Bar */}
-                <div
-                    className={cn(
-                        "absolute top-0 left-0 right-0 h-1 bg-white/[0.15] transition-all",
-                        seekEnabled
-                            ? "cursor-pointer group hover:h-2"
-                            : "cursor-not-allowed"
-                    )}
-                    onClick={seekEnabled ? handleProgressClick : undefined}
-                    title={
-                        !hasMedia
-                            ? undefined
-                            : !canSeek
-                            ? downloadProgress !== null
-                                ? `Downloading ${downloadProgress}%... Seek will be available when cached`
-                                : "Downloading... Seeking will be available when cached"
-                            : "Click to seek"
-                    }
-                >
-                    <div
-                        className={cn(
-                            "h-full rounded-full relative transition-all duration-150",
-                            seekEnabled
-                                ? "bg-white"
-                                : hasMedia
-                                ? "bg-white/50"
-                                : "bg-gray-600"
-                        )}
-                        style={{ width: `${progress}%` }}
-                    >
-                        {seekEnabled && (
-                            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg shadow-white/50" />
-                        )}
-                    </div>
-                </div>
+                <SeekSlider
+                    progress={progress}
+                    duration={duration}
+                    currentTime={clampedCurrentTime}
+                    onSeek={handleSeek}
+                    canSeek={canSeek}
+                    hasMedia={hasMedia}
+                    downloadProgress={downloadProgress}
+                    variant="minimal"
+                    className="absolute top-0 left-0 right-0"
+                />
 
                 {/* Player Content */}
                 <div className="px-3 py-2.5 pt-3">
@@ -591,6 +634,7 @@ export function MiniPlayer() {
                             <button
                                 onClick={() => setPlayerMode("full")}
                                 className="text-gray-400 hover:text-white transition p-1"
+                                aria-label="Show bottom player"
                                 title="Show bottom player"
                             >
                                 <MonitorUp className="w-3.5 h-3.5" />
@@ -604,6 +648,7 @@ export function MiniPlayer() {
                                         : "text-gray-600 cursor-not-allowed"
                                 )}
                                 disabled={!hasMedia}
+                                aria-label="Expand player"
                                 title="Expand to full screen"
                             >
                                 <Maximize2 className="w-3.5 h-3.5" />
@@ -625,6 +670,8 @@ export function MiniPlayer() {
                                         : "text-gray-400 hover:text-white"
                                     : "text-gray-600 cursor-not-allowed"
                             )}
+                            aria-label="Shuffle"
+                            aria-pressed={isShuffle}
                             title={canSkip ? "Shuffle" : "Shuffle (music only)"}
                         >
                             <Shuffle className="w-3.5 h-3.5" />
@@ -640,6 +687,7 @@ export function MiniPlayer() {
                                     ? "text-gray-400 hover:text-white"
                                     : "text-gray-600 cursor-not-allowed"
                             )}
+                            aria-label="Skip backward 30 seconds"
                             title="Rewind 30 seconds"
                         >
                             <RotateCcw className="w-3.5 h-3.5" />
@@ -658,6 +706,7 @@ export function MiniPlayer() {
                                     ? "text-gray-400 hover:text-white"
                                     : "text-gray-600 cursor-not-allowed"
                             )}
+                            aria-label="Previous track"
                             title={
                                 canSkip ? "Previous" : "Previous (music only)"
                             }
@@ -683,6 +732,7 @@ export function MiniPlayer() {
                                     ? "bg-white/80 text-black"
                                     : "bg-gray-700 text-gray-500 cursor-not-allowed"
                             )}
+                            aria-label={isPlaying ? "Pause" : "Play"}
                             title={
                                 isBuffering
                                     ? "Buffering..."
@@ -710,6 +760,7 @@ export function MiniPlayer() {
                                     ? "text-gray-400 hover:text-white"
                                     : "text-gray-600 cursor-not-allowed"
                             )}
+                            aria-label="Next track"
                             title={canSkip ? "Next" : "Next (music only)"}
                         >
                             <SkipForward className="w-4 h-4" />
@@ -725,6 +776,7 @@ export function MiniPlayer() {
                                     ? "text-gray-400 hover:text-white"
                                     : "text-gray-600 cursor-not-allowed"
                             )}
+                            aria-label="Skip forward 30 seconds"
                             title="Forward 30 seconds"
                         >
                             <RotateCw className="w-3.5 h-3.5" />
@@ -745,6 +797,8 @@ export function MiniPlayer() {
                                         : "text-gray-400 hover:text-white"
                                     : "text-gray-600 cursor-not-allowed"
                             )}
+                            aria-label={repeatMode === 'one' ? "Repeat one" : repeatMode === 'all' ? "Repeat all" : "Repeat off"}
+                            aria-pressed={repeatMode !== 'off'}
                             title={
                                 canSkip
                                     ? repeatMode === "off"
@@ -774,6 +828,8 @@ export function MiniPlayer() {
                                     ? "text-brand hover:text-brand-hover"
                                     : "text-gray-400 hover:text-brand"
                             )}
+                            aria-label="Toggle vibe visualization"
+                            aria-pressed={vibeMode}
                             title={
                                 vibeMode
                                     ? "Turn off vibe mode"

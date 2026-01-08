@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import crypto from "crypto";
@@ -88,7 +89,7 @@ router.post("/", async (req, res) => {
             },
         });
 
-        console.log(`API key created for user ${userId}: ${deviceName}`);
+        logger.debug(`API key created for user ${userId}: ${deviceName}`);
 
         res.status(201).json({
             apiKey: apiKey.key,
@@ -98,7 +99,7 @@ router.post("/", async (req, res) => {
                 "API key created successfully. Save this key - you won't see it again!",
         });
     } catch (error) {
-        console.error("Create API key error:", error);
+        logger.error("Create API key error:", error);
         res.status(500).json({ error: "Failed to create API key" });
     }
 });
@@ -152,7 +153,7 @@ router.get("/", async (req, res) => {
 
         res.json({ apiKeys: keys });
     } catch (error) {
-        console.error("List API keys error:", error);
+        logger.error("List API keys error:", error);
         res.status(500).json({ error: "Failed to list API keys" });
     }
 });
@@ -219,11 +220,11 @@ router.delete("/:id", async (req, res) => {
                 .json({ error: "API key not found or already deleted" });
         }
 
-        console.log(`API key ${keyId} revoked by user ${userId}`);
+        logger.debug(`API key ${keyId} revoked by user ${userId}`);
 
         res.json({ message: "API key revoked successfully" });
     } catch (error) {
-        console.error("Delete API key error:", error);
+        logger.error("Delete API key error:", error);
         res.status(500).json({ error: "Failed to revoke API key" });
     }
 });

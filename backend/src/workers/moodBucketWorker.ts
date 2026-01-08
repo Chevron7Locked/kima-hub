@@ -10,6 +10,7 @@
  * logic in TypeScript and avoid modifying the Python code.
  */
 
+import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { moodBucketService } from "../services/moodBucketService";
 
@@ -24,10 +25,10 @@ let workerInterval: NodeJS.Timeout | null = null;
  * Start the mood bucket worker
  */
 export async function startMoodBucketWorker() {
-    console.log("\n=== Starting Mood Bucket Worker ===");
-    console.log(`   Batch size: ${BATCH_SIZE}`);
-    console.log(`   Interval: ${WORKER_INTERVAL_MS / 1000}s`);
-    console.log("");
+    logger.debug("\n=== Starting Mood Bucket Worker ===");
+    logger.debug(`   Batch size: ${BATCH_SIZE}`);
+    logger.debug(`   Interval: ${WORKER_INTERVAL_MS / 1000}s`);
+    logger.debug("");
 
     // Run immediately
     await processNewlyAnalyzedTracks();
@@ -45,7 +46,7 @@ export function stopMoodBucketWorker() {
     if (workerInterval) {
         clearInterval(workerInterval);
         workerInterval = null;
-        console.log("[Mood Bucket] Worker stopped");
+        logger.debug("[Mood Bucket] Worker stopped");
     }
 }
 
@@ -81,7 +82,7 @@ async function processNewlyAnalyzedTracks(): Promise<number> {
             return 0;
         }
 
-        console.log(
+        logger.debug(
             `[Mood Bucket] Processing ${tracksWithoutBuckets.length} newly analyzed tracks...`
         );
 
@@ -93,22 +94,22 @@ async function processNewlyAnalyzedTracks(): Promise<number> {
                 );
                 if (moods.length > 0) {
                     assigned++;
-                    console.log(`   ✓ ${track.title}: [${moods.join(", ")}]`);
+                    logger.debug(` ${track.title}: [${moods.join(", ")}]`);
                 }
             } catch (error: any) {
-                console.error(
+                logger.error(
                     `   ✗ ${track.title}: ${error?.message || error}`
                 );
             }
         }
 
-        console.log(
+        logger.debug(
             `[Mood Bucket] Assigned ${assigned}/${tracksWithoutBuckets.length} tracks to mood buckets`
         );
 
         return assigned;
     } catch (error) {
-        console.error("[Mood Bucket] Worker error:", error);
+        logger.error("[Mood Bucket] Worker error:", error);
         return 0;
     } finally {
         isRunning = false;
@@ -163,6 +164,6 @@ export async function backfillMoodBuckets(): Promise<{
     processed: number;
     assigned: number;
 }> {
-    console.log("[Mood Bucket] Starting full backfill...");
+    logger.debug("[Mood Bucket] Starting full backfill...");
     return moodBucketService.backfillAllTracks();
 }

@@ -6,14 +6,25 @@
  */
 
 import { Router } from "express";
-import { prisma } from "../utils/db";
 import { scanQueue } from "../workers/queues";
-import { discoverWeeklyService } from "../services/discoverWeekly";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { queueCleaner } from "../jobs/queueCleaner";
 import { getSystemSettings } from "../utils/systemSettings";
+import { prisma } from "../utils/db";
+import { logger } from "../utils/logger";
 
 const router = Router();
+
+// GET /webhooks/lidarr/verify - Webhook verification endpoint
+router.get("/lidarr/verify", (req, res) => {
+    logger.debug("[WEBHOOK] Verification request received");
+    res.json({
+        status: "ok",
+        timestamp: new Date().toISOString(),
+        service: "lidify",
+        version: process.env.npm_package_version || "unknown",
+    });
+});
 
 // POST /webhooks/lidarr - Handle Lidarr webhooks
 router.post("/lidarr", async (req, res) => {
@@ -25,7 +36,7 @@ router.post("/lidarr", async (req, res) => {
             !settings?.lidarrUrl ||
             !settings?.lidarrApiKey
         ) {
-            console.log(
+            logger.debug(
                 `[WEBHOOK] Lidarr webhook received but Lidarr is disabled. Ignoring.`
             );
             return res.status(202).json({
@@ -35,12 +46,27 @@ router.post("/lidarr", async (req, res) => {
             });
         }
 
+        // Verify webhook secret if configured
+        // Note: settings.lidarrWebhookSecret is already decrypted by getSystemSettings()
+        if (settings.lidarrWebhookSecret) {
+            const providedSecret = req.headers["x-webhook-secret"] as string;
+
+            if (!providedSecret || providedSecret !== settings.lidarrWebhookSecret) {
+                logger.debug(
+                    `[WEBHOOK] Lidarr webhook received with invalid or missing secret`
+                );
+                return res.status(401).json({
+                    error: "Unauthorized - Invalid webhook secret",
+                });
+            }
+        }
+
         const eventType = req.body.eventType;
-        console.log(`[WEBHOOK] Lidarr event: ${eventType}`);
+        logger.debug(`[WEBHOOK] Lidarr event: ${eventType}`);
 
         // Log payload in debug mode only (avoid verbose logs in production)
         if (process.env.DEBUG_WEBHOOKS === "true") {
-            console.log(`   Payload:`, JSON.stringify(req.body, null, 2));
+            logger.debug(`   Payload:`, JSON.stringify(req.body, null, 2));
         }
 
         switch (eventType) {
@@ -68,16 +94,16 @@ router.post("/lidarr", async (req, res) => {
                 break;
 
             case "Test":
-                console.log("   Lidarr test webhook received");
+                logger.debug("   Lidarr test webhook received");
                 break;
 
             default:
-                console.log(`   Unhandled event: ${eventType}`);
+                logger.debug(`   Unhandled event: ${eventType}`);
         }
 
         res.json({ success: true });
     } catch (error: any) {
-        console.error("Webhook error:", error.message);
+        logger.error("Webhook error:", error.message);
         res.status(500).json({ error: "Webhook processing failed" });
     }
 });
@@ -93,12 +119,12 @@ async function handleGrab(payload: any) {
     const artistName = payload.artist?.name;
     const lidarrAlbumId = payload.albums?.[0]?.id;
 
-    console.log(`   Album: ${artistName} - ${albumTitle}`);
-    console.log(`   Download ID: ${downloadId}`);
-    console.log(`   MBID: ${albumMbid}`);
+    logger.debug(`   Album: ${artistName} - ${albumTitle}`);
+    logger.debug(`   Download ID: ${downloadId}`);
+    logger.debug(`   MBID: ${albumMbid}`);
 
     if (!downloadId) {
-        console.log(`   Missing downloadId, skipping`);
+        logger.debug(`   Missing downloadId, skipping`);
         return;
     }
 
@@ -128,13 +154,13 @@ async function handleDownload(payload: any) {
         payload.album?.foreignAlbumId || payload.albums?.[0]?.foreignAlbumId;
     const lidarrAlbumId = payload.album?.id || payload.albums?.[0]?.id;
 
-    console.log(`   Album: ${artistName} - ${albumTitle}`);
-    console.log(`   Download ID: ${downloadId}`);
-    console.log(`   Album MBID: ${albumMbid}`);
-    console.log(`   Lidarr Album ID: ${lidarrAlbumId}`);
+    logger.debug(`   Album: ${artistName} - ${albumTitle}`);
+    logger.debug(`   Download ID: ${downloadId}`);
+    logger.debug(`   Album MBID: ${albumMbid}`);
+    logger.debug(`   Lidarr Album ID: ${lidarrAlbumId}`);
 
     if (!downloadId) {
-        console.log(`   Missing downloadId, skipping`);
+        logger.debug(`   Missing downloadId, skipping`);
         return;
     }
 
@@ -148,61 +174,35 @@ async function handleDownload(payload: any) {
     );
 
     if (result.jobId) {
-        // Check if this is part of a download batch (artist download)
-        if (result.downloadBatchId) {
-            // Check if all jobs in the batch are complete
-            const batchComplete = await checkDownloadBatchComplete(
-                result.downloadBatchId
-            );
-            if (batchComplete) {
-                console.log(
-                    `   All albums in batch complete, triggering library scan...`
-                );
-                await scanQueue.add("scan", {
-                    type: "full",
-                    source: "lidarr-import-batch",
-                });
-            } else {
-                console.log(`   Batch not complete, skipping scan`);
-            }
-        } else if (!result.batchId) {
-            // Single album download (not part of discovery batch)
-            console.log(`   Triggering library scan...`);
-            await scanQueue.add("scan", {
-                type: "full",
-                source: "lidarr-import",
-            });
-        }
-        // If part of discovery batch, the download manager already called checkBatchCompletion
+        // Find the download job that triggered this webhook to get userId
+        const downloadJob = await prisma.downloadJob.findUnique({
+            where: { id: result.jobId },
+            select: { userId: true, id: true },
+        });
+
+        // Trigger scan immediately for this album (incremental scan with enrichment data)
+        // Don't wait for batch completion - enrichment should happen per-album
+        logger.debug(
+            `   Triggering incremental scan for: ${artistName} - ${albumTitle}`
+        );
+        await scanQueue.add("scan", {
+            userId: downloadJob?.userId || null,
+            source: "lidarr-webhook",
+            artistName: artistName,
+            albumMbid: albumMbid,
+            downloadId: result.jobId,
+        });
+
+        // Discovery batch completion (for playlist building) is handled by download manager
     } else {
         // No job found - this might be an external download not initiated by us
         // Still trigger a scan to pick up the new music
-        console.log(`   No matching job, triggering scan anyway...`);
+        logger.debug(`   No matching job, triggering scan anyway...`);
         await scanQueue.add("scan", {
             type: "full",
             source: "lidarr-import-external",
         });
     }
-}
-
-/**
- * Check if all jobs in a download batch are complete
- */
-async function checkDownloadBatchComplete(batchId: string): Promise<boolean> {
-    const pendingJobs = await prisma.downloadJob.count({
-        where: {
-            metadata: {
-                path: ["batchId"],
-                equals: batchId,
-            },
-            status: { in: ["pending", "processing"] },
-        },
-    });
-
-    console.log(
-        `   Batch ${batchId}: ${pendingJobs} pending/processing jobs remaining`
-    );
-    return pendingJobs === 0;
 }
 
 /**
@@ -215,12 +215,12 @@ async function handleImportFailure(payload: any) {
     const albumTitle = payload.album?.title || payload.release?.title;
     const reason = payload.message || "Import failed";
 
-    console.log(`   Album: ${albumTitle}`);
-    console.log(`   Download ID: ${downloadId}`);
-    console.log(`   Reason: ${reason}`);
+    logger.debug(`   Album: ${albumTitle}`);
+    logger.debug(`   Download ID: ${downloadId}`);
+    logger.debug(`   Reason: ${reason}`);
 
     if (!downloadId) {
-        console.log(`   Missing downloadId, skipping`);
+        logger.debug(`   Missing downloadId, skipping`);
         return;
     }
 

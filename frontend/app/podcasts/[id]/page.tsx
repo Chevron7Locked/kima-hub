@@ -34,7 +34,7 @@ export default function PodcastDetailPage() {
     // Extract colors from the proxied image URL
     const { colors } = useImageColor(heroImage);
 
-    // Action hooks
+    // Action hooks - pass sortedEpisodes for queue building
     const {
         isSubscribing,
         showDeleteConfirm,
@@ -43,9 +43,10 @@ export default function PodcastDetailPage() {
         handleRemovePodcast,
         handlePlayEpisode,
         handlePlayPauseEpisode,
+        handleMarkEpisodeComplete,
         isEpisodePlaying,
         isPlaying,
-    } = usePodcastActions(podcastId);
+    } = usePodcastActions(podcastId, sortedEpisodes);
 
     // Loading state
     if (isLoading) {
@@ -154,6 +155,7 @@ export default function PodcastDetailPage() {
                                 handlePlayPauseEpisode(episode, podcast)
                             }
                             onPlay={(episode) => handlePlayEpisode(episode, podcast)}
+                            onMarkComplete={handleMarkEpisodeComplete}
                         />
                     )}
 

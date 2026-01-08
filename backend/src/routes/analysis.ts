@@ -1,7 +1,10 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { requireAuth, requireAdmin } from "../middleware/auth";
+import { getSystemSettings } from "../utils/systemSettings";
+import os from "os";
 
 const router = Router();
 
@@ -42,7 +45,7 @@ router.get("/status", requireAuth, async (req, res) => {
             isComplete: pending === 0 && processing === 0 && queueLength === 0,
         });
     } catch (error: any) {
-        console.error("Analysis status error:", error);
+        logger.error("Analysis status error:", error);
         res.status(500).json({ error: "Failed to get analysis status" });
     }
 });
@@ -87,14 +90,14 @@ router.post("/start", requireAuth, requireAdmin, async (req, res) => {
         }
         await pipeline.exec();
 
-        console.log(`Queued ${tracks.length} tracks for audio analysis`);
+        logger.debug(`Queued ${tracks.length} tracks for audio analysis`);
 
         res.json({
             message: `Queued ${tracks.length} tracks for analysis`,
             queued: tracks.length,
         });
     } catch (error: any) {
-        console.error("Analysis start error:", error);
+        logger.error("Analysis start error:", error);
         res.status(500).json({ error: "Failed to start analysis" });
     }
 });
@@ -121,7 +124,7 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (req, res) => {
             reset: result.count,
         });
     } catch (error: any) {
-        console.error("Retry failed error:", error);
+        logger.error("Retry failed error:", error);
         res.status(500).json({ error: "Failed to retry analysis" });
     }
 });
@@ -166,7 +169,7 @@ router.post("/analyze/:trackId", requireAuth, async (req, res) => {
             trackId,
         });
     } catch (error: any) {
-        console.error("Analyze track error:", error);
+        logger.error("Analyze track error:", error);
         res.status(500).json({ error: "Failed to queue track for analysis" });
     }
 });
@@ -214,7 +217,7 @@ router.get("/track/:trackId", requireAuth, async (req, res) => {
 
         res.json(track);
     } catch (error: any) {
-        console.error("Get track analysis error:", error);
+        logger.error("Get track analysis error:", error);
         res.status(500).json({ error: "Failed to get track analysis" });
     }
 });
@@ -280,14 +283,77 @@ router.get("/features", requireAuth, async (req, res) => {
             },
         });
     } catch (error: any) {
-        console.error("Get features error:", error);
+        logger.error("Get features error:", error);
         res.status(500).json({ error: "Failed to get feature statistics" });
     }
 });
 
+/**
+ * GET /api/analysis/workers
+ * Get current audio analyzer worker configuration
+ */
+router.get("/workers", requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const settings = await getSystemSettings();
+        const cpuCores = os.cpus().length;
+        const currentWorkers = settings?.audioAnalyzerWorkers || 2;
+        
+        // Recommended: 50% of CPU cores, min 2, max 8
+        const recommended = Math.max(2, Math.min(8, Math.floor(cpuCores / 2)));
+        
+        res.json({
+            workers: currentWorkers,
+            cpuCores,
+            recommended,
+            description: `Using ${currentWorkers} of ${cpuCores} available CPU cores`,
+        });
+    } catch (error: any) {
+        logger.error("Get workers config error:", error);
+        res.status(500).json({ error: "Failed to get worker configuration" });
+    }
+});
+
+/**
+ * PUT /api/analysis/workers
+ * Update audio analyzer worker count
+ */
+router.put("/workers", requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const { workers } = req.body;
+        
+        if (typeof workers !== 'number' || workers < 1 || workers > 8) {
+            return res.status(400).json({ 
+                error: "Workers must be a number between 1 and 8" 
+            });
+        }
+        
+        // Update SystemSettings
+        await prisma.systemSettings.update({
+            where: { id: "default" },
+            data: { audioAnalyzerWorkers: workers },
+        });
+        
+        // Publish control signal to Redis for Python worker to pick up
+        await redisClient.publish(
+            "audio:analysis:control",
+            JSON.stringify({ command: "set_workers", count: workers })
+        );
+        
+        const cpuCores = os.cpus().length;
+        const recommended = Math.max(2, Math.min(8, Math.floor(cpuCores / 2)));
+        
+        logger.info(`Audio analyzer workers updated to ${workers}`);
+        
+        res.json({
+            workers,
+            cpuCores,
+            recommended,
+            description: `Using ${workers} of ${cpuCores} available CPU cores`,
+        });
+    } catch (error: any) {
+        logger.error("Update workers config error:", error);
+        res.status(500).json({ error: "Failed to update worker configuration" });
+    }
+});
+
 export default router;
-
-
-
-
-

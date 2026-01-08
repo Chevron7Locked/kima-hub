@@ -1,4 +1,5 @@
 import { prisma } from "../utils/db";
+import { logger } from "../utils/logger";
 import fs from "fs/promises";
 import path from "path";
 import { config } from "../config";
@@ -40,7 +41,7 @@ export class PodcastCacheService {
         };
 
         try {
-            console.log(" Starting podcast cover sync...");
+            logger.debug(" Starting podcast cover sync...");
 
             // Ensure cover cache directory exists
             await fs.mkdir(this.coverCacheDir, { recursive: true });
@@ -53,7 +54,7 @@ export class PodcastCacheService {
                 },
             });
 
-            console.log(
+            logger.debug(
                 `[PODCAST] Found ${podcasts.length} podcasts needing cover sync`
             );
 
@@ -72,7 +73,7 @@ export class PodcastCacheService {
                                 data: { localCoverPath: localPath },
                             });
                             result.synced++;
-                            console.log(`  Synced cover for: ${podcast.title}`);
+                            logger.debug(`  Synced cover for: ${podcast.title}`);
                         } else {
                             result.skipped++;
                         }
@@ -81,18 +82,18 @@ export class PodcastCacheService {
                     result.failed++;
                     const errorMsg = `Failed to sync cover for ${podcast.title}: ${error.message}`;
                     result.errors.push(errorMsg);
-                    console.error(`  ✗ ${errorMsg}`);
+                    logger.error(` ${errorMsg}`);
                 }
             }
 
-            console.log("\nPodcast Cover Sync Summary:");
-            console.log(`  Synced: ${result.synced}`);
-            console.log(`   Failed: ${result.failed}`);
-            console.log(`    Skipped: ${result.skipped}`);
+            logger.debug("\nPodcast Cover Sync Summary:");
+            logger.debug(`  Synced: ${result.synced}`);
+            logger.debug(`   Failed: ${result.failed}`);
+            logger.debug(`    Skipped: ${result.skipped}`);
 
             return result;
         } catch (error: any) {
-            console.error(" Podcast cover sync failed:", error);
+            logger.error(" Podcast cover sync failed:", error);
             throw error;
         }
     }
@@ -109,7 +110,7 @@ export class PodcastCacheService {
         };
 
         try {
-            console.log(" Starting podcast episode cover sync...");
+            logger.debug(" Starting podcast episode cover sync...");
 
             await fs.mkdir(this.coverCacheDir, { recursive: true });
 
@@ -133,7 +134,7 @@ export class PodcastCacheService {
                 (ep) => ep.imageUrl !== ep.podcast.imageUrl
             );
 
-            console.log(
+            logger.debug(
                 `[PODCAST] Found ${uniqueEpisodes.length} episodes with unique covers`
             );
 
@@ -152,7 +153,7 @@ export class PodcastCacheService {
                                 data: { localCoverPath: localPath },
                             });
                             result.synced++;
-                            console.log(
+                            logger.debug(
                                 `  Synced cover for episode: ${episode.title}`
                             );
                         } else {
@@ -163,18 +164,18 @@ export class PodcastCacheService {
                     result.failed++;
                     const errorMsg = `Failed to sync cover for episode ${episode.title}: ${error.message}`;
                     result.errors.push(errorMsg);
-                    console.error(`  ✗ ${errorMsg}`);
+                    logger.error(` ${errorMsg}`);
                 }
             }
 
-            console.log("\nEpisode Cover Sync Summary:");
-            console.log(`  Synced: ${result.synced}`);
-            console.log(`   Failed: ${result.failed}`);
-            console.log(`    Skipped: ${result.skipped}`);
+            logger.debug("\nEpisode Cover Sync Summary:");
+            logger.debug(`  Synced: ${result.synced}`);
+            logger.debug(`   Failed: ${result.failed}`);
+            logger.debug(`    Skipped: ${result.skipped}`);
 
             return result;
         } catch (error: any) {
-            console.error(" Episode cover sync failed:", error);
+            logger.error(" Episode cover sync failed:", error);
             throw error;
         }
     }
@@ -204,7 +205,7 @@ export class PodcastCacheService {
 
             return filePath;
         } catch (error: any) {
-            console.error(
+            logger.error(
                 `Failed to download cover for ${type} ${id}:`,
                 error.message
             );
@@ -240,7 +241,7 @@ export class PodcastCacheService {
             if (!validCoverPaths.has(file)) {
                 await fs.unlink(path.join(this.coverCacheDir, file));
                 deleted++;
-                console.log(`  [DELETE] Deleted orphaned podcast cover: ${file}`);
+                logger.debug(`  [DELETE] Deleted orphaned podcast cover: ${file}`);
             }
         }
 

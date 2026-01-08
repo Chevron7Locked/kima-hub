@@ -60,6 +60,8 @@ A self-hosted music streaming platform with intelligent discovery, podcast suppo
 
 **Bulk Operations** - Delete artists, albums, or tracks with confirmation. Paginated views for large libraries.
 
+**Metadata Enrichment** - Automatic enrichment of artist bios, images, mood tags, and audio analysis from Last.fm and local audio processing. Configurable enrichment speed (Conservative to Maximum) balances processing speed with API rate limits. Comprehensive UX with pause/resume/stop controls, failure tracking, and retry capabilities.
+
 ---
 
 ## Player
@@ -74,13 +76,13 @@ A self-hosted music streaming platform with intelligent discovery, podcast suppo
 
 ## Additional Features
 
-- Global search across artists, albums, and tracks
-- Featured playlists from Deezer
-- Recently added and popular artists sections
-- Create and share playlists with other users
-- MusicBrainz integration for accurate metadata
-- Clean, responsive UI that works on desktop, tablet, and mobile
+-   Global search across artists, albums, and tracks
+-   Featured playlists from Deezer
+-   Recently added and popular artists sections
+-   Create and share playlists with other users
+-   MusicBrainz integration for accurate metadata
+-   Clean, responsive UI that works on desktop, tablet, and mobile
 
 ---
 
-*Lidify is self-hosted, giving you full control over your music library with the discovery features of commercial streaming services.*
+_Lidify is self-hosted, giving you full control over your music library with the discovery features of commercial streaming services._

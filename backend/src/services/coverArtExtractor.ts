@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { logger } from "../utils/logger";
 import * as path from "path";
 import * as crypto from "crypto";
 import { parseFile } from "music-metadata";
@@ -44,13 +45,13 @@ export class CoverArtExtractor {
             // Save to cache
             await fs.promises.writeFile(cachePath, picture.data);
 
-            console.log(
+            logger.debug(
                 `[COVER-ART] Extracted cover art from ${path.basename(audioFilePath)}: ${cacheFileName}`
             );
 
             return cacheFileName;
         } catch (err) {
-            console.error(
+            logger.error(
                 `[COVER-ART] Failed to extract from ${audioFilePath}:`,
                 err
             );

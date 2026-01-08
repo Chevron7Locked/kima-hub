@@ -14,6 +14,7 @@ import { ActivityPanel } from "./ActivityPanel";
 import { GalaxyBackground } from "../ui/GalaxyBackground";
 import { GradientSpinner } from "../ui/GradientSpinner";
 import { PWAInstallPrompt } from "../PWAInstallPrompt";
+import { PullToRefresh } from "../ui/PullToRefresh";
 import { ReactNode } from "react";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { useIsTV } from "@/lib/tv-utils";
@@ -84,6 +85,12 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
         if (isTV) {
             return (
                 <PlayerModeWrapper>
+                    <a
+                        href="#main-content"
+                        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[100] focus:px-4 focus:py-2 focus:bg-white focus:text-black focus:rounded-lg focus:font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                        Skip to main content
+                    </a>
                     <MediaControlsHandler />
                     <TVLayout>{children}</TVLayout>
                 </PlayerModeWrapper>
@@ -94,6 +101,12 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
         if (isMobileOrTablet) {
             return (
                 <PlayerModeWrapper>
+                    <a
+                        href="#main-content"
+                        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[100] focus:px-4 focus:py-2 focus:bg-white focus:text-black focus:rounded-lg focus:font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                        Skip to main content
+                    </a>
                     <div className="h-screen bg-black overflow-hidden flex flex-col">
                         <MediaControlsHandler />
                         <TopBar />
@@ -110,18 +123,22 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                         />
 
                         {/* Main content area with rounded corners */}
-                        <main
-                            className="flex-1 bg-gradient-to-b from-[#1a1a1a] via-black to-black mx-2 mb-2 rounded-lg overflow-y-auto relative"
-                            style={{
-                                marginTop: "58px",
-                                marginBottom:
-                                    "calc(56px + env(safe-area-inset-bottom, 0px) + 8px)",
-                            }}
-                        >
-                            <GalaxyBackground />
-                            {/* Padding at bottom for mini player floating above */}
-                            <div className="pb-24">{children}</div>
-                        </main>
+                        <PullToRefresh>
+                            <main
+                                id="main-content"
+                                tabIndex={-1}
+                                className="flex-1 bg-gradient-to-b from-[#1a1a1a] via-black to-black mx-2 mb-2 rounded-lg overflow-y-auto relative focus:outline-none"
+                                style={{
+                                    marginTop: "58px",
+                                    marginBottom:
+                                        "calc(56px + env(safe-area-inset-bottom, 0px) + 8px)",
+                                }}
+                            >
+                                <GalaxyBackground />
+                                {/* Padding at bottom for mini player floating above */}
+                                <div className="pb-24">{children}</div>
+                            </main>
+                        </PullToRefresh>
 
                         {/* Mini Player - fixed, positioned above bottom nav */}
                         <UniversalPlayer />
@@ -137,6 +154,12 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
         // Desktop Layout
         return (
             <PlayerModeWrapper>
+                <a
+                    href="#main-content"
+                    className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[100] focus:px-4 focus:py-2 focus:bg-white focus:text-black focus:rounded-lg focus:font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                    Skip to main content
+                </a>
                 <div
                     className="h-screen bg-black overflow-hidden flex flex-col"
                     style={{ paddingTop: "64px" }}
@@ -145,7 +168,11 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                     <TopBar />
                     <div className="flex-1 flex gap-2 p-2 pt-0 overflow-hidden">
                         <Sidebar />
-                        <main className="flex-1 bg-gradient-to-b from-[#1a1a1a] via-black to-black rounded-lg overflow-y-auto relative">
+                        <main
+                            id="main-content"
+                            tabIndex={-1}
+                            className="flex-1 bg-gradient-to-b from-[#1a1a1a] via-black to-black rounded-lg overflow-y-auto relative focus:outline-none"
+                        >
                             <GalaxyBackground />
                             {children}
                         </main>

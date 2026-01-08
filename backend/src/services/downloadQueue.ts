@@ -1,3 +1,5 @@
+import { logger } from "../utils/logger";
+
 interface DownloadInfo {
     downloadId: string;
     albumTitle: string;
@@ -72,15 +74,15 @@ class DownloadQueueManager {
         };
 
         this.activeDownloads.set(downloadId, info);
-        console.log(
+        logger.debug(
             `[DOWNLOAD] Started: "${albumTitle}" by ${artistName} (${downloadId})`
         );
-        console.log(`   Album MBID: ${albumMbid}`);
-        console.log(`   Active downloads: ${this.activeDownloads.size}`);
+        logger.debug(`   Album MBID: ${albumMbid}`);
+        logger.debug(`   Active downloads: ${this.activeDownloads.size}`);
 
         // Persist Lidarr download reference to download job for later status updates
         this.linkDownloadJob(downloadId, albumMbid).catch((error) => {
-            console.error(` linkDownloadJob error:`, error);
+            logger.error(` linkDownloadJob error:`, error);
         });
 
         // Start timeout on first download
@@ -108,12 +110,12 @@ class DownloadQueueManager {
      */
     async completeDownload(downloadId: string, albumTitle: string) {
         this.activeDownloads.delete(downloadId);
-        console.log(`Download complete: "${albumTitle}" (${downloadId})`);
-        console.log(`   Remaining downloads: ${this.activeDownloads.size}`);
+        logger.debug(`Download complete: "${albumTitle}" (${downloadId})`);
+        logger.debug(`   Remaining downloads: ${this.activeDownloads.size}`);
 
         // If no more downloads, trigger refresh immediately
         if (this.activeDownloads.size === 0) {
-            console.log(`⏰ All downloads complete! Starting refresh now...`);
+            logger.debug(`⏰ All downloads complete! Starting refresh now...`);
             this.clearTimeout();
             this.triggerFullRefresh();
         }
@@ -125,29 +127,29 @@ class DownloadQueueManager {
     async failDownload(downloadId: string, reason: string) {
         const info = this.activeDownloads.get(downloadId);
         if (!info) {
-            console.log(
+            logger.debug(
                 `  Download ${downloadId} not tracked, ignoring failure`
             );
             return;
         }
 
-        console.log(` Download failed: "${info.albumTitle}" (${downloadId})`);
-        console.log(`   Reason: ${reason}`);
-        console.log(`   Attempt ${info.attempts}/${this.MAX_RETRY_ATTEMPTS}`);
+        logger.debug(` Download failed: "${info.albumTitle}" (${downloadId})`);
+        logger.debug(`   Reason: ${reason}`);
+        logger.debug(`   Attempt ${info.attempts}/${this.MAX_RETRY_ATTEMPTS}`);
 
         // Check if we should retry
         if (info.attempts < this.MAX_RETRY_ATTEMPTS) {
             info.attempts++;
-            console.log(`    Retrying download... (attempt ${info.attempts})`);
+            logger.debug(`    Retrying download... (attempt ${info.attempts})`);
             await this.retryDownload(info);
         } else {
-            console.log(`   ⛔ Max retry attempts reached, giving up`);
+            logger.debug(`   ⛔ Max retry attempts reached, giving up`);
             await this.cleanupFailedAlbum(info);
             this.activeDownloads.delete(downloadId);
 
             // Check if all downloads are done
             if (this.activeDownloads.size === 0) {
-                console.log(
+                logger.debug(
                     `⏰ All downloads finished (some failed). Starting refresh...`
                 );
                 this.clearTimeout();
@@ -162,7 +164,7 @@ class DownloadQueueManager {
     private async retryDownload(info: DownloadInfo) {
         try {
             if (!info.albumId) {
-                console.log(` No album ID, cannot retry`);
+                logger.debug(` No album ID, cannot retry`);
                 return;
             }
 
@@ -176,7 +178,7 @@ class DownloadQueueManager {
                 !settings.lidarrUrl ||
                 !settings.lidarrApiKey
             ) {
-                console.log(` Lidarr not configured`);
+                logger.debug(` Lidarr not configured`);
                 return;
             }
 
@@ -195,9 +197,9 @@ class DownloadQueueManager {
                 }
             );
 
-            console.log(`   Retry search triggered in Lidarr`);
+            logger.debug(`   Retry search triggered in Lidarr`);
         } catch (error: any) {
-            console.log(` Failed to retry: ${error.message}`);
+            logger.debug(` Failed to retry: ${error.message}`);
         }
     }
 
@@ -206,7 +208,7 @@ class DownloadQueueManager {
      */
     private async cleanupFailedAlbum(info: DownloadInfo) {
         try {
-            console.log(`    Cleaning up failed album: ${info.albumTitle}`);
+            logger.debug(`    Cleaning up failed album: ${info.albumTitle}`);
 
             const { getSystemSettings } = await import(
                 "../utils/systemSettings"
@@ -233,9 +235,9 @@ class DownloadQueueManager {
                             timeout: 10000,
                         }
                     );
-                    console.log(`   Removed album from Lidarr`);
+                    logger.debug(`   Removed album from Lidarr`);
                 } catch (error: any) {
-                    console.log(` Failed to remove album: ${error.message}`);
+                    logger.debug(` Failed to remove album: ${error.message}`);
                 }
             }
 
@@ -264,27 +266,27 @@ class DownloadQueueManager {
                                 timeout: 10000,
                             }
                         );
-                        console.log(
+                        logger.debug(
                             `   Removed artist from Lidarr (no other albums)`
                         );
                     }
                 } catch (error: any) {
-                    console.log(
+                    logger.debug(
                         ` Failed to check/remove artist: ${error.message}`
                     );
                 }
             }
 
-            // Mark as failed in Discovery database
+            // Mark as deleted in Discovery database (closest to failed status)
             const { prisma } = await import("../utils/db");
             await prisma.discoveryAlbum.updateMany({
                 where: { albumTitle: info.albumTitle },
-                data: { status: "FAILED" },
+                data: { status: "DELETED" },
             });
-            console.log(`   Marked as failed in database`);
+            logger.debug(`   Marked as failed in database`);
 
             // Notify callbacks about unavailable album
-            console.log(
+            logger.debug(
                 `   [NOTIFY] Notifying ${this.unavailableCallbacks.length} callbacks about unavailable album`
             );
             for (const callback of this.unavailableCallbacks) {
@@ -299,11 +301,11 @@ class DownloadQueueManager {
                         similarity: info.similarity,
                     });
                 } catch (error: any) {
-                    console.log(` Callback error: ${error.message}`);
+                    logger.debug(` Callback error: ${error.message}`);
                 }
             }
         } catch (error: any) {
-            console.log(` Cleanup error: ${error.message}`);
+            logger.debug(` Cleanup error: ${error.message}`);
         }
     }
 
@@ -312,20 +314,20 @@ class DownloadQueueManager {
      */
     private startTimeout() {
         const timeoutMs = this.TIMEOUT_MINUTES * 60 * 1000;
-        console.log(
+        logger.debug(
             `[TIMER] Starting ${this.TIMEOUT_MINUTES}-minute timeout for automatic scan`
         );
 
         this.timeoutTimer = setTimeout(() => {
             if (this.activeDownloads.size > 0) {
-                console.log(
+                logger.debug(
                     `\n  Timeout reached! ${this.activeDownloads.size} downloads still pending.`
                 );
-                console.log(`   These downloads never completed:`);
+                logger.debug(`   These downloads never completed:`);
 
                 // Mark each pending download as failed to trigger callbacks
                 for (const [downloadId, info] of this.activeDownloads) {
-                    console.log(
+                    logger.debug(
                         `     - ${info.albumTitle} by ${info.artistName}`
                     );
                     // This will trigger the unavailable album callback
@@ -333,14 +335,14 @@ class DownloadQueueManager {
                         downloadId,
                         "Download timeout - never completed"
                     ).catch((err) => {
-                        console.error(
+                        logger.error(
                             `Error failing download ${downloadId}:`,
                             err
                         );
                     });
                 }
 
-                console.log(
+                logger.debug(
                     `   Triggering scan anyway to process completed downloads...\n`
                 );
             } else {
@@ -364,27 +366,27 @@ class DownloadQueueManager {
      */
     private async triggerFullRefresh() {
         try {
-            console.log("\n Starting full library refresh...\n");
+            logger.debug("\n Starting full library refresh...\n");
 
             // Step 1: Clear failed imports from Lidarr
-            console.log("[1/2] Checking for failed imports in Lidarr...");
+            logger.debug("[1/2] Checking for failed imports in Lidarr...");
             await this.clearFailedLidarrImports();
 
             // Step 2: Trigger Lidify library sync
-            console.log("[2/2] Triggering Lidify library sync...");
+            logger.debug("[2/2] Triggering Lidify library sync...");
             const lidifySuccess = await this.triggerLidifySync();
 
             if (!lidifySuccess) {
-                console.error(" Lidify sync failed");
+                logger.error(" Lidify sync failed");
                 return;
             }
 
-            console.log("Lidify sync started");
-            console.log(
+            logger.debug("Lidify sync started");
+            logger.debug(
                 "\n[SUCCESS] Full library refresh complete! New music should appear shortly.\n"
             );
         } catch (error) {
-            console.error(" Library refresh error:", error);
+            logger.error(" Library refresh error:", error);
         }
     }
 
@@ -399,7 +401,7 @@ class DownloadQueueManager {
             const settings = await getSystemSettings();
 
             if (!settings.lidarrEnabled || !settings.lidarrUrl) {
-                console.log(" Lidarr not configured, skipping");
+                logger.debug(" Lidarr not configured, skipping");
                 return;
             }
 
@@ -408,7 +410,7 @@ class DownloadQueueManager {
             // Get Lidarr API key
             const apiKey = settings.lidarrApiKey;
             if (!apiKey) {
-                console.log(" Lidarr API key not found, skipping");
+                logger.debug(" Lidarr API key not found, skipping");
                 return;
             }
 
@@ -433,11 +435,11 @@ class DownloadQueueManager {
             );
 
             if (failed.length === 0) {
-                console.log("   No failed imports found");
+                logger.debug("   No failed imports found");
                 return;
             }
 
-            console.log(` Found ${failed.length} failed import(s)`);
+            logger.debug(` Found ${failed.length} failed import(s)`);
 
             for (const item of failed) {
                 const artistName =
@@ -445,7 +447,7 @@ class DownloadQueueManager {
                 const albumTitle =
                     item.album?.title || item.album?.name || "Unknown Album";
 
-                console.log(`       ${artistName} - ${albumTitle}`);
+                logger.debug(`       ${artistName} - ${albumTitle}`);
 
                 try {
                     // Remove from queue, blocklist, and trigger search
@@ -474,22 +476,22 @@ class DownloadQueueManager {
                                 timeout: 10000,
                             }
                         );
-                        console.log(
+                        logger.debug(
                             `         → Blocklisted and searching for alternative`
                         );
                     } else {
-                        console.log(
+                        logger.debug(
                             `         → Blocklisted (no album ID for re-search)`
                         );
                     }
                 } catch (error: any) {
-                    console.log(`       Failed to process: ${error.message}`);
+                    logger.debug(`       Failed to process: ${error.message}`);
                 }
             }
 
-            console.log(`   Cleared ${failed.length} failed import(s)`);
+            logger.debug(`   Cleared ${failed.length} failed import(s)`);
         } catch (error: any) {
-            console.log(` Failed to check Lidarr queue: ${error.message}`);
+            logger.debug(` Failed to check Lidarr queue: ${error.message}`);
         }
     }
 
@@ -501,12 +503,12 @@ class DownloadQueueManager {
             const { scanQueue } = await import("../workers/queues");
             const { prisma } = await import("../utils/db");
 
-            console.log("   Starting library scan...");
+            logger.debug("   Starting library scan...");
 
             // Get first user for scanning
             const firstUser = await prisma.user.findFirst();
             if (!firstUser) {
-                console.error(` No users found in database, cannot scan`);
+                logger.error(` No users found in database, cannot scan`);
                 return false;
             }
 
@@ -516,10 +518,10 @@ class DownloadQueueManager {
                 source: "download-queue",
             });
 
-            console.log("Library scan queued");
+            logger.debug("Library scan queued");
             return true;
         } catch (error: any) {
-            console.error("Lidify sync trigger error:", error.message);
+            logger.error("Lidify sync trigger error:", error.message);
             return false;
         }
     }
@@ -546,7 +548,7 @@ class DownloadQueueManager {
      * Manually trigger a full refresh (for testing or manual triggers)
      */
     async manualRefresh() {
-        console.log("\n Manual refresh triggered...\n");
+        logger.debug("\n Manual refresh triggered...\n");
         await this.triggerFullRefresh();
     }
 
@@ -561,7 +563,7 @@ class DownloadQueueManager {
         for (const [downloadId, info] of this.activeDownloads) {
             const age = now - info.startTime;
             if (age > this.STALE_TIMEOUT_MS) {
-                console.log(
+                logger.debug(
                     `[CLEANUP] Cleaning up stale download: "${
                         info.albumTitle
                     }" (${downloadId}) - age: ${Math.round(
@@ -574,12 +576,77 @@ class DownloadQueueManager {
         }
 
         if (cleanedCount > 0) {
-            console.log(
+            logger.debug(
                 `[CLEANUP] Cleaned up ${cleanedCount} stale download(s)`
             );
         }
 
         return cleanedCount;
+    }
+
+    /**
+     * Reconcile in-memory state with database on startup
+     * - Mark stale jobs (>30 min without update) as failed
+     * - Load active/processing jobs into memory
+     */
+    async reconcileOnStartup(): Promise<{ loaded: number; failed: number }> {
+        const { prisma } = await import("../utils/db");
+        
+        const staleThreshold = new Date(Date.now() - this.STALE_TIMEOUT_MS);
+        
+        // Mark stale processing jobs as failed
+        const staleResult = await prisma.downloadJob.updateMany({
+            where: {
+                status: "processing",
+                startedAt: { lt: staleThreshold }
+            },
+            data: {
+                status: "failed",
+                error: "Server restart - download was processing but never completed"
+            }
+        });
+        
+        logger.debug(`[DOWNLOAD] Marked ${staleResult.count} stale downloads as failed`);
+        
+        // Load recent processing jobs into memory (not stale)
+        const activeJobs = await prisma.downloadJob.findMany({
+            where: {
+                status: "processing",
+                startedAt: { gte: staleThreshold }
+            },
+            select: {
+                id: true,
+                subject: true,
+                targetMbid: true,
+                lidarrRef: true,
+                metadata: true,
+                startedAt: true,
+                attempts: true
+            }
+        });
+        
+        // Populate in-memory map from database
+        for (const job of activeJobs) {
+            const metadata = job.metadata as Record<string, any> || {};
+            this.activeDownloads.set(job.lidarrRef || job.id, {
+                downloadId: job.lidarrRef || job.id,
+                albumTitle: job.subject,
+                albumMbid: job.targetMbid,
+                artistName: metadata.artistName || "Unknown",
+                artistMbid: metadata.artistMbid,
+                albumId: metadata.lidarrAlbumId,
+                artistId: metadata.lidarrArtistId,
+                attempts: job.attempts,
+                startTime: job.startedAt?.getTime() || Date.now(),
+                userId: metadata.userId,
+                tier: metadata.tier,
+                similarity: metadata.similarity
+            });
+        }
+        
+        logger.debug(`[DOWNLOAD] Loaded ${activeJobs.length} active downloads from database`);
+        
+        return { loaded: activeJobs.length, failed: staleResult.count };
     }
 
     /**
@@ -592,14 +659,14 @@ class DownloadQueueManager {
         }
         this.clearTimeout();
         this.activeDownloads.clear();
-        console.log("Download queue manager shutdown");
+        logger.debug("Download queue manager shutdown");
     }
 
     /**
      * Link Lidarr download IDs to download jobs (so we can mark them completed later)
      */
     private async linkDownloadJob(downloadId: string, albumMbid: string) {
-        console.log(
+        logger.debug(
             `   [LINK] Attempting to link download job for MBID: ${albumMbid}`
         );
         try {
@@ -615,7 +682,7 @@ class DownloadQueueManager {
                     targetMbid: true,
                 },
             });
-            console.log(
+            logger.debug(
                 `   [LINK] Found ${existingJobs.length} job(s) with this MBID:`,
                 JSON.stringify(existingJobs, null, 2)
             );
@@ -629,27 +696,28 @@ class DownloadQueueManager {
                 data: {
                     lidarrRef: downloadId,
                     status: "processing",
+                    startedAt: new Date(),
                 },
             });
 
             if (result.count === 0) {
-                console.log(
+                logger.debug(
                     `     No matching download jobs found to link with Lidarr ID ${downloadId}`
                 );
-                console.log(
+                logger.debug(
                     ` This means either: no job exists, job already has lidarrRef, or status is not pending/processing`
                 );
             } else {
-                console.log(
+                logger.debug(
                     `   Linked Lidarr download ${downloadId} to ${result.count} download job(s)`
                 );
             }
         } catch (error: any) {
-            console.error(
+            logger.error(
                 ` Failed to persist Lidarr download link:`,
                 error.message
             );
-            console.error(`   Error details:`, error);
+            logger.error(`   Error details:`, error);
         }
     }
 }

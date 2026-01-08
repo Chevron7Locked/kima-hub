@@ -1,4 +1,5 @@
 import { prisma } from "../utils/db";
+import { logger } from "../utils/logger";
 import { enrichSimilarArtist } from "./artistEnrichment";
 
 let isEnriching = false;
@@ -13,9 +14,9 @@ const ENRICHMENT_INTERVAL_MS = 30 * 1000; // Run every 30 seconds (increased fro
  * Throttled to reduce API load and prevent rate limiting
  */
 export async function startEnrichmentWorker() {
-    console.log("Starting enrichment worker...");
-    console.log(`   - Concurrent artists: ${ENRICHMENT_BATCH_SIZE}`);
-    console.log(`   - Check interval: ${ENRICHMENT_INTERVAL_MS / 1000} seconds`);
+    logger.debug("Starting enrichment worker...");
+    logger.debug(`   - Concurrent artists: ${ENRICHMENT_BATCH_SIZE}`);
+    logger.debug(`   - Check interval: ${ENRICHMENT_INTERVAL_MS / 1000} seconds`);
 
     // Run immediately on start
     await enrichNextBatch();
@@ -33,7 +34,7 @@ export function stopEnrichmentWorker() {
     if (enrichmentInterval) {
         clearInterval(enrichmentInterval);
         enrichmentInterval = null;
-        console.log(" Enrichment worker stopped");
+        logger.debug(" Enrichment worker stopped");
     }
 }
 
@@ -71,7 +72,7 @@ async function enrichNextBatch() {
             return;
         }
 
-        console.log(
+        logger.debug(
             `\n[Enrichment Worker] Processing batch of ${artists.length} artists...`
         );
 
@@ -79,25 +80,25 @@ async function enrichNextBatch() {
         await Promise.allSettled(
             artists.map(async (artist) => {
                 try {
-                    console.log(`   → Starting: ${artist.name}`);
+                    logger.debug(` Starting: ${artist.name}`);
                     await enrichSimilarArtist(artist);
-                    console.log(`   Completed: ${artist.name}`);
+                    logger.debug(`   Completed: ${artist.name}`);
                 } catch (error) {
-                    console.error(`    Failed: ${artist.name}`, error);
+                    logger.error(`    Failed: ${artist.name}`, error);
                 }
             })
         );
 
         // Log progress
         const progress = await getEnrichmentProgress();
-        console.log(
+        logger.debug(
             `\n[Enrichment Progress] ${progress.completed}/${progress.total} (${progress.progress}%)`
         );
-        console.log(
+        logger.debug(
             `   Pending: ${progress.pending} | Failed: ${progress.failed}\n`
         );
     } catch (error) {
-        console.error(` [Enrichment Worker] Batch error:`, error);
+        logger.error(` [Enrichment Worker] Batch error:`, error);
     } finally {
         isEnriching = false;
     }

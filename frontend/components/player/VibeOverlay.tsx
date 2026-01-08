@@ -541,7 +541,7 @@ export function VibeComparisonArt({
     if (!vibeMode || !comparisons) return null;
 
     // Radar chart dimensions
-    const size = 280;
+    const size = 320;
     const center = size / 2;
     const maxRadius = 110;
 
@@ -564,7 +564,8 @@ export function VibeComparisonArt({
     return (
         <div
             className={cn(
-                "relative w-full h-full bg-gradient-to-br from-[#1a1a2e] via-[#0f0f1a] to-[#000000] flex items-center justify-center overflow-hidden",
+                "relative w-full h-full flex items-center justify-center",
+                "md:bg-gradient-to-br md:from-[#1a1a2e] md:via-[#0f0f1a] md:to-[#000000] md:overflow-hidden",
                 className
             )}
         >

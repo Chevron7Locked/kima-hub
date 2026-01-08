@@ -1,4 +1,5 @@
 import { audiobookshelfService } from "./audiobookshelf";
+import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import fs from "fs/promises";
 import path from "path";
@@ -19,6 +20,7 @@ interface SyncResult {
 
 export class AudiobookCacheService {
     private coverCacheDir: string;
+    private coverCacheAvailable: boolean = false;
 
     constructor() {
         // Store covers in: <MUSIC_PATH>/cover-cache/audiobooks/
@@ -27,6 +29,23 @@ export class AudiobookCacheService {
             "cover-cache",
             "audiobooks"
         );
+    }
+
+    /**
+     * Try to ensure cover cache directory exists
+     * Returns true if available, false if not (permissions issue)
+     */
+    private async ensureCoverCacheDir(): Promise<boolean> {
+        try {
+            await fs.mkdir(this.coverCacheDir, { recursive: true });
+            this.coverCacheAvailable = true;
+            return true;
+        } catch (error: any) {
+            logger.warn(`[AUDIOBOOK] Cover cache directory unavailable: ${error.message}`);
+            logger.warn("[AUDIOBOOK] Covers will be served directly from Audiobookshelf");
+            this.coverCacheAvailable = false;
+            return false;
+        }
     }
 
     /**
@@ -41,15 +60,15 @@ export class AudiobookCacheService {
         };
 
         try {
-            console.log(" Starting audiobook sync from Audiobookshelf...");
+            logger.debug(" Starting audiobook sync from Audiobookshelf...");
 
-            // Ensure cover cache directory exists
-            await fs.mkdir(this.coverCacheDir, { recursive: true });
+            // Try to ensure cover cache directory exists (non-fatal if it fails)
+            await this.ensureCoverCacheDir();
 
             // Fetch all audiobooks from Audiobookshelf
             const audiobooks = await audiobookshelfService.getAllAudiobooks();
 
-            console.log(
+            logger.debug(
                 `[AUDIOBOOK] Found ${audiobooks.length} audiobooks in Audiobookshelf`
             );
 
@@ -66,7 +85,7 @@ export class AudiobookCacheService {
                         metadata.author ||
                         book.author ||
                         "Unknown Author";
-                    console.log(`  Synced: ${title} by ${author}`);
+                    logger.debug(`  Synced: ${title} by ${author}`);
                 } catch (error: any) {
                     result.failed++;
                     const metadata = book.media?.metadata || book;
@@ -74,23 +93,23 @@ export class AudiobookCacheService {
                         metadata.title || book.title || "Unknown Title";
                     const errorMsg = `Failed to sync ${title}: ${error.message}`;
                     result.errors.push(errorMsg);
-                    console.error(`  ✗ ${errorMsg}`);
+                    logger.error(` ${errorMsg}`);
                 }
             }
 
-            console.log("\nSync Summary:");
-            console.log(`  Synced: ${result.synced}`);
-            console.log(`   Failed: ${result.failed}`);
-            console.log(`    Skipped: ${result.skipped}`);
+            logger.debug("\nSync Summary:");
+            logger.debug(`  Synced: ${result.synced}`);
+            logger.debug(`   Failed: ${result.failed}`);
+            logger.debug(`    Skipped: ${result.skipped}`);
 
             if (result.errors.length > 0) {
-                console.log("\n[ERRORS]:");
-                result.errors.forEach((err) => console.log(`  - ${err}`));
+                logger.debug("\n[ERRORS]:");
+                result.errors.forEach((err) => logger.debug(`  - ${err}`));
             }
 
             return result;
         } catch (error: any) {
-            console.error(" Audiobook sync failed:", error);
+            logger.error(" Audiobook sync failed:", error);
             throw error;
         }
     }
@@ -106,7 +125,7 @@ export class AudiobookCacheService {
 
         // Skip if no title (invalid audiobook data)
         if (!title) {
-            console.warn(`  Skipping audiobook ${book.id} - missing title`);
+            logger.warn(`  Skipping audiobook ${book.id} - missing title`);
             return;
         }
 
@@ -187,7 +206,7 @@ export class AudiobookCacheService {
 
         // Log series info for debugging (only for first few books)
         if (series) {
-            console.log(
+            logger.debug(
                 `    [Series] "${title}" -> "${series}" #${
                     seriesSequence || "?"
                 }`
@@ -281,7 +300,7 @@ export class AudiobookCacheService {
 
             return null;
         } catch (error: any) {
-            console.error(
+            logger.error(
                 "Failed to get Audiobookshelf base URL:",
                 error.message
             );
@@ -291,11 +310,17 @@ export class AudiobookCacheService {
 
     /**
      * Download a cover image and save it locally
+     * Returns null if cover caching is not available (permissions issue)
      */
     private async downloadCover(
         audiobookId: string,
         coverUrl: string
-    ): Promise<string> {
+    ): Promise<string | null> {
+        // Skip cover download if cache directory is not available
+        if (!this.coverCacheAvailable) {
+            return null;
+        }
+
         try {
             // Get API key for authentication
             const { getSystemSettings } = await import(
@@ -327,11 +352,11 @@ export class AudiobookCacheService {
 
             return filePath;
         } catch (error: any) {
-            console.error(
+            logger.error(
                 `Failed to download cover for ${audiobookId}:`,
                 error.message
             );
-            return null as any; // Return null if download fails
+            return null;
         }
     }
 
@@ -350,7 +375,7 @@ export class AudiobookCacheService {
             audiobook.lastSyncedAt <
                 new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
         ) {
-            console.log(
+            logger.debug(
                 `[AUDIOBOOK] Audiobook ${audiobookId} not cached or stale, syncing...`
             );
             try {
@@ -362,13 +387,13 @@ export class AudiobookCacheService {
                     where: { id: audiobookId },
                 });
             } catch (syncError: any) {
-                console.warn(
+                logger.warn(
                     `  Failed to sync audiobook ${audiobookId} from Audiobookshelf:`,
                     syncError.message
                 );
                 // If we have stale cached data, return it anyway
                 if (audiobook) {
-                    console.log(
+                    logger.debug(
                         `   Using stale cached data for ${audiobookId}`
                     );
                 } else {
@@ -387,6 +412,13 @@ export class AudiobookCacheService {
      * Clean up old cached covers that are no longer in database
      */
     async cleanupOrphanedCovers(): Promise<number> {
+        // Ensure cache directory is available
+        const available = await this.ensureCoverCacheDir();
+        if (!available) {
+            logger.warn("[AUDIOBOOK] Cannot cleanup covers - cache directory unavailable");
+            return 0;
+        }
+
         const audiobooks = await prisma.audiobook.findMany({
             select: { localCoverPath: true },
         });
@@ -398,14 +430,18 @@ export class AudiobookCacheService {
         );
 
         let deleted = 0;
-        const files = await fs.readdir(this.coverCacheDir);
+        try {
+            const files = await fs.readdir(this.coverCacheDir);
 
-        for (const file of files) {
-            if (!validCoverPaths.has(file)) {
-                await fs.unlink(path.join(this.coverCacheDir, file));
-                deleted++;
-                console.log(`  [DELETE] Deleted orphaned cover: ${file}`);
+            for (const file of files) {
+                if (!validCoverPaths.has(file)) {
+                    await fs.unlink(path.join(this.coverCacheDir, file));
+                    deleted++;
+                    logger.debug(`  [DELETE] Deleted orphaned cover: ${file}`);
+                }
             }
+        } catch (error: any) {
+            logger.warn(`[AUDIOBOOK] Failed to read cover cache directory: ${error.message}`);
         }
 
         return deleted;

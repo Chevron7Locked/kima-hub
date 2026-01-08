@@ -53,7 +53,6 @@ export function useDiscoverData() {
 
       // If batch was active and now isn't, reload data
       if (wasActiveRef.current && !status.active) {
-        console.log('[Discover] Batch completed, reloading playlist data...');
         wasActiveRef.current = false;
         setPendingGeneration(false);
         await loadData();
@@ -76,7 +75,6 @@ export function useDiscoverData() {
   const startPolling = useCallback(() => {
     if (pollingRef.current) return; // Already polling
 
-    console.log('[Discover] Starting batch status polling...');
     pollingRef.current = setInterval(async () => {
       const status = await checkBatchStatus();
       
@@ -86,7 +84,6 @@ export function useDiscoverData() {
       // 3. We previously had an active batch (wasActiveRef)
       // This ensures we keep polling while waiting for the batch to be created
       if (status && !status.active && !pendingRef.current && wasActiveRef.current) {
-        console.log('[Discover] Batch completed, stopping polling');
         if (pollingRef.current) {
           clearInterval(pollingRef.current);
           pollingRef.current = null;

@@ -3,9 +3,12 @@
 import { Disc3 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
-import { MetadataEditor } from "@/components/MetadataEditor";
 import { Album, AlbumSource } from "../types";
-import { ReactNode } from "react";
+import { ReactNode, lazy, Suspense } from "react";
+import { useAlbumDisplayData } from "@/hooks/useMetadataDisplay";
+
+// Lazy load MetadataEditor - modal component opened on user action
+const MetadataEditor = lazy(() => import("@/components/MetadataEditor").then(mod => ({ default: mod.MetadataEditor })));
 
 interface AlbumHeroProps {
     album: Album;
@@ -24,6 +27,7 @@ export function AlbumHero({
     onReload,
     children,
 }: AlbumHeroProps) {
+    const displayData = useAlbumDisplayData(album);
     const formatDuration = (seconds?: number) => {
         if (!seconds) return "";
         const hours = Math.floor(seconds / 3600);
@@ -101,40 +105,55 @@ export function AlbumHero({
                         <p className="text-xs font-medium text-white/90 mb-1">
                             Album
                         </p>
-                        <div className="flex items-center gap-3 group mb-2">
+                        <div className="flex items-center gap-2 group mb-2">
                             <h1 className="text-2xl md:text-4xl lg:text-5xl font-bold text-white leading-tight line-clamp-2">
-                                {album.title}
+                                {displayData.title}
                             </h1>
+                            {displayData.hasUserOverrides && (
+                                <span className="px-2 py-0.5 text-xs bg-amber-500/20 text-amber-400 rounded-full border border-amber-500/30 shrink-0">
+                                    Edited
+                                </span>
+                            )}
                             {source === "library" && (
-                                <MetadataEditor
-                                    type="album"
-                                    id={album.id}
-                                    currentData={{
-                                        title: album.title,
-                                        year: album.year,
-                                        genres: album.genre ? [album.genre] : [],
-                                        mbid: album.mbid,
-                                        coverUrl: album.coverUrl,
-                                    }}
-                                    onSave={async () => {
-                                        await onReload();
-                                    }}
-                                />
+                                <Suspense fallback={null}>
+                                    <MetadataEditor
+                                        type="album"
+                                        id={album.id}
+                                        currentData={{
+                                            title: displayData.title,
+                                            year: displayData.year,
+                                            genres: displayData.genres,
+                                            mbid: album.mbid,
+                                            coverUrl: displayData.coverUrl,
+                                            // Pass originals for reset comparison
+                                            _originalTitle: album.title,
+                                            _originalYear: album.year,
+                                            _originalGenres: album.genre ? [album.genre] : [],
+                                            _originalCoverUrl: album.coverUrl,
+                                            _hasUserOverrides: displayData.hasUserOverrides,
+                                        }}
+                                        onSave={async () => {
+                                            await onReload();
+                                        }}
+                                    />
+                                </Suspense>
                             )}
                         </div>
                         <div className="flex flex-wrap items-center gap-1 text-sm text-white/70 mb-1">
                             {album.artist && (
                                 <Link
-                                    href={`/artist/${album.artist.mbid || album.artist.id}`}
+                                    href={`/artist/${
+                                        album.artist.mbid || album.artist.id
+                                    }`}
                                     className="font-medium text-white hover:underline"
                                 >
                                     {album.artist.name}
                                 </Link>
                             )}
-                            {album.year && (
+                            {displayData.year && (
                                 <>
                                     <span className="mx-1">•</span>
-                                    <span>{album.year}</span>
+                                    <span>{displayData.year}</span>
                                 </>
                             )}
                             {album.trackCount && album.trackCount > 0 && (
@@ -143,9 +162,7 @@ export function AlbumHero({
                                     <span>{album.trackCount} songs</span>
                                 </>
                             )}
-                            {totalDuration && (
-                                <span>, {totalDuration}</span>
-                            )}
+                            {totalDuration && <span>, {totalDuration}</span>}
                         </div>
                         {album.genre && (
                             <span className="inline-block px-2 py-0.5 bg-white/10 rounded-full text-xs text-white/70">
@@ -158,9 +175,7 @@ export function AlbumHero({
 
             {/* Action Bar - Full Width */}
             {children && (
-                <div className="relative px-4 md:px-8 pb-4">
-                    {children}
-                </div>
+                <div className="relative px-4 md:px-8 pb-4">{children}</div>
             )}
         </div>
     );

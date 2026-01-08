@@ -10,6 +10,7 @@
  * 6. Clean up old completed/failed DownloadJob records
  */
 
+import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 
 interface IntegrityReport {
@@ -23,7 +24,7 @@ interface IntegrityReport {
 }
 
 export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
-    console.log("\nRunning data integrity check...");
+    logger.debug("\nRunning data integrity check...");
 
     const report: IntegrityReport = {
         expiredExclusions: 0,
@@ -43,7 +44,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
     });
     report.expiredExclusions = expiredExclusions.count;
     if (expiredExclusions.count > 0) {
-        console.log(
+        logger.debug(
             `     Removed ${expiredExclusions.count} expired exclusions`
         );
     }
@@ -56,7 +57,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
     });
     report.orphanedDiscoveryTracks = orphanedDiscoveryTracks.count;
     if (orphanedDiscoveryTracks.count > 0) {
-        console.log(
+        logger.debug(
             `     Removed ${orphanedDiscoveryTracks.count} orphaned discovery track records`
         );
     }
@@ -100,7 +101,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
                 where: { id: album.id },
             });
             report.orphanedAlbums++;
-            console.log(
+            logger.debug(
                 `     Removed orphaned album: ${album.artist.name} - ${album.title}`
             );
         }
@@ -198,7 +199,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
             : artistNameMatches
                 ? `artist "${album.artist.name}" matches discovery`
                 : `artist MBID matches discovery`;
-        console.log(
+        logger.debug(
             `     Fixing mislocated album: ${album.artist.name} - ${album.title} (LIBRARY -> DISCOVER, ${reason})`
         );
         
@@ -221,7 +222,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
     
     report.mislocatedAlbums = mislocatedAlbumsFixed;
     if (mislocatedAlbumsFixed > 0) {
-        console.log(`     Fixed ${mislocatedAlbumsFixed} mislocated albums`);
+        logger.debug(`     Fixed ${mislocatedAlbumsFixed} mislocated albums`);
     }
 
     // 5. Clean up albums with NO tracks (files were deleted from filesystem)
@@ -245,7 +246,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
         });
 
         report.orphanedAlbums++;
-        console.log(
+        logger.debug(
             `     Removed empty album (no tracks): ${album.artist.name} - ${album.title}`
         );
     }
@@ -259,7 +260,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
         )
     `;
     if (orphanedOwnedAlbums > 0) {
-        console.log(
+        logger.debug(
             `     Removed ${orphanedOwnedAlbums} orphaned OwnedAlbum records`
         );
     }
@@ -304,7 +305,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
             });
 
             report.consolidatedArtists++;
-            console.log(
+            logger.debug(
                 `     Consolidated "${tempArtist.name}" (temp) into real artist`
             );
         }
@@ -352,20 +353,20 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
     });
     report.oldDownloadJobs = oldJobs.count;
     if (oldJobs.count > 0) {
-        console.log(`     Removed ${oldJobs.count} old download jobs`);
+        logger.debug(`     Removed ${oldJobs.count} old download jobs`);
     }
 
     // Summary
-    console.log("\nData integrity check complete:");
-    console.log(`   - Expired exclusions: ${report.expiredExclusions}`);
-    console.log(
+    logger.debug("\nData integrity check complete:");
+    logger.debug(`   - Expired exclusions: ${report.expiredExclusions}`);
+    logger.debug(
         `   - Orphaned discovery tracks: ${report.orphanedDiscoveryTracks}`
     );
-    console.log(`   - Mislocated albums (LIBRARY->DISCOVER): ${report.mislocatedAlbums}`);
-    console.log(`   - Orphaned albums: ${report.orphanedAlbums}`);
-    console.log(`   - Consolidated artists: ${report.consolidatedArtists}`);
-    console.log(`   - Orphaned artists: ${report.orphanedArtists}`);
-    console.log(`   - Old download jobs: ${report.oldDownloadJobs}`);
+    logger.debug(`   - Mislocated albums (LIBRARY->DISCOVER): ${report.mislocatedAlbums}`);
+    logger.debug(`   - Orphaned albums: ${report.orphanedAlbums}`);
+    logger.debug(`   - Consolidated artists: ${report.consolidatedArtists}`);
+    logger.debug(`   - Orphaned artists: ${report.orphanedArtists}`);
+    logger.debug(`   - Old download jobs: ${report.oldDownloadJobs}`);
 
     return report;
 }
@@ -374,11 +375,11 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
 if (require.main === module) {
     runDataIntegrityCheck()
         .then((report) => {
-            console.log("\nData integrity check completed successfully");
+            logger.debug("\nData integrity check completed successfully");
             process.exit(0);
         })
         .catch((err) => {
-            console.error("\n Data integrity check failed:", err);
+            logger.error("\n Data integrity check failed:", err);
             process.exit(1);
         });
 }

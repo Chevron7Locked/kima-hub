@@ -29,7 +29,7 @@ export default function ArtistPage() {
   const { isPendingByMbid } = useDownloadContext();
 
   // Data hook
-  const { artist, albums, loading, error, source, reloadArtist } = useArtistData();
+  const { artist, albums, loading, error, source, sortBy, setSortBy, reloadArtist } = useArtistData();
 
   // Action hooks
   const { playAll, shufflePlay } = useArtistActions();
@@ -209,6 +209,8 @@ export default function ArtistPage() {
             albums={ownedAlbums}
             colors={colors}
             onPlayAlbum={handlePlayAlbum}
+            sortBy={sortBy}
+            onSortChange={setSortBy}
           />
 
           {/* Available Albums to Download */}

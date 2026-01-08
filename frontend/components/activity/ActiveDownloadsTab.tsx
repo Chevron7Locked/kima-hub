@@ -12,6 +12,12 @@ interface ActiveDownload {
     type: string;
     status: string;
     createdAt: string;
+    metadata?: {
+        statusText?: string;
+        currentSource?: "lidarr" | "soulseek";
+        lidarrAttempts?: number;
+        soulseekAttempts?: number;
+    };
 }
 
 export function ActiveDownloadsTab() {
@@ -31,15 +37,15 @@ export function ActiveDownloadsTab() {
     };
 
     const handleCancel = async (id: string) => {
-        setCancelling(prev => new Set(prev).add(id));
+        setCancelling((prev) => new Set(prev).add(id));
         try {
             await api.deleteDownload(id);
             // Optimistically remove from list
-            setDownloads(prev => prev.filter(d => d.id !== id));
+            setDownloads((prev) => prev.filter((d) => d.id !== id));
         } catch (error) {
             console.error("Failed to cancel download:", error);
         } finally {
-            setCancelling(prev => {
+            setCancelling((prev) => {
                 const next = new Set(prev);
                 next.delete(id);
                 return next;
@@ -48,11 +54,11 @@ export function ActiveDownloadsTab() {
     };
 
     const handleCancelAll = async () => {
-        const ids = downloads.map(d => d.id);
+        const ids = downloads.map((d) => d.id);
         setCancelling(new Set(ids));
         try {
             // Cancel all downloads in parallel
-            await Promise.all(ids.map(id => api.deleteDownload(id)));
+            await Promise.all(ids.map((id) => api.deleteDownload(id)));
             setDownloads([]);
         } catch (error) {
             console.error("Failed to cancel all downloads:", error);
@@ -75,7 +81,7 @@ export function ActiveDownloadsTab() {
         const date = new Date(dateStr);
         const now = new Date();
         const diff = now.getTime() - date.getTime();
-        
+
         if (diff < 60000) return "Just started";
         if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
         if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
@@ -95,7 +101,9 @@ export function ActiveDownloadsTab() {
             <div className="flex flex-col items-center justify-center py-12 text-center">
                 <Download className="w-8 h-8 text-white/20 mb-3" />
                 <p className="text-sm text-white/40">No active downloads</p>
-                <p className="text-xs text-white/30 mt-1">Downloads will appear here</p>
+                <p className="text-xs text-white/30 mt-1">
+                    Downloads will appear here
+                </p>
             </div>
         );
     }
@@ -141,14 +149,39 @@ export function ActiveDownloadsTab() {
                                 <p className="text-sm font-medium text-white truncate">
                                     {download.subject}
                                 </p>
-                                <div className="flex items-center gap-2 mt-1">
-                                    <span className={cn(
-                                        "text-xs font-medium capitalize",
-                                        download.status === "processing" ? "text-blue-400" : "text-yellow-400"
-                                    )}>
+                                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                    <span
+                                        className={cn(
+                                            "text-xs font-medium capitalize",
+                                            download.status === "processing"
+                                                ? "text-blue-400"
+                                                : "text-yellow-400"
+                                        )}
+                                    >
                                         {download.status}
                                     </span>
-                                    <span className="text-xs text-white/30">•</span>
+                                    {download.metadata?.statusText && (
+                                        <>
+                                            <span className="text-xs text-white/30">
+                                                •
+                                            </span>
+                                            <span
+                                                className={cn(
+                                                    "text-xs font-medium",
+                                                    download.metadata
+                                                        .currentSource ===
+                                                        "lidarr"
+                                                        ? "text-purple-400"
+                                                        : "text-teal-400"
+                                                )}
+                                            >
+                                                {download.metadata.statusText}
+                                            </span>
+                                        </>
+                                    )}
+                                    <span className="text-xs text-white/30">
+                                        •
+                                    </span>
                                     <span className="text-xs text-white/30 capitalize flex items-center gap-1">
                                         {download.type === "album" ? (
                                             <Disc className="w-3 h-3" />
@@ -157,7 +190,9 @@ export function ActiveDownloadsTab() {
                                         )}
                                         {download.type}
                                     </span>
-                                    <span className="text-xs text-white/30">•</span>
+                                    <span className="text-xs text-white/30">
+                                        •
+                                    </span>
                                     <span className="text-xs text-white/30">
                                         {formatTime(download.createdAt)}
                                     </span>

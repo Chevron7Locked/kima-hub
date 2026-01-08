@@ -1,6 +1,8 @@
 import dotenv from "dotenv";
 import { z } from "zod";
+import * as fs from "fs";
 import { validateMusicConfig, MusicConfig } from "./utils/configValidator";
+import { logger } from "./utils/logger";
 
 dotenv.config();
 
@@ -18,14 +20,14 @@ const envSchema = z.object({
 
 try {
     envSchema.parse(process.env);
-    console.log("Environment variables validated");
+    logger.debug("Environment variables validated");
 } catch (error) {
     if (error instanceof z.ZodError) {
-        console.error(" Environment validation failed:");
+        logger.error(" Environment validation failed:");
         error.errors.forEach((err) => {
-            console.error(`   - ${err.path.join(".")}: ${err.message}`);
+            logger.error(`   - ${err.path.join(".")}: ${err.message}`);
         });
-        console.error(
+        logger.error(
             "\n Please check your .env file and ensure all required variables are set."
         );
         process.exit(1);
@@ -47,10 +49,10 @@ let musicConfig: MusicConfig = {
 export async function initializeMusicConfig() {
     try {
         musicConfig = await validateMusicConfig();
-        console.log("Music configuration initialized");
+        logger.debug("Music configuration initialized");
     } catch (err: any) {
-        console.error(" Configuration validation failed:", err.message);
-        console.warn("   Using default/environment configuration");
+        logger.error(" Configuration validation failed:", err.message);
+        logger.warn("   Using default/environment configuration");
         // Don't exit process - allow app to start for other features
         // Music features will fail gracefully if config is invalid
     }
@@ -80,11 +82,9 @@ export const config = {
               }
             : undefined,
 
-    // Last.fm - ships with default app key, users can override in settings
+    // Last.fm - ships with default app key, user can optionally override
     lastfm: {
-        // Default application API key (free tier, for public use)
-        // Users can override this in System Settings with their own key
-        apiKey: process.env.LASTFM_API_KEY || "c1797de6bf0b7e401b623118120cd9e1",
+        apiKey: process.env.LASTFM_API_KEY || "95fe0eaa9875db7bb8539b2c738b4dcd",
     },
 
     // OpenAI - reads from database

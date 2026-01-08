@@ -90,17 +90,9 @@ export function Sidebar() {
 
         // Listen for playlist events to refresh playlists
         const handlePlaylistEvent = async () => {
-            console.log(
-                "[Sidebar] Playlist event received, refreshing playlists..."
-            );
             if (!isAuthenticated) return;
             try {
                 const data = await api.getPlaylists();
-                console.log(
-                    "[Sidebar] Playlists refreshed:",
-                    data.length,
-                    "playlists"
-                );
                 setPlaylists(data);
             } catch (error) {
                 console.error("Failed to reload playlists:", error);
@@ -215,6 +207,7 @@ export function Sidebar() {
                                     ? "bg-[#1DB954] text-black"
                                     : "bg-white/10 text-white hover:bg-white/15 active:scale-95"
                             )}
+                            aria-label={isSyncing ? "Syncing library" : "Sync library"}
                             title={isSyncing ? "Syncing..." : "Sync Library"}
                         >
                             <RefreshCw
@@ -233,6 +226,7 @@ export function Sidebar() {
                                     ? "bg-white text-black"
                                     : "bg-white/10 text-gray-400 hover:text-white hover:bg-white/15 active:scale-95"
                             )}
+                            aria-label="Settings"
                             title="Settings"
                         >
                             <Settings className="w-4 h-4" />
@@ -247,6 +241,8 @@ export function Sidebar() {
                     "pt-6 space-y-1",
                     isMobileOrTablet ? "px-6" : "px-3"
                 )}
+                role="navigation"
+                aria-label="Main navigation"
             >
                 {navigation.map((item) => {
                     const isActive = pathname === item.href;
@@ -257,6 +253,7 @@ export function Sidebar() {
                             key={item.name}
                             href={item.href}
                             prefetch={false}
+                            aria-current={isActive ? "page" : undefined}
                             className={cn(
                                 "block rounded-lg transition-all duration-200 group relative overflow-hidden",
                                 isMobileOrTablet ? "px-4 py-3.5" : "px-4 py-3",
@@ -310,6 +307,7 @@ export function Sidebar() {
                         href="/playlists"
                         prefetch={false}
                         className="w-7 h-7 flex items-center justify-center rounded-md bg-white/5 text-gray-400 hover:text-white hover:bg-gradient-to-br hover:from-purple-500 hover:to-pink-500 hover:scale-110 transition-all duration-300 shadow-lg shadow-transparent hover:shadow-purple-500/30 border border-white/5 hover:border-transparent"
+                        aria-label="Create playlist"
                         title="Create Playlist"
                     >
                         <Plus className="w-4 h-4" />

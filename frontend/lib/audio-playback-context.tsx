@@ -10,6 +10,7 @@ import {
     ReactNode,
     useMemo,
 } from "react";
+import { useAudioState } from "./audio-state-context";
 
 interface AudioPlaybackContextType {
     isPlaying: boolean;
@@ -128,6 +129,30 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         }
         setIsHydrated(true);
     }, []);
+
+    // Get state from AudioStateContext for position sync
+    const state = useAudioState();
+
+    // Sync currentTime from audiobook/podcast progress when not playing
+    // This ensures the UI shows the correct saved position on page load
+    useEffect(() => {
+        if (!isHydrated) return;
+        if (isPlaying) return; // Don't override during active playback
+
+        const { currentAudiobook, currentPodcast, playbackType } = state;
+
+        if (playbackType === "audiobook" && currentAudiobook?.progress?.currentTime) {
+            setCurrentTime(currentAudiobook.progress.currentTime);
+        } else if (playbackType === "podcast" && currentPodcast?.progress?.currentTime) {
+            setCurrentTime(currentPodcast.progress.currentTime);
+        }
+    }, [
+        isHydrated,
+        isPlaying,
+        state.currentAudiobook?.progress?.currentTime,
+        state.currentPodcast?.progress?.currentTime,
+        state.playbackType,
+    ]);
 
     // Cleanup seek lock timeout on unmount
     useEffect(() => {

@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { requireAuthOrToken } from "../middleware/auth";
+import { logger } from "../utils/logger";
+import { requireAuthOrToken, requireAdmin } from "../middleware/auth";
 import { programmaticPlaylistService } from "../services/programmaticPlaylists";
 import {
     moodBucketService,
@@ -93,7 +94,7 @@ router.get("/", async (req, res) => {
 
         res.json(mixes);
     } catch (error) {
-        console.error("Get mixes error:", error);
+        logger.error("Get mixes error:", error);
         res.status(500).json({ error: "Failed to get mixes" });
     }
 });
@@ -252,7 +253,7 @@ router.post("/mood", async (req, res) => {
             .map((id: string) => tracks.find((t) => t.id === id))
             .filter((t: any) => t !== undefined);
 
-        console.log(
+        logger.debug(
             `[MIXES] Generated mood-on-demand mix with ${mix.trackCount} tracks`
         );
 
@@ -261,7 +262,7 @@ router.post("/mood", async (req, res) => {
             tracks: orderedTracks,
         });
     } catch (error) {
-        console.error("Generate mood mix error:", error);
+        logger.error("Generate mood mix error:", error);
         res.status(500).json({ error: "Failed to generate mood mix" });
     }
 });
@@ -430,11 +431,11 @@ router.post("/mood/save-preferences", async (req, res) => {
         const cacheKey = `mixes:${userId}`;
         await redisClient.del(cacheKey);
 
-        console.log(`[MIXES] Saved mood mix preferences for user ${userId}`);
+        logger.debug(`[MIXES] Saved mood mix preferences for user ${userId}`);
 
         res.json({ success: true, message: "Mood preferences saved" });
     } catch (error) {
-        console.error("Save mood preferences error:", error);
+        logger.error("Save mood preferences error:", error);
         res.status(500).json({ error: "Failed to save mood preferences" });
     }
 });
@@ -462,7 +463,7 @@ router.get("/mood/buckets/presets", async (req, res) => {
         const presets = await moodBucketService.getMoodPresets();
         res.json(presets);
     } catch (error) {
-        console.error("Get mood presets error:", error);
+        logger.error("Get mood presets error:", error);
         res.status(500).json({ error: "Failed to get mood presets" });
     }
 });
@@ -535,7 +536,7 @@ router.get("/mood/buckets/:mood", async (req, res) => {
             tracks: orderedTracks,
         });
     } catch (error) {
-        console.error("Get mood bucket mix error:", error);
+        logger.error("Get mood bucket mix error:", error);
         res.status(500).json({ error: "Failed to get mood mix" });
     }
 });
@@ -611,7 +612,7 @@ router.post("/mood/buckets/:mood/save", async (req, res) => {
             .map((id: string) => tracks.find((t) => t.id === id))
             .filter((t: any) => t !== undefined);
 
-        console.log(
+        logger.debug(
             `[MIXES] Saved mood bucket mix for user ${userId}: ${mood} (${savedMix.trackCount} tracks)`
         );
 
@@ -623,7 +624,7 @@ router.post("/mood/buckets/:mood/save", async (req, res) => {
             },
         });
     } catch (error) {
-        console.error("Save mood bucket mix error:", error);
+        logger.error("Save mood bucket mix error:", error);
         res.status(500).json({ error: "Failed to save mood mix" });
     }
 });
@@ -642,15 +643,14 @@ router.post("/mood/buckets/:mood/save", async (req, res) => {
  *       200:
  *         description: Backfill completed
  */
-router.post("/mood/buckets/backfill", async (req, res) => {
+router.post("/mood/buckets/backfill", requireAdmin, async (req, res) => {
     try {
         const userId = getRequestUserId(req);
         if (!userId) {
             return res.status(401).json({ error: "Not authenticated" });
         }
 
-        // TODO: Add admin check
-        console.log(
+        logger.debug(
             `[MIXES] Starting mood bucket backfill requested by user ${userId}`
         );
 
@@ -662,7 +662,7 @@ router.post("/mood/buckets/backfill", async (req, res) => {
             assigned: result.assigned,
         });
     } catch (error) {
-        console.error("Backfill mood buckets error:", error);
+        logger.error("Backfill mood buckets error:", error);
         res.status(500).json({ error: "Failed to backfill mood buckets" });
     }
 });
@@ -721,7 +721,7 @@ router.post("/refresh", async (req, res) => {
 
         res.json({ message: "Mixes refreshed", mixes });
     } catch (error) {
-        console.error("Refresh mixes error:", error);
+        logger.error("Refresh mixes error:", error);
         res.status(500).json({ error: "Failed to refresh mixes" });
     }
 });
@@ -849,7 +849,7 @@ router.post("/:id/save", async (req, res) => {
             data: playlistItems,
         });
 
-        console.log(
+        logger.debug(
             `[MIXES] Saved mix ${mixId} as playlist ${playlist.id} (${mix.trackIds.length} tracks)`
         );
 
@@ -859,7 +859,7 @@ router.post("/:id/save", async (req, res) => {
             trackCount: mix.trackIds.length,
         });
     } catch (error) {
-        console.error("Save mix as playlist error:", error);
+        logger.error("Save mix as playlist error:", error);
         res.status(500).json({ error: "Failed to save mix as playlist" });
     }
 });
@@ -982,7 +982,7 @@ router.get("/:id", async (req, res) => {
             tracks: orderedTracks,
         });
     } catch (error) {
-        console.error("Get mix error:", error);
+        logger.error("Get mix error:", error);
         res.status(500).json({ error: "Failed to get mix" });
     }
 });

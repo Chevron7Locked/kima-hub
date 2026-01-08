@@ -43,9 +43,11 @@ export function BottomNavigation() {
     if (!isMobileOrTablet) return null;
 
     return (
-        <nav 
+        <nav
             className="fixed bottom-0 left-0 right-0 z-40 bg-black border-t border-white/10"
-            style={{ 
+            role="navigation"
+            aria-label="Main navigation"
+            style={{
                 paddingBottom: 'env(safe-area-inset-bottom, 0px)'
             }}
         >
@@ -60,10 +62,12 @@ export function BottomNavigation() {
                             href={item.href}
                             className={cn(
                                 "flex flex-col items-center justify-center flex-1 h-full py-2 transition-colors",
-                                isActive 
-                                    ? "text-white" 
+                                isActive
+                                    ? "text-white"
                                     : "text-gray-500 active:text-gray-300"
                             )}
+                            aria-label={item.name}
+                            aria-current={isActive ? "page" : undefined}
                         >
                             <Icon 
                                 className={cn(

@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { logger } from "../utils/logger";
 import * as path from "path";
 import { prisma } from "../utils/db";
 import { config } from "../config";
@@ -26,7 +27,7 @@ export class FileValidatorService {
             duration: 0,
         };
 
-        console.log("[FileValidator] Starting library validation...");
+        logger.debug("[FileValidator] Starting library validation...");
 
         // Get all tracks from the database
         const tracks = await prisma.track.findMany({
@@ -37,7 +38,7 @@ export class FileValidatorService {
             },
         });
 
-        console.log(
+        logger.debug(
             `[FileValidator] Found ${tracks.length} tracks to validate`
         );
 
@@ -53,7 +54,7 @@ export class FileValidatorService {
 
                     // Prevent path traversal attacks
                     if (!absolutePath.startsWith(path.normalize(config.music.musicPath))) {
-                        console.warn(
+                        logger.warn(
                             `[FileValidator] Path traversal attempt detected: ${track.filePath}`
                         );
                         missingTrackIds.push(track.id);
@@ -64,7 +65,7 @@ export class FileValidatorService {
                     const exists = await this.fileExists(absolutePath);
 
                     if (!exists) {
-                        console.log(
+                        logger.debug(
                             `[FileValidator] Missing file: ${track.filePath} (${track.title})`
                         );
                         missingTrackIds.push(track.id);
@@ -74,12 +75,12 @@ export class FileValidatorService {
 
                     // Log progress every 100 tracks
                     if (result.tracksChecked % 100 === 0) {
-                        console.log(
+                        logger.debug(
                             `[FileValidator] Progress: ${result.tracksChecked}/${tracks.length} tracks checked, ${missingTrackIds.length} missing`
                         );
                     }
                 } catch (err: any) {
-                    console.error(
+                    logger.error(
                         `[FileValidator] Error checking ${track.filePath}:`,
                         err.message
                     );
@@ -93,7 +94,7 @@ export class FileValidatorService {
 
         // Remove missing tracks from database
         if (missingTrackIds.length > 0) {
-            console.log(
+            logger.debug(
                 `[FileValidator] Removing ${missingTrackIds.length} missing tracks from database...`
             );
 
@@ -108,7 +109,7 @@ export class FileValidatorService {
 
         result.duration = Date.now() - startTime;
 
-        console.log(
+        logger.debug(
             `[FileValidator] Validation complete: ${result.tracksChecked} checked, ${result.tracksRemoved} removed (${result.duration}ms)`
         );
 
@@ -150,7 +151,7 @@ export class FileValidatorService {
 
         // Prevent path traversal attacks
         if (!absolutePath.startsWith(path.normalize(config.music.musicPath))) {
-            console.warn(
+            logger.warn(
                 `[FileValidator] Path traversal attempt detected: ${track.filePath}`
             );
             return false;
@@ -159,7 +160,7 @@ export class FileValidatorService {
         const exists = await this.fileExists(absolutePath);
 
         if (!exists) {
-            console.log(
+            logger.debug(
                 `[FileValidator] Track file missing, removing from DB: ${track.title}`
             );
             await prisma.track.delete({

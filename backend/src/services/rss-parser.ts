@@ -1,4 +1,5 @@
 import Parser from "rss-parser";
+import { logger } from "../utils/logger";
 
 interface RSSPodcast {
     title: string;
@@ -36,18 +37,18 @@ class RSSParserService {
         this.parser = new Parser({
             customFields: {
                 feed: [
-                    ["itunes:author", "itunesAuthor"],
-                    ["itunes:image", "itunesImage"],
-                    ["itunes:explicit", "itunesExplicit"],
-                    ["itunes:type", "itunesType"],
+                    ["itunes:author", "itunesAuthor"] as any,
+                    ["itunes:image", "itunesImage"] as any,
+                    ["itunes:explicit", "itunesExplicit"] as any,
+                    ["itunes:type", "itunesType"] as any,
                 ],
                 item: [
-                    ["itunes:author", "itunesAuthor"],
-                    ["itunes:duration", "itunesDuration"],
-                    ["itunes:image", "itunesImage"],
-                    ["itunes:episode", "itunesEpisode"],
-                    ["itunes:season", "itunesSeason"],
-                    ["itunes:explicit", "itunesExplicit"],
+                    ["itunes:author", "itunesAuthor"] as any,
+                    ["itunes:duration", "itunesDuration"] as any,
+                    ["itunes:image", "itunesImage"] as any,
+                    ["itunes:episode", "itunesEpisode"] as any,
+                    ["itunes:season", "itunesSeason"] as any,
+                    ["itunes:explicit", "itunesExplicit"] as any,
                 ],
             },
         });
@@ -58,7 +59,7 @@ class RSSParserService {
      */
     async parseFeed(feedUrl: string): Promise<ParsedPodcastFeed> {
         try {
-            console.log(`\n [RSS PARSER] Fetching feed: ${feedUrl}`);
+            logger.debug(`\n [RSS PARSER] Fetching feed: ${feedUrl}`);
             const feed = await this.parser.parseURL(feedUrl);
 
             // Extract podcast metadata
@@ -72,9 +73,9 @@ class RSSParserService {
                 itunesId: this.extractItunesId(feed),
             };
 
-            console.log(`   Podcast: ${podcast.title}`);
-            console.log(`   Author: ${podcast.author || "Unknown"}`);
-            console.log(`   Episodes found: ${feed.items?.length || 0}`);
+            logger.debug(`   Podcast: ${podcast.title}`);
+            logger.debug(`   Author: ${podcast.author || "Unknown"}`);
+            logger.debug(`   Episodes found: ${feed.items?.length || 0}`);
 
             // Extract episodes
             const episodes: RSSEpisode[] = (feed.items || [])
@@ -83,7 +84,7 @@ class RSSParserService {
                         // Find audio enclosure
                         const audioEnclosure = this.findAudioEnclosure(item);
                         if (!audioEnclosure) {
-                            console.warn(
+                            logger.warn(
                                 ` Skipping episode "${item.title}" - no audio found`
                             );
                             return null;
@@ -121,7 +122,7 @@ class RSSParserService {
 
                         return episode;
                     } catch (error: any) {
-                        console.error(
+                        logger.error(
                             `    Error parsing episode "${item.title}":`,
                             error.message
                         );
@@ -130,11 +131,11 @@ class RSSParserService {
                 })
                 .filter((ep): ep is RSSEpisode => ep !== null);
 
-            console.log(`   Successfully parsed ${episodes.length} episodes`);
+            logger.debug(`   Successfully parsed ${episodes.length} episodes`);
 
             return { podcast, episodes };
         } catch (error: any) {
-            console.error(
+            logger.error(
                 `\n [RSS PARSER] Failed to parse feed:`,
                 error.message
             );

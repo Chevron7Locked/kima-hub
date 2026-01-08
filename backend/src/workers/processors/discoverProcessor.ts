@@ -1,4 +1,5 @@
 import { Job } from "bull";
+import { logger } from "../../utils/logger";
 import { discoverWeeklyService } from "../../services/discoverWeekly";
 
 export interface DiscoverJobData {
@@ -9,6 +10,7 @@ export interface DiscoverJobResult {
     success: boolean;
     playlistName: string;
     songCount: number;
+    batchId?: string;
     error?: string;
 }
 
@@ -17,7 +19,7 @@ export async function processDiscoverWeekly(
 ): Promise<DiscoverJobResult> {
     const { userId } = job.data;
 
-    console.log(
+    logger.debug(
         `[DiscoverJob ${job.id}] Generating Discover Weekly for user ${userId}`
     );
 
@@ -28,36 +30,36 @@ export async function processDiscoverWeekly(
         // For now, we'll just report progress at key stages
         await job.progress(20); // Starting generation
 
-        console.log(
+        logger.debug(
             `[DiscoverJob ${job.id}] Calling discoverWeeklyService.generatePlaylist...`
         );
         const result = await discoverWeeklyService.generatePlaylist(userId);
 
-        console.log(`[DiscoverJob ${job.id}] Result:`, {
+        logger.debug(`[DiscoverJob ${job.id}] Result:`, {
             success: result.success,
             playlistName: result.playlistName,
             songCount: result.songCount,
-            error: result.error,
+            batchId: result.batchId,
         });
 
         await job.progress(100); // Complete
 
-        console.log(
-            `[DiscoverJob ${job.id}] Generation complete: ${
-                result.success ? "SUCCESS" : "FAILED"
-            }`
+        logger.debug(
+            `[DiscoverJob ${job.id}] Generation complete: SUCCESS`
         );
-        if (!result.success) {
-            console.log(`[DiscoverJob ${job.id}] Error: ${result.error}`);
-        }
 
-        return result;
+        return {
+            success: result.success,
+            playlistName: result.playlistName,
+            songCount: result.songCount,
+            batchId: result.batchId,
+        };
     } catch (error: any) {
-        console.error(
+        logger.error(
             `[DiscoverJob ${job.id}] Generation failed with exception:`,
             error
         );
-        console.error(`[DiscoverJob ${job.id}] Stack trace:`, error.stack);
+        logger.error(`[DiscoverJob ${job.id}] Stack trace:`, error.stack);
 
         return {
             success: false,

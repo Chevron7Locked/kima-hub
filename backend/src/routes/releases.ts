@@ -1,6 +1,8 @@
+import { logger } from "../utils/logger";
+
 /**
  * Release Radar API
- * 
+ *
  * Provides upcoming and recent releases from:
  * 1. Lidarr monitored artists (via calendar API)
  * 2. Similar artists from user's library (Last.fm similar artists)
@@ -52,7 +54,7 @@ router.get("/radar", async (req, res) => {
         const endDate = new Date(now);
         endDate.setDate(endDate.getDate() + daysAhead);
 
-        console.log(`[Releases] Fetching radar: ${daysBack} days back, ${daysAhead} days ahead`);
+        logger.debug(`[Releases] Fetching radar: ${daysBack} days back, ${daysAhead} days ahead`);
 
         // 1. Get releases from Lidarr calendar (monitored artists)
         const lidarrReleases = await lidarrService.getCalendar(startDate, endDate);
@@ -92,8 +94,8 @@ router.get("/radar", async (req, res) => {
             sa => sa.toArtist.mbid && !monitoredMbids.has(sa.toArtist.mbid)
         );
 
-        console.log(`[Releases] Found ${lidarrReleases.length} Lidarr releases`);
-        console.log(`[Releases] Found ${unmonitoredSimilar.length} unmonitored similar artists`);
+        logger.debug(`[Releases] Found ${lidarrReleases.length} Lidarr releases`);
+        logger.debug(`[Releases] Found ${unmonitoredSimilar.length} unmonitored similar artists`);
 
         // 4. Get albums in library to check what user already has
         const libraryAlbums = await prisma.album.findMany({
@@ -142,7 +144,7 @@ router.get("/radar", async (req, res) => {
 
         res.json(response);
     } catch (error: any) {
-        console.error("[Releases] Radar error:", error.message);
+        logger.error("[Releases] Radar error:", error.message);
         res.status(500).json({ error: "Failed to fetch release radar" });
     }
 });
@@ -173,7 +175,7 @@ router.get("/upcoming", async (req, res) => {
             daysAhead,
         });
     } catch (error: any) {
-        console.error("[Releases] Upcoming error:", error.message);
+        logger.error("[Releases] Upcoming error:", error.message);
         res.status(500).json({ error: "Failed to fetch upcoming releases" });
     }
 });
@@ -195,7 +197,6 @@ router.get("/recent", async (req, res) => {
         
         // Get library albums to mark what's already downloaded
         const libraryAlbums = await prisma.album.findMany({
-            where: { rgMbid: { not: null } },
             select: { rgMbid: true }
         });
         const libraryMbids = new Set(libraryAlbums.map(a => a.rgMbid).filter(Boolean));
@@ -214,7 +215,7 @@ router.get("/recent", async (req, res) => {
             inLibraryCount: releases.length - notInLibrary.length,
         });
     } catch (error: any) {
-        console.error("[Releases] Recent error:", error.message);
+        logger.error("[Releases] Recent error:", error.message);
         res.status(500).json({ error: "Failed to fetch recent releases" });
     }
 });
@@ -233,24 +234,15 @@ router.post("/download/:albumMbid", async (req, res) => {
             return res.status(401).json({ error: "Authentication required" });
         }
 
-        console.log(`[Releases] Download requested for album: ${albumMbid}`);
+        logger.debug(`[Releases] Download requested for album: ${albumMbid}`);
 
-        // Use Lidarr to download the album
-        const result = await lidarrService.downloadAlbum(albumMbid);
-
-        if (result) {
-            res.json({ 
-                success: true, 
-                message: "Download started",
-                albumId: result.id
-            });
-        } else {
-            res.status(404).json({ 
-                error: "Album not found in Lidarr or download failed" 
-            });
-        }
+        // TODO: Implement downloadAlbum method on LidarrService
+        // For now, return not implemented error
+        res.status(501).json({
+            error: "Download feature not yet implemented for release radar"
+        });
     } catch (error: any) {
-        console.error("[Releases] Download error:", error.message);
+        logger.error("[Releases] Download error:", error.message);
         res.status(500).json({ error: "Failed to start download" });
     }
 });

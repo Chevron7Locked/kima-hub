@@ -10,6 +10,7 @@ import { TopResult } from "@/features/search/components/TopResult";
 import { EmptyState } from "@/features/search/components/EmptyState";
 import { LibraryAlbumsGrid } from "@/features/search/components/LibraryAlbumsGrid";
 import { LibraryPodcastsGrid } from "@/features/search/components/LibraryPodcastsGrid";
+import { LibraryAudiobooksGrid } from "@/features/search/components/LibraryAudiobooksGrid";
 import { LibraryTracksList } from "@/features/search/components/LibraryTracksList";
 import { SimilarArtistsGrid } from "@/features/search/components/SimilarArtistsGrid";
 import { SoulseekSongsList } from "@/features/search/components/SoulseekSongsList";
@@ -57,6 +58,16 @@ export default function SearchPage() {
     const showLibrary = filterTab === "all" || filterTab === "library";
     const showDiscover = filterTab === "all" || filterTab === "discover";
     const showSoulseek = filterTab === "all" || filterTab === "soulseek";
+
+    // Determine if we should show the 2-column layout
+    const hasTopResult = libraryResults?.artists?.[0] || topArtist;
+    const hasTracks =
+        libraryResults?.tracks?.length > 0 || soulseekResults.length > 0;
+    const show2ColumnLayout =
+        hasSearched &&
+        hasTopResult &&
+        hasTracks &&
+        (showLibrary || showDiscover);
 
     // Handle TV search
     const handleTVSearch = (searchQuery: string) => {
@@ -157,41 +168,88 @@ export default function SearchPage() {
                         </div>
                     )}
 
-                {/* Top Result */}
-                {hasSearched &&
-                    (showDiscover || showLibrary) &&
-                    (libraryResults?.artists?.[0] || topArtist) && (
-                        <TopResult
-                            libraryArtist={libraryResults?.artists?.[0]}
-                            discoveryArtist={topArtist}
-                        />
-                    )}
-
-                {/* Soulseek Songs */}
-                {hasSearched && showSoulseek && soulseekResults.length > 0 && (
-                    <section>
-                        <h2 className="text-2xl font-bold text-white mb-6">
-                            Songs
-                        </h2>
-                        <SoulseekSongsList
-                            soulseekResults={soulseekResults}
-                            downloadingFiles={downloadingFiles}
-                            onDownload={handleDownload}
-                        />
-                    </section>
-                )}
-
-                {/* Library Songs */}
-                {hasSearched &&
-                    showLibrary &&
-                    libraryResults?.tracks?.length > 0 && (
-                        <section>
+                {/* 2-Column Layout: Top Result (left) + Songs (right) */}
+                {show2ColumnLayout ? (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Left Column: Top Result */}
+                        <div>
                             <h2 className="text-2xl font-bold text-white mb-6">
-                                Songs in Your Library
+                                Top Result
                             </h2>
-                            <LibraryTracksList tracks={libraryResults.tracks} />
-                        </section>
-                    )}
+                            <TopResult
+                                libraryArtist={libraryResults?.artists?.[0]}
+                                discoveryArtist={topArtist}
+                            />
+                        </div>
+
+                        {/* Right Column: Songs */}
+                        <div>
+                            <h2 className="text-2xl font-bold text-white mb-6">
+                                {showSoulseek && soulseekResults.length > 0
+                                    ? "Songs"
+                                    : "Songs in Your Library"}
+                            </h2>
+                            {showSoulseek && soulseekResults.length > 0 ? (
+                                <SoulseekSongsList
+                                    soulseekResults={soulseekResults}
+                                    downloadingFiles={downloadingFiles}
+                                    onDownload={handleDownload}
+                                />
+                            ) : showLibrary &&
+                              libraryResults?.tracks?.length > 0 ? (
+                                <LibraryTracksList
+                                    tracks={libraryResults.tracks}
+                                />
+                            ) : null}
+                        </div>
+                    </div>
+                ) : (
+                    <>
+                        {/* Original single-column layout when not showing 2-column */}
+                        {hasSearched &&
+                            (showDiscover || showLibrary) &&
+                            hasTopResult && (
+                                <div>
+                                    <TopResult
+                                        libraryArtist={
+                                            libraryResults?.artists?.[0]
+                                        }
+                                        discoveryArtist={topArtist}
+                                    />
+                                </div>
+                            )}
+
+                        {/* Soulseek Songs */}
+                        {hasSearched &&
+                            showSoulseek &&
+                            soulseekResults.length > 0 && (
+                                <section>
+                                    <h2 className="text-2xl font-bold text-white mb-6">
+                                        Songs
+                                    </h2>
+                                    <SoulseekSongsList
+                                        soulseekResults={soulseekResults}
+                                        downloadingFiles={downloadingFiles}
+                                        onDownload={handleDownload}
+                                    />
+                                </section>
+                            )}
+
+                        {/* Library Songs */}
+                        {hasSearched &&
+                            showLibrary &&
+                            libraryResults?.tracks?.length > 0 && (
+                                <section>
+                                    <h2 className="text-2xl font-bold text-white mb-6">
+                                        Songs in Your Library
+                                    </h2>
+                                    <LibraryTracksList
+                                        tracks={libraryResults.tracks}
+                                    />
+                                </section>
+                            )}
+                    </>
+                )}
 
                 {/* Library Albums */}
                 {hasSearched &&
@@ -219,6 +277,21 @@ export default function SearchPage() {
                         </section>
                     )}
 
+                {/* Library Audiobooks */}
+                {hasSearched &&
+                    showLibrary &&
+                    libraryResults?.audiobooks &&
+                    libraryResults.audiobooks.length > 0 && (
+                        <section>
+                            <h2 className="text-2xl font-bold text-white mb-6">
+                                Audiobooks
+                            </h2>
+                            <LibraryAudiobooksGrid
+                                audiobooks={libraryResults.audiobooks}
+                            />
+                        </section>
+                    )}
+
                 {/* Similar Artists */}
                 {hasSearched &&
                     showDiscover &&
@@ -235,7 +308,10 @@ export default function SearchPage() {
                     (!libraryResults ||
                         (!libraryResults.artists?.length &&
                             !libraryResults.albums?.length &&
-                            !libraryResults.tracks?.length)) && (
+                            !libraryResults.tracks?.length &&
+                            !libraryResults.podcasts?.length &&
+                            !libraryResults.audiobooks?.length &&
+                            !libraryResults.episodes?.length)) && (
                         <div className="flex flex-col items-center justify-center py-24 text-center">
                             <SearchIcon className="w-16 h-16 text-gray-700 mb-4" />
                             <h3 className="text-xl font-bold text-white mb-2">

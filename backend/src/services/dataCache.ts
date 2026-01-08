@@ -10,6 +10,7 @@
  * - All fetched data is persisted for future use
  */
 
+import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { fanartService } from "./fanart";
@@ -38,15 +39,16 @@ class DataCacheService {
         try {
             const artist = await prisma.artist.findUnique({
                 where: { id: artistId },
-                select: { heroUrl: true },
+                select: { heroUrl: true, userHeroUrl: true },
             });
-            if (artist?.heroUrl) {
+            const displayHeroUrl = artist?.userHeroUrl ?? artist?.heroUrl;
+            if (displayHeroUrl) {
                 // Also populate Redis for faster future reads
-                this.setRedisCache(cacheKey, artist.heroUrl, ARTIST_IMAGE_TTL);
-                return artist.heroUrl;
+                this.setRedisCache(cacheKey, displayHeroUrl, ARTIST_IMAGE_TTL);
+                return displayHeroUrl;
             }
         } catch (err) {
-            console.warn("[DataCache] DB lookup failed for artist:", artistId);
+            logger.warn("[DataCache] DB lookup failed for artist:", artistId);
         }
 
         // 2. Check Redis cache
@@ -98,7 +100,7 @@ class DataCacheService {
                 return album.coverUrl;
             }
         } catch (err) {
-            console.warn("[DataCache] DB lookup failed for album:", albumId);
+            logger.warn("[DataCache] DB lookup failed for album:", albumId);
         }
 
         // 2. Check Redis cache
@@ -155,14 +157,15 @@ class DataCacheService {
      * Only returns what's already cached, doesn't make API calls
      */
     async getArtistImagesBatch(
-        artists: Array<{ id: string; heroUrl?: string | null }>
+        artists: Array<{ id: string; heroUrl?: string | null; userHeroUrl?: string | null }>
     ): Promise<Map<string, string | null>> {
         const results = new Map<string, string | null>();
 
-        // First, use any heroUrls already in the data
+        // First, use any heroUrls/userHeroUrls already in the data (with override pattern)
         for (const artist of artists) {
-            if (artist.heroUrl) {
-                results.set(artist.id, artist.heroUrl);
+            const displayHeroUrl = artist.userHeroUrl ?? artist.heroUrl;
+            if (displayHeroUrl) {
+                results.set(artist.id, displayHeroUrl);
             }
         }
 
@@ -242,7 +245,7 @@ class DataCacheService {
             try {
                 heroUrl = await fanartService.getArtistImage(mbid);
                 if (heroUrl) {
-                    console.log(`[DataCache] Got image from Fanart.tv for ${artistName}`);
+                    logger.debug(`[DataCache] Got image from Fanart.tv for ${artistName}`);
                     return heroUrl;
                 }
             } catch (err) {
@@ -254,7 +257,7 @@ class DataCacheService {
         try {
             heroUrl = await deezerService.getArtistImage(artistName);
             if (heroUrl) {
-                console.log(`[DataCache] Got image from Deezer for ${artistName}`);
+                logger.debug(`[DataCache] Got image from Deezer for ${artistName}`);
                 return heroUrl;
             }
         } catch (err) {
@@ -275,7 +278,7 @@ class DataCacheService {
                     // Filter out Last.fm placeholder images
                     const imageUrl = largestImage["#text"];
                     if (!imageUrl.includes("2a96cbd8b46e442fc41c2b86b821562f")) {
-                        console.log(`[DataCache] Got image from Last.fm for ${artistName}`);
+                        logger.debug(`[DataCache] Got image from Last.fm for ${artistName}`);
                         return imageUrl;
                     }
                 }
@@ -284,7 +287,7 @@ class DataCacheService {
             // Last.fm failed
         }
 
-        console.log(`[DataCache] No image found for ${artistName}`);
+        logger.debug(`[DataCache] No image found for ${artistName}`);
         return null;
     }
 
@@ -298,7 +301,7 @@ class DataCacheService {
                 data: { heroUrl },
             });
         } catch (err) {
-            console.warn("[DataCache] Failed to update artist heroUrl:", err);
+            logger.warn("[DataCache] Failed to update artist heroUrl:", err);
         }
     }
 
@@ -312,7 +315,7 @@ class DataCacheService {
                 data: { coverUrl },
             });
         } catch (err) {
-            console.warn("[DataCache] Failed to update album coverUrl:", err);
+            logger.warn("[DataCache] Failed to update album coverUrl:", err);
         }
     }
 
@@ -328,11 +331,31 @@ class DataCacheService {
     }
 
     /**
+     * Set multiple Redis cache entries using pipelining
+     * Uses MULTI/EXEC for atomic batch writes
+     */
+    private async setRedisCacheBatch(
+        entries: Array<{ key: string; value: string; ttl: number }>
+    ): Promise<void> {
+        if (entries.length === 0) return;
+
+        try {
+            const multi = redisClient.multi();
+            for (const { key, value, ttl } of entries) {
+                multi.setEx(key, ttl, value);
+            }
+            await multi.exec();
+        } catch (err) {
+            logger.warn("[DataCache] Batch cache write failed:", err);
+        }
+    }
+
+    /**
      * Warm up Redis cache from database
      * Called on server startup
      */
     async warmupCache(): Promise<void> {
-        console.log("[DataCache] Warming up Redis cache from database...");
+        logger.debug("[DataCache] Warming up Redis cache from database...");
 
         try {
             // Warm up artist images
@@ -341,14 +364,16 @@ class DataCacheService {
                 select: { id: true, heroUrl: true },
             });
 
-            let artistCount = 0;
-            for (const artist of artists) {
-                if (artist.heroUrl) {
-                    await this.setRedisCache(`hero:${artist.id}`, artist.heroUrl, ARTIST_IMAGE_TTL);
-                    artistCount++;
-                }
-            }
-            console.log(`[DataCache] Cached ${artistCount} artist images`);
+            const artistEntries = artists
+                .filter((a) => a.heroUrl)
+                .map((a) => ({
+                    key: `hero:${a.id}`,
+                    value: a.heroUrl!,
+                    ttl: ARTIST_IMAGE_TTL,
+                }));
+
+            await this.setRedisCacheBatch(artistEntries);
+            logger.debug(`[DataCache] Cached ${artistEntries.length} artist images`);
 
             // Warm up album covers
             const albums = await prisma.album.findMany({
@@ -356,18 +381,20 @@ class DataCacheService {
                 select: { id: true, coverUrl: true },
             });
 
-            let albumCount = 0;
-            for (const album of albums) {
-                if (album.coverUrl) {
-                    await this.setRedisCache(`album-cover:${album.id}`, album.coverUrl, ALBUM_COVER_TTL);
-                    albumCount++;
-                }
-            }
-            console.log(`[DataCache] Cached ${albumCount} album covers`);
+            const albumEntries = albums
+                .filter((a) => a.coverUrl)
+                .map((a) => ({
+                    key: `album-cover:${a.id}`,
+                    value: a.coverUrl!,
+                    ttl: ALBUM_COVER_TTL,
+                }));
 
-            console.log("[DataCache] Cache warmup complete");
+            await this.setRedisCacheBatch(albumEntries);
+            logger.debug(`[DataCache] Cached ${albumEntries.length} album covers`);
+
+            logger.debug("[DataCache] Cache warmup complete");
         } catch (err) {
-            console.error("[DataCache] Cache warmup failed:", err);
+            logger.error("[DataCache] Cache warmup failed:", err);
         }
     }
 }

@@ -1,6 +1,7 @@
 import { Router } from "express";
+import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
-import { prisma } from "../utils/db";
+import { prisma, Prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 
 const router = Router();
@@ -22,14 +23,14 @@ router.get("/genres", async (req, res) => {
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
-                console.log(`[HOMEPAGE] Cache HIT for genres`);
+                logger.debug(`[HOMEPAGE] Cache HIT for genres`);
                 return res.json(JSON.parse(cached));
             }
         } catch (cacheError) {
-            console.warn("[HOMEPAGE] Redis cache read error:", cacheError);
+            logger.warn("[HOMEPAGE] Redis cache read error:", cacheError);
         }
 
-        console.log(
+        logger.debug(
             `[HOMEPAGE] ✗ Cache MISS for genres, fetching from database...`
         );
 
@@ -37,7 +38,7 @@ router.get("/genres", async (req, res) => {
         const albums = await prisma.album.findMany({
             where: {
                 genres: {
-                    isEmpty: false, // Only albums with genres
+                    not: Prisma.JsonNull, // Only albums with genres (not null)
                 },
                 location: "LIBRARY", // Exclude discovery albums
             },
@@ -60,8 +61,11 @@ router.get("/genres", async (req, res) => {
         // Count genre occurrences
         const genreCounts = new Map<string, number>();
         for (const album of albums) {
-            for (const genre of album.genres) {
-                genreCounts.set(genre, (genreCounts.get(genre) || 0) + 1);
+            const genres = album.genres as string[];
+            if (genres && Array.isArray(genres)) {
+                for (const genre of genres) {
+                    genreCounts.set(genre, (genreCounts.get(genre) || 0) + 1);
+                }
             }
         }
 
@@ -71,12 +75,15 @@ router.get("/genres", async (req, res) => {
             .slice(0, limitNum)
             .map(([genre]) => genre);
 
-        console.log(`[HOMEPAGE] Top genres: ${topGenres.join(", ")}`);
+        logger.debug(`[HOMEPAGE] Top genres: ${topGenres.join(", ")}`);
 
         // For each top genre, get sample albums (up to 10)
         const genresWithAlbums = topGenres.map((genre) => {
             const genreAlbums = albums
-                .filter((a) => a.genres.includes(genre))
+                .filter((a) => {
+                    const genres = a.genres as string[];
+                    return genres && Array.isArray(genres) && genres.includes(genre);
+                })
                 .slice(0, 10)
                 .map((a) => ({
                     id: a.id,
@@ -103,14 +110,14 @@ router.get("/genres", async (req, res) => {
                 24 * 60 * 60,
                 JSON.stringify(genresWithAlbums)
             );
-            console.log(`[HOMEPAGE] Cached genres for 24 hours`);
+            logger.debug(`[HOMEPAGE] Cached genres for 24 hours`);
         } catch (cacheError) {
-            console.warn("[HOMEPAGE] Redis cache write error:", cacheError);
+            logger.warn("[HOMEPAGE] Redis cache write error:", cacheError);
         }
 
         res.json(genresWithAlbums);
     } catch (error) {
-        console.error("Get homepage genres error:", error);
+        logger.error("Get homepage genres error:", error);
         res.status(500).json({ error: "Failed to fetch genres" });
     }
 });
@@ -129,14 +136,14 @@ router.get("/top-podcasts", async (req, res) => {
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
-                console.log(`[HOMEPAGE] Cache HIT for top podcasts`);
+                logger.debug(`[HOMEPAGE] Cache HIT for top podcasts`);
                 return res.json(JSON.parse(cached));
             }
         } catch (cacheError) {
-            console.warn("[HOMEPAGE] Redis cache read error:", cacheError);
+            logger.warn("[HOMEPAGE] Redis cache read error:", cacheError);
         }
 
-        console.log(
+        logger.debug(
             `[HOMEPAGE] ✗ Cache MISS for top podcasts, fetching from database...`
         );
 
@@ -172,14 +179,14 @@ router.get("/top-podcasts", async (req, res) => {
                 24 * 60 * 60,
                 JSON.stringify(result)
             );
-            console.log(`[HOMEPAGE] Cached top podcasts for 24 hours`);
+            logger.debug(`[HOMEPAGE] Cached top podcasts for 24 hours`);
         } catch (cacheError) {
-            console.warn("[HOMEPAGE] Redis cache write error:", cacheError);
+            logger.warn("[HOMEPAGE] Redis cache write error:", cacheError);
         }
 
         res.json(result);
     } catch (error) {
-        console.error("Get top podcasts error:", error);
+        logger.error("Get top podcasts error:", error);
         res.status(500).json({ error: "Failed to fetch top podcasts" });
     }
 });

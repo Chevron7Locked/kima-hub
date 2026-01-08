@@ -103,7 +103,7 @@ const AlbumsGrid = memo(function AlbumsGrid({
     return (
         <div
             data-tv-section="library-albums"
-            className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4"
+            className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4"
         >
             {albums.map((album, index) => (
                 <AlbumCardItem

@@ -2,9 +2,10 @@ import { Router, Response } from "express";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { imageLimiter, apiLimiter } from "../middleware/rateLimiter";
 import { lastFmService } from "../services/lastfm";
-import { prisma } from "../utils/db";
+import { prisma, Prisma } from "../utils/db";
 import { getEnrichmentProgress } from "../workers/enrichment";
 import { redisClient } from "../utils/redis";
+import { logger } from "../utils/logger";
 import crypto from "crypto";
 import path from "path";
 import fs from "fs";
@@ -22,6 +23,15 @@ import { organizeSingles } from "../workers/organizeSingles";
 import { enrichSimilarArtist } from "../workers/artistEnrichment";
 import { extractColorsFromImage } from "../utils/colorExtractor";
 import { dataCacheService } from "../services/dataCache";
+import {
+    getMergedGenres,
+    getArtistDisplaySummary,
+} from "../utils/metadataOverrides";
+import {
+    getEffectiveYear,
+    getDecadeWhereClause,
+    getDecadeFromYear,
+} from "../utils/dateFilters";
 
 const router = Router();
 
@@ -105,12 +115,12 @@ router.post("/scan", async (req, res) => {
             const { organizeSingles } = await import(
                 "../workers/organizeSingles"
             );
-            console.log("[Scan] Organizing SLSKD downloads before scan...");
+            logger.info("[Scan] Organizing SLSKD downloads before scan...");
             await organizeSingles();
-            console.log("[Scan] SLSKD organization complete");
+            logger.info("[Scan] SLSKD organization complete");
         } catch (err: any) {
             // Not a fatal error - SLSKD might not be running or have no files
-            console.log("[Scan] SLSKD organization skipped:", err.message);
+            logger.info("[Scan] SLSKD organization skipped:", err.message);
         }
 
         const userId = req.user?.id || "system";
@@ -127,7 +137,7 @@ router.post("/scan", async (req, res) => {
             musicPath: config.music.musicPath,
         });
     } catch (error) {
-        console.error("Scan trigger error:", error);
+        logger.error("Scan trigger error:", error);
         res.status(500).json({ error: "Failed to start scan" });
     }
 });
@@ -151,7 +161,7 @@ router.get("/scan/status/:jobId", async (req, res) => {
             result,
         });
     } catch (error) {
-        console.error("Get scan status error:", error);
+        logger.error("Get scan status error:", error);
         res.status(500).json({ error: "Failed to get job status" });
     }
 });
@@ -161,12 +171,12 @@ router.post("/organize", async (req, res) => {
     try {
         // Run in background
         organizeSingles().catch((err) => {
-            console.error("Manual organization failed:", err);
+            logger.error("Manual organization failed:", err);
         });
 
         res.json({ message: "Organization started in background" });
     } catch (error) {
-        console.error("Organization trigger error:", error);
+        logger.error("Organization trigger error:", error);
         res.status(500).json({ error: "Failed to start organization" });
     }
 });
@@ -186,12 +196,12 @@ router.post("/artists/:id/enrich", async (req, res) => {
 
         // Run enrichment in background
         enrichSimilarArtist(artist).catch((err) => {
-            console.error(`Failed to enrich artist ${artist.name}:`, err);
+            logger.error(`Failed to enrich artist ${artist.name}:`, err);
         });
 
         res.json({ message: "Artist enrichment started in background" });
     } catch (error) {
-        console.error("Enrich artist error:", error);
+        logger.error("Enrich artist error:", error);
         res.status(500).json({ error: "Failed to enrich artist" });
     }
 });
@@ -202,7 +212,7 @@ router.get("/enrichment-progress", async (req, res) => {
         const progress = await getEnrichmentProgress();
         res.json(progress);
     } catch (error) {
-        console.error("Failed to get enrichment progress:", error);
+        logger.error("Failed to get enrichment progress:", error);
         res.status(500).json({ error: "Failed to get enrichment progress" });
     }
 });
@@ -221,7 +231,7 @@ router.post("/re-enrich-all", async (req, res) => {
             },
         });
 
-        console.log(
+        logger.debug(
             ` Reset ${result.count} artists with missing images to pending`
         );
 
@@ -230,7 +240,7 @@ router.post("/re-enrich-all", async (req, res) => {
             count: result.count,
         });
     } catch (error) {
-        console.error("Failed to reset artists:", error);
+        logger.error("Failed to reset artists:", error);
         res.status(500).json({ error: "Failed to reset artists" });
     }
 });
@@ -269,6 +279,7 @@ router.get("/recently-listened", async (req, res) => {
                                                 mbid: true,
                                                 name: true,
                                                 heroUrl: true,
+                                                userHeroUrl: true,
                                             },
                                         },
                                     },
@@ -283,7 +294,7 @@ router.get("/recently-listened", async (req, res) => {
                         isFinished: false,
                         currentTime: { gt: 0 }, // Only show if actually started
                     },
-                    orderBy: { lastPlayedAt: "desc" },
+                    orderBy: { lastPlayedAt: Prisma.SortOrder.desc },
                     take: Math.ceil(limitNum / 3), // Get up to 1/3 for audiobooks
                 }),
                 prisma.podcastProgress.findMany({
@@ -292,7 +303,7 @@ router.get("/recently-listened", async (req, res) => {
                         isFinished: false,
                         currentTime: { gt: 0 }, // Only show if actually started
                     },
-                    orderBy: { lastPlayedAt: "desc" },
+                    orderBy: { lastPlayedAt: Prisma.SortOrder.desc },
                     take: limitNum * 2, // Get extra to account for deduplication
                     include: {
                         episode: {
@@ -406,11 +417,12 @@ router.get("/recently-listened", async (req, res) => {
                 if (item.type === "audiobook" || item.type === "podcast") {
                     return item;
                 } else {
-                    let coverArt = item.heroUrl;
+                    // Use override pattern: userHeroUrl ?? heroUrl
+                    let coverArt = item.userHeroUrl ?? item.heroUrl;
 
                     // Fetch image on-demand if missing
                     if (!coverArt) {
-                        console.log(
+                        logger.debug(
                             `[IMAGE] Fetching image on-demand for ${item.name}...`
                         );
 
@@ -420,7 +432,7 @@ router.get("/recently-listened", async (req, res) => {
                             const cached = await redisClient.get(cacheKey);
                             if (cached) {
                                 coverArt = cached;
-                                console.log(`  Found cached image`);
+                                logger.debug(`  Found cached image`);
                             }
                         } catch (err) {
                             // Redis errors are non-critical
@@ -481,7 +493,7 @@ router.get("/recently-listened", async (req, res) => {
 
                                     if (largestImage && largestImage["#text"]) {
                                         coverArt = largestImage["#text"];
-                                        console.log(`  Found Last.fm image`);
+                                        logger.debug(`  Found Last.fm image`);
                                     }
                                 }
                             } catch (err) {
@@ -497,7 +509,7 @@ router.get("/recently-listened", async (req, res) => {
                                     7 * 24 * 60 * 60,
                                     coverArt
                                 );
-                                console.log(`  Cached image for 7 days`);
+                                logger.debug(`  Cached image for 7 days`);
                             } catch (err) {
                                 // Redis errors are non-critical
                             }
@@ -515,7 +527,7 @@ router.get("/recently-listened", async (req, res) => {
 
         res.json({ items: results });
     } catch (error) {
-        console.error("Get recently listened error:", error);
+        logger.error("Get recently listened error:", error);
         res.status(500).json({ error: "Failed to fetch recently listened" });
     }
 });
@@ -542,6 +554,7 @@ router.get("/recently-added", async (req, res) => {
                         mbid: true,
                         name: true,
                         heroUrl: true,
+                        userHeroUrl: true,
                     },
                 },
             },
@@ -575,10 +588,11 @@ router.get("/recently-added", async (req, res) => {
         // For artists without heroUrl, fetch images on-demand
         const artistsWithImages = await Promise.all(
             Array.from(artistsMap.values()).map(async (artist) => {
-                let coverArt = artist.heroUrl;
+                // Use override pattern: userHeroUrl ?? heroUrl
+                let coverArt = artist.userHeroUrl ?? artist.heroUrl;
 
                 if (!coverArt) {
-                    console.log(
+                    logger.debug(
                         `[IMAGE] Fetching image on-demand for ${artist.name}...`
                     );
 
@@ -588,7 +602,7 @@ router.get("/recently-added", async (req, res) => {
                         const cached = await redisClient.get(cacheKey);
                         if (cached) {
                             coverArt = cached;
-                            console.log(`  Found cached image`);
+                            logger.debug(`  Found cached image`);
                         }
                     } catch (err) {
                         // Redis errors are non-critical
@@ -649,7 +663,7 @@ router.get("/recently-added", async (req, res) => {
 
                                 if (largestImage && largestImage["#text"]) {
                                     coverArt = largestImage["#text"];
-                                    console.log(`  Found Last.fm image`);
+                                    logger.debug(`  Found Last.fm image`);
                                 }
                             }
                         } catch (err) {
@@ -665,7 +679,7 @@ router.get("/recently-added", async (req, res) => {
                                 7 * 24 * 60 * 60,
                                 coverArt
                             );
-                            console.log(`  Cached image for 7 days`);
+                            logger.debug(`  Cached image for 7 days`);
                         } catch (err) {
                             // Redis errors are non-critical
                         }
@@ -682,7 +696,7 @@ router.get("/recently-added", async (req, res) => {
 
         res.json({ artists: artistsWithImages });
     } catch (error) {
-        console.error("Get recently added error:", error);
+        logger.error("Get recently added error:", error);
         res.status(500).json({ error: "Failed to fetch recently added" });
     }
 });
@@ -696,7 +710,10 @@ router.get("/artists", async (req, res) => {
             offset: offsetParam = "0",
             filter = "owned", // owned (default), discovery, all
         } = req.query;
-        const limit = Math.min(parseInt(limitParam as string, 10) || 500, MAX_LIMIT);
+        const limit = Math.min(
+            parseInt(limitParam as string, 10) || 500,
+            MAX_LIMIT
+        );
         const offset = parseInt(offsetParam as string, 10) || 0;
 
         // Build where clause based on filter
@@ -784,6 +801,7 @@ router.get("/artists", async (req, res) => {
                     mbid: true,
                     name: true,
                     heroUrl: true,
+                    userHeroUrl: true,
                     albums: {
                         where: {
                             ...(albumLocationFilter
@@ -805,11 +823,131 @@ router.get("/artists", async (req, res) => {
 
         // Use DataCacheService for batch image lookup (DB + Redis, no API calls for lists)
         const imageMap = await dataCacheService.getArtistImagesBatch(
-            artistsWithAlbums.map((a) => ({ id: a.id, heroUrl: a.heroUrl }))
+            artistsWithAlbums.map((a) => ({ id: a.id, heroUrl: a.heroUrl, userHeroUrl: a.userHeroUrl }))
+        );
+
+        // ========== ON-DEMAND IMAGE FETCHING FOR LIBRARY ARTISTS ==========
+        // For artists without images, fetch on-demand (fixes Bug 2: Artist images missing on Library page)
+        const artistsWithoutImages = artistsWithAlbums.filter(
+            (artist) => !imageMap.get(artist.id) && !artist.heroUrl
+        );
+
+        logger.debug(
+            `[Library] Found ${artistsWithoutImages.length} artists without images, fetching on-demand...`
+        );
+
+        // Fetch images with concurrency limit of 5 simultaneous requests
+        const imageFetchPromises = artistsWithoutImages.map(async (artist) => {
+            let coverArt: string | null = null;
+
+            logger.debug(
+                `[IMAGE] Fetching image on-demand for ${artist.name}...`
+            );
+
+            // Check Redis cache first
+            const cacheKey = `hero-image:${artist.id}`;
+            try {
+                const cached = await redisClient.get(cacheKey);
+                if (cached) {
+                    coverArt = cached;
+                    logger.debug(`  Found cached image`);
+                    return { artistId: artist.id, coverArt };
+                }
+            } catch (err) {
+                // Redis errors are non-critical
+            }
+
+            // Try Fanart.tv if we have real MBID
+            if (!coverArt && artist.mbid && !artist.mbid.startsWith("temp-")) {
+                try {
+                    coverArt = await fanartService.getArtistImage(artist.mbid);
+                } catch (err) {
+                    // Fanart.tv failed, continue to next source
+                }
+            }
+
+            // Fallback to Deezer
+            if (!coverArt) {
+                try {
+                    coverArt = await deezerService.getArtistImage(artist.name);
+                } catch (err) {
+                    // Deezer failed, continue to next source
+                }
+            }
+
+            // Fallback to Last.fm
+            if (!coverArt) {
+                try {
+                    const validMbid =
+                        artist.mbid && !artist.mbid.startsWith("temp-")
+                            ? artist.mbid
+                            : undefined;
+                    const lastfmInfo = await lastFmService.getArtistInfo(
+                        artist.name,
+                        validMbid
+                    );
+
+                    if (lastfmInfo.image && lastfmInfo.image.length > 0) {
+                        const largestImage =
+                            lastfmInfo.image.find(
+                                (img: any) =>
+                                    img.size === "extralarge" ||
+                                    img.size === "mega"
+                            ) ||
+                            lastfmInfo.image[lastfmInfo.image.length - 1];
+
+                        if (largestImage && largestImage["#text"]) {
+                            coverArt = largestImage["#text"];
+                            logger.debug(`  Found Last.fm image`);
+                        }
+                    }
+                } catch (err) {
+                    // Last.fm failed, leave as null
+                }
+            }
+
+            // Cache the result for 7 days
+            if (coverArt) {
+                try {
+                    await redisClient.setEx(
+                        cacheKey,
+                        7 * 24 * 60 * 60,
+                        coverArt
+                    );
+                    logger.debug(`  Cached image for 7 days`);
+                } catch (err) {
+                    // Redis errors are non-critical
+                }
+            }
+
+            return { artistId: artist.id, coverArt };
+        });
+
+        // Process in batches of 5 for concurrency control
+        const batchSize = 5;
+        const fetchedImages = new Map<string, string | null>();
+        
+        for (let i = 0; i < imageFetchPromises.length; i += batchSize) {
+            const batch = imageFetchPromises.slice(i, i + batchSize);
+            const results = await Promise.allSettled(batch);
+            
+            results.forEach((result) => {
+                if (result.status === "fulfilled" && result.value.coverArt) {
+                    fetchedImages.set(result.value.artistId, result.value.coverArt);
+                }
+            });
+        }
+
+        logger.debug(
+            `[Library] Fetched ${fetchedImages.size} new images on-demand`
         );
 
         const artistsWithImages = artistsWithAlbums.map((artist) => {
-            const coverArt = imageMap.get(artist.id) || artist.heroUrl || null;
+            const coverArt =
+                fetchedImages.get(artist.id) ||
+                imageMap.get(artist.id) ||
+                artist.heroUrl ||
+                null;
             // Sum up track counts from all albums
             const trackCount = artist.albums.reduce(
                 (sum, album) => sum + (album._count?.tracks || 0),
@@ -833,8 +971,8 @@ router.get("/artists", async (req, res) => {
             limit,
         });
     } catch (error: any) {
-        console.error("[Library] Get artists error:", error?.message || error);
-        console.error("[Library] Stack:", error?.stack);
+        logger.error("[Library] Get artists error:", error?.message || error);
+        logger.error("[Library] Stack:", error?.stack);
         res.status(500).json({
             error: "Failed to fetch artists",
             details: error?.message,
@@ -925,7 +1063,7 @@ router.get("/enrichment-diagnostics", async (req, res) => {
             ].filter(Boolean),
         });
     } catch (error: any) {
-        console.error(
+        logger.error(
             "[Library] Enrichment diagnostics error:",
             error?.message
         );
@@ -947,8 +1085,55 @@ router.post("/retry-enrichment", async (req, res) => {
             count: result.count,
         });
     } catch (error: any) {
-        console.error("[Library] Retry enrichment error:", error?.message);
+        logger.error("[Library] Retry enrichment error:", error?.message);
         res.status(500).json({ error: "Failed to retry enrichment" });
+    }
+});
+
+// POST /library/backfill-genres - Backfill genres for artists missing them
+router.post("/backfill-genres", async (req, res) => {
+    try {
+        // Find artists that have been enriched but have no genres
+        const artistsToBackfill = await prisma.artist.findMany({
+            where: {
+                enrichmentStatus: "completed",
+                OR: [
+                    { genres: { equals: Prisma.DbNull } },
+                    { genres: { equals: [] } },
+                ],
+            },
+            select: { id: true, name: true, mbid: true },
+            take: 50,  // Process in batches
+        });
+
+        if (artistsToBackfill.length === 0) {
+            return res.json({
+                message: "No artists need genre backfill",
+                count: 0,
+            });
+        }
+
+        // Reset these artists to pending so enrichment worker re-processes them
+        const result = await prisma.artist.updateMany({
+            where: {
+                id: { in: artistsToBackfill.map(a => a.id) },
+            },
+            data: {
+                enrichmentStatus: "pending",
+                lastEnriched: null,
+            },
+        });
+
+        logger.info(`[Backfill] Reset ${result.count} artists for genre enrichment`);
+
+        res.json({
+            message: `Reset ${result.count} artists for genre enrichment`,
+            count: result.count,
+            artists: artistsToBackfill.map(a => a.name).slice(0, 10),
+        });
+    } catch (error: any) {
+        logger.error("[Backfill] Genre backfill error:", error?.message);
+        res.status(500).json({ error: "Failed to backfill genres" });
     }
 });
 
@@ -959,10 +1144,10 @@ router.get("/artists/:id", async (req, res) => {
 
         const artistInclude = {
             albums: {
-                orderBy: { year: "desc" },
+                orderBy: { year: Prisma.SortOrder.desc },
                 include: {
                     tracks: {
-                        orderBy: { trackNo: "asc" },
+                        orderBy: { trackNo: Prisma.SortOrder.asc },
                         take: 10, // Top tracks
                         include: {
                             album: {
@@ -1029,7 +1214,7 @@ router.get("/artists/:id", async (req, res) => {
         // If artist has temp MBID, try to find real MBID by searching MusicBrainz
         let effectiveMbid = artist.mbid;
         if (!effectiveMbid || effectiveMbid.startsWith("temp-")) {
-            console.log(
+            logger.debug(
                 ` Artist has temp/no MBID, searching MusicBrainz for ${artist.name}...`
             );
             try {
@@ -1039,7 +1224,7 @@ router.get("/artists/:id", async (req, res) => {
                 );
                 if (searchResults.length > 0) {
                     effectiveMbid = searchResults[0].id;
-                    console.log(`  Found MBID: ${effectiveMbid}`);
+                    logger.debug(`  Found MBID: ${effectiveMbid}`);
 
                     // Update database with real MBID for future use (skip if duplicate)
                     try {
@@ -1050,23 +1235,23 @@ router.get("/artists/:id", async (req, res) => {
                     } catch (mbidError: any) {
                         // If MBID already exists for another artist, just log and continue
                         if (mbidError.code === "P2002") {
-                            console.log(
+                            logger.debug(
                                 `MBID ${effectiveMbid} already exists for another artist, skipping update`
                             );
                         } else {
-                            console.error(
+                            logger.error(
                                 `  ✗ Failed to update MBID:`,
                                 mbidError
                             );
                         }
                     }
                 } else {
-                    console.log(
+                    logger.debug(
                         `  ✗ No MusicBrainz match found for ${artist.name}`
                     );
                 }
             } catch (error) {
-                console.error(`  ✗ MusicBrainz search failed:`, error);
+                logger.error(` MusicBrainz search failed:`, error);
             }
         }
 
@@ -1079,7 +1264,7 @@ router.get("/artists/:id", async (req, res) => {
             source: "database" as const,
         }));
 
-        console.log(
+        logger.debug(
             `[Artist] Found ${dbAlbums.length} albums from database (actual owned files)`
         );
 
@@ -1098,11 +1283,11 @@ router.get("/artists/:id", async (req, res) => {
                 const cachedDisco = await redisClient.get(discoCacheKey);
                 if (cachedDisco && cachedDisco !== "NOT_FOUND") {
                     releaseGroups = JSON.parse(cachedDisco);
-                    console.log(
+                    logger.debug(
                         `[Artist] Using cached discography (${releaseGroups.length} albums)`
                     );
                 } else {
-                    console.log(
+                    logger.debug(
                         `[Artist] Fetching discography from MusicBrainz...`
                     );
                     releaseGroups = await musicBrainzService.getReleaseGroups(
@@ -1118,7 +1303,7 @@ router.get("/artists/:id", async (req, res) => {
                     );
                 }
 
-                console.log(
+                logger.debug(
                     `  Got ${releaseGroups.length} albums from MusicBrainz (before filtering)`
                 );
 
@@ -1153,7 +1338,7 @@ router.get("/artists/:id", async (req, res) => {
                     }
                 );
 
-                console.log(
+                logger.debug(
                     `  Filtered to ${filteredReleaseGroups.length} studio albums/EPs`
                 );
 
@@ -1208,10 +1393,10 @@ router.get("/artists/:id", async (req, res) => {
 
                 albumsWithOwnership = [...dbAlbums, ...mbAlbumsFiltered];
 
-                console.log(
+                logger.debug(
                     `  Total albums: ${albumsWithOwnership.length} (${dbAlbums.length} owned from database, ${mbAlbumsFiltered.length} from MusicBrainz)`
                 );
-                console.log(
+                logger.debug(
                     `  Owned: ${
                         albumsWithOwnership.filter((a) => a.owned).length
                     }, Available: ${
@@ -1219,7 +1404,7 @@ router.get("/artists/:id", async (req, res) => {
                     }`
                 );
             } catch (error) {
-                console.error(
+                logger.error(
                     `Failed to fetch MusicBrainz discography:`,
                     error
                 );
@@ -1228,7 +1413,7 @@ router.get("/artists/:id", async (req, res) => {
             }
         } else {
             // No valid MBID - just use database albums
-            console.log(
+            logger.debug(
                 `[Artist] No valid MBID, using ${dbAlbums.length} albums from database`
             );
             albumsWithOwnership = dbAlbums;
@@ -1236,9 +1421,7 @@ router.get("/artists/:id", async (req, res) => {
 
         // Extract top tracks from library first
         const allTracks = artist.albums.flatMap((a) => a.tracks);
-        let topTracks = allTracks
-            .sort((a, b) => (b.playCount || 0) - (a.playCount || 0))
-            .slice(0, 10);
+        let topTracks = allTracks.slice(0, 10);
 
         // Get user play counts for all tracks
         const userId = req.user!.id;
@@ -1266,7 +1449,7 @@ router.get("/artists/:id", async (req, res) => {
 
             if (cachedTopTracks && cachedTopTracks !== "NOT_FOUND") {
                 lastfmTopTracks = JSON.parse(cachedTopTracks);
-                console.log(
+                logger.debug(
                     `[Artist] Using cached top tracks (${lastfmTopTracks.length})`
                 );
             } else {
@@ -1286,7 +1469,7 @@ router.get("/artists/:id", async (req, res) => {
                     24 * 60 * 60,
                     JSON.stringify(lastfmTopTracks)
                 );
-                console.log(
+                logger.debug(
                     `[Artist] Cached ${lastfmTopTracks.length} top tracks`
                 );
             }
@@ -1306,7 +1489,7 @@ router.get("/artists/:id", async (req, res) => {
                         ...matchedTrack,
                         playCount: lfmTrack.playcount
                             ? parseInt(lfmTrack.playcount)
-                            : matchedTrack.playCount,
+                            : 0,
                         listeners: lfmTrack.listeners
                             ? parseInt(lfmTrack.listeners)
                             : 0,
@@ -1344,7 +1527,7 @@ router.get("/artists/:id", async (req, res) => {
 
             topTracks = combinedTracks.slice(0, 10);
         } catch (error) {
-            console.error(
+            logger.error(
                 `Failed to get Last.fm top tracks for ${artist.name}:`,
                 error
             );
@@ -1380,20 +1563,27 @@ router.get("/artists/:id", async (req, res) => {
 
         if (enrichedSimilar && enrichedSimilar.length > 0) {
             // Use pre-enriched data from database (fast path)
-            console.log(
+            logger.debug(
                 `[Artist] Using ${enrichedSimilar.length} similar artists from enriched JSON`
             );
 
             // First, batch lookup which similar artists exist in our library
-            const similarNames = enrichedSimilar.slice(0, 10).map((s) => s.name.toLowerCase());
-            const similarMbids = enrichedSimilar.slice(0, 10).map((s) => s.mbid).filter(Boolean) as string[];
-            
+            const similarNames = enrichedSimilar
+                .slice(0, 10)
+                .map((s) => s.name.toLowerCase());
+            const similarMbids = enrichedSimilar
+                .slice(0, 10)
+                .map((s) => s.mbid)
+                .filter(Boolean) as string[];
+
             // Find library artists matching by name or mbid
             const libraryMatches = await prisma.artist.findMany({
                 where: {
                     OR: [
                         { normalizedName: { in: similarNames } },
-                        ...(similarMbids.length > 0 ? [{ mbid: { in: similarMbids } }] : []),
+                        ...(similarMbids.length > 0
+                            ? [{ mbid: { in: similarMbids } }]
+                            : []),
                     ],
                 },
                 select: {
@@ -1405,25 +1595,37 @@ router.get("/artists/:id", async (req, res) => {
                     _count: {
                         select: {
                             albums: {
-                                where: { location: "LIBRARY", tracks: { some: {} } },
+                                where: {
+                                    location: "LIBRARY",
+                                    tracks: { some: {} },
+                                },
                             },
                         },
                     },
                 },
             });
-            
+
             // Create lookup maps for quick matching
-            const libraryByName = new Map(libraryMatches.map((a) => [a.normalizedName?.toLowerCase() || a.name.toLowerCase(), a]));
-            const libraryByMbid = new Map(libraryMatches.filter((a) => a.mbid).map((a) => [a.mbid!, a]));
+            const libraryByName = new Map(
+                libraryMatches.map((a) => [
+                    a.normalizedName?.toLowerCase() || a.name.toLowerCase(),
+                    a,
+                ])
+            );
+            const libraryByMbid = new Map(
+                libraryMatches.filter((a) => a.mbid).map((a) => [a.mbid!, a])
+            );
 
             // Fetch images in parallel from Deezer (cached in Redis)
             const similarWithImages = await Promise.all(
                 enrichedSimilar.slice(0, 10).map(async (s) => {
                     // Check if this artist is in our library
-                    const libraryArtist = (s.mbid && libraryByMbid.get(s.mbid)) || libraryByName.get(s.name.toLowerCase());
-                    
+                    const libraryArtist =
+                        (s.mbid && libraryByMbid.get(s.mbid)) ||
+                        libraryByName.get(s.name.toLowerCase());
+
                     let image = libraryArtist?.heroUrl || null;
-                    
+
                     // If no library image, try Deezer
                     if (!image) {
                         try {
@@ -1433,7 +1635,9 @@ router.get("/artists/:id", async (req, res) => {
                             if (cached && cached !== "NOT_FOUND") {
                                 image = cached;
                             } else {
-                                image = await deezerService.getArtistImage(s.name);
+                                image = await deezerService.getArtistImage(
+                                    s.name
+                                );
                                 if (image) {
                                     await redisClient.setEx(
                                         cacheKey,
@@ -1466,12 +1670,12 @@ router.get("/artists/:id", async (req, res) => {
             const cachedSimilar = await redisClient.get(similarCacheKey);
             if (cachedSimilar && cachedSimilar !== "NOT_FOUND") {
                 similarArtists = JSON.parse(cachedSimilar);
-                console.log(
+                logger.debug(
                     `[Artist] Using cached similar artists (${similarArtists.length})`
                 );
             } else {
                 // Cache miss - fetch from Last.fm
-                console.log(
+                logger.debug(
                     `[Artist] Fetching similar artists from Last.fm...`
                 );
 
@@ -1479,7 +1683,7 @@ router.get("/artists/:id", async (req, res) => {
                     const validMbid =
                         effectiveMbid && !effectiveMbid.startsWith("temp-")
                             ? effectiveMbid
-                            : undefined;
+                            : "";
                     const lastfmSimilar = await lastFmService.getSimilarArtists(
                         validMbid,
                         artist.name,
@@ -1487,14 +1691,20 @@ router.get("/artists/:id", async (req, res) => {
                     );
 
                     // Batch lookup which similar artists exist in our library
-                    const similarNames = lastfmSimilar.map((s: any) => s.name.toLowerCase());
-                    const similarMbids = lastfmSimilar.map((s: any) => s.mbid).filter(Boolean) as string[];
-                    
+                    const similarNames = lastfmSimilar.map((s: any) =>
+                        s.name.toLowerCase()
+                    );
+                    const similarMbids = lastfmSimilar
+                        .map((s: any) => s.mbid)
+                        .filter(Boolean) as string[];
+
                     const libraryMatches = await prisma.artist.findMany({
                         where: {
                             OR: [
                                 { normalizedName: { in: similarNames } },
-                                ...(similarMbids.length > 0 ? [{ mbid: { in: similarMbids } }] : []),
+                                ...(similarMbids.length > 0
+                                    ? [{ mbid: { in: similarMbids } }]
+                                    : []),
                             ],
                         },
                         select: {
@@ -1506,23 +1716,38 @@ router.get("/artists/:id", async (req, res) => {
                             _count: {
                                 select: {
                                     albums: {
-                                        where: { location: "LIBRARY", tracks: { some: {} } },
+                                        where: {
+                                            location: "LIBRARY",
+                                            tracks: { some: {} },
+                                        },
                                     },
                                 },
                             },
                         },
                     });
-                    
-                    const libraryByName = new Map(libraryMatches.map((a) => [a.normalizedName?.toLowerCase() || a.name.toLowerCase(), a]));
-                    const libraryByMbid = new Map(libraryMatches.filter((a) => a.mbid).map((a) => [a.mbid!, a]));
+
+                    const libraryByName = new Map(
+                        libraryMatches.map((a) => [
+                            a.normalizedName?.toLowerCase() ||
+                                a.name.toLowerCase(),
+                            a,
+                        ])
+                    );
+                    const libraryByMbid = new Map(
+                        libraryMatches
+                            .filter((a) => a.mbid)
+                            .map((a) => [a.mbid!, a])
+                    );
 
                     // Fetch images in parallel (Deezer only - fastest source)
                     const similarWithImages = await Promise.all(
                         lastfmSimilar.map(async (s: any) => {
-                            const libraryArtist = (s.mbid && libraryByMbid.get(s.mbid)) || libraryByName.get(s.name.toLowerCase());
-                            
+                            const libraryArtist =
+                                (s.mbid && libraryByMbid.get(s.mbid)) ||
+                                libraryByName.get(s.name.toLowerCase());
+
                             let image = libraryArtist?.heroUrl || null;
-                            
+
                             if (!image) {
                                 try {
                                     image = await deezerService.getArtistImage(
@@ -1539,7 +1764,8 @@ router.get("/artists/:id", async (req, res) => {
                                 mbid: s.mbid || null,
                                 coverArt: image,
                                 albumCount: 0,
-                                ownedAlbumCount: libraryArtist?._count?.albums || 0,
+                                ownedAlbumCount:
+                                    libraryArtist?._count?.albums || 0,
                                 weight: s.match,
                                 inLibrary: !!libraryArtist,
                             };
@@ -1554,11 +1780,11 @@ router.get("/artists/:id", async (req, res) => {
                         24 * 60 * 60,
                         JSON.stringify(similarArtists)
                     );
-                    console.log(
+                    logger.debug(
                         `[Artist] Cached ${similarArtists.length} similar artists`
                     );
                 } catch (error) {
-                    console.error(
+                    logger.error(
                         `[Artist] Failed to fetch similar artists:`,
                         error
                     );
@@ -1570,12 +1796,14 @@ router.get("/artists/:id", async (req, res) => {
         res.json({
             ...artist,
             coverArt: heroUrl, // Use fetched hero image (falls back to artist.heroUrl)
+            bio: getArtistDisplaySummary(artist),
+            genres: getMergedGenres(artist),
             albums: albumsWithOwnership,
             topTracks,
             similarArtists,
         });
     } catch (error) {
-        console.error("Get artist error:", error);
+        logger.error("Get artist error:", error);
         res.status(500).json({ error: "Failed to fetch artist" });
     }
 });
@@ -1589,7 +1817,10 @@ router.get("/albums", async (req, res) => {
             offset: offsetParam = "0",
             filter = "owned", // owned (default), discovery, all
         } = req.query;
-        const limit = Math.min(parseInt(limitParam as string, 10) || 500, MAX_LIMIT);
+        const limit = Math.min(
+            parseInt(limitParam as string, 10) || 500,
+            MAX_LIMIT
+        );
         const offset = parseInt(offsetParam as string, 10) || 0;
 
         let where: any = {
@@ -1658,8 +1889,8 @@ router.get("/albums", async (req, res) => {
             limit,
         });
     } catch (error: any) {
-        console.error("[Library] Get albums error:", error?.message || error);
-        console.error("[Library] Stack:", error?.stack);
+        logger.error("[Library] Get albums error:", error?.message || error);
+        logger.error("[Library] Stack:", error?.stack);
         res.status(500).json({
             error: "Failed to fetch albums",
             details: error?.message,
@@ -1684,7 +1915,7 @@ router.get("/albums/:id", async (req, res) => {
                     },
                 },
                 tracks: {
-                    orderBy: { trackNo: "asc" },
+                    orderBy: { trackNo: Prisma.SortOrder.asc },
                 },
             },
         });
@@ -1702,7 +1933,7 @@ router.get("/albums/:id", async (req, res) => {
                         },
                     },
                     tracks: {
-                        orderBy: { trackNo: "asc" },
+                        orderBy: { trackNo: Prisma.SortOrder.asc },
                     },
                 },
             });
@@ -1728,7 +1959,7 @@ router.get("/albums/:id", async (req, res) => {
             coverArt: album.coverUrl,
         });
     } catch (error) {
-        console.error("Get album error:", error);
+        logger.error("Get album error:", error);
         res.status(500).json({ error: "Failed to fetch album" });
     }
 });
@@ -1736,8 +1967,15 @@ router.get("/albums/:id", async (req, res) => {
 // GET /library/tracks?albumId=&limit=100&offset=0
 router.get("/tracks", async (req, res) => {
     try {
-        const { albumId, limit: limitParam = "100", offset: offsetParam = "0" } = req.query;
-        const limit = Math.min(parseInt(limitParam as string, 10) || 100, MAX_LIMIT);
+        const {
+            albumId,
+            limit: limitParam = "100",
+            offset: offsetParam = "0",
+        } = req.query;
+        const limit = Math.min(
+            parseInt(limitParam as string, 10) || 100,
+            MAX_LIMIT
+        );
         const offset = parseInt(offsetParam as string, 10) || 0;
 
         const where: any = {};
@@ -1778,7 +2016,7 @@ router.get("/tracks", async (req, res) => {
 
         res.json({ tracks, total, offset, limit });
     } catch (error) {
-        console.error("Get tracks error:", error);
+        logger.error("Get tracks error:", error);
         res.status(500).json({ error: "Failed to fetch tracks" });
     }
 });
@@ -1787,7 +2025,10 @@ router.get("/tracks", async (req, res) => {
 router.get("/tracks/shuffle", async (req, res) => {
     try {
         const { limit: limitParam = "100" } = req.query;
-        const limit = Math.min(parseInt(limitParam as string, 10) || 100, MAX_LIMIT);
+        const limit = Math.min(
+            parseInt(limitParam as string, 10) || 100,
+            MAX_LIMIT
+        );
 
         // Get total count of tracks
         const totalTracks = await prisma.track.count();
@@ -1797,7 +2038,7 @@ router.get("/tracks/shuffle", async (req, res) => {
         }
 
         // For small libraries, fetch all and shuffle in memory
-        // For large libraries, use random offset sampling for better performance
+        // For large libraries, use database-level randomization for memory efficiency
         let tracksData;
         if (totalTracks <= limit) {
             // Fetch all tracks and shuffle
@@ -1821,21 +2062,19 @@ router.get("/tracks/shuffle", async (req, res) => {
                 [tracksData[i], tracksData[j]] = [tracksData[j], tracksData[i]];
             }
         } else {
-            // For large libraries, sample random tracks using multiple random offsets
-            // This provides good randomization without loading entire library
-            const sampleSize = Math.min(limit, totalTracks);
-            const offsets = new Set<number>();
+            // For large libraries, use database-level randomization
+            // Get random track IDs first (efficient, O(limit) memory)
+            const randomIds = await prisma.$queryRaw<{ id: string }[]>`
+                SELECT id FROM "Track"
+                ORDER BY RANDOM()
+                LIMIT ${limit}
+            `;
 
-            // Generate unique random offsets
-            while (offsets.size < sampleSize) {
-                offsets.add(Math.floor(Math.random() * totalTracks));
-            }
-
-            // Fetch tracks at random offsets (batch for efficiency)
-            const offsetArray = Array.from(offsets);
+            // Then fetch full track data for selected IDs
             tracksData = await prisma.track.findMany({
-                skip: 0,
-                take: totalTracks, // We'll filter by our offsets
+                where: {
+                    id: { in: randomIds.map((r) => r.id) },
+                },
                 include: {
                     album: {
                         include: {
@@ -1850,11 +2089,7 @@ router.get("/tracks/shuffle", async (req, res) => {
                 },
             });
 
-            // Pick tracks at our random indices and shuffle
-            const selectedTracks = offsetArray.map(idx => tracksData[idx]).filter(Boolean);
-            tracksData = selectedTracks;
-
-            // Fisher-Yates shuffle
+            // Shuffle the result to maintain randomness (findMany doesn't preserve order)
             for (let i = tracksData.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [tracksData[i], tracksData[j]] = [tracksData[j], tracksData[i]];
@@ -1872,7 +2107,7 @@ router.get("/tracks/shuffle", async (req, res) => {
 
         res.json({ tracks, total: totalTracks });
     } catch (error) {
-        console.error("Shuffle tracks error:", error);
+        logger.error("Shuffle tracks error:", error);
         res.status(500).json({ error: "Failed to shuffle tracks" });
     }
 });
@@ -1912,7 +2147,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                 coverUrl = `${audiobookshelfBaseUrl}/api/${audiobookPath}`;
 
                 // Fetch with authentication
-                console.log(
+                logger.debug(
                     `[COVER-ART] Fetching audiobook cover: ${coverUrl.substring(
                         0,
                         100
@@ -1926,7 +2161,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                 });
 
                 if (!imageResponse.ok) {
-                    console.error(
+                    logger.error(
                         `[COVER-ART] Failed to fetch audiobook cover: ${coverUrl} (${imageResponse.status} ${imageResponse.statusText})`
                     );
                     return res
@@ -1963,13 +2198,13 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                     nativePath
                 );
 
-                console.log(
+                logger.debug(
                     `[COVER-ART] Serving native cover: ${coverCachePath}`
                 );
 
                 // Check if file exists
                 if (!fs.existsSync(coverCachePath)) {
-                    console.error(
+                    logger.error(
                         `[COVER-ART] Native cover not found: ${coverCachePath}`
                     );
                     return res
@@ -2040,7 +2275,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                 }
 
                 // Native cover file missing - try to find album and fetch from Deezer
-                console.warn(
+                logger.warn(
                     `[COVER-ART] Native cover not found: ${coverCachePath}, trying Deezer fallback`
                 );
 
@@ -2070,7 +2305,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                         }
                     }
                 } catch (error) {
-                    console.error(
+                    logger.error(
                         `[COVER-ART] Failed to fetch Deezer fallback for ${albumId}:`,
                         error
                     );
@@ -2102,7 +2337,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                 coverUrl = `${audiobookshelfBaseUrl}/api/${audiobookPath}`;
 
                 // Fetch with authentication
-                console.log(
+                logger.debug(
                     `[COVER-ART] Fetching audiobook cover: ${coverUrl.substring(
                         0,
                         100
@@ -2116,7 +2351,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                 });
 
                 if (!imageResponse.ok) {
-                    console.error(
+                    logger.error(
                         `[COVER-ART] Failed to fetch audiobook cover: ${coverUrl} (${imageResponse.status} ${imageResponse.statusText})`
                     );
                     return res
@@ -2170,7 +2405,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
 
                 // Check if this is a cached 404
                 if (cachedData.notFound) {
-                    console.log(
+                    logger.debug(
                         `[COVER-ART] Cached 404 for ${coverUrl.substring(
                             0,
                             60
@@ -2181,14 +2416,14 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                         .json({ error: "Cover art not found" });
                 }
 
-                console.log(
+                logger.debug(
                     `[COVER-ART] Cache HIT for ${coverUrl.substring(0, 60)}...`
                 );
                 const imageBuffer = Buffer.from(cachedData.data, "base64");
 
                 // Check if client has cached version
                 if (req.headers["if-none-match"] === cachedData.etag) {
-                    console.log(`[COVER-ART] Client has cached version (304)`);
+                    logger.debug(`[COVER-ART] Client has cached version (304)`);
                     return res.status(304).end();
                 }
 
@@ -2207,7 +2442,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                 res.setHeader("ETag", cachedData.etag);
                 return res.send(imageBuffer);
             } else {
-                console.log(
+                logger.debug(
                     `[COVER-ART] ✗ Cache MISS for ${coverUrl.substring(
                         0,
                         60
@@ -2215,18 +2450,18 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                 );
             }
         } catch (cacheError) {
-            console.warn("[COVER-ART] Redis cache read error:", cacheError);
+            logger.warn("[COVER-ART] Redis cache read error:", cacheError);
         }
 
         // Fetch the image and proxy it to avoid CORS issues
-        console.log(`[COVER-ART] Fetching: ${coverUrl.substring(0, 100)}...`);
+        logger.debug(`[COVER-ART] Fetching: ${coverUrl.substring(0, 100)}...`);
         const imageResponse = await fetch(coverUrl, {
             headers: {
                 "User-Agent": "Lidify/1.0",
             },
         });
         if (!imageResponse.ok) {
-            console.error(
+            logger.error(
                 `[COVER-ART] Failed to fetch: ${coverUrl} (${imageResponse.status} ${imageResponse.statusText})`
             );
 
@@ -2238,9 +2473,9 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                         60 * 60, // 1 hour
                         JSON.stringify({ notFound: true })
                     );
-                    console.log(`[COVER-ART] Cached 404 response for 1 hour`);
+                    logger.debug(`[COVER-ART] Cached 404 response for 1 hour`);
                 } catch (cacheError) {
-                    console.warn(
+                    logger.warn(
                         "[COVER-ART] Redis cache write error:",
                         cacheError
                     );
@@ -2249,7 +2484,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
 
             return res.status(404).json({ error: "Cover art not found" });
         }
-        console.log(`[COVER-ART] Successfully fetched, caching...`);
+        logger.debug(`[COVER-ART] Successfully fetched, caching...`);
 
         const buffer = await imageResponse.arrayBuffer();
         const imageBuffer = Buffer.from(buffer);
@@ -2270,7 +2505,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                 })
             );
         } catch (cacheError) {
-            console.warn("Redis cache write error:", cacheError);
+            logger.warn("Redis cache write error:", cacheError);
         }
 
         // Check if client has cached version
@@ -2292,7 +2527,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
         // Send the image
         res.send(imageBuffer);
     } catch (error) {
-        console.error("Get cover art error:", error);
+        logger.error("Get cover art error:", error);
         res.status(500).json({ error: "Failed to fetch cover art" });
     }
 });
@@ -2318,7 +2553,7 @@ router.get("/album-cover/:mbid", imageLimiter, async (req, res) => {
 
         res.json({ coverUrl });
     } catch (error) {
-        console.error("Get album cover error:", error);
+        logger.error("Get album cover error:", error);
         res.status(500).json({ error: "Failed to fetch cover art" });
     }
 });
@@ -2339,7 +2574,7 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
             imageUrl.includes("placeholder") ||
             imageUrl.startsWith("/placeholder")
         ) {
-            console.log(
+            logger.debug(
                 `[COLORS] Placeholder image detected, returning fallback colors`
             );
             return res.json({
@@ -2362,21 +2597,21 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
-                console.log(
+                logger.debug(
                     `[COLORS] Cache HIT for ${imageUrl.substring(0, 60)}...`
                 );
                 return res.json(JSON.parse(cached));
             } else {
-                console.log(
+                logger.debug(
                     `[COLORS] ✗ Cache MISS for ${imageUrl.substring(0, 60)}...`
                 );
             }
         } catch (cacheError) {
-            console.warn("[COLORS] Redis cache read error:", cacheError);
+            logger.warn("[COLORS] Redis cache read error:", cacheError);
         }
 
         // Fetch the image
-        console.log(
+        logger.debug(
             `[COLORS] Fetching image: ${imageUrl.substring(0, 100)}...`
         );
         const imageResponse = await fetch(imageUrl, {
@@ -2386,7 +2621,7 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
         });
 
         if (!imageResponse.ok) {
-            console.error(
+            logger.error(
                 `[COLORS] Failed to fetch image: ${imageUrl} (${imageResponse.status})`
             );
             return res.status(404).json({ error: "Image not found" });
@@ -2398,7 +2633,7 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
         // Extract colors using sharp
         const colors = await extractColorsFromImage(imageBuffer);
 
-        console.log(`[COLORS] Extracted colors:`, colors);
+        logger.debug(`[COLORS] Extracted colors:`, colors);
 
         // Cache the result for 30 days
         try {
@@ -2407,14 +2642,14 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
                 30 * 24 * 60 * 60, // 30 days
                 JSON.stringify(colors)
             );
-            console.log(`[COLORS] Cached colors for 30 days`);
+            logger.debug(`[COLORS] Cached colors for 30 days`);
         } catch (cacheError) {
-            console.warn("[COLORS] Redis cache write error:", cacheError);
+            logger.warn("[COLORS] Redis cache write error:", cacheError);
         }
 
         res.json(colors);
     } catch (error) {
-        console.error("Extract colors error:", error);
+        logger.error("Extract colors error:", error);
         res.status(500).json({ error: "Failed to extract colors" });
     }
 });
@@ -2422,12 +2657,12 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
 // GET /library/tracks/:id/stream
 router.get("/tracks/:id/stream", async (req, res) => {
     try {
-        console.log("[STREAM] Request received for track:", req.params.id);
+        logger.debug("[STREAM] Request received for track:", req.params.id);
         const { quality } = req.query;
         const userId = req.user?.id;
 
         if (!userId) {
-            console.log("[STREAM] No userId in session - unauthorized");
+            logger.debug("[STREAM] No userId in session - unauthorized");
             return res.status(401).json({ error: "Unauthorized" });
         }
 
@@ -2436,7 +2671,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
         });
 
         if (!track) {
-            console.log("[STREAM] Track not found");
+            logger.debug("[STREAM] Track not found");
             return res.status(404).json({ error: "Track not found" });
         }
 
@@ -2459,7 +2694,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
                     trackId: track.id,
                 },
             });
-            console.log("[STREAM] Logged new play for track:", track.title);
+            logger.debug("[STREAM] Logged new play for track:", track.title);
         }
 
         // Get user's quality preference
@@ -2476,7 +2711,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
         const ext = track.filePath
             ? path.extname(track.filePath).toLowerCase()
             : "";
-        console.log(
+        logger.debug(
             `[STREAM] Quality: requested=${
                 quality || "default"
             }, using=${requestedQuality}, format=${ext}`
@@ -2501,7 +2736,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
                     normalizedFilePath
                 );
 
-                console.log(
+                logger.debug(
                     `[STREAM] Using native file: ${track.filePath} (${requestedQuality})`
                 );
 
@@ -2515,7 +2750,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
                     );
 
                 // Stream file with range support
-                console.log(
+                logger.debug(
                     `[STREAM] Sending file: ${filePath}, mimeType: ${mimeType}`
                 );
 
@@ -2536,9 +2771,9 @@ router.get("/tracks/:id/stream", async (req, res) => {
                         // Always destroy the streaming service to clean up intervals
                         streamingService.destroy();
                         if (err) {
-                            console.error(`[STREAM] sendFile error:`, err);
+                            logger.error(`[STREAM] sendFile error:`, err);
                         } else {
-                            console.log(
+                            logger.debug(
                                 `[STREAM] File sent successfully: ${path.basename(
                                     filePath
                                 )}`
@@ -2554,7 +2789,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
                     err.code === "FFMPEG_NOT_FOUND" &&
                     requestedQuality !== "original"
                 ) {
-                    console.warn(
+                    logger.warn(
                         `[STREAM] FFmpeg not available, falling back to original quality`
                     );
                     const fallbackFilePath = track.filePath.replace(/\\/g, "/");
@@ -2594,7 +2829,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
                             // Always destroy the streaming service to clean up intervals
                             streamingService.destroy();
                             if (err) {
-                                console.error(
+                                logger.error(
                                     `[STREAM] sendFile fallback error:`,
                                     err
                                 );
@@ -2604,7 +2839,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
                     return;
                 }
 
-                console.error("[STREAM] Native streaming failed:", err.message);
+                logger.error("[STREAM] Native streaming failed:", err.message);
                 return res
                     .status(500)
                     .json({ error: "Failed to stream track" });
@@ -2612,10 +2847,10 @@ router.get("/tracks/:id/stream", async (req, res) => {
         }
 
         // No file path available
-        console.log("[STREAM] Track has no file path - unavailable");
+        logger.debug("[STREAM] Track has no file path - unavailable");
         return res.status(404).json({ error: "Track not available" });
     } catch (error) {
-        console.error("Stream track error:", error);
+        logger.error("Stream track error:", error);
         res.status(500).json({ error: "Failed to stream track" });
     }
 });
@@ -2661,7 +2896,7 @@ router.get("/tracks/:id", async (req, res) => {
 
         res.json(formattedTrack);
     } catch (error) {
-        console.error("Get track error:", error);
+        logger.error("Get track error:", error);
         res.status(500).json({ error: "Failed to fetch track" });
     }
 });
@@ -2694,10 +2929,10 @@ router.delete("/tracks/:id", async (req, res) => {
 
                 if (fs.existsSync(absolutePath)) {
                     fs.unlinkSync(absolutePath);
-                    console.log(`[DELETE] Deleted file: ${absolutePath}`);
+                    logger.debug(`[DELETE] Deleted file: ${absolutePath}`);
                 }
             } catch (err) {
-                console.warn("[DELETE] Could not delete file:", err);
+                logger.warn("[DELETE] Could not delete file:", err);
                 // Continue with database deletion even if file deletion fails
             }
         }
@@ -2707,11 +2942,11 @@ router.delete("/tracks/:id", async (req, res) => {
             where: { id: track.id },
         });
 
-        console.log(`[DELETE] Deleted track: ${track.title}`);
+        logger.debug(`[DELETE] Deleted track: ${track.title}`);
 
         res.json({ message: "Track deleted successfully" });
     } catch (error) {
-        console.error("Delete track error:", error);
+        logger.error("Delete track error:", error);
         res.status(500).json({ error: "Failed to delete track" });
     }
 });
@@ -2750,7 +2985,7 @@ router.delete("/albums/:id", async (req, res) => {
                         deletedFiles++;
                     }
                 } catch (err) {
-                    console.warn("[DELETE] Could not delete file:", err);
+                    logger.warn("[DELETE] Could not delete file:", err);
                 }
             }
         }
@@ -2768,13 +3003,13 @@ router.delete("/albums/:id", async (req, res) => {
                 const files = fs.readdirSync(albumFolder);
                 if (files.length === 0) {
                     fs.rmdirSync(albumFolder);
-                    console.log(
+                    logger.debug(
                         `[DELETE] Deleted empty album folder: ${albumFolder}`
                     );
                 }
             }
         } catch (err) {
-            console.warn("[DELETE] Could not delete album folder:", err);
+            logger.warn("[DELETE] Could not delete album folder:", err);
         }
 
         // Delete from database (cascade will delete tracks)
@@ -2782,7 +3017,7 @@ router.delete("/albums/:id", async (req, res) => {
             where: { id: album.id },
         });
 
-        console.log(
+        logger.debug(
             `[DELETE] Deleted album: ${album.title} (${deletedFiles} files)`
         );
 
@@ -2791,7 +3026,7 @@ router.delete("/albums/:id", async (req, res) => {
             deletedFiles,
         });
     } catch (error) {
-        console.error("Delete album error:", error);
+        logger.error("Delete album error:", error);
         res.status(500).json({ error: "Failed to delete album" });
     }
 });
@@ -2859,7 +3094,7 @@ router.delete("/artists/:id", async (req, res) => {
                             }
                         }
                     } catch (err) {
-                        console.warn("[DELETE] Could not delete file:", err);
+                        logger.warn("[DELETE] Could not delete file:", err);
                     }
                 }
             }
@@ -2869,7 +3104,7 @@ router.delete("/artists/:id", async (req, res) => {
         for (const artistFolder of artistFoldersToDelete) {
             try {
                 if (fs.existsSync(artistFolder)) {
-                    console.log(
+                    logger.debug(
                         `[DELETE] Attempting to delete folder: ${artistFolder}`
                     );
 
@@ -2878,12 +3113,12 @@ router.delete("/artists/:id", async (req, res) => {
                         recursive: true,
                         force: true,
                     });
-                    console.log(
+                    logger.debug(
                         `[DELETE] Successfully deleted artist folder: ${artistFolder}`
                     );
                 }
             } catch (err: any) {
-                console.error(
+                logger.error(
                     `[DELETE] Failed to delete artist folder ${artistFolder}:`,
                     err?.message || err
                 );
@@ -2903,9 +3138,9 @@ router.delete("/artists/:id", async (req, res) => {
                             } else {
                                 fs.unlinkSync(filePath);
                             }
-                            console.log(`[DELETE] Deleted: ${filePath}`);
+                            logger.debug(`[DELETE] Deleted: ${filePath}`);
                         } catch (fileErr: any) {
-                            console.error(
+                            logger.error(
                                 `[DELETE] Could not delete ${filePath}:`,
                                 fileErr?.message
                             );
@@ -2913,11 +3148,11 @@ router.delete("/artists/:id", async (req, res) => {
                     }
                     // Try deleting the now-empty folder
                     fs.rmdirSync(artistFolder);
-                    console.log(
+                    logger.debug(
                         `[DELETE] Deleted artist folder after manual cleanup: ${artistFolder}`
                     );
                 } catch (cleanupErr: any) {
-                    console.error(
+                    logger.error(
                         `[DELETE] Cleanup also failed for ${artistFolder}:`,
                         cleanupErr?.message
                     );
@@ -2939,11 +3174,11 @@ router.delete("/artists/:id", async (req, res) => {
             ) {
                 try {
                     fs.rmSync(commonPath, { recursive: true, force: true });
-                    console.log(
+                    logger.debug(
                         `[DELETE] Deleted additional artist folder: ${commonPath}`
                     );
                 } catch (err: any) {
-                    console.error(
+                    logger.error(
                         `[DELETE] Could not delete ${commonPath}:`,
                         err?.message
                     );
@@ -2962,16 +3197,16 @@ router.delete("/artists/:id", async (req, res) => {
                     true
                 );
                 if (lidarrResult.success) {
-                    console.log(`[DELETE] Lidarr: ${lidarrResult.message}`);
+                    logger.debug(`[DELETE] Lidarr: ${lidarrResult.message}`);
                     lidarrDeleted = true;
                 } else {
-                    console.warn(
+                    logger.warn(
                         `[DELETE] Lidarr deletion note: ${lidarrResult.message}`
                     );
                     lidarrError = lidarrResult.message;
                 }
             } catch (err: any) {
-                console.warn(
+                logger.warn(
                     "[DELETE] Could not delete from Lidarr:",
                     err?.message || err
                 );
@@ -2985,18 +3220,18 @@ router.delete("/artists/:id", async (req, res) => {
                 where: { artistId: artist.id },
             });
         } catch (err) {
-            console.warn("[DELETE] Could not delete OwnedAlbum records:", err);
+            logger.warn("[DELETE] Could not delete OwnedAlbum records:", err);
         }
 
         // Delete from database (cascade will delete albums and tracks)
-        console.log(
+        logger.debug(
             `[DELETE] Deleting artist from database: ${artist.name} (${artist.id})`
         );
         await prisma.artist.delete({
             where: { id: artist.id },
         });
 
-        console.log(
+        logger.debug(
             `[DELETE] Successfully deleted artist: ${
                 artist.name
             } (${deletedFiles} files${
@@ -3011,8 +3246,8 @@ router.delete("/artists/:id", async (req, res) => {
             lidarrError,
         });
     } catch (error: any) {
-        console.error("Delete artist error:", error?.message || error);
-        console.error("Delete artist stack:", error?.stack);
+        logger.error("Delete artist error:", error?.message || error);
+        logger.error("Delete artist stack:", error?.stack);
         res.status(500).json({
             error: "Failed to delete artist",
             details: error?.message || "Unknown error",
@@ -3038,70 +3273,39 @@ router.get("/genres", async (req, res) => {
             )
         );
 
-        // Get genres from TrackGenre relation (most accurate)
-        const trackGenres = await prisma.genre.findMany({
-            include: {
-                _count: {
-                    select: { trackGenres: true },
-                },
-            },
-        });
+        // Query Artist.genres field (populated by enrichment from Last.fm tags)
+        // Use raw SQL to expand JSONB array and count tracks per genre
+        const minTracks = 15; // Minimum tracks for a genre to show up
+        const genreResults = await prisma.$queryRaw<
+            { genre: string; track_count: bigint }[]
+        >`
+            SELECT LOWER(g.genre) as genre, COUNT(DISTINCT t.id) as track_count
+            FROM "Artist" ar
+            CROSS JOIN LATERAL jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
+            JOIN "Album" a ON a."artistId" = ar.id
+            JOIN "Track" t ON t."albumId" = a.id
+            WHERE ar.genres IS NOT NULL
+            GROUP BY LOWER(g.genre)
+            HAVING COUNT(DISTINCT t.id) >= ${minTracks}
+            ORDER BY track_count DESC
+            LIMIT 20
+        `;
 
-        const genreMap = new Map<string, number>();
+        // Filter out artist names and convert bigint to number
+        const genres = genreResults
+            .map((row) => ({
+                genre: row.genre,
+                count: Number(row.track_count),
+            }))
+            .filter((g) => !artistNames.has(g.genre.toLowerCase()));
 
-        // Add track genre counts (excluding artist names)
-        for (const g of trackGenres) {
-            if (g.name && g._count.trackGenres > 0) {
-                const normalized = g.name.trim();
-                // Skip if it matches an artist name
-                if (normalized && !artistNames.has(normalized.toLowerCase())) {
-                    genreMap.set(normalized, g._count.trackGenres);
-                }
-            }
-        }
-
-        // Fallback: Get genres from Album.genres JSON field if no TrackGenres
-        if (genreMap.size === 0) {
-            const albums = await prisma.album.findMany({
-                where: {
-                    genres: { not: null },
-                },
-                select: {
-                    genres: true,
-                    _count: { select: { tracks: true } },
-                },
-            });
-
-            for (const album of albums) {
-                const albumGenres = album.genres as string[] | null;
-                if (albumGenres && Array.isArray(albumGenres)) {
-                    for (const genre of albumGenres) {
-                        const normalized = genre.trim();
-                        // Skip if it matches an artist name
-                        if (
-                            normalized &&
-                            !artistNames.has(normalized.toLowerCase())
-                        ) {
-                            genreMap.set(
-                                normalized,
-                                (genreMap.get(normalized) || 0) +
-                                    album._count.tracks
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        // Convert to array and sort by count
-        const genres = Array.from(genreMap.entries())
-            .map(([genre, count]) => ({ genre, count }))
-            .sort((a, b) => b.count - a.count)
-            .slice(0, 20); // Top 20 genres
+        logger.debug(
+            `[Genres] Found ${genres.length} genres from Artist.genres (min ${minTracks} tracks)`
+        );
 
         res.json({ genres });
     } catch (error) {
-        console.error("Genres endpoint error:", error);
+        logger.error("Genres endpoint error:", error);
         res.status(500).json({ error: "Failed to get genres" });
     }
 });
@@ -3113,24 +3317,23 @@ router.get("/genres", async (req, res) => {
  */
 router.get("/decades", async (req, res) => {
     try {
-        // Get all albums with year and track count
+        // Get all albums with year fields and track count
         const albums = await prisma.album.findMany({
-            where: {
-                year: { not: null },
-            },
             select: {
                 year: true,
+                originalYear: true,
+                displayYear: true,
                 _count: { select: { tracks: true } },
             },
         });
 
-        // Group by decade
+        // Group by decade using effective year (displayYear > originalYear > year)
         const decadeMap = new Map<number, number>();
 
         for (const album of albums) {
-            if (album.year) {
-                // Calculate decade start (e.g., 1987 -> 1980, 2023 -> 2020)
-                const decadeStart = Math.floor(album.year / 10) * 10;
+            const effectiveYear = getEffectiveYear(album);
+            if (effectiveYear) {
+                const decadeStart = getDecadeFromYear(effectiveYear);
                 decadeMap.set(
                     decadeStart,
                     (decadeMap.get(decadeStart) || 0) + album._count.tracks
@@ -3146,7 +3349,7 @@ router.get("/decades", async (req, res) => {
 
         res.json({ decades });
     } catch (error) {
-        console.error("Decades endpoint error:", error);
+        logger.error("Decades endpoint error:", error);
         res.status(500).json({ error: "Failed to get decades" });
     }
 });
@@ -3223,7 +3426,7 @@ router.get("/radio", async (req, res) => {
                     trackIds = mostPlayedTracks.map((t) => t.id);
                 } else {
                     // No play data yet - just get random tracks
-                    console.log(
+                    logger.debug(
                         "[Radio:favorites] No play data found, returning random tracks"
                     );
                     const randomTracks = await prisma.track.findMany({
@@ -3237,16 +3440,10 @@ router.get("/radio", async (req, res) => {
             case "decade":
                 // Filter by decade (e.g., value = "1990" for 90s)
                 const decadeStart = parseInt(value as string) || 2000;
-                const decadeEnd = decadeStart + 9;
 
                 const decadeTracks = await prisma.track.findMany({
                     where: {
-                        album: {
-                            year: {
-                                gte: decadeStart,
-                                lte: decadeEnd,
-                            },
-                        },
+                        album: getDecadeWhereClause(decadeStart),
                     },
                     select: { id: true },
                     take: limitNum * 3,
@@ -3255,51 +3452,36 @@ router.get("/radio", async (req, res) => {
                 break;
 
             case "genre":
-                // Filter by genre (matches against album or track genre tags)
+                // Filter by genre (uses Artist.genres and Artist.userGenres)
                 const genreValue = ((value as string) || "").toLowerCase();
 
-                // Strategy 1: Check trackGenres relation (most reliable)
-                const genreRelationTracks = await prisma.track.findMany({
-                    where: {
-                        trackGenres: {
-                            some: {
-                                genre: {
-                                    name: {
-                                        contains: genreValue,
-                                        mode: "insensitive",
-                                    },
-                                },
-                            },
-                        },
-                    },
-                    select: { id: true },
-                    take: limitNum * 2,
-                });
-                trackIds = genreRelationTracks.map((t) => t.id);
+                // Query Artist.genres and userGenres fields with raw SQL
+                // Join Artist → Album → Track and filter by genre using LIKE for partial matching
+                // Check BOTH canonical genres AND user-added genres (OR condition)
+                const genreTracks = await prisma.$queryRaw<
+                    { id: string }[]
+                >`
+                    SELECT DISTINCT t.id
+                    FROM "Artist" ar
+                    JOIN "Album" a ON a."artistId" = ar.id
+                    JOIN "Track" t ON t."albumId" = a.id
+                    WHERE (
+                        (ar.genres IS NOT NULL AND EXISTS (
+                            SELECT 1 FROM jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
+                            WHERE LOWER(g.genre) LIKE ${"%" + genreValue + "%"}
+                        ))
+                        OR
+                        (ar."userGenres" IS NOT NULL AND EXISTS (
+                            SELECT 1 FROM jsonb_array_elements_text(ar."userGenres"::jsonb) AS ug(genre)
+                            WHERE LOWER(ug.genre) LIKE ${"%" + genreValue + "%"}
+                        ))
+                    )
+                    LIMIT ${limitNum * 2}
+                `;
+                trackIds = genreTracks.map((t) => t.id);
 
-                // Strategy 2: If not enough, check album.genres JSON field with raw query
-                if (trackIds.length < limitNum) {
-                    const albumGenreTracks = await prisma.$queryRaw<
-                        { id: string }[]
-                    >`
-                        SELECT t.id 
-                        FROM "Track" t
-                        JOIN "Album" a ON t."albumId" = a.id
-                        WHERE a.genres IS NOT NULL 
-                        AND EXISTS (
-                            SELECT 1 FROM jsonb_array_elements_text(a.genres::jsonb) AS g
-                            WHERE LOWER(g) LIKE ${"%" + genreValue + "%"}
-                        )
-                        LIMIT ${limitNum * 2}
-                    `;
-                    const newIds = albumGenreTracks
-                        .map((t) => t.id)
-                        .filter((id) => !trackIds.includes(id));
-                    trackIds = [...trackIds, ...newIds];
-                }
-
-                console.log(
-                    `[Radio:genre] Found ${trackIds.length} tracks for genre "${genreValue}"`
+                logger.debug(
+                    `[Radio:genre] Found ${trackIds.length} tracks for genre "${genreValue}" from Artist.genres and userGenres`
                 );
                 break;
 
@@ -3402,7 +3584,7 @@ router.get("/radio", async (req, res) => {
                     take: limitNum * 2,
                 });
                 workoutTrackIds = energyTracks.map((t) => t.id);
-                console.log(
+                logger.debug(
                     `[Radio:workout] Found ${workoutTrackIds.length} tracks via audio analysis`
                 );
 
@@ -3453,7 +3635,7 @@ router.get("/radio", async (req, res) => {
                     workoutTrackIds = [
                         ...new Set([...workoutTrackIds, ...genreTrackIds]),
                     ];
-                    console.log(
+                    logger.debug(
                         `[Radio:workout] After genre check: ${workoutTrackIds.length} tracks`
                     );
 
@@ -3476,7 +3658,7 @@ router.get("/radio", async (req, res) => {
                                 ...albumGenreTracks.map((t) => t.id),
                             ]),
                         ];
-                        console.log(
+                        logger.debug(
                             `[Radio:workout] After album genre check: ${workoutTrackIds.length} tracks`
                         );
                     }
@@ -3495,7 +3677,7 @@ router.get("/radio", async (req, res) => {
                         .json({ error: "Artist ID required for artist radio" });
                 }
 
-                console.log(
+                logger.debug(
                     `[Radio:artist] Starting artist radio for: ${artistId}`
                 );
 
@@ -3510,7 +3692,7 @@ router.get("/radio", async (req, res) => {
                         danceability: true,
                     },
                 });
-                console.log(
+                logger.debug(
                     `[Radio:artist] Found ${artistTracks.length} tracks from artist`
                 );
 
@@ -3547,7 +3729,7 @@ router.get("/radio", async (req, res) => {
                                   ) / analyzedTracks.length,
                           }
                         : null;
-                console.log(`[Radio:artist] Artist vibe:`, avgVibe);
+                logger.debug(`[Radio:artist] Artist vibe:`, avgVibe);
 
                 // 2. Get library artist IDs (artists user actually owns)
                 const ownedArtists = await prisma.ownedAlbum.findMany({
@@ -3558,7 +3740,7 @@ router.get("/radio", async (req, res) => {
                     ownedArtists.map((o) => o.artistId)
                 );
                 libraryArtistIds.delete(artistId); // Exclude the current artist
-                console.log(
+                logger.debug(
                     `[Radio:artist] Library has ${libraryArtistIds.size} other artists`
                 );
 
@@ -3574,7 +3756,7 @@ router.get("/radio", async (req, res) => {
                 let similarArtistIds = similarInLibrary.map(
                     (s) => s.toArtistId
                 );
-                console.log(
+                logger.debug(
                     `[Radio:artist] Found ${similarArtistIds.length} Last.fm similar artists in library`
                 );
 
@@ -3582,9 +3764,9 @@ router.get("/radio", async (req, res) => {
                 if (similarArtistIds.length < 5 && libraryArtistIds.size > 0) {
                     const artist = await prisma.artist.findUnique({
                         where: { id: artistId },
-                        select: { genres: true },
+                        select: { genres: true, userGenres: true },
                     });
-                    const artistGenres = (artist?.genres as string[]) || [];
+                    const artistGenres = getMergedGenres(artist || {});
 
                     if (artistGenres.length > 0) {
                         // Find library artists with overlapping genres
@@ -3592,14 +3774,17 @@ router.get("/radio", async (req, res) => {
                             where: {
                                 id: { in: Array.from(libraryArtistIds) },
                             },
-                            select: { id: true, genres: true },
+                            select: {
+                                id: true,
+                                genres: true,
+                                userGenres: true,
+                            },
                         });
 
-                        // Score artists by genre overlap
+                        // Score artists by genre overlap using merged genres
                         const scoredArtists = genreMatchArtists
                             .map((a) => {
-                                const theirGenres =
-                                    (a.genres as string[]) || [];
+                                const theirGenres = getMergedGenres(a);
                                 const overlap = artistGenres.filter((g) =>
                                     theirGenres.some(
                                         (tg) =>
@@ -3624,7 +3809,7 @@ router.get("/radio", async (req, res) => {
                                 ...genreArtistIds,
                             ]),
                         ];
-                        console.log(
+                        logger.debug(
                             `[Radio:artist] After genre matching: ${similarArtistIds.length} similar artists`
                         );
                     }
@@ -3651,7 +3836,7 @@ router.get("/radio", async (req, res) => {
                             danceability: true,
                         },
                     });
-                    console.log(
+                    logger.debug(
                         `[Radio:artist] Found ${similarTracks.length} tracks from similar artists`
                     );
                 }
@@ -3710,7 +3895,7 @@ router.get("/radio", async (req, res) => {
                                 (b as any).vibeScore - (a as any).vibeScore
                         );
 
-                    console.log(
+                    logger.debug(
                         `[Radio:artist] Applied vibe boost, top score: ${(
                             similarTracks[0] as any
                         )?.vibeScore?.toFixed(2)}`
@@ -3739,7 +3924,7 @@ router.get("/radio", async (req, res) => {
                 trackIds = [...selectedOriginal, ...selectedSimilar].map(
                     (t) => t.id
                 );
-                console.log(
+                logger.debug(
                     `[Radio:artist] Final mix: ${selectedOriginal.length} original + ${selectedSimilar.length} similar = ${trackIds.length} tracks`
                 );
                 break;
@@ -3754,7 +3939,7 @@ router.get("/radio", async (req, res) => {
                         .json({ error: "Track ID required for vibe matching" });
                 }
 
-                console.log(
+                logger.debug(
                     `[Radio:vibe] Starting vibe match for track: ${sourceTrackId}`
                 );
 
@@ -3782,19 +3967,19 @@ router.get("/radio", async (req, res) => {
                     (sourceTrack.moodHappy !== null &&
                         sourceTrack.moodSad !== null);
 
-                console.log(
+                logger.debug(
                     `[Radio:vibe] Source: "${sourceTrack.title}" by ${sourceTrack.album.artist.name}`
                 );
-                console.log(
+                logger.debug(
                     `[Radio:vibe] Analysis mode: ${
                         isEnhancedAnalysis ? "ENHANCED" : "STANDARD"
                     }`
                 );
-                console.log(
+                logger.debug(
                     `[Radio:vibe] Source features: BPM=${sourceTrack.bpm}, Energy=${sourceTrack.energy}, Valence=${sourceTrack.valence}`
                 );
                 if (isEnhancedAnalysis) {
-                    console.log(
+                    logger.debug(
                         `[Radio:vibe] ML Moods: Happy=${sourceTrack.moodHappy}, Sad=${sourceTrack.moodSad}, Relaxed=${sourceTrack.moodRelaxed}, Aggressive=${sourceTrack.moodAggressive}, Party=${sourceTrack.moodParty}, Acoustic=${sourceTrack.moodAcoustic}, Electronic=${sourceTrack.moodElectronic}`
                     );
                 }
@@ -3860,7 +4045,7 @@ router.get("/radio", async (req, res) => {
                         },
                     });
 
-                    console.log(
+                    logger.debug(
                         `[Radio:vibe] Found ${analyzedTracks.length} analyzed tracks to compare`
                     );
 
@@ -4129,19 +4314,19 @@ router.get("/radio", async (req, res) => {
                         const enhancedCount = goodMatches.filter(
                             (t) => t.enhanced
                         ).length;
-                        console.log(
+                        logger.debug(
                             `[Radio:vibe] Audio matching found ${
                                 vibeMatchedIds.length
                             } tracks (>${minThreshold * 100}% similarity)`
                         );
-                        console.log(
+                        logger.debug(
                             `[Radio:vibe] Enhanced matches: ${enhancedCount}, Standard matches: ${
                                 goodMatches.length - enhancedCount
                             }`
                         );
 
                         if (goodMatches.length > 0) {
-                            console.log(
+                            logger.debug(
                                 `[Radio:vibe] Top match score: ${goodMatches[0].score.toFixed(
                                     2
                                 )} (${
@@ -4165,7 +4350,7 @@ router.get("/radio", async (req, res) => {
                     });
                     const newIds = artistTracks.map((t) => t.id);
                     vibeMatchedIds = [...vibeMatchedIds, ...newIds];
-                    console.log(
+                    logger.debug(
                         `[Radio:vibe] Fallback A (same artist): added ${newIds.length} tracks, total: ${vibeMatchedIds.length}`
                     );
                 }
@@ -4213,7 +4398,7 @@ router.get("/radio", async (req, res) => {
                         );
                         const newIds = similarArtistTracks.map((t) => t.id);
                         vibeMatchedIds = [...vibeMatchedIds, ...newIds];
-                        console.log(
+                        logger.debug(
                             `[Radio:vibe] Fallback B (similar artists): added ${newIds.length} tracks, total: ${vibeMatchedIds.length}`
                         );
                     }
@@ -4246,7 +4431,7 @@ router.get("/radio", async (req, res) => {
                     });
                     const newIds = genreTracks.map((t) => t.id);
                     vibeMatchedIds = [...vibeMatchedIds, ...newIds];
-                    console.log(
+                    logger.debug(
                         `[Radio:vibe] Fallback C (same genre): added ${newIds.length} tracks, total: ${vibeMatchedIds.length}`
                     );
                 }
@@ -4262,13 +4447,13 @@ router.get("/radio", async (req, res) => {
                     });
                     const newIds = randomTracks.map((t) => t.id);
                     vibeMatchedIds = [...vibeMatchedIds, ...newIds];
-                    console.log(
+                    logger.debug(
                         `[Radio:vibe] Fallback D (random): added ${newIds.length} tracks, total: ${vibeMatchedIds.length}`
                     );
                 }
 
                 trackIds = vibeMatchedIds;
-                console.log(
+                logger.debug(
                     `[Radio:vibe] Final vibe queue: ${trackIds.length} tracks`
                 );
                 break;
@@ -4330,9 +4515,9 @@ router.get("/radio", async (req, res) => {
         // === VIBE QUEUE LOGGING ===
         // Log detailed info for vibe matching analysis (using ordered tracks)
         if (type === "vibe" && vibeSourceFeatures) {
-            console.log("\n" + "=".repeat(100));
-            console.log("VIBE QUEUE ANALYSIS - Source Track");
-            console.log("=".repeat(100));
+            logger.debug("\n" + "=".repeat(100));
+            logger.debug("VIBE QUEUE ANALYSIS - Source Track");
+            logger.debug("=".repeat(100));
 
             // Find source track for logging
             const srcTrack = await prisma.track.findUnique({
@@ -4346,28 +4531,28 @@ router.get("/radio", async (req, res) => {
             });
 
             if (srcTrack) {
-                console.log(
+                logger.debug(
                     `SOURCE: "${srcTrack.title}" by ${srcTrack.album.artist.name}`
                 );
-                console.log(`  Album: ${srcTrack.album.title}`);
-                console.log(
+                logger.debug(`  Album: ${srcTrack.album.title}`);
+                logger.debug(
                     `  Analysis Mode: ${
                         (srcTrack as any).analysisMode || "unknown"
                     }`
                 );
-                console.log(
+                logger.debug(
                     `  BPM: ${srcTrack.bpm?.toFixed(1) || "N/A"} | Energy: ${
                         srcTrack.energy?.toFixed(2) || "N/A"
                     } | Valence: ${srcTrack.valence?.toFixed(2) || "N/A"}`
                 );
-                console.log(
+                logger.debug(
                     `  Danceability: ${
                         srcTrack.danceability?.toFixed(2) || "N/A"
                     } | Arousal: ${
                         srcTrack.arousal?.toFixed(2) || "N/A"
                     } | Key: ${srcTrack.keyScale || "N/A"}`
                 );
-                console.log(
+                logger.debug(
                     `  ML Moods: Happy=${
                         (srcTrack as any).moodHappy?.toFixed(2) || "N/A"
                     }, Sad=${
@@ -4378,31 +4563,31 @@ router.get("/radio", async (req, res) => {
                         (srcTrack as any).moodAggressive?.toFixed(2) || "N/A"
                     }`
                 );
-                console.log(
+                logger.debug(
                     `  Genres: ${
                         srcTrack.trackGenres
                             .map((tg) => tg.genre.name)
                             .join(", ") || "N/A"
                     }`
                 );
-                console.log(
+                logger.debug(
                     `  Last.fm Tags: ${
                         ((srcTrack as any).lastfmTags || []).join(", ") || "N/A"
                     }`
                 );
-                console.log(
+                logger.debug(
                     `  Mood Tags: ${
                         ((srcTrack as any).moodTags || []).join(", ") || "N/A"
                     }`
                 );
             }
 
-            console.log("\n" + "-".repeat(100));
-            console.log(
+            logger.debug("\n" + "-".repeat(100));
+            logger.debug(
                 `VIBE QUEUE - ${orderedTracks.length} tracks (showing up to 50, SORTED BY MATCH SCORE)`
             );
-            console.log("-".repeat(100));
-            console.log(
+            logger.debug("-".repeat(100));
+            logger.debug(
                 `${"#".padEnd(3)} | ${"TRACK".padEnd(35)} | ${"ARTIST".padEnd(
                     20
                 )} | ${"BPM".padEnd(6)} | ${"ENG".padEnd(5)} | ${"VAL".padEnd(
@@ -4411,7 +4596,7 @@ router.get("/radio", async (req, res) => {
                     4
                 )} | ${"A".padEnd(4)} | MODE    | GENRES`
             );
-            console.log("-".repeat(100));
+            logger.debug("-".repeat(100));
 
             orderedTracks.slice(0, 50).forEach((track, i) => {
                 const t = track as any;
@@ -4454,7 +4639,7 @@ router.get("/radio", async (req, res) => {
                     .map((tg) => tg.genre.name)
                     .join(", ");
 
-                console.log(
+                logger.debug(
                     `${String(i + 1).padEnd(
                         3
                     )} | ${title} | ${artist} | ${bpm} | ${energy} | ${valence} | ${happy} | ${sad} | ${relaxed} | ${aggressive} | ${mode} | ${genres}`
@@ -4462,10 +4647,10 @@ router.get("/radio", async (req, res) => {
             });
 
             if (orderedTracks.length > 50) {
-                console.log(`... and ${orderedTracks.length - 50} more tracks`);
+                logger.debug(`... and ${orderedTracks.length - 50} more tracks`);
             }
 
-            console.log("=".repeat(100) + "\n");
+            logger.debug("=".repeat(100) + "\n");
         }
 
         // Transform to match frontend Track interface
@@ -4521,7 +4706,7 @@ router.get("/radio", async (req, res) => {
 
         res.json(response);
     } catch (error) {
-        console.error("Radio endpoint error:", error);
+        logger.error("Radio endpoint error:", error);
         res.status(500).json({ error: "Failed to get radio tracks" });
     }
 });
