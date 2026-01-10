@@ -1,0 +1,279 @@
+# ==============================================================================
+
+# .rooignore - Custom for Lidify (Based on Context Analysis)
+
+# ==============================================================================
+
+# Created: 2026-01-09
+
+# Current token usage: ~177,000 tokens per request
+
+# Target: ~60,000-80,000 tokens per request (60% reduction)
+
+# Expected savings: $335-395/month
+
+# ==============================================================================
+
+# ==============================================================================
+
+# TEST ARTIFACTS - BIGGEST BLOAT (1.4MB found in your project)
+
+# ==============================================================================
+
+# Playwright test reports and results - these are generated artifacts
+
+playwright-report/
+test-results/
+frontend/playwright-report/
+frontend/test-results/
+
+# Test files themselves
+
+_.test.ts
+_.test.tsx
+_.test.js
+_.test.jsx
+_.spec.ts
+_.spec.tsx
+_.spec.js
+_.spec.jsx
+**/**tests**/
+**/tests/
+
+# ==============================================================================
+
+# CONTEXT_PORTAL - Your RAG System (1MB of vector DB data)
+
+# ==============================================================================
+
+# This is YOUR context portal - Roo Code doesn't need to read it!
+
+context_portal/
+context_portal/conport_vector_data/
+context_portal/context.db
+\*.sqlite3
+
+# ==============================================================================
+
+# BUILD ARTIFACTS & CACHES (.next/ = 24MB)
+
+# ==============================================================================
+
+.next/
+dist/
+build/
+out/
+\*.tsbuildinfo
+.turbo/
+
+# ==============================================================================
+
+# DEPENDENCIES - Never needed (429M backend + 729M frontend)
+
+# ==============================================================================
+
+node_modules/
+.pnp
+.pnp.js
+.yarn/
+
+# Lock files (488KB total)
+
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+**/node_modules/**/yarn.lock
+
+# ==============================================================================
+
+# IMAGES & MEDIA - (3MB+ of screenshots)
+
+# ==============================================================================
+
+# All image formats
+
+_.png
+_.jpg
+_.jpeg
+_.gif
+_.webp
+_.svg
+_.ico
+_.bmp
+
+# Specifically your screenshot directories
+
+assets/screenshots/
+frontend/assets/splash.png
+frontend/assets/splash-dark.png
+
+# ==============================================================================
+
+# DOCS - Large deployment doc (312KB)
+
+# ==============================================================================
+
+# Keep README.md, CONTRIBUTING.md, CHANGELOG.md
+
+# Exclude large pending deploy docs
+
+docs/PENDING_DEPLOY-1.md
+
+# ==============================================================================
+
+# DATABASE MIGRATIONS - Keep recent, exclude none (all are 2025+)
+
+# ==============================================================================
+
+# Your migrations are all from 2025/2026, so keep them all
+
+# If you add older migrations later:
+
+# backend/prisma/migrations/2024\*/
+
+# ==============================================================================
+
+# VERSION CONTROL
+
+# ==============================================================================
+
+.git/
+.gitignore
+.gitattributes
+
+# ==============================================================================
+
+# SOULARR - External project (separate tool)
+
+# ==============================================================================
+
+# If this is a separate tool/subproject, exclude it
+
+soularr/
+
+# ==============================================================================
+
+# IDE & EDITOR
+
+# ==============================================================================
+
+.vscode/
+.idea/
+\*.sublime-workspace
+.DS_Store
+desktop.ini
+
+# Roo-specific directories (don't need to analyze Roo's own metadata)
+
+.roo/
+.claude/
+
+# ==============================================================================
+
+# LOGS & TEMP
+
+# ==============================================================================
+
+_.log
+npm-debug.log_
+yarn-debug.log*
+yarn-error.log*
+_.tmp
+_.temp
+tmp/
+temp/
+
+# ==============================================================================
+
+# ENVIRONMENT FILES
+
+# ==============================================================================
+
+.env.local
+.env.\*.local
+.env.production
+.env.development
+
+# ==============================================================================
+
+# DOCKER (Keep these - you modify them)
+
+# ==============================================================================
+
+# Keeping Docker files as you have 8 docker-compose files
+
+# Uncomment if you rarely modify:
+
+# Dockerfile
+
+# docker-compose\*.yml
+
+# ==============================================================================
+
+# GITHUB WORKFLOWS
+
+# ==============================================================================
+
+.github/workflows/
+
+# ==============================================================================
+
+# PYTHON CACHE (from services/audio-analyzer)
+
+# ==============================================================================
+
+**pycache**/
+_.pyc
+_.pyo
+\*.pyd
+.Python
+
+# ==============================================================================
+
+# VERIFICATION CHECKLIST
+
+# ==============================================================================
+
+# After adding this file:
+
+#
+
+# 1. Restart Roo Code
+
+# 2. Make a simple request (e.g., "explain backend/src/routes/library.ts")
+
+# 3. Check OpenRouter activity: https://openrouter.ai/activity
+
+# 4. Verify token count: Should be ~60K-80K (down from 177K)
+
+#
+
+# If still high:
+
+# - Check if node_modules/ is truly excluded
+
+# - Verify .next/ is excluded
+
+# - Check if test files are still being loaded
+
+#
+
+# If too aggressive (AI can't find files):
+
+# - Remove specific exclusions one at a time
+
+# - Start by uncommenting Docker files
+
+# - Then uncomment docs if needed
+
+#
+
+# Expected cost per request:
+
+# - Before: $0.141 (177K tokens)
+
+# - After: $0.055-0.070 (60-80K tokens)
+
+# - Savings: 50-60% reduction
+
+# ==============================================================================

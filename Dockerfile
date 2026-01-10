@@ -193,6 +193,7 @@ priority=10
 
 [program:redis]
 command=/usr/bin/redis-server --dir /data/redis --appendonly yes
+user=redis
 autostart=true
 autorestart=true
 stdout_logfile=/dev/stdout
@@ -235,7 +236,7 @@ stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
-environment=DATABASE_URL="postgresql://lidify:lidify@localhost:5432/lidify",REDIS_URL="redis://localhost:6379",MUSIC_PATH="/music",BATCH_SIZE="10",SLEEP_INTERVAL="5"
+environment=DATABASE_URL="postgresql://lidify:lidify@localhost:5432/lidify",REDIS_URL="redis://localhost:6379",MUSIC_PATH="/music",BATCH_SIZE="10",SLEEP_INTERVAL="5",MAX_ANALYZE_SECONDS="90"
 priority=50
 EOF
 
@@ -274,10 +275,33 @@ if [ -z "$PG_BIN" ]; then
 fi
 echo "Using PostgreSQL from: $PG_BIN"
 
-# Fix permissions on data directories (may have different UID from previous container)
-echo "Fixing data directory permissions..."
-chown -R postgres:postgres /data/postgres /run/postgresql 2>/dev/null || true
-chmod 700 /data/postgres 2>/dev/null || true
+# Prepare data directories (bind-mount safe)
+echo "Preparing data directories..."
+mkdir -p /data/postgres /data/redis /run/postgresql
+
+if id postgres >/dev/null 2>&1; then
+    chown -R postgres:postgres /data/postgres /run/postgresql 2>/dev/null || true
+    chmod 700 /data/postgres 2>/dev/null || true
+    if ! gosu postgres test -w /data/postgres; then
+        POSTGRES_UID=$(id -u postgres)
+        POSTGRES_GID=$(id -g postgres)
+        echo "ERROR: /data/postgres is not writable by postgres (${POSTGRES_UID}:${POSTGRES_GID})."
+        echo "If you bind-mount /data, ensure the host path is writable by that UID/GID."
+        exit 1
+    fi
+fi
+
+if id redis >/dev/null 2>&1; then
+    chown -R redis:redis /data/redis 2>/dev/null || true
+    chmod 700 /data/redis 2>/dev/null || true
+    if ! gosu redis test -w /data/redis; then
+        REDIS_UID=$(id -u redis)
+        REDIS_GID=$(id -g redis)
+        echo "ERROR: /data/redis is not writable by redis (${REDIS_UID}:${REDIS_GID})."
+        echo "If you bind-mount /data, ensure the host path is writable by that UID/GID."
+        exit 1
+    fi
+fi
 
 # Clean up stale PID file if exists
 rm -f /data/postgres/postmaster.pid 2>/dev/null || true

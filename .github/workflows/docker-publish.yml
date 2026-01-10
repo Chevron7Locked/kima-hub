@@ -1,4 +1,4 @@
-name: Build and Publish Docker Image
+name: Release ${{ github.ref_name }}
 
 on:
     push:

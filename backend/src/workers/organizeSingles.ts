@@ -121,9 +121,12 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
                 continue;
             }
 
-            // Create destination directory
-            if (!fs.existsSync(destDir)) {
+            // Create destination directory (idempotent - won't fail if exists)
+            try {
                 fs.mkdirSync(destDir, { recursive: true });
+            } catch (err: any) {
+                sessionLog('ORGANIZE', `Failed to create directory ${destDir}: ${err.message}`, 'WARN');
+                continue; // Skip this file, try next
             }
 
             // Move file (copy then delete original)

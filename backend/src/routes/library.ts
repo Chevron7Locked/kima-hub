@@ -2754,32 +2754,12 @@ router.get("/tracks/:id/stream", async (req, res) => {
                     `[STREAM] Sending file: ${filePath}, mimeType: ${mimeType}`
                 );
 
-                res.sendFile(
-                    filePath,
-                    {
-                        headers: {
-                            "Content-Type": mimeType,
-                            "Accept-Ranges": "bytes",
-                            "Cache-Control": "public, max-age=31536000",
-                            "Access-Control-Allow-Origin":
-                                req.headers.origin || "*",
-                            "Access-Control-Allow-Credentials": "true",
-                            "Cross-Origin-Resource-Policy": "cross-origin",
-                        },
-                    },
-                    (err) => {
-                        // Always destroy the streaming service to clean up intervals
-                        streamingService.destroy();
-                        if (err) {
-                            logger.error(`[STREAM] sendFile error:`, err);
-                        } else {
-                            logger.debug(
-                                `[STREAM] File sent successfully: ${path.basename(
-                                    filePath
-                                )}`
-                            );
-                        }
-                    }
+                await streamingService.streamFileWithRangeSupport(req, res, filePath, mimeType);
+                streamingService.destroy();
+                logger.debug(
+                    `[STREAM] File sent successfully: ${path.basename(
+                        filePath
+                    )}`
                 );
 
                 return;
@@ -2812,30 +2792,8 @@ router.get("/tracks/:id/stream", async (req, res) => {
                             absolutePath
                         );
 
-                    res.sendFile(
-                        filePath,
-                        {
-                            headers: {
-                                "Content-Type": mimeType,
-                                "Accept-Ranges": "bytes",
-                                "Cache-Control": "public, max-age=31536000",
-                                "Access-Control-Allow-Origin":
-                                    req.headers.origin || "*",
-                                "Access-Control-Allow-Credentials": "true",
-                                "Cross-Origin-Resource-Policy": "cross-origin",
-                            },
-                        },
-                        (err) => {
-                            // Always destroy the streaming service to clean up intervals
-                            streamingService.destroy();
-                            if (err) {
-                                logger.error(
-                                    `[STREAM] sendFile fallback error:`,
-                                    err
-                                );
-                            }
-                        }
-                    );
+                    await streamingService.streamFileWithRangeSupport(req, res, filePath, mimeType);
+                    streamingService.destroy();
                     return;
                 }
 

@@ -17,6 +17,7 @@ const navigation = [
     { name: "Library", href: "/library" },
     { name: "Radio", href: "/radio" },
     { name: "Discovery", href: "/discover" },
+    { name: "Releases", href: "/releases" },
     { name: "Audiobooks", href: "/audiobooks" },
     { name: "Podcasts", href: "/podcasts" },
     { name: "Browse", href: "/browse/playlists", badge: "Beta" },

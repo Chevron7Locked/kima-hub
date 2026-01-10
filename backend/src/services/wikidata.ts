@@ -78,13 +78,10 @@ class WikidataService {
       LIMIT 1
     `;
 
-        const response = await axios.get("https://query.wikidata.org/sparql", {
+        const response = await this.client.get("https://query.wikidata.org/sparql", {
             params: {
                 query: sparqlQuery,
                 format: "json",
-            },
-            headers: {
-                "User-Agent": "Lidify/1.0.0",
             },
         });
 
@@ -100,7 +97,7 @@ class WikidataService {
     ): Promise<string | undefined> {
         try {
             // Get English Wikipedia article title
-            const response = await axios.get(
+            const response = await this.client.get(
                 `https://www.wikidata.org/wiki/Special:EntityData/${wikidataId}.json`
             );
 
@@ -110,7 +107,7 @@ class WikidataService {
             if (!enWikiTitle) return undefined;
 
             // Get article summary from Wikipedia API
-            const summaryResponse = await axios.get(
+            const summaryResponse = await this.client.get(
                 "https://en.wikipedia.org/api/rest_v1/page/summary/" +
                     encodeURIComponent(enWikiTitle)
             );
@@ -129,7 +126,7 @@ class WikidataService {
         wikidataId: string
     ): Promise<string | undefined> {
         try {
-            const response = await axios.get(
+            const response = await this.client.get(
                 `https://www.wikidata.org/wiki/Special:EntityData/${wikidataId}.json`
             );
 

@@ -275,6 +275,16 @@ docker compose pull
 docker compose up -d
 ```
 
+### Bind-mounting `/data` on Linux
+
+Named volumes are recommended. If you bind-mount `/data`, make sure required subdirectories exist and are writable by the container service users.
+
+```bash
+mkdir -p /path/to/lidify-data/postgres /path/to/lidify-data/redis
+```
+
+If startup logs report a permission error, `chown` the host path to the UID/GID shown in the logs (for example, the postgres user).
+
 ---
 
 Lidify will begin scanning your music library automatically. Depending on the size of your collection, this may take a few minutes to several hours.

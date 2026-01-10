@@ -247,7 +247,8 @@ export function SeekSlider({
         >
             <div
                 className={cn(
-                    "h-full rounded-full relative transition-all duration-150",
+                    "h-full rounded-full relative",
+                    !isDragging && "transition-all duration-150",
                     styles.progress
                 )}
                 style={{ width: `${displayProgress}%` }}

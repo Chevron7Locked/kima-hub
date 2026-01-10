@@ -5,6 +5,52 @@ All notable changes to Lidify will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] - 2025-01-07
+
+Bug fix patch release addressing 6 P1 critical issues and 2 P2 quality-of-life improvements.
+
+### Fixed
+
+#### Critical (P1)
+-   **Docker:** PostgreSQL/Redis bind mount permission errors on Linux hosts ([#59](https://github.com/Chevron7Locked/lidify/issues/59)) - @arsaboo via [#62](https://github.com/Chevron7Locked/lidify/pull/62)
+-   **Audio Analyzer:** Memory consumption/OOM crashes with large libraries ([#21](https://github.com/Chevron7Locked/lidify/issues/21), [#26](https://github.com/Chevron7Locked/lidify/issues/26)) - @rustyricky via [#53](https://github.com/Chevron7Locked/lidify/pull/53)
+-   **LastFM:** ".map is not a function" crashes with obscure artists ([#37](https://github.com/Chevron7Locked/lidify/issues/37)) - @RustyJonez via [#39](https://github.com/Chevron7Locked/lidify/pull/39)
+-   **Wikidata:** 403 Forbidden errors from missing User-Agent header ([#57](https://github.com/Chevron7Locked/lidify/issues/57))
+-   **Downloads:** Singles directory creation race conditions ([#58](https://github.com/Chevron7Locked/lidify/issues/58))
+-   **Firefox:** FLAC playback stopping at ~4:34 mark on large files ([#42](https://github.com/Chevron7Locked/lidify/issues/42), [#17](https://github.com/Chevron7Locked/lidify/issues/17))
+
+#### Quality of Life (P2)
+-   **Desktop UI:** Added missing "Releases" link to desktop sidebar navigation ([#41](https://github.com/Chevron7Locked/lidify/issues/41))
+-   **iPhone:** Dynamic Island/notch overlapping TopBar buttons ([#54](https://github.com/Chevron7Locked/lidify/issues/54))
+
+### Technical Details
+
+-   **Docker Permissions (#62):** Creates `/data/postgres` and `/data/redis` directories with proper ownership; validates write permissions at startup using `gosu <user> test -w`
+-   **Audio Analyzer Memory (#53):** TensorFlow GPU memory growth enabled; `MAX_ANALYZE_SECONDS` configurable (default 90s); explicit garbage collection in finally blocks
+-   **LastFM Normalization (#39):** `normalizeToArray()` utility wraps single-object API responses; protects 5 locations in artist discovery endpoints
+-   **Wikidata User-Agent (#57):** All 4 API endpoints now use configured axios client with proper User-Agent header
+-   **Singles Directory (#58):** Replaced TOCTOU `existsSync()`+`mkdirSync()` pattern with idempotent `mkdir({recursive: true})`
+-   **Firefox FLAC (#42):** Replaced Express `res.sendFile()` with manual range request handling via `fs.createReadStream()` with proper `Content-Range` headers
+-   **Desktop Releases (#41):** Single-line addition to Sidebar.tsx navigation array
+-   **iPhone Safe Area (#54):** TopBar and AuthenticatedLayout use `env(safe-area-inset-top)` CSS environment variable
+
+### Deferred to Future Release
+
+-   **PR #49** - Playlist visibility toggle (needs PR review)
+-   **PR #47** - Mood bucket tags (already implemented, verify and close)
+-   **PR #36** - Docker --user flag (needs security review)
+
+### Contributors
+
+Thanks to everyone who contributed to this release:
+
+-   @arsaboo - Docker bind mount permissions fix ([#62](https://github.com/Chevron7Locked/lidify/pull/62))
+-   @rustyricky - Audio analyzer memory limits ([#53](https://github.com/Chevron7Locked/lidify/pull/53))
+-   @RustyJonez - LastFM array normalization ([#39](https://github.com/Chevron7Locked/lidify/pull/39))
+-   @tombatossals - Testing and validation
+
+---
+
 ## [1.3.2] - 2025-01-07
 
 ### Fixed

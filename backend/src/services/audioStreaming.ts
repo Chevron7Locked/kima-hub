@@ -1,4 +1,6 @@
 import * as fs from "fs";
+import { promises as fsPromises } from "fs";
+import { Request, Response } from "express";
 import { logger } from "../utils/logger";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -382,6 +384,95 @@ export class AudioStreamingService {
             ".wv": "audio/x-wavpack",
         };
         return mimeTypes[ext] || "audio/mpeg";
+    }
+
+    /**
+     * Stream file with proper HTTP Range support (fixes Firefox FLAC issue #42/#17)
+     * Manually handles Range requests to ensure compatibility with Firefox's strict
+     * Content-Range header validation for large FLAC files.
+     */
+    async streamFileWithRangeSupport(
+        req: Request,
+        res: Response,
+        filePath: string,
+        mimeType: string
+    ): Promise<void> {
+        try {
+            // Get file stats for size
+            const stats = await fsPromises.stat(filePath);
+            const fileSize = stats.size;
+
+            // Parse Range header
+            const range = req.headers.range;
+            let start = 0;
+            let end = fileSize - 1;
+
+            if (range) {
+                // Parse bytes=START-END or bytes=START-
+                const parts = range.replace(/bytes=/, "").split("-");
+                start = parseInt(parts[0], 10);
+                end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+                // Validate range
+                if (start >= fileSize || end >= fileSize || start > end) {
+                    res.status(416).set({
+                        "Content-Range": `bytes */${fileSize}`,
+                    });
+                    res.end();
+                    return;
+                }
+            }
+
+            const contentLength = end - start + 1;
+
+            // Set response headers
+            const headers: Record<string, string> = {
+                "Content-Type": mimeType,
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=31536000",
+                "Content-Length": contentLength.toString(),
+            };
+
+            // Add CORS headers from request origin
+            if (req.headers.origin) {
+                headers["Access-Control-Allow-Origin"] = req.headers.origin;
+                headers["Access-Control-Allow-Credentials"] = "true";
+            }
+
+            // Set status and range-specific headers
+            if (range) {
+                res.status(206);
+                headers["Content-Range"] = `bytes ${start}-${end}/${fileSize}`;
+            } else {
+                res.status(200);
+            }
+
+            res.set(headers);
+
+            // Create read stream with range
+            const stream = fs.createReadStream(filePath, { start, end });
+
+            // Handle stream errors
+            stream.on("error", (err) => {
+                logger.error(`[AudioStreaming] Stream error for ${filePath}:`, err);
+                if (!res.headersSent) {
+                    res.status(500).end();
+                }
+            });
+
+            // Handle cleanup on response close
+            res.on("close", () => {
+                stream.destroy();
+            });
+
+            // Pipe stream to response
+            stream.pipe(res);
+        } catch (err) {
+            logger.error(`[AudioStreaming] Failed to stream ${filePath}:`, err);
+            if (!res.headersSent) {
+                res.status(500).end();
+            }
+        }
     }
 
     /**

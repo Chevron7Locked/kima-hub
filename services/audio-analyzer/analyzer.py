@@ -65,6 +65,7 @@ import traceback
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
+import gc
 
 # BrokenProcessPool was added in Python 3.9, provide compatibility for Python 3.8
 try:
@@ -112,6 +113,14 @@ except ImportError as e:
 TF_MODELS_AVAILABLE = False
 TensorflowPredictMusiCNN = None
 try:
+    import tensorflow as tf
+    # Limit TensorFlow memory usage (CPU & GPU)
+    try:
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except Exception:
+        pass
     from essentia.standard import TensorflowPredictMusiCNN
     TF_MODELS_AVAILABLE = True
     logger.info("TensorflowPredictMusiCNN available - Enhanced mode enabled")
@@ -376,14 +385,18 @@ class AudioAnalyzer:
             traceback.print_exc()
             self.enhanced_mode = False
     
-    def load_audio(self, file_path: str, sample_rate: int = 16000) -> Optional[Any]:
-        """Load audio file as mono signal"""
+    def load_audio(self, file_path: str, sample_rate: int = 16000, max_duration: int = 90) -> Optional[Any]:
+        """Load up to max_duration seconds of audio as mono signal (to limit memory usage)"""
         if not ESSENTIA_AVAILABLE:
             return None
         
         try:
             loader = es.MonoLoader(filename=file_path, sampleRate=sample_rate)
             audio = loader()
+            # Limit to max_duration seconds
+            max_samples = int(sample_rate * max_duration)
+            if len(audio) > max_samples:
+                audio = audio[:max_samples]
             return audio
         except Exception as e:
             logger.error(f"Failed to load audio {file_path}: {e}")
@@ -514,12 +527,17 @@ class AudioAnalyzer:
             result['_error'] = 'Essentia library not installed'
             return result
         
-        # Load audio at different sample rates for different algorithms
-        audio_44k = self.load_audio(file_path, 44100)
-        audio_16k = self.load_audio(file_path, 16000)
-        
+        # Limit memory: only analyze up to MAX_ANALYZE_SECONDS (default 90s)
+        MAX_ANALYZE_SECONDS = int(os.getenv('MAX_ANALYZE_SECONDS', '90'))
+        try:
+            # Load audio at different sample rates for different algorithms, limit duration
+            audio_44k = self.load_audio(file_path, 44100, max_duration=MAX_ANALYZE_SECONDS)
+            audio_16k = self.load_audio(file_path, 16000, max_duration=MAX_ANALYZE_SECONDS)
+        except MemoryError:
+            logger.error(f"MemoryError: Could not load audio for {file_path}")
+            result['_error'] = 'MemoryError: audio file too large'
+            return result
         if audio_44k is None or audio_16k is None:
-            result['_error'] = 'Failed to load audio file'
             return result
         
         # Validate audio before analysis (Phase 2 defensive improvement)
@@ -586,7 +604,10 @@ class AudioAnalyzer:
             # Process audio in frames for detailed analysis
             frame_size = 2048
             hop_size = 1024
-            for i in range(0, len(audio_44k) - frame_size, hop_size):
+            max_frames = int((44100 * MAX_ANALYZE_SECONDS - frame_size) / hop_size)
+            for idx, i in enumerate(range(0, len(audio_44k) - frame_size, hop_size)):
+                if idx > max_frames:
+                    break
                 frame = audio_44k[i:i + frame_size]
                 windowed = self.windowing(frame)
                 spectrum = self.spectrum(windowed)
@@ -599,7 +620,6 @@ class AudioAnalyzer:
             # RMS-based energy (properly normalized to 0-1)
             if rms_values:
                 avg_rms = np.mean(rms_values)
-                # RMS is typically 0.0-0.5 for normalized audio, scale to 0-1
                 result['energy'] = round(min(1.0, float(avg_rms) * 3), 3)
             else:
                 result['energy'] = 0.5
@@ -616,7 +636,6 @@ class AudioAnalyzer:
             result['_zcr'] = np.mean(zcr_values) if zcr_values else 0.1
             
             # Basic Danceability (non-ML)
-            # Note: es.Danceability() can return values > 1.0, so we clamp
             danceability, _ = self.danceability_extractor(audio_44k)
             result['danceability'] = round(max(0.0, min(1.0, float(danceability))), 3)
             
@@ -632,22 +651,25 @@ class AudioAnalyzer:
                     traceback.print_exc()
                     self._apply_standard_estimates(result, scale, bpm)
             else:
-                # === STANDARD MODE: Use heuristics ===
                 self._apply_standard_estimates(result, scale, bpm)
             
             # Generate mood tags based on all features
             result['moodTags'] = self._generate_mood_tags(result)
             
             logger.info(f"Analysis complete [{result['analysisMode']}]: BPM={result['bpm']}, Key={result['key']} {result['keyScale']}, Valence={result['valence']}, Arousal={result['arousal']}")
-            
+        except MemoryError:
+            logger.error(f"MemoryError during analysis of {file_path}")
+            result['_error'] = 'MemoryError: analysis exceeded memory limits'
         except Exception as e:
             logger.error(f"Analysis error: {e}")
             traceback.print_exc()
-        
-        # Clean up internal fields before returning
-        for key in ['_spectral_centroid', '_spectral_flatness', '_zcr']:
-            result.pop(key, None)
-        
+        finally:
+            # Clean up internal fields before returning
+            for key in ['_spectral_centroid', '_spectral_flatness', '_zcr']:
+                result.pop(key, None)
+            # Explicitly free memory
+            del audio_44k, audio_16k
+            gc.collect()
         return result
     
     def _extract_ml_features(self, audio_16k) -> Dict[str, Any]:

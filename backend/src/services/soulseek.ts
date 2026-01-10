@@ -6,6 +6,7 @@
 import slsk from "slsk-client";
 import path from "path";
 import fs from "fs";
+import { mkdir } from "fs/promises";
 import PQueue from "p-queue";
 import { getSystemSettings } from "../utils/systemSettings";
 import { sessionLog } from "../utils/playlistLogger";
@@ -700,10 +701,14 @@ class SoulseekService {
             return { success: false, error: "Not connected" };
         }
 
-        // Ensure destination directory exists
+        // Ensure destination directory exists (idempotent - won't fail if exists)
         const destDir = path.dirname(destPath);
-        if (!fs.existsSync(destDir)) {
-            fs.mkdirSync(destDir, { recursive: true });
+        try {
+            await mkdir(destDir, { recursive: true });
+        } catch (err: any) {
+            sessionLog("SOULSEEK", `Failed to create directory ${destDir}: ${err.message}`, "ERROR");
+            this.activeDownloads--;
+            return { success: false, error: `Cannot create destination directory: ${err.message}` };
         }
 
         sessionLog(

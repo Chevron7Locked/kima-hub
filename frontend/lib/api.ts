@@ -1,4 +1,5 @@
 const AUTH_TOKEN_KEY = "auth_token";
+const REFRESH_TOKEN_KEY = "refresh_token";
 
 // Mood Mix Types (Legacy - for old presets endpoint)
 export interface MoodPreset {
@@ -113,6 +114,7 @@ class ApiClient {
             if (this.token) {
                 this.tokenInitialized = true;
             }
+            // Note: Refresh token is loaded on-demand via getRefreshToken()
         }
     }
 
@@ -153,19 +155,31 @@ class ApiClient {
         this.baseUrl = "";
     }
 
-    // Store JWT token
-    setToken(token: string) {
+    // Store JWT token and optionally refresh token
+    setToken(token: string, refreshToken?: string) {
         this.token = token;
         if (typeof window !== "undefined") {
             localStorage.setItem(AUTH_TOKEN_KEY, token);
+            if (refreshToken) {
+                localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+            }
         }
     }
 
-    // Clear JWT token
+    // Get refresh token from storage
+    getRefreshToken(): string | null {
+        if (typeof window === "undefined") {
+            return null;
+        }
+        return localStorage.getItem(REFRESH_TOKEN_KEY);
+    }
+
+    // Clear both JWT tokens
     clearToken() {
         this.token = null;
         if (typeof window !== "undefined") {
             localStorage.removeItem(AUTH_TOKEN_KEY);
+            localStorage.removeItem(REFRESH_TOKEN_KEY);
         }
     }
 
@@ -178,14 +192,55 @@ class ApiClient {
     }
 
     /**
+     * Refresh the access token using the refresh token
+     * @returns true if refresh succeeded, false otherwise
+     */
+    private async refreshAccessToken(): Promise<boolean> {
+        const refreshToken = this.getRefreshToken();
+        if (!refreshToken) {
+            return false;
+        }
+
+        try {
+            const response = await fetch(`${this.getBaseUrl()}/api/auth/refresh`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ refreshToken }),
+                credentials: "include",
+            });
+
+            if (!response.ok) {
+                // Refresh token invalid or expired - clear tokens
+                this.clearToken();
+                return false;
+            }
+
+            const data = await response.json();
+            
+            // Store new tokens
+            if (data.token) {
+                this.setToken(data.token, data.refreshToken);
+                return true;
+            }
+            
+            this.clearToken();
+            return false;
+        } catch (error) {
+            console.error("[API] Token refresh failed:", error);
+            this.clearToken();
+            return false;
+        }
+    }
+
+    /**
      * Make an authenticated API request
      * Public method for components that need custom API calls
      */
     async request<T>(
         endpoint: string,
-        options: RequestInit & { silent404?: boolean } = {}
+        options: RequestInit & { silent404?: boolean; _retryCount?: number } = {}
     ): Promise<T> {
-        const { silent404, ...fetchOptions } = options;
+        const { silent404, _retryCount = 0, ...fetchOptions } = options;
         const headers: HeadersInit = {
             "Content-Type": "application/json",
             ...fetchOptions.headers,
@@ -215,6 +270,23 @@ class ApiClient {
             // Only log non-404 errors (404s are often expected)
             if (!(silent404 && response.status === 404)) {
                 console.error(`[API] Request failed: ${url}`, error);
+            }
+
+            // Handle 401 with token refresh (retry once)
+            if (response.status === 401 && _retryCount === 0 && endpoint !== "/auth/refresh") {
+                console.log("[API] 401 error - attempting token refresh");
+                const refreshed = await this.refreshAccessToken();
+                
+                if (refreshed) {
+                    console.log("[API] Token refreshed - retrying request");
+                    // Retry the request with new token
+                    return this.request<T>(endpoint, {
+                        ...options,
+                        _retryCount: 1, // Prevent infinite loops
+                    });
+                }
+                
+                console.log("[API] Token refresh failed - user needs to re-login");
             }
 
             if (response.status === 401) {
@@ -260,6 +332,7 @@ class ApiClient {
     async login(username: string, password: string, token?: string) {
         const data = await this.request<{
             token?: string;
+            refreshToken?: string;
             user?: {
                 id: string;
                 username: string;
@@ -274,9 +347,9 @@ class ApiClient {
             body: JSON.stringify({ username, password, token }),
         });
 
-        // If login returned a JWT token, store it
+        // If login returned JWT tokens, store them
         if (data.token) {
-            this.setToken(data.token);
+            this.setToken(data.token, data.refreshToken);
         }
 
         // Return user data in consistent format

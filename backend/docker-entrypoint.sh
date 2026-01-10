@@ -36,6 +36,17 @@ npx prisma migrate deploy
 echo "[DB] Generating Prisma client..."
 npx prisma generate
 
+# Clear Redis cache on deployment to prevent stale data (e.g., 404 images)
+echo "[REDIS] Clearing cache for fresh deployment..."
+node -e "
+const { createClient } = require('redis');
+const client = createClient({ url: process.env.REDIS_URL || 'redis://redis:6379' });
+client.connect()
+  .then(() => client.flushAll())
+  .then(() => { console.log('[REDIS] Cache cleared successfully'); return client.quit(); })
+  .catch(err => { console.warn('[REDIS] Cache clear failed (non-critical):', err.message); });
+" || echo "[REDIS] Cache clear skipped (Redis unavailable)"
+
 # Generate session secret if not provided
 if [ -z "$SESSION_SECRET" ] || [ "$SESSION_SECRET" = "changeme-generate-secure-key" ]; then
   echo "[WARN] SESSION_SECRET not set or using default. Generating random key..."
