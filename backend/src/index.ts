@@ -99,8 +99,22 @@ app.use(express.json({ limit: "1mb" })); // Increased from 100KB default to supp
 
 // Session
 // Trust proxy for reverse proxy setups (nginx, traefik, etc.)
-// Set to true to trust all proxies in the chain (common in Docker/Portainer setups)
-app.set("trust proxy", true);
+// IMPORTANT: Avoid boolean true (express-rate-limit disallows it). Use hop count or list.
+const trustProxyEnv = process.env.TRUST_PROXY;
+let trustProxySetting: number | boolean | string = false;
+if (typeof trustProxyEnv === "string") {
+    const normalized = trustProxyEnv.trim().toLowerCase();
+    if (normalized === "true") {
+        trustProxySetting = 1;
+    } else if (normalized === "false") {
+        trustProxySetting = false;
+    } else if (/^\d+$/.test(normalized)) {
+        trustProxySetting = parseInt(normalized, 10);
+    } else {
+        trustProxySetting = trustProxyEnv; // e.g. "loopback", "uniquelocal"
+    }
+}
+app.set("trust proxy", trustProxySetting);
 
 app.use(
     session({
@@ -111,7 +125,7 @@ app.use(
         secret: config.sessionSecret,
         resave: false,
         saveUninitialized: false,
-        proxy: true, // Trust the reverse proxy
+        proxy: !!trustProxySetting, // Trust the reverse proxy if configured
         cookie: {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
