@@ -107,4 +107,17 @@ export const config = {
     allowedOrigins:
         process.env.ALLOWED_ORIGINS?.split(",").map((o) => o.trim()) ||
         (process.env.NODE_ENV === "development" ? true : []),
+
+    importPreview: {
+        musicBrainzEnabled:
+            process.env.IMPORT_PREVIEW_MB_ENABLED !== "false",
+        musicBrainzLookupLimit: (() => {
+            const parsed = parseInt(
+                process.env.IMPORT_PREVIEW_MB_LIMIT || "25",
+                10
+            );
+            if (!Number.isFinite(parsed) || parsed < 0) return 25;
+            return parsed;
+        })(),
+    },
 };

@@ -1,5 +1,6 @@
 import { spotifyService, SpotifyTrack, SpotifyPlaylist } from "./spotify";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 import { musicBrainzService } from "./musicbrainz";
 import { deezerService } from "./deezer";
 import {
@@ -99,9 +100,21 @@ export interface ImportJob {
     }>;
 }
 
+export interface PreviewJob {
+    id: string;
+    status: "pending" | "processing" | "completed" | "failed";
+    error: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    result: ImportPreview | null;
+}
+
 // Redis key pattern for import jobs
 const IMPORT_JOB_KEY = (id: string) => `import:job:${id}`;
 const IMPORT_JOB_TTL = 24 * 60 * 60; // 24 hours
+
+const PREVIEW_JOB_KEY = (id: string) => `import:preview:${id}`;
+const PREVIEW_JOB_TTL = 60 * 60; // 1 hour
 
 /**
  * Save import job to both database and Redis cache for cross-process sharing
@@ -150,6 +163,26 @@ async function saveImportJob(job: ImportJob): Promise<void> {
             error
         );
         // Continue - Redis is optional, DB is source of truth
+    }
+}
+
+async function savePreviewJob(job: PreviewJob): Promise<void> {
+    await redisClient.setEx(
+        PREVIEW_JOB_KEY(job.id),
+        PREVIEW_JOB_TTL,
+        JSON.stringify(job)
+    );
+}
+
+async function getPreviewJob(jobId: string): Promise<PreviewJob | null> {
+    try {
+        const data = await redisClient.get(PREVIEW_JOB_KEY(jobId));
+        if (!data) return null;
+        const parsed = JSON.parse(data) as PreviewJob;
+        return parsed;
+    } catch (err) {
+        logger?.error("Failed to read preview job:", err);
+        return null;
     }
 }
 
@@ -554,6 +587,16 @@ class SpotifyImportService {
         const logPrefix =
             source === "Spotify" ? "[Spotify Import]" : "[Deezer Import]";
 
+        const mbEnabled = config.importPreview.musicBrainzEnabled;
+        let mbRemaining = mbEnabled
+            ? config.importPreview.musicBrainzLookupLimit
+            : 0;
+
+        const canUseMusicBrainz = (cost = 1) => mbRemaining >= cost;
+        const consumeMusicBrainz = (cost = 1) => {
+            mbRemaining = Math.max(0, mbRemaining - cost);
+        };
+
         const matchedTracks: MatchedTrack[] = [];
         const unmatchedByAlbum = new Map<string, SpotifyTrack[]>();
 
@@ -599,16 +642,23 @@ class SpotifyImportService {
                     );
                 }
 
-                const mbResult = await this.findAlbumMbid(
-                    artistName,
-                    normalizedAlbumName
-                );
-                artistMbid = mbResult.artistMbid;
-                albumMbid = mbResult.albumMbid;
+                if (canUseMusicBrainz(2)) {
+                    consumeMusicBrainz(2);
+                    const mbResult = await this.findAlbumMbid(
+                        artistName,
+                        normalizedAlbumName
+                    );
+                    artistMbid = mbResult.artistMbid;
+                    albumMbid = mbResult.albumMbid;
 
-                if (albumMbid) {
+                    if (albumMbid) {
+                        logger?.debug(
+                            `${logPrefix} ✓ Found album directly: "${albumName}" (MBID: ${albumMbid})`
+                        );
+                    }
+                } else {
                     logger?.debug(
-                        `${logPrefix} ✓ Found album directly: "${albumName}" (MBID: ${albumMbid})`
+                        `${logPrefix} MusicBrainz lookup budget exhausted; skipping album lookup for "${albumName}"`
                     );
                 }
             }
@@ -618,6 +668,12 @@ class SpotifyImportService {
                     `${logPrefix} Album not found, trying track-based search...`
                 );
                 for (const track of albumTracks) {
+                    if (!canUseMusicBrainz(1)) {
+                        logger?.debug(
+                            `${logPrefix} MusicBrainz lookup budget exhausted; skipping track-based search`
+                        );
+                        break;
+                    }
                     // Normalize track title to remove live/remaster suffixes
                     const normalizedTrackTitle = stripTrackSuffix(track.title);
                     const wasNormalized = normalizedTrackTitle !== track.title;
@@ -631,6 +687,7 @@ class SpotifyImportService {
                         );
                     }
 
+                    consumeMusicBrainz(1);
                     const recordingInfo =
                         await musicBrainzService.searchRecording(
                             normalizedTrackTitle,
@@ -759,6 +816,84 @@ class SpotifyImportService {
             },
             "Spotify"
         );
+    }
+
+    /**
+     * Start an async preview job
+     */
+    async startPreviewJob(url: string): Promise<PreviewJob> {
+        const jobId = `preview_${Date.now()}_${Math.random()
+            .toString(36)
+            .substring(7)}`;
+
+        const job: PreviewJob = {
+            id: jobId,
+            status: "pending",
+            error: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            result: null,
+        };
+
+        await savePreviewJob(job);
+
+        setImmediate(() => {
+            this.processPreviewJob(jobId, url).catch((err) => {
+                logger?.error("Preview job processing error:", err);
+            });
+        });
+
+        return job;
+    }
+
+    /**
+     * Get preview job status
+     */
+    async getPreviewJob(jobId: string): Promise<PreviewJob | null> {
+        return getPreviewJob(jobId);
+    }
+
+    private async processPreviewJob(
+        jobId: string,
+        url: string
+    ): Promise<void> {
+        const job = await getPreviewJob(jobId);
+        if (!job) return;
+
+        job.status = "processing";
+        job.updatedAt = new Date();
+        await savePreviewJob(job);
+
+        try {
+            let preview: ImportPreview;
+
+            if (url.includes("deezer.com")) {
+                const deezerMatch = url.match(/playlist[\/:](\d+)/);
+                if (!deezerMatch) {
+                    throw new Error("Invalid Deezer playlist URL");
+                }
+                const playlistId = deezerMatch[1];
+                const deezerPlaylist = await deezerService.getPlaylist(
+                    playlistId
+                );
+                if (!deezerPlaylist) {
+                    throw new Error("Deezer playlist not found");
+                }
+                preview = await this.generatePreviewFromDeezer(deezerPlaylist);
+            } else {
+                preview = await this.generatePreview(url);
+            }
+
+            job.status = "completed";
+            job.result = preview;
+            job.updatedAt = new Date();
+            await savePreviewJob(job);
+        } catch (error: any) {
+            job.status = "failed";
+            job.error = error.message || "Failed to generate preview";
+            job.updatedAt = new Date();
+            await savePreviewJob(job);
+        }
     }
 
     /**

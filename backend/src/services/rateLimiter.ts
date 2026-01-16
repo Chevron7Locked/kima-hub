@@ -40,10 +40,10 @@ const SERVICE_CONFIGS: ServiceConfig = {
     },
     musicbrainz: {
         intervalCap: 1, // 1 request per second (MusicBrainz is strict)
-        interval: 1100, // Slightly over 1 second to be safe
+        interval: 1200, // Slightly over 1 second to be safe
         concurrency: 1,
-        maxRetries: 3,
-        baseDelay: 2000,
+        maxRetries: 5,
+        baseDelay: 3000,
     },
     deezer: {
         intervalCap: 25, // Deezer is more lenient
@@ -171,10 +171,23 @@ class GlobalRateLimiter {
                 lastError = error;
 
                 // Check if it's a rate limit error
+                const status = error.response?.status;
+                const headers = error.response?.headers || {};
+                const responseError = error.response?.data?.error || "";
+                const isMbRateLimited =
+                    status === 503 &&
+                    (headers["x-mb-rate-limiter"] ||
+                        headers["x-ratelimit-zone"] ||
+                        responseError
+                            .toString()
+                            .toLowerCase()
+                            .includes("rate limit"));
+
                 const isRateLimit =
-                    error.response?.status === 429 ||
+                    status === 429 ||
                     error.message?.includes("429") ||
-                    error.message?.toLowerCase().includes("rate limit");
+                    error.message?.toLowerCase().includes("rate limit") ||
+                    isMbRateLimited;
 
                 if (isRateLimit) {
                     circuit.consecutiveFailures++;
