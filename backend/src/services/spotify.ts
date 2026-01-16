@@ -1,6 +1,7 @@
 import axios from "axios";
 import { logger } from "../utils/logger";
 import { deezerService } from "./deezer";
+import { rateLimiter } from "./rateLimiter";
 
 /**
  * Spotify Service
@@ -511,7 +512,9 @@ class SpotifyService {
             if (albumMap.has(track.spotifyId)) continue;
 
             try {
-                const result = await deezerService.getTrackAlbum(track.artist, track.title);
+                const result = await rateLimiter.execute("deezer", () =>
+                    deezerService.getTrackAlbum(track.artist, track.title)
+                );
                 if (result) {
                     albumMap.set(track.spotifyId, {
                         album: result.albumName,
@@ -519,12 +522,8 @@ class SpotifyService {
                     });
                     logger.debug(`[Deezer Fallback] Found album for "${track.title}": "${result.albumName}"`);
                 }
-
-                // Rate limit - wait 100ms between requests
-                await new Promise(resolve => setTimeout(resolve, 100));
             } catch (error: unknown) {
-                const errorMsg = error instanceof Error ? error.message : String(error);
-                logger.debug(`[Deezer Fallback] Failed for "${track.title}": ${errorMsg}`);
+                logger.debug(`[Deezer Fallback] Rate limit hit for "${track.title}", skipping`);
             }
         }
 
