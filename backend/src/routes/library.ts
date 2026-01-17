@@ -411,119 +411,21 @@ router.get("/recently-listened", async (req, res) => {
             albumCounts.map((ac) => [ac.artistId, ac._count.rgMbid])
         );
 
-        // Add on-demand image fetching for artists without heroUrl
-        const results = await Promise.all(
-            limitedItems.map(async (item) => {
-                if (item.type === "audiobook" || item.type === "podcast") {
-                    return item;
-                } else {
-                    // Use override pattern: userHeroUrl ?? heroUrl
-                    let coverArt = item.userHeroUrl ?? item.heroUrl;
-
-                    // Fetch image on-demand if missing
-                    if (!coverArt) {
-                        logger.debug(
-                            `[IMAGE] Fetching image on-demand for ${item.name}...`
-                        );
-
-                        // Check Redis cache first
-                        const cacheKey = `hero-image:${item.id}`;
-                        try {
-                            const cached = await redisClient.get(cacheKey);
-                            if (cached) {
-                                coverArt = cached;
-                                logger.debug(`  Found cached image`);
-                            }
-                        } catch (err) {
-                            // Redis errors are non-critical
-                        }
-
-                        // Try Fanart.tv if we have real MBID
-                        if (
-                            !coverArt &&
-                            item.mbid &&
-                            !item.mbid.startsWith("temp-")
-                        ) {
-                            try {
-                                coverArt = await fanartService.getArtistImage(
-                                    item.mbid
-                                );
-                            } catch (err) {
-                                // Fanart.tv failed, continue to next source
-                            }
-                        }
-
-                        // Fallback to Deezer
-                        if (!coverArt) {
-                            try {
-                                coverArt = await deezerService.getArtistImage(
-                                    item.name
-                                );
-                            } catch (err) {
-                                // Deezer failed, continue to next source
-                            }
-                        }
-
-                        // Fallback to Last.fm
-                        if (!coverArt) {
-                            try {
-                                const validMbid =
-                                    item.mbid && !item.mbid.startsWith("temp-")
-                                        ? item.mbid
-                                        : undefined;
-                                const lastfmInfo =
-                                    await lastFmService.getArtistInfo(
-                                        item.name,
-                                        validMbid
-                                    );
-
-                                if (
-                                    lastfmInfo.image &&
-                                    lastfmInfo.image.length > 0
-                                ) {
-                                    const largestImage =
-                                        lastfmInfo.image.find(
-                                            (img: any) =>
-                                                img.size === "extralarge" ||
-                                                img.size === "mega"
-                                        ) ||
-                                        lastfmInfo.image[
-                                            lastfmInfo.image.length - 1
-                                        ];
-
-                                    if (largestImage && largestImage["#text"]) {
-                                        coverArt = largestImage["#text"];
-                                        logger.debug(`  Found Last.fm image`);
-                                    }
-                                }
-                            } catch (err) {
-                                // Last.fm failed, leave as null
-                            }
-                        }
-
-                        // Cache the result for 7 days
-                        if (coverArt) {
-                            try {
-                                await redisClient.setEx(
-                                    cacheKey,
-                                    7 * 24 * 60 * 60,
-                                    coverArt
-                                );
-                                logger.debug(`  Cached image for 7 days`);
-                            } catch (err) {
-                                // Redis errors are non-critical
-                            }
-                        }
-                    }
-
-                    return {
-                        ...item,
-                        coverArt,
-                        albumCount: albumCountMap.get(item.id) || 0,
-                    };
-                }
-            })
-        );
+        // Map results - no on-demand image fetching for performance
+        // Artists without images will show placeholders until enrichment completes
+        const results = limitedItems.map((item) => {
+            if (item.type === "audiobook" || item.type === "podcast") {
+                return item;
+            } else {
+                // Use override pattern: userHeroUrl ?? heroUrl
+                const coverArt = item.userHeroUrl ?? item.heroUrl ?? null;
+                return {
+                    ...item,
+                    coverArt,
+                    albumCount: albumCountMap.get(item.id) || 0,
+                };
+            }
+        });
 
         res.json({ items: results });
     } catch (error) {
@@ -584,115 +486,17 @@ router.get("/recently-added", async (req, res) => {
             albumCounts.map((ac) => [ac.artistId, ac._count.id])
         );
 
-        // ========== ON-DEMAND IMAGE FETCHING FOR RECENTLY ADDED ==========
-        // For artists without heroUrl, fetch images on-demand
-        const artistsWithImages = await Promise.all(
-            Array.from(artistsMap.values()).map(async (artist) => {
-                // Use override pattern: userHeroUrl ?? heroUrl
-                let coverArt = artist.userHeroUrl ?? artist.heroUrl;
-
-                if (!coverArt) {
-                    logger.debug(
-                        `[IMAGE] Fetching image on-demand for ${artist.name}...`
-                    );
-
-                    // Check Redis cache first
-                    const cacheKey = `hero-image:${artist.id}`;
-                    try {
-                        const cached = await redisClient.get(cacheKey);
-                        if (cached) {
-                            coverArt = cached;
-                            logger.debug(`  Found cached image`);
-                        }
-                    } catch (err) {
-                        // Redis errors are non-critical
-                    }
-
-                    // Try Fanart.tv if we have real MBID
-                    if (
-                        !coverArt &&
-                        artist.mbid &&
-                        !artist.mbid.startsWith("temp-")
-                    ) {
-                        try {
-                            coverArt = await fanartService.getArtistImage(
-                                artist.mbid
-                            );
-                        } catch (err) {
-                            // Fanart.tv failed, continue to next source
-                        }
-                    }
-
-                    // Fallback to Deezer
-                    if (!coverArt) {
-                        try {
-                            coverArt = await deezerService.getArtistImage(
-                                artist.name
-                            );
-                        } catch (err) {
-                            // Deezer failed, continue to next source
-                        }
-                    }
-
-                    // Fallback to Last.fm
-                    if (!coverArt) {
-                        try {
-                            const validMbid =
-                                artist.mbid && !artist.mbid.startsWith("temp-")
-                                    ? artist.mbid
-                                    : undefined;
-                            const lastfmInfo =
-                                await lastFmService.getArtistInfo(
-                                    artist.name,
-                                    validMbid
-                                );
-
-                            if (
-                                lastfmInfo.image &&
-                                lastfmInfo.image.length > 0
-                            ) {
-                                const largestImage =
-                                    lastfmInfo.image.find(
-                                        (img: any) =>
-                                            img.size === "extralarge" ||
-                                            img.size === "mega"
-                                    ) ||
-                                    lastfmInfo.image[
-                                        lastfmInfo.image.length - 1
-                                    ];
-
-                                if (largestImage && largestImage["#text"]) {
-                                    coverArt = largestImage["#text"];
-                                    logger.debug(`  Found Last.fm image`);
-                                }
-                            }
-                        } catch (err) {
-                            // Last.fm failed, leave as null
-                        }
-                    }
-
-                    // Cache the result for 7 days
-                    if (coverArt) {
-                        try {
-                            await redisClient.setEx(
-                                cacheKey,
-                                7 * 24 * 60 * 60,
-                                coverArt
-                            );
-                            logger.debug(`  Cached image for 7 days`);
-                        } catch (err) {
-                            // Redis errors are non-critical
-                        }
-                    }
-                }
-
-                return {
-                    ...artist,
-                    coverArt,
-                    albumCount: albumCountMap.get(artist.id) || 0,
-                };
-            })
-        );
+        // Map results - no on-demand image fetching for performance
+        // Artists without images will show placeholders until enrichment completes
+        const artistsWithImages = Array.from(artistsMap.values()).map((artist) => {
+            // Use override pattern: userHeroUrl ?? heroUrl
+            const coverArt = artist.userHeroUrl ?? artist.heroUrl ?? null;
+            return {
+                ...artist,
+                coverArt,
+                albumCount: albumCountMap.get(artist.id) || 0,
+            };
+        });
 
         res.json({ artists: artistsWithImages });
     } catch (error) {
@@ -822,6 +626,8 @@ router.get("/artists", async (req, res) => {
         ]);
 
         // Use DataCacheService for batch image lookup (DB + Redis, no API calls for lists)
+        // NOTE: On-demand image fetching removed for performance - rely on enrichment worker
+        // Artists without images will show placeholders until enrichment completes
         const imageMap = await dataCacheService.getArtistImagesBatch(
             artistsWithAlbums.map((a) => ({
                 id: a.id,
@@ -830,130 +636,8 @@ router.get("/artists", async (req, res) => {
             }))
         );
 
-        // ========== ON-DEMAND IMAGE FETCHING FOR LIBRARY ARTISTS ==========
-        // For artists without images, fetch on-demand (fixes Bug 2: Artist images missing on Library page)
-        const artistsWithoutImages = artistsWithAlbums.filter(
-            (artist) => !imageMap.get(artist.id) && !artist.heroUrl
-        );
-
-        logger.debug(
-            `[Library] Found ${artistsWithoutImages.length} artists without images, fetching on-demand...`
-        );
-
-        // Function to fetch image for a single artist (not executed until called)
-        const fetchArtistImage = async (artist: typeof artistsWithoutImages[0]) => {
-            let coverArt: string | null = null;
-
-            logger.debug(
-                `[IMAGE] Fetching image on-demand for ${artist.name}...`
-            );
-
-            // Check Redis cache first
-            const cacheKey = `hero-image:${artist.id}`;
-            try {
-                const cached = await redisClient.get(cacheKey);
-                if (cached) {
-                    coverArt = cached;
-                    logger.debug(`  Found cached image`);
-                    return { artistId: artist.id, coverArt };
-                }
-            } catch (err) {
-                // Redis errors are non-critical
-            }
-
-            // Try Fanart.tv if we have real MBID
-            if (!coverArt && artist.mbid && !artist.mbid.startsWith("temp-")) {
-                try {
-                    coverArt = await fanartService.getArtistImage(artist.mbid);
-                } catch (err) {
-                    // Fanart.tv failed, continue to next source
-                }
-            }
-
-            // Fallback to Deezer
-            if (!coverArt) {
-                try {
-                    coverArt = await deezerService.getArtistImage(artist.name);
-                } catch (err) {
-                    // Deezer failed, continue to next source
-                }
-            }
-
-            // Fallback to Last.fm
-            if (!coverArt) {
-                try {
-                    const validMbid =
-                        artist.mbid && !artist.mbid.startsWith("temp-")
-                            ? artist.mbid
-                            : undefined;
-                    const lastfmInfo = await lastFmService.getArtistInfo(
-                        artist.name,
-                        validMbid
-                    );
-
-                    if (lastfmInfo.image && lastfmInfo.image.length > 0) {
-                        const largestImage =
-                            lastfmInfo.image.find(
-                                (img: any) =>
-                                    img.size === "extralarge" ||
-                                    img.size === "mega"
-                            ) || lastfmInfo.image[lastfmInfo.image.length - 1];
-
-                        if (largestImage && largestImage["#text"]) {
-                            coverArt = largestImage["#text"];
-                            logger.debug(`  Found Last.fm image`);
-                        }
-                    }
-                } catch (err) {
-                    // Last.fm failed, leave as null
-                }
-            }
-
-            // Cache the result for 7 days
-            if (coverArt) {
-                try {
-                    await redisClient.setEx(
-                        cacheKey,
-                        7 * 24 * 60 * 60,
-                        coverArt
-                    );
-                    logger.debug(`  Cached image for 7 days`);
-                } catch (err) {
-                    // Redis errors are non-critical
-                }
-            }
-
-            return { artistId: artist.id, coverArt };
-        };
-
-        // Process in batches of 5 for TRUE concurrency control
-        // (promises are created inside the loop, not upfront)
-        const batchSize = 5;
-        const fetchedImages = new Map<string, string | null>();
-
-        for (let i = 0; i < artistsWithoutImages.length; i += batchSize) {
-            const batch = artistsWithoutImages.slice(i, i + batchSize);
-            const results = await Promise.allSettled(
-                batch.map((artist) => fetchArtistImage(artist))
-            );
-
-            results.forEach((result) => {
-                if (result.status === "fulfilled" && result.value.coverArt) {
-                    fetchedImages.set(
-                        result.value.artistId,
-                        result.value.coverArt
-                    );
-                }
-            });
-        }
-
-        logger.debug(
-            `[Library] Fetched ${fetchedImages.size} new images on-demand`
-        );
-
         const artistsWithImages = artistsWithAlbums.map((artist) => {
             const coverArt =
-                fetchedImages.get(artist.id) ||
                 imageMap.get(artist.id) ||
                 artist.heroUrl ||
                 null;
