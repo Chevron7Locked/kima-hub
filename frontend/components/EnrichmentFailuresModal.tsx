@@ -166,7 +166,7 @@ export function EnrichmentFailuresModal({
                 </div>
 
                 {/* Filter Tabs */}
-                <div className="flex gap-2 p-4 border-b border-white/10 overflow-x-auto">
+                <div className="flex gap-3 px-6 py-4 border-b border-white/10 overflow-x-auto">
                     {(
                         [
                             { key: "all" as const, label: "All", count: counts?.total || 0 },
@@ -194,7 +194,7 @@ export function EnrichmentFailuresModal({
                                 setCurrentPage(1);
                                 setSelectedFailures(new Set());
                             }}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+                            className={`px-5 py-2.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                                 selectedType === tab.key
                                     ? "bg-[#ecb200] text-black"
                                     : "bg-white/5 text-white/70 hover:bg-white/10"
