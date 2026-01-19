@@ -52,30 +52,56 @@ export default function LibraryPage() {
     const queryClient = useQueryClient();
 
     // Use React Query hooks for cached data fetching
-    const artistsQuery = useLibraryArtistsQuery({
-        filter,
-        sortBy,
-        limit: itemsPerPage,
-        page: currentPage,
-    });
+    // Only fetch data for active tab to prevent unnecessary API calls
+    const artistsQuery = useLibraryArtistsQuery(
+        {
+            filter,
+            sortBy,
+            limit: itemsPerPage,
+            page: currentPage,
+        },
+        {
+            enabled: activeTab === "artists",
+        },
+    );
 
-    const albumsQuery = useLibraryAlbumsQuery({
-        filter,
-        sortBy,
-        limit: itemsPerPage,
-        page: currentPage,
-    });
+    const albumsQuery = useLibraryAlbumsQuery(
+        {
+            filter,
+            sortBy,
+            limit: itemsPerPage,
+            page: currentPage,
+        },
+        {
+            enabled: activeTab === "albums",
+        },
+    );
 
-    const tracksQuery = useLibraryTracksQuery({
-        sortBy,
-        limit: itemsPerPage,
-        page: currentPage,
-    });
+    const tracksQuery = useLibraryTracksQuery(
+        {
+            sortBy,
+            limit: itemsPerPage,
+            page: currentPage,
+        },
+        {
+            enabled: activeTab === "tracks",
+        },
+    );
 
     // Get data based on active tab
-    const artists = useMemo(() => activeTab === "artists" ? (artistsQuery.data?.artists ?? []) : [], [activeTab, artistsQuery.data?.artists]);
-    const albums = useMemo(() => activeTab === "albums" ? (albumsQuery.data?.albums ?? []) : [], [activeTab, albumsQuery.data?.albums]);
-    const tracks = useMemo(() => activeTab === "tracks" ? (tracksQuery.data?.tracks ?? []) : [], [activeTab, tracksQuery.data?.tracks]);
+    const artists = useMemo(
+        () =>
+            activeTab === "artists" ? (artistsQuery.data?.artists ?? []) : [],
+        [activeTab, artistsQuery.data?.artists],
+    );
+    const albums = useMemo(
+        () => (activeTab === "albums" ? (albumsQuery.data?.albums ?? []) : []),
+        [activeTab, albumsQuery.data?.albums],
+    );
+    const tracks = useMemo(
+        () => (activeTab === "tracks" ? (tracksQuery.data?.tracks ?? []) : []),
+        [activeTab, tracksQuery.data?.tracks],
+    );
 
     // Loading state based on active tab
     const isLoading =
@@ -84,39 +110,49 @@ export default function LibraryPage() {
         (activeTab === "tracks" && tracksQuery.isLoading);
 
     // Pagination from active query
-    const pagination = useMemo(() => ({
-        total:
-            activeTab === "artists"
-                ? (artistsQuery.data?.total ?? 0)
-                : activeTab === "albums"
-                ? (albumsQuery.data?.total ?? 0)
+    const pagination = useMemo(
+        () => ({
+            total:
+                activeTab === "artists" ? (artistsQuery.data?.total ?? 0)
+                : activeTab === "albums" ? (albumsQuery.data?.total ?? 0)
                 : (tracksQuery.data?.total ?? 0),
-        offset:
-            activeTab === "artists"
-                ? (artistsQuery.data?.offset ?? 0)
-                : activeTab === "albums"
-                ? (albumsQuery.data?.offset ?? 0)
+            offset:
+                activeTab === "artists" ? (artistsQuery.data?.offset ?? 0)
+                : activeTab === "albums" ? (albumsQuery.data?.offset ?? 0)
                 : (tracksQuery.data?.offset ?? 0),
-        limit: itemsPerPage,
-        totalPages: Math.ceil(
-            (activeTab === "artists"
-                ? (artistsQuery.data?.total ?? 0)
-                : activeTab === "albums"
-                ? (albumsQuery.data?.total ?? 0)
-                : (tracksQuery.data?.total ?? 0)) / itemsPerPage
-        ),
-        currentPage,
-        itemsPerPage,
-    }), [activeTab, artistsQuery.data, albumsQuery.data, tracksQuery.data, itemsPerPage, currentPage]);
+            limit: itemsPerPage,
+            totalPages: Math.ceil(
+                (activeTab === "artists" ? (artistsQuery.data?.total ?? 0)
+                : activeTab === "albums" ? (albumsQuery.data?.total ?? 0)
+                : (tracksQuery.data?.total ?? 0)) / itemsPerPage,
+            ),
+            currentPage,
+            itemsPerPage,
+        }),
+        [
+            activeTab,
+            artistsQuery.data,
+            albumsQuery.data,
+            tracksQuery.data,
+            itemsPerPage,
+            currentPage,
+        ],
+    );
 
     // Reload data function using React Query invalidation
     const reloadData = useCallback(async () => {
         if (activeTab === "artists") {
-            await queryClient.invalidateQueries({ queryKey: ["library", "artists"] });
+            await queryClient.invalidateQueries({
+                queryKey: ["library", "artists"],
+            });
         } else if (activeTab === "albums") {
-            await queryClient.invalidateQueries({ queryKey: ["library", "albums"] });
+            await queryClient.invalidateQueries({
+                queryKey: ["library", "albums"],
+            });
         } else {
-            await queryClient.invalidateQueries({ queryKey: ["library", "tracks"] });
+            await queryClient.invalidateQueries({
+                queryKey: ["library", "tracks"],
+            });
         }
     }, [activeTab, queryClient]);
 
@@ -157,18 +193,24 @@ export default function LibraryPage() {
     });
 
     // Change tab function
-    const changeTab = useCallback((tab: Tab) => {
-        router.push(`/library?tab=${tab}`, { scroll: false });
-    }, [router]);
+    const changeTab = useCallback(
+        (tab: Tab) => {
+            router.push(`/library?tab=${tab}`, { scroll: false });
+        },
+        [router],
+    );
 
     // Update page with URL state and scroll to top
-    const updatePage = useCallback((page: number) => {
-        const params = new URLSearchParams();
-        params.set("tab", activeTab);
-        params.set("page", String(page));
-        router.push(`/library?${params.toString()}`, { scroll: false });
-        window.scrollTo({ top: 0, behavior: "smooth" });
-    }, [activeTab, router]);
+    const updatePage = useCallback(
+        (page: number) => {
+            const params = new URLSearchParams();
+            params.set("tab", activeTab);
+            params.set("page", String(page));
+            router.push(`/library?${params.toString()}`, { scroll: false });
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        },
+        [activeTab, router],
+    );
 
     // Helper to convert library Track to audio context Track format
     const formatTracksForAudio = useCallback((libraryTracks: typeof tracks) => {
@@ -189,13 +231,13 @@ export default function LibraryPage() {
     }, []);
 
     // Wrapper for playTracks that converts track format
-    const handlePlayTracks = useCallback((
-        libraryTracks: typeof tracks,
-        startIndex?: number
-    ) => {
-        const formattedTracks = formatTracksForAudio(libraryTracks);
-        playTracks(formattedTracks, startIndex);
-    }, [formatTracksForAudio, playTracks]);
+    const handlePlayTracks = useCallback(
+        (libraryTracks: typeof tracks, startIndex?: number) => {
+            const formattedTracks = formatTracksForAudio(libraryTracks);
+            playTracks(formattedTracks, startIndex);
+        },
+        [formatTracksForAudio, playTracks],
+    );
 
     // Shuffle entire library - uses server-side shuffle for large libraries
     const handleShuffleLibrary = useCallback(async () => {
@@ -243,6 +285,34 @@ export default function LibraryPage() {
         }
     }, [deleteConfirm, deleteArtist, deleteAlbum, deleteTrack, reloadData]);
 
+    // Memoize delete handlers to prevent grid re-renders
+    const handleDeleteArtist = useCallback((id: string, name: string) => {
+        setDeleteConfirm({
+            isOpen: true,
+            type: "artist",
+            id,
+            title: name,
+        });
+    }, []);
+
+    const handleDeleteAlbum = useCallback((id: string, title: string) => {
+        setDeleteConfirm({
+            isOpen: true,
+            type: "album",
+            id,
+            title,
+        });
+    }, []);
+
+    const handleDeleteTrack = useCallback((id: string, title: string) => {
+        setDeleteConfirm({
+            isOpen: true,
+            type: "track",
+            id,
+            title,
+        });
+    }, []);
+
     return (
         <div className="min-h-screen relative">
             <LibraryHeader />
@@ -269,9 +339,9 @@ export default function LibraryPage() {
                         <button
                             onClick={() => setShowFilters(!showFilters)}
                             className={`flex items-center justify-center w-8 h-8 rounded-full transition-all ${
-                                showFilters
-                                    ? "bg-white/20 text-white"
-                                    : "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
+                                showFilters ?
+                                    "bg-white/20 text-white"
+                                :   "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
                             }`}
                             title="Show Filters"
                         >
@@ -281,11 +351,11 @@ export default function LibraryPage() {
                         {/* Item Count */}
                         <span className="text-sm text-gray-400 ml-2">
                             {totalItems.toLocaleString()}{" "}
-                            {activeTab === "artists"
-                                ? "artists"
-                                : activeTab === "albums"
-                                ? "albums"
-                                : "songs"}
+                            {activeTab === "artists" ?
+                                "artists"
+                            : activeTab === "albums" ?
+                                "albums"
+                            :   "songs"}
                         </span>
                     </div>
                 </div>
@@ -300,9 +370,9 @@ export default function LibraryPage() {
                                 <button
                                     onClick={() => setFilter("owned")}
                                     className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
-                                        filter === "owned"
-                                            ? "bg-[#ecb200] text-black"
-                                            : "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
+                                        filter === "owned" ?
+                                            "bg-[#ecb200] text-black"
+                                        :   "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
                                     }`}
                                 >
                                     Owned
@@ -310,9 +380,9 @@ export default function LibraryPage() {
                                 <button
                                     onClick={() => setFilter("discovery")}
                                     className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
-                                        filter === "discovery"
-                                            ? "bg-purple-500 text-white"
-                                            : "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
+                                        filter === "discovery" ?
+                                            "bg-purple-500 text-white"
+                                        :   "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
                                     }`}
                                 >
                                     Discovery
@@ -320,9 +390,9 @@ export default function LibraryPage() {
                                 <button
                                     onClick={() => setFilter("all")}
                                     className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
-                                        filter === "all"
-                                            ? "bg-white/20 text-white"
-                                            : "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
+                                        filter === "all" ?
+                                            "bg-white/20 text-white"
+                                        :   "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
                                     }`}
                                 >
                                     All
@@ -369,14 +439,7 @@ export default function LibraryPage() {
                         artists={artists}
                         isLoading={isLoading}
                         onPlay={playArtist}
-                        onDelete={(id, name) =>
-                            setDeleteConfirm({
-                                isOpen: true,
-                                type: "artist",
-                                id,
-                                title: name,
-                            })
-                        }
+                        onDelete={handleDeleteArtist}
                     />
                 )}
 
@@ -385,14 +448,7 @@ export default function LibraryPage() {
                         albums={albums}
                         isLoading={isLoading}
                         onPlay={playAlbum}
-                        onDelete={(id, title) =>
-                            setDeleteConfirm({
-                                isOpen: true,
-                                type: "album",
-                                id,
-                                title,
-                            })
-                        }
+                        onDelete={handleDeleteAlbum}
                     />
                 )}
 
@@ -404,14 +460,7 @@ export default function LibraryPage() {
                         onPlay={handlePlayTracks}
                         onAddToQueue={addTrackToQueue}
                         onAddToPlaylist={addTrackToPlaylist}
-                        onDelete={(id: string, title: string) =>
-                            setDeleteConfirm({
-                                isOpen: true,
-                                type: "track",
-                                id,
-                                title,
-                            })
-                        }
+                        onDelete={handleDeleteTrack}
                     />
                 )}
 
@@ -440,7 +489,7 @@ export default function LibraryPage() {
                         <button
                             onClick={() =>
                                 updatePage(
-                                    Math.min(totalPages, currentPage + 1)
+                                    Math.min(totalPages, currentPage + 1),
                                 )
                             }
                             disabled={currentPage === totalPages || isLoading}
@@ -470,18 +519,17 @@ export default function LibraryPage() {
                     }
                     onConfirm={handleDelete}
                     title={`Delete ${
-                        deleteConfirm.type === "artist"
-                            ? "Artist"
-                            : deleteConfirm.type === "album"
-                            ? "Album"
-                            : "Track"
+                        deleteConfirm.type === "artist" ? "Artist"
+                        : deleteConfirm.type === "album" ? "Album"
+                        : "Track"
                     }?`}
                     message={
-                        deleteConfirm.type === "track"
-                            ? `Are you sure you want to delete "${deleteConfirm.title}"? This will permanently delete the file from your system.`
-                            : deleteConfirm.type === "album"
-                            ? `Are you sure you want to delete "${deleteConfirm.title}"? This will permanently delete all tracks and files from your system.`
-                            : `Are you sure you want to delete "${deleteConfirm.title}"? This will permanently delete all albums, tracks, and files from your system.`
+                        deleteConfirm.type === "track" ?
+                            `Are you sure you want to delete "${deleteConfirm.title}"? This will permanently delete the file from your system.`
+                        : deleteConfirm.type === "album" ?
+                            `Are you sure you want to delete "${deleteConfirm.title}"? This will permanently delete all tracks and files from your system.`
+                        :   `Are you sure you want to delete "${deleteConfirm.title}"? This will permanently delete all albums, tracks, and files from your system.`
+
                     }
                     confirmText="Delete"
                     cancelText="Cancel"
