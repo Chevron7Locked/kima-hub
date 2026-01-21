@@ -52,7 +52,8 @@ class HowlerEngine {
     private readonly popFadeMs: number = 10; // ms - micro-fade to reduce click/pop on track changes
     private shouldRetryLoads: boolean = false; // Only retry transient load errors where it helps (Android WebView)
     private cleanupTimeoutId: NodeJS.Timeout | null = null; // Track cleanup timeout to prevent race conditions
-    
+    private pendingCleanupHowls: Howl[] = []; // Track Howls being cleaned up
+
     // Seek state management - prevents stale timeupdate events during seeks
     private isSeeking: boolean = false;
     private seekTargetTime: number | null = null;
@@ -690,12 +691,13 @@ class HowlerEngine {
 
     /**
      * Cleanup current Howl instance
+     * Safe for rapid consecutive calls - tracks pending cleanups
      */
     private cleanup(): void {
         this.cancelPreload();
         this.stopTimeUpdates();
 
-        // Cancel any pending cleanup timeout to prevent race conditions
+        // Cancel any pending cleanup timeout
         if (this.cleanupTimeoutId) {
             clearTimeout(this.cleanupTimeoutId);
             this.cleanupTimeoutId = null;
@@ -706,34 +708,43 @@ class HowlerEngine {
             const wasPlaying = this.state.isPlaying;
             const targetVolume = this.state.isMuted ? 0 : this.state.volume;
 
-            // Detach immediately so new loads don't race with cleanup.
+            // Detach immediately so new loads don't race with cleanup
             this.howl = null;
+
+            // Track this howl for cleanup
+            this.pendingCleanupHowls.push(oldHowl);
+
+            const finalizeCleanup = (howl: Howl) => {
+                try {
+                    howl.stop();
+                    howl.unload();
+                } catch {
+                    // Intentionally ignored: Howl instance is being destroyed
+                }
+                // Remove from pending list
+                const idx = this.pendingCleanupHowls.indexOf(howl);
+                if (idx > -1) {
+                    this.pendingCleanupHowls.splice(idx, 1);
+                }
+            };
 
             try {
                 if (wasPlaying) {
-                    // Micro-fade before stop/unload to reduce click/pop artifacts.
+                    // Micro-fade before stop/unload to reduce click/pop artifacts
                     oldHowl.fade(targetVolume, 0, this.popFadeMs);
                     this.cleanupTimeoutId = setTimeout(() => {
                         this.cleanupTimeoutId = null;
-                        try {
-                            oldHowl.stop();
-                            oldHowl.unload();
-                        } catch {
-                            // Intentionally ignored: Howl instance is being destroyed, cleanup errors are harmless
-                        }
+                        finalizeCleanup(oldHowl);
                     }, this.popFadeMs + 2);
                 } else {
-                    // Synchronous cleanup when not playing - no race condition risk
-                    oldHowl.stop();
-                    oldHowl.unload();
+                    // Synchronous cleanup when not playing
+                    finalizeCleanup(oldHowl);
                 }
             } catch {
                 // Intentionally ignored: cleanup errors on destroyed Howl are harmless
+                finalizeCleanup(oldHowl);
             }
         }
-
-        // Note: Removed Howler.unload() - it was unloading ALL audio globally
-        // which caused issues. Individual howl.unload() calls are sufficient.
 
         this.state.currentSrc = null;
         this.state.isPlaying = false;
@@ -749,6 +760,18 @@ class HowlerEngine {
         // Note: cancelPreload() is already called by cleanup()
         this.isLoading = false;
         this.eventListeners.clear();
+
+        // Clean up any pending Howls from rapid cleanup calls
+        for (const howl of this.pendingCleanupHowls) {
+            try {
+                howl.stop();
+                howl.unload();
+            } catch {
+                // Ignore cleanup errors
+            }
+        }
+        this.pendingCleanupHowls = [];
+
         // Ensure cleanup timeout is cleared
         if (this.cleanupTimeoutId) {
             clearTimeout(this.cleanupTimeoutId);
