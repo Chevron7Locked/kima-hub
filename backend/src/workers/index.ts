@@ -26,6 +26,7 @@ import {
 import { runDataIntegrityCheck } from "./dataIntegrity";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { queueCleaner } from "../jobs/queueCleaner";
+import { enrichmentStateService } from "../services/enrichmentState";
 
 // Track intervals and timeouts for cleanup
 const intervals: NodeJS.Timeout[] = [];
@@ -307,6 +308,14 @@ export async function shutdownWorkers(): Promise<void> {
 
     // Stop unified enrichment worker
     stopUnifiedEnrichmentWorker();
+
+    // Disconnect enrichment state service Redis connections (2 connections)
+    try {
+        await enrichmentStateService.disconnect();
+        logger.debug("Enrichment state service disconnected");
+    } catch (err) {
+        logger.error("Failed to disconnect enrichment state service:", err);
+    }
 
     // Stop mood bucket worker
     stopMoodBucketWorker();
