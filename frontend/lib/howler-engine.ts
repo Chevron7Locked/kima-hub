@@ -179,20 +179,12 @@ class HowlerEngine {
             this.retryCount = 0;
         }
 
-        // Add format hints (required for URLs without file extensions)
-        // Include multiple formats as fallbacks - browser will try them in order
+        // Add format hint if provided
+        // Only use the specific format - fallbacks cause wrong decoder attempts
         if (format) {
-            // Put the expected format first, then common fallbacks
-            const formats = [format];
-            if (!formats.includes("mp3")) formats.push("mp3");
-            if (!formats.includes("flac")) formats.push("flac");
-            if (!formats.includes("mp4")) formats.push("mp4");
-            if (!formats.includes("webm")) formats.push("webm");
-            howlConfig.format = formats;
-        } else {
-            // Default format order if none specified
-            howlConfig.format = ["mp3", "flac", "mp4", "webm", "wav"];
+            howlConfig.format = [format];
         }
+        // If no format provided, let Howler detect from Content-Type header
 
         this.howl = new Howl({
             ...howlConfig,
