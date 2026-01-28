@@ -285,7 +285,8 @@ services:
         deploy:
             resources:
                 limits:
-                    memory: 4G
+                    # Increased from 4G to handle large lossless files
+                    memory: 6G
                     cpus: "4"
                 reservations:
                     memory: 2G

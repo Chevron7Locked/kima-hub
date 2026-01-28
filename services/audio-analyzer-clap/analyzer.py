@@ -27,9 +27,10 @@ import time
 import logging
 import threading
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple
 import traceback
 import numpy as np
+import librosa
 
 # CPU thread limiting must be set before importing torch
 THREADS_PER_WORKER = int(os.getenv('THREADS_PER_WORKER', '1'))
@@ -68,6 +69,13 @@ CONTROL_CHANNEL = 'audio:clap:control'
 # Model version identifier
 MODEL_VERSION = 'laion-clap-music-v1'
 
+# Large file handling: files above this size (bytes) will be chunked
+LARGE_FILE_THRESHOLD = 50 * 1024 * 1024  # 50MB
+# Duration to extract from large files (seconds)
+CHUNK_DURATION = 60  # 60 seconds from the middle
+# Sample rate for CLAP model (48kHz)
+CLAP_SAMPLE_RATE = 48000
+
 
 class CLAPAnalyzer:
     """
@@ -105,9 +113,63 @@ class CLAPAnalyzer:
             traceback.print_exc()
             raise
 
+    def _load_audio_chunk(self, audio_path: str) -> Tuple[Optional[np.ndarray], int]:
+        """
+        Load audio from a file, handling large files by extracting a middle chunk.
+
+        For files larger than LARGE_FILE_THRESHOLD, only loads CHUNK_DURATION seconds
+        from the middle of the file to reduce memory usage.
+
+        Args:
+            audio_path: Path to the audio file
+
+        Returns:
+            Tuple of (audio_array, sample_rate) or (None, 0) on error
+        """
+        file_size = os.path.getsize(audio_path)
+        is_large = file_size > LARGE_FILE_THRESHOLD
+
+        if is_large:
+            logger.info(f"Large file detected ({file_size / (1024*1024):.1f}MB), loading middle {CHUNK_DURATION}s chunk")
+
+        try:
+            if is_large:
+                # For large files, first get duration without loading audio
+                duration = librosa.get_duration(path=audio_path)
+
+                if duration > CHUNK_DURATION:
+                    # Calculate middle offset
+                    offset = (duration - CHUNK_DURATION) / 2
+                    logger.info(f"File duration: {duration:.1f}s, extracting from {offset:.1f}s")
+
+                    # Load only the middle chunk at CLAP's expected sample rate
+                    audio, sr = librosa.load(
+                        audio_path,
+                        sr=CLAP_SAMPLE_RATE,
+                        offset=offset,
+                        duration=CHUNK_DURATION,
+                        mono=True
+                    )
+                else:
+                    # File is long enough in size but short in duration, load all
+                    audio, sr = librosa.load(audio_path, sr=CLAP_SAMPLE_RATE, mono=True)
+            else:
+                # Small file, load normally
+                audio, sr = librosa.load(audio_path, sr=CLAP_SAMPLE_RATE, mono=True)
+
+            return audio, sr
+
+        except Exception as e:
+            logger.error(f"Failed to load audio from {audio_path}: {e}")
+            traceback.print_exc()
+            return None, 0
+
     def get_audio_embedding(self, audio_path: str) -> Optional[np.ndarray]:
         """
         Generate a 1024-dimensional embedding from an audio file.
+
+        For large files (>50MB), only processes the middle 60 seconds to
+        reduce memory usage while still capturing the track's vibe.
 
         Args:
             audio_path: Path to the audio file
@@ -123,10 +185,19 @@ class CLAPAnalyzer:
             return None
 
         try:
+            # Load audio (with chunking for large files)
+            audio, sr = self._load_audio_chunk(audio_path)
+
+            if audio is None:
+                return None
+
+            logger.debug(f"Loaded audio: {len(audio)/sr:.1f}s at {sr}Hz")
+
             with self._lock:
-                # CLAP expects a list of audio paths
-                embeddings = self.model.get_audio_embedding_from_filelist(
-                    [audio_path],
+                # Use get_audio_embedding_from_data for pre-loaded audio
+                # This gives us control over memory usage
+                embeddings = self.model.get_audio_embedding_from_data(
+                    [audio],
                     use_tensor=False
                 )
 
@@ -139,8 +210,6 @@ class CLAPAnalyzer:
 
                 # CLAP base model outputs 512-dim, but we need 1024 for our schema
                 # Pad with zeros to match the expected dimension
-                # Note: In production, you might use a larger CLAP model or concatenate
-                # audio features to fill the 1024-dim space
                 if embedding.shape[0] < 1024:
                     padded = np.zeros(1024, dtype=np.float32)
                     padded[:embedding.shape[0]] = embedding
