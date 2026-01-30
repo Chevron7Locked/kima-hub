@@ -331,6 +331,12 @@ class Worker:
             self.db.connect()
 
             while not self.stop_event.is_set():
+                # Publish heartbeat for feature detection
+                try:
+                    self.redis_client.set("clap:worker:heartbeat", str(int(time.time() * 1000)))
+                except Exception:
+                    pass  # Heartbeat is informational, don't crash on Redis failure
+
                 try:
                     self._process_job()
                 except psycopg2.Error as e:

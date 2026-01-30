@@ -1328,6 +1328,12 @@ class AnalysisWorker:
         
         try:
             while self.running:
+                # Publish heartbeat for feature detection
+                try:
+                    self.redis.set("audio:worker:heartbeat", str(int(time.time() * 1000)))
+                except Exception:
+                    pass  # Heartbeat is informational, don't crash on Redis failure
+
                 try:
                     # Check for control signals (pause/resume/stop)
                     self._check_control_signals()
