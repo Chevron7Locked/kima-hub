@@ -262,8 +262,17 @@ services:
                 reservations:
                     memory: 2G
         # Disabled by default - enable when needed
+        # Profiles: analysis (MusicCNN only), vibe/full (both analyzers)
         profiles:
-            - audio-analysis
+            - analysis
+            - vibe
+            - full
+        healthcheck:
+            test: ["CMD", "pgrep", "-f", "python.*analyzer"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 60s
 
     # CLAP Audio Analyzer - Generates embeddings for similarity search
     audio-analyzer-clap:
@@ -288,6 +297,8 @@ services:
                 condition: service_healthy
             backend:
                 condition: service_healthy
+            audio-analyzer:
+                condition: service_healthy
         restart: unless-stopped
         deploy:
             resources:
@@ -297,8 +308,10 @@ services:
                     cpus: "4"
                 reservations:
                     memory: 1G
+        # Profiles: vibe/full (CLAP requires MusicCNN analysis first)
         profiles:
-            - audio-analysis
+            - vibe
+            - full
 
 volumes:
     # Lidify core
