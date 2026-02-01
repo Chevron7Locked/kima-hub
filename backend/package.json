@@ -15,7 +15,8 @@
         "db:studio": "prisma studio",
         "seed:user": "tsx seeds/createUser.ts",
         "test:smoke": "tsx scripts/smoke.ts",
-        "sync": "tsx src/workers/sync.ts"
+        "sync": "tsx src/workers/sync.ts",
+        "create:testuser": "tsx scripts/create-test-user.ts"
     },
     "dependencies": {
         "@bull-board/api": "^6.14.2",
