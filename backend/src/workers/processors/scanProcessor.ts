@@ -10,6 +10,7 @@ import * as path from "path";
  * Part of Phase 2 & 3 fix for #31
  *
  * Phase 3 enhancement: Uses fuzzy matching to catch more name variations
+ * Phase 4 optimization: Batched queries instead of N+1 pattern
  */
 async function reconcileDownloadJobsWithScan(): Promise<number> {
     const { prisma } = await import("../../utils/db");
@@ -23,129 +24,115 @@ async function reconcileDownloadJobsWithScan(): Promise<number> {
         return 0;
     }
 
-    let reconciled = 0;
+    // Extract job metadata for matching
+    const jobsWithMetadata = activeJobs
+        .map((job) => {
+            const metadata = (job.metadata as any) || {};
+            return {
+                job,
+                artistName: metadata?.artistName as string | undefined,
+                albumTitle: metadata?.albumTitle as string | undefined,
+            };
+        })
+        .filter((j) => j.artistName && j.albumTitle);
 
-    for (const job of activeJobs) {
-        const metadata = (job.metadata as any) || {};
-        const artistName = metadata?.artistName;
-        const albumTitle = metadata?.albumTitle;
+    if (jobsWithMetadata.length === 0) {
+        return 0;
+    }
 
-        if (!artistName || !albumTitle) {
-            continue;
+    // Batch fetch: Get all albums that might match any of our jobs
+    // Use OR conditions for all artist name prefixes (for fuzzy matching)
+    const artistPrefixes = [...new Set(
+        jobsWithMetadata.map((j) => j.artistName!.substring(0, 5).toLowerCase())
+    )];
+
+    const candidateAlbums = await prisma.album.findMany({
+        where: {
+            OR: artistPrefixes.map((prefix) => ({
+                artist: {
+                    name: {
+                        contains: prefix,
+                        mode: "insensitive" as const,
+                    },
+                },
+            })),
+        },
+        include: {
+            tracks: {
+                select: { id: true },
+                take: 1,
+            },
+            artist: {
+                select: { name: true },
+            },
+        },
+    });
+
+    // Import fuzzy matcher once
+    const { matchAlbum } = await import("../../utils/fuzzyMatch");
+
+    // Match jobs to albums
+    const jobsToComplete: string[] = [];
+    const discoveryBatchIds: string[] = [];
+
+    for (const { job, artistName, albumTitle } of jobsWithMetadata) {
+        // Try exact/contains match first
+        let matchedAlbum = candidateAlbums.find(
+            (album) =>
+                album.tracks.length > 0 &&
+                album.artist.name.toLowerCase().includes(artistName!.toLowerCase()) &&
+                album.title.toLowerCase().includes(albumTitle!.toLowerCase())
+        );
+
+        // Fuzzy match if exact match failed
+        if (!matchedAlbum) {
+            matchedAlbum = candidateAlbums.find(
+                (album) =>
+                    album.tracks.length > 0 &&
+                    matchAlbum(
+                        artistName!,
+                        albumTitle!,
+                        album.artist.name,
+                        album.title,
+                        0.75
+                    )
+            );
         }
 
-        try {
-            // First try: Exact/contains match (fast)
-            let album = await prisma.album.findFirst({
-                where: {
-                    AND: [
-                        {
-                            artist: {
-                                name: {
-                                    contains: artistName,
-                                    mode: "insensitive",
-                                },
-                            },
-                        },
-                        {
-                            title: {
-                                contains: albumTitle,
-                                mode: "insensitive",
-                            },
-                        },
-                    ],
-                },
-                include: {
-                    tracks: {
-                        select: { id: true },
-                        take: 1,
-                    },
-                    artist: {
-                        select: { name: true },
-                    },
-                },
-            });
-
-            // Second try: Fuzzy match if exact match failed
-            if (!album || album.tracks.length === 0) {
-                const { matchAlbum } = await import("../../utils/fuzzyMatch");
-
-                // Get candidate albums
-                const candidates = await prisma.album.findMany({
-                    where: {
-                        artist: {
-                            name: {
-                                contains: artistName.substring(0, 5),
-                                mode: "insensitive",
-                            },
-                        },
-                    },
-                    include: {
-                        tracks: {
-                            select: { id: true },
-                            take: 1,
-                        },
-                        artist: {
-                            select: { name: true },
-                        },
-                    },
-                    take: 50,
-                });
-
-                const fuzzyMatch = candidates.find(
-                    (candidate) =>
-                        candidate.tracks.length > 0 &&
-                        matchAlbum(
-                            artistName,
-                            albumTitle,
-                            candidate.artist.name,
-                            candidate.title,
-                            0.75
-                        )
-                );
-
-                if (fuzzyMatch) {
-                    album = fuzzyMatch;
-                }
+        if (matchedAlbum) {
+            jobsToComplete.push(job.id);
+            if (job.discoveryBatchId) {
+                discoveryBatchIds.push(job.discoveryBatchId);
             }
-
-            if (album && album.tracks.length > 0) {
-                // Album exists with tracks - mark job complete
-                await prisma.downloadJob.update({
-                    where: { id: job.id },
-                    data: {
-                        status: "completed",
-                        completedAt: new Date(),
-                        error: null,
-                        metadata: {
-                            ...metadata,
-                            completedAt: new Date().toISOString(),
-                            reconciledFromScan: true,
-                        },
-                    },
-                });
-
-                reconciled++;
-
-                // Check batch completion for discovery jobs
-                if (job.discoveryBatchId) {
-                    const { discoverWeeklyService } = await import(
-                        "../../services/discoverWeekly"
-                    );
-                    await discoverWeeklyService.checkBatchCompletion(
-                        job.discoveryBatchId
-                    );
-                }
-            }
-        } catch (error: any) {
-            logger.error(
-                `[SCAN-RECONCILE] Error checking job ${job.id}:`,
-                error.message
-            );
         }
     }
 
-    return reconciled;
+    if (jobsToComplete.length === 0) {
+        return 0;
+    }
+
+    // Batch update: Mark all matched jobs as completed
+    await prisma.downloadJob.updateMany({
+        where: { id: { in: jobsToComplete } },
+        data: {
+            status: "completed",
+            completedAt: new Date(),
+            error: null,
+        },
+    });
+
+    // Check batch completion for discovery jobs (deduplicated)
+    const uniqueBatchIds = [...new Set(discoveryBatchIds)];
+    if (uniqueBatchIds.length > 0) {
+        const { discoverWeeklyService } = await import(
+            "../../services/discoverWeekly"
+        );
+        for (const batchId of uniqueBatchIds) {
+            await discoverWeeklyService.checkBatchCompletion(batchId);
+        }
+    }
+
+    return jobsToComplete.length;
 }
 
 export interface ScanJobData {
