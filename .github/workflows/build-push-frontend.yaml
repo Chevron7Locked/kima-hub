@@ -17,7 +17,7 @@ permissions:
   security-events: write  # Required for vulnerability scanning results
 
 env:
-  NEXT_PUBLIC_API_URL: https://listen-api.wells.gg
+  NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
 
 # =============================================================
 # JOBS - Main workflow components
