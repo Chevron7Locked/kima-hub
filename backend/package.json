@@ -1,6 +1,6 @@
 {
     "name": "lidify-backend",
-    "version": "1.3.7",
+    "version": "1.3.8",
     "description": "Lidify backend API server",
     "license": "GPL-3.0",
     "repository": {
