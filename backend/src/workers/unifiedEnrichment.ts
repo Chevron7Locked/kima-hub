@@ -488,7 +488,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
             await audioAnalysisCleanupService.cleanupStaleProcessing();
         if (cleanupResult.reset > 0 || cleanupResult.permanentlyFailed > 0) {
             logger.debug(
-                `[Enrichment] Audio analysis cleanup: ${cleanupResult.reset} reset, ${cleanupResult.permanentlyFailed} permanently failed`,
+                `[Enrichment] Audio analysis cleanup: ${cleanupResult.reset} reset, ${cleanupResult.permanentlyFailed} permanently failed, ${cleanupResult.recovered} recovered`,
             );
         }
 
