@@ -64,24 +64,29 @@ const proxy = async (
     });
 };
 
-type RouteParams = { params: { path: string[] } };
+type RouteParams = { params: Promise<{ path: string[] }> };
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
-    return proxy(request, params.path.join("/"));
+    const { path } = await params;
+    return proxy(request, path.join("/"));
 }
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
-    return proxy(request, params.path.join("/"));
+    const { path } = await params;
+    return proxy(request, path.join("/"));
 }
 
 export async function PUT(request: NextRequest, { params }: RouteParams) {
-    return proxy(request, params.path.join("/"));
+    const { path } = await params;
+    return proxy(request, path.join("/"));
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
-    return proxy(request, params.path.join("/"));
+    const { path } = await params;
+    return proxy(request, path.join("/"));
 }
 
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
-    return proxy(request, params.path.join("/"));
+    const { path } = await params;
+    return proxy(request, path.join("/"));
 }
