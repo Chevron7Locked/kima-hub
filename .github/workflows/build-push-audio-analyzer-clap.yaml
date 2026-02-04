@@ -23,7 +23,7 @@ permissions:
 jobs:
   build-push-audio-analyzer-clap:
     runs-on: 
-      - ubuntu
+      - ubuntu-latest
 
     steps:
       # Convert repository name to lowercase for Docker compatibility
