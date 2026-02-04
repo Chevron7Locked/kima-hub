@@ -85,21 +85,6 @@ const nextConfig: NextConfig = {
             },
         ];
     },
-    // Proxy API requests to backend (for Docker all-in-one container)
-    async rewrites() {
-        const backendUrl = process.env.BACKEND_URL || "http://127.0.0.1:3006";
-        
-        return [
-            {
-                source: "/api/:path*",
-                destination: `${backendUrl}/api/:path*`,
-            },
-            {
-                source: "/health",
-                destination: `${backendUrl}/health`,
-            },
-        ];
-    },
 };
 
 export default withBundleAnalyzer(nextConfig);
