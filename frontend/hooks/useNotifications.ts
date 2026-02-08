@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 
 export interface Notification {
     id: string;
@@ -34,6 +35,8 @@ export interface DownloadHistoryItem {
         [key: string]: unknown;
     };
 }
+
+const EMPTY_DOWNLOADS: DownloadHistoryItem[] = [];
 
 /**
  * Hook for managing notifications using React Query as single source of truth.
@@ -217,18 +220,20 @@ export function useDownloadHistory() {
  * - Polls every 30s when idle (to catch new downloads)
  */
 export function useActiveDownloads() {
+    const { isAuthenticated } = useAuth();
     const fetchDownloads = useCallback(async () => {
         return api.get<DownloadHistoryItem[]>("/notifications/downloads/active");
     }, []);
 
     const {
-        data: downloads = [],
+        data: downloads = EMPTY_DOWNLOADS,
         isLoading,
         error,
         refetch,
     } = useQuery<DownloadHistoryItem[]>({
         queryKey: ["active-downloads"],
         queryFn: fetchDownloads,
+        enabled: isAuthenticated,
     });
 
     return {
