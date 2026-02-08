@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useDownloadStatus, DownloadJob } from "@/hooks/useDownloadStatus";
 import { useAuth } from "@/lib/auth-context";
+import { useEventSource } from "@/hooks/useEventSource";
 
 interface PendingDownload {
     id: string;
@@ -49,6 +50,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         []
     );
     const { isAuthenticated } = useAuth();
+    useEventSource();
     const downloadStatus = useDownloadStatus(15000, isAuthenticated);
 
     // Sync pending downloads with actual download status (render-time adjustment)

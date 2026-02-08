@@ -5,6 +5,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import { FeaturesProvider } from "@/lib/features-context";
 import { ToastProvider } from "@/lib/toast-context";
 import { DownloadProvider } from "@/lib/download-context";
+import { DownloadProgressProvider } from "@/lib/download-progress-context";
 import { ConditionalAudioProvider } from "@/components/providers/ConditionalAudioProvider";
 import { AuthenticatedLayout } from "@/components/layout/AuthenticatedLayout";
 import { QueryProvider } from "@/lib/query-client";
@@ -62,15 +63,17 @@ export default function RootLayout({
                     <AuthProvider>
                         <FeaturesProvider>
                             <QueryProvider>
-                                <DownloadProvider>
-                                    <ConditionalAudioProvider>
+                                <DownloadProgressProvider>
+                                    <DownloadProvider>
+                                        <ConditionalAudioProvider>
                                         <ToastProvider>
                                             <AuthenticatedLayout>
                                                 {children}
                                             </AuthenticatedLayout>
                                         </ToastProvider>
                                     </ConditionalAudioProvider>
-                                </DownloadProvider>
+                                    </DownloadProvider>
+                                </DownloadProgressProvider>
                             </QueryProvider>
                         </FeaturesProvider>
                     </AuthProvider>
