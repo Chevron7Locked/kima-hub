@@ -39,6 +39,7 @@ import analysisRoutes from "./routes/analysis";
 import releasesRoutes from "./routes/releases";
 import vibeRoutes from "./routes/vibe";
 import systemRoutes from "./routes/system";
+import eventsRoutes from "./routes/events";
 import { dataCacheService } from "./services/dataCache";
 import { errorHandler } from "./middleware/errorHandler";
 import { requireAuth, requireAdmin } from "./middleware/auth";
@@ -163,6 +164,8 @@ app.use("/api/analysis", apiLimiter, analysisRoutes);
 app.use("/api/releases", apiLimiter, releasesRoutes);
 app.use("/api/vibe", apiLimiter, vibeRoutes);
 app.use("/api/system", apiLimiter, systemRoutes);
+// SSE - no rate limit, long-lived connections
+app.use("/api/events", eventsRoutes);
 
 // Health check (keep at root for simple container health checks)
 app.get("/health", (req, res) => {
