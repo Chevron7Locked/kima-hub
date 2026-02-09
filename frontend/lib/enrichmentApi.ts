@@ -11,7 +11,7 @@ export interface EnrichmentState {
     startedAt?: string;
     pausedAt?: string;
     stoppedAt?: string;
-    currentPhase: "artists" | "tracks" | "audio" | null;
+    currentPhase: "artists" | "tracks" | "audio" | "vibe" | "podcasts" | null;
     lastActivity: string;
     stoppingInfo?: {
         phase: string;

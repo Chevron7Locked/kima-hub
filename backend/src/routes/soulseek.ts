@@ -10,6 +10,10 @@ import { requireAuth } from "../middleware/auth";
 import { soulseekService, SearchResult } from "../services/soulseek";
 import { getSystemSettings } from "../utils/systemSettings";
 import { randomUUID } from "crypto";
+import { eventBus } from "../services/eventBus";
+import path from "path";
+import type { FileSearchResponse } from "../lib/soulseek/messages/from/peer";
+import { FileAttribute } from "../lib/soulseek/messages/common";
 
 const router = Router();
 
@@ -22,6 +26,31 @@ interface SearchSession {
 
 const searchSessions = new Map<string, SearchSession>();
 const SEARCH_SESSION_TTL = 5 * 60 * 1000; // 5 minutes
+
+function formatSearchResult(response: FileSearchResponse) {
+    return response.files.map((file) => {
+        const fullPath = file.filename;
+        const filename = fullPath.split(/[/\\]/).pop() || fullPath;
+        const format = filename.toLowerCase().endsWith(".flac") ? "flac" : "mp3";
+        const pathParts = fullPath.split(/[/\\]/);
+        const parsedArtist = pathParts.length > 2 ? pathParts[pathParts.length - 3] : undefined;
+        const parsedAlbum = pathParts.length > 1 ? pathParts[pathParts.length - 2] : undefined;
+        const nameWithoutExt = filename.replace(/\.[^.]+$/, "");
+        const parsedTitle = nameWithoutExt.replace(/^\d+[\s.\-_]*/, "").replace(/^\s*-\s*/, "").trim() || undefined;
+
+        return {
+            username: response.username,
+            path: fullPath,
+            filename,
+            size: Number(file.size),
+            bitrate: file.attrs.get(FileAttribute.Bitrate) || 0,
+            format,
+            parsedArtist,
+            parsedAlbum,
+            parsedTitle,
+        };
+    });
+}
 
 // Cleanup old search sessions every minute
 setInterval(() => {
@@ -149,35 +178,54 @@ router.post(
                 createdAt: new Date(),
             });
 
-            // Start async search (don't await - results come in over time)
-            // Use full 45s timeout for quality results from P2P network
+            // Extract userId for SSE targeting
+            const userId = (req as any).user?.id;
+
+            // Start async search with onResult callback for SSE streaming
             soulseekService
-                .searchTrack(searchQuery, "")
-                .then((result) => {
+                .searchTrack(searchQuery, "", false, 45000, (response) => {
+                    // Stream each peer response via SSE
+                    const formatted = formatSearchResult(response);
+                    if (formatted.length > 0 && userId) {
+                        eventBus.emit({
+                            type: "search:result",
+                            userId,
+                            payload: { searchId, results: formatted },
+                        });
+                    }
+                    // Also accumulate in session for GET fallback
                     const session = searchSessions.get(searchId);
-                    if (session && result.found && result.allMatches) {
-                        logger.debug(
-                            `[Soulseek] Search ${searchId} found ${result.allMatches.length} matches`,
-                        );
-                        // Store all matches for polling
-                        session.results = result.allMatches.map((match) => ({
-                            user: match.username,
-                            file: match.fullPath,
-                            size: match.size,
-                            slots: true, // Assume available since ranked
-                            bitrate: match.bitRate,
+                    if (session) {
+                        session.results.push(...formatted.map((r) => ({
+                            user: r.username,
+                            file: r.path,
+                            size: r.size,
+                            slots: true,
+                            bitrate: r.bitrate,
                             speed: 0,
-                        }));
-                        logger.debug(
-                            `[Soulseek] Search ${searchId} session updated with ${session.results.length} results`,
-                        );
-                    } else {
-                        logger.debug(
-                            `[Soulseek] Search ${searchId} completed with no matches (found: ${result.found})`,
-                        );
+                        })));
                     }
                 })
+                .then((result) => {
+                    if (userId) {
+                        eventBus.emit({
+                            type: "search:complete",
+                            userId,
+                            payload: { searchId, found: result.found, matchCount: result.allMatches.length },
+                        });
+                    }
+                    logger.debug(
+                        `[Soulseek] Search ${searchId} completed: ${result.allMatches.length} matches`,
+                    );
+                })
                 .catch((err) => {
+                    if (userId) {
+                        eventBus.emit({
+                            type: "search:complete",
+                            userId,
+                            payload: { searchId, found: false, matchCount: 0, error: err.message },
+                        });
+                    }
                     logger.error(
                         `[Soulseek] Search ${searchId} failed:`,
                         err.message,
@@ -215,29 +263,15 @@ router.get("/search/:searchId", requireAuth, async (req, res) => {
             });
         }
 
-        // Format results for frontend
+        // Format results for frontend (reuse accumulated results from SSE callbacks)
         const formattedResults = session.results.map((r) => {
             const filename = r.file.split(/[/\\]/).pop() || r.file;
-            const format =
-                filename.toLowerCase().endsWith(".flac") ? "flac" : "mp3";
-
-            // Try to parse artist and album from path
+            const format = filename.toLowerCase().endsWith(".flac") ? "flac" : "mp3";
             const pathParts = r.file.split(/[/\\]/);
-            const parsedArtist =
-                pathParts.length > 2 ?
-                    pathParts[pathParts.length - 3]
-                :   undefined;
-            const parsedAlbum =
-                pathParts.length > 1 ?
-                    pathParts[pathParts.length - 2]
-                :   undefined;
-
-            // Extract title from filename: strip extension, track number prefix, and leading dash/space
+            const parsedArtist = pathParts.length > 2 ? pathParts[pathParts.length - 3] : undefined;
+            const parsedAlbum = pathParts.length > 1 ? pathParts[pathParts.length - 2] : undefined;
             const nameWithoutExt = filename.replace(/\.[^.]+$/, "");
-            const parsedTitle = nameWithoutExt
-                .replace(/^\d+[\s.\-_]*/, "") // Remove leading track number
-                .replace(/^\s*-\s*/, "") // Remove leading dash
-                .trim() || undefined;
+            const parsedTitle = nameWithoutExt.replace(/^\d+[\s.\-_]*/, "").replace(/^\s*-\s*/, "").trim() || undefined;
 
             return {
                 username: r.user,
@@ -267,7 +301,7 @@ router.get("/search/:searchId", requireAuth, async (req, res) => {
 
 /**
  * POST /soulseek/download
- * Download a track directly
+ * Download a specific file from a specific user
  */
 router.post(
     "/download",
@@ -275,7 +309,13 @@ router.post(
     requireSoulseekConfigured,
     async (req, res) => {
         try {
-            const { artist, title, album, filepath, filename } = req.body;
+            const { username, filepath, artist, title, album, filename } = req.body;
+
+            if (!username || !filepath) {
+                return res.status(400).json({
+                    error: "username and filepath are required",
+                });
+            }
 
             // Derive artist/title from filename if not provided
             let resolvedArtist = artist;
@@ -283,7 +323,7 @@ router.post(
 
             if (!resolvedArtist || !resolvedTitle) {
                 // Try to extract from filename (strip extension and track number)
-                const name = (filename || filepath?.split(/[/\\]/).pop() || "")
+                const name = (filename || filepath.split(/[/\\]/).pop() || "")
                     .replace(/\.[^.]+$/, "")
                     .replace(/^\d+[\s.\-_]*/, "")
                     .trim();
@@ -302,22 +342,51 @@ router.post(
                 });
             }
 
-            logger.debug(`[Soulseek] Downloading: "${resolvedArtist} - ${resolvedTitle}"`);
-
-            const result = await soulseekService.searchAndDownload(
-                resolvedArtist,
-                resolvedTitle,
-                album || "Unknown Album",
+            // Build destination path: musicPath/artist/album/filename
+            const sanitize = (str: string) =>
+                str.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_");
+            const destPath = path.join(
                 musicPath,
+                sanitize(resolvedArtist),
+                sanitize(album || "Unknown Album"),
+                sanitize(filename || filepath.split(/[/\\]/).pop() || "track.mp3"),
             );
 
+            logger.debug(`[Soulseek] Downloading from ${username}: ${filepath} -> ${destPath}`);
+
+            const match = {
+                username,
+                fullPath: filepath,
+                filename: filename || filepath.split(/[/\\]/).pop() || "track.mp3",
+                size: 0,
+                quality: "unknown",
+                score: 0,
+            };
+
+            const result = await soulseekService.downloadTrack(match, destPath);
+
             if (result.success) {
+                // Trigger library scan to import the new file
+                try {
+                    const { scanQueue } = await import("../workers/queues");
+                    await scanQueue.add("scan", {
+                        userId: (req as any).user?.id || null,
+                        source: "soulseek-manual-download",
+                        artistName: resolvedArtist,
+                    });
+                    logger.debug(`[Soulseek] Library scan queued for: ${resolvedArtist} - ${resolvedTitle}`);
+                } catch (scanError: any) {
+                    logger.warn(`[Soulseek] Failed to queue library scan: ${scanError.message}`);
+                    // Don't fail the request if scan queueing fails
+                }
+
                 res.json({
                     success: true,
-                    filePath: result.filePath,
+                    filePath: destPath,
+                    message: "Download complete, scanning library...",
                 });
             } else {
-                res.status(404).json({
+                res.status(500).json({
                     success: false,
                     error: result.error || "Download failed",
                 });

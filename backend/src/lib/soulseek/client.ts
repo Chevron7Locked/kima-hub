@@ -79,24 +79,19 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
 
     this.listen.on('error', (error) => this.emit('listen-error', error))
 
-    this.listen.on('message', (msg) => {
+    this.listen.on('message', (msg, _address, socket) => {
       const handler = async () => {
         switch (msg.kind) {
           case 'peerInit': {
             const existingPeer = this.peers.get(msg.username)
             if (existingPeer) {
+              socket.destroy()
               return
             }
 
-            const peerAddress = await this.getPeerAddress(msg.username)
-
-            const peer = new SlskPeer(
-              {
-                host: peerAddress.host,
-                port: peerAddress.port,
-              },
-              msg.username
-            )
+            // Reuse the inbound socket -- the peer already connected to us,
+            // no need to open a new outbound connection
+            const peer = new SlskPeer(socket, msg.username)
 
             peer.once('close', () => {
               peer.destroy()
@@ -128,6 +123,7 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
       const handler = () => {
         switch (msg.kind) {
           case 'login': {
+            this.server.send('setWaitPort', { port: this.listenPort })
             this.server.send('sharedFoldersFiles', { dirs: 1, files: 1 })
             this.server.send('haveNoParents', { haveNoParents: true })
             this.server.send('setStatus', { status: UserStatus.Online })
@@ -518,38 +514,28 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
         type: ConnectionType.PeerToPeer,
       })
 
-      const { address } = await new Promise<{
+      const { socket } = await new Promise<{
         msg: PierceFirewall
-        address: Address
+        socket: net.Socket
       }>((resolve, reject) => {
         const timeout_ = setTimeout(() => {
           this.listen.off('message', listener)
           reject(new Error('getPeerByUsername timed out'))
         }, timeout)
 
-        const listener: SlskListenEvents['message'] = (msg, address) => {
+        const listener: SlskListenEvents['message'] = (msg, _address, socket) => {
           if (msg.kind === 'pierceFirewall' && msg.token === token) {
             clearTimeout(timeout_)
             this.listen.off('message', listener)
-            resolve({ msg, address })
+            resolve({ msg, socket })
           }
         }
 
         this.listen.on('message', listener)
       })
 
-      const peer = new SlskPeer(
-        {
-          host: address.host,
-          port: address.port,
-        },
-        username
-      )
-
-      await new Promise<void>((resolve, reject) => {
-        peer.once('connect', () => resolve())
-        peer.once('error', (error) => reject(error))
-      })
+      // Reuse the inbound socket
+      const peer = new SlskPeer(socket, username)
 
       peer.once('close', () => peer.destroy())
 

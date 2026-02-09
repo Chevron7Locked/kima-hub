@@ -9,7 +9,6 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
-import { subscribeQueryEvent } from "@/lib/query-events";
 import type {
     Artist,
     ListenedItem,
@@ -92,15 +91,6 @@ export function useHomeData(): UseHomeDataReturn {
         window.addEventListener("mixes-updated", handleMixesUpdated);
         return () =>
             window.removeEventListener("mixes-updated", handleMixesUpdated);
-    }, [queryClient]);
-
-    // Listen for library-updated event (fired when library scan completes)
-    useEffect(() => {
-        const unsubscribe = subscribeQueryEvent("library-updated", () => {
-            queryClient.refetchQueries({ queryKey: queryKeys.recentlyAdded() });
-        });
-
-        return unsubscribe;
     }, [queryClient]);
 
     // React Query hooks - these automatically handle caching, refetching, and loading states

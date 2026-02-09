@@ -163,24 +163,19 @@ logger.debug("Worker processors registered and event handlers attached");
 // Start Discovery Weekly cron scheduler (Sundays at 8 PM)
 startDiscoverWeeklyCron();
 
-// Run data integrity check on startup and then every 24 hours
-timeouts.push(
-    setTimeout(() => {
-        runDataIntegrityCheck().catch((err) => {
-            logger.error("Data integrity check failed:", err);
-        });
-    }, 10000) // Run 10 seconds after startup
-);
+// Self-rescheduling data integrity check (prevents pile-up on slow runs)
+async function runDataIntegrityCycle() {
+    try {
+        await runDataIntegrityCheck();
+    } catch (err) {
+        logger.error("Data integrity check failed:", err);
+    }
+    timeouts.push(setTimeout(runDataIntegrityCycle, 24 * 60 * 60 * 1000));
+}
 
-intervals.push(
-    setInterval(() => {
-        runDataIntegrityCheck().catch((err) => {
-            logger.error("Data integrity check failed:", err);
-        });
-    }, 24 * 60 * 60 * 1000) // Run every 24 hours
-);
-
-logger.debug("Data integrity check scheduled (every 24 hours)");
+// First run 10 seconds after startup
+timeouts.push(setTimeout(runDataIntegrityCycle, 10000));
+logger.debug("Data integrity check scheduled (every 24 hours, self-rescheduling)");
 
 /**
  * Wrap an async operation with a timeout to prevent indefinite hangs

@@ -6,7 +6,14 @@ export type SSEEventType =
     | "download:progress"
     | "download:queued"
     | "download:complete"
-    | "download:failed";
+    | "download:failed"
+    | "search:result"
+    | "search:complete"
+    | "scan:progress"
+    | "scan:complete"
+    | "import:progress"
+    | "discover:progress"
+    | "discover:complete";
 
 export interface SSEEvent {
     type: SSEEventType;

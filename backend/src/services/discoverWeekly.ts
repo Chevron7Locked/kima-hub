@@ -32,6 +32,7 @@ import {
 import { shuffleArray } from "../utils/shuffle";
 import { updateArtistCounts } from "./artistCountsService";
 import { config as appConfig } from "../config";
+import { eventBus } from "./eventBus";
 
 interface SeedArtist {
     name: string;
@@ -644,6 +645,13 @@ export class DiscoverWeeklyService {
         const failed = failedJobs.length;
         const total = batch.jobs.length;
 
+        // Emit progress via SSE
+        eventBus.emit({
+            type: "discover:progress",
+            userId: batch.userId,
+            payload: { batchId, status: "downloading", completed, failed, total, progress: Math.round(((completed + failed) / total) * 100) },
+        });
+
         logger.debug(
             `[BATCH ${batchId}] Status: ${completed} completed, ${failed} failed, ${pendingJobs.length} pending (total: ${total})`
         );
@@ -726,6 +734,12 @@ export class DiscoverWeeklyService {
             logger.debug(`   All downloads failed`);
             await discoveryBatchLogger.error(batchId, "All downloads failed");
 
+            eventBus.emit({
+                type: "discover:complete",
+                userId: batch.userId,
+                payload: { batchId, status: "failed" },
+            });
+
             // Cleanup failed artists from Lidarr
             await this.cleanupFailedArtists(batchId);
             return;
@@ -745,6 +759,12 @@ export class DiscoverWeeklyService {
             type: "full",
             source: "discover-weekly-completion",
             discoveryBatchId: batchId,
+        });
+
+        eventBus.emit({
+            type: "discover:progress",
+            userId: batch.userId,
+            payload: { batchId, status: "scanning", completed, failed, total, progress: 100 },
         });
 
         logger.debug(
@@ -1350,6 +1370,13 @@ export class DiscoverWeeklyService {
                 "Transaction failed - no records created"
             );
         }
+
+        // Emit discover:complete via SSE
+        eventBus.emit({
+            type: "discover:complete",
+            userId: batch.userId,
+            payload: { batchId, status: result ? "completed" : "failed" },
+        });
 
         // ALWAYS cleanup failed artists from Lidarr (even if playlist creation failed)
         // This prevents accumulating unused artists in Lidarr over time

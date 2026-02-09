@@ -92,15 +92,6 @@ export interface AliasInfo {
     mbid?: string;
 }
 
-export interface DiscoverResponse {
-    results: DiscoverResult[];
-    aliasInfo: AliasInfo | null;
-}
-
-export interface SimilarArtistsResponse {
-    similarArtists: DiscoverResult[];
-}
-
 export interface SoulseekResult {
     username: string;
     path: string;
@@ -112,3 +103,7 @@ export interface SoulseekResult {
     parsedAlbum?: string;
     parsedTitle?: string;
 }
+
+export type SoulseekSortField = "quality" | "bitrate" | "size" | "filename";
+export type SoulseekViewMode = "flat" | "grouped";
+export type SoulseekFormatFilter = "all" | "flac" | "320" | "256";

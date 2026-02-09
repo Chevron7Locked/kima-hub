@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { DiscoverPlaylist, DiscoverConfig } from '../types';
 
@@ -13,19 +14,23 @@ interface BatchStatus {
 }
 
 export function useDiscoverData() {
+  const queryClient = useQueryClient();
   const [playlist, setPlaylist] = useState<DiscoverPlaylist | null>(null);
   const [config, setConfig] = useState<DiscoverConfig | null>(null);
   const [loading, setLoading] = useState(true);
-  const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
   const [pendingGeneration, setPendingGeneration] = useState(false);
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const wasActiveRef = useRef(false);
-  const pendingRef = useRef(false); // Track pending state for polling callback
 
-  // Keep pendingRef in sync with pendingGeneration
-  useEffect(() => {
-    pendingRef.current = pendingGeneration;
-  }, [pendingGeneration]);
+  // SSE-populated batch status (populated by useEventSource via queryClient.setQueryData)
+  const { data: sseBatchStatus } = useQuery<BatchStatus | null>({
+    queryKey: ["discover-batch-status"],
+    queryFn: () => queryClient.getQueryData<BatchStatus>(["discover-batch-status"]) ?? null,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+
+  // Derive batchStatus from SSE data or use null
+  const batchStatus = sseBatchStatus || null;
 
   const loadData = useCallback(async () => {
     try {
@@ -41,111 +46,54 @@ export function useDiscoverData() {
     }
   }, []);
 
+  // Check initial batch status on mount (one-time fetch)
   const checkBatchStatus = useCallback(async () => {
     try {
       const status = await api.getDiscoverBatchStatus();
-      setBatchStatus(status);
-
-      // Clear pending state once batch is confirmed active
-      if (status.active) {
-        setPendingGeneration(false);
-      }
-
-      // If batch was active and now isn't, reload data
-      if (wasActiveRef.current && !status.active) {
-        wasActiveRef.current = false;
-        setPendingGeneration(false);
-        await loadData();
-      }
-      
-      // Track if batch is currently active
-      if (status.active) {
-        wasActiveRef.current = true;
-      }
-
+      // Seed the React Query cache so SSE has a baseline
+      queryClient.setQueryData(["discover-batch-status"], status);
       return status;
     } catch (error) {
       console.error('Failed to check batch status:', error);
       setPendingGeneration(false);
       return null;
     }
-  }, [loadData]);
-
-  // Start polling for batch status
-  const startPolling = useCallback(() => {
-    if (pollingRef.current) return; // Already polling
-
-    let errorCount = 0;
-    pollingRef.current = setInterval(async () => {
-      const status = await checkBatchStatus();
-
-      // Stop polling on repeated API failures
-      if (!status) {
-        errorCount++;
-        if (errorCount >= 5) {
-          if (pollingRef.current) {
-            clearInterval(pollingRef.current);
-            pollingRef.current = null;
-          }
-        }
-        return;
-      }
-      errorCount = 0;
-
-      // Stop polling when batch is not active and we're not waiting for generation
-      if (!status.active && !pendingRef.current) {
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current);
-          pollingRef.current = null;
-        }
-      }
-    }, 3000); // Poll every 3 seconds
-  }, [checkBatchStatus]);
-
-  // Stop polling
-  const stopPolling = useCallback(() => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-  }, []);
+  }, [queryClient]);
 
   // Initial load
   useEffect(() => {
     const init = async () => {
       setLoading(true);
-      
-      // Check batch status first
-      const status = await checkBatchStatus();
-      
-      // Load playlist data
+      await checkBatchStatus();
       await loadData();
-      
-      // Start polling if batch is active
-      if (status?.active) {
-        startPolling();
-      }
-
-      setTimeout(() => {
-        setLoading(false);
-      }, 100);
+      setTimeout(() => { setLoading(false); }, 100);
     };
 
     init();
-
-    return () => {
-      stopPolling();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only: initial data load and polling setup should not re-trigger on callback identity changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only
   }, []);
 
-  // Start polling when batch becomes active OR when generation is pending
-  // This ensures we catch the batch as soon as it's created
+  // React to SSE-driven batch status changes
   useEffect(() => {
-    if ((batchStatus?.active || pendingGeneration) && !pollingRef.current) {
-      startPolling();
+    if (!batchStatus) return;
+
+    // Clear pending state once batch is confirmed active
+    if (batchStatus.active) {
+      setPendingGeneration(false);
     }
-  }, [batchStatus?.active, pendingGeneration, startPolling]);
+
+    // If batch was active and now isn't, reload data
+    if (wasActiveRef.current && !batchStatus.active) {
+      wasActiveRef.current = false;
+      setPendingGeneration(false);
+      loadData();
+    }
+
+    // Track if batch is currently active
+    if (batchStatus.active) {
+      wasActiveRef.current = true;
+    }
+  }, [batchStatus, loadData]);
 
   // Optimistically update a track's liked status
   const updateTrackLiked = useCallback((albumId: string, isLiked: boolean) => {
@@ -153,8 +101,8 @@ export function useDiscoverData() {
       if (!prev) return prev;
       return {
         ...prev,
-        tracks: prev.tracks.map(track => 
-          track.albumId === albumId 
+        tracks: prev.tracks.map(track =>
+          track.albumId === albumId
             ? { ...track, isLiked, likedAt: isLiked ? new Date().toISOString() : null }
             : track
         ),

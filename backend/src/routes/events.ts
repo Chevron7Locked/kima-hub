@@ -60,7 +60,9 @@ router.get("/", (req: Request, res: Response) => {
 
     const listener = (event: SSEEvent) => {
         if (event.userId === userId) {
-            safeSend(`data: ${JSON.stringify(event)}\n\n`);
+            // Flatten payload into top-level so frontend can read data.searchId etc.
+            const { userId: _uid, payload, ...rest } = event;
+            safeSend(`data: ${JSON.stringify({ ...rest, ...payload })}\n\n`);
         }
     };
     const unsubscribe = eventBus.subscribe(listener);

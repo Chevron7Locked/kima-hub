@@ -265,7 +265,8 @@ class SoulseekService {
         artistName: string,
         trackTitle: string,
         isRetry: boolean = false,
-        timeoutMs: number = 45000
+        timeoutMs: number = 45000,
+        onResult?: (result: FileSearchResponse) => void
     ): Promise<SearchTrackResult> {
         this.totalSearches++;
         const searchId = this.totalSearches;
@@ -313,7 +314,7 @@ class SoulseekService {
         try {
             const responses: FileSearchResponse[] = await this.client.search(
                 query,
-                { timeout: timeoutMs }
+                { timeout: timeoutMs, onResult }
             );
 
             const searchDuration = Date.now() - searchStartTime;
@@ -345,7 +346,8 @@ class SoulseekService {
                         artistName,
                         trackTitle,
                         true,
-                        timeoutMs
+                        timeoutMs,
+                        onResult
                     );
                 }
 
@@ -449,7 +451,8 @@ class SoulseekService {
                     artistName,
                     trackTitle,
                     true,
-                    timeoutMs
+                    timeoutMs,
+                    onResult
                 );
             }
 

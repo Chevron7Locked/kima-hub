@@ -11,8 +11,7 @@
 export type QueryEventType =
     | "audiobook-progress-updated"
     | "podcast-progress-updated"
-    | "library-updated"
-    | "mixes-updated"; // Include existing event for consistency
+    | "mixes-updated";
 
 /**
  * Event payload interface - can be extended for event-specific data

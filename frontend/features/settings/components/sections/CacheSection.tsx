@@ -575,7 +575,9 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 !enrichmentProgress.isFullyComplete && (
                                     <span className="text-xs text-purple-400 flex items-center gap-1">
                                         <Loader2 className="w-3 h-3 animate-spin" />
-                                        Audio analysis running
+                                        {enrichmentProgress.audioAnalysis.pending > 0 || enrichmentProgress.audioAnalysis.processing > 0
+                                            ? "Audio analysis running"
+                                            : "Vibe embeddings running"}
                                     </span>
                                 )}
                             {enrichmentProgress.isFullyComplete && (

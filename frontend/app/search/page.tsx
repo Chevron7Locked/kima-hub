@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { SearchIcon } from "lucide-react";
+import { SearchIcon, Sparkles } from "lucide-react";
 import { useSearchData } from "@/features/search/hooks/useSearchData";
 import { useSoulseekSearch } from "@/features/search/hooks/useSoulseekSearch";
 import { SearchFilters } from "@/features/search/components/SearchFilters";
@@ -14,8 +14,10 @@ import { LibraryAudiobooksGrid } from "@/features/search/components/LibraryAudio
 import { LibraryTracksList } from "@/features/search/components/LibraryTracksList";
 import { SimilarArtistsGrid } from "@/features/search/components/SimilarArtistsGrid";
 import { AliasResolutionBanner } from "@/features/search/components/AliasResolutionBanner";
-import { SoulseekSongsList } from "@/features/search/components/SoulseekSongsList";
+import { UnifiedSongsList } from "@/features/search/components/UnifiedSongsList";
+import { SoulseekBrowser } from "@/features/search/components/SoulseekBrowser";
 import { TVSearchInput } from "@/features/search/components/TVSearchInput";
+import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import type { FilterTab } from "@/features/search/types";
 
 export default function SearchPage() {
@@ -24,7 +26,6 @@ export default function SearchPage() {
     const [filterTab, setFilterTab] = useState<FilterTab>("all");
     const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
 
-    // Custom hooks
     const {
         libraryResults,
         discoverResults,
@@ -38,12 +39,14 @@ export default function SearchPage() {
         soulseekResults,
         isSoulseekSearching,
         isSoulseekPolling,
+        isSearchComplete,
         soulseekEnabled,
         downloadingFiles,
         handleDownload,
+        handleBulkDownload,
+        uniqueUserCount,
     } = useSoulseekSearch({ query });
 
-    // Sync query from URL params on navigation (render-time adjustment)
     const urlQuery = searchParams.get("q") ?? "";
     const [prevUrlQuery, setPrevUrlQuery] = useState(urlQuery);
     if (urlQuery !== prevUrlQuery) {
@@ -53,7 +56,6 @@ export default function SearchPage() {
         }
     }
 
-    // Derived state
     const topArtist = discoverResults.find((r) => r.type === "music");
     const isLoading =
         isLibrarySearching ||
@@ -62,296 +64,246 @@ export default function SearchPage() {
         isSoulseekPolling;
     const showLibrary = filterTab === "all" || filterTab === "library";
     const showDiscover = filterTab === "all" || filterTab === "discover";
-    const showSoulseek = filterTab === "all" || filterTab === "soulseek";
 
-    // Determine if we should show the 2-column layout
     const hasTopResult = libraryResults?.artists?.[0] || topArtist;
     const hasTracks =
-        libraryResults?.tracks?.length > 0 || soulseekResults.length > 0;
+        (libraryResults?.tracks?.length ?? 0) > 0 || soulseekResults.length > 0;
     const show2ColumnLayout =
         hasSearched &&
         hasTopResult &&
         hasTracks &&
+        filterTab !== "soulseek" &&
         (showLibrary || showDiscover);
 
-    // Handle TV search
     const handleTVSearch = (searchQuery: string) => {
         setQuery(searchQuery);
         router.push(`/search?q=${encodeURIComponent(searchQuery)}`);
     };
 
     return (
-        <div className="min-h-screen px-6 py-6">
-            {/* TV Search Input - only visible in TV mode */}
-            <TVSearchInput initialQuery={query} onSearch={handleTVSearch} />
+        <div className="min-h-screen relative overflow-hidden">
+            {/* Animated background gradient that pulses during search */}
+            <div
+                className={`fixed inset-0 pointer-events-none transition-opacity duration-1000 ${
+                    isLoading ? "opacity-100" : "opacity-0"
+                }`}
+            >
+                <div className="absolute inset-0 bg-gradient-to-br from-[#eab308]/5 via-transparent to-[#a855f7]/5 animate-pulse" />
+                <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-[#eab308]/10 rounded-full blur-[120px] animate-float" />
+                <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-[#a855f7]/10 rounded-full blur-[120px] animate-float-delayed" />
+            </div>
 
-            <SearchFilters
-                filterTab={filterTab}
-                onFilterChange={setFilterTab}
-                soulseekEnabled={soulseekEnabled}
-                hasSearched={hasSearched}
-            />
+            {/* Main content */}
+            <div className="relative z-10 px-6 py-8 max-w-[1600px] mx-auto">
+                <TVSearchInput initialQuery={query} onSearch={handleTVSearch} />
 
-            <div className="pb-24 space-y-12">
-                {hasSearched && aliasInfo && (
-                    <AliasResolutionBanner aliasInfo={aliasInfo} />
+                {/* Hero Header - Only show when no search */}
+                {!hasSearched && (
+                    <div className="mb-12 text-center animate-fade-in">
+                        <div className="inline-flex items-center gap-3 mb-4 text-[#eab308]">
+                            <Sparkles className="w-6 h-6" />
+                            <span className="text-sm font-semibold tracking-wider uppercase">
+                                Discovery Engine
+                            </span>
+                            <Sparkles className="w-6 h-6" />
+                        </div>
+                        <h1 className="text-6xl md:text-7xl font-black mb-4 bg-gradient-to-br from-white via-white to-gray-500 bg-clip-text text-transparent leading-tight">
+                            Find Your Sound
+                        </h1>
+                        <p className="text-lg text-gray-400 max-w-2xl mx-auto">
+                            Search your library, discover new artists, or tap into the P2P network for rare tracks
+                        </p>
+                    </div>
+                )}
+
+                {/* Search state indicator bar */}
+                {hasSearched && (
+                    <div className="mb-8">
+                        <div className="flex items-center justify-between mb-6">
+                            <div>
+                                <h1 className="text-4xl font-black mb-2 tracking-tight">
+                                    {query}
+                                </h1>
+                                {isLoading && (
+                                    <div className="flex items-center gap-2 text-sm text-[#eab308]">
+                                        <div className="w-1 h-1 rounded-full bg-[#eab308] animate-ping" />
+                                        <span className="font-medium">Searching across sources...</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <SearchFilters
+                            filterTab={filterTab}
+                            onFilterChange={setFilterTab}
+                            soulseekEnabled={soulseekEnabled}
+                            hasSearched={hasSearched}
+                            soulseekResultCount={soulseekResults.length}
+                        />
+                    </div>
+                )}
+
+                {aliasInfo && (
+                    <div className="mb-8">
+                        <AliasResolutionBanner aliasInfo={aliasInfo} />
+                    </div>
                 )}
 
                 <EmptyState hasSearched={hasSearched} isLoading={isLoading} />
 
-                {/* Loading spinner */}
+                {/* Loading state - only when no results yet */}
                 {hasSearched &&
-                    (isLibrarySearching ||
-                        isDiscoverSearching ||
-                        isSoulseekSearching) &&
+                    filterTab !== "soulseek" &&
+                    (isLibrarySearching || isDiscoverSearching || isSoulseekSearching) &&
                     (!libraryResults || !libraryResults.artists?.length) &&
                     discoverResults.length === 0 && (
-                        <div className="flex flex-col items-center justify-center py-16 relative z-10">
-                            <div className="relative w-16 h-16 mb-4">
-                                <svg
-                                    className="w-16 h-16 animate-spin"
-                                    viewBox="0 0 64 64"
-                                >
-                                    <defs>
-                                        <linearGradient
-                                            id="spinnerGrad"
-                                            x1="0%"
-                                            y1="0%"
-                                            x2="100%"
-                                            y2="100%"
-                                        >
-                                            <stop
-                                                offset="0%"
-                                                style={{
-                                                    stopColor: "#facc15",
-                                                    stopOpacity: 1,
-                                                }}
-                                            />
-                                            <stop
-                                                offset="25%"
-                                                style={{
-                                                    stopColor: "#f59e0b",
-                                                    stopOpacity: 1,
-                                                }}
-                                            />
-                                            <stop
-                                                offset="50%"
-                                                style={{
-                                                    stopColor: "#c026d3",
-                                                    stopOpacity: 1,
-                                                }}
-                                            />
-                                            <stop
-                                                offset="75%"
-                                                style={{
-                                                    stopColor: "#a855f7",
-                                                    stopOpacity: 1,
-                                                }}
-                                            />
-                                            <stop
-                                                offset="100%"
-                                                style={{
-                                                    stopColor: "#facc15",
-                                                    stopOpacity: 1,
-                                                }}
-                                            />
-                                        </linearGradient>
-                                    </defs>
-                                    <circle
-                                        cx="32"
-                                        cy="32"
-                                        r="28"
-                                        fill="none"
-                                        stroke="url(#spinnerGrad)"
-                                        strokeWidth="4"
-                                        strokeLinecap="round"
-                                        strokeDasharray="140 40"
-                                    />
-                                </svg>
+                        <div className="flex flex-col items-center justify-center py-24 relative">
+                            <div className="relative">
+                                <GradientSpinner size="xl" className="mb-6" />
+                                <div className="absolute inset-0 bg-gradient-to-r from-[#eab308] to-[#a855f7] opacity-20 blur-xl animate-pulse" />
                             </div>
-                            <p className="text-gray-400 text-sm">
-                                {isSoulseekSearching || isSoulseekPolling
-                                    ? `Searching... (${soulseekResults.length} found)`
-                                    : "Searching..."}
+                            <p className="text-gray-400 text-sm animate-pulse">
+                                Scanning library and network...
                             </p>
                         </div>
                     )}
 
-                {/* 2-Column Layout: Top Result (left) + Songs (right) */}
-                {show2ColumnLayout ? (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Left Column: Top Result */}
-                        <div>
-                            <TopResult
-                                libraryArtist={libraryResults?.artists?.[0]}
-                                discoveryArtist={topArtist}
-                            />
-                        </div>
-
-                        {/* Right Column: Songs */}
-                        <div>
-                            <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-                                {showSoulseek && soulseekResults.length > 0
-                                    ? "Songs"
-                                    : showSoulseek && (isSoulseekSearching || isSoulseekPolling)
-                                    ? <>
-                                        <span>Songs</span>
-                                        <span className="inline-flex items-center gap-2 text-sm font-normal text-gray-400">
-                                            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24">
-                                                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="40 20" />
-                                            </svg>
-                                            Searching...
-                                        </span>
-                                      </>
-                                    : "Songs in Your Library"}
-                            </h2>
-                            {showSoulseek && soulseekResults.length > 0 ? (
-                                <SoulseekSongsList
-                                    soulseekResults={soulseekResults}
-                                    downloadingFiles={downloadingFiles}
-                                    onDownload={handleDownload}
-                                />
-                            ) : showSoulseek && (isSoulseekSearching || isSoulseekPolling) ? (
-                                <div className="space-y-2">
-                                    {[1, 2, 3].map((i) => (
-                                        <div key={i} className="flex items-center gap-4 p-3 rounded-lg bg-white/5 animate-pulse">
-                                            <div className="w-10 h-10 rounded bg-white/10" />
-                                            <div className="flex-1 space-y-2">
-                                                <div className="h-4 bg-white/10 rounded w-3/4" />
-                                                <div className="h-3 bg-white/10 rounded w-1/2" />
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : showLibrary &&
-                              libraryResults?.tracks?.length > 0 ? (
-                                <LibraryTracksList
-                                    tracks={libraryResults.tracks}
-                                />
-                            ) : null}
-                        </div>
+                {/* Soulseek Tab */}
+                {filterTab === "soulseek" && hasSearched && (
+                    <div className="animate-slide-up">
+                        <SoulseekBrowser
+                            results={soulseekResults}
+                            isSearching={isSoulseekSearching}
+                            isPolling={isSoulseekPolling}
+                            isComplete={isSearchComplete}
+                            uniqueUserCount={uniqueUserCount}
+                            downloadingFiles={downloadingFiles}
+                            onDownload={handleDownload}
+                            onBulkDownload={handleBulkDownload}
+                        />
                     </div>
-                ) : (
-                    <>
-                        {/* Original single-column layout when not showing 2-column */}
-                        {hasSearched &&
-                            (showDiscover || showLibrary) &&
-                            hasTopResult && (
-                                <div>
+                )}
+
+                {/* All / Library / Discover Tabs */}
+                {filterTab !== "soulseek" && (
+                    <div className="space-y-12">
+                        {show2ColumnLayout ? (
+                            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.5fr] gap-8 animate-slide-up">
+                                {/* Featured Result - Larger card */}
+                                <div className="space-y-4">
+                                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-3">
+                                        <span className="w-1 h-8 bg-gradient-to-b from-[#eab308] to-[#f59e0b] rounded-full" />
+                                        Top Match
+                                    </h2>
                                     <TopResult
-                                        libraryArtist={
-                                            libraryResults?.artists?.[0]
-                                        }
+                                        libraryArtist={libraryResults?.artists?.[0]}
                                         discoveryArtist={topArtist}
                                     />
                                 </div>
-                            )}
 
-                        {/* Soulseek Songs */}
-                        {hasSearched &&
-                            showSoulseek &&
-                            soulseekResults.length > 0 && (
-                                <section>
-                                    <SoulseekSongsList
-                                        soulseekResults={soulseekResults}
-                                        downloadingFiles={downloadingFiles}
-                                        onDownload={handleDownload}
-                                    />
-                                </section>
-                            )}
-
-                        {/* Soulseek Loading State */}
-                        {hasSearched &&
-                            showSoulseek &&
-                            soulseekResults.length === 0 &&
-                            (isSoulseekSearching || isSoulseekPolling) && (
-                                <section>
-                                    <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-                                        <span>Soulseek</span>
-                                        <span className="inline-flex items-center gap-2 text-sm font-normal text-gray-400">
-                                            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24">
-                                                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="40 20" />
-                                            </svg>
-                                            Searching P2P network... (~45s)
-                                        </span>
+                                {/* Songs list - More prominent */}
+                                <div className="space-y-4">
+                                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-3">
+                                        <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full" />
+                                        Tracks
                                     </h2>
-                                    <div className="space-y-2">
-                                        {[1, 2, 3].map((i) => (
-                                            <div key={i} className="flex items-center gap-4 p-3 rounded-lg bg-white/5 animate-pulse">
-                                                <div className="w-10 h-10 rounded bg-white/10" />
-                                                <div className="flex-1 space-y-2">
-                                                    <div className="h-4 bg-white/10 rounded w-3/4" />
-                                                    <div className="h-3 bg-white/10 rounded w-1/2" />
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </section>
-                            )}
+                                    {filterTab === "all" ? (
+                                        <UnifiedSongsList
+                                            tracks={libraryResults?.tracks ?? []}
+                                            soulseekResults={soulseekResults}
+                                            downloadingFiles={downloadingFiles}
+                                            onDownload={handleDownload}
+                                        />
+                                    ) : filterTab === "library" ? (
+                                        <LibraryTracksList
+                                            tracks={libraryResults?.tracks ?? []}
+                                        />
+                                    ) : null}
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                {hasSearched && (showDiscover || showLibrary) && hasTopResult && (
+                                    <section className="animate-slide-up">
+                                        <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                            <span className="w-1 h-8 bg-gradient-to-b from-[#eab308] to-[#f59e0b] rounded-full" />
+                                            Top Match
+                                        </h2>
+                                        <TopResult
+                                            libraryArtist={libraryResults?.artists?.[0]}
+                                            discoveryArtist={topArtist}
+                                        />
+                                    </section>
+                                )}
 
-                        {/* Library Songs */}
-                        {hasSearched &&
-                            showLibrary &&
-                            libraryResults?.tracks?.length > 0 && (
-                                <section>
-                                    <h2 className="text-2xl font-bold text-white mb-6">
-                                        Songs in Your Library
-                                    </h2>
-                                    <LibraryTracksList
-                                        tracks={libraryResults.tracks}
-                                    />
-                                </section>
-                            )}
-                    </>
+                                {hasSearched && hasTracks && (
+                                    <section className="animate-slide-up" style={{ animationDelay: "0.1s" }}>
+                                        <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                            <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full" />
+                                            Tracks
+                                        </h2>
+                                        {filterTab === "all" ? (
+                                            <UnifiedSongsList
+                                                tracks={libraryResults?.tracks ?? []}
+                                                soulseekResults={soulseekResults}
+                                                downloadingFiles={downloadingFiles}
+                                                onDownload={handleDownload}
+                                            />
+                                        ) : filterTab === "library" ? (
+                                            <LibraryTracksList
+                                                tracks={libraryResults?.tracks ?? []}
+                                            />
+                                        ) : null}
+                                    </section>
+                                )}
+                            </>
+                        )}
+
+                        {/* Albums Grid */}
+                        {hasSearched && showLibrary && (libraryResults?.albums?.length ?? 0) > 0 && (
+                            <section className="animate-slide-up" style={{ animationDelay: "0.2s" }}>
+                                <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                    <span className="w-1 h-8 bg-gradient-to-b from-[#22c55e] to-[#16a34a] rounded-full" />
+                                    Albums
+                                </h2>
+                                <LibraryAlbumsGrid albums={libraryResults!.albums!} />
+                            </section>
+                        )}
+
+                        {/* Podcasts Grid */}
+                        {hasSearched && showLibrary && (libraryResults?.podcasts?.length ?? 0) > 0 && (
+                            <section className="animate-slide-up" style={{ animationDelay: "0.3s" }}>
+                                <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                    <span className="w-1 h-8 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full" />
+                                    Podcasts
+                                </h2>
+                                <LibraryPodcastsGrid podcasts={libraryResults!.podcasts!} />
+                            </section>
+                        )}
+
+                        {/* Audiobooks Grid */}
+                        {hasSearched && showLibrary && (libraryResults?.audiobooks?.length ?? 0) > 0 && (
+                            <section className="animate-slide-up" style={{ animationDelay: "0.4s" }}>
+                                <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                    <span className="w-1 h-8 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full" />
+                                    Audiobooks
+                                </h2>
+                                <LibraryAudiobooksGrid audiobooks={libraryResults!.audiobooks!} />
+                            </section>
+                        )}
+
+                        {/* Related Artists */}
+                        {hasSearched && showDiscover && similarArtists.length > 0 && (
+                            <section className="animate-slide-up" style={{ animationDelay: "0.5s" }}>
+                                <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                    <span className="w-1 h-8 bg-gradient-to-b from-[#ec4899] to-[#db2777] rounded-full" />
+                                    Related Artists
+                                </h2>
+                                <SimilarArtistsGrid similarArtists={similarArtists} />
+                            </section>
+                        )}
+                    </div>
                 )}
-
-                {/* Library Albums */}
-                {hasSearched &&
-                    showLibrary &&
-                    libraryResults?.albums?.length > 0 && (
-                        <section>
-                            <h2 className="text-2xl font-bold text-white mb-6">
-                                Your Albums
-                            </h2>
-                            <LibraryAlbumsGrid albums={libraryResults.albums} />
-                        </section>
-                    )}
-
-                {/* Library Podcasts */}
-                {hasSearched &&
-                    showLibrary &&
-                    libraryResults?.podcasts?.length > 0 && (
-                        <section>
-                            <h2 className="text-2xl font-bold text-white mb-6">
-                                Podcasts
-                            </h2>
-                            <LibraryPodcastsGrid
-                                podcasts={libraryResults.podcasts}
-                            />
-                        </section>
-                    )}
-
-                {/* Library Audiobooks */}
-                {hasSearched &&
-                    showLibrary &&
-                    libraryResults?.audiobooks &&
-                    libraryResults.audiobooks.length > 0 && (
-                        <section>
-                            <h2 className="text-2xl font-bold text-white mb-6">
-                                Audiobooks
-                            </h2>
-                            <LibraryAudiobooksGrid
-                                audiobooks={libraryResults.audiobooks}
-                            />
-                        </section>
-                    )}
-
-                {/* Related Artists */}
-                {hasSearched &&
-                    showDiscover &&
-                    similarArtists.length > 0 && (
-                        <SimilarArtistsGrid similarArtists={similarArtists} />
-                    )}
 
                 {/* No Results */}
                 {hasSearched &&
@@ -365,13 +317,19 @@ export default function SearchPage() {
                             !libraryResults.podcasts?.length &&
                             !libraryResults.audiobooks?.length &&
                             !libraryResults.episodes?.length)) && (
-                        <div className="flex flex-col items-center justify-center py-24 text-center">
-                            <SearchIcon className="w-16 h-16 text-gray-700 mb-4" />
-                            <h3 className="text-xl font-bold text-white mb-2">
-                                No results found
+                        <div className="flex flex-col items-center justify-center py-32 text-center animate-fade-in">
+                            <div className="relative mb-8">
+                                <SearchIcon className="w-20 h-20 text-gray-800" />
+                                <div className="absolute inset-0 bg-gradient-to-br from-[#eab308]/20 to-[#a855f7]/20 blur-2xl" />
+                            </div>
+                            <h3 className="text-2xl font-bold text-white mb-3">
+                                No matches found
                             </h3>
-                            <p className="text-gray-400">
-                                Try searching for something else
+                            <p className="text-gray-400 mb-2">
+                                Try a different search term or check your spelling
+                            </p>
+                            <p className="text-sm text-gray-500">
+                                Tip: Enable Soulseek to search the P2P network
                             </p>
                         </div>
                     )}

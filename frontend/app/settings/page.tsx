@@ -179,7 +179,7 @@ export default function SettingsPage() {
                             settings={systemSettings}
                             onUpdate={updateSystemSettings}
                             onTest={handleTestService}
-                            isTesting={testingServices.slskd || false}
+                            isTesting={testingServices.soulseek || false}
                         />
 
                         {/* AI Services */}

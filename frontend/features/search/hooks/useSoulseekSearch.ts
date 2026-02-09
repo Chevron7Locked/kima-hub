@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+import { searchResultStore } from "@/lib/search-result-store";
 import type { SoulseekResult } from "../types";
 
 interface UseSoulseekSearchProps {
@@ -12,9 +13,12 @@ interface UseSoulseekSearchReturn {
     soulseekResults: SoulseekResult[];
     isSoulseekSearching: boolean;
     isSoulseekPolling: boolean;
+    isSearchComplete: boolean;
     soulseekEnabled: boolean;
     downloadingFiles: Set<string>;
     handleDownload: (result: SoulseekResult) => Promise<void>;
+    handleBulkDownload: (results: SoulseekResult[]) => Promise<void>;
+    uniqueUserCount: number;
 }
 
 export function useSoulseekSearch({
@@ -23,12 +27,11 @@ export function useSoulseekSearch({
     const queryClient = useQueryClient();
     const [soulseekResults, setSoulseekResults] = useState<SoulseekResult[]>([]);
     const [isSoulseekSearching, setIsSoulseekSearching] = useState(false);
-    const [isSoulseekPolling, setIsSoulseekPolling] = useState(false);
     const [soulseekEnabled, setSoulseekEnabled] = useState(false);
     const [downloadingFiles, setDownloadingFiles] = useState<Set<string>>(new Set());
+    const [isComplete, setIsComplete] = useState(false);
 
-    const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-    const abortRef = useRef<AbortController | null>(null);
+    const searchIdRef = useRef<string | null>(null);
 
     useEffect(() => {
         const checkSoulseekStatus = async () => {
@@ -44,97 +47,77 @@ export function useSoulseekSearch({
         checkSoulseekStatus();
     }, []);
 
-    // Soulseek search with polling
+    // Soulseek search with SSE streaming
     useEffect(() => {
         if (!query.trim() || !soulseekEnabled) {
             setSoulseekResults([]);
             return;
         }
 
-        const abortController = new AbortController();
-        abortRef.current = abortController;
-
-        const cleanup = () => {
-            abortController.abort();
-            if (pollIntervalRef.current) {
-                clearInterval(pollIntervalRef.current);
-                pollIntervalRef.current = null;
-            }
-            setIsSoulseekPolling(false);
-        };
+        let cancelled = false;
 
         const timer = setTimeout(async () => {
-            if (abortController.signal.aborted) return;
+            if (cancelled) return;
+
+            // Clear previous search
+            if (searchIdRef.current) {
+                searchResultStore.clear(searchIdRef.current);
+            }
 
             setIsSoulseekSearching(true);
-            setIsSoulseekPolling(true);
+            setIsComplete(false);
+            setSoulseekResults([]);
 
             try {
                 const { searchId } = await api.searchSoulseek(query);
-                if (abortController.signal.aborted) return;
+                if (cancelled) return;
 
-                setSoulseekResults([]);
-
-                // Wait 3 seconds before polling (give search time to collect)
-                await new Promise((resolve) => setTimeout(resolve, 3000));
-                if (abortController.signal.aborted) return;
-
+                searchIdRef.current = searchId;
                 setIsSoulseekSearching(false);
 
-                let pollCount = 0;
-                const maxPolls = 30; // 30 polls * 2s = 60 seconds max
-
-                pollIntervalRef.current = setInterval(async () => {
-                    if (abortController.signal.aborted) {
-                        if (pollIntervalRef.current) {
-                            clearInterval(pollIntervalRef.current);
-                            pollIntervalRef.current = null;
+                // Read store and update state
+                const syncFromStore = () => {
+                    if (cancelled) return;
+                    const session = searchResultStore.getSession(searchId);
+                    if (session) {
+                        setSoulseekResults([...session.results]);
+                        if (session.complete) {
+                            setIsComplete(true);
                         }
-                        return;
                     }
+                };
 
-                    try {
-                        const { results } = await api.getSoulseekResults(searchId);
+                // Subscribe to SSE-driven store updates
+                const unsubscribe = searchResultStore.subscribe(searchId, syncFromStore);
 
-                        if (abortController.signal.aborted) return;
+                // Immediately check for results that arrived during the POST roundtrip
+                syncFromStore();
 
-                        if (results && results.length > 0) {
-                            setSoulseekResults(results);
-                            if (results.length >= 10) {
-                                if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-                                pollIntervalRef.current = null;
-                                setIsSoulseekPolling(false);
-                            }
-                        }
-
-                        pollCount++;
-                        if (pollCount >= maxPolls) {
-                            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-                            pollIntervalRef.current = null;
-                            setIsSoulseekPolling(false);
-                        }
-                    } catch (error) {
-                        if (abortController.signal.aborted) return;
-                        console.error("Error polling Soulseek results:", error);
-                        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-                        pollIntervalRef.current = null;
-                        setIsSoulseekPolling(false);
-                    }
-                }, 2000);
+                // Store unsubscribe for cleanup
+                cleanupRef.current = () => {
+                    unsubscribe();
+                    searchResultStore.clear(searchId);
+                };
             } catch (error) {
-                if (abortController.signal.aborted) return;
+                if (cancelled) return;
                 console.error("Soulseek search error:", error);
                 if (error instanceof Error && error.message?.includes("not enabled")) {
                     setSoulseekEnabled(false);
                 }
                 setIsSoulseekSearching(false);
-                setIsSoulseekPolling(false);
             }
         }, 800);
 
+        const cleanupRef = { current: () => {} };
+
         return () => {
+            cancelled = true;
             clearTimeout(timer);
-            cleanup();
+            cleanupRef.current();
+            if (searchIdRef.current) {
+                searchResultStore.clear(searchIdRef.current);
+                searchIdRef.current = null;
+            }
         };
     }, [query, soulseekEnabled]);
 
@@ -180,12 +163,26 @@ export function useSoulseekSearch({
         }
     }, [queryClient]);
 
+    const handleBulkDownload = useCallback(async (results: SoulseekResult[]) => {
+        for (const result of results) {
+            await handleDownload(result);
+        }
+    }, [handleDownload]);
+
+    const uniqueUserCount = useMemo(
+        () => new Set(soulseekResults.map((r) => r.username)).size,
+        [soulseekResults],
+    );
+
     return {
         soulseekResults,
         isSoulseekSearching,
-        isSoulseekPolling,
+        isSoulseekPolling: !isComplete && !isSoulseekSearching && !!searchIdRef.current && !!query.trim() && soulseekEnabled,
+        isSearchComplete: isComplete,
         soulseekEnabled,
         downloadingFiles,
         handleDownload,
+        handleBulkDownload,
+        uniqueUserCount,
     };
 }

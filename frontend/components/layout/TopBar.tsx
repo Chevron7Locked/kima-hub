@@ -16,8 +16,8 @@ import { ActivityPanelToggle } from "./ActivityPanel";
 import { cn } from "@/utils/cn";
 import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast-context";
-import { useJobStatus } from "@/hooks/useJobStatus";
 import { useDownloadContext } from "@/lib/download-context";
+import { useQuery } from "@tanstack/react-query";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { useAuth } from "@/lib/auth-context";
 import { useQueryClient } from "@tanstack/react-query";
@@ -39,20 +39,30 @@ export function TopBar() {
     const searchInputRef = useRef<HTMLInputElement | null>(null);
     const queryClient = useQueryClient();
 
-    const { isPolling } = useJobStatus(scanJobId, "scan", {
-        onComplete: () => {
-            // Refresh Activity Panel and enrichment progress after scan
-            queryClient.invalidateQueries({ queryKey: ["notifications"] });
-            queryClient.invalidateQueries({
-                queryKey: ["enrichment-progress"],
-            });
-            setScanJobId(null);
-        },
-        onError: () => {
-            // Scan errors will show in the activity panel via notifications
-            setScanJobId(null);
-        },
+    // SSE-populated scan status (populated by useEventSource via queryClient.setQueryData)
+    const { data: scanStatus } = useQuery<{
+        status: string;
+        progress: number;
+        jobId: string;
+        error?: string;
+    } | null>({
+        queryKey: ["scan-status", scanJobId],
+        queryFn: () => queryClient.getQueryData(["scan-status", scanJobId]) ?? null,
+        enabled: !!scanJobId,
+        staleTime: Infinity,
+        refetchOnWindowFocus: false,
     });
+
+    const isScanning = !!scanJobId && scanStatus?.status === "active";
+    const isPolling = !!scanJobId && (!scanStatus || scanStatus.status === "active");
+
+    // Handle scan completion/failure
+    useEffect(() => {
+        if (!scanStatus || !scanJobId) return;
+        if (scanStatus.status === "completed" || scanStatus.status === "failed") {
+            setScanJobId(null);
+        }
+    }, [scanStatus, scanJobId]);
 
     // Track download status from context (single source of truth)
     const { pendingDownloads, downloadStatus } = useDownloadContext();

@@ -3,18 +3,15 @@ import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/hooks/useQueries";
 import { api } from "@/lib/api";
-import { useDownloadContext } from "@/lib/download-context";
 import type { AlbumSource } from "../types";
-import { useMemo, useEffect, useRef } from "react";
+import { useMemo, useEffect } from "react";
 
 export function useAlbumData(albumId?: string) {
     const params = useParams();
     const router = useRouter();
     const id = albumId || (params.id as string);
-    const { downloadStatus } = useDownloadContext();
-    const prevActiveCountRef = useRef(downloadStatus.activeDownloads.length);
 
-    // Use React Query with dynamic refetch interval based on download status
+    // Album data refreshed via download:complete -> invalidate ["album"] in useEventSource
     const {
         data: album,
         isLoading,
@@ -33,28 +30,11 @@ export function useAlbumData(albumId?: string) {
         enabled: !!id,
         staleTime: 10 * 60 * 1000,
         retry: 1,
-        // Poll every 5 seconds when there are active downloads
-        refetchInterval: downloadStatus.hasActiveDownloads ? 5000 : false,
     });
-
-    // Refetch when downloads complete (active count decreases)
-    useEffect(() => {
-        const currentActiveCount = downloadStatus.activeDownloads.length;
-        if (
-            prevActiveCountRef.current > 0 &&
-            currentActiveCount < prevActiveCountRef.current
-        ) {
-            // Downloads have completed, refresh data
-            refetch();
-        }
-        prevActiveCountRef.current = currentActiveCount;
-    }, [downloadStatus.activeDownloads.length, refetch]);
 
     // Determine source from the album data (if it came from library or discovery)
     const source: AlbumSource | null = useMemo(() => {
         if (!album) return null;
-        // Check the owned property - this is the definitive source of truth
-        // Albums can have track listings from MusicBrainz even if not owned
         return album.owned === true ? "library" : "discovery";
     }, [album]);
 

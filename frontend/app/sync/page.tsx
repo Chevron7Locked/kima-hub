@@ -1,136 +1,106 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import Image from "next/image";
-import { dispatchQueryEvent } from "@/lib/query-events";
 
 export default function SyncPage() {
     useRouter();
+    const queryClient = useQueryClient();
     const [syncing, setSyncing] = useState(true);
     const [progress, setProgress] = useState(0);
     const [message, setMessage] = useState("Scanning your music library...");
     const [error, setError] = useState("");
     const [completedSteps, setCompletedSteps] = useState<string[]>([]);
+    const [scanJobId, setScanJobId] = useState<string | null>(null);
+    const handledRef = useRef(false);
 
+    // SSE-populated scan status (populated by useEventSource via queryClient.setQueryData)
+    const { data: scanStatus } = useQuery<{
+        status: string;
+        progress: number;
+        jobId: string;
+        result?: { tracksAdded: number; tracksUpdated: number; tracksRemoved: number };
+        error?: string;
+    } | null>({
+        queryKey: ["scan-status", scanJobId],
+        queryFn: () => queryClient.getQueryData(["scan-status", scanJobId]) ?? null,
+        enabled: !!scanJobId,
+        staleTime: Infinity,
+        refetchOnWindowFocus: false,
+    });
+
+    // Start scan on mount
     useEffect(() => {
         let mounted = true;
-        let pollInterval: NodeJS.Timeout | null = null;
-        let redirectTimeout: NodeJS.Timeout | null = null;
 
         const startSync = async () => {
             try {
-                // Start the library scan
                 const scanResult = await api.scanLibrary();
-                const jobId = scanResult.jobId;
-
                 if (!mounted) return;
+                setScanJobId(scanResult.jobId);
                 setMessage("Scanning your music library...");
-
-                // Poll for actual scan progress
-                pollInterval = setInterval(async () => {
-                    try {
-                        const status = await api.getScanStatus(jobId);
-
-                        if (!mounted) {
-                            if (pollInterval) clearInterval(pollInterval);
-                            return;
-                        }
-
-                        if (status.status === "completed") {
-                            if (pollInterval) clearInterval(pollInterval);
-                            setProgress(90);
-                            setCompletedSteps(["tracks", "library", "albums", "indexes"]);
-
-                            // Trigger post-scan operations
-                            try {
-                                // 1. Audiobook sync
-                                setMessage("Syncing audiobooks...");
-                                await api.post("/audiobooks/sync");
-                            } catch (audiobookError) {
-                                console.error("Audiobook sync failed:", audiobookError);
-                                // Don't fail the whole flow if audiobook sync fails
-                            }
-
-                            if (!mounted) return;
-                            setProgress(95);
-
-                            // Enrichment runs on-demand from Settings page
-                            // Artists get images from Deezer/Fanart when first viewed
-
-                            // Dispatch event to update Recently Added section
-                            dispatchQueryEvent("library-updated");
-
-                            setProgress(100);
-                            setMessage("All set! Redirecting...");
-                            redirectTimeout = setTimeout(() => {
-                                // Use window.location for full page reload to ensure fresh data
-                                window.location.href = "/";
-                            }, 1500);
-                        } else if (status.status === "failed") {
-                            if (pollInterval) clearInterval(pollInterval);
-                            setError(
-                                "Scan failed. You can skip and try again later."
-                            );
-                            setSyncing(false);
-                        } else {
-                            // Update progress based on actual scan progress
-                            setProgress(Math.min(status.progress || 0, 90)); // Cap at 90% to reserve last 10% for audiobooks
-
-                            // Update completed steps based on progress
-                            const steps: string[] = [];
-                            if (status.progress >= 15) steps.push("tracks");
-                            if (status.progress >= 30) steps.push("library");
-                            if (status.progress >= 50) steps.push("albums");
-                            if (status.progress >= 70) steps.push("indexes");
-                            setCompletedSteps(steps);
-
-                            if (status.progress > 0 && status.progress < 30) {
-                                setMessage("Discovering tracks...");
-                            } else if (
-                                status.progress >= 30 &&
-                                status.progress < 60
-                            ) {
-                                setMessage("Indexing albums...");
-                            } else if (
-                                status.progress >= 60 &&
-                                status.progress < 90
-                            ) {
-                                setMessage("Organizing artists...");
-                            } else if (status.progress >= 90) {
-                                setMessage("Almost done...");
-                            }
-                        }
-                    } catch (pollError) {
-                        console.error("Error polling scan status:", pollError);
-                    }
-                }, 1000); // Poll every second
             } catch (err: unknown) {
                 console.error("Sync error:", err);
                 if (!mounted) return;
-                setError(
-                    "Failed to start sync. You can skip and start manually later."
-                );
+                setError("Failed to start sync. You can skip and start manually later.");
                 setSyncing(false);
             }
         };
 
         startSync();
-
-        return () => {
-            mounted = false;
-            if (pollInterval) {
-                clearInterval(pollInterval);
-            }
-            if (redirectTimeout) {
-                clearTimeout(redirectTimeout);
-            }
-        };
+        return () => { mounted = false; };
     }, []);
 
+    // React to SSE-driven scan status changes
+    useEffect(() => {
+        if (!scanStatus || handledRef.current) return;
+
+        if (scanStatus.status === "active") {
+            const p = scanStatus.progress || 0;
+            setProgress(Math.min(p, 90));
+
+            const steps: string[] = [];
+            if (p >= 15) steps.push("tracks");
+            if (p >= 30) steps.push("library");
+            if (p >= 50) steps.push("albums");
+            if (p >= 70) steps.push("indexes");
+            setCompletedSteps(steps);
+
+            if (p > 0 && p < 30) setMessage("Discovering tracks...");
+            else if (p >= 30 && p < 60) setMessage("Indexing albums...");
+            else if (p >= 60 && p < 90) setMessage("Organizing artists...");
+            else if (p >= 90) setMessage("Almost done...");
+        } else if (scanStatus.status === "completed") {
+            handledRef.current = true;
+            setProgress(90);
+            setCompletedSteps(["tracks", "library", "albums", "indexes"]);
+
+            // Post-scan operations
+            (async () => {
+                try {
+                    setMessage("Syncing audiobooks...");
+                    await api.post("/audiobooks/sync");
+                } catch (audiobookError) {
+                    console.error("Audiobook sync failed:", audiobookError);
+                }
+
+                setProgress(100);
+                setMessage("All set! Redirecting...");
+                setTimeout(() => {
+                    window.location.href = "/";
+                }, 1500);
+            })();
+        } else if (scanStatus.status === "failed") {
+            handledRef.current = true;
+            setError("Scan failed. You can skip and try again later.");
+            setSyncing(false);
+        }
+    }, [scanStatus, queryClient]);
+
     const handleSkip = () => {
-        // Use window.location for full page reload to ensure fresh data
         window.location.href = "/";
     };
 

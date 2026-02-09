@@ -1,6 +1,7 @@
 import { Job } from "bull";
 import { logger } from "../../utils/logger";
 import { discoverWeeklyService } from "../../services/discoverWeekly";
+import { eventBus } from "../../services/eventBus";
 
 export interface DiscoverJobData {
     userId: string;
@@ -41,6 +42,14 @@ export async function processDiscoverWeekly(
             songCount: result.songCount,
             batchId: result.batchId,
         });
+
+        if (result.batchId) {
+            eventBus.emit({
+                type: "discover:progress",
+                userId,
+                payload: { batchId: result.batchId, status: "downloading", completed: 0, failed: 0, total: result.songCount, progress: 0 },
+            });
+        }
 
         await job.progress(100); // Complete
 

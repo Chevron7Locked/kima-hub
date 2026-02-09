@@ -16,7 +16,7 @@ import {
     ChevronUp,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/lib/toast-context";
 
 // Types for Spotify Import
@@ -163,43 +163,36 @@ function SpotifyImportPageContent() {
         }
     }, [searchParams, toast]);
 
-    // Poll for import job status
+    // SSE-populated import status (populated by useEventSource via queryClient.setQueryData)
+    const { data: sseImportStatus } = useQuery<(ImportJob & { jobId?: string }) | null>({
+        queryKey: ["import-status", importJob?.id],
+        queryFn: () => queryClient.getQueryData(["import-status", importJob?.id]) ?? null,
+        enabled: !!importJob && importJob.status !== "completed" && importJob.status !== "failed" && importJob.status !== "cancelled",
+        staleTime: Infinity,
+        refetchOnWindowFocus: false,
+    });
+
+    // React to SSE-driven import status changes
     useEffect(() => {
-        if (
-            !importJob ||
-            importJob.status === "completed" ||
-            importJob.status === "failed" ||
-            importJob.status === "cancelled"
-        ) {
-            return;
+        if (!sseImportStatus || !importJob) return;
+
+        const updated: ImportJob = {
+            ...importJob,
+            status: sseImportStatus.status,
+            progress: sseImportStatus.progress,
+            albumsCompleted: sseImportStatus.albumsCompleted,
+            tracksMatched: sseImportStatus.tracksMatched,
+            createdPlaylistId: sseImportStatus.createdPlaylistId,
+            error: sseImportStatus.error,
+        };
+        setImportJob(updated);
+
+        if (updated.status === "completed" || updated.status === "cancelled") {
+            setStep("complete");
+        } else if (updated.status === "failed") {
+            setStep("complete");
         }
-
-        const interval = setInterval(async () => {
-            try {
-                const job = await api.get<ImportJob>(
-                    `/spotify/import/${importJob.id}/status`
-                );
-                setImportJob(job);
-
-                if (job.status === "completed") {
-                    setStep("complete");
-                    queryClient.invalidateQueries({ queryKey: ["notifications"] });
-                    queryClient.invalidateQueries({ queryKey: ["playlists"] });
-                } else if (job.status === "cancelled") {
-                    setStep("complete");
-                    queryClient.invalidateQueries({ queryKey: ["notifications"] });
-                    queryClient.invalidateQueries({ queryKey: ["playlists"] });
-                } else if (job.status === "failed") {
-                    setStep("complete");
-                    queryClient.invalidateQueries({ queryKey: ["notifications"] });
-                }
-            } catch (err) {
-                console.error("Failed to poll job status:", err);
-            }
-        }, 2000);
-
-        return () => clearInterval(interval);
-    }, [importJob, toast, queryClient]);
+    }, [sseImportStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Handle URL paste/change
     const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {

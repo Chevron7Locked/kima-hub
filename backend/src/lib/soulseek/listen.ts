@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events'
-import type { Server } from 'net'
+import type { Server, Socket } from 'net'
 import net from 'net'
 import type TypedEventEmitter from 'typed-emitter'
 
@@ -10,7 +10,7 @@ import type { MessageParser } from './messages/message-parser'
 import { MessageStream } from './messages/message-stream'
 
 export type SlskListenEvents = {
-  message: (msg: FromPeerInitMessage, address: Address) => void
+  message: (msg: FromPeerInitMessage, address: Address, socket: Socket) => void
   error: (error: Error) => void
 }
 
@@ -35,7 +35,7 @@ export class SlskListen extends (EventEmitter as new () => TypedEventEmitter<Sls
         try {
           const data = fromPeerInitMessageParser(msg)
           if (data) {
-            this.emit('message', data, { host, port })
+            this.emit('message', data, { host, port }, c)
           }
         } catch (error) {
           console.error('Failed to parse peer init message', error)

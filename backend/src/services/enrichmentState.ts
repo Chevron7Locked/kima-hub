@@ -11,7 +11,6 @@ import { config } from "../config";
 
 const ENRICHMENT_STATE_KEY = "enrichment:state";
 const ENRICHMENT_CONTROL_CHANNEL = "enrichment:control";
-const AUDIO_CONTROL_CHANNEL = "audio:analysis:control";
 
 export type EnrichmentStatus = "idle" | "running" | "paused" | "stopping";
 export type EnrichmentPhase = "artists" | "tracks" | "audio" | "vibe" | "podcasts" | null;
@@ -142,7 +141,6 @@ class EnrichmentStateService {
 
         // Notify workers via pub/sub
         await this.publisher.publish(ENRICHMENT_CONTROL_CHANNEL, "pause");
-        await this.publisher.publish(AUDIO_CONTROL_CHANNEL, "pause");
 
         logger.debug("[Enrichment State] Paused");
         return updated;
@@ -176,7 +174,6 @@ class EnrichmentStateService {
 
         // Notify workers via pub/sub
         await this.publisher.publish(ENRICHMENT_CONTROL_CHANNEL, "resume");
-        await this.publisher.publish(AUDIO_CONTROL_CHANNEL, "resume");
 
         logger.debug("[Enrichment State] Resumed");
         return updated;
@@ -204,7 +201,6 @@ class EnrichmentStateService {
 
         // Notify workers via pub/sub
         await this.publisher.publish(ENRICHMENT_CONTROL_CHANNEL, "stop");
-        await this.publisher.publish(AUDIO_CONTROL_CHANNEL, "stop");
 
         logger.debug("[Enrichment State] Stopping (worker will transition to idle when current item completes)...");
 

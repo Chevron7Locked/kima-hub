@@ -2,6 +2,7 @@ import { Job } from "bull";
 import { logger } from "../../utils/logger";
 import { MusicScannerService } from "../../services/musicScanner";
 import { config } from "../../config";
+import { eventBus } from "../../services/eventBus";
 import * as path from "path";
 
 /**
@@ -191,14 +192,23 @@ export async function processScan(
     );
 
     // Create scanner with progress callback and cover cache path
+    let lastEmittedPercent = -2;
     const scanner = new MusicScannerService((progress) => {
-        // Calculate percentage (filesScanned / filesTotal * 100)
         const percent = Math.floor(
             (progress.filesScanned / progress.filesTotal) * 100
         );
         job.progress(percent).catch((err) =>
             logger.error(`Failed to update job progress:`, err)
         );
+        // Emit SSE every 2% to avoid flooding
+        if (userId && percent >= lastEmittedPercent + 2) {
+            lastEmittedPercent = percent;
+            eventBus.emit({
+                type: "scan:progress",
+                userId,
+                payload: { jobId: String(job.id), progress: percent },
+            });
+        }
     }, coverCachePath);
 
     // Use provided music path or fall back to config
@@ -210,6 +220,17 @@ export async function processScan(
         const result = await scanner.scanLibrary(scanPath);
 
         await job.progress(100);
+
+        if (userId) {
+            eventBus.emit({
+                type: "scan:complete",
+                userId,
+                payload: {
+                    jobId: String(job.id),
+                    result: { tracksAdded: result.tracksAdded, tracksUpdated: result.tracksUpdated, tracksRemoved: result.tracksRemoved },
+                },
+            });
+        }
 
         logger.debug(
             `[ScanJob ${job.id}] Scan complete: +${result.tracksAdded} ~${result.tracksUpdated} -${result.tracksRemoved}`
@@ -600,6 +621,13 @@ export async function processScan(
         return result;
     } catch (error: any) {
         logger.error(`[ScanJob ${job.id}] Scan failed:`, error);
+        if (userId) {
+            eventBus.emit({
+                type: "scan:complete",
+                userId,
+                payload: { jobId: String(job.id), error: error.message || "Scan failed" },
+            });
+        }
         throw error;
     }
 }

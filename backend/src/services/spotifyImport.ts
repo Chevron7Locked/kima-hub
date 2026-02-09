@@ -13,6 +13,7 @@ import { redisClient } from "../utils/redis";
 import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";
 import { extractPrimaryArtist } from "../utils/artistNormalization";
+import { eventBus } from "./eventBus";
 
 // Store loggers for each job
 const jobLoggers = new Map<string, ReturnType<typeof createPlaylistLogger>>();
@@ -153,6 +154,24 @@ async function saveImportJob(job: ImportJob): Promise<void> {
         );
         // Continue - Redis is optional, DB is source of truth
     }
+
+    // Emit SSE event for real-time frontend updates
+    eventBus.emit({
+        type: "import:progress",
+        userId: job.userId,
+        payload: {
+            jobId: job.id,
+            status: job.status,
+            progress: job.progress,
+            albumsTotal: job.albumsTotal,
+            albumsCompleted: job.albumsCompleted,
+            tracksMatched: job.tracksMatched,
+            tracksTotal: job.tracksTotal,
+            tracksDownloadable: job.tracksDownloadable,
+            createdPlaylistId: job.createdPlaylistId,
+            error: job.error,
+        },
+    });
 }
 
 /**

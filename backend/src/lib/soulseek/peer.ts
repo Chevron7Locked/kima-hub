@@ -23,10 +23,17 @@ export class SlskPeer extends (EventEmitter as new () => TypedEventEmitter<SlskP
   msgs: MessageStream
   username: string
 
-  constructor(address: Address, username: string) {
+  constructor(addressOrSocket: Address | Socket, username: string) {
     super()
     this.username = username
-    this.conn = net.createConnection(address)
+
+    if ('on' in addressOrSocket && typeof (addressOrSocket as Socket).write === 'function') {
+      // Existing socket (inbound connection from listen server)
+      this.conn = addressOrSocket as Socket
+    } else {
+      // New outbound connection
+      this.conn = net.createConnection(addressOrSocket as Address)
+    }
 
     this.msgs = new MessageStream()
 

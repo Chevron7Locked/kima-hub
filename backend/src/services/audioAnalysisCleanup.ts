@@ -76,6 +76,13 @@ class AudioAnalysisCleanupService {
         this.onSuccess();
     }
 
+    resetCircuitBreaker(): void {
+        this.state = "closed";
+        this.failureCount = 0;
+        this.lastFailureTime = null;
+        logger.debug("[AudioAnalysisCleanup] Circuit breaker reset");
+    }
+
     async cleanupStaleProcessing(): Promise<{
         reset: number;
         permanentlyFailed: number;

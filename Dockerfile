@@ -50,6 +50,10 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     redis \
     psycopg2-binary
 
+# Install cuDNN 8 for TensorFlow GPU (separate from PyTorch's cuDNN 9)
+# TF 2.15 needs cuDNN 8, PyTorch needs cuDNN 9 -- installed to isolated path to avoid conflicts
+RUN pip3 install --no-cache-dir --break-system-packages --target=/opt/cudnn8 'nvidia-cudnn-cu12==8.9.7.29'
+
 # Download Essentia ML models (~200MB total) - these enable Enhanced vibe matching
 # IMPORTANT: Using MusiCNN models to match analyzer.py expectations
 RUN echo "Downloading Essentia ML models for Enhanced vibe matching..." && \
@@ -271,7 +275,7 @@ stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
-environment=DATABASE_URL="postgresql://lidify:lidify@localhost:5432/lidify",REDIS_URL="redis://localhost:6379",MUSIC_PATH="/music",BATCH_SIZE="10",SLEEP_INTERVAL="5",MAX_ANALYZE_SECONDS="90",BRPOP_TIMEOUT="30",MODEL_IDLE_TIMEOUT="300",NUM_WORKERS="2",THREADS_PER_WORKER="1",CUDA_VISIBLE_DEVICES=""
+environment=DATABASE_URL="postgresql://lidify:lidify@localhost:5432/lidify",REDIS_URL="redis://localhost:6379",MUSIC_PATH="/music",BATCH_SIZE="10",SLEEP_INTERVAL="5",MAX_ANALYZE_SECONDS="90",BRPOP_TIMEOUT="30",MODEL_IDLE_TIMEOUT="300",NUM_WORKERS="2",THREADS_PER_WORKER="1",LD_LIBRARY_PATH="/opt/cudnn8/nvidia/cudnn/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cublas/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cufft/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cuda_runtime/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cuda_nvrtc/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cusolver/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cusparse/lib:/usr/local/lib/python3.11/dist-packages/nvidia/nccl/lib"
 priority=50
 
 [program:audio-analyzer-clap]

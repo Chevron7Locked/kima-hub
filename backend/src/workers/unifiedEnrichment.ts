@@ -219,15 +219,37 @@ export async function startUnifiedEnrichmentWorker() {
     logger.debug(`   Interval: ${ENRICHMENT_INTERVAL_MS / 1000}s`);
     logger.debug("");
 
+     // Crash recovery: reset orphaned tracks stuck in "processing" from a previous crash
+     const orphanedAudio = await prisma.track.updateMany({
+         where: { analysisStatus: "processing" },
+         data: { analysisStatus: "pending", analysisStartedAt: null },
+     });
+     const orphanedVibe = await prisma.track.updateMany({
+         where: { vibeAnalysisStatus: "processing" },
+         data: { vibeAnalysisStatus: "pending", vibeAnalysisStartedAt: null },
+     });
+     if (orphanedAudio.count > 0 || orphanedVibe.count > 0) {
+         logger.info(
+             `[Enrichment] Crash recovery: reset ${orphanedAudio.count} orphaned audio + ${orphanedVibe.count} orphaned vibe tracks to pending`
+         );
+     }
+
+     // Reset circuit breaker so stale failure state from a previous run doesn't block queuing
+     audioAnalysisCleanupService.resetCircuitBreaker();
+
+     // Reset local flags from any previous session
+     isPaused = false;
+     isStopping = false;
+
      // Check if there's existing state that might be problematic
      const existingState = await enrichmentStateService.getState();
-     
+
      // Only clear state if it exists and is in a non-idle state
      // This prevents clearing fresh state from a previous worker instance
      if (existingState && existingState.status !== "idle") {
          await enrichmentStateService.clear();
      }
-     
+
      // Initialize state
      await enrichmentStateService.initializeState();
 
@@ -237,9 +259,18 @@ export async function startUnifiedEnrichmentWorker() {
     // Run immediately
     await runEnrichmentCycle(false);
 
-    // Then run at interval
-    enrichmentInterval = setInterval(async () => {
+    // Self-rescheduling: schedule next cycle after current one completes
+    scheduleNextEnrichmentCycle();
+}
+
+/**
+ * Schedule the next enrichment cycle after the current one completes.
+ * Replaces setInterval to prevent pile-up when cycles exceed ENRICHMENT_INTERVAL_MS.
+ */
+function scheduleNextEnrichmentCycle() {
+    enrichmentInterval = setTimeout(async () => {
         await runEnrichmentCycle(false);
+        scheduleNextEnrichmentCycle();
     }, ENRICHMENT_INTERVAL_MS);
 }
 
@@ -248,7 +279,7 @@ export async function startUnifiedEnrichmentWorker() {
  */
 export function stopUnifiedEnrichmentWorker() {
     if (enrichmentInterval) {
-        clearInterval(enrichmentInterval);
+        clearTimeout(enrichmentInterval);
         enrichmentInterval = null;
         logger.debug("[Enrichment] Worker stopped");
     }
@@ -584,10 +615,6 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                         error,
                     );
                 }
-            } else {
-                logger.debug(
-                    "[Enrichment] Completion notification already sent, skipping",
-                );
             }
         }
     } catch (error) {
@@ -1333,12 +1360,18 @@ export async function triggerEnrichmentNow(): Promise<{
 
      await audioAnalysisCleanupService.cleanupStaleProcessing();
 
-     const tracks = await prisma.track.findMany({
-         where: { analysisStatus: "pending" },
-         select: { id: true },
+     // Reset all non-pending tracks so they get re-queued
+     const reset = await prisma.track.updateMany({
+         where: {
+             analysisStatus: { not: "pending" },
+         },
+         data: {
+             analysisStatus: "pending",
+             analysisStartedAt: null,
+         },
      });
 
-     logger.debug(`[Enrichment] Found ${tracks.length} tracks pending audio analysis`);
+     logger.debug(`[Enrichment] Reset ${reset.count} tracks to pending for audio re-analysis`);
 
      const queued = await queueAudioAnalysis();
 
