@@ -10,6 +10,7 @@ export type Download =
   | ConnectedDownload
   | DownloadingDownload
   | CompleteDownload
+  | DeniedDownload
 
 export type SlskDownloadEvents = {
   status: (status: Download['status'], data: DownloadStatusData) => void
@@ -57,6 +58,13 @@ export type CompleteDownload = Omit<DownloadingDownload, 'status'> & {
 }
 export const isCompleteDownload = (download: Download): download is CompleteDownload =>
   download.status === 'complete'
+
+export type DeniedDownload = Omit<RequestedDownload, 'status'> & {
+  status: 'denied'
+  reason: string
+}
+export const isDeniedDownload = (download: Download): download is DeniedDownload =>
+  download.status === 'denied'
 
 export type DownloadWithToken = ConnectedDownload | DownloadingDownload | CompleteDownload
 export const downloadHasToken = (download: Download): download is DownloadWithToken =>

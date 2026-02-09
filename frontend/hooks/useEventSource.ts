@@ -14,15 +14,18 @@ export function useEventSource() {
     const { updateProgress, clearProgress } = useDownloadProgress();
     const eventSourceRef = useRef<EventSource | null>(null);
     const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const reconnectAttemptsRef = useRef(0);
 
     useEffect(() => {
-        const token = api.getToken();
-        if (!isAuthenticated || !token) return;
+        if (!isAuthenticated) return;
 
         let mounted = true;
 
         const connect = () => {
             if (!mounted) return;
+
+            const token = api.getToken();
+            if (!token) return;
 
             const es = new EventSource(`${API_BASE}/events?token=${token}`);
             eventSourceRef.current = es;
@@ -66,6 +69,7 @@ export function useEventSource() {
                             queryClient.invalidateQueries({ queryKey: ["notifications"] });
                             break;
                         case "connected":
+                            reconnectAttemptsRef.current = 0;
                             break;
                     }
                 } catch {
@@ -77,7 +81,9 @@ export function useEventSource() {
                 es.close();
                 eventSourceRef.current = null;
                 if (mounted) {
-                    reconnectTimeoutRef.current = setTimeout(connect, 5000);
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
+                    reconnectAttemptsRef.current++;
+                    reconnectTimeoutRef.current = setTimeout(connect, delay);
                 }
             };
         };

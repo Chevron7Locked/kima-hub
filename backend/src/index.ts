@@ -476,6 +476,11 @@ async function gracefulShutdown(signal: string) {
         const { shutdownWorkers } = await import("./workers");
         await shutdownWorkers();
 
+        // Disconnect Soulseek
+        logger.debug("Disconnecting Soulseek...");
+        const { soulseekService } = await import("./services/soulseek");
+        soulseekService.disconnect();
+
         // Close Redis connection
         logger.debug("Closing Redis connection...");
         await redisClient.quit();

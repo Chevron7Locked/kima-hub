@@ -220,28 +220,6 @@ class PlaylistLogger {
         this.error(`✗ Failed: "${albumName}" by ${artistName} - ${reason}`);
     }
 
-    logSoulseekFallbackStart(albumName: string, artistName: string): void {
-        this.info('');
-        this.info('--- SOULSEEK FALLBACK ---');
-        this.info(`Trying Soulseek for: "${albumName}" by ${artistName}`);
-    }
-
-    logSoulseekSearchResult(found: boolean, quality?: string, username?: string, trackCount?: number, sizeMB?: number): void {
-        if (found) {
-            this.info(`✓ Soulseek match: ${quality} from ${username} (${trackCount} tracks, ${sizeMB}MB)`);
-        } else {
-            this.info(`✗ Soulseek: No suitable results found`);
-        }
-    }
-
-    logSoulseekDownloadQueued(filesQueued: number, username: string): void {
-        this.info(`✓ Soulseek: Queued ${filesQueued} files from ${username}`);
-    }
-
-    logSoulseekDownloadFailed(reason: string): void {
-        this.error(`✗ Soulseek download failed: ${reason}`);
-    }
-
     logDownloadProgress(completed: number, failed: number, pending: number): void {
         this.info(`Download status: ${completed} completed, ${failed} failed, ${pending} pending`);
     }

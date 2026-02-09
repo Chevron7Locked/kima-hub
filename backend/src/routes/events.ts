@@ -46,15 +46,30 @@ router.get("/", (req: Request, res: Response) => {
 
     logger.debug(`[SSE] Client connected: userId=${userId}`);
 
+    const safeSend = (data: string): boolean => {
+        try {
+            if (!res.destroyed && !res.writableEnded) {
+                res.write(data);
+                return true;
+            }
+        } catch {
+            // Connection already closed
+        }
+        return false;
+    };
+
     const listener = (event: SSEEvent) => {
         if (event.userId === userId) {
-            res.write(`data: ${JSON.stringify(event)}\n\n`);
+            safeSend(`data: ${JSON.stringify(event)}\n\n`);
         }
     };
     const unsubscribe = eventBus.subscribe(listener);
 
     const heartbeat = setInterval(() => {
-        res.write(`: heartbeat\n\n`);
+        if (!safeSend(`: heartbeat\n\n`)) {
+            clearInterval(heartbeat);
+            unsubscribe();
+        }
     }, 30_000);
 
     req.on("close", () => {
@@ -70,13 +85,5 @@ router.get("/", (req: Request, res: Response) => {
         logger.debug(`[SSE] Client disconnected: userId=${userId}`);
     });
 });
-
-export function getSSEConnectionCount(): number {
-    let count = 0;
-    for (const set of connections.values()) {
-        count += set.size;
-    }
-    return count;
-}
 
 export default router;

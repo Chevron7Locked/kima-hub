@@ -215,9 +215,8 @@ export function useDownloadHistory() {
 }
 
 /**
- * Hook for active downloads with adaptive polling
- * - Polls every 10s when downloads are active (for progress updates)
- * - Polls every 30s when idle (to catch new downloads)
+ * Hook for active downloads. Updates are driven by SSE events
+ * (download:complete, download:failed) invalidating the query cache.
  */
 export function useActiveDownloads() {
     const { isAuthenticated } = useAuth();

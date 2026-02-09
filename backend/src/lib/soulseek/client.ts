@@ -113,11 +113,9 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
         }
       }
 
-      try {
-        void handler()
-      } catch (error) {
+      handler().catch((error) => {
         this.emit('client-error', error)
-      }
+      })
     })
 
     this.wirePeerMessageHandlers()
@@ -219,7 +217,10 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
                     download.events.emit('progress', {
                       receivedBytes: download.receivedBytes,
                       totalBytes: download.totalBytes,
-                      progress: Number((download.receivedBytes * 100n) / download.totalBytes) / 100,
+                      progress:
+                        download.totalBytes > 0n
+                          ? Number((download.receivedBytes * 100n) / download.totalBytes) / 100
+                          : 0,
                     })
 
                     const isComplete = download.receivedBytes >= download.totalBytes
@@ -337,10 +338,12 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
             if (existingDownloadIndex !== -1) {
               const download = this.downloads[existingDownloadIndex]
               download.stream.destroy(new Error(`Upload denied: ${msg.reason}`))
-              download.events.emit('status', 'denied' as any, {
-                ...makeDownloadStatusData(download),
+              const denied = {
+                ...download,
+                status: 'denied' as const,
                 reason: msg.reason,
-              } as any)
+              }
+              download.events.emit('status', 'denied', makeDownloadStatusData(denied))
               this.downloads = this.downloads.filter((_, i) => i !== existingDownloadIndex)
             }
             break
@@ -411,8 +414,11 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
     this.credentials = { username, password }
     await this.login(username, password, timeout)
     this.reconnectAttempts = 0
+    this.wireCloseHandler()
+  }
 
-    this.server.conn.on('close', () => {
+  private wireCloseHandler() {
+    this.server.conn.once('close', () => {
       this.loggedIn = false
       if (this.autoReconnect && this.credentials) {
         this.scheduleReconnect()
@@ -436,13 +442,7 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
         this.wireServerHandlers()
         await this.login(this.credentials.username, this.credentials.password)
         this.reconnectAttempts = 0
-
-        this.server.conn.on('close', () => {
-          this.loggedIn = false
-          if (this.autoReconnect && this.credentials) {
-            this.scheduleReconnect()
-          }
-        })
+        this.wireCloseHandler()
       } catch {
         this.scheduleReconnect()
       }
@@ -590,12 +590,29 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
       return peer
     }
 
+    const peerA = getByConnectToPeer()
+    const peerB = getByPeerInit()
+
     let peer: SlskPeer
     try {
-      peer = await Promise.any([getByConnectToPeer(), getByPeerInit()])
+      peer = await Promise.any([peerA, peerB])
     } catch (error) {
       throw new Error(`Could not connect to ${username}`)
     }
+
+    // Destroy the losing peer to prevent socket leak
+    const cleanupLoser = async (loserPromise: Promise<SlskPeer>) => {
+      try {
+        const loser = await loserPromise
+        if (loser !== peer) {
+          loser.destroy()
+        }
+      } catch {
+        // Already failed, nothing to clean up
+      }
+    }
+    void cleanupLoser(peerA)
+    void cleanupLoser(peerB)
 
     peer.once('close', () => this.peers.delete(username))
     peer.on('message', (msg) => this.peerMessages.emit('message', msg, peer))
