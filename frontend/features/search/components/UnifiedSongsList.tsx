@@ -181,7 +181,8 @@ export function UnifiedSongsList({
                                   .join(" - ") || result.filename,
                       }
                     : parseFilename(result.filename);
-                const isDownloading = downloadingFiles.has(result.filename);
+                const downloadKey = `${result.username}:${result.path}`;
+                const isDownloading = downloadingFiles.has(downloadKey);
 
                 return (
                     <div

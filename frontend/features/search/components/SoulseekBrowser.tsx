@@ -350,7 +350,7 @@ function FlatView({
                     key={`${result.username}-${result.path}-${index}`}
                     result={result}
                     isSelected={selectedKeys.has(getResultKey(result))}
-                    isDownloading={downloadingFiles.has(result.filename)}
+                    isDownloading={downloadingFiles.has(getResultKey(result))}
                     onToggleSelect={onToggleSelect}
                     onDownload={onDownload}
                     animationDelay={index < 20 ? index * 15 : 0}
@@ -493,7 +493,7 @@ function GroupedView({
                                         key={`${result.path}-${index}`}
                                         result={result}
                                         isSelected={selectedKeys.has(getResultKey(result))}
-                                        isDownloading={downloadingFiles.has(result.filename)}
+                                        isDownloading={downloadingFiles.has(getResultKey(result))}
                                         onToggleSelect={onToggleSelect}
                                         onDownload={onDownload}
                                         animationDelay={0}

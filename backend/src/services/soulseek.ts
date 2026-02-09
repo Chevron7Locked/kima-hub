@@ -656,7 +656,7 @@ class SoulseekService {
             .slice(0, 10);
     }
 
-    async downloadTrack(
+    public async downloadTrack(
         match: TrackMatch,
         destPath: string,
         attemptNumber: number = 0

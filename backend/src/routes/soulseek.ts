@@ -344,7 +344,9 @@ router.post(
 
             // Build destination path: musicPath/artist/album/filename
             const sanitize = (str: string) =>
-                str.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_");
+                str.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+                   .replace(/\.\./g, "_")  // Block parent directory traversal
+                   .replace(/^\.+/, "");    // Block hidden files
             const destPath = path.join(
                 musicPath,
                 sanitize(resolvedArtist),

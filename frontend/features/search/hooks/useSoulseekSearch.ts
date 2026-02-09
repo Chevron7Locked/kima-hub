@@ -122,8 +122,9 @@ export function useSoulseekSearch({
     }, [query, soulseekEnabled]);
 
     const handleDownload = useCallback(async (result: SoulseekResult) => {
+        const downloadKey = `${result.username}:${result.path}`;
         try {
-            setDownloadingFiles((prev) => new Set([...prev, result.filename]));
+            setDownloadingFiles((prev) => new Set([...prev, downloadKey]));
 
             await api.downloadFromSoulseek(
                 result.username,
@@ -146,7 +147,7 @@ export function useSoulseekSearch({
             setTimeout(() => {
                 setDownloadingFiles((prev) => {
                     const newSet = new Set(prev);
-                    newSet.delete(result.filename);
+                    newSet.delete(downloadKey);
                     return newSet;
                 });
             }, 5000);
@@ -157,7 +158,7 @@ export function useSoulseekSearch({
             toast.error(message);
             setDownloadingFiles((prev) => {
                 const newSet = new Set(prev);
-                newSet.delete(result.filename);
+                newSet.delete(downloadKey);
                 return newSet;
             });
         }
