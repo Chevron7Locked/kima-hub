@@ -1,11 +1,13 @@
 /**
  * Multi-strategy search for Soulseek P2P network
  *
- * Implements fallback strategies to handle varied file naming conventions:
- * 1. Artist + Album + Title (most specific)
- * 2. Artist + Title (current approach)
- * 3. Album + Title (for compilation albums)
- * 4. Relaxed normalization (keeps more metadata)
+ * Strategies ordered from simple to complex based on real-world filename patterns.
+ * Simpler queries match more actual filenames and should be tried first:
+ * 1. Artist + Title (aggressive normalization) - most likely to match
+ * 2. Artist + Title (moderate normalization) - balanced approach
+ * 3. Title only (aggressive normalization) - fallback when artist name doesn't match
+ * 4. Album + Title - fallback for compilation albums
+ * 5. Artist + Album + Title - last resort for highly specific searches
  */
 
 import { SlskClient } from "../lib/soulseek/client";
@@ -119,19 +121,9 @@ export function normalizeArtistName(artist: string): string {
 }
 
 /**
- * All available search strategies, ordered by priority
+ * All available search strategies, ordered by priority (simple to complex)
  */
 export const SEARCH_STRATEGIES: SearchStrategy[] = [
-    {
-        name: "artist-album-title",
-        buildQuery: (artist, track, album) => {
-            if (!album) return "";
-            const normalizedArtist = normalizeArtistName(artist);
-            const normalizedTitle = normalizeTrackTitle(track, 'moderate');
-            return `${normalizedArtist} ${album} ${normalizedTitle}`.trim();
-        },
-        priority: 1,
-    },
     {
         name: "artist-title-aggressive",
         buildQuery: (artist, track) => {
@@ -139,16 +131,7 @@ export const SEARCH_STRATEGIES: SearchStrategy[] = [
             const normalizedTitle = normalizeTrackTitle(track, 'aggressive');
             return `${normalizedArtist} ${normalizedTitle}`.trim();
         },
-        priority: 2,
-    },
-    {
-        name: "album-title",
-        buildQuery: (artist, track, album) => {
-            if (!album) return "";
-            const normalizedTitle = normalizeTrackTitle(track, 'moderate');
-            return `${album} ${normalizedTitle}`.trim();
-        },
-        priority: 3,
+        priority: 1,
     },
     {
         name: "artist-title-moderate",
@@ -157,14 +140,32 @@ export const SEARCH_STRATEGIES: SearchStrategy[] = [
             const normalizedTitle = normalizeTrackTitle(track, 'moderate');
             return `${normalizedArtist} ${normalizedTitle}`.trim();
         },
+        priority: 2,
+    },
+    {
+        name: "title-only-aggressive",
+        buildQuery: (artist, track) => {
+            const normalizedTitle = normalizeTrackTitle(track, 'aggressive');
+            return normalizedTitle.trim();
+        },
+        priority: 3,
+    },
+    {
+        name: "album-title",
+        buildQuery: (artist, track, album) => {
+            if (!album) return "";
+            const normalizedTitle = normalizeTrackTitle(track, 'moderate');
+            return `${album} ${normalizedTitle}`.trim();
+        },
         priority: 4,
     },
     {
-        name: "artist-title-minimal",
-        buildQuery: (artist, track) => {
+        name: "artist-album-title",
+        buildQuery: (artist, track, album) => {
+            if (!album) return "";
             const normalizedArtist = normalizeArtistName(artist);
-            const normalizedTitle = normalizeTrackTitle(track, 'minimal');
-            return `${normalizedArtist} ${normalizedTitle}`.trim();
+            const normalizedTitle = normalizeTrackTitle(track, 'moderate');
+            return `${normalizedArtist} ${album} ${normalizedTitle}`.trim();
         },
         priority: 5,
     },
