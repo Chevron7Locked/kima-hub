@@ -261,11 +261,17 @@ class SoulseekService {
         };
     }
 
+    /**
+     * Search for a track on Soulseek
+     *
+     * @param timeoutMs Default 15s per research (slsk-batchdl uses 6s, community recommends 10-15s)
+     *                  Too long wastes time, too short misses slow peers
+     */
     async searchTrack(
         artistName: string,
         trackTitle: string,
         isRetry: boolean = false,
-        timeoutMs: number = 45000,
+        timeoutMs: number = 15000,
         onResult?: (result: FileSearchResponse) => void
     ): Promise<SearchTrackResult> {
         this.totalSearches++;
