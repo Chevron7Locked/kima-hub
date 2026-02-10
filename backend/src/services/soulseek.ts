@@ -65,7 +65,7 @@ class SoulseekService {
     private consecutiveEmptySearches = 0;
     private totalSearches = 0;
     private totalSuccessfulSearches = 0;
-    private readonly MAX_CONSECUTIVE_EMPTY = 3;
+    private readonly MAX_CONSECUTIVE_EMPTY = 10; // Avoid reconnect spam that triggers rate limits
 
     constructor() {
         setInterval(() => this.cleanupFailedUsers(), 5 * 60 * 1000);
@@ -516,10 +516,17 @@ class SoulseekService {
             .filter((w) => w.length > 2)
             .slice(0, 3);
 
-        // Filter for active users only (have upload slots available)
+        // Prefer active users (have upload slots) but don't require it
+        // Strict filtering can cause 0 results → reconnect spam → rate limits
         const availableResults = results.filter(
-            (file) => !this.isUserBlocked(file.user) && file.slots === true
+            (file) => !this.isUserBlocked(file.user)
         );
+
+        // Sort by slots (active users first), then by speed
+        availableResults.sort((a, b) => {
+            if (a.slots !== b.slots) return b.slots ? 1 : -1; // slots true first
+            return (b.speed || 0) - (a.speed || 0); // then by speed
+        });
 
         const scored = availableResults.map((file) => {
             const filename = (file.file || "").toLowerCase();
