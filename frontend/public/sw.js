@@ -1,6 +1,6 @@
 // Lidify Service Worker
 const CACHE_NAME = 'lidify-v1';
-const IMAGE_CACHE_NAME = 'lidify-images-v2';
+const IMAGE_CACHE_NAME = 'lidify-images-v3';
 const MAX_IMAGE_CACHE_ENTRIES = 2000;
 const MAX_CONCURRENT_IMAGE_REQUESTS = 8;
 const REQUEST_DELAY_MS = 10;
@@ -31,6 +31,20 @@ function isImageRoute(pathname) {
 }
 
 /**
+ * Create a cache key URL by stripping auth token from query params.
+ * Image identity is determined by path + url + size params only.
+ */
+function createImageCacheKey(requestUrl) {
+  try {
+    const url = new URL(requestUrl);
+    url.searchParams.delete('token');
+    return new Request(url.toString());
+  } catch {
+    return new Request(requestUrl);
+  }
+}
+
+/**
  * Trim cache to max entries (LRU eviction by oldest)
  */
 async function trimCache(cacheName, maxEntries) {
@@ -51,15 +65,14 @@ async function trimCache(cacheName, maxEntries) {
  */
 function processImageQueue() {
   while (activeImageRequests < MAX_CONCURRENT_IMAGE_REQUESTS && imageRequestQueue.length > 0) {
-    const { request, resolve, reject } = imageRequestQueue.shift();
+    const { request, cacheKey, resolve, reject } = imageRequestQueue.shift();
     activeImageRequests++;
 
-    fetchAndCacheImage(request)
+    fetchAndCacheImage(request, cacheKey)
       .then(resolve)
       .catch(reject)
       .finally(() => {
         activeImageRequests--;
-        // Small delay before processing next to avoid burst
         setTimeout(processImageQueue, REQUEST_DELAY_MS);
       });
   }
@@ -68,24 +81,21 @@ function processImageQueue() {
 /**
  * Fetch image from network and cache it
  */
-async function fetchAndCacheImage(request) {
+async function fetchAndCacheImage(request, cacheKey) {
   const cache = await caches.open(IMAGE_CACHE_NAME);
 
   try {
+    // Fetch with original request (includes auth token)
     const networkResponse = await fetch(request);
 
-    // Cache successful responses
     if (networkResponse.status === 200) {
-      // Clone before caching (response can only be consumed once)
-      cache.put(request, networkResponse.clone());
-
-      // Trim cache in background (don't block response)
+      // Cache with normalized key (no token)
+      cache.put(cacheKey, networkResponse.clone());
       trimCache(IMAGE_CACHE_NAME, MAX_IMAGE_CACHE_ENTRIES);
     }
 
     return networkResponse;
   } catch {
-    // Network failed, return a placeholder or error
     return new Response('Image unavailable', { status: 503 });
   }
 }
@@ -93,9 +103,9 @@ async function fetchAndCacheImage(request) {
 /**
  * Queue an image request with throttling
  */
-function queueImageRequest(request) {
+function queueImageRequest(request, cacheKey) {
   return new Promise((resolve, reject) => {
-    imageRequestQueue.push({ request, resolve, reject });
+    imageRequestQueue.push({ request, cacheKey, resolve, reject });
     processImageQueue();
   });
 }
@@ -148,15 +158,17 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       (async () => {
         const cache = await caches.open(IMAGE_CACHE_NAME);
+        const cacheKey = createImageCacheKey(request.url);
 
-        // Try cache first
-        const cachedResponse = await cache.match(request);
+        // Try cache first (token-independent key)
+        const cachedResponse = await cache.match(cacheKey);
         if (cachedResponse) {
           return cachedResponse;
         }
 
         // Not in cache, queue the request with throttling
-        return queueImageRequest(request);
+        // Pass both original request (for auth) and cache key (for storage)
+        return queueImageRequest(request, cacheKey);
       })()
     );
     return;
