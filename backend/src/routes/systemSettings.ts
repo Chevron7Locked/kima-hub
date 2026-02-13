@@ -764,8 +764,15 @@ router.post("/clear-caches", async (req, res) => {
             "../services/notificationService"
         );
 
-        // Get all keys but exclude session keys
-        const allKeys = await redisClient.keys("*");
+        // Collect all keys using SCAN (non-blocking) and exclude session keys
+        const allKeys: string[] = [];
+        let cursor = 0;
+        do {
+            const result = await redisClient.scan(cursor, { MATCH: "*", COUNT: 100 });
+            cursor = result.cursor;
+            allKeys.push(...result.keys);
+        } while (cursor !== 0);
+
         const keysToDelete = allKeys.filter(
             (key: string) => !key.startsWith("sess:")
         );
@@ -778,9 +785,7 @@ router.post("/clear-caches", async (req, res) => {
                     allKeys.length - keysToDelete.length
                 } session keys)...`
             );
-            for (const key of keysToDelete) {
-                await redisClient.del(key);
-            }
+            await redisClient.del(keysToDelete);
             logger.debug(
                 `[CACHE] Successfully cleared ${keysToDelete.length} cache entries`
             );

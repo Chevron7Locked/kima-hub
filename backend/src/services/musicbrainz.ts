@@ -669,8 +669,15 @@ class MusicBrainzService {
      */
     async clearStaleRecordingCaches(): Promise<number> {
         try {
-            // Get all recording cache keys
-            const keys = await redisClient.keys("mb:search:recording:*");
+            // Collect all recording cache keys using SCAN (non-blocking)
+            const keys: string[] = [];
+            let cursor = 0;
+            do {
+                const result = await redisClient.scan(cursor, { MATCH: "mb:search:recording:*", COUNT: 100 });
+                cursor = result.cursor;
+                keys.push(...result.keys);
+            } while (cursor !== 0);
+
             let cleared = 0;
 
             for (const key of keys) {

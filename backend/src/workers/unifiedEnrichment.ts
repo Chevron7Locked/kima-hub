@@ -519,7 +519,13 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
             if (!state?.coreCacheCleared) {
                 try {
                     const redisInstance = getRedis();
-                    const mixKeys = await redisInstance.keys("mixes:*");
+                    const mixKeys: string[] = [];
+                    let scanCursor = "0";
+                    do {
+                        const [nextCursor, batch] = await redisInstance.scan(scanCursor, "MATCH", "mixes:*", "COUNT", 100);
+                        scanCursor = nextCursor;
+                        mixKeys.push(...batch);
+                    } while (scanCursor !== "0");
                     if (mixKeys.length > 0) {
                         await redisInstance.del(...mixKeys);
                         logger.info(
@@ -549,7 +555,13 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
             if (!stateBeforeNotify?.fullCacheCleared) {
                 try {
                     const redisInstance = getRedis();
-                    const mixKeys = await redisInstance.keys("mixes:*");
+                    const mixKeys: string[] = [];
+                    let scanCursor = "0";
+                    do {
+                        const [nextCursor, batch] = await redisInstance.scan(scanCursor, "MATCH", "mixes:*", "COUNT", 100);
+                        scanCursor = nextCursor;
+                        mixKeys.push(...batch);
+                    } while (scanCursor !== "0");
                     if (mixKeys.length > 0) {
                         await redisInstance.del(...mixKeys);
                         logger.info(
