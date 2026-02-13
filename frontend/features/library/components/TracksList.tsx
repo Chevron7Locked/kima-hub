@@ -45,35 +45,44 @@ const TrackRow = memo(
         return (
             <div
                 key={track.id}
-                onClick={onPlayTrack}
+                onDoubleClick={onPlayTrack}
                 data-tv-card
                 data-tv-card-index={index}
                 tabIndex={0}
                 className={cn(
-                    "grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_1fr_auto] items-center gap-3 px-3 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
-                    isCurrentlyPlaying && "bg-white/5",
+                    "grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_1fr_auto] items-center gap-3 px-4 py-3 rounded-lg border-2 transition-all group cursor-pointer",
+                    isCurrentlyPlaying
+                        ? "bg-[#a855f7]/10 border-[#a855f7]/30 shadow-lg shadow-[#a855f7]/10"
+                        : "bg-[#0a0a0a] border-white/5 hover:border-[#a855f7]/30 hover:bg-[#a855f7]/5",
                 )}
             >
-                {/* Track number / Play icon */}
+                {/* Track number / Play button */}
                 <div className="w-8 flex items-center justify-center">
-                    <span
-                        className={cn(
-                            "text-sm group-hover:hidden",
-                            isCurrentlyPlaying ? "text-[#ecb200]" : (
-                                "text-gray-500"
-                            ),
-                        )}
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onPlayTrack();
+                        }}
+                        className="w-8 h-8 flex items-center justify-center"
+                        aria-label="Play"
                     >
-                        {isCurrentlyPlaying ?
-                            <AudioLines className="w-4 h-4 text-[#ecb200]" />
-                        :   index + 1}
-                    </span>
-                    <Play className="w-4 h-4 text-white hidden group-hover:block fill-current" />
+                        <span
+                            className={cn(
+                                "text-sm font-mono font-bold group-hover:hidden",
+                                isCurrentlyPlaying ? "text-[#a855f7]" : "text-gray-600",
+                            )}
+                        >
+                            {isCurrentlyPlaying ?
+                                <AudioLines className="w-4 h-4 text-[#a855f7]" />
+                            :   index + 1}
+                        </span>
+                        <Play className="w-4 h-4 text-[#a855f7] hidden group-hover:block fill-current" />
+                    </button>
                 </div>
 
                 {/* Cover + Title/Artist */}
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="relative w-10 h-10 bg-[#282828] rounded flex items-center justify-center overflow-hidden shrink-0">
+                    <div className="relative w-11 h-11 bg-[#181818] rounded border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
                         {track.album?.coverArt ?
                             <CachedImage
                                 src={api.getCoverArtUrl(
@@ -85,20 +94,18 @@ const TrackRow = memo(
                                 sizes="40px"
                                 className="object-cover"
                             />
-                        :   <AudioLines className="w-4 h-4 text-gray-600" />}
+                        :   <AudioLines className="w-5 h-5 text-gray-700" />}
                     </div>
                     <div className="min-w-0">
                         <h3
                             className={cn(
-                                "text-sm font-medium truncate",
-                                isCurrentlyPlaying ? "text-[#ecb200]" : (
-                                    "text-white"
-                                ),
+                                "text-sm font-bold truncate tracking-tight",
+                                isCurrentlyPlaying ? "text-[#a855f7]" : "text-white",
                             )}
                         >
                             {track.displayTitle ?? track.title}
                         </h3>
-                        <p className="text-xs text-gray-400 truncate">
+                        <p className="text-xs font-mono text-gray-500 truncate">
                             {track.album?.artist?.name}
                         </p>
                     </div>
@@ -106,7 +113,7 @@ const TrackRow = memo(
 
                 {/* Album - hidden on mobile */}
                 <div className="hidden md:block min-w-0">
-                    <p className="text-sm text-gray-400 truncate">
+                    <p className="text-sm font-mono text-gray-500 truncate">
                         {track.album?.title}
                     </p>
                 </div>
@@ -118,7 +125,7 @@ const TrackRow = memo(
                             e.stopPropagation();
                             onAddToQueue(track);
                         }}
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-white/20"
                         title="Add to Queue"
                     >
                         <ListPlus className="w-4 h-4" />
@@ -128,7 +135,7 @@ const TrackRow = memo(
                             e.stopPropagation();
                             onShowAddToPlaylist(track.id);
                         }}
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-white/20"
                         title="Add to Playlist"
                     >
                         <Plus className="w-4 h-4" />
@@ -138,12 +145,12 @@ const TrackRow = memo(
                             e.stopPropagation();
                             onDelete(track.id, track.title);
                         }}
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-red-500/30"
                         title="Delete Track"
                     >
                         <Trash2 className="w-4 h-4" />
                     </button>
-                    <span className="text-xs text-gray-500 w-10 text-right">
+                    <span className="text-sm font-mono font-bold text-gray-600 w-12 text-right">
                         {formatTime(track.duration)}
                     </span>
                 </div>
@@ -207,15 +214,15 @@ export function TracksList({
 
     return (
         <>
-            {/* Header row */}
-            <div className="grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_1fr_auto] items-center gap-3 px-3 py-2 border-b border-white/10 text-xs text-gray-500 uppercase tracking-wider">
-                <div className="w-8 text-center">#</div>
-                <div>Title</div>
-                <div className="hidden md:block">Album</div>
-                <div className="w-[140px] text-right pr-2">Duration</div>
+            {/* Header row - terminal style */}
+            <div className="grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_1fr_auto] items-center gap-3 px-4 py-3 bg-[#0a0a0a] border-2 border-white/10 rounded-lg mb-2">
+                <div className="w-8 text-center text-xs font-mono font-black text-[#a855f7] uppercase">#</div>
+                <div className="text-xs font-mono font-black text-[#a855f7] uppercase tracking-wider">Title</div>
+                <div className="hidden md:block text-xs font-mono font-black text-[#a855f7] uppercase tracking-wider">Album</div>
+                <div className="w-[140px] text-right pr-2 text-xs font-mono font-black text-[#a855f7] uppercase tracking-wider">Duration</div>
             </div>
 
-            <div data-tv-section="library-tracks">
+            <div data-tv-section="library-tracks" className="space-y-1">
                 {tracks.map((track, index) => {
                     const isCurrentlyPlaying = currentTrackId === track.id;
                     return (
