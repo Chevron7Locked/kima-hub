@@ -39,20 +39,17 @@ const AudioPlaybackContext = createContext<
     AudioPlaybackContextType | undefined
 >(undefined);
 
-// LocalStorage keys
-const STORAGE_KEYS = {
-    CURRENT_TIME: "lidify_current_time",
-};
+// currentTime is no longer persisted to localStorage.
+// Audiobook/podcast positions sync from server-side progress.
+// Music tracks always start at 0.
 
 export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const [isPlaying, setIsPlaying] = useState(false);
-    const [currentTime, setCurrentTime] = useState(() => {
-        if (typeof window === "undefined") return 0;
-        try {
-            const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_TIME);
-            return saved ? parseFloat(saved) : 0;
-        } catch { return 0; }
-    });
+    // Always start at 0. Audiobook/podcast positions are synced from server-side
+    // progress via the progressKey mechanism below. Music tracks always start at 0.
+    // Previously this restored from localStorage, which showed stale positions (e.g. 0:10)
+    // for tracks that hadn't been played yet in the current session.
+    const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
     const [isBuffering, setIsBuffering] = useState(false);
     const setTargetSeekPosition = useCallback((_position: number | null) => {
@@ -66,7 +63,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const audioErrorRef = useRef<string | null>(null);
     const [playbackState, setPlaybackState] = useState<PlaybackState>("IDLE");
     const [isHydrated] = useState(() => typeof window !== "undefined");
-    const lastSaveTimeRef = useRef<number>(0);
 
     // Clear audio error
     const clearAudioError = useCallback(() => {
@@ -105,12 +101,19 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
 
     // Seek lock state - prevents stale timeupdate events from overwriting optimistic UI updates
     const [isSeekLocked, setIsSeekLocked] = useState(false);
+    const isSeekLockedRef = useRef(false);
     const seekTargetRef = useRef<number | null>(null);
     const seekLockTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Keep ref in sync for use in stable callbacks
+    useEffect(() => {
+        isSeekLockedRef.current = isSeekLocked;
+    }, [isSeekLocked]);
 
     // Lock the seek state - ignores timeupdate events until audio catches up or timeout
     const lockSeek = useCallback((targetTime: number, timeoutMs: number = 500) => {
         setIsSeekLocked(true);
+        isSeekLockedRef.current = true;
         seekTargetRef.current = targetTime;
 
         // Clear any existing timeout
@@ -121,24 +124,27 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         // Auto-unlock after timeout as a safety measure
         seekLockTimeoutRef.current = setTimeout(() => {
             setIsSeekLocked(false);
+            isSeekLockedRef.current = false;
             seekTargetRef.current = null;
             seekLockTimeoutRef.current = null;
         }, timeoutMs);
     }, []);
 
     // setCurrentTimeFromEngine - for timeupdate events from Howler
-    // Respects seek lock to prevent stale updates causing flicker
+    // Respects seek lock to prevent stale updates causing flicker.
+    // Uses refs instead of state to keep callback identity stable -- this
+    // prevents the events effect in HowlerAudioElement from re-registering
+    // all Howler listeners on every seek lock change.
     const setCurrentTimeFromEngine = useCallback(
         (time: number) => {
-            if (isSeekLocked && seekTargetRef.current !== null) {
-                // During seek, only accept updates that are close to our target
-                // This prevents old positions from briefly showing during seek
+            if (isSeekLockedRef.current && seekTargetRef.current !== null) {
                 const isNearTarget = Math.abs(time - seekTargetRef.current) < 2;
                 if (!isNearTarget) {
                     return; // Ignore stale position update
                 }
                 // Position is near target - seek completed, unlock
                 setIsSeekLocked(false);
+                isSeekLockedRef.current = false;
                 seekTargetRef.current = null;
                 if (seekLockTimeoutRef.current) {
                     clearTimeout(seekLockTimeoutRef.current);
@@ -147,7 +153,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             }
             setCurrentTime(time);
         },
-        [isSeekLocked]
+        [] // Stable -- reads refs, never re-creates
     );
 
     // currentTime and isHydrated are initialized via lazy useState from localStorage
@@ -180,25 +186,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             }
         };
     }, []);
-
-    // Save currentTime to localStorage (throttled to avoid excessive writes)
-    useEffect(() => {
-        if (!isHydrated || typeof window === "undefined") return;
-
-        // Throttle saves to every 5 seconds using timestamp comparison
-        const now = Date.now();
-        if (now - lastSaveTimeRef.current < 5000) return;
-
-        lastSaveTimeRef.current = now;
-        try {
-            localStorage.setItem(
-                STORAGE_KEYS.CURRENT_TIME,
-                currentTime.toString()
-            );
-        } catch (error) {
-            console.error("[AudioPlayback] Failed to save currentTime:", error);
-        }
-    }, [currentTime, isHydrated]);
 
     // Memoize to prevent re-renders when values haven't changed
     const value = useMemo(

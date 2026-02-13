@@ -790,7 +790,15 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
     // Skip if a track change is in progress -- the track-change effect handles playback.
     // This prevents doubled audio when next() sets both currentTrack and isPlaying simultaneously.
     useEffect(() => {
-        if (isLoadingRef.current) return;
+        if (isLoadingRef.current) {
+            // A load is in progress. If the user pressed play, show the loading
+            // spinner so they know audio is coming. handleLoaded will auto-play
+            // because lastPlayingStateRef.current will be true at that point.
+            if (isPlaying && playbackStateMachine.getState() === "IDLE") {
+                playbackStateMachine.forceTransition("LOADING");
+            }
+            return;
+        }
 
         isUserInitiatedRef.current = true;
 

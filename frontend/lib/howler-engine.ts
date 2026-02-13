@@ -5,7 +5,7 @@
  * Handles: play, pause, seek, volume, track changes, events
  */
 
-import { Howl, HowlOptions } from "howler";
+import { Howl, Howler, HowlOptions } from "howler";
 
 interface ExtendedHowlOptions extends HowlOptions {
     xhr?: {
@@ -350,6 +350,14 @@ class HowlerEngine {
             return;
         }
 
+        // Resume suspended AudioContext (browser autoplay policy).
+        // Howler uses a global AudioContext that may be suspended until
+        // a user gesture triggers it. This ensures it's resumed.
+        const ctx = (Howler as unknown as { ctx?: AudioContext }).ctx;
+        if (ctx && ctx.state === "suspended") {
+            ctx.resume();
+        }
+
         // Mark as user-initiated for autoplay recovery
         this.userInitiatedPlay = true;
 
@@ -617,10 +625,13 @@ class HowlerEngine {
     }
 
     /**
-     * Check if audio source is loaded (Howl instance exists)
+     * Check if audio is loaded and ready to play
      */
     hasAudio(): boolean {
-        return this.howl !== null;
+        if (!this.howl) return false;
+        // Check Howl's actual state - 'loaded' means ready to play
+        const state = this.howl.state();
+        return state === "loaded";
     }
 
     /**

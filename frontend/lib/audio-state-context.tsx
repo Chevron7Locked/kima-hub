@@ -203,9 +203,10 @@ function parseStorageJson<T>(key: string, fallback: T): T {
 }
 
 export function AudioStateProvider({ children }: { children: ReactNode }) {
-    const [currentTrack, setCurrentTrack] = useState<Track | null>(
-        () => parseStorageJson(STORAGE_KEYS.CURRENT_TRACK, null)
-    );
+    // Don't restore currentTrack from localStorage. The server state API is the
+    // source of truth for what was playing. This prevents ghost tracks appearing
+    // in the player when the track is no longer available or queued.
+    const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
     const [currentAudiobook, setCurrentAudiobook] = useState<Audiobook | null>(
         () => parseStorageJson(STORAGE_KEYS.CURRENT_AUDIOBOOK, null)
     );
@@ -214,10 +215,13 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     );
     const [playbackType, setPlaybackType] = useState<
         "track" | "audiobook" | "podcast" | null
-    >(() => readStorage(STORAGE_KEYS.PLAYBACK_TYPE) as "track" | "audiobook" | "podcast" | null);
-    const [queue, setQueue] = useState<Track[]>(
-        () => parseStorageJson(STORAGE_KEYS.QUEUE, [])
-    );
+    >(() => {
+        const stored = readStorage(STORAGE_KEYS.PLAYBACK_TYPE) as "track" | "audiobook" | "podcast" | null;
+        // Don't restore "track" type since we no longer restore currentTrack from localStorage.
+        // Server state will re-set this if there was an active track.
+        return stored === "track" ? null : stored;
+    });
+    const [queue, setQueue] = useState<Track[]>([]);
     const [currentIndex, setCurrentIndex] = useState(
         () => { const v = readStorage(STORAGE_KEYS.CURRENT_INDEX); return v ? parseInt(v) : 0; }
     );
