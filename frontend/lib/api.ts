@@ -1,36 +1,7 @@
 const AUTH_TOKEN_KEY = "auth_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
 
-// Mood Mix Types (Legacy - for old presets endpoint)
-export interface MoodPreset {
-    id: string;
-    name: string;
-    color: string;
-    params: MoodMixParams;
-}
-
-export interface MoodMixParams {
-    // Basic audio features
-    valence?: { min?: number; max?: number };
-    energy?: { min?: number; max?: number };
-    danceability?: { min?: number; max?: number };
-    acousticness?: { min?: number; max?: number };
-    instrumentalness?: { min?: number; max?: number };
-    arousal?: { min?: number; max?: number };
-    bpm?: { min?: number; max?: number };
-    keyScale?: "major" | "minor";
-    // ML mood predictions (require Enhanced mode analysis)
-    moodHappy?: { min?: number; max?: number };
-    moodSad?: { min?: number; max?: number };
-    moodRelaxed?: { min?: number; max?: number };
-    moodAggressive?: { min?: number; max?: number };
-    moodParty?: { min?: number; max?: number };
-    moodAcoustic?: { min?: number; max?: number };
-    moodElectronic?: { min?: number; max?: number };
-    limit?: number;
-}
-
-// New Mood Bucket Types (simplified mood system)
+// Mood Bucket Types (simplified mood system)
 export type MoodType =
     | "happy"
     | "sad"
@@ -60,46 +31,6 @@ export interface MoodBucketMix {
     trackCount: number;
     color: string;
     tracks?: ApiData[];
-}
-
-export interface SavedMoodMixResponse {
-    success: boolean;
-    mix: MoodBucketMix & { generatedAt: string };
-}
-
-// Vibe (CLAP Similarity) Types
-export interface SimilarTrack {
-    id: string;
-    title: string;
-    duration: number;
-    trackNo: number;
-    distance: number;
-    album: {
-        id: string;
-        title: string;
-        coverUrl: string | null;
-    };
-    artist: {
-        id: string;
-        name: string;
-    };
-}
-
-export interface SimilarTracksResponse {
-    sourceTrackId: string;
-    tracks: SimilarTrack[];
-}
-
-export interface VibeSearchResponse {
-    query: string;
-    tracks: SimilarTrack[];
-}
-
-export interface VibeStatusResponse {
-    totalTracks: number;
-    embeddedTracks: number;
-    progress: number;
-    isComplete: boolean;
 }
 
 interface ApiError extends Error {
@@ -211,11 +142,6 @@ class ApiClient {
      */
     getToken(): string | null {
         return this.token;
-    }
-
-    // Refresh the base URL from configuration
-    refreshBaseUrl(): void {
-        this.baseUrl = "";
     }
 
     // Store JWT token and optionally refresh token
@@ -332,13 +258,25 @@ class ApiClient {
         });
 
         if (!response.ok) {
-            const error = await response.json().catch(() => ({
-                error: response.statusText,
-            }));
+            let error: Record<string, unknown>;
+            try {
+                error = await response.json();
+            } catch (_parseError) {
+                error = {
+                    error: response.statusText || "Request failed",
+                    status: response.status,
+                    parseError: "Failed to parse error response",
+                };
+            }
 
             // Only log non-404 errors (404s are often expected)
             if (!(silent404 && response.status === 404)) {
-                console.error(`[API] Request failed: ${url}`, error);
+                console.error(`[API] Request failed: ${url}`, {
+                    status: response.status,
+                    statusText: response.statusText,
+                    error,
+                    headers: Object.fromEntries(response.headers.entries()),
+                });
             }
 
             // Handle 401 with token refresh (retry once)
@@ -365,7 +303,7 @@ class ApiClient {
                 throw err;
             }
 
-            const err = new Error(error.error || "An error occurred");
+            const err = new Error(String(error.error || error.message || "An error occurred"));
             (err as ApiError).status = response.status;
             (err as ApiError).data = error;
             throw err;
@@ -507,20 +445,6 @@ class ApiClient {
             jobId: string;
             musicPath: string;
         }>("/library/scan", {
-            method: "POST",
-        });
-    }
-
-    async getScanStatus(jobId: string) {
-        return this.request<{
-            status: string;
-            progress: number;
-            result?: ApiData;
-        }>(`/library/scan/status/${jobId}`);
-    }
-
-    async organizeLibrary() {
-        return this.request<{ message: string }>("/library/organize", {
             method: "POST",
         });
     }
@@ -712,12 +636,6 @@ class ApiClient {
         );
     }
 
-    async getSimilarTracks(seedTrackId: string, limit = 20) {
-        return this.request<{ recommendations: ApiData[] }>(
-            `/recommendations/tracks?seedTrackId=${seedTrackId}&limit=${limit}`
-        );
-    }
-
     // Playlists
     async getPlaylists() {
         return this.request<ApiData[]>("/playlists");
@@ -731,16 +649,6 @@ class ApiClient {
         return this.request<ApiData>("/playlists", {
             method: "POST",
             body: JSON.stringify({ name, isPublic }),
-        });
-    }
-
-    async updatePlaylist(
-        id: string,
-        data: { name?: string; isPublic?: boolean }
-    ) {
-        return this.request<ApiData>(`/playlists/${id}`, {
-            method: "PUT",
-            body: JSON.stringify(data),
         });
     }
 
@@ -799,26 +707,6 @@ class ApiClient {
         return this.request<{ previewUrl: string }>(
             `/playlists/${playlistId}/pending/${pendingTrackId}/preview`
         );
-    }
-
-    // Playback tracking
-    async trackPlayback(trackId: string, progress?: number) {
-        return this.request<void>("/playback/track", {
-            method: "POST",
-            body: JSON.stringify({ trackId, progress }),
-        });
-    }
-
-    // Play tracking
-    async logPlay(trackId: string) {
-        return this.request<ApiData>("/plays", {
-            method: "POST",
-            body: JSON.stringify({ trackId }),
-        });
-    }
-
-    async getRecentPlays(limit = 50) {
-        return this.request<ApiData[]>(`/plays?limit=${limit}`);
     }
 
     // Settings
@@ -881,20 +769,6 @@ class ApiClient {
         });
     }
 
-    async testNzbget(url: string, username: string, password: string) {
-        return this.request<ServiceTestResult>("/system-settings/test-nzbget", {
-            method: "POST",
-            body: JSON.stringify({ url, username, password }),
-        });
-    }
-
-    async testQbittorrent(url: string, username: string, password: string) {
-        return this.request<ServiceTestResult>("/system-settings/test-qbittorrent", {
-            method: "POST",
-            body: JSON.stringify({ url, username, password }),
-        });
-    }
-
     async testLastfm(apiKey: string) {
         return this.request<ServiceTestResult>("/system-settings/test-lastfm", {
             method: "POST",
@@ -937,13 +811,6 @@ class ApiClient {
         });
     }
 
-    async testListenNotes(apiKey: string) {
-        return this.request<ServiceTestResult>("/system-settings/test-listennotes", {
-            method: "POST",
-            body: JSON.stringify({ apiKey }),
-        });
-    }
-
     // Downloads (Lidarr)
     async downloadAlbum(
         artistName: string,
@@ -980,18 +847,6 @@ class ApiClient {
         });
     }
 
-    async getDownloadStatus(id: string) {
-        return this.request<ApiData>(`/downloads/${id}`);
-    }
-
-    async getDownloads(limit?: number, includeDiscovery: boolean = false) {
-        const params = new URLSearchParams();
-        if (limit) params.set("limit", String(limit));
-        params.set("includeDiscovery", String(includeDiscovery));
-        const query = params.toString() ? `?${params.toString()}` : "";
-        return this.request<ApiData[]>(`/downloads${query}`);
-    }
-
     async deleteDownload(id: string) {
         return this.request<{ success: boolean }>(`/downloads/${id}`, {
             method: "DELETE",
@@ -1006,19 +861,6 @@ class ApiClient {
                 method: "POST",
             }
         );
-    }
-
-    async getDiscoverGenerationStatus(jobId: string) {
-        return this.request<{
-            status: string;
-            progress: number;
-            result?: {
-                success: boolean;
-                playlistName: string;
-                songCount: number;
-                error?: string;
-            };
-        }>(`/discover/generate/status/${jobId}`);
     }
 
     async getCurrentDiscoverWeekly() {
@@ -1095,40 +937,6 @@ class ApiClient {
         });
     }
 
-    // Discovery Exclusions
-    async getDiscoverExclusions() {
-        return this.request<{
-            exclusions: Array<{
-                id: string;
-                albumMbid: string;
-                artistName: string;
-                albumTitle: string;
-                lastSuggestedAt: string;
-                expiresAt: string;
-            }>;
-            count: number;
-        }>("/discover/exclusions");
-    }
-
-    async clearDiscoverExclusions() {
-        return this.request<{
-            success: boolean;
-            message: string;
-            clearedCount: number;
-        }>("/discover/exclusions", {
-            method: "DELETE",
-        });
-    }
-
-    async removeDiscoverExclusion(id: string) {
-        return this.request<{
-            success: boolean;
-            message: string;
-        }>(`/discover/exclusions/${id}`, {
-            method: "DELETE",
-        });
-    }
-
     // Artists (Discovery)
     async getArtistDiscovery(nameOrMbid: string) {
         return this.request<ApiData>(
@@ -1148,13 +956,6 @@ class ApiClient {
                 artistName
             )}/${encodeURIComponent(trackTitle)}`
         );
-    }
-
-    async testDeezer(apiKey?: string) {
-        return this.request<ServiceTestResult>("/system-settings/test-deezer", {
-            method: "POST",
-            body: JSON.stringify({ apiKey }),
-        });
     }
 
     // Audiobooks
@@ -1201,16 +1002,6 @@ class ApiClient {
         });
     }
 
-    async getContinueListening() {
-        return this.request<ApiData[]>("/audiobooks/continue-listening");
-    }
-
-    async searchAudiobooks(query: string) {
-        return this.request<ApiData[]>(
-            `/audiobooks/search?q=${encodeURIComponent(query)}`
-        );
-    }
-
     // Podcasts
     async getPodcasts() {
         return this.request<ApiData[]>("/podcasts");
@@ -1222,12 +1013,6 @@ class ApiClient {
 
     async previewPodcast(itunesId: string) {
         return this.request<ApiData>(`/podcasts/preview/${itunesId}`);
-    }
-
-    async getPodcastEpisode(podcastId: string, episodeId: string) {
-        return this.request<ApiData>(
-            `/podcasts/${podcastId}/episodes/${episodeId}`
-        );
     }
 
     getPodcastEpisodeStreamUrl(podcastId: string, episodeId: string): string {
@@ -1433,12 +1218,6 @@ class ApiClient {
         );
     }
 
-    async getSoulseekResults(searchId: string) {
-        return this.request<{ results: ApiData[]; count: number }>(
-            `/soulseek/search/${searchId}`
-        );
-    }
-
     async downloadFromSoulseek(
         username: string,
         filepath: string,
@@ -1464,12 +1243,6 @@ class ApiClient {
                 title,
             }),
         });
-    }
-
-    async getSlskdDownloads() {
-        return this.request<{ downloads: ApiData[]; count: number }>(
-            "/soulseek/downloads"
-        );
     }
 
     // Programmatic Mixes
@@ -1502,19 +1275,7 @@ class ApiClient {
         );
     }
 
-    // Mood on Demand (Legacy)
-    async getMoodPresets() {
-        return this.request<MoodPreset[]>("/mixes/mood/presets");
-    }
-
-    async generateMoodMix(params: MoodMixParams) {
-        return this.request<ApiData>("/mixes/mood", {
-            method: "POST",
-            body: JSON.stringify(params),
-        });
-    }
-
-    // New Mood Bucket System (simplified, pre-computed)
+    // Mood Bucket System (simplified, pre-computed)
     async getMoodBucketPresets() {
         return this.request<MoodBucketPreset[]>("/mixes/mood/buckets/presets");
     }
@@ -1524,61 +1285,16 @@ class ApiClient {
     }
 
     async saveMoodBucketMix(mood: MoodType) {
-        return this.request<SavedMoodMixResponse>(
+        return this.request<{
+            success: boolean;
+            mix: MoodBucketMix & { generatedAt: string };
+        }>(
             `/mixes/mood/buckets/${mood}/save`,
             { method: "POST" }
         );
     }
 
-    async backfillMoodBuckets() {
-        return this.request<{
-            success: boolean;
-            processed: number;
-            assigned: number;
-        }>("/mixes/mood/buckets/backfill", { method: "POST" });
-    }
-
     // Enrichment
-    async getEnrichmentSettings() {
-        return this.request<ApiData>("/enrichment/settings");
-    }
-
-    async updateEnrichmentSettings(settings: ApiData) {
-        return this.request<ApiData>("/enrichment/settings", {
-            method: "PUT",
-            body: JSON.stringify(settings),
-        });
-    }
-
-    async enrichArtist(artistId: string) {
-        return this.request<{
-            success: boolean;
-            confidence: number;
-            data: ApiData;
-        }>(`/enrichment/artist/${artistId}`, {
-            method: "POST",
-        });
-    }
-
-    async enrichAlbum(albumId: string) {
-        return this.request<{
-            success: boolean;
-            confidence: number;
-            data: ApiData;
-        }>(`/enrichment/album/${albumId}`, {
-            method: "POST",
-        });
-    }
-
-    async startLibraryEnrichment() {
-        return this.request<{ success: boolean; message: string }>(
-            "/enrichment/start",
-            {
-                method: "POST",
-            }
-        );
-    }
-
     async syncLibraryEnrichment() {
         return this.request<{
             message: string;
@@ -1730,14 +1446,6 @@ class ApiClient {
     }
 
     // Homepage
-    async getHomepageGenres(limit = 4) {
-        return this.request<ApiData[]>(`/homepage/genres?limit=${limit}`);
-    }
-
-    async getHomepageTopPodcasts(limit = 6) {
-        return this.request<ApiData[]>(`/homepage/top-podcasts?limit=${limit}`);
-    }
-
     async getPopularArtists(limit = 20) {
         return this.request<{ artists: ApiData[] }>(
             `/discover/popular-artists?limit=${limit}`
