@@ -41,4 +41,32 @@ describe("SoulseekService - Race Condition Fix", () => {
             expect(matches?.length).toBe(2);
         });
     });
+
+    describe("search result deduplication", () => {
+        it("should have flattenSearchResults method", () => {
+            const servicePath = path.join(__dirname, "../soulseek.ts");
+            const content = fs.readFileSync(servicePath, "utf-8");
+
+            // Check that flattenSearchResults method exists
+            expect(content).toContain("flattenSearchResults");
+            expect(content).toContain("const seen = new Set<string>");
+        });
+
+        it("should deduplicate by user:filename key", () => {
+            const servicePath = path.join(__dirname, "../soulseek.ts");
+            const content = fs.readFileSync(servicePath, "utf-8");
+
+            // Check that deduplication uses user:filename pattern
+            const dedupPattern = /const key = `\$\{.*username.*\}:\$\{.*filename.*\}`/;
+            expect(content).toMatch(dedupPattern);
+        });
+
+        it("should call flattenSearchResults in searchTrack", () => {
+            const servicePath = path.join(__dirname, "../soulseek.ts");
+            const content = fs.readFileSync(servicePath, "utf-8");
+
+            // Check that searchTrack uses the flattening method
+            expect(content).toContain("this.flattenSearchResults(responses)");
+        });
+    });
 });

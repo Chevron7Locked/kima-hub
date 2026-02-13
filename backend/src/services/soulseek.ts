@@ -332,23 +332,11 @@ private activeDownloads = 0;
             this.totalSuccessfulSearches++;
 
             // Flatten responses to SearchResult format
-            const flatResults: SearchResult[] = [];
-            for (const response of responses) {
-                for (const file of response.files) {
-                    flatResults.push({
-                        user: response.username,
-                        file: file.filename,
-                        size: Number(file.size),
-                        slots: response.slotsFree,
-                        bitrate: file.attrs.get(FileAttribute.Bitrate),
-                        speed: response.avgSpeed,
-                    });
-                }
-            }
+            const flatResults = this.flattenSearchResults(responses);
 
             sessionLog(
                 "SOULSEEK",
-                `[Search #${searchId}] Found ${flatResults.length} files from ${responses.length} users in ${searchDuration}ms`
+                `[Search #${searchId}] Found ${flatResults.length} unique results from ${responses.length} peers in ${searchDuration}ms`
             );
 
             // Rank and filter results
@@ -414,6 +402,36 @@ if (!isRetry && this.consecutiveEmptySearches >= this.MAX_CONSECUTIVE_EMPTY) {
 
             return { found: false, bestMatch: null, allMatches: [] };
         }
+    }
+
+    private flattenSearchResults(responses: FileSearchResponse[]): SearchResult[] {
+        const seen = new Set<string>();
+        const results: SearchResult[] = [];
+
+        for (const response of responses) {
+            for (const file of response.files) {
+                // Create unique key: user + filename (not full path)
+                const filename = file.filename.split(/[/\\]/).pop() || file.filename;
+                const key = `${response.username}:${filename}`;
+
+                // Skip if we've already seen this user+filename combo
+                if (seen.has(key)) {
+                    continue;
+                }
+                seen.add(key);
+
+                results.push({
+                    user: response.username,
+                    file: file.filename,
+                    size: Number(file.size),
+                    slots: response.slotsFree,
+                    bitrate: file.attrs.get(FileAttribute.Bitrate),
+                    speed: response.avgSpeed,
+                });
+            }
+        }
+
+        return results;
     }
 
 private isUserBlocked(username: string): boolean {
