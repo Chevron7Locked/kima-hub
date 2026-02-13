@@ -75,7 +75,7 @@ export async function downloadAndStoreImage(
             return null;
         }
 
-        fs.writeFileSync(filePath, Buffer.from(buffer));
+        await fs.promises.writeFile(filePath, Buffer.from(buffer));
         logger.debug(`[ImageStorage] Saved ${type} image: ${filename}`);
 
         return `native:${subdir}/${filename}`;

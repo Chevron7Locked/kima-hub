@@ -1,10 +1,12 @@
 import { getSystemSettings } from "../utils/systemSettings";
 import { decrypt } from "../utils/encryption";
 
-let podcastindexApi: any = null;
+let cachedClient: any = null;
+let cachedCredentialsHash: string | null = null;
 
 /**
- * Initialize PodcastIndex API client with credentials from system settings
+ * Initialize PodcastIndex API client with credentials from system settings.
+ * Caches the client and only recreates it when credentials change.
  */
 async function initPodcastindexClient() {
     const settings = await getSystemSettings();
@@ -20,10 +22,16 @@ async function initPodcastindexClient() {
     const apiKey = decrypt(settings.podcastindexApiKey);
     const apiSecret = decrypt(settings.podcastindexApiSecret);
 
-    const podcastIndexApi = require("podcast-index-api");
-    podcastindexApi = podcastIndexApi(apiKey, apiSecret, "Lidify");
+    const hash = `${apiKey}:${apiSecret}`;
+    if (cachedClient && cachedCredentialsHash === hash) {
+        return cachedClient;
+    }
 
-    return podcastindexApi;
+    const podcastIndexApi = require("podcast-index-api");
+    cachedClient = podcastIndexApi(apiKey, apiSecret, "Lidify");
+    cachedCredentialsHash = hash;
+
+    return cachedClient;
 }
 
 /**
