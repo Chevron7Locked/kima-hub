@@ -615,6 +615,15 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                 }
 
                 isLoadingRef.current = false;
+
+                // Ensure state machine leaves LOADING even if the generic
+                // handleError doesn't fire (e.g., during effect re-render)
+                if (playbackStateMachine.getState() === "LOADING") {
+                    playbackStateMachine.forceTransition("ERROR", {
+                        error: "Audio failed to load",
+                    });
+                }
+
                 howlerEngine.off("load", handleLoaded);
                 howlerEngine.off("loaderror", handleLoadError);
                 loadListenerRef.current = null;
