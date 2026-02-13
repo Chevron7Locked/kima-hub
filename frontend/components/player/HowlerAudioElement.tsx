@@ -298,6 +298,17 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         [currentPodcast, isBuffering]
     );
 
+    // Refs for unmount progress save (kept in sync via useLayoutEffect)
+    const saveAudiobookProgressRef = useRef(saveAudiobookProgress);
+    const savePodcastProgressRef = useRef(savePodcastProgress);
+    const playbackTypeRef = useRef(playbackType);
+
+    useLayoutEffect(() => {
+        saveAudiobookProgressRef.current = saveAudiobookProgress;
+        savePodcastProgressRef.current = savePodcastProgress;
+        playbackTypeRef.current = playbackType;
+    }, [saveAudiobookProgress, savePodcastProgress, playbackType]);
+
     // Subscribe to Howler events
     useEffect(() => {
         const handleTimeUpdate = (data: { time: number }) => {
@@ -928,7 +939,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
 
                                         howlerEngine.seek(seekTime);
 
-                                        if (wasPlayingAtSeekStart) {
+                                        if (wasPlayingAtSeekStart && lastPlayingStateRef.current) {
                                             howlerEngine.play();
                                             setIsPlaying(true);
                                         }
@@ -937,9 +948,10 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                                     seekReloadListenerRef.current = onLoad;
                                     howlerEngine.on("load", onLoad);
                                 } else {
-                                    // Seek succeeded - resume playback if needed
+                                    // Seek succeeded - resume playback if needed (but not if user paused during seek)
                                     if (
                                         wasPlayingAtSeekStart &&
+                                        lastPlayingStateRef.current &&
                                         !howlerEngine.isPlaying()
                                     ) {
                                         howlerEngine.play();
@@ -1104,6 +1116,13 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
     // Cleanup on unmount
     useEffect(() => {
         return () => {
+            // Save final progress before cleanup
+            if (playbackTypeRef.current === "audiobook") {
+                saveAudiobookProgressRef.current();
+            } else if (playbackTypeRef.current === "podcast") {
+                savePodcastProgressRef.current();
+            }
+
             howlerEngine.cleanup(true);
 
             if (progressSaveIntervalRef.current) {
