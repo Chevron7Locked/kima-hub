@@ -31,12 +31,13 @@ export function usePreviewPlayer() {
                 return;
             }
 
-            // Stop currently playing preview if any
+            // Stop currently playing preview and destroy it
             if (currentPreview && currentPreview !== albumId) {
                 const audio = previewAudios.get(currentPreview);
                 if (audio) {
                     audio.pause();
-                    audio.currentTime = 0;
+                    audio.src = "";
+                    audio.load();
                 }
             }
 
@@ -45,8 +46,13 @@ export function usePreviewPlayer() {
                 const audio = previewAudios.get(albumId);
                 if (audio) {
                     audio.pause();
-                    audio.currentTime = 0;
+                    audio.src = "";
+                    audio.load();
                 }
+                // Remove from map to free memory
+                const newMap = new Map(previewAudios);
+                newMap.delete(albumId);
+                setPreviewAudios(newMap);
                 setCurrentPreview(null);
                 // Resume main player if it was playing before
                 if (mainPlayerWasPausedRef.current) {
@@ -74,6 +80,10 @@ export function usePreviewPlayer() {
                     audio.onerror = () => {
                         toast.error("Failed to load preview");
                         setCurrentPreview(null);
+                        if (mainPlayerWasPausedRef.current) {
+                            howlerEngine.play();
+                            mainPlayerWasPausedRef.current = false;
+                        }
                     };
                     const newMap = new Map(previewAudios);
                     newMap.set(albumId, audio);
