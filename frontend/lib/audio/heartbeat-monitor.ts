@@ -47,6 +47,7 @@ export class HeartbeatMonitor {
   private staleCount: number = 0;
   private isStalled: boolean = false;
   private isRunning: boolean = false;
+  private lastTickTime: number = 0;
   private debugEnabled: boolean = false;
 
   constructor(callbacks: HeartbeatCallbacks, config: Partial<HeartbeatConfig> = {}) {
@@ -67,6 +68,7 @@ export class HeartbeatMonitor {
     this.isRunning = true;
     this.lastKnownTime = this.callbacks.getCurrentTime();
     this.staleCount = 0;
+    this.lastTickTime = Date.now();
     this.isStalled = false;
 
     if (this.debugEnabled) {
@@ -144,6 +146,21 @@ export class HeartbeatMonitor {
   }
 
   private tick(): void {
+    const now = Date.now();
+    const wallClockDelta = now - this.lastTickTime;
+    this.lastTickTime = now;
+
+    // If wall-clock gap is > 3x interval, tab was likely backgrounded.
+    // Reset stale counter to avoid false-positive stall detection.
+    if (wallClockDelta > this.config.interval * 3) {
+      this.lastKnownTime = this.callbacks.getCurrentTime();
+      this.staleCount = 0;
+      if (this.debugEnabled) {
+        console.log(`[Heartbeat] Tab resume detected (${wallClockDelta}ms gap), reset stale counter`);
+      }
+      return;
+    }
+
     const currentTime = this.callbacks.getCurrentTime();
     const isActuallyPlaying = this.callbacks.isActuallyPlaying();
     const timeDelta = Math.abs(currentTime - this.lastKnownTime);
@@ -158,13 +175,16 @@ export class HeartbeatMonitor {
 
       if (this.staleCount >= this.config.staleThreshold) {
         if (!isActuallyPlaying) {
-          // Howler stopped but we didn't get an event
-          if (this.debugEnabled) {
-            console.log('[Heartbeat] Unexpected stop detected');
+          // Howler stopped but we didn't get an event -- fire once only
+          if (!this.isStalled) {
+            this.isStalled = true;
+            if (this.debugEnabled) {
+              console.log('[Heartbeat] Unexpected stop detected');
+            }
+            this.callbacks.onUnexpectedStop();
           }
-          this.callbacks.onUnexpectedStop();
         } else if (!this.isStalled) {
-          // Howler says playing but time isn't moving - network stall
+          // Howler says playing but time isn't moving -- network stall
           this.isStalled = true;
           if (this.debugEnabled) {
             console.log('[Heartbeat] Stall detected');
@@ -173,7 +193,7 @@ export class HeartbeatMonitor {
         }
       }
     } else {
-      // Time is moving - reset stale counter
+      // Time is moving -- reset stale counter
       this.lastKnownTime = currentTime;
       this.staleCount = 0;
 
