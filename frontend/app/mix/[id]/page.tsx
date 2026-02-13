@@ -305,27 +305,36 @@ export default function MixPage() {
                                 return (
                                     <div
                                         key={track.id}
-                                        onClick={() => handlePlayTrack(index)}
+                                        onDoubleClick={() => handlePlayTrack(index)}
                                         className={cn(
                                             "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
                                             isCurrentlyPlaying && "bg-white/10"
                                         )}
                                     >
-                                        {/* Track Number / Play Icon */}
+                                        {/* Track Number / Play Button */}
                                         <div className="flex items-center justify-center">
-                                            <span
-                                                className={cn(
-                                                    "text-sm group-hover:hidden",
-                                                    isCurrentlyPlaying ? "text-[#ecb200]" : "text-gray-400"
-                                                )}
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handlePlayTrack(index);
+                                                }}
+                                                className="w-8 h-8 flex items-center justify-center"
+                                                aria-label="Play"
                                             >
-                                                {isCurrentlyPlaying && isPlaying ? (
-                                                    <Music className="w-4 h-4 text-[#ecb200] animate-pulse" />
-                                                ) : (
-                                                    index + 1
-                                                )}
-                                            </span>
-                                            <Play className="w-4 h-4 text-white hidden group-hover:block" />
+                                                <span
+                                                    className={cn(
+                                                        "text-sm group-hover:hidden",
+                                                        isCurrentlyPlaying ? "text-[#ecb200]" : "text-gray-400"
+                                                    )}
+                                                >
+                                                    {isCurrentlyPlaying && isPlaying ? (
+                                                        <Music className="w-4 h-4 text-[#ecb200] animate-pulse" />
+                                                    ) : (
+                                                        index + 1
+                                                    )}
+                                                </span>
+                                                <Play className="w-4 h-4 text-white hidden group-hover:block" />
+                                            </button>
                                         </div>
 
                                         {/* Title + Artist */}
