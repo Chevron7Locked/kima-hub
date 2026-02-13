@@ -4,24 +4,7 @@ import { cn } from "@/utils/cn";
 import { DiscoverTrack } from "../types";
 import { api } from "@/lib/api";
 import { formatTime } from "@/utils/formatTime";
-
-const tierColors: Record<string, string> = {
-    high: "text-green-400",
-    medium: "text-yellow-400",
-    explore: "text-orange-400",
-    wildcard: "text-purple-400",
-    low: "text-orange-400",
-    wild: "text-purple-400",
-};
-
-const tierLabels: Record<string, string> = {
-    high: "High Match",
-    medium: "Medium Match",
-    explore: "Explore",
-    wildcard: "Wild Card",
-    low: "Explore",
-    wild: "Wild Card",
-};
+import { tierColors, tierLabels } from "../constants";
 
 interface TrackListProps {
     tracks: DiscoverTrack[];
@@ -59,7 +42,7 @@ export function TrackList({
                     return (
                         <div
                             key={track.id}
-                            onClick={() =>
+                            onDoubleClick={() =>
                                 isTrackPlaying && isPlaying
                                     ? onTogglePlay()
                                     : onPlayTrack(index)
@@ -69,23 +52,34 @@ export function TrackList({
                                 isTrackPlaying && "bg-white/10"
                             )}
                         >
-                            {/* Track Number / Play Icon */}
+                            {/* Track Number / Play Button */}
                             <div className="flex items-center justify-center">
-                                <span
-                                    className={cn(
-                                        "text-sm group-hover:hidden",
-                                        isTrackPlaying
-                                            ? "text-[#ecb200]"
-                                            : "text-gray-400"
-                                    )}
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        isTrackPlaying && isPlaying
+                                            ? onTogglePlay()
+                                            : onPlayTrack(index);
+                                    }}
+                                    className="w-8 h-8 flex items-center justify-center"
+                                    aria-label={isTrackPlaying && isPlaying ? "Pause" : "Play"}
                                 >
-                                    {isTrackPlaying && isPlaying ? (
-                                        <Music className="w-4 h-4 text-[#ecb200] animate-pulse" />
-                                    ) : (
-                                        index + 1
-                                    )}
-                                </span>
-                                <Play className="w-4 h-4 text-white hidden group-hover:block" />
+                                    <span
+                                        className={cn(
+                                            "group-hover:hidden text-sm",
+                                            isTrackPlaying
+                                                ? "text-[#ecb200]"
+                                                : "text-gray-400"
+                                        )}
+                                    >
+                                        {isTrackPlaying && isPlaying ? (
+                                            <Music className="w-4 h-4 text-[#ecb200] animate-pulse" />
+                                        ) : (
+                                            index + 1
+                                        )}
+                                    </span>
+                                    <Play className="w-4 h-4 text-white hidden group-hover:block" />
+                                </button>
                             </div>
 
                             {/* Title + Artist */}
@@ -153,7 +147,7 @@ export function TrackList({
                                     className={cn(
                                         "p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all",
                                         track.isLiked
-                                            ? "text-purple-400 hover:text-purple-300"
+                                            ? "text-[#a855f7] hover:text-[#9333ea]"
                                             : "text-gray-400 hover:text-white"
                                     )}
                                     title={
