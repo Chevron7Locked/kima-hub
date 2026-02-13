@@ -96,7 +96,6 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
     // Playback context
     const {
         isPlaying,
-        setCurrentTime,
         setCurrentTimeFromEngine,
         setDuration,
         setIsPlaying,
@@ -135,6 +134,9 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
     // Debounce timer for rapid podcast seeks
     const seekDebounceRef = useRef<NodeJS.Timeout | null>(null);
     const pendingSeekTimeRef = useRef<number | null>(null);
+    // Track seek-related timeouts for cleanup
+    const seekVerifyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const seekCompleteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     // Preload management
     const preloadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastPreloadedTrackIdRef = useRef<string | null>(null);
@@ -733,145 +735,22 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         howlerEngine.setMuted(isMuted);
     }, [isMuted]);
 
-    // Poll for podcast cache and reload when ready
-    const startCachePolling = useCallback(
-        (podcastId: string, episodeId: string, targetTime: number) => {
-            // Capture the current seek operation ID
-            const pollingSeekId = seekOperationIdRef.current;
-
-            if (cachePollingRef.current) {
-                clearInterval(cachePollingRef.current);
-            }
-
-            let pollCount = 0;
-            const maxPolls = 60;
-
-            cachePollingRef.current = setInterval(async () => {
-                // Check if a newer seek operation has started
-                if (seekOperationIdRef.current !== pollingSeekId) {
-                    if (cachePollingRef.current) {
-                        clearInterval(cachePollingRef.current);
-                        cachePollingRef.current = null;
-                    }
-                    podcastDebugLog("cache polling aborted (stale)", {
-                        pollingSeekId,
-                        currentId: seekOperationIdRef.current,
-                    });
-                    return;
-                }
-
-                pollCount++;
-
-                try {
-                    const status = await api.getPodcastEpisodeCacheStatus(
-                        podcastId,
-                        episodeId
-                    );
-
-                    // Re-check after async operation
-                    if (seekOperationIdRef.current !== pollingSeekId) {
-                        if (cachePollingRef.current) {
-                            clearInterval(cachePollingRef.current);
-                            cachePollingRef.current = null;
-                        }
-                        return;
-                    }
-
-                    podcastDebugLog("cache poll", {
-                        podcastId,
-                        episodeId,
-                        pollCount,
-                        cached: status.cached,
-                        downloading: status.downloading,
-                        downloadProgress: status.downloadProgress,
-                        targetTime,
-                    });
-
-                    if (status.cached) {
-                        if (cachePollingRef.current) {
-                            clearInterval(cachePollingRef.current);
-                            cachePollingRef.current = null;
-                        }
-
-                        podcastDebugLog(
-                            "cache ready -> howlerEngine.reload()",
-                            {
-                                podcastId,
-                                episodeId,
-                                targetTime,
-                            }
-                        );
-                        // Clean up any previous cache polling load listener
-                        if (cachePollingLoadListenerRef.current) {
-                            howlerEngine.off(
-                                "load",
-                                cachePollingLoadListenerRef.current
-                            );
-                            cachePollingLoadListenerRef.current = null;
-                        }
-
-                        howlerEngine.reload();
-
-                        const onLoad = () => {
-                            howlerEngine.off("load", onLoad);
-                            cachePollingLoadListenerRef.current = null;
-
-                            // Check if still current before acting
-                            if (seekOperationIdRef.current !== pollingSeekId) {
-                                podcastDebugLog(
-                                    "cache polling load callback aborted (stale)",
-                                    { pollingSeekId }
-                                );
-                                return;
-                            }
-
-                            howlerEngine.seek(targetTime);
-                            setCurrentTime(targetTime);
-                            howlerEngine.play();
-                            podcastDebugLog("post-reload seek+play", {
-                                podcastId,
-                                episodeId,
-                                targetTime,
-                                howlerTime: howlerEngine.getCurrentTime(),
-                                actualTime: howlerEngine.getActualCurrentTime(),
-                            });
-
-                            setIsBuffering(false);
-                            setTargetSeekPosition(null);
-                            setIsPlaying(true);
-                        };
-
-                        cachePollingLoadListenerRef.current = onLoad;
-                        howlerEngine.on("load", onLoad);
-                    } else if (pollCount >= maxPolls) {
-                        if (cachePollingRef.current) {
-                            clearInterval(cachePollingRef.current);
-                            cachePollingRef.current = null;
-                        }
-
-                        console.warn(
-                            "[HowlerAudioElement] Cache polling timeout"
-                        );
-                        setIsBuffering(false);
-                        setTargetSeekPosition(null);
-                    }
-                } catch (error) {
-                    console.error(
-                        "[HowlerAudioElement] Cache polling error:",
-                        error
-                    );
-                }
-            }, 2000);
-        },
-        [setCurrentTime, setIsBuffering, setTargetSeekPosition, setIsPlaying]
-    );
-
     // Handle seeking via event emitter
     useEffect(() => {
         // Store previous time to detect large skips vs fine scrubbing
         let previousTime = howlerEngine.getCurrentTime();
 
         const handleSeek = async (time: number) => {
+            // Clear previous seek timeouts to prevent stale callbacks
+            if (seekVerifyTimeoutRef.current) {
+                clearTimeout(seekVerifyTimeoutRef.current);
+                seekVerifyTimeoutRef.current = null;
+            }
+            if (seekCompleteTimeoutRef.current) {
+                clearTimeout(seekCompleteTimeoutRef.current);
+                seekCompleteTimeoutRef.current = null;
+            }
+
             // Increment seek operation ID to track this specific seek
             seekOperationIdRef.current += 1;
             const thisSeekId = seekOperationIdRef.current;
@@ -966,7 +845,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                             howlerEngine.seek(seekTime);
 
                             // Verify seek succeeded after a short delay
-                            setTimeout(() => {
+                            seekVerifyTimeoutRef.current = setTimeout(() => {
                                 if (seekOperationIdRef.current !== thisSeekId) {
                                     return;
                                 }
@@ -1103,16 +982,16 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             howlerEngine.seek(time);
 
             // Reset seeking flag after a short delay to allow seek to complete
-            setTimeout(() => {
+            seekCompleteTimeoutRef.current = setTimeout(() => {
                 isSeekingRef.current = false;
             }, 100);
         };
 
         const unsubscribe = audioSeekEmitter.subscribe(handleSeek);
         return unsubscribe;
-    }, [playbackType, currentPodcast, setIsBuffering, setTargetSeekPosition, setIsPlaying, startCachePolling]);
+    }, [playbackType, currentPodcast, setIsBuffering, setTargetSeekPosition, setIsPlaying]);
 
-    // Cleanup cache polling, seek timeout, and seek-reload listener on unmount
+    // Cleanup cache polling, seek timeouts, and seek-reload listener on unmount
     useEffect(() => {
         return () => {
             if (cachePollingRef.current) {
@@ -1120,6 +999,12 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             }
             if (seekCheckTimeoutRef.current) {
                 clearTimeout(seekCheckTimeoutRef.current);
+            }
+            if (seekVerifyTimeoutRef.current) {
+                clearTimeout(seekVerifyTimeoutRef.current);
+            }
+            if (seekCompleteTimeoutRef.current) {
+                clearTimeout(seekCompleteTimeoutRef.current);
             }
             if (seekReloadListenerRef.current) {
                 howlerEngine.off("load", seekReloadListenerRef.current);

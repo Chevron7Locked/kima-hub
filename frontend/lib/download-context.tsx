@@ -8,6 +8,7 @@ import {
     useEffect,
     useMemo,
     useCallback,
+    useRef,
 } from "react";
 import { useActiveDownloads, DownloadHistoryItem } from "@/hooks/useNotifications";
 import { useEventSource } from "@/hooks/useEventSource";
@@ -48,6 +49,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     const [pendingDownloads, setPendingDownloads] = useState<PendingDownload[]>(
         []
     );
+    const pendingDownloadsRef = useRef<PendingDownload[]>([]);
     useEventSource();
     const { downloads: activeDownloads } = useActiveDownloads();
 
@@ -99,37 +101,50 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         subject: string,
         mbid: string
     ): string | null => {
-        // Check synchronously first to avoid race conditions
-        let result: string | null = null;
+        // Check for duplicates synchronously via ref to avoid concurrent mode races
+        if (pendingDownloadsRef.current.some((d) => d.mbid === mbid)) {
+            return null;
+        }
+
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const download: PendingDownload = {
+            id,
+            type,
+            subject,
+            mbid,
+            timestamp: Date.now(),
+        };
+
+        // Eagerly update ref so rapid successive calls see the new entry
+        pendingDownloadsRef.current = [...pendingDownloadsRef.current, download];
 
         setPendingDownloads((prev) => {
-            // Check if already downloading this MBID
+            // Double-check inside updater in case of rapid concurrent calls
             if (prev.some((d) => d.mbid === mbid)) {
                 return prev;
             }
-
-            const id = `${Date.now()}-${Math.random()}`;
-            const download: PendingDownload = {
-                id,
-                type,
-                subject,
-                mbid,
-                timestamp: Date.now(),
-            };
-
-            result = id;
-            return [...prev, download];
+            const next = [...prev, download];
+            pendingDownloadsRef.current = next;
+            return next;
         });
 
-        return result;
+        return id;
     }, []);
 
     const removePendingDownload = useCallback((id: string) => {
-        setPendingDownloads((prev) => prev.filter((d) => d.id !== id));
+        setPendingDownloads((prev) => {
+            const next = prev.filter((d) => d.id !== id);
+            pendingDownloadsRef.current = next;
+            return next;
+        });
     }, []);
 
     const removePendingByMbid = useCallback((mbid: string) => {
-        setPendingDownloads((prev) => prev.filter((d) => d.mbid !== mbid));
+        setPendingDownloads((prev) => {
+            const next = prev.filter((d) => d.mbid !== mbid);
+            pendingDownloadsRef.current = next;
+            return next;
+        });
     }, []);
 
     const isPending = useCallback((subject: string): boolean => {

@@ -97,16 +97,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const lastCursorTrackIndexRef = useRef<number | null>(null);
     const lastCursorIsShuffleRef = useRef<boolean | null>(null);
 
-    // Ref to track repeat-one timeout for cleanup
-    const repeatTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-    // Cleanup timeout on unmount
+    // Cleanup on unmount
     useEffect(() => {
         queueDebugLog("AudioControlsProvider mounted");
         return () => {
-            if (repeatTimeoutRef.current) {
-                clearTimeout(repeatTimeoutRef.current);
-            }
             queueDebugLog("AudioControlsProvider unmounted");
         };
     }, []);
@@ -330,23 +324,85 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         playback.setIsPlaying(true);
     }, [playback]);
 
+    const seek = useCallback(
+        (time: number) => {
+            // Prefer canonical durations for long-form media. If both exist, take the safer minimum.
+            const mediaDuration =
+                state.playbackType === "podcast"
+                    ? state.currentPodcast?.duration || 0
+                    : state.playbackType === "audiobook"
+                    ? state.currentAudiobook?.duration || 0
+                    : state.currentTrack?.duration || 0;
+            const maxDuration =
+                mediaDuration > 0 && playback.duration > 0
+                    ? Math.min(mediaDuration, playback.duration)
+                    : mediaDuration || playback.duration || 0;
+            const clampedTime =
+                maxDuration > 0
+                    ? Math.min(Math.max(time, 0), maxDuration)
+                    : Math.max(time, 0);
+
+            // Lock seek to prevent stale timeupdate events from overwriting optimistic update
+            // This is especially important for podcasts where seeking may require audio reload
+            playback.lockSeek(clampedTime);
+
+            // Optimistically update local playback time for instant UI feedback
+            playback.setCurrentTime(clampedTime);
+
+            // Keep audiobook/podcast progress in sync locally so detail pages reflect scrubs
+            if (state.playbackType === "audiobook" && state.currentAudiobook) {
+                // IMPORTANT: use functional update to avoid stale-closure overwrites
+                // (seeking must never be able to swap the currently-playing audiobook)
+                state.setCurrentAudiobook((prev) => {
+                    if (!prev) return prev;
+                    const duration = prev.duration || 0;
+                    const progressPercent =
+                        duration > 0 ? (clampedTime / duration) * 100 : 0;
+                    return {
+                        ...prev,
+                        progress: {
+                            currentTime: clampedTime,
+                            progress: progressPercent,
+                            isFinished: false,
+                            lastPlayedAt: new Date(),
+                        },
+                    };
+                });
+            } else if (
+                state.playbackType === "podcast" &&
+                state.currentPodcast
+            ) {
+                // IMPORTANT: use functional update to avoid stale-closure overwrites
+                // (seeking must never be able to swap the currently-playing episode)
+                state.setCurrentPodcast((prev) => {
+                    if (!prev) return prev;
+                    const duration = prev.duration || 0;
+                    const progressPercent =
+                        duration > 0 ? (clampedTime / duration) * 100 : 0;
+                    return {
+                        ...prev,
+                        progress: {
+                            currentTime: clampedTime,
+                            progress: progressPercent,
+                            isFinished: false,
+                            lastPlayedAt: new Date(),
+                        },
+                    };
+                });
+            }
+
+            audioSeekEmitter.emit(clampedTime);
+        },
+        [playback, state]
+    );
+
     const next = useCallback(() => {
         if (state.queue.length === 0) return;
 
-        // Handle repeat one
+        // Handle repeat one - seek to start instead of pause/play cycle to avoid flicker
         if (state.repeatMode === "one" && state.repeatOneCount === 0) {
             state.setRepeatOneCount(1);
-            playback.setCurrentTime(0);
-            playback.setIsPlaying(false);
-            // Clear any existing timeout before setting a new one
-            if (repeatTimeoutRef.current) {
-                clearTimeout(repeatTimeoutRef.current);
-            }
-            // Short delay for audio element state synchronization
-            repeatTimeoutRef.current = setTimeout(
-                () => playback.setIsPlaying(true),
-                10
-            );
+            seek(0);
             return;
         }
 
@@ -393,7 +449,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         state.setCurrentTrack(state.queue[nextIndex]);
         playback.setCurrentTime(0);
         playback.setIsPlaying(true);
-    }, [state, playback]);
+    }, [state, playback, seek]);
 
     const previous = useCallback(() => {
         if (state.queue.length === 0) return;
@@ -658,78 +714,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playback.setCurrentTime(time);
         },
         [playback]
-    );
-
-    const seek = useCallback(
-        (time: number) => {
-            // Prefer canonical durations for long-form media. If both exist, take the safer minimum.
-            const mediaDuration =
-                state.playbackType === "podcast"
-                    ? state.currentPodcast?.duration || 0
-                    : state.playbackType === "audiobook"
-                    ? state.currentAudiobook?.duration || 0
-                    : state.currentTrack?.duration || 0;
-            const maxDuration =
-                mediaDuration > 0 && playback.duration > 0
-                    ? Math.min(mediaDuration, playback.duration)
-                    : mediaDuration || playback.duration || 0;
-            const clampedTime =
-                maxDuration > 0
-                    ? Math.min(Math.max(time, 0), maxDuration)
-                    : Math.max(time, 0);
-
-            // Lock seek to prevent stale timeupdate events from overwriting optimistic update
-            // This is especially important for podcasts where seeking may require audio reload
-            playback.lockSeek(clampedTime);
-
-            // Optimistically update local playback time for instant UI feedback
-            playback.setCurrentTime(clampedTime);
-
-            // Keep audiobook/podcast progress in sync locally so detail pages reflect scrubs
-            if (state.playbackType === "audiobook" && state.currentAudiobook) {
-                // IMPORTANT: use functional update to avoid stale-closure overwrites
-                // (seeking must never be able to swap the currently-playing audiobook)
-                state.setCurrentAudiobook((prev) => {
-                    if (!prev) return prev;
-                    const duration = prev.duration || 0;
-                    const progressPercent =
-                        duration > 0 ? (clampedTime / duration) * 100 : 0;
-                    return {
-                        ...prev,
-                        progress: {
-                            currentTime: clampedTime,
-                            progress: progressPercent,
-                            isFinished: false,
-                            lastPlayedAt: new Date(),
-                        },
-                    };
-                });
-            } else if (
-                state.playbackType === "podcast" &&
-                state.currentPodcast
-            ) {
-                // IMPORTANT: use functional update to avoid stale-closure overwrites
-                // (seeking must never be able to swap the currently-playing episode)
-                state.setCurrentPodcast((prev) => {
-                    if (!prev) return prev;
-                    const duration = prev.duration || 0;
-                    const progressPercent =
-                        duration > 0 ? (clampedTime / duration) * 100 : 0;
-                    return {
-                        ...prev,
-                        progress: {
-                            currentTime: clampedTime,
-                            progress: progressPercent,
-                            isFinished: false,
-                            lastPlayedAt: new Date(),
-                        },
-                    };
-                });
-            }
-
-            audioSeekEmitter.emit(clampedTime);
-        },
-        [playback, state]
     );
 
     const skipForward = useCallback(
