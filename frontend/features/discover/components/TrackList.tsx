@@ -42,11 +42,13 @@ export function TrackList({
                     return (
                         <div
                             key={track.id}
-                            onDoubleClick={() =>
-                                isTrackPlaying && isPlaying
-                                    ? onTogglePlay()
-                                    : onPlayTrack(index)
-                            }
+                            onDoubleClick={() => {
+                                if (isTrackPlaying && isPlaying) {
+                                    onTogglePlay();
+                                } else {
+                                    onPlayTrack(index);
+                                }
+                            }}
                             className={cn(
                                 "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,2fr)_80px_80px] gap-4 px-4 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
                                 isTrackPlaying && "bg-white/10"
@@ -57,9 +59,11 @@ export function TrackList({
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        isTrackPlaying && isPlaying
-                                            ? onTogglePlay()
-                                            : onPlayTrack(index);
+                                        if (isTrackPlaying && isPlaying) {
+                                            onTogglePlay();
+                                        } else {
+                                            onPlayTrack(index);
+                                        }
                                     }}
                                     className="w-8 h-8 flex items-center justify-center"
                                     aria-label={isTrackPlaying && isPlaying ? "Pause" : "Play"}
