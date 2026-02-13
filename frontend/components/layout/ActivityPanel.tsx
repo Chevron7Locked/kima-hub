@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useActiveDownloads } from "@/hooks/useNotifications";
 import { NotificationsTab } from "@/components/activity/NotificationsTab";
@@ -51,9 +51,11 @@ export function ActivityPanel({
     const isMobileOrTablet = isMobile || isTablet;
 
     // If settings tab is active but no settings content provided, default to notifications
-    if (resolvedActiveTab === "settings" && !settingsContent) {
-        setResolvedActiveTab("notifications");
-    }
+    useEffect(() => {
+        if (resolvedActiveTab === "settings" && !settingsContent) {
+            setResolvedActiveTab("notifications");
+        }
+    }, [resolvedActiveTab, settingsContent, setResolvedActiveTab]);
 
     // Badge counts
     const notificationBadge = unreadCount > 0 ? unreadCount : null;

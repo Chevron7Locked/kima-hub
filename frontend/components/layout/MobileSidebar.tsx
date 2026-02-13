@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Settings, RefreshCw, LogOut, Compass, X, Radio } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/utils/cn";
@@ -22,12 +22,23 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
     const { logout } = useAuth();
     const { toast } = useToast();
     const [isSyncing, setIsSyncing] = useState(false);
+    const isFirstRender = useRef(true);
+    const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Close on route change
+    // Close on route change (skip initial mount)
     useEffect(() => {
+        if (isFirstRender.current) {
+            isFirstRender.current = false;
+            return;
+        }
         onClose();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pathname]);
+    }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        return () => {
+            if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+        };
+    }, []);
 
     // Handle library sync
     const handleSync = async () => {
@@ -42,7 +53,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
             console.error("Failed to sync library:", error);
             toast.error("Failed to start scan. Please try again.");
         } finally {
-            setTimeout(() => setIsSyncing(false), 2000);
+            syncTimeoutRef.current = setTimeout(() => setIsSyncing(false), 2000);
         }
     };
 
@@ -71,7 +82,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
 
             {/* Sidebar Drawer */}
             <div
-                className="fixed inset-y-0 left-0 w-[280px] bg-[#0a0a0a] z-50 flex flex-col overflow-hidden transform transition-transform border-r border-white/[0.06] z-100"
+                className="fixed inset-y-0 left-0 w-[280px] bg-[#0a0a0a] z-100 flex flex-col overflow-hidden transform transition-transform border-r border-white/[0.06]"
                 style={{
                     paddingTop: "env(safe-area-inset-top)",
                 }}

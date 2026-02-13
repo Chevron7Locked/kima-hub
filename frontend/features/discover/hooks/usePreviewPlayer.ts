@@ -9,22 +9,26 @@ export function usePreviewPlayer() {
         Map<string, HTMLAudioElement>
     >(new Map());
     const mainPlayerWasPausedRef = useRef(false);
+    const previewAudiosRef = useRef<Map<string, HTMLAudioElement>>(new Map());
 
-    // Cleanup audio on unmount
+    // Keep ref in sync
+    useEffect(() => {
+        previewAudiosRef.current = previewAudios;
+    });
+
+    // Cleanup only on unmount
     useEffect(() => {
         return () => {
-            previewAudios.forEach((audio) => {
+            previewAudiosRef.current.forEach((audio) => {
                 audio.pause();
                 audio.src = "";
-                audio.load();
             });
-            // Resume main player if needed
             if (mainPlayerWasPausedRef.current) {
                 howlerEngine.play();
                 mainPlayerWasPausedRef.current = false;
             }
         };
-    }, [previewAudios]);
+    }, []);
 
     const handleTogglePreview = useCallback(
         (albumId: string, previewUrl: string) => {

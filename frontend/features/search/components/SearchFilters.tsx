@@ -120,7 +120,6 @@ export function SearchFilters({
                                         "absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r",
                                         filter.gradient
                                     )}
-                                    style={{ opacity: 0.1 }}
                                 />
                             )}
                         </button>

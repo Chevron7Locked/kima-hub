@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Plus, Settings, RefreshCw } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { api } from "@/lib/api";
@@ -44,6 +44,7 @@ export function Sidebar() {
     const isMobileOrTablet = isMobile || isTablet;
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isSyncing, setIsSyncing] = useState(false);
+    const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const { data: playlists = [], isLoading: isLoadingPlaylists } = useQuery<
         Playlist[]
@@ -64,10 +65,15 @@ export function Sidebar() {
             console.error("Failed to trigger library scan:", error);
             toast.error("Failed to start scan. Please try again.");
         } finally {
-            // Keep syncing for a bit to show the animation
-            setTimeout(() => setIsSyncing(false), 2000);
+            syncTimeoutRef.current = setTimeout(() => setIsSyncing(false), 2000);
         }
     };
+
+    useEffect(() => {
+        return () => {
+            if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+        };
+    }, []);
 
     // Close mobile menu when route changes
     useEffect(() => {
@@ -215,7 +221,6 @@ export function Sidebar() {
                 <div className="space-y-0.5">
                     {navigation.map((item, index) => {
                         const isActive = pathname === item.href;
-                        const badge = "badge" in item ? (item as { badge: React.ReactNode }).badge : null;
 
                         return (
                             <Link
@@ -263,13 +268,6 @@ export function Sidebar() {
                                 >
                                     {item.name}
                                 </span>
-
-                                {/* Badge */}
-                                {badge && (
-                                    <span className="ml-auto px-1.5 py-0.5 text-[9px] font-mono font-bold uppercase tracking-wider bg-[#eab308]/20 text-[#eab308] border border-[#eab308]/30">
-                                        {badge}
-                                    </span>
-                                )}
                             </Link>
                         );
                     })}

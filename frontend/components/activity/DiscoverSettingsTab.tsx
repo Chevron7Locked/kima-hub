@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast-context";
 import { Trash2, Loader2, ArrowLeft } from "lucide-react";
@@ -22,6 +22,12 @@ export function DiscoverSettingsTab({
     const { toast } = useToast();
     const [isClearing, setIsClearing] = useState(false);
     const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+    useEffect(() => {
+        return () => {
+            if (debounceRef.current) clearTimeout(debounceRef.current);
+        };
+    }, []);
 
     // Generic handler for config changes with debounce
     function handleConfigChange<K extends keyof DiscoverConfig>(
