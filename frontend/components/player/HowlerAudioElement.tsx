@@ -137,6 +137,8 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
     // Track seek-related timeouts for cleanup
     const seekVerifyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const seekCompleteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    // Loading timeout -- prevents stuck LOADING state if Howler never fires load/loaderror
+    const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     // Preload management
     const preloadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastPreloadedTrackIdRef = useRef<string | null>(null);
@@ -466,6 +468,24 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         // Transition state machine to LOADING
         playbackStateMachine.forceTransition("LOADING");
 
+        // Set loading timeout -- if audio never loads/errors, recover after 30s
+        if (loadingTimeoutRef.current) {
+            clearTimeout(loadingTimeoutRef.current);
+        }
+        loadingTimeoutRef.current = setTimeout(() => {
+            loadingTimeoutRef.current = null;
+            if (playbackStateMachine.isLoading) {
+                console.error("[HowlerAudioElement] Load timeout -- recovering from stuck LOADING state");
+                playbackStateMachine.forceTransition("ERROR", {
+                    error: "Audio failed to load -- request timed out",
+                    errorCode: 408,
+                });
+                setIsPlaying(false);
+                setIsBuffering(false);
+                isLoadingRef.current = false;
+            }
+        }, 30000);
+
         let streamUrl: string | null = null;
         let startTime = 0;
 
@@ -531,6 +551,12 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             const handleLoaded = () => {
                 if (loadIdRef.current !== thisLoadId) return;
 
+                // Clear loading timeout
+                if (loadingTimeoutRef.current) {
+                    clearTimeout(loadingTimeoutRef.current);
+                    loadingTimeoutRef.current = null;
+                }
+
                 isLoadingRef.current = false;
 
                 if (startTime > 0) {
@@ -565,6 +591,12 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             };
 
             const handleLoadError = () => {
+                // Clear loading timeout
+                if (loadingTimeoutRef.current) {
+                    clearTimeout(loadingTimeoutRef.current);
+                    loadingTimeoutRef.current = null;
+                }
+
                 isLoadingRef.current = false;
                 howlerEngine.off("load", handleLoaded);
                 howlerEngine.off("loaderror", handleLoadError);
@@ -1079,6 +1111,9 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             if (cachePollingLoadListenerRef.current) {
                 howlerEngine.off("load", cachePollingLoadListenerRef.current);
                 cachePollingLoadListenerRef.current = null;
+            }
+            if (loadingTimeoutRef.current) {
+                clearTimeout(loadingTimeoutRef.current);
             }
             // Clean up preload refs
             if (preloadTimeoutRef.current) {
