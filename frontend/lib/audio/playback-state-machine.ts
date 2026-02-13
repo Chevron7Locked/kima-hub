@@ -10,7 +10,6 @@ export type PlaybackState =
   | 'LOADING'
   | 'READY'
   | 'PLAYING'
-  | 'SEEKING'
   | 'BUFFERING'
   | 'ERROR';
 
@@ -19,7 +18,6 @@ export interface StateContext {
   previousState: PlaybackState | null;
   error: string | null;
   errorCode: number | null;
-  wasPlayingBeforeSeek: boolean;
   lastTransitionTime: number;
 }
 
@@ -27,9 +25,8 @@ export interface StateContext {
 const VALID_TRANSITIONS: Record<PlaybackState, PlaybackState[]> = {
   IDLE: ['LOADING'],
   LOADING: ['READY', 'PLAYING', 'ERROR', 'IDLE'],
-  READY: ['PLAYING', 'LOADING', 'IDLE', 'SEEKING'],
-  PLAYING: ['READY', 'SEEKING', 'BUFFERING', 'LOADING', 'ERROR', 'IDLE'],
-  SEEKING: ['PLAYING', 'READY', 'ERROR', 'LOADING'],
+  READY: ['PLAYING', 'LOADING', 'IDLE'],
+  PLAYING: ['READY', 'BUFFERING', 'LOADING', 'ERROR', 'IDLE'],
   BUFFERING: ['PLAYING', 'ERROR', 'IDLE'],
   ERROR: ['LOADING', 'IDLE'],
 };
@@ -42,7 +39,6 @@ export class PlaybackStateMachine {
     previousState: null,
     error: null,
     errorCode: null,
-    wasPlayingBeforeSeek: false,
     lastTransitionTime: Date.now(),
   };
 
@@ -79,11 +75,6 @@ export class PlaybackStateMachine {
     }
 
     const from = this.context.state;
-
-    // Track if we were playing before seek
-    if (to === 'SEEKING') {
-      this.context.wasPlayingBeforeSeek = from === 'PLAYING';
-    }
 
     // Clear error when leaving ERROR state
     const error = to === 'ERROR' ? (options?.error ?? 'Unknown error') : null;
@@ -122,7 +113,6 @@ export class PlaybackStateMachine {
       state: to,
       error: to === 'ERROR' ? (options?.error ?? 'Unknown error') : null,
       errorCode: to === 'ERROR' ? (options?.errorCode ?? null) : null,
-      wasPlayingBeforeSeek: false,
       lastTransitionTime: Date.now(),
     };
 
@@ -153,7 +143,6 @@ export class PlaybackStateMachine {
       previousState: null,
       error: null,
       errorCode: null,
-      wasPlayingBeforeSeek: false,
       lastTransitionTime: Date.now(),
     };
     this.notify();
@@ -164,7 +153,6 @@ export class PlaybackStateMachine {
   get isLoading(): boolean { return this.context.state === 'LOADING'; }
   get isReady(): boolean { return this.context.state === 'READY'; }
   get isPlaying(): boolean { return this.context.state === 'PLAYING'; }
-  get isSeeking(): boolean { return this.context.state === 'SEEKING'; }
   get isBuffering(): boolean { return this.context.state === 'BUFFERING'; }
   get hasError(): boolean { return this.context.state === 'ERROR'; }
   get canPlay(): boolean { return this.context.state === 'READY' || this.context.state === 'PLAYING'; }

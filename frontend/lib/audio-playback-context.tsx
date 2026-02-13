@@ -18,7 +18,6 @@ interface AudioPlaybackContextType {
     currentTime: number;
     duration: number;
     isBuffering: boolean;
-    targetSeekPosition: number | null;
     canSeek: boolean;
     downloadProgress: number | null; // 0-100 for downloading, null for not downloading
     isSeekLocked: boolean; // True when a seek operation is in progress
@@ -33,7 +32,6 @@ interface AudioPlaybackContextType {
     setCanSeek: (canSeek: boolean) => void;
     setDownloadProgress: (progress: number | null) => void;
     lockSeek: (targetTime: number) => void; // Lock updates during seek
-    unlockSeek: () => void; // Unlock after seek completes
     clearAudioError: () => void; // Clear the audio error state
 }
 
@@ -43,7 +41,6 @@ const AudioPlaybackContext = createContext<
 
 // LocalStorage keys
 const STORAGE_KEYS = {
-    IS_PLAYING: "lidify_is_playing",
     CURRENT_TIME: "lidify_current_time",
 };
 
@@ -58,7 +55,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     });
     const [duration, setDuration] = useState(0);
     const [isBuffering, setIsBuffering] = useState(false);
-    const [targetSeekPosition, setTargetSeekPosition] = useState<number | null>(
+    const [_targetSeekPosition, setTargetSeekPosition] = useState<number | null>(
         null
     );
     const [canSeek, setCanSeek] = useState(true); // Default true for music, false for uncached podcasts
@@ -126,16 +123,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             seekTargetRef.current = null;
             seekLockTimeoutRef.current = null;
         }, 500);
-    }, []);
-
-    // Unlock the seek state
-    const unlockSeek = useCallback(() => {
-        setIsSeekLocked(false);
-        seekTargetRef.current = null;
-        if (seekLockTimeoutRef.current) {
-            clearTimeout(seekLockTimeoutRef.current);
-            seekLockTimeoutRef.current = null;
-        }
     }, []);
 
     // setCurrentTimeFromEngine - for timeupdate events from Howler
@@ -219,7 +206,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             currentTime,
             duration,
             isBuffering,
-            targetSeekPosition,
             canSeek,
             downloadProgress,
             isSeekLocked,
@@ -234,7 +220,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             setCanSeek,
             setDownloadProgress,
             lockSeek,
-            unlockSeek,
             clearAudioError,
         }),
         [
@@ -242,7 +227,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             currentTime,
             duration,
             isBuffering,
-            targetSeekPosition,
             canSeek,
             downloadProgress,
             isSeekLocked,
@@ -250,7 +234,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             playbackState,
             setCurrentTimeFromEngine,
             lockSeek,
-            unlockSeek,
             clearAudioError,
         ]
     );

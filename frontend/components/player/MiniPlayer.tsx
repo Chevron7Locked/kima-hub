@@ -516,7 +516,6 @@ export function MiniPlayer() {
                 <SeekSlider
                     progress={progress}
                     duration={duration}
-                    currentTime={clampedCurrentTime}
                     onSeek={handleSeek}
                     canSeek={canSeek}
                     hasMedia={hasMedia}

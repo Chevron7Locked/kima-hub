@@ -3,8 +3,6 @@
  * Centralized type definitions for the settings feature
  */
 
-export type Tab = "user" | "account" | "system";
-
 export interface UserSettings {
     playbackQuality: "original" | "high" | "medium" | "low";
     wifiOnly: boolean;
@@ -58,16 +56,3 @@ export interface ApiKey {
     lastUsedAt?: string | null;
 }
 
-export interface User {
-    id: string;
-    username: string;
-    role: "user" | "admin";
-    createdAt: string;
-}
-
-export interface ConfirmModalConfig {
-    title: string;
-    message: string;
-    confirmText: string;
-    onConfirm: () => void;
-}

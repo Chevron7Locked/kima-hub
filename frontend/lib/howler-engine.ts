@@ -391,20 +391,6 @@ class HowlerEngine {
     }
 
     /**
-     * Check if currently in a seek operation
-     */
-    isCurrentlySeeking(): boolean {
-        return this.isSeeking;
-    }
-
-    /**
-     * Get the target seek position (if seeking)
-     */
-    getSeekTarget(): number | null {
-        return this.seekTargetTime;
-    }
-
-    /**
      * Force reload the audio from current source
      * Used after cache is ready to enable seeking
      */

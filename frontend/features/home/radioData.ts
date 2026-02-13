@@ -117,11 +117,11 @@ const DECADE_ACCENT_COLORS: Record<number, { color: string; hoverBorder: string;
     2020: { color: "from-[#f97316]/15 to-[#d97706]/10", hoverBorder: "hover:border-[#f97316]/40", hoverShadow: "hover:shadow-[#f97316]/10", accentGradient: "from-[#f97316] to-[#d97706]" },
 };
 
-export function getGenreStyle(genre: string) {
+function getGenreStyle(genre: string) {
     return GENRE_STYLES[genre.toLowerCase()] || DEFAULT_STYLE;
 }
 
-export function getDecadeStyle(decade: number) {
+function getDecadeStyle(decade: number) {
     const knownDecades = Object.keys(DECADE_ACCENT_COLORS).map(Number).sort((a, b) => b - a);
     for (const known of knownDecades) {
         if (decade >= known) return DECADE_ACCENT_COLORS[known];
@@ -129,7 +129,7 @@ export function getDecadeStyle(decade: number) {
     return DEFAULT_STYLE;
 }
 
-export function getDecadeName(decade: number): string {
+function getDecadeName(decade: number): string {
     if (decade < 1900) return `${decade}s`;
     if (decade < 2000) return `${decade.toString().slice(2)}s`;
     return `${decade}s`;

@@ -8,8 +8,6 @@ interface SeekSliderProps {
     progress: number;
     /** Duration in seconds */
     duration: number;
-    /** Current time in seconds */
-    currentTime: number;
     /** Callback when seeking to a new position */
     onSeek: (time: number) => void;
     /** Whether seeking is enabled */
@@ -29,7 +27,6 @@ interface SeekSliderProps {
 export function SeekSlider({
     progress,
     duration,
-    currentTime: _currentTime,
     onSeek,
     canSeek,
     hasMedia,

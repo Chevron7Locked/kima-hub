@@ -190,27 +190,6 @@ export class HeartbeatMonitor {
   }
 
   /**
-   * Check if currently monitoring
-   */
-  get monitoring(): boolean {
-    return this.isRunning;
-  }
-
-  /**
-   * Check if currently stalled
-   */
-  get stalled(): boolean {
-    return this.isStalled;
-  }
-
-  /**
-   * Update config at runtime
-   */
-  updateConfig(config: Partial<HeartbeatConfig>): void {
-    this.config = { ...this.config, ...config };
-  }
-
-  /**
    * Cleanup resources
    */
   destroy(): void {

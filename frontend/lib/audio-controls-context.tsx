@@ -52,7 +52,6 @@ interface AudioControlsContextType {
     // Playback controls
     pause: () => void;
     resume: () => void;
-    play: () => void;
     next: () => void;
     previous: () => void;
 
@@ -328,10 +327,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     }, [state, playPodcast, pause]);
 
     const resume = useCallback(() => {
-        playback.setIsPlaying(true);
-    }, [playback]);
-
-    const play = useCallback(() => {
         playback.setIsPlaying(true);
     }, [playback]);
 
@@ -860,7 +855,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             nextPodcastEpisode,
             pause,
             resume,
-            play,
             next,
             previous,
             addToQueue,
@@ -888,7 +882,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             nextPodcastEpisode,
             pause,
             resume,
-            play,
             next,
             previous,
             addToQueue,

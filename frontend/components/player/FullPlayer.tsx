@@ -521,7 +521,6 @@ export function FullPlayer() {
                             <SeekSlider
                                 progress={progress}
                                 duration={duration}
-                                currentTime={displayTime}
                                 onSeek={handleSeek}
                                 canSeek={canSeek}
                                 hasMedia={hasMedia}

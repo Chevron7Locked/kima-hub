@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-export interface Notification {
+interface Notification {
     id: string;
     userId: string;
     type: string;
@@ -147,70 +147,6 @@ export function useNotifications() {
         markAllAsRead: () => markAllAsReadMutation.mutate(),
         clearNotification: (id: string) => clearMutation.mutate(id),
         clearAll: () => clearAllMutation.mutate(),
-    };
-}
-
-/**
- * Hook for download history - unchanged from original
- */
-export function useDownloadHistory() {
-    const fetchHistory = useCallback(async () => {
-        return api.get<DownloadHistoryItem[]>("/notifications/downloads/history");
-    }, []);
-
-    const {
-        data: history = [],
-        isLoading,
-        error,
-        refetch,
-    } = useQuery<DownloadHistoryItem[]>({
-        queryKey: ["download-history"],
-        queryFn: fetchHistory,
-    });
-
-    const queryClient = useQueryClient();
-
-    const clearDownload = useCallback(async (id: string) => {
-        try {
-            await api.post(`/notifications/downloads/${id}/clear`);
-            queryClient.setQueryData<DownloadHistoryItem[]>(
-                ["download-history"],
-                (old) => old?.filter((d) => d.id !== id) || []
-            );
-        } catch (err: unknown) {
-            console.error("Failed to clear download:", err);
-        }
-    }, [queryClient]);
-
-    const clearAll = useCallback(async () => {
-        try {
-            await api.post("/notifications/downloads/clear-all");
-            queryClient.setQueryData<DownloadHistoryItem[]>(["download-history"], []);
-        } catch (err: unknown) {
-            console.error("Failed to clear all:", err);
-        }
-    }, [queryClient]);
-
-    const retryDownload = useCallback(async (id: string) => {
-        try {
-            await api.post(`/notifications/downloads/${id}/retry`);
-            queryClient.setQueryData<DownloadHistoryItem[]>(
-                ["download-history"],
-                (old) => old?.filter((d) => d.id !== id) || []
-            );
-        } catch (err: unknown) {
-            console.error("Failed to retry download:", err);
-        }
-    }, [queryClient]);
-
-    return {
-        history,
-        isLoading,
-        error: error instanceof Error ? error.message : null,
-        refetch,
-        clearDownload,
-        clearAll,
-        retryDownload,
     };
 }
 
