@@ -155,6 +155,8 @@ export function useTrackPreview<T extends PreviewableTrack>() {
         const stopPreview = () => {
             if (previewAudioRef.current) {
                 previewAudioRef.current.pause();
+                previewAudioRef.current.src = "";
+                previewAudioRef.current.load();
                 previewAudioRef.current = null;
                 setPreviewPlaying(false);
                 setPreviewTrack(null);

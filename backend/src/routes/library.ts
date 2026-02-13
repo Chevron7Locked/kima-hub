@@ -70,6 +70,7 @@ function registerStream(userId: string, trackId: string, res: Response): void {
             }
         }
         if (oldest) {
+            logger.debug("[STREAM] Evicting oldest stream for user", userId, "track", oldest.trackId);
             try {
                 if (!oldest.res.writableEnded) {
                     oldest.res.end();
@@ -2316,9 +2317,6 @@ router.get("/tracks/:id/stream", async (req, res) => {
             return res.status(401).json({ error: "Unauthorized" });
         }
 
-        // Register this stream for per-user concurrency limiting
-        registerStream(userId, req.params.id, res);
-
         const track = await prisma.track.findUnique({
             where: { id: req.params.id },
         });
@@ -2327,6 +2325,9 @@ router.get("/tracks/:id/stream", async (req, res) => {
             logger.debug("[STREAM] Track not found");
             return res.status(404).json({ error: "Track not found" });
         }
+
+        // Register this stream for per-user concurrency limiting (after track validation)
+        registerStream(userId, req.params.id, res);
 
         // Log play start - only if this is a new playback session
         const recentPlay = await prisma.play.findFirst({
