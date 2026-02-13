@@ -272,13 +272,17 @@ class HowlerEngine {
 
                     // Wait a bit before retrying
                     setTimeout(() => {
+                        // Abort if user switched to a different track while waiting
+                        if (this.state.currentSrc !== null && this.state.currentSrc !== srcToRetry) {
+                            return;
+                        }
                         this.load(
                             srcToRetry,
                             autoplayToRetry,
                             formatToRetry,
                             true
                         );
-                    }, 500 * this.retryCount); // Exponential backoff
+                    }, 500 * this.retryCount); // Linear backoff: 500ms, 1000ms, 1500ms
                     return;
                 }
 
@@ -729,6 +733,14 @@ class HowlerEngine {
     cleanup(immediate: boolean = false): void {
         this.cancelPreload();
         this.stopTimeUpdates();
+
+        // Clear seek state to prevent stale seek locks on new track
+        if (this.seekTimeoutId) {
+            clearTimeout(this.seekTimeoutId);
+            this.seekTimeoutId = null;
+        }
+        this.isSeeking = false;
+        this.seekTargetTime = null;
 
         // Cancel any pending cleanup timeout
         if (this.cleanupTimeoutId) {
