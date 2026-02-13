@@ -325,12 +325,15 @@ class DownloadQueueManager {
                 );
                 logger.debug(`   These downloads never completed:`);
 
-                // Mark each pending download as failed to trigger callbacks
+                // Collect IDs first to avoid mutating the Map during iteration
+                const toFail: string[] = [];
                 for (const [downloadId, info] of this.activeDownloads) {
                     logger.debug(
                         `     - ${info.albumTitle} by ${info.artistName}`
                     );
-                    // This will trigger the unavailable album callback
+                    toFail.push(downloadId);
+                }
+                for (const downloadId of toFail) {
                     this.failDownload(
                         downloadId,
                         "Download timeout - never completed"
@@ -558,7 +561,7 @@ class DownloadQueueManager {
      */
     cleanupStaleDownloads(): number {
         const now = Date.now();
-        let cleanedCount = 0;
+        const toClean: string[] = [];
 
         for (const [downloadId, info] of this.activeDownloads) {
             const age = now - info.startTime;
@@ -570,10 +573,14 @@ class DownloadQueueManager {
                         age / 60000
                     )} minutes`
                 );
-                this.activeDownloads.delete(downloadId);
-                cleanedCount++;
+                toClean.push(downloadId);
             }
         }
+
+        for (const downloadId of toClean) {
+            this.activeDownloads.delete(downloadId);
+        }
+        const cleanedCount = toClean.length;
 
         if (cleanedCount > 0) {
             logger.debug(

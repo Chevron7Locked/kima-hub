@@ -48,27 +48,21 @@ export function getDownloadProgress(episodeId: string): { progress: number; down
 }
 
 /**
- * Check if a cached file exists and is valid
- * Returns null if file doesn't exist, is empty, or is still being downloaded
+ * Internal cache validation -- checks filesystem and DB without consulting
+ * the downloadingEpisodes set. Used by performDownload to avoid the
+ * delete-then-readd race on the in-progress set.
  */
-export async function getCachedFilePath(episodeId: string): Promise<string | null> {
-    // Don't return cache path if still downloading - file may be incomplete
-    if (downloadingEpisodes.has(episodeId)) {
-        logger.debug(`[PODCAST-DL] Episode ${episodeId} is still downloading, not using cache`);
-        return null;
-    }
-    
+async function validateCachedFile(episodeId: string): Promise<string | null> {
     const cacheDir = getPodcastCacheDir();
     const cachedPath = path.join(cacheDir, `${episodeId}.mp3`);
-    
+
     try {
         await fs.access(cachedPath, fs.constants.F_OK);
         const stats = await fs.stat(cachedPath);
-        
+
         // File must be > 0 bytes to be valid
         if (stats.size > 0) {
             // Strong validation: if we know the canonical remote file size, require the cache to match.
-            // This prevents "cached=true" when we only downloaded part of the file (which breaks seeking and causes 416s).
             try {
                 const episode = await prisma.podcastEpisode.findUnique({
                     where: { id: episodeId },
@@ -99,32 +93,32 @@ export async function getCachedFilePath(episodeId: string): Promise<string | nul
             const dbRecord = await prisma.podcastDownload.findFirst({
                 where: { episodeId }
             });
-            
+
             // If no DB record, file might be incomplete or stale
             if (!dbRecord) {
                 logger.debug(`[PODCAST-DL] No DB record for ${episodeId}, deleting stale cache file`);
                 await fs.unlink(cachedPath).catch(() => {});
                 return null;
             }
-            
+
             // Validate file size matches what we recorded (allow 1% variance for filesystem differences)
             const expectedSize = dbRecord.fileSizeMb * 1024 * 1024;
             const actualSize = stats.size;
             const variance = Math.abs(actualSize - expectedSize) / expectedSize;
-            
+
             if (expectedSize > 0 && variance > 0.01) {
                 logger.debug(`[PODCAST-DL] Size mismatch for ${episodeId}: actual ${actualSize} vs expected ${Math.round(expectedSize)}, deleting`);
                 await fs.unlink(cachedPath).catch(() => {});
                 await prisma.podcastDownload.deleteMany({ where: { episodeId } });
                 return null;
             }
-            
+
             // Update last accessed time
             await prisma.podcastDownload.updateMany({
                 where: { episodeId },
                 data: { lastAccessedAt: new Date() }
             });
-            
+
             logger.debug(`[PODCAST-DL] Cache valid for ${episodeId}: ${stats.size} bytes`);
             return cachedPath;
         }
@@ -132,6 +126,20 @@ export async function getCachedFilePath(episodeId: string): Promise<string | nul
     } catch {
         return null;
     }
+}
+
+/**
+ * Check if a cached file exists and is valid
+ * Returns null if file doesn't exist, is empty, or is still being downloaded
+ */
+export async function getCachedFilePath(episodeId: string): Promise<string | null> {
+    // Don't return cache path if still downloading - file may be incomplete
+    if (downloadingEpisodes.has(episodeId)) {
+        logger.debug(`[PODCAST-DL] Episode ${episodeId} is still downloading, not using cache`);
+        return null;
+    }
+
+    return validateCachedFile(episodeId);
 }
 
 /**
@@ -183,10 +191,8 @@ async function performDownload(
     const finalPath = path.join(cacheDir, `${episodeId}.mp3`);
     
     try {
-        // Check if already cached (and validated)
-        downloadingEpisodes.delete(episodeId); // Temporarily remove to check cache
-        const existingCached = await getCachedFilePath(episodeId);
-        downloadingEpisodes.add(episodeId); // Re-add
+        // Check if already cached (and validated) without toggling the downloading set
+        const existingCached = await validateCachedFile(episodeId);
         if (existingCached) {
             logger.debug(`[PODCAST-DL] Episode ${episodeId} already cached, skipping download`);
             return;
