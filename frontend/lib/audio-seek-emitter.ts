@@ -17,7 +17,13 @@ class AudioSeekEmitter {
     }
 
     public emit(time: number): void {
-        this.listeners.forEach((listener) => listener(time));
+        this.listeners.forEach((listener) => {
+            try {
+                listener(time);
+            } catch (err) {
+                console.error("[AudioSeekEmitter] Listener error:", err);
+            }
+        });
     }
 }
 
