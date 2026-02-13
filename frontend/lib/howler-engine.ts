@@ -414,7 +414,7 @@ class HowlerEngine {
         const src = this.state.currentSrc;
         const format = this.howl ? (this.howl as unknown as { _format?: string[] })._format : undefined;
 
-        this.cleanup();
+        this.cleanup(true);
         this.load(src, false, format?.[0]);
     }
 
