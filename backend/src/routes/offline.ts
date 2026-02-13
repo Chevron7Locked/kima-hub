@@ -15,7 +15,7 @@ const downloadAlbumSchema = z.object({
 // POST /offline/albums/:id/download
 router.post("/albums/:id/download", async (req, res) => {
     try {
-        const userId = req.session.userId!;
+        const userId = req.user!.id;
         const albumId = req.params.id;
         const { quality } = downloadAlbumSchema.parse(req.body);
 
@@ -112,7 +112,7 @@ router.post("/albums/:id/download", async (req, res) => {
 // POST /offline/tracks/:id/complete (called by mobile after download)
 router.post("/tracks/:id/complete", async (req, res) => {
     try {
-        const userId = req.session.userId!;
+        const userId = req.user!.id;
         const trackId = req.params.id;
         const { localPath, quality, fileSizeMb } = req.body;
 
@@ -154,7 +154,7 @@ router.post("/tracks/:id/complete", async (req, res) => {
 // GET /offline/albums
 router.get("/albums", async (req, res) => {
     try {
-        const userId = req.session.userId!;
+        const userId = req.user!.id;
 
         // Get all cached tracks grouped by album
         const cachedTracks = await prisma.cachedTrack.findMany({
@@ -218,7 +218,7 @@ router.get("/albums", async (req, res) => {
 // DELETE /offline/albums/:id
 router.delete("/albums/:id", async (req, res) => {
     try {
-        const userId = req.session.userId!;
+        const userId = req.user!.id;
         const albumId = req.params.id;
 
         // Get all cached tracks for this album
@@ -254,7 +254,7 @@ router.delete("/albums/:id", async (req, res) => {
 // GET /offline/stats
 router.get("/stats", async (req, res) => {
     try {
-        const userId = req.session.userId!;
+        const userId = req.user!.id;
 
         const [settings, cacheStats] = await Promise.all([
             prisma.userSettings.findUnique({
