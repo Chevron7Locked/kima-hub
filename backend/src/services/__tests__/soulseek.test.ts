@@ -111,4 +111,44 @@ describe("SoulseekService - Race Condition Fix", () => {
             expect(content).toMatch(filePattern);
         });
     });
+
+    describe("circuit breaker", () => {
+        it("should have isUserBlocked method", () => {
+            const servicePath = path.join(__dirname, "../soulseek.ts");
+            const content = fs.readFileSync(servicePath, "utf-8");
+
+            expect(content).toContain("isUserBlocked");
+            expect(content).toContain("FAILURE_THRESHOLD");
+        });
+
+        it("should have recordUserFailure method", () => {
+            const servicePath = path.join(__dirname, "../soulseek.ts");
+            const content = fs.readFileSync(servicePath, "utf-8");
+
+            expect(content).toContain("recordUserFailure");
+            expect(content).toContain("failedUsers");
+        });
+
+        it("should have isUserInCooldown method", () => {
+            const servicePath = path.join(__dirname, "../soulseek.ts");
+            const content = fs.readFileSync(servicePath, "utf-8");
+
+            expect(content).toContain("isUserInCooldown");
+            expect(content).toContain("userConnectionCooldowns");
+        });
+
+        it("should have failure window for expiration", () => {
+            const servicePath = path.join(__dirname, "../soulseek.ts");
+            const content = fs.readFileSync(servicePath, "utf-8");
+
+            expect(content).toContain("FAILURE_WINDOW");
+        });
+
+        it("should have per-user cooldown constant", () => {
+            const servicePath = path.join(__dirname, "../soulseek.ts");
+            const content = fs.readFileSync(servicePath, "utf-8");
+
+            expect(content).toContain("USER_CONNECTION_COOLDOWN");
+        });
+    });
 });
