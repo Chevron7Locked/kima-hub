@@ -915,3 +915,22 @@ model TrackEmbedding {
   @@index([modelVersion])
   @@map("track_embeddings")
 }
+
+model WebhookEvent {
+  id            String    @id @default(cuid())
+  eventId       String    @unique
+  source        String
+  eventType     String
+  payload       Json
+  processed     Boolean   @default(false)
+  processedAt   DateTime?
+  correlationId String?
+  error         String?
+  retryCount    Int       @default(0)
+  createdAt     DateTime  @default(now())
+
+  @@index([source, eventType])
+  @@index([processed])
+  @@index([correlationId])
+  @@index([createdAt])
+}

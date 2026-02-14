@@ -1,8 +1,15 @@
 /**
- * Lidarr Webhook Handler (Refactored)
+ * Lidarr Webhook Handler (Event Sourcing)
  *
- * Handles Lidarr webhooks for download tracking and Discovery Weekly integration.
- * Uses the stateless simpleDownloadManager for all operations.
+ * Handles Lidarr webhooks using event sourcing pattern:
+ * 1. Store webhook event in database (with deduplication)
+ * 2. Respond immediately with 200 OK
+ * 3. Process event asynchronously
+ *
+ * This ensures:
+ * - No webhook events are lost
+ * - Can replay missed events
+ * - Survives server restarts
  */
 
 import { Router } from "express";
@@ -12,6 +19,7 @@ import { queueCleaner } from "../jobs/queueCleaner";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { webhookEventStore } from "../services/webhookEventStore";
 
 const router = Router();
 
@@ -47,7 +55,6 @@ router.post("/lidarr", async (req, res) => {
         }
 
         // Verify webhook secret if configured
-        // Note: settings.lidarrWebhookSecret is already decrypted by getSystemSettings()
         if (settings.lidarrWebhookSecret) {
             const providedSecret = req.headers["x-webhook-secret"] as string;
 
@@ -64,44 +71,25 @@ router.post("/lidarr", async (req, res) => {
         const eventType = req.body.eventType;
         logger.debug(`[WEBHOOK] Lidarr event: ${eventType}`);
 
-        // Log payload in debug mode only (avoid verbose logs in production)
+        // Log payload in debug mode only
         if (process.env.DEBUG_WEBHOOKS === "true") {
             logger.debug(`   Payload:`, JSON.stringify(req.body, null, 2));
         }
 
-        switch (eventType) {
-            case "Grab":
-                await handleGrab(req.body);
-                break;
+        // STEP 1: Store webhook event immediately (with deduplication)
+        const storedEvent = await webhookEventStore.storeEvent(
+            "lidarr",
+            eventType,
+            req.body
+        );
 
-            case "Download":
-            case "AlbumDownload":
-            case "TrackRetag":
-            case "Rename":
-                await handleDownload(req.body);
-                break;
+        // STEP 2: Respond immediately (don't wait for processing)
+        res.json({ success: true, eventId: storedEvent.id });
 
-            case "ImportFailure":
-            case "DownloadFailed":
-            case "DownloadFailure":
-                await handleImportFailure(req.body);
-                break;
-
-            case "Health":
-            case "HealthIssue":
-            case "HealthRestored":
-                // Ignore health events
-                break;
-
-            case "Test":
-                logger.debug("   Lidarr test webhook received");
-                break;
-
-            default:
-                logger.debug(`   Unhandled event: ${eventType}`);
-        }
-
-        res.json({ success: true });
+        // STEP 3: Process event asynchronously
+        processWebhookEvent(storedEvent.id, eventType, req.body).catch((error) => {
+            logger.error(`[WEBHOOK] Failed to process event ${storedEvent.id}:`, error.message);
+        });
     } catch (error: any) {
         logger.error("Webhook error:", error.message);
         res.status(500).json({ error: "Webhook processing failed" });
@@ -109,9 +97,56 @@ router.post("/lidarr", async (req, res) => {
 });
 
 /**
- * Handle Grab event (download started by Lidarr)
+ * Process webhook event asynchronously
  */
-async function handleGrab(payload: any) {
+async function processWebhookEvent(
+    eventId: string,
+    eventType: string,
+    payload: any
+): Promise<void> {
+    try {
+        let correlationId: string | undefined;
+
+        switch (eventType) {
+            case "Grab":
+                correlationId = await handleGrab(payload);
+                break;
+
+            case "Download":
+            case "AlbumDownload":
+            case "TrackRetag":
+            case "Rename":
+                correlationId = await handleDownload(payload);
+                break;
+
+            case "ImportFailure":
+            case "DownloadFailed":
+            case "DownloadFailure":
+                correlationId = await handleImportFailure(payload);
+                break;
+
+            case "Health":
+            case "HealthIssue":
+            case "HealthRestored":
+            case "Test":
+                break;
+
+            default:
+                logger.debug(`   Unhandled event: ${eventType}`);
+        }
+
+        await webhookEventStore.markProcessed(eventId, correlationId);
+    } catch (error: any) {
+        logger.error(`[WEBHOOK] Event processing failed:`, error.message);
+        await webhookEventStore.markFailed(eventId, error.message);
+    }
+}
+
+/**
+ * Handle Grab event (download started by Lidarr)
+ * Returns correlation ID (download job ID) if matched
+ */
+async function handleGrab(payload: any): Promise<string | undefined> {
     const downloadId = payload.downloadId;
     const albumMbid =
         payload.albums?.[0]?.foreignAlbumId || payload.albums?.[0]?.mbId;
@@ -125,10 +160,9 @@ async function handleGrab(payload: any) {
 
     if (!downloadId) {
         logger.debug(`   Missing downloadId, skipping`);
-        return;
+        return undefined;
     }
 
-    // Use the download manager's multi-strategy matching
     const result = await simpleDownloadManager.onDownloadGrabbed(
         downloadId,
         albumMbid || "",
@@ -138,15 +172,18 @@ async function handleGrab(payload: any) {
     );
 
     if (result.matched) {
-        // Start queue cleaner to monitor this download
         queueCleaner.start();
+        return result.jobId;
     }
+
+    return undefined;
 }
 
 /**
  * Handle Download event (download complete + imported)
+ * Returns correlation ID (download job ID) if matched
  */
-async function handleDownload(payload: any) {
+async function handleDownload(payload: any): Promise<string | undefined> {
     const downloadId = payload.downloadId;
     const albumTitle = payload.album?.title || payload.albums?.[0]?.title;
     const artistName = payload.artist?.name;
@@ -161,10 +198,9 @@ async function handleDownload(payload: any) {
 
     if (!downloadId) {
         logger.debug(`   Missing downloadId, skipping`);
-        return;
+        return undefined;
     }
 
-    // Handle completion through download manager
     const result = await simpleDownloadManager.onDownloadComplete(
         downloadId,
         albumMbid,
@@ -174,14 +210,11 @@ async function handleDownload(payload: any) {
     );
 
     if (result.jobId) {
-        // Find the download job that triggered this webhook to get userId
         const downloadJob = await prisma.downloadJob.findUnique({
             where: { id: result.jobId },
             select: { userId: true, id: true },
         });
 
-        // Trigger scan immediately for this album (incremental scan with enrichment data)
-        // Don't wait for batch completion - enrichment should happen per-album
         logger.debug(
             `   Triggering incremental scan for: ${artistName} - ${albumTitle}`
         );
@@ -193,22 +226,22 @@ async function handleDownload(payload: any) {
             downloadId: result.jobId,
         });
 
-        // Discovery batch completion (for playlist building) is handled by download manager
+        return result.jobId;
     } else {
-        // No job found - this might be an external download not initiated by us
-        // Still trigger a scan to pick up the new music
         logger.debug(`   No matching job, triggering scan anyway...`);
         await scanQueue.add("scan", {
             type: "full",
             source: "lidarr-import-external",
         });
+        return undefined;
     }
 }
 
 /**
  * Handle import failure with automatic retry
+ * Returns correlation ID (download job ID) if job found
  */
-async function handleImportFailure(payload: any) {
+async function handleImportFailure(payload: any): Promise<string | undefined> {
     const downloadId = payload.downloadId;
     const albumMbid =
         payload.album?.foreignAlbumId || payload.albums?.[0]?.foreignAlbumId;
@@ -221,11 +254,11 @@ async function handleImportFailure(payload: any) {
 
     if (!downloadId) {
         logger.debug(`   Missing downloadId, skipping`);
-        return;
+        return undefined;
     }
 
-    // Handle failure through download manager (handles retry logic)
-    await simpleDownloadManager.onImportFailed(downloadId, reason, albumMbid);
+    const result = await simpleDownloadManager.onImportFailed(downloadId, reason, albumMbid);
+    return result.jobId;
 }
 
 export default router;

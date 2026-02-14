@@ -341,6 +341,27 @@ app.listen(config.port, "0.0.0.0", async () => {
         logger.error("Cache warmup failed:", err);
     });
 
+    // Webhook reconciliation - runs every 5 minutes to process missed events
+    const { webhookReconciliation } = await import("./jobs/webhookReconciliation");
+    webhookReconciliation.start();
+
+    // Webhook event cleanup - runs daily to remove old processed events
+    const { webhookEventStore } = await import("./services/webhookEventStore");
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+
+    // Run cleanup on startup (async, don't block)
+    webhookEventStore.cleanupOldEvents(30).catch((err) => {
+        logger.error("Webhook event cleanup failed:", err);
+    });
+
+    // Schedule daily webhook event cleanup
+    webhookCleanupInterval = setInterval(() => {
+        webhookEventStore.cleanupOldEvents(30).catch((err) => {
+            logger.error("Scheduled webhook event cleanup failed:", err);
+        });
+    }, TWENTY_FOUR_HOURS);
+    logger.debug("Webhook event cleanup scheduled (daily, 30-day expiry)");
+
     // Podcast cache cleanup - runs daily to remove cached episodes older than 30 days
     const { cleanupExpiredCache } = await import("./services/podcastDownload");
 
@@ -350,7 +371,6 @@ app.listen(config.port, "0.0.0.0", async () => {
     });
 
     // Schedule daily cleanup (every 24 hours)
-    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
     podcastCleanupInterval = setInterval(() => {
         cleanupExpiredCache().catch((err) => {
             logger.error("Scheduled podcast cache cleanup failed:", err);
@@ -463,6 +483,7 @@ app.listen(config.port, "0.0.0.0", async () => {
 let isShuttingDown = false;
 let healthCheckInterval: NodeJS.Timeout | null = null;
 let podcastCleanupInterval: NodeJS.Timeout | null = null;
+let webhookCleanupInterval: NodeJS.Timeout | null = null;
 
 async function gracefulShutdown(signal: string) {
     if (isShuttingDown) {
@@ -481,6 +502,11 @@ async function gracefulShutdown(signal: string) {
         // Clear scheduled intervals
         if (healthCheckInterval) clearInterval(healthCheckInterval);
         if (podcastCleanupInterval) clearInterval(podcastCleanupInterval);
+        if (webhookCleanupInterval) clearInterval(webhookCleanupInterval);
+
+        // Stop webhook reconciliation
+        const { webhookReconciliation } = await import("./jobs/webhookReconciliation");
+        webhookReconciliation.stop();
 
         // Disconnect Soulseek
         logger.debug("Disconnecting Soulseek...");
