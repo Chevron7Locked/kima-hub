@@ -123,6 +123,62 @@ class MusicBrainzService {
         });
     }
 
+    /**
+     * Get detailed album information including track count, type, and release date
+     */
+    async getAlbumDetails(rgMbid: string): Promise<{
+        id: string;
+        title: string;
+        artistName: string;
+        releaseDate?: string;
+        trackCount?: number;
+        primaryType?: string;
+        secondaryTypes?: string[];
+    } | null> {
+        const cacheKey = `mb:album:details:${rgMbid}`;
+
+        return this.cachedRequest(cacheKey, async () => {
+            try {
+                // Get release group info
+                const rgResponse = await this.client.get(`/release-group/${rgMbid}`, {
+                    params: {
+                        inc: "releases",
+                        fmt: "json",
+                    },
+                });
+
+                const rg = rgResponse.data;
+
+                // Get first release for track count
+                let trackCount = 0;
+                if (rg.releases && rg.releases.length > 0) {
+                    const releaseId = rg.releases[0].id;
+                    const releaseResponse = await this.client.get(`/release/${releaseId}`, {
+                        params: {
+                            inc: "recordings",
+                            fmt: "json",
+                        },
+                    });
+
+                    trackCount = releaseResponse.data.media?.[0]?.['track-count'] || 0;
+                }
+
+                return {
+                    id: rg.id,
+                    title: rg.title,
+                    artistName: rg['artist-credit']?.[0]?.name || '',
+                    releaseDate: rg['first-release-date'],
+                    trackCount,
+                    primaryType: rg['primary-type'],
+                    secondaryTypes: rg['secondary-types'] || [],
+                };
+            } catch (error: any) {
+                logger.error(`[MusicBrainz] Error fetching album details for ${rgMbid}: ${error.message}`);
+                return null;
+            }
+        });
+    }
+
     async getRelease(releaseMbid: string) {
         const cacheKey = `mb:release:${releaseMbid}`;
 

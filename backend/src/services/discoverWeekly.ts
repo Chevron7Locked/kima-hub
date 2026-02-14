@@ -2213,34 +2213,18 @@ export class DiscoverWeeklyService {
         skippedExcluded: number;
         skippedDuplicate: number;
     }> {
+        const MIN_TRACK_COUNT = 7; // Filter out EPs
+        const RECENT_YEARS = 5; // Prefer albums from last 5 years
+        const currentYear = new Date().getFullYear();
+
         let albumsChecked = 0;
         let skippedNoMbid = 0;
         let skippedOwned = 0;
         let skippedExcluded = 0;
         let skippedDuplicate = 0;
 
-        // Patterns to exclude non-studio releases
-        const EXCLUDE_PATTERNS = [
-            /\blive\b/i,
-            /\bep\b$/i, // Only at end of title
-            /\bacoustic\b/i,
-            /\bsession[s]?\b/i,
-            /\bcompilation\b/i,
-            /\bgreatest\s*hits\b/i,
-            /\bbest\s*of\b/i,
-            /\bremix(es|ed)?\b/i,
-            /\bunplugged\b/i,
-            /\bcollection\b/i,
-            /\banthology\b/i,
-            /\bdemo[s]?\b/i,
-        ];
-
-        const isStudioAlbum = (title: string): boolean => {
-            return !EXCLUDE_PATTERNS.some((pattern) => pattern.test(title));
-        };
-
         try {
-            // Get 10 albums per artist (was 5) to increase chances of finding available content
+            // Get 10 albums per artist to increase chances of finding good representative content
             const topAlbums = await lastFmService.getArtistTopAlbums(
                 artist.mbid || "",
                 artist.name,
@@ -2258,13 +2242,17 @@ export class DiscoverWeeklyService {
                 };
             }
 
+            // Collect and score all valid albums
+            const scoredAlbums: Array<{
+                albumName: string;
+                albumMbid: string;
+                score: number;
+                releaseYear: number;
+                trackCount: number;
+            }> = [];
+
             for (const album of topAlbums) {
                 albumsChecked++;
-
-                // Skip non-studio albums (live, compilations, EPs, etc.)
-                if (!isStudioAlbum(album.name)) {
-                    continue;
-                }
 
                 // Get MBID from MusicBrainz
                 const mbAlbum = await musicBrainzService.searchAlbum(
@@ -2282,7 +2270,30 @@ export class DiscoverWeeklyService {
                     skippedDuplicate++;
                     continue;
                 }
-                seenAlbums.add(mbAlbum.id);
+
+                // Get detailed album information
+                const details = await musicBrainzService.getAlbumDetails(mbAlbum.id);
+                if (!details) {
+                    skippedNoMbid++;
+                    continue;
+                }
+
+                // Skip non-studio albums (use MusicBrainz metadata instead of regex)
+                if (details.primaryType !== 'Album') {
+                    continue;
+                }
+                if (details.secondaryTypes?.includes('Live')) {
+                    continue;
+                }
+                if (details.secondaryTypes?.includes('Compilation')) {
+                    continue;
+                }
+
+                // Skip EPs (< 7 tracks)
+                if (details.trackCount && details.trackCount < MIN_TRACK_COUNT) {
+                    logger.debug(`      [SKIP] ${album.name} - only ${details.trackCount} tracks (EP)`);
+                    continue;
+                }
 
                 // Skip if owned (with fuzzy matching)
                 try {
@@ -2328,15 +2339,31 @@ export class DiscoverWeeklyService {
                     continue;
                 }
 
-                // Found a valid album!
+                // Calculate score for this valid album
+                let score = 0;
+
+                // Recent albums get bonus (last 5 years)
+                const releaseYear = details.releaseDate ? parseInt(details.releaseDate.split('-')[0]) : 0;
+                if (releaseYear >= currentYear - RECENT_YEARS) {
+                    score += 10;
+                }
+
+                // Popularity score (normalized playcount from Last.fm)
+                const playcount = album.playcount || 0;
+                score += Math.log10(playcount + 1);
+
+                scoredAlbums.push({
+                    albumName: album.name,
+                    albumMbid: mbAlbum.id,
+                    score,
+                    releaseYear,
+                    trackCount: details.trackCount || 0,
+                });
+            }
+
+            if (scoredAlbums.length === 0) {
                 return {
-                    recommendation: {
-                        artistName: artist.name,
-                        artistMbid: artist.mbid,
-                        albumTitle: album.name,
-                        albumMbid: mbAlbum.id,
-                        similarity: artist.avgMatch || artist.match || 0.5,
-                    },
+                    recommendation: null,
                     albumsChecked,
                     skippedNoMbid,
                     skippedOwned,
@@ -2344,6 +2371,29 @@ export class DiscoverWeeklyService {
                     skippedDuplicate,
                 };
             }
+
+            // Sort by score (recent + popular = best)
+            scoredAlbums.sort((a, b) => b.score - a.score);
+
+            const best = scoredAlbums[0];
+            seenAlbums.add(best.albumMbid);
+
+            logger.debug(`      [SELECTED] ${best.albumName} (${best.releaseYear}, ${best.trackCount} tracks, score: ${best.score.toFixed(1)})`);
+
+            return {
+                recommendation: {
+                    artistName: artist.name,
+                    artistMbid: artist.mbid,
+                    albumTitle: best.albumName,
+                    albumMbid: best.albumMbid,
+                    similarity: artist.avgMatch || artist.match || 0.5,
+                },
+                albumsChecked,
+                skippedNoMbid,
+                skippedOwned,
+                skippedExcluded,
+                skippedDuplicate,
+            };
         } catch (error: any) {
             logger.warn(
                 `   Failed to get albums for ${artist.name}: ${error.message}`
