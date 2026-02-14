@@ -47,6 +47,24 @@ import { resizeImageBuffer, getResizedImagePath } from "../services/imageStorage
 const router = Router();
 
 /**
+ * Validates that a resolved path is within the expected base directory
+ * @param basePath - The base directory (e.g., covers directory)
+ * @param userPath - User-provided path component
+ * @returns Validated absolute path or null if traversal detected
+ */
+function validateCoverPath(basePath: string, userPath: string): string | null {
+    const resolvedBase = path.resolve(basePath);
+    const resolvedPath = path.resolve(resolvedBase, userPath);
+
+    // Ensure resolved path starts with base path (prevents traversal)
+    if (!resolvedPath.startsWith(resolvedBase + path.sep) && resolvedPath !== resolvedBase) {
+        return null;
+    }
+
+    return resolvedPath;
+}
+
+/**
  * Per-user active stream tracking.
  * Limits concurrent audio streams to prevent resource exhaustion from
  * zombie connections or misbehaving clients.
@@ -1874,11 +1892,12 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
             // Check if this is a native cover (prefixed with "native:")
             if (decodedUrl.startsWith("native:")) {
                 const nativePath = decodedUrl.replace("native:", "");
-                const coverCachePath = path.join(
-                    config.music.transcodeCachePath,
-                    "../covers",
-                    nativePath
-                );
+                const coversBase = path.resolve(config.music.transcodeCachePath, "../covers");
+                const coverCachePath = validateCoverPath(coversBase, nativePath);
+
+                if (!coverCachePath) {
+                    return res.status(400).json({ error: "Invalid cover path" });
+                }
 
                 if (!fs.existsSync(coverCachePath)) {
                     logger.error(`[COVER-ART] Native cover not found: ${coverCachePath}`);
@@ -1903,11 +1922,12 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
             // Check if this is a native cover (prefixed with "native:")
             if (decodedId.startsWith("native:")) {
                 const nativePath = decodedId.replace("native:", "");
-                const coverCachePath = path.join(
-                    config.music.transcodeCachePath,
-                    "../covers",
-                    nativePath
-                );
+                const coversBase = path.resolve(config.music.transcodeCachePath, "../covers");
+                const coverCachePath = validateCoverPath(coversBase, nativePath);
+
+                if (!coverCachePath) {
+                    return res.status(400).json({ error: "Invalid cover path" });
+                }
 
                 if (fs.existsSync(coverCachePath)) {
                     return serveNativeImage(coverCachePath, nativePath, size as string | undefined, req, res);
