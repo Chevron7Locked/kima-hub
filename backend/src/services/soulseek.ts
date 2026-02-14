@@ -12,6 +12,7 @@ import type { FileSearchResponse } from "../lib/soulseek/messages/from/peer";
 import { FileAttribute } from "../lib/soulseek/messages/common";
 import { getSystemSettings } from "../utils/systemSettings";
 import { sessionLog } from "../utils/playlistLogger";
+import { distributedLock } from "../utils/distributedLock";
 
 export interface SearchResult {
     user: string;
@@ -38,7 +39,7 @@ export interface SearchTrackResult {
     allMatches: TrackMatch[];
 }
 
-class SoulseekService {
+export class SoulseekService {
     private client: SlskClient | null = null;
     private connecting = false;
     private connectPromise: Promise<void> | null = null;
@@ -242,61 +243,82 @@ class SoulseekService {
             this.forceDisconnect();
         }
 
-        // If already connecting, wait for that connection
-        if (this.connecting && this.connectPromise) {
-            return this.connectPromise;
-        }
+        // Use distributed lock to prevent concurrent connections across processes
+        const lockKey = 'soulseek:connection';
+        const lockTtl = 360000; // 6 minutes - exceeds max backoff (5min)
 
-        // Client exists but not logged in AND not connecting - clean it up
-        if (this.client && !this.client.loggedIn) {
-            this.forceDisconnect();
-        }
+        try {
+            // withLock handles lock release in its finally block
+            // so we don't need to manually check release() success
+            await distributedLock.withLock(lockKey, lockTtl, async () => {
+                // Double-check after acquiring lock
+                if (!force && this.client && this.client.loggedIn) {
+                    if (this.checkConnectionHealth()) {
+                        return;
+                    }
+                }
 
-        // Apply exponential backoff (slskd practice)
-        const backoffDelay = force ? 0 : this.getReconnectDelay();
-        if (backoffDelay > 0) {
-            const now = Date.now();
-            const timeSinceLastAttempt = this.lastConnectAttempt > 0
-                ? now - this.lastConnectAttempt
-                : backoffDelay + 1;
+                // Check if another process is already connecting
+                if (this.connecting && this.connectPromise) {
+                    await this.connectPromise;
+                    return;
+                }
 
-            if (timeSinceLastAttempt < backoffDelay) {
-                const waitMs = backoffDelay - timeSinceLastAttempt;
-                sessionLog(
-                    "SOULSEEK",
-                    `Exponential backoff: waiting ${Math.round(waitMs / 1000)}s before reconnect attempt (attempt #${this.failedConnectionAttempts})`,
-                    "WARN"
-                );
-                throw new Error(
-                    `Connection backoff - wait ${Math.round(waitMs / 1000)}s before retry (attempt ${this.failedConnectionAttempts})`
-                );
-            }
-        }
+                // Client exists but not logged in AND not connecting - clean it up
+                if (this.client && !this.client.loggedIn) {
+                    this.forceDisconnect();
+                }
 
-        this.connecting = true;
-        this.lastConnectAttempt = Date.now();
+                // Apply exponential backoff (slskd practice)
+                const backoffDelay = force ? 0 : this.getReconnectDelay();
+                if (backoffDelay > 0) {
+                    const now = Date.now();
+                    const timeSinceLastAttempt = this.lastConnectAttempt > 0
+                        ? now - this.lastConnectAttempt
+                        : backoffDelay + 1;
 
-        this.connectPromise = this.connect()
-            .then(() => {
-                // Success - reset failure counter
-                this.failedConnectionAttempts = 0;
-            })
-            .catch((err) => {
-                // Increment failure counter for exponential backoff
-                this.failedConnectionAttempts++;
-                sessionLog(
-                    "SOULSEEK",
-                    `Connection failed (attempt #${this.failedConnectionAttempts}). Next retry delay: ${Math.round(this.getReconnectDelay() / 1000)}s`,
-                    "ERROR"
-                );
-                throw err;
-            })
-            .finally(() => {
-                this.connecting = false;
-                this.connectPromise = null;
+                    if (timeSinceLastAttempt < backoffDelay) {
+                        const waitMs = backoffDelay - timeSinceLastAttempt;
+                        sessionLog(
+                            "SOULSEEK",
+                            `Exponential backoff: waiting ${Math.round(waitMs / 1000)}s before reconnect attempt (attempt #${this.failedConnectionAttempts})`,
+                            "WARN"
+                        );
+                        throw new Error(
+                            `Connection backoff - wait ${Math.round(waitMs / 1000)}s before retry (attempt ${this.failedConnectionAttempts})`
+                        );
+                    }
+                }
+
+                this.connecting = true;
+                this.lastConnectAttempt = Date.now();
+                this.connectPromise = this.connect();
+
+                try {
+                    await this.connectPromise;
+                    // Success - reset failure counter
+                    this.failedConnectionAttempts = 0;
+                } catch (err) {
+                    // Increment failure counter for exponential backoff
+                    this.failedConnectionAttempts++;
+                    sessionLog(
+                        "SOULSEEK",
+                        `Connection failed (attempt #${this.failedConnectionAttempts}). Next retry delay: ${Math.round(this.getReconnectDelay() / 1000)}s`,
+                        "ERROR"
+                    );
+                    throw err;
+                } finally {
+                    this.connecting = false;
+                    this.connectPromise = null;
+                }
             });
-
-        return this.connectPromise;
+        } catch (error: any) {
+            if (error.message.includes('Failed to acquire lock')) {
+                sessionLog("SOULSEEK", "Connection already in progress in another process", "DEBUG");
+                throw new Error('Soulseek connection already in progress');
+            }
+            throw error;
+        }
     }
 
     isConnected(): boolean {

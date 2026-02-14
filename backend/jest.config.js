@@ -7,4 +7,7 @@ module.exports = {
     moduleFileExtensions: ['ts', 'js', 'json'],
     clearMocks: true,
     collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
+    transformIgnorePatterns: [
+        'node_modules/(?!(p-queue|eventemitter3)/)',
+    ],
 };
