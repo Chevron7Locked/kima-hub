@@ -2488,6 +2488,36 @@ export class DiscoverWeeklyService {
     }
 
     /**
+     * Check if candidate provides sufficient variety from recent picks.
+     * Prevents consecutive similar artists (e.g., 5 shoegaze bands in a row).
+     */
+    private checkVariety(
+        candidate: any,
+        recentPicks: RecommendedAlbum[],
+        lookbackWindow: number
+    ): boolean {
+        if (recentPicks.length < lookbackWindow) return true;
+
+        const recentWindow = recentPicks.slice(-lookbackWindow);
+        const avgRecentSimilarity = recentWindow.reduce((sum, p) => sum + p.similarity, 0) / recentWindow.length;
+
+        // If recent picks are all high similarity (>80%)
+        // and candidate is also high similarity (>80%)
+        // reject to enforce variety
+        const SIMILARITY_CLUSTER_THRESHOLD = 0.80;
+
+        const recentAreClusteredHigh = avgRecentSimilarity >= SIMILARITY_CLUSTER_THRESHOLD;
+        const candidateIsHigh = (candidate.avgMatch || candidate.match || 0) >= SIMILARITY_CLUSTER_THRESHOLD;
+
+        if (recentAreClusteredHigh && candidateIsHigh) {
+            logger.debug(`      [VARIETY] Skipping ${candidate.name} - too similar to recent picks (${(avgRecentSimilarity * 100).toFixed(0)}% avg)`);
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Deep Cuts Strategy - Exploratory picks from seed adjacency.
      * Finds artists at 20-35% similarity - still connected but more adventurous.
      */
@@ -2911,12 +2941,18 @@ export class DiscoverWeeklyService {
             tierName: "high" | "medium" | "explore"
         ): Promise<RecommendedAlbum[]> => {
             const selected: RecommendedAlbum[] = [];
+            const VARIETY_LOOKBACK = 2;
 
             for (const artist of tier) {
                 if (selected.length >= count) break;
 
                 const key = artist.name.toLowerCase();
                 if (seenArtists.has(key)) continue;
+
+                // Check variety (prevent consecutive similar artists)
+                if (!this.checkVariety(artist, [...recommendations, ...selected], VARIETY_LOOKBACK)) {
+                    continue;
+                }
 
                 // Check if artist is in library (prefer NEW artists)
                 let artistInLibrary = false;
