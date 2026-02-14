@@ -64,6 +64,8 @@ export async function getSystemSettings(forceRefresh = false) {
         ),
         openaiApiKey: safeDecrypt(settings.openaiApiKey, "openaiApiKey"),
         lastfmApiKey: safeDecrypt(settings.lastfmApiKey, "lastfmApiKey"),
+        lastfmApiSecret: safeDecrypt(settings.lastfmApiSecret, "lastfmApiSecret"),
+        lastfmUserKey: safeDecrypt(settings.lastfmUserKey, "lastfmUserKey"),
         fanartApiKey: safeDecrypt(settings.fanartApiKey, "fanartApiKey"),
         audiobookshelfApiKey: safeDecrypt(
             settings.audiobookshelfApiKey,

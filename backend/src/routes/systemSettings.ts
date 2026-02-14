@@ -43,7 +43,11 @@ const systemSettingsSchema = z.object({
   fanartEnabled: z.boolean().optional(),
   fanartApiKey: z.string().nullable().optional(),
 
+  // Last.fm
   lastfmApiKey: z.string().nullable().optional(),
+  lastfmApiSecret: z.string().nullable().optional(),
+  lastfmUserKey: z.string().nullable().optional(),
+  lastfmEnabled: z.boolean().nullable().optional(),
 
   // Media Services
   audiobookshelfEnabled: z.boolean().optional(),
@@ -53,6 +57,8 @@ const systemSettingsSchema = z.object({
   // Soulseek (direct connection via vendored soulseek-ts)
   soulseekUsername: z.string().nullable().optional(),
   soulseekPassword: z.string().nullable().optional(),
+  soulseekEnabled: z.boolean().nullable().optional(),
+  soulseekDownloadPath: z.string().nullable().optional(),
 
   // Spotify (for playlist import)
   spotifyClientId: z.string().nullable().optional(),
@@ -117,6 +123,8 @@ router.get("/", async (req, res) => {
       openaiApiKey: safeDecrypt(settings.openaiApiKey),
       fanartApiKey: safeDecrypt(settings.fanartApiKey),
       lastfmApiKey: safeDecrypt(settings.lastfmApiKey),
+      lastfmApiSecret: safeDecrypt(settings.lastfmApiSecret),
+      lastfmUserKey: safeDecrypt(settings.lastfmUserKey),
       audiobookshelfApiKey: safeDecrypt(settings.audiobookshelfApiKey),
       soulseekPassword: safeDecrypt(settings.soulseekPassword),
       spotifyClientSecret: safeDecrypt(settings.spotifyClientSecret),
@@ -153,6 +161,10 @@ router.post("/", async (req, res) => {
       encryptedData.fanartApiKey = encrypt(data.fanartApiKey);
     if (data.lastfmApiKey)
       encryptedData.lastfmApiKey = encrypt(data.lastfmApiKey);
+    if (data.lastfmApiSecret)
+      encryptedData.lastfmApiSecret = encrypt(data.lastfmApiSecret);
+    if (data.lastfmUserKey)
+      encryptedData.lastfmUserKey = encrypt(data.lastfmUserKey);
     if (data.audiobookshelfApiKey)
       encryptedData.audiobookshelfApiKey = encrypt(data.audiobookshelfApiKey);
     if (data.soulseekPassword)
