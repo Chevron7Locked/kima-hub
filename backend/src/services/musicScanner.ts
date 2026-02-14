@@ -13,6 +13,7 @@ import {
     extractPrimaryArtist,
     parseArtistFromPath,
     extractArtistFromRelativePath,
+    extractAlbumFromRelativePath,
     collapseForComparison,
 } from "../utils/artistNormalization";
 import { backfillAllArtistCounts } from "./artistCountsService";
@@ -510,7 +511,9 @@ export class MusicScannerService {
             }
         }
 
-        const albumTitle = metadata.common.album || "Unknown Album";
+        const albumTitle = metadata.common.album
+            || extractAlbumFromRelativePath(relativePath)
+            || "Unknown Album";
         const year = metadata.common.year || null;
 
         // ALWAYS extract primary artist first - this handles both:

@@ -331,3 +331,20 @@ export function extractArtistFromRelativePath(relativePath: string): string | nu
 
     return null;
 }
+
+/**
+ * Extract album title from a relative file path.
+ * Uses the immediate parent folder name, which is typically the album folder
+ * in standard Artist/Album/Track.ext layouts.
+ *
+ * Returns null if the file is at the root level (no parent folder).
+ */
+export function extractAlbumFromRelativePath(relativePath: string): string | null {
+    if (!relativePath) return null;
+
+    const parts = relativePath.split('/');
+    if (parts.length < 2) return null;
+
+    const albumFolder = parts[parts.length - 2];
+    return albumFolder || null;
+}

@@ -16,6 +16,7 @@ import {
     extractPrimaryArtist,
     parseArtistFromPath,
     extractArtistFromRelativePath,
+    extractAlbumFromRelativePath,
     normalizeArtistName,
     canonicalizeVariousArtists,
     areArtistNamesSimilar,
@@ -353,6 +354,43 @@ function runTests(): void {
         } else {
             console.log(`❌ FAIL: ${test.name}`);
             console.log(`   Input:    "${test.input}"`);
+            console.log(`   Expected: ${JSON.stringify(test.expected)}`);
+            console.log(`   Got:      ${JSON.stringify(result)}`);
+            totalFailed++;
+        }
+    }
+
+    // Run extractAlbumFromRelativePath tests
+    console.log("\n💿 extractAlbumFromRelativePath() Tests");
+    console.log("-".repeat(70));
+
+    const albumPathTests = [
+        {
+            name: "Standard: Artist/Album/Track.wav",
+            input: "Night Witch/Heir of Sympathy/Track.wav",
+            expected: "Heir of Sympathy",
+        },
+        {
+            name: "With year: Artist/Album (2021)/Track.mp3",
+            input: "Imminence/Heaven in Hiding (2021)/Track.mp3",
+            expected: "Heaven in Hiding (2021)",
+        },
+        {
+            name: "Flat file: Track.mp3",
+            input: "Track.mp3",
+            expected: null,
+        },
+    ];
+
+    for (const test of albumPathTests) {
+        const result = extractAlbumFromRelativePath(test.input);
+        const passed = result === test.expected;
+
+        if (passed) {
+            console.log(`✅ PASS: ${test.name}`);
+            totalPassed++;
+        } else {
+            console.log(`❌ FAIL: ${test.name}`);
             console.log(`   Expected: ${JSON.stringify(test.expected)}`);
             console.log(`   Got:      ${JSON.stringify(result)}`);
             totalFailed++;
