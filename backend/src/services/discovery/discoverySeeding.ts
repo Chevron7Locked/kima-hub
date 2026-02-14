@@ -211,6 +211,10 @@ export class DiscoverySeeding {
         const excluded = await this.isAlbumExcluded(albumMbid, userId);
         if (excluded) return true;
 
+        // Check if recently unavailable (failed downloads)
+        const unavailable = await this.isAlbumUnavailable(albumMbid, userId);
+        if (unavailable) return true;
+
         // OPTIMIZED fuzzy matching - only if names provided
         if (artistName && albumTitle) {
             const normArtist = normalizeForMatching(artistName);
@@ -263,6 +267,30 @@ export class DiscoverySeeding {
 
         if (recentDiscovery) {
             logger.debug(`[DiscoverySeeding] Album ${albumMbid} excluded - discovered within last ${EXCLUSION_WEEKS} weeks`);
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if album failed to download in recent weeks.
+     * Prevents wasting slots on albums not available on Soulseek.
+     */
+    async isAlbumUnavailable(albumMbid: string, userId: string): Promise<boolean> {
+        const UNAVAILABLE_RETRY_WEEKS = 4;
+        const retryCutoff = subWeeks(new Date(), UNAVAILABLE_RETRY_WEEKS);
+
+        const recentFailure = await prisma.unavailableAlbum.findFirst({
+            where: {
+                albumMbid,
+                userId,
+                weekStartDate: { gte: retryCutoff },
+            },
+        });
+
+        if (recentFailure) {
+            logger.debug(`[DiscoverySeeding] Album ${albumMbid} unavailable - failed within last ${UNAVAILABLE_RETRY_WEEKS} weeks`);
             return true;
         }
 
