@@ -2488,6 +2488,78 @@ export class DiscoverWeeklyService {
     }
 
     /**
+     * Deep Cuts Strategy - Exploratory picks from seed adjacency.
+     * Finds artists at 20-35% similarity - still connected but more adventurous.
+     */
+    private async deepCutsStrategy(
+        seeds: SeedArtist[],
+        targetCount: number,
+        seenAlbums: Set<string>,
+        userId: string
+    ): Promise<RecommendedAlbum[]> {
+        logger.debug(`\n[STRATEGY] Deep Cuts - finding adjacent artists from seeds`);
+
+        const DEEP_CUT_MIN = 0.20;
+        const DEEP_CUT_MAX = 0.35;
+
+        const recommendations: RecommendedAlbum[] = [];
+        const seenArtists = new Set<string>();
+
+        for (const seed of seeds) {
+            if (recommendations.length >= targetCount) break;
+
+            try {
+                // Fetch more artists to find those in the deep cut range
+                const similar = await lastFmService.getSimilarArtists(
+                    seed.mbid || '',
+                    seed.name,
+                    50 // Fetch more to find low-similarity matches
+                );
+
+                // Filter to deep cut range
+                const deepCuts = similar.filter(
+                    (a) => (a.match || 0) >= DEEP_CUT_MIN && (a.match || 0) <= DEEP_CUT_MAX
+                );
+
+                logger.debug(`   ${seed.name}: ${deepCuts.length} deep cuts found`);
+
+                for (const artist of shuffleArray(deepCuts)) {
+                    if (recommendations.length >= targetCount) break;
+
+                    const key = artist.name.toLowerCase();
+                    if (seenArtists.has(key)) continue;
+
+                    // Check if in library
+                    const inLibrary = await this.isArtistInLibrary(artist.name, artist.mbid);
+                    if (inLibrary) continue;
+
+                    // Find album
+                    const result = await this.findValidAlbumForArtist(artist, userId, seenAlbums);
+
+                    if (result.recommendation) {
+                        seenArtists.add(key);
+                        result.recommendation.tier = 'wildcard';
+                        result.recommendation.similarity = artist.match || 0.25;
+                        recommendations.push(result.recommendation);
+
+                        logger.debug(`    ✓ [DEEP CUT] ${artist.name} - ${result.recommendation.albumTitle} (${((artist.match || 0) * 100).toFixed(0)}%)`);
+                    }
+                }
+            } catch (error: any) {
+                logger.error(`   Failed to get deep cuts for ${seed.name}: ${error.message}`);
+            }
+
+            // Small delay between seeds
+            if (recommendations.length < targetCount) {
+                await new Promise(r => setTimeout(r, 200));
+            }
+        }
+
+        logger.debug(`   Found ${recommendations.length} deep cut recommendations`);
+        return recommendations;
+    }
+
+    /**
      * TAG EXPLORATION STRATEGY
      * Find albums by the user's top genre tags via Last.fm
      */
@@ -3012,14 +3084,15 @@ export class DiscoverWeeklyService {
             }
         }
 
-        // Add genre wildcards for variety
+        // Add deep cuts for adventurous variety
         logger.debug(
-            `\n   === Adding ${wildcardCount} WILDCARD picks from genre tags ===`
+            `\n   === Adding ${wildcardCount} DEEP CUT picks ===`
         );
-        const wildcards = await this.tagExplorationStrategy(
-            userId,
+        const wildcards = await this.deepCutsStrategy(
+            seeds,
             wildcardCount,
-            seenAlbums
+            seenAlbums,
+            userId
         );
         for (const wc of wildcards) {
             wc.tier = "wildcard";
