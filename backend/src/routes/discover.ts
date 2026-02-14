@@ -13,6 +13,12 @@ import { config } from "../config";
 import { discoverQueue, scanQueue } from "../workers/queues";
 import { getSystemSettings } from "../utils/systemSettings";
 import { lidarrService } from "../services/lidarr";
+import {
+  UserFacingError,
+  IntegrationError,
+  ConfigurationError,
+  RateLimitError,
+} from '../utils/errors';
 
 const router = Router();
 
@@ -217,8 +223,41 @@ router.post("/generate", async (req, res) => {
             jobId: job.id,
         });
     } catch (error) {
-        logger.error("Generate Discover Weekly error:", error);
-        res.status(500).json({ error: "Failed to start generation" });
+        if (error instanceof UserFacingError) {
+            return res.status(error.statusCode).json({
+                error: error.message,
+                code: error.code,
+            });
+        }
+
+        if (error instanceof ConfigurationError) {
+            return res.status(400).json({
+                error: error.message,
+                code: 'CONFIGURATION_ERROR',
+            });
+        }
+
+        if (error instanceof RateLimitError) {
+            return res.status(429).json({
+                error: error.message,
+                retryAfter: error.retryAfter,
+            });
+        }
+
+        if (error instanceof IntegrationError) {
+            logger.error(`Integration error (${error.integration}):`, error);
+            return res.status(503).json({
+                error: `${error.integration} is currently unavailable. Please try again later.`,
+                code: 'INTEGRATION_ERROR',
+            });
+        }
+
+        // Unknown error
+        logger.error('Unexpected error in discovery generation:', error);
+        return res.status(500).json({
+            error: 'An unexpected error occurred',
+            code: 'INTERNAL_ERROR',
+        });
     }
 });
 

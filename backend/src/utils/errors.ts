@@ -115,3 +115,42 @@ export function wrapNodeError(err: any, context: string): AppError {
         { originalError: err.message }
     );
 }
+
+export class UserFacingError extends Error {
+  constructor(
+    message: string,
+    public statusCode: number = 400,
+    public code?: string
+  ) {
+    super(message);
+    this.name = 'UserFacingError';
+  }
+}
+
+export class IntegrationError extends Error {
+  constructor(
+    message: string,
+    public integration: string,
+    public retryable: boolean = false
+  ) {
+    super(message);
+    this.name = 'IntegrationError';
+  }
+}
+
+export class ConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigurationError';
+  }
+}
+
+export class RateLimitError extends Error {
+  constructor(
+    message: string,
+    public retryAfter?: number
+  ) {
+    super(message);
+    this.name = 'RateLimitError';
+  }
+}

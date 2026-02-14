@@ -21,6 +21,12 @@ import { lastFmService } from "./lastfm";
 import { AcquisitionError, AcquisitionErrorType } from "./lidarr";
 import { distributedLock } from "../utils/distributedLock";
 import PQueue from "p-queue";
+import { downloadJobsTotal, downloadJobDuration, activeDownloads } from "../utils/metrics";
+import {
+  UserFacingError,
+  IntegrationError,
+  ConfigurationError,
+} from '../utils/errors';
 
 /**
  * Context for tracking acquisition origin
@@ -298,9 +304,30 @@ class AcquisitionService {
         request: AlbumAcquisitionRequest,
         context: AcquisitionContext
     ): Promise<AcquisitionResult> {
+        const startTime = Date.now();
         logger.debug(
             `\n[Acquisition] Acquiring album: ${request.artistName} - ${request.albumTitle} (queue: ${this.albumQueue.size} pending, ${this.albumQueue.pending} active)`
         );
+
+        // Validate inputs
+        if (!request.mbid) {
+            throw new UserFacingError('Album MBID is required', 400, 'INVALID_INPUT');
+        }
+
+        // Check configuration
+        const soulseekAvailable = await soulseekService.isAvailable();
+        const settings = await getSystemSettings();
+        const lidarrAvailable = !!(
+            settings?.lidarrEnabled &&
+            settings?.lidarrUrl &&
+            settings?.lidarrApiKey
+        );
+
+        if (!soulseekAvailable && !lidarrAvailable) {
+            throw new ConfigurationError(
+                'No download sources configured. Please configure Soulseek or Lidarr in settings.'
+            );
+        }
 
         // Verify artist name before acquisition
         try {
@@ -325,75 +352,89 @@ class AcquisitionService {
 
         // Validate at least one source is available
         if (!behavior.hasPrimarySource) {
-            const error =
-                "No download sources available (neither Soulseek nor Lidarr configured)";
-            logger.error(`[Acquisition] ${error}`);
-            return { success: false, error };
+            throw new ConfigurationError(
+                'No download sources configured. Please configure Soulseek or Lidarr in settings.'
+            );
         }
 
         // Try primary source first
         let result: AcquisitionResult;
 
-        if (behavior.primarySource === "soulseek") {
-            logger.debug(`[Acquisition] Trying primary: Soulseek`);
-            result = await this.acquireAlbumViaSoulseek(request, context);
+        try {
+            if (behavior.primarySource === "soulseek") {
+                logger.debug(`[Acquisition] Trying primary: Soulseek`);
+                result = await this.acquireAlbumViaSoulseek(request, context);
 
-            // Fallback to Lidarr if Soulseek fails and fallback is configured
-            if (!result.success) {
-                logger.debug(
-                    `[Acquisition] Soulseek failed: ${result.error || "unknown error"}`
-                );
-                logger.debug(
-                    `[Acquisition] Fallback available: hasFallback=${behavior.hasFallbackSource}, source=${behavior.fallbackSource}`
-                );
+                // Fallback to Lidarr if Soulseek fails and fallback is configured
+                if (!result.success) {
+                    logger.debug(
+                        `[Acquisition] Soulseek failed: ${result.error || "unknown error"}`
+                    );
+                    logger.debug(
+                        `[Acquisition] Fallback available: hasFallback=${behavior.hasFallbackSource}, source=${behavior.fallbackSource}`
+                    );
 
-                if (
-                    behavior.hasFallbackSource &&
-                    behavior.fallbackSource === "lidarr"
-                ) {
-                    logger.debug(
-                        `[Acquisition] Attempting Lidarr fallback...`
-                    );
-                    result = await this.acquireAlbumViaLidarr(request, context);
-                } else {
-                    logger.debug(
-                        `[Acquisition] No fallback configured or fallback not Lidarr`
-                    );
+                    if (
+                        behavior.hasFallbackSource &&
+                        behavior.fallbackSource === "lidarr"
+                    ) {
+                        logger.debug(
+                            `[Acquisition] Attempting Lidarr fallback...`
+                        );
+                        result = await this.acquireAlbumViaLidarr(request, context);
+                    } else {
+                        logger.debug(
+                            `[Acquisition] No fallback configured or fallback not Lidarr`
+                        );
+                    }
                 }
-            }
-        } else if (behavior.primarySource === "lidarr") {
-            logger.debug(`[Acquisition] Trying primary: Lidarr`);
-            result = await this.acquireAlbumViaLidarr(request, context);
+            } else if (behavior.primarySource === "lidarr") {
+                logger.debug(`[Acquisition] Trying primary: Lidarr`);
+                result = await this.acquireAlbumViaLidarr(request, context);
 
-            // Fallback to Soulseek if Lidarr fails and fallback is configured
-            if (!result.success) {
-                logger.debug(
-                    `[Acquisition] Lidarr failed: ${result.error || "unknown error"}`
-                );
-                logger.debug(
-                    `[Acquisition] Fallback available: hasFallback=${behavior.hasFallbackSource}, source=${behavior.fallbackSource}`
-                );
+                // Fallback to Soulseek if Lidarr fails and fallback is configured
+                if (!result.success) {
+                    logger.debug(
+                        `[Acquisition] Lidarr failed: ${result.error || "unknown error"}`
+                    );
+                    logger.debug(
+                        `[Acquisition] Fallback available: hasFallback=${behavior.hasFallbackSource}, source=${behavior.fallbackSource}`
+                    );
 
-                if (
-                    behavior.hasFallbackSource &&
-                    behavior.fallbackSource === "soulseek"
-                ) {
-                    logger.debug(
-                        `[Acquisition] Attempting Soulseek fallback...`
-                    );
-                    result = await this.acquireAlbumViaSoulseek(request, context);
-                } else {
-                    logger.debug(
-                        `[Acquisition] No fallback configured or fallback not Soulseek`
-                    );
+                    if (
+                        behavior.hasFallbackSource &&
+                        behavior.fallbackSource === "soulseek"
+                    ) {
+                        logger.debug(
+                            `[Acquisition] Attempting Soulseek fallback...`
+                        );
+                        result = await this.acquireAlbumViaSoulseek(request, context);
+                    } else {
+                        logger.debug(
+                            `[Acquisition] No fallback configured or fallback not Soulseek`
+                        );
+                    }
                 }
+            } else {
+                // This should never happen due to validation above
+                throw new ConfigurationError("No primary source configured");
             }
-        } else {
-            // This should never happen due to validation above
-            const error = "No primary source configured";
-            logger.error(`[Acquisition] ${error}`);
-            return { success: false, error };
+        } catch (error) {
+            if (error instanceof IntegrationError && error.retryable) {
+                // Retry logic
+                logger.info(`Retrying download for ${request.mbid} due to retryable error`);
+                return await this.acquireAlbumInternal(request, context);
+            }
+            throw error;
         }
+
+        // Record metrics
+        const duration = (Date.now() - startTime) / 1000;
+        const source = result.source || 'unknown';
+        const status = result.success ? 'success' : 'failed';
+
+        downloadJobsTotal.inc({ source, status });
+        downloadJobDuration.observe({ source, status }, duration);
 
         return result;
     }
