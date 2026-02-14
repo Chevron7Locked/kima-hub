@@ -288,3 +288,46 @@ export function parseArtistFromPath(folderName: string): string | null {
 
     return null;
 }
+
+/**
+ * Extract artist name from a relative file path by trying multiple strategies:
+ * 1. parseArtistFromPath on the album folder name (catches "Artist - Album" patterns)
+ * 2. Grandparent folder name (catches standard Artist/Album/Track.ext layout)
+ * 3. Filename parsing (catches "Artist - Album - Track - Title.ext" naming)
+ *
+ * Returns null if no artist can be determined.
+ */
+export function extractArtistFromRelativePath(relativePath: string): string | null {
+    if (!relativePath) return null;
+
+    const parts = relativePath.split('/');
+    if (parts.length < 2) return null;
+
+    const albumFolder = parts[parts.length - 2];
+    const fileName = parts[parts.length - 1];
+
+    // Strategy 1: Parse "Artist - Album" from album folder name
+    const fromAlbumFolder = parseArtistFromPath(albumFolder);
+    if (fromAlbumFolder) return fromAlbumFolder;
+
+    // Strategy 2: Grandparent folder = artist (standard Artist/Album/Track layout)
+    if (parts.length >= 3) {
+        const grandparent = parts[parts.length - 3];
+        const genericFolders = ['music', 'songs', 'audio', 'media', 'downloads', 'library'];
+        if (grandparent && !genericFolders.includes(grandparent.toLowerCase())) {
+            return grandparent;
+        }
+    }
+
+    // Strategy 3: Parse "Artist - Album - Track - Title.ext" from filename
+    const baseName = fileName.replace(/\.[^.]+$/, '');
+    const dashSegments = baseName.split(/\s+-\s+/);
+    if (dashSegments.length >= 3) {
+        const artist = dashSegments[0].trim();
+        if (artist.length >= 2 && !/^\d+$/.test(artist)) {
+            return artist;
+        }
+    }
+
+    return null;
+}

@@ -15,6 +15,7 @@
 import {
     extractPrimaryArtist,
     parseArtistFromPath,
+    extractArtistFromRelativePath,
     normalizeArtistName,
     canonicalizeVariousArtists,
     areArtistNamesSimilar,
@@ -303,6 +304,57 @@ function runTests(): void {
             console.log(`   Input:    "${test.input}"`);
             console.log(`   Expected: "${test.expected}"`);
             console.log(`   Got:      "${result}"`);
+            totalFailed++;
+        }
+    }
+
+    // Run extractArtistFromRelativePath tests
+    console.log("\n📁 extractArtistFromRelativePath() Tests");
+    console.log("-".repeat(70));
+
+    const relativePathTests = [
+        // Standard Artist/Album/Track.ext — grandparent is artist
+        {
+            name: "Standard 3-level: Night Witch/Heir of Sympathy/Track.wav",
+            input: "Night Witch/Heir of Sympathy/Track.wav",
+            expected: "Night Witch",
+        },
+        {
+            name: "Standard 3-level: Imminence/Heaven in Hiding (2021)/Track.mp3",
+            input: "Imminence/Heaven in Hiding (2021)/Track.mp3",
+            expected: "Imminence",
+        },
+        {
+            name: "4-level Singles: Singles/Kai Engel/Idea/Track.mp3",
+            input: "Singles/Kai Engel/Idea/Track.mp3",
+            expected: "Kai Engel",
+        },
+        // Dash pattern in album folder name — parseArtistFromPath handles this
+        {
+            name: "Dash in album folder: Artist/Artist - Album (2020)/Track.mp3",
+            input: "Artist/Artist - Album (2020)/Track.mp3",
+            expected: "Artist",
+        },
+        // Single level — no grandparent available
+        {
+            name: "Flat file: Track.mp3 (no folders)",
+            input: "Track.mp3",
+            expected: null,
+        },
+    ];
+
+    for (const test of relativePathTests) {
+        const result = extractArtistFromRelativePath(test.input);
+        const passed = result === test.expected;
+
+        if (passed) {
+            console.log(`✅ PASS: ${test.name}`);
+            totalPassed++;
+        } else {
+            console.log(`❌ FAIL: ${test.name}`);
+            console.log(`   Input:    "${test.input}"`);
+            console.log(`   Expected: ${JSON.stringify(test.expected)}`);
+            console.log(`   Got:      ${JSON.stringify(result)}`);
             totalFailed++;
         }
     }

@@ -12,6 +12,7 @@ import {
     canonicalizeVariousArtists,
     extractPrimaryArtist,
     parseArtistFromPath,
+    extractArtistFromRelativePath,
     collapseForComparison,
 } from "../utils/artistNormalization";
 import { backfillAllArtistCounts } from "./artistCountsService";
@@ -492,21 +493,19 @@ export class MusicScannerService {
             metadata.common.artist ||
             "";
 
-        // Folder fallback: If metadata is empty, try to parse from folder structure
+        // Folder/filename fallback: If metadata is empty, try to parse from path structure
         if (!rawArtistName || rawArtistName.trim() === "") {
-            const folderPath = path.dirname(relativePath);
-            const folderName = path.basename(folderPath);
-            const parsedArtist = parseArtistFromPath(folderName);
-            
+            const parsedArtist = extractArtistFromRelativePath(relativePath);
+
             if (parsedArtist) {
                 logger.debug(
-                    `[Scanner] No metadata artist found, using folder: "${folderName}" -> "${parsedArtist}"`
+                    `[Scanner] No metadata artist found, using path: "${relativePath}" -> "${parsedArtist}"`
                 );
                 rawArtistName = parsedArtist;
             } else {
                 rawArtistName = "Unknown Artist";
                 logger.warn(
-                    `[Scanner] Unknown Artist assigned for: ${relativePath} (no metadata, folder parse failed: "${folderName}")`
+                    `[Scanner] Unknown Artist assigned for: ${relativePath} (no metadata, path parse failed)`
                 );
             }
         }
