@@ -181,7 +181,7 @@ export class SoulseekService {
 
         try {
             sessionLog("SOULSEEK", "Attempting login to Soulseek server...", "DEBUG");
-            await this.client.loginAndRemember(
+            await this.client.login(
                 settings.username,
                 settings.password,
                 this.LOGIN_TIMEOUT // 10s (slskd default, reduced from 15s)
@@ -197,6 +197,23 @@ export class SoulseekService {
         this.failedConnectionAttempts = 0; // Reset on successful connection
         soulseekConnectionStatus.set(1);
         sessionLog("SOULSEEK", "Connected to Soulseek network");
+
+        // Handle unexpected server disconnection at service level
+        // This ensures reconnection goes through ensureConnected() with proper
+        // distributed locking and backoff, not the client's own scheduleReconnect
+        this.client.server.conn.once('close', () => {
+            sessionLog("SOULSEEK", "Server connection closed unexpectedly", "WARN");
+            if (this.client) {
+                try {
+                    this.client.destroy();
+                } catch {
+                    // ignore cleanup errors
+                }
+            }
+            this.client = null;
+            this.connectedAt = null;
+            soulseekConnectionStatus.set(0);
+        });
     }
 
     /**
