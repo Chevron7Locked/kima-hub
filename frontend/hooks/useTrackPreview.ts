@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast-context";
-import { howlerEngine } from "@/lib/howler-engine";
+import { audioEngine } from "@/lib/audio-engine";
 
 interface PreviewableTrack {
     id: string;
@@ -91,8 +91,8 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 return;
             }
 
-            if (howlerEngine.isPlaying()) {
-                howlerEngine.pause();
+            if (audioEngine.isPlaying()) {
+                audioEngine.pause();
                 mainPlayerWasPausedRef.current = true;
             }
 
@@ -103,7 +103,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 setPreviewPlaying(false);
                 setPreviewTrack(null);
                 if (mainPlayerWasPausedRef.current) {
-                    howlerEngine.play();
+                    audioEngine.play();
                     mainPlayerWasPausedRef.current = false;
                 }
             };
@@ -113,7 +113,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 setPreviewPlaying(false);
                 setPreviewTrack(null);
                 if (mainPlayerWasPausedRef.current) {
-                    howlerEngine.play();
+                    audioEngine.play();
                     mainPlayerWasPausedRef.current = false;
                 }
             };
@@ -165,9 +165,9 @@ export function useTrackPreview<T extends PreviewableTrack>() {
             }
         };
 
-        howlerEngine.on("play", stopPreview);
+        audioEngine.on("play", stopPreview);
         return () => {
-            howlerEngine.off("play", stopPreview);
+            audioEngine.off("play", stopPreview);
         };
     }, []);
 
@@ -180,7 +180,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 previewAudioRef.current = null;
             }
             if (mainPlayerWasPausedRef.current) {
-                howlerEngine.play();
+                audioEngine.play();
                 mainPlayerWasPausedRef.current = false;
             }
         };
