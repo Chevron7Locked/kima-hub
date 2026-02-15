@@ -23,6 +23,11 @@ export class SlskServer extends (EventEmitter as new () => TypedEventEmitter<Sls
     super()
     this.conn = net.createConnection(address)
 
+    // Enable TCP keepalive to detect dead connections (matches slskd/Nicotine+)
+    this.conn.once('connect', () => {
+      this.conn.setKeepAlive(true, 15000)
+    })
+
     this.msgs = new MessageStream()
 
     this.conn.on('error', (error) => {
