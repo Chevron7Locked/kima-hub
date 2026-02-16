@@ -51,7 +51,7 @@
 
 1. **Restart Backend**
    ```bash
-   cd /run/media/chevron7/Storage/Projects/lidify/backend
+   cd /run/media/chevron7/Storage/Projects/kima/backend
    npm run dev
    ```
 

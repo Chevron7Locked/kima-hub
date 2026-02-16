@@ -29,7 +29,7 @@ This approach:
 **Steps:**
 
 ```bash
-cd /mnt/storage/Projects/lidify/backend
+cd /mnt/storage/Projects/kima/backend
 
 # Step 1: Baseline the database (mark migrations as applied without running them)
 npx prisma migrate resolve --applied "20250101000000_rename_soulseek_fallback"
@@ -83,7 +83,7 @@ If baselining doesn't work, manually apply just the missing changes:
 
 ```sql
 -- Connect to database
--- psql -U lidify -d lidify
+-- psql -U kima -d kima
 
 -- Check if columns already exist (IMPORTANT: verify first!)
 SELECT column_name FROM information_schema.columns
@@ -110,10 +110,10 @@ npx prisma migrate resolve --applied "20260214145320_standardize_integration_con
 - [ ] **Backup database** (CRITICAL for 1k+ users)
   ```bash
   # Docker method
-  docker compose exec postgres pg_dump -U lidify lidify > backup_$(date +%Y%m%d_%H%M%S).sql
+  docker compose exec postgres pg_dump -U kima kima > backup_$(date +%Y%m%d_%H%M%S).sql
 
   # Direct method (if pg_dump available)
-  pg_dump -h 127.0.0.1 -p 5433 -U lidify lidify > backup_$(date +%Y%m%d_%H%M%S).sql
+  pg_dump -h 127.0.0.1 -p 5433 -U kima kima > backup_$(date +%Y%m%d_%H%M%S).sql
   ```
 
 - [ ] **Verify backup is valid**
@@ -135,8 +135,8 @@ npx prisma migrate resolve --applied "20260214145320_standardize_integration_con
 - [ ] **Test migration on backup first** (RECOMMENDED)
   ```bash
   # Create test database
-  createdb lidify_test
-  psql lidify_test < backup_YYYYMMDD_HHMMSS.sql
+  createdb kima_test
+  psql kima_test < backup_YYYYMMDD_HHMMSS.sql
 
   # Update .env temporarily to point to test DB
   # Run migration on test DB
@@ -210,7 +210,7 @@ ALTER TABLE "SystemSettings" ADD COLUMN "lastfmEnabled" BOOLEAN;
 
 ```bash
 # Step 1: Restore from backup
-psql -U lidify -d lidify < backup_YYYYMMDD_HHMMSS.sql
+psql -U kima -d kima < backup_YYYYMMDD_HHMMSS.sql
 
 # Step 2: Restart application
 docker compose restart backend
@@ -226,7 +226,7 @@ git checkout main  # or previous stable tag
 docker compose restart backend
 
 # Step 3: (Optional) Remove new columns if they cause issues
-psql -U lidify -d lidify -c '
+psql -U kima -d kima -c '
   ALTER TABLE "SystemSettings" DROP COLUMN IF EXISTS "soulseekEnabled";
   ALTER TABLE "SystemSettings" DROP COLUMN IF EXISTS "soulseekDownloadPath";
   ALTER TABLE "SystemSettings" DROP COLUMN IF EXISTS "lastfmApiSecret";

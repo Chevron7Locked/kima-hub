@@ -1,9 +1,40 @@
 # Changelog
 
-All notable changes to Lidify will be documented in this file.
+All notable changes to Kima will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.5.0] - 2026-02-16
+
+### Changed
+
+- **REBRAND**: Project renamed from Lidify to Kima
+- Repository moved to `kima-hub` on GitHub
+- Docker images now published as `chevron7locked/kima`
+- All user-facing references updated across codebase
+- First official release under Kima branding
+
+### Added
+
+- **Critical Reliability Fixes**: Eliminated Soulseek connection race conditions with distributed locks
+- **100% Webhook Reliability**: Event sourcing with PostgreSQL persistence
+- **Download Deduplication**: Database unique constraint prevents duplicate jobs
+- **Discovery Batch Locking**: Optimistic locking with version field
+- **Redis State Persistence**: Search sessions, blocklists, and cache layer
+- **Prometheus Metrics**: Full instrumentation at `/metrics` endpoint
+- **Automatic Data Cleanup**: 30-60 day retention policies
+- **Database-First Configuration**: Encrypted sensitive credentials with runtime updates
+- **Automatic Database Baselining**: Seamless migration for existing databases
+- **Complete Type Safety**: Eliminated all `as any` assertions
+- **Typed Error Handling**: User-friendly error messages with proper HTTP codes
+
+### Infrastructure
+
+- Redis-based distributed locking for race condition prevention
+- Webhook event store with automatic retry and reconciliation
+- Comprehensive type definitions for Lidarr and Soulseek APIs
+- Architecture Decision Records (ADRs) documenting key technical choices
 
 ## [1.4.3] - 2026-02-08
 
@@ -25,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Case-sensitive artist search ([#64](https://github.com/Chevron7Locked/lidify/issues/64)):** Added PostgreSQL tsvector search with ILIKE fallback; all artist/album/track searches are now case-insensitive
+- **Case-sensitive artist search ([#64](https://github.com/Chevron7Locked/kima-hub/issues/64)):** Added PostgreSQL tsvector search with ILIKE fallback; all artist/album/track searches are now case-insensitive
 - **Circuit breaker false trips:** Audio analysis cleanup circuit breaker now counts cleanup runs instead of individual tracks, preventing premature breaker trips on large batches of stale tracks
 - **DB reconciliation race condition:** Analyzer marks tracks as `processing` in the database before pushing to Redis queue, preventing the backend from double-queuing the same tracks
 - **Enrichment completion detection:** `isFullyComplete` now checks CLAP processing count and queue length, not just completed vs total
@@ -55,7 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Contributors
 
-- @Allram - Soulseek import fix ([#85](https://github.com/Chevron7Locked/lidify/pull/85))
+- @Allram - Soulseek import fix ([#85](https://github.com/Chevron7Locked/kima-hub/pull/85))
 
 ## [1.4.1] - 2026-02-06
 
@@ -236,22 +267,22 @@ Comprehensive patch release addressing critical stability issues, performance im
 
 #### Critical (P1)
 
-- **Docker:** PostgreSQL/Redis bind mount permission errors on Linux hosts ([#59](https://github.com/Chevron7Locked/lidify/issues/59)) - @arsaboo via [#62](https://github.com/Chevron7Locked/lidify/pull/62)
-- **Audio Analyzer:** Memory consumption/OOM crashes with large libraries ([#21](https://github.com/Chevron7Locked/lidify/issues/21), [#26](https://github.com/Chevron7Locked/lidify/issues/26)) - @rustyricky via [#53](https://github.com/Chevron7Locked/lidify/pull/53)
-- **LastFM:** ".map is not a function" crashes with obscure artists ([#37](https://github.com/Chevron7Locked/lidify/issues/37)) - @RustyJonez via [#39](https://github.com/Chevron7Locked/lidify/pull/39)
-- **Wikidata:** 403 Forbidden errors from missing User-Agent header ([#57](https://github.com/Chevron7Locked/lidify/issues/57))
-- **Downloads:** Singles directory creation race conditions ([#58](https://github.com/Chevron7Locked/lidify/issues/58))
-- **Firefox:** FLAC playback stopping at ~4:34 mark on large files ([#42](https://github.com/Chevron7Locked/lidify/issues/42), [#17](https://github.com/Chevron7Locked/lidify/issues/17))
-- **Downloads:** "Skip Track" fallback setting ignored, incorrectly falling back to Lidarr ([#68](https://github.com/Chevron7Locked/lidify/issues/68))
-- **Auth:** Login "Internal Server Error" and "socket hang up" on NAS hardware ([#75](https://github.com/Chevron7Locked/lidify/issues/75))
+- **Docker:** PostgreSQL/Redis bind mount permission errors on Linux hosts ([#59](https://github.com/Chevron7Locked/kima-hub/issues/59)) - @arsaboo via [#62](https://github.com/Chevron7Locked/kima-hub/pull/62)
+- **Audio Analyzer:** Memory consumption/OOM crashes with large libraries ([#21](https://github.com/Chevron7Locked/kima-hub/issues/21), [#26](https://github.com/Chevron7Locked/kima-hub/issues/26)) - @rustyricky via [#53](https://github.com/Chevron7Locked/kima-hub/pull/53)
+- **LastFM:** ".map is not a function" crashes with obscure artists ([#37](https://github.com/Chevron7Locked/kima-hub/issues/37)) - @RustyJonez via [#39](https://github.com/Chevron7Locked/kima-hub/pull/39)
+- **Wikidata:** 403 Forbidden errors from missing User-Agent header ([#57](https://github.com/Chevron7Locked/kima-hub/issues/57))
+- **Downloads:** Singles directory creation race conditions ([#58](https://github.com/Chevron7Locked/kima-hub/issues/58))
+- **Firefox:** FLAC playback stopping at ~4:34 mark on large files ([#42](https://github.com/Chevron7Locked/kima-hub/issues/42), [#17](https://github.com/Chevron7Locked/kima-hub/issues/17))
+- **Downloads:** "Skip Track" fallback setting ignored, incorrectly falling back to Lidarr ([#68](https://github.com/Chevron7Locked/kima-hub/issues/68))
+- **Auth:** Login "Internal Server Error" and "socket hang up" on NAS hardware ([#75](https://github.com/Chevron7Locked/kima-hub/issues/75))
 - **Podcasts:** Seeking backward causing player crash and backend container hang
 - **API:** Rate limiter crash with "trust proxy" validation error causing socket hang up
 - **Downloads:** Duplicate download jobs created due to race condition (database-level locking fix)
 
 #### Quality of Life (P2)
 
-- **Desktop UI:** Added missing "Releases" link to desktop sidebar navigation ([#41](https://github.com/Chevron7Locked/lidify/issues/41))
-- **iPhone:** Dynamic Island/notch overlapping TopBar buttons ([#54](https://github.com/Chevron7Locked/lidify/issues/54))
+- **Desktop UI:** Added missing "Releases" link to desktop sidebar navigation ([#41](https://github.com/Chevron7Locked/kima-hub/issues/41))
+- **iPhone:** Dynamic Island/notch overlapping TopBar buttons ([#54](https://github.com/Chevron7Locked/kima-hub/issues/54))
 - **Album Discovery:** Cover Art Archive timeouts causing slow page loads (2s timeout added)
 - **Wikimedia:** Image proxy 429 rate limiting due to incomplete User-Agent header
 
@@ -291,7 +322,7 @@ Comprehensive patch release addressing critical stability issues, performance im
 - **NAS Login (#75):** Backend now built with `tsc` and runs with `node dist/index.js`; proxy trust setting updated; session secret standardized
 - **Podcast Seek:** AbortController cancels upstream requests on client disconnect; stream error handlers prevent crashes
 - **Rate Limiter:** All rate limiter configurations disable proxy validation (`validate: { trustProxy: false }`)
-- **Wikimedia Proxy:** User-Agent standardized to `"Lidify/1.0.0 (https://github.com/Chevron7Locked/lidify)"` across all external API calls
+- **Wikimedia Proxy:** User-Agent standardized to `"Lidify/1.0.0 (https://github.com/Chevron7Locked/kima-hub)"` across all external API calls
 
 #### Production Readiness Improvements
 
@@ -340,11 +371,11 @@ Internal code quality and stability fixes discovered during production readiness
 
 Thanks to everyone who contributed to this release:
 
-- @arsaboo - Docker bind mount permissions fix ([#62](https://github.com/Chevron7Locked/lidify/pull/62))
-- @rustyricky - Audio analyzer memory limits ([#53](https://github.com/Chevron7Locked/lidify/pull/53))
-- @RustyJonez - LastFM array normalization ([#39](https://github.com/Chevron7Locked/lidify/pull/39))
+- @arsaboo - Docker bind mount permissions fix ([#62](https://github.com/Chevron7Locked/kima-hub/pull/62))
+- @rustyricky - Audio analyzer memory limits ([#53](https://github.com/Chevron7Locked/kima-hub/pull/53))
+- @RustyJonez - LastFM array normalization ([#39](https://github.com/Chevron7Locked/kima-hub/pull/39))
 - @tombatossals - Testing and validation
-- @zeknurn - Skip Track bug report ([#68](https://github.com/Chevron7Locked/lidify/issues/68))
+- @zeknurn - Skip Track bug report ([#68](https://github.com/Chevron7Locked/kima-hub/issues/68))
 
 ---
 
@@ -418,16 +449,16 @@ Thanks to everyone who contributed to this release:
 
 ### Fixed
 
-- **Critical:** Audio analyzer crashes on libraries with non-ASCII filenames ([#6](https://github.com/Chevron7Locked/lidify/issues/6))
-- **Critical:** Audio analyzer BrokenProcessPool after ~1900 tracks ([#21](https://github.com/Chevron7Locked/lidify/issues/21))
-- **Critical:** Audio analyzer OOM kills with aggressive worker auto-scaling ([#26](https://github.com/Chevron7Locked/lidify/issues/26))
-- **Critical:** Audio analyzer model downloads and volume mount conflicts ([#2](https://github.com/Chevron7Locked/lidify/issues/2))
-- Radio stations playing songs from wrong decades due to remaster dates ([#43](https://github.com/Chevron7Locked/lidify/issues/43))
-- Manual metadata editing failing with 500 errors ([#9](https://github.com/Chevron7Locked/lidify/issues/9))
-- Active downloads not resolving after Lidarr successfully imports ([#31](https://github.com/Chevron7Locked/lidify/issues/31))
-- Discovery playlist downloads failing for artists with large catalogs ([#34](https://github.com/Chevron7Locked/lidify/issues/34))
+- **Critical:** Audio analyzer crashes on libraries with non-ASCII filenames ([#6](https://github.com/Chevron7Locked/kima-hub/issues/6))
+- **Critical:** Audio analyzer BrokenProcessPool after ~1900 tracks ([#21](https://github.com/Chevron7Locked/kima-hub/issues/21))
+- **Critical:** Audio analyzer OOM kills with aggressive worker auto-scaling ([#26](https://github.com/Chevron7Locked/kima-hub/issues/26))
+- **Critical:** Audio analyzer model downloads and volume mount conflicts ([#2](https://github.com/Chevron7Locked/kima-hub/issues/2))
+- Radio stations playing songs from wrong decades due to remaster dates ([#43](https://github.com/Chevron7Locked/kima-hub/issues/43))
+- Manual metadata editing failing with 500 errors ([#9](https://github.com/Chevron7Locked/kima-hub/issues/9))
+- Active downloads not resolving after Lidarr successfully imports ([#31](https://github.com/Chevron7Locked/kima-hub/issues/31))
+- Discovery playlist downloads failing for artists with large catalogs ([#34](https://github.com/Chevron7Locked/kima-hub/issues/34))
 - Discovery batches stuck in "downloading" status indefinitely
-- Audio analyzer rhythm extraction failures on short/silent audio ([#13](https://github.com/Chevron7Locked/lidify/issues/13))
+- Audio analyzer rhythm extraction failures on short/silent audio ([#13](https://github.com/Chevron7Locked/kima-hub/issues/13))
 - "Of Mice & Men" artist name truncated to "Of Mice" during scanning
 - Edition variant albums (Remastered, Deluxe) failing with "No releases available"
 - Downloads stuck in "Lidarr #1" state for 5 minutes before failing
@@ -437,8 +468,8 @@ Thanks to everyone who contributed to this release:
 - Artist name search ampersand handling ("Earth, Wind & Fire")
 - Vibe overlay display issues on mobile devices
 - Pagination scroll behavior (now scrolls to top instead of bottom)
-- LastFM API crashes when receiving single objects instead of arrays ([#37](https://github.com/Chevron7Locked/lidify/issues/37)) - @tombatossals
-- Mood bucket infinite loop for tracks analyzed in standard mode ([#40](https://github.com/Chevron7Locked/lidify/issues/40)) - @RustyJonez
+- LastFM API crashes when receiving single objects instead of arrays ([#37](https://github.com/Chevron7Locked/kima-hub/issues/37)) - @tombatossals
+- Mood bucket infinite loop for tracks analyzed in standard mode ([#40](https://github.com/Chevron7Locked/kima-hub/issues/40)) - @RustyJonez
 - Playlist visibility toggle not properly syncing hide/show state - @tombatossals
 - Audio player time display showing current time exceeding total duration (e.g., "58:00 / 54:34")
 - Progress bar could exceed 100% for long-form media with stale metadata
@@ -553,16 +584,16 @@ When deploying this update:
 
 Big thanks to everyone who contributed, tested, and helped make this release happen:
 
-- @tombatossals - LastFM API normalization utility ([#39](https://github.com/Chevron7Locked/lidify/pull/39)), playlist visibility toggle fix ([#49](https://github.com/Chevron7Locked/lidify/pull/49))
-- @RustyJonez - Mood bucket standard mode keyword scoring ([#47](https://github.com/Chevron7Locked/lidify/pull/47))
-- @iamiq - Audio analyzer crash reporting ([#2](https://github.com/Chevron7Locked/lidify/issues/2))
-- @volcs0 - Memory pressure testing ([#26](https://github.com/Chevron7Locked/lidify/issues/26))
-- @Osiriz - Long-running analysis testing ([#21](https://github.com/Chevron7Locked/lidify/issues/21))
-- @hessonam - Non-ASCII character testing ([#6](https://github.com/Chevron7Locked/lidify/issues/6))
-- @niles - RhythmExtractor edge case reporting ([#13](https://github.com/Chevron7Locked/lidify/issues/13))
-- @TheChrisK - Metadata editor bug reporting ([#9](https://github.com/Chevron7Locked/lidify/issues/9))
-- @lizar93 - Discovery playlist testing ([#34](https://github.com/Chevron7Locked/lidify/issues/34))
-- @brokenglasszero - Mood tags feature verification ([#35](https://github.com/Chevron7Locked/lidify/issues/35))
+- @tombatossals - LastFM API normalization utility ([#39](https://github.com/Chevron7Locked/kima-hub/pull/39)), playlist visibility toggle fix ([#49](https://github.com/Chevron7Locked/kima-hub/pull/49))
+- @RustyJonez - Mood bucket standard mode keyword scoring ([#47](https://github.com/Chevron7Locked/kima-hub/pull/47))
+- @iamiq - Audio analyzer crash reporting ([#2](https://github.com/Chevron7Locked/kima-hub/issues/2))
+- @volcs0 - Memory pressure testing ([#26](https://github.com/Chevron7Locked/kima-hub/issues/26))
+- @Osiriz - Long-running analysis testing ([#21](https://github.com/Chevron7Locked/kima-hub/issues/21))
+- @hessonam - Non-ASCII character testing ([#6](https://github.com/Chevron7Locked/kima-hub/issues/6))
+- @niles - RhythmExtractor edge case reporting ([#13](https://github.com/Chevron7Locked/kima-hub/issues/13))
+- @TheChrisK - Metadata editor bug reporting ([#9](https://github.com/Chevron7Locked/kima-hub/issues/9))
+- @lizar93 - Discovery playlist testing ([#34](https://github.com/Chevron7Locked/kima-hub/issues/34))
+- @brokenglasszero - Mood tags feature verification ([#35](https://github.com/Chevron7Locked/kima-hub/issues/35))
 
 And all users who reported bugs, tested fixes, and provided feedback!
 

@@ -67,7 +67,7 @@ docker compose up -d
 [MIGRATE] ✓ Database is up to date
 [MIGRATE] ✓ Safe migration process complete
 [DB] Generating Prisma client...
-[START] Lidify Backend starting on port 3006...
+[START] Kima Backend starting on port 3006...
 ```
 
 ### What Happens Behind the Scenes
@@ -186,12 +186,12 @@ If database changes cause issues:
 
 ```bash
 # 1. Restore from backup (taken before deployment)
-docker compose exec postgres psql -U lidify -d lidify < backup.sql
+docker compose exec postgres psql -U kima -d kima < backup.sql
 
 # 2. Revert code (as above)
 
 # 3. Clear migration history if needed
-docker compose exec postgres psql -U lidify -d lidify -c "DELETE FROM _prisma_migrations WHERE migration_name LIKE '202602%';"
+docker compose exec postgres psql -U kima -d kima -c "DELETE FROM _prisma_migrations WHERE migration_name LIKE '202602%';"
 ```
 
 **When to use**: Only if new columns/tables cause Prisma errors
@@ -303,7 +303,7 @@ Before announcing to users:
 ## User Communication Template
 
 ```markdown
-# Lidify v1.4.4 - Integration Stability Update
+# Kima v1.4.4 - Integration Stability Update
 
 This release includes critical reliability improvements for Lidarr and Soulseek integrations.
 
@@ -398,7 +398,7 @@ If issues arise:
 1. **Check logs first**: `docker compose logs backend --tail=100`
 2. **Verify Redis**: `docker compose ps redis` (should show "Up")
 3. **Check migration status**: `docker compose exec backend npx prisma migrate status`
-4. **Database query**: `docker compose exec postgres psql -U lidify -d lidify -c "SELECT COUNT(*) FROM _prisma_migrations;"`
+4. **Database query**: `docker compose exec postgres psql -U kima -d kima -c "SELECT COUNT(*) FROM _prisma_migrations;"`
 
 Expected result: **30 migrations tracked**
 

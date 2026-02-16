@@ -65,7 +65,7 @@ export const eventBus = new EventBus();
 
 **Step 2: Verify it compiles**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/backend && npx tsc --noEmit src/services/eventBus.ts`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/backend && npx tsc --noEmit src/services/eventBus.ts`
 
 **Step 3: Commit**
 
@@ -194,7 +194,7 @@ app.use("/api/events", eventsRoutes); // SSE - no rate limit, long-lived connect
 
 **Step 3: Verify compilation**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/backend && npx tsc --noEmit`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/backend && npx tsc --noEmit`
 
 **Step 4: Commit**
 
@@ -264,7 +264,7 @@ In the `clear()` method (after line 100), add:
 
 **Step 2: Verify compilation**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/backend && npx tsc --noEmit`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/backend && npx tsc --noEmit`
 
 **Step 3: Commit**
 
@@ -320,7 +320,7 @@ Search for "slskd" or "SLSKD" comments in simpleDownloadManager.ts and update/re
 
 **Step 5: Verify compilation**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/backend && npx tsc --noEmit`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/backend && npx tsc --noEmit`
 
 **Step 6: Commit**
 
@@ -528,7 +528,7 @@ export function useJobProgress(jobId: string): DownloadProgressData | undefined 
 
 **Step 3: Verify frontend compiles**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/frontend && npx next lint`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/frontend && npx next lint`
 
 **Step 4: Commit**
 
@@ -577,7 +577,7 @@ useEventSource();
 
 **Step 3: Verify frontend compiles**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/frontend && npx next lint`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/frontend && npx next lint`
 
 **Step 4: Commit**
 
@@ -679,7 +679,7 @@ In `Sidebar.tsx` line 58: `window.dispatchEvent(new CustomEvent("notifications-c
 
 **Step 7: Verify frontend compiles**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/frontend && npx next lint`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/frontend && npx next lint`
 
 **Step 8: Commit**
 
@@ -742,20 +742,20 @@ Create each file exactly as shown in the soulseek-ts source. Key files:
 **Step 3: Add typed-emitter dependency**
 
 ```bash
-cd /run/media/chevron7/Storage/Projects/lidify/backend && npm install typed-emitter
+cd /run/media/chevron7/Storage/Projects/kima/backend && npm install typed-emitter
 ```
 
 **Step 4: Remove slsk-client dependency**
 
 ```bash
-cd /run/media/chevron7/Storage/Projects/lidify/backend && npm uninstall slsk-client
+cd /run/media/chevron7/Storage/Projects/kima/backend && npm uninstall slsk-client
 ```
 
 Also delete `backend/src/types/slsk-client.d.ts` (the type declarations for the old library).
 
 **Step 5: Verify compilation**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/backend && npx tsc --noEmit`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/backend && npx tsc --noEmit`
 
 Fix any import path issues. The vendored code uses relative imports internally so it should work as-is.
 
@@ -836,7 +836,7 @@ case 'uploadDenied': {
 
 **Step 3: Verify compilation**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/backend && npx tsc --noEmit`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/backend && npx tsc --noEmit`
 
 **Step 4: Commit**
 
@@ -931,7 +931,7 @@ destroy() {
 
 **Step 2: Verify compilation**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/backend && npx tsc --noEmit`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/backend && npx tsc --noEmit`
 
 **Step 3: Commit**
 
@@ -975,7 +975,7 @@ The `searchAndDownloadBatch()` method should work similarly to the old one: para
 
 **Step 2: Verify compilation**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/backend && npx tsc --noEmit`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/backend && npx tsc --noEmit`
 
 **Step 3: Commit**
 
@@ -1029,7 +1029,7 @@ Also update the comment at line 628 referencing "slsk-client".
 
 **Step 2: Verify compilation**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/backend && npx tsc --noEmit`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/backend && npx tsc --noEmit`
 
 **Step 3: Commit**
 
@@ -1071,7 +1071,7 @@ git rm -f docs/plans/2026-02-07-slskd-integration.md docs/plans/2026-02-08-slskd
 
 **Step 3: Verify compilation**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/backend && npx tsc --noEmit`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/backend && npx tsc --noEmit`
 
 **Step 4: Commit**
 
@@ -1122,7 +1122,7 @@ Progress bar component (inline, no separate file needed):
 
 **Step 2: Verify frontend compiles**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/frontend && npx next lint`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/frontend && npx next lint`
 
 **Step 3: Commit**
 
@@ -1141,13 +1141,13 @@ git commit -m "feat: add real-time progress bar to active downloads"
 
 **Step 1: Backend typecheck**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/backend && npx tsc --noEmit`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/backend && npx tsc --noEmit`
 
 Fix any errors.
 
 **Step 2: Frontend lint**
 
-Run: `cd /run/media/chevron7/Storage/Projects/lidify/frontend && npx next lint`
+Run: `cd /run/media/chevron7/Storage/Projects/kima/frontend && npx next lint`
 
 Fix any errors.
 
