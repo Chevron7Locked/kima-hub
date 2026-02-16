@@ -123,7 +123,7 @@ export function Sidebar() {
                     {/* Logo and Title */}
                     <div className="flex items-center gap-4 mb-5">
                         <Image
-                            src="/assets/images/KIMA.webp"
+                            src="/assets/images/kima.webp"
                             alt="Kima Logo"
                             width={48}
                             height={48}

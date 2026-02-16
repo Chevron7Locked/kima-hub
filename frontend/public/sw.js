@@ -9,7 +9,7 @@ const REQUEST_DELAY_MS = 10;
 const PRECACHE_ASSETS = [
   '/',
   '/manifest.webmanifest',
-  '/assets/images/KIMA.webp',
+  '/assets/images/kima.webp',
 ];
 
 // Image route patterns to cache
