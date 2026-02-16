@@ -206,7 +206,7 @@ async function performDownload(
             responseType: 'stream',
             timeout: 600000, // 10 minute timeout for large files (3+ hour podcasts)
             headers: {
-                'User-Agent': 'Lidify/1.0 (https://github.com/Chevron7Locked/lidify)'
+                'User-Agent': 'Kima/1.0 (https://github.com/Chevron7Locked/lidify)'
             },
             // Don't let axios decompress - we want raw bytes
             decompress: false

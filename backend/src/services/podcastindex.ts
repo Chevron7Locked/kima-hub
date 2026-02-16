@@ -28,7 +28,7 @@ async function initPodcastindexClient() {
     }
 
     const podcastIndexApi = require("podcast-index-api");
-    cachedClient = podcastIndexApi(apiKey, apiSecret, "Lidify");
+    cachedClient = podcastIndexApi(apiKey, apiSecret, "Kima");
     cachedCredentialsHash = hash;
 
     return cachedClient;

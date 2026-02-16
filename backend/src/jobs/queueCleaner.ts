@@ -115,7 +115,7 @@ class QueueCleanerService {
             }
 
             // PART 0.3: Reconcile processing jobs with local library (critical fix for #31)
-            // Check if albums already exist in Lidify's database even if Lidarr webhooks were missed
+            // Check if albums already exist in Kima's database even if Lidarr webhooks were missed
             const localReconcileResult = await this.reconcileWithLocalLibrary();
             if (localReconcileResult.reconciled > 0) {
                 logger.debug(
@@ -347,7 +347,7 @@ class QueueCleanerService {
 
     /**
      * Reconcile processing jobs with local library (Phase 1 & 3 fix for #31)
-     * Checks if albums already exist in Lidify's database and marks matching jobs as complete
+     * Checks if albums already exist in Kima's database and marks matching jobs as complete
      * This handles cases where:
      * - Lidarr webhooks were missed
      * - MBID mismatches between MusicBrainz and Lidarr

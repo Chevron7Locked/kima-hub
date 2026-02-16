@@ -42,7 +42,7 @@ export async function writeEnvFile(
 
     // Build new .env content
     const lines: string[] = [
-        "# Lidify Environment Variables",
+        "# Kima Environment Variables",
         `# Auto-generated on ${new Date().toISOString()}`,
         "",
     ];

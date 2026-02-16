@@ -53,7 +53,7 @@ export async function downloadAndStoreImage(
 
         const response = await fetch(url, {
             headers: {
-                "User-Agent": "Lidify/1.0.0 (https://github.com/Chevron7Locked/lidify)",
+                "User-Agent": "Kima/1.0.0 (https://github.com/Chevron7Locked/lidify)",
             },
             signal: AbortSignal.timeout(30000),
         });

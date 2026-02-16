@@ -24,14 +24,8 @@ import type {
  * Used to determine fallback strategies
  */
 export enum AcquisitionErrorType {
-    ARTIST_NOT_FOUND = "ARTIST_NOT_FOUND",
     ALBUM_NOT_FOUND = "ALBUM_NOT_FOUND",
-    NO_INDEXER_RESULTS = "NO_INDEXER_RESULTS",
     NO_RELEASES_AVAILABLE = "NO_RELEASES_AVAILABLE",
-    INDEXER_TIMEOUT = "INDEXER_TIMEOUT",
-    METADATA_ERROR = "METADATA_ERROR",
-    NETWORK_ERROR = "NETWORK_ERROR",
-    UNKNOWN = "UNKNOWN",
 }
 
 /**
@@ -77,6 +71,22 @@ class LidarrService {
     private enabled: boolean;
     private initialized: boolean = false;
 
+    // API timeouts
+    private readonly API_TIMEOUT_DEFAULT = 30000;
+    private readonly API_TIMEOUT_INDEXER_SEARCH = 60000;
+
+    // Command polling
+    private readonly COMMAND_POLL_TIMEOUT_DEFAULT = 30000;
+    private readonly COMMAND_POLL_INTERVAL = 2000;
+
+    // Metadata fetching
+    private readonly METADATA_FETCH_MAX_ATTEMPTS = 20;
+    private readonly METADATA_FETCH_DELAY = 3000;
+    private readonly METADATA_FETCH_TOTAL_TIMEOUT = 60000;
+
+    // Root folder management
+    private readonly ROOT_FOLDER_CREATE_DELAY = 2000;
+
     constructor() {
         // Initial check from .env (for backwards compatibility)
         this.enabled = config.lidarr?.enabled || false;
@@ -84,7 +94,7 @@ class LidarrService {
         if (this.enabled && config.lidarr) {
             this.client = axios.create({
                 baseURL: config.lidarr.url,
-                timeout: 30000,
+                timeout: this.API_TIMEOUT_DEFAULT,
                 headers: {
                     "X-Api-Key": config.lidarr.apiKey,
                 },
@@ -107,7 +117,7 @@ class LidarrService {
                     logger.debug("Lidarr configured from database");
                     this.client = axios.create({
                         baseURL: url,
-                        timeout: 30000,
+                        timeout: this.API_TIMEOUT_DEFAULT,
                         headers: {
                             "X-Api-Key": apiKey,
                         },
@@ -689,7 +699,7 @@ class LidarrService {
             // Trigger metadata refresh to ensure album catalog is populated
             if (!searchForMissingAlbums) {
                 // Add a small delay to let Lidarr's internal state settle
-                await new Promise((resolve) => setTimeout(resolve, 2000));
+                await new Promise((resolve) => setTimeout(resolve, this.ROOT_FOLDER_CREATE_DELAY));
                 
                 logger.debug(`   Triggering metadata refresh for new artist...`);
                 try {
@@ -825,8 +835,8 @@ class LidarrService {
      */
     private async waitForCommand(
         commandId: number,
-        timeoutMs: number = 30000,
-        pollIntervalMs: number = 2000
+        timeoutMs: number = this.COMMAND_POLL_TIMEOUT_DEFAULT,
+        pollIntervalMs: number = this.COMMAND_POLL_INTERVAL
     ): Promise<{ status: string; message: string }> {
         const startTime = Date.now();
 
@@ -952,8 +962,8 @@ class LidarrService {
 
                 // Increased timeout: 20 attempts * 3 seconds = 60 seconds total
                 // Large artist catalogs (e.g., prolific bands) need more time
-                const maxAttempts = 20;
-                const retryDelay = 3000; // 3 seconds between retries
+                const maxAttempts = this.METADATA_FETCH_MAX_ATTEMPTS;
+                const retryDelay = this.METADATA_FETCH_DELAY; // 3 seconds between retries
 
                 for (let attempt = 1; attempt <= maxAttempts; attempt++) {
                     await new Promise((resolve) =>
@@ -966,7 +976,7 @@ class LidarrService {
                     artistAlbums = retryResponse.data;
 
                     if (artistAlbums.length > 0) {
-                        logger.debug(`   Albums loaded after ${attempt * 3}s`);
+                        logger.debug(`   Albums loaded after ${attempt * (this.METADATA_FETCH_DELAY / 1000)}s`);
                         break;
                     }
 
@@ -977,7 +987,7 @@ class LidarrService {
                     } else {
                         logger.warn(
                             ` Timeout reached after ${
-                                maxAttempts * 3
+                                (maxAttempts * this.METADATA_FETCH_DELAY) / 1000
                             }s - artist catalog may still be populating`
                         );
                     }
@@ -1296,8 +1306,7 @@ class LidarrService {
             // Wait for search to complete (with 30s timeout)
             try {
                 const result = await this.waitForCommand(
-                    searchResponse.data.id,
-                    30000
+                    searchResponse.data.id
                 );
 
                 if (result.message?.includes("0 reports")) {
@@ -1380,8 +1389,7 @@ class LidarrService {
                         );
 
                         const retryResult = await this.waitForCommand(
-                            retryResponse.data.id,
-                            30000
+                            retryResponse.data.id
                         );
 
                         if (retryResult.message?.includes("0 reports")) {
@@ -1441,8 +1449,7 @@ class LidarrService {
 
                                     try {
                                         const baseResult = await this.waitForCommand(
-                                            baseSearchResponse.data.id,
-                                            30000
+                                            baseSearchResponse.data.id
                                         );
 
                                         if (baseResult.message?.includes("0 reports")) {
@@ -1602,7 +1609,7 @@ class LidarrService {
                     deleteFiles: deleteFiles,
                     addImportListExclusion: false,
                 },
-                timeout: 30000, // 30 second timeout
+                timeout: this.API_TIMEOUT_DEFAULT, // 30 second timeout
             });
 
             logger.debug(
@@ -2110,7 +2117,7 @@ class LidarrService {
                     deleteFiles,
                     addImportListExclusion: false,
                 },
-                timeout: 30000,
+                timeout: this.API_TIMEOUT_DEFAULT,
             });
 
             return { success: true, message: "Artist deleted" };
@@ -2140,7 +2147,7 @@ class LidarrService {
             );
             const response = await this.client.get("/api/v1/release", {
                 params: { albumId: lidarrAlbumId },
-                timeout: 60000, // 60s timeout for indexer searches
+                timeout: this.API_TIMEOUT_INDEXER_SEARCH, // 60s timeout for indexer searches
             });
 
             const releases: LidarrIndexerRelease[] = response.data || [];
@@ -2750,118 +2757,3 @@ export async function getRecentCompletedDownloads(
     }
 }
 
-/**
- * Get the current queue count from Lidarr
- */
-export async function getQueueCount(
-    lidarrUrl: string,
-    apiKey: string
-): Promise<number> {
-    try {
-        const response = await axios.get<LidarrQueueResponse>(
-            `${lidarrUrl}/api/v1/queue`,
-            {
-                params: {
-                    page: 1,
-                    pageSize: 1,
-                },
-                headers: { "X-Api-Key": apiKey },
-            }
-        );
-        return response.data.totalRecords;
-    } catch (error: any) {
-        logger.error("Failed to get queue count:", error.message);
-        return 0;
-    }
-}
-
-/**
- * Get the full Lidarr queue
- * Returns all items currently in the download queue
- */
-export async function getQueue(): Promise<LidarrQueueItem[]> {
-    const settings = await getSystemSettings();
-    if (
-        !settings?.lidarrEnabled ||
-        !settings.lidarrUrl ||
-        !settings.lidarrApiKey
-    ) {
-        return [];
-    }
-
-    try {
-        const response = await axios.get<LidarrQueueResponse>(
-            `${settings.lidarrUrl}/api/v1/queue`,
-            {
-                params: {
-                    page: 1,
-                    pageSize: 100,
-                    includeUnknownArtistItems: true,
-                },
-                headers: { "X-Api-Key": settings.lidarrApiKey },
-            }
-        );
-
-        return response.data.records || [];
-    } catch (error: any) {
-        logger.error("Failed to get Lidarr queue:", error.message);
-        return [];
-    }
-}
-
-/**
- * Check if a specific download is still actively downloading in Lidarr's queue
- * Returns true if actively downloading, false if not found or stuck
- */
-export async function isDownloadActive(
-    downloadId: string
-): Promise<{ active: boolean; status?: string; progress?: number }> {
-    const settings = await getSystemSettings();
-    if (
-        !settings?.lidarrEnabled ||
-        !settings.lidarrUrl ||
-        !settings.lidarrApiKey
-    ) {
-        return { active: false };
-    }
-
-    try {
-        const response = await axios.get<LidarrQueueResponse>(
-            `${settings.lidarrUrl}/api/v1/queue`,
-            {
-                params: {
-                    page: 1,
-                    pageSize: 100,
-                    includeUnknownArtistItems: true,
-                },
-                headers: { "X-Api-Key": settings.lidarrApiKey },
-            }
-        );
-
-        const item = response.data.records.find(
-            (r: LidarrQueueItem) => r.downloadId === downloadId
-        );
-
-        if (!item) {
-            return { active: false, status: "not_found" };
-        }
-
-        // Check if it's actively downloading (not stuck in warning/failed state)
-        const isActivelyDownloading =
-            item.status === "downloading" ||
-            (item.trackedDownloadState === "downloading" &&
-                item.trackedDownloadStatus !== "warning");
-
-        return {
-            active: isActivelyDownloading,
-            status: item.trackedDownloadState || item.status,
-            progress:
-                item.sizeleft && item.size
-                    ? Math.round((1 - item.sizeleft / item.size) * 100)
-                    : undefined,
-        };
-    } catch (error: any) {
-        logger.error("Failed to check download status:", error.message);
-        return { active: false };
-    }
-}

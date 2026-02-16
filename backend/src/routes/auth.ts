@@ -452,8 +452,8 @@ router.post("/2fa/setup", requireAuth, async (req, res) => {
 
         // Generate secret
         const secret = speakeasy.generateSecret({
-            name: `Lidify (${user.username})`,
-            issuer: "Lidify",
+            name: `Kima (${user.username})`,
+            issuer: "Kima",
         });
 
         // Generate QR code

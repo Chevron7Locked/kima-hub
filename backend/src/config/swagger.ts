@@ -5,12 +5,12 @@ const options: swaggerJsdoc.Options = {
     definition: {
         openapi: "3.0.0",
         info: {
-            title: "Lidify API",
+            title: "Kima API",
             version: "1.0.0",
             description:
                 "Self-hosted music streaming server with Discover Weekly and full-text search",
             contact: {
-                name: "Lidify",
+                name: "Kima",
                 url: "https://github.com/Chevron7Locked/lidify",
             },
         },

@@ -1844,7 +1844,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
           headers: {
             Authorization: `Bearer ${audiobookshelfApiKey}`,
             "User-Agent":
-              "Lidify/1.0.0 (https://github.com/Chevron7Locked/lidify)",
+              "Kima/1.0.0 (https://github.com/Chevron7Locked/lidify)",
           },
         });
 
@@ -1998,7 +1998,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
           headers: {
             Authorization: `Bearer ${audiobookshelfApiKey}`,
             "User-Agent":
-              "Lidify/1.0.0 (https://github.com/Chevron7Locked/lidify)",
+              "Kima/1.0.0 (https://github.com/Chevron7Locked/lidify)",
           },
         });
 
@@ -2087,7 +2087,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
     logger.debug(`[COVER-ART] Fetching: ${coverUrl.substring(0, 100)}...`);
     const imageResponse = await fetch(coverUrl, {
       headers: {
-        "User-Agent": "Lidify/1.0.0 (https://github.com/Chevron7Locked/lidify)",
+        "User-Agent": "Kima/1.0.0 (https://github.com/Chevron7Locked/lidify)",
       },
     });
     if (!imageResponse.ok) {
@@ -2245,7 +2245,7 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
     logger.debug(`[COLORS] Fetching image: ${imageUrl.substring(0, 100)}...`);
     const imageResponse = await fetch(imageUrl, {
       headers: {
-        "User-Agent": "Lidify/1.0.0 (https://github.com/Chevron7Locked/lidify)",
+        "User-Agent": "Kima/1.0.0 (https://github.com/Chevron7Locked/lidify)",
       },
     });
 

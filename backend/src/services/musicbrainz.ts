@@ -12,7 +12,7 @@ class MusicBrainzService {
             timeout: 10000,
             headers: {
                 "User-Agent":
-                    "Lidify/1.0.0 (https://github.com/Chevron7Locked/lidify)",
+                    "Kima/1.0.0 (https://github.com/Chevron7Locked/lidify)",
             },
         });
     }

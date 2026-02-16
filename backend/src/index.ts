@@ -202,7 +202,7 @@ app.use(
     swaggerUi.serve,
     swaggerUi.setup(swaggerSpec, {
         customCss: ".swagger-ui .topbar { display: none }",
-        customSiteTitle: "Lidify API Documentation",
+        customSiteTitle: "Kima API Documentation",
     })
 );
 
@@ -289,7 +289,7 @@ app.listen(config.port, "0.0.0.0", async () => {
     await checkPasswordReset();
 
     logger.debug(
-        `Lidify API running on port ${config.port} (accessible on all network interfaces)`
+        `Kima API running on port ${config.port} (accessible on all network interfaces)`
     );
 
     // Enable slow query monitoring in development

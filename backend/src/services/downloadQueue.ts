@@ -367,7 +367,7 @@ class DownloadQueueManager {
     }
 
     /**
-     * Trigger full library refresh (Lidarr cleanup → Lidify sync)
+     * Trigger full library refresh (Lidarr cleanup → Kima sync)
      */
     private async triggerFullRefresh() {
         try {
@@ -377,16 +377,16 @@ class DownloadQueueManager {
             logger.debug("[1/2] Checking for failed imports in Lidarr...");
             await this.clearFailedLidarrImports();
 
-            // Step 2: Trigger Lidify library sync
-            logger.debug("[2/2] Triggering Lidify library sync...");
-            const lidifySuccess = await this.triggerLidifySync();
+            // Step 2: Trigger Kima library sync
+            logger.debug("[2/2] Triggering Kima library sync...");
+            const lidifySuccess = await this.triggerKimaSync();
 
             if (!lidifySuccess) {
-                logger.error(" Lidify sync failed");
+                logger.error(" Kima sync failed");
                 return;
             }
 
-            logger.debug("Lidify sync started");
+            logger.debug("Kima sync started");
             logger.debug(
                 "\n[SUCCESS] Full library refresh complete! New music should appear shortly.\n"
             );
@@ -501,9 +501,9 @@ class DownloadQueueManager {
     }
 
     /**
-     * Trigger Lidify library sync
+     * Trigger Kima library sync
      */
-    private async triggerLidifySync(): Promise<boolean> {
+    private async triggerKimaSync(): Promise<boolean> {
         try {
             const { scanQueue } = await import("../workers/queues");
             const { prisma } = await import("../utils/db");
@@ -526,7 +526,7 @@ class DownloadQueueManager {
             logger.debug("Library scan queued");
             return true;
         } catch (error: any) {
-            logger.error("Lidify sync trigger error:", error.message);
+            logger.error("Kima sync trigger error:", error.message);
             return false;
         }
     }

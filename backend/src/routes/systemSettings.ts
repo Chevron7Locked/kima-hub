@@ -267,7 +267,7 @@ router.post("/", async (req, res) => {
 
         logger.debug(`   Webhook URL: ${webhookUrl}`);
 
-        // Check if webhook already exists - find by name "Lidify" OR by URL containing "lidify" or "webhooks/lidarr"
+        // Check if webhook already exists - find by name "Kima" OR by URL containing "lidify" or "webhooks/lidarr"
         const notificationsResponse = await axios.get(
           `${lidarrUrl}/api/v1/notification`,
           {
@@ -276,12 +276,12 @@ router.post("/", async (req, res) => {
           },
         );
 
-        // Find existing Lidify webhook by name (primary) or URL pattern (fallback)
+        // Find existing Kima webhook by name (primary) or URL pattern (fallback)
         const existingWebhook = notificationsResponse.data.find(
           (n: any) =>
             n.implementation === "Webhook" &&
             // Match by name
-            (n.name === "Lidify" ||
+            (n.name === "Kima" ||
               // Or match by URL pattern (catches old webhooks with different URLs)
               n.fields?.find(
                 (f: any) =>
@@ -324,7 +324,7 @@ router.post("/", async (req, res) => {
           supportsOnHealthIssue: true,
           supportsOnApplicationUpdate: true,
           includeHealthWarnings: false,
-          name: "Lidify",
+          name: "Kima",
           implementation: "Webhook",
           implementationName: "Webhook",
           configContract: "WebhookSettings",
