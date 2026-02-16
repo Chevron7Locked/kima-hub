@@ -64,6 +64,7 @@ export const soulseekDownloadsTotal = new Counter({
 export const soulseekDownloadDuration = new Histogram({
   name: 'lidify_soulseek_download_duration_seconds',
   help: 'Duration of Soulseek downloads in seconds',
+  labelNames: ['status'],
   buckets: [5, 10, 30, 60, 120, 300, 600, 1200],
 });
 
