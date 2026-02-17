@@ -5,7 +5,7 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.0] - 2026-02-16
+## [1.5.0] - 2026-02-17
 
 ### Changed
 
@@ -14,9 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker images now published as `chevron7locked/kima`
 - All user-facing references updated across codebase
 - First official release under Kima branding
+- **Soulseek credential changes**: Settings and onboarding now reset and reconnect Soulseek immediately instead of just disconnecting
+- **Soulseek search timeout**: Reduced from 45s to 10s for faster UI response (200+ results stream well within that window)
+- **Search result streaming**: Low-quality results (< 128kbps MP3) filtered before streaming to UI, capped at 200 streamed results per search
 
 ### Added
 
+- **Album-level Soulseek search**: Discovery downloads use a single album-wide search query with directory grouping and fuzzy title matching, reducing download time from ~15 minutes to ~15-30 seconds
+- **SSE-based Soulseek search**: Search results stream to the browser in real-time via Server-Sent Events instead of waiting for the full search to complete
+- **Multi-tab audio sync**: BroadcastChannel API prevents multiple browser tabs from playing audio simultaneously -- new tab claims playback, other tabs pause
+- **Network error retry**: Audio engine retries on network errors with exponential backoff (2s, 4s) before surfacing the failure
+- **Stream eviction notification**: Users see "Playback interrupted -- stream may have been taken by another session" instead of a generic error
+- **Stuck discovery batch recovery**: Batches stuck in scanning state are automatically recovered after 10 minutes and force-failed after 30 minutes
+- **Stuck Spotify import recovery**: Spotify imports stuck in scanning or downloading states are automatically detected and recovered by the queue cleaner
+- **Manual download activity feed**: Soulseek manual downloads now emit `download:complete` events and appear in the activity feed
 - **Critical Reliability Fixes**: Eliminated Soulseek connection race conditions with distributed locks
 - **100% Webhook Reliability**: Event sourcing with PostgreSQL persistence
 - **Download Deduplication**: Database unique constraint prevents duplicate jobs
@@ -28,6 +39,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Automatic Database Baselining**: Seamless migration for existing databases
 - **Complete Type Safety**: Eliminated all `as any` assertions
 - **Typed Error Handling**: User-friendly error messages with proper HTTP codes
+
+### Fixed
+
+- **Discovery download timeout**: Album-level search eliminates the per-track search overhead (13 tracks x 5 strategies x 15s) that caused 300s acquisition timeouts
+- **Worker scheduling starvation**: `setTimeout` rescheduling moved into `finally` blocks so worker cycles always reschedule, even when pile-up guards cause early return
+- **Concurrent discovery generation**: Distributed lock (`discover:generate:{userId}`, 30s TTL) prevents duplicate batches when the generate button is clicked rapidly
+- **Recovery scan routing**: Fixed source strings (`"discover-weekly-completion"`, `"spotify-import"`) so recovered stuck scans trigger the correct post-scan handlers instead of silently completing
+- **Unbounded scan re-queuing**: Added deduplication flags so stuck batches aren't re-queued by the queue cleaner every 30 seconds
+- **buildFinalPlaylist idempotency**: Early return guard prevents duplicate playlist generation if the method is called multiple times for the same batch
+- **MediaError SSR safety**: Replaced browser-only `MediaError.MEDIA_ERR_NETWORK` with literal value `2` for Next.js server-side rendering compatibility
+- **Soulseek search session leak**: Sessions capped at 50 with oldest-eviction to prevent unbounded Map growth
+- **Soulseek cooldown Map leak**: Added 5-minute periodic cleanup of expired entries from connection cooldown Maps, cleared on both `disconnect()` and `forceDisconnect()`
+- **Unhandled promise rejection**: Wrapped fire-and-forget search `.then()`/`.catch()` handler bodies in try/catch
+- **Batch download fault tolerance**: Replaced `Promise.all` with `Promise.allSettled` in album search download phase and per-track batch search/download phases so one failure doesn't abort the entire batch
+- **SSE connection establishment**: Added `res.flushHeaders()` and per-message `flush()` calls to ensure SSE data reaches the client immediately through reverse proxies
+
+### Removed
+
+- Debug `console.log` statements from SSE event route and Soulseek search route
+- Dead `playback-released` BroadcastChannel broadcast code from audio player
+- Animated search background gradient (replaced with cleaner static layout)
 
 ### Infrastructure
 

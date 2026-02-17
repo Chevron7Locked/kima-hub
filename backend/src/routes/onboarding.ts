@@ -361,7 +361,28 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
             },
         });
 
-        res.json({ success: true, tested: true });
+        // Test connection by resetting and reconnecting
+        let connectionTested = false;
+        try {
+            const { soulseekService } = await import("../services/soulseek");
+            await soulseekService.resetAndReconnect();
+            connectionTested = true;
+            logger.debug("[ONBOARDING] Soulseek connection test successful");
+        } catch (error: any) {
+            logger.warn(
+                "  Soulseek connection test failed (saved anyway):",
+                error.message
+            );
+            // Don't block - just log the warning
+        }
+
+        res.json({
+            success: true,
+            tested: connectionTested,
+            warning: connectionTested
+                ? null
+                : "Connection test failed but settings saved. You can test again in Settings.",
+        });
     } catch (err: any) {
         if (err instanceof z.ZodError) {
             return res

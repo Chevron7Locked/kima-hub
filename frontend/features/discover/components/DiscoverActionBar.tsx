@@ -22,7 +22,7 @@ export function DiscoverActionBar({
     onCancelGeneration,
 }: DiscoverActionBarProps) {
     return (
-        <div className="bg-[#0a0a0a] px-6 md:px-8 py-4 border-b border-white/10">
+        <div className=" px-6 md:px-8 py-6">
             <div className="max-w-[1600px] mx-auto flex items-center gap-4">
                 {/* Play Button */}
                 {playlist && playlist.tracks.length > 0 && (
@@ -31,16 +31,15 @@ export function DiscoverActionBar({
                         disabled={isGenerating}
                         className={cn(
                             "h-12 w-12 flex items-center justify-center border-2 rounded-lg transition-all duration-300",
-                            isGenerating
-                                ? "border-white/20 bg-white/5 cursor-not-allowed opacity-50"
-                                : "border-[#eab308] bg-[#eab308] hover:bg-[#f59e0b] hover:border-[#f59e0b] hover:scale-110 hover:shadow-lg hover:shadow-[#eab308]/20"
+                            isGenerating ?
+                                "border-white/20 bg-white/5 cursor-not-allowed opacity-50"
+                            :   "border-[#eab308] bg-[#eab308] hover:bg-[#f59e0b] hover:border-[#f59e0b] hover:scale-110 hover:shadow-lg hover:shadow-[#eab308]/20",
                         )}
                     >
-                        {isPlaylistPlaying && isPlaying ? (
+                        {isPlaylistPlaying && isPlaying ?
                             <Pause className="w-5 h-5 fill-current text-black" />
-                        ) : (
-                            <Play className="w-5 h-5 fill-current text-black ml-0.5" />
-                        )}
+                        :   <Play className="w-5 h-5 fill-current text-black ml-0.5" />
+                        }
                     </button>
                 )}
 

@@ -72,6 +72,7 @@ export function useSoulseekSearch({
                 const { searchId } = await api.searchSoulseek(query);
                 if (cancelled) return;
 
+                console.log(`[SEARCH HOOK] Got searchId: ${searchId}`);
                 searchIdRef.current = searchId;
                 setIsSoulseekSearching(false);
                 setHasActiveSearch(true);
@@ -80,8 +81,10 @@ export function useSoulseekSearch({
                 const syncFromStore = () => {
                     if (cancelled) return;
                     const session = searchResultStore.getSession(searchId);
+                    console.log(`[SEARCH HOOK] syncFromStore called - session exists: ${!!session}, results: ${session?.results.length || 0}`);
                     if (session) {
                         setSoulseekResults([...session.results]);
+                        console.log(`[SEARCH HOOK] Updated state with ${session.results.length} results`);
                         if (session.complete) {
                             setIsComplete(true);
                         }
@@ -89,9 +92,11 @@ export function useSoulseekSearch({
                 };
 
                 // Subscribe to SSE-driven store updates
+                console.log(`[SEARCH HOOK] Subscribing to store for searchId: ${searchId}`);
                 const unsubscribe = searchResultStore.subscribe(searchId, syncFromStore);
 
                 // Immediately check for results that arrived during the POST roundtrip
+                console.log(`[SEARCH HOOK] Checking for initial results...`);
                 syncFromStore();
 
                 // Store unsubscribe for cleanup

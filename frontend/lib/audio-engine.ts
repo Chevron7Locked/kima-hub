@@ -31,6 +31,10 @@ class AudioEngine {
         isMuted: false,
     };
 
+    private networkRetryCount = 0;
+    private readonly MAX_NETWORK_RETRIES = 2;
+    private networkRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+
     // Preload for gapless playback
     private preloadAudio: HTMLAudioElement | null = null;
     private preloadSrc: string | null = null;
@@ -74,6 +78,7 @@ class AudioEngine {
         });
 
         add("canplay", () => {
+            this.networkRetryCount = 0;
             this.emit("canplay", { duration: audio.duration || 0 });
         });
 
@@ -83,11 +88,33 @@ class AudioEngine {
 
         // "playing" fires when playback resumes after buffering
         add("playing", () => {
+            this.networkRetryCount = 0;
             this.emit("play");
         });
 
         add("error", () => {
             const err = audio.error;
+
+            // Auto-retry on network errors (MEDIA_ERR_NETWORK = code 2) with backoff
+            if (
+                err?.code === 2 &&
+                this.networkRetryCount < this.MAX_NETWORK_RETRIES &&
+                this.state.currentSrc
+            ) {
+                this.networkRetryCount++;
+                const delay = this.networkRetryCount * 2000;
+                console.warn(
+                    `[AudioEngine] Network error, retrying in ${delay}ms (attempt ${this.networkRetryCount}/${this.MAX_NETWORK_RETRIES})`
+                );
+                this.networkRetryTimeout = setTimeout(() => {
+                    if (this.audio && this.state.currentSrc) {
+                        this.audio.load();
+                        this.audio.play().catch(() => {});
+                    }
+                }, delay);
+                return;
+            }
+
             this.stopTimeUpdates();
             this.emit("error", {
                 error: err?.message || "Audio playback error",
@@ -188,6 +215,7 @@ class AudioEngine {
         }
 
         // Normal load path
+        this.cancelNetworkRetry();
         this.state.currentSrc = src;
         this.audio.src = src;
         // Setting src stops any current playback and starts loading the new source.
@@ -397,6 +425,7 @@ class AudioEngine {
     cleanup(): void {
         this.cancelPreload();
         this.stopTimeUpdates();
+        this.cancelNetworkRetry();
 
         if (this.audio) {
             this.audio.pause();
@@ -405,6 +434,14 @@ class AudioEngine {
         }
 
         this.state.currentSrc = null;
+    }
+
+    private cancelNetworkRetry(): void {
+        if (this.networkRetryTimeout) {
+            clearTimeout(this.networkRetryTimeout);
+            this.networkRetryTimeout = null;
+        }
+        this.networkRetryCount = 0;
     }
 
     /**

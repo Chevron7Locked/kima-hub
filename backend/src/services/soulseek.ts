@@ -54,8 +54,8 @@ export class SoulseekService {
     private lastConnectAttempt = 0;
     private failedConnectionAttempts = 0;
     private readonly MAX_BACKOFF_MS = 300000; // 5 minutes (slskd practice)
-    private readonly DOWNLOAD_TIMEOUT_INITIAL = 60000;
-    private readonly DOWNLOAD_TIMEOUT_RETRY = 30000;
+    private readonly DOWNLOAD_TIMEOUT_INITIAL = 120000;
+    private readonly DOWNLOAD_TIMEOUT_RETRY = 60000;
     private readonly MAX_DOWNLOAD_RETRIES = 20;
 
     private readonly FAILURE_THRESHOLD = 3;
@@ -67,6 +67,7 @@ export class SoulseekService {
 
     private userConnectionCooldowns = new Map<string, number>();
     private readonly USER_CONNECTION_COOLDOWN = 5000; // Increased from 3s to 5s
+    private cooldownCleanupInterval: NodeJS.Timeout | null = null;
 
     private connectedAt: Date | null = null;
     private lastSuccessfulSearch: Date | null = null;
@@ -213,6 +214,18 @@ export class SoulseekService {
         soulseekConnectionStatus.set(1);
         sessionLog("SOULSEEK", "Connected to Soulseek network");
 
+        // Periodic cleanup of expired cooldown entries to prevent memory leak
+        if (!this.cooldownCleanupInterval) {
+            this.cooldownCleanupInterval = setInterval(() => {
+                const now = Date.now();
+                for (const [username, cooldownUntil] of this.userConnectionCooldowns.entries()) {
+                    if (now >= cooldownUntil) {
+                        this.userConnectionCooldowns.delete(username);
+                    }
+                }
+            }, 5 * 60 * 1000);
+        }
+
         // Handle unexpected server disconnection at service level
         // This ensures reconnection goes through ensureConnected() with proper
         // distributed locking and backoff, not the client's own scheduleReconnect
@@ -255,6 +268,10 @@ export class SoulseekService {
             `Force disconnecting (was connected for ${uptime}s)`,
             "DEBUG"
         );
+        if (this.cooldownCleanupInterval) {
+            clearInterval(this.cooldownCleanupInterval);
+            this.cooldownCleanupInterval = null;
+        }
         if (this.client) {
             try {
                 this.client.destroy();
@@ -499,7 +516,8 @@ export class SoulseekService {
                 trackTitle,
                 albumName,
                 timeoutMs,
-                searchId
+                searchId,
+                onResult
             );
 
             const searchDuration = Date.now() - searchStartTime;
@@ -516,41 +534,64 @@ export class SoulseekService {
                     !isRetry &&
                     this.consecutiveEmptySearches >= this.MAX_CONSECUTIVE_EMPTY
                 ) {
-                    // Don't force reconnect if we're in backoff period (prevents rate limiting)
-                    const backoffDelay = this.getReconnectDelay();
-                    const timeSinceLastAttempt = this.lastConnectAttempt > 0
-                        ? Date.now() - this.lastConnectAttempt
-                        : backoffDelay + 1;
-
-                    if (timeSinceLastAttempt < backoffDelay) {
+                    // If we're now connected, reset counter and allow search
+                    // (prevents permanent blocking after recovering from rate limit)
+                    if (this.client?.loggedIn) {
                         sessionLog(
                             "SOULSEEK",
-                            `[Search #${searchId}] Too many empty searches but respecting backoff period (${Math.round(backoffDelay / 1000)}s)`,
+                            `[Search #${searchId}] Resetting empty search counter (now connected)`,
+                            "DEBUG"
+                        );
+                        this.consecutiveEmptySearches = 0;
+                        // Continue with normal search flow below
+                    } else {
+                        // Not connected - check if we should wait for backoff
+                        const backoffDelay = this.getReconnectDelay();
+                        const timeSinceLastAttempt = this.lastConnectAttempt > 0
+                            ? Date.now() - this.lastConnectAttempt
+                            : backoffDelay + 1;
+
+                        if (timeSinceLastAttempt < backoffDelay) {
+                            sessionLog(
+                                "SOULSEEK",
+                                `[Search #${searchId}] Too many empty searches but respecting backoff period (${Math.round(backoffDelay / 1000)}s)`,
+                                "WARN"
+                            );
+                            soulseekSearchesTotal.inc({ status: 'not_found' });
+                            soulseekSearchDuration.observe((Date.now() - metricsStartTime) / 1000);
+                            return { found: false, bestMatch: null, allMatches: [] };
+                        }
+
+                        if (this.activeDownloads > 0) {
+                            sessionLog(
+                                "SOULSEEK",
+                                `[Search #${searchId}] Too many empty searches but ${this.activeDownloads} downloads active, skipping reconnect`,
+                                "WARN"
+                            );
+                            soulseekSearchesTotal.inc({ status: 'not_found' });
+                            soulseekSearchDuration.observe((Date.now() - metricsStartTime) / 1000);
+                            return { found: false, bestMatch: null, allMatches: [] };
+                        }
+
+                        sessionLog(
+                            "SOULSEEK",
+                            `[Search #${searchId}] Too many consecutive empty searches, forcing reconnect and retry...`,
                             "WARN"
                         );
-                        soulseekSearchesTotal.inc({ status: 'not_found' });
-                        soulseekSearchDuration.observe((Date.now() - metricsStartTime) / 1000);
-                        return { found: false, bestMatch: null, allMatches: [] };
+                        this.forceDisconnect();
+
+                        // Wait for disconnect to complete before reconnecting
+                        await new Promise(resolve => setTimeout(resolve, 100));
+
+                        return this.searchTrack(
+                            artistName,
+                            trackTitle,
+                            albumName,
+                            true,
+                            timeoutMs,
+                            onResult
+                        );
                     }
-
-                    sessionLog(
-                        "SOULSEEK",
-                        `[Search #${searchId}] Too many consecutive empty searches, forcing reconnect and retry...`,
-                        "WARN"
-                    );
-                    this.forceDisconnect();
-
-                    // Wait for disconnect to complete before reconnecting
-                    await new Promise(resolve => setTimeout(resolve, 100));
-
-                    return this.searchTrack(
-                        artistName,
-                        trackTitle,
-                        albumName,
-                        true,
-                        timeoutMs,
-                        onResult
-                    );
                 }
 
                 soulseekSearchesTotal.inc({ status: 'not_found' });
@@ -617,7 +658,21 @@ export class SoulseekService {
             this.consecutiveEmptySearches++;
 
 if (!isRetry && this.consecutiveEmptySearches >= this.MAX_CONSECUTIVE_EMPTY) {
-                 // Don't force reconnect if we're in backoff period (prevents rate limiting)
+                 // If we're now connected, reset counter and allow search
+                 if (this.client?.loggedIn) {
+                     sessionLog(
+                         "SOULSEEK",
+                         `[Search #${searchId}] Resetting failure counter (now connected)`,
+                         "DEBUG"
+                     );
+                     this.consecutiveEmptySearches = 0;
+                     // Return the error result, don't retry
+                     soulseekSearchesTotal.inc({ status: 'failed' });
+                     soulseekSearchDuration.observe((Date.now() - metricsStartTime) / 1000);
+                     return { found: false, bestMatch: null, allMatches: [] };
+                 }
+
+                 // Not connected - check if we should wait for backoff
                  const backoffDelay = this.getReconnectDelay();
                  const timeSinceLastAttempt = this.lastConnectAttempt > 0
                      ? Date.now() - this.lastConnectAttempt
@@ -627,6 +682,17 @@ if (!isRetry && this.consecutiveEmptySearches >= this.MAX_CONSECUTIVE_EMPTY) {
                      sessionLog(
                          "SOULSEEK",
                          `[Search #${searchId}] ${this.consecutiveEmptySearches} consecutive failures but respecting backoff period (${Math.round(backoffDelay / 1000)}s)`,
+                         "WARN"
+                     );
+                     soulseekSearchesTotal.inc({ status: 'failed' });
+                     soulseekSearchDuration.observe((Date.now() - metricsStartTime) / 1000);
+                     return { found: false, bestMatch: null, allMatches: [] };
+                 }
+
+                 if (this.activeDownloads > 0) {
+                     sessionLog(
+                         "SOULSEEK",
+                         `[Search #${searchId}] ${this.consecutiveEmptySearches} consecutive failures but ${this.activeDownloads} downloads active, skipping reconnect`,
                          "WARN"
                      );
                      soulseekSearchesTotal.inc({ status: 'failed' });
@@ -666,9 +732,10 @@ if (!isRetry && this.consecutiveEmptySearches >= this.MAX_CONSECUTIVE_EMPTY) {
 
         for (const response of responses) {
             for (const file of response.files) {
-                // Create unique key: user + filename (not full path)
-                const filename = file.filename.split(/[/\\]/).pop() || file.filename;
-                const key = `${response.username}:${filename}`;
+                // Create unique key: user + full path (not basename)
+                // Using basename caused album files with the same name in
+                // different directories to be silently dropped
+                const key = `${response.username}:${file.filename}`;
 
                 // Skip if we've already seen this user+filename combo
                 if (seen.has(key)) {
@@ -899,7 +966,8 @@ private async recordUserFailure(username: string): Promise<void> {
     public async downloadTrack(
         match: TrackMatch,
         destPath: string,
-        attemptNumber: number = 0
+        attemptNumber: number = 0,
+        skipCooldown: boolean = false
     ): Promise<{ success: boolean; error?: string }> {
         const downloadStartTime = Date.now();
         this.activeDownloads++;
@@ -929,7 +997,7 @@ if (!this.client) {
              return { success: false, error: "Not connected" };
          }
 
-         if (this.isUserInCooldown(match.username)) {
+         if (!skipCooldown && this.isUserInCooldown(match.username)) {
              this.activeDownloads--;
              return { success: false, error: "User in cooldown" };
          }
@@ -1163,6 +1231,411 @@ async downloadBestMatch(
         };
     }
 
+async searchAndDownloadAlbum(
+        artistName: string,
+        albumName: string,
+        tracks: Array<{ title: string; position?: number }>,
+        musicPath: string
+    ): Promise<{ successful: number; failed: number; files: string[]; errors: string[] }> {
+        const results = { successful: 0, failed: 0, files: [] as string[], errors: [] as string[] };
+
+        if (tracks.length === 0) {
+            return results;
+        }
+
+        const { normalizeArtistName, normalizeTrackTitle } = await import("./soulseek-search-strategies");
+        const { stripAlbumEdition, canonicalizeVariousArtists, VARIOUS_ARTISTS_CANONICAL } = await import("../utils/artistNormalization");
+        const fuzz = await import("fuzzball");
+
+        // --- Phase 1: Album-level search (1-2 network calls) ---
+        const isVA = canonicalizeVariousArtists(artistName) === VARIOUS_ARTISTS_CANONICAL;
+        const normalizedAlbum = stripAlbumEdition(albumName);
+        const query = isVA
+            ? normalizedAlbum
+            : `${normalizeArtistName(artistName)} ${normalizedAlbum}`;
+
+        sessionLog("SOULSEEK", `[Album Search] "${query}" (${tracks.length} tracks, VA=${isVA})`);
+
+        // Fix 5: Wrap ensureConnected + search in try/catch
+        try {
+            await this.ensureConnected();
+        } catch (err: any) {
+            sessionLog("SOULSEEK", `[Album Search] Connection failed: ${err.message}, falling back to per-track`, "WARN");
+            return this.searchAndDownloadBatch(
+                tracks.map(t => ({ artist: artistName, title: t.title, album: albumName })),
+                musicPath,
+                2
+            );
+        }
+        if (!this.client) {
+            results.failed = tracks.length;
+            results.errors.push("Not connected to Soulseek");
+            return results;
+        }
+
+        const audioExtensions = [".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav", ".aac"];
+
+        const countAudioFiles = (resps: FileSearchResponse[]): number => {
+            let count = 0;
+            for (const r of resps) {
+                for (const f of r.files) {
+                    if (audioExtensions.some(ext => f.filename.toLowerCase().endsWith(ext))) {
+                        count++;
+                    }
+                }
+            }
+            return count;
+        };
+
+        // Fix 5: Wrap search calls in try/catch
+        // Fix 6: Reduced timeouts (8s primary, 6s fallback) per slsk-batchdl/Soularr practice
+        let responses: FileSearchResponse[];
+        let audioCount: number;
+        try {
+            responses = await this.client.search(query, { timeout: 8000 });
+            audioCount = countAudioFiles(responses);
+
+            if (audioCount === 0 && !isVA) {
+                sessionLog("SOULSEEK", `[Album Search] Primary query returned 0 audio files, trying album-only fallback`);
+                responses = await this.client.search(normalizedAlbum, { timeout: 6000 });
+                audioCount = countAudioFiles(responses);
+            }
+        } catch (err: any) {
+            sessionLog("SOULSEEK", `[Album Search] Search failed: ${err.message}, falling back to per-track`, "WARN");
+            return this.searchAndDownloadBatch(
+                tracks.map(t => ({ artist: artistName, title: t.title, album: albumName })),
+                musicPath,
+                2
+            );
+        }
+
+        if (audioCount === 0) {
+            sessionLog("SOULSEEK", `[Album Search] No audio results, falling back to per-track batch search`);
+            return this.searchAndDownloadBatch(
+                tracks.map(t => ({ artist: artistName, title: t.title, album: albumName })),
+                musicPath,
+                2
+            );
+        }
+
+        // --- Phase 2: Group results by user + parent directory ---
+        const flatResults = this.flattenSearchResults(responses);
+
+        // Fix 3: Filter blocked users before grouping
+        const blockChecks = await Promise.all(
+            flatResults.map(async (r) => ({
+                result: r,
+                blocked: await this.isUserBlocked(r.user),
+            }))
+        );
+        const audioResults = blockChecks
+            .filter(({ blocked }) => !blocked)
+            .map(({ result }) => result)
+            .filter(r => audioExtensions.some(ext => r.file.toLowerCase().endsWith(ext)));
+
+        const groups = new Map<string, SearchResult[]>();
+        for (const result of audioResults) {
+            const parts = result.file.replace(/\\/g, "/").split("/");
+            parts.pop();
+            const parentDir = parts.join("/");
+            const key = `${result.user}|||${parentDir}`;
+            if (!groups.has(key)) {
+                groups.set(key, []);
+            }
+            groups.get(key)!.push(result);
+        }
+
+        // Merge multi-disc groups (CD1/CD2/Disc1/Disc2) from same user
+        const discPattern = /[\/\\](cd\s*\d+|disc\s*\d+|disk\s*\d+|d\d+)$/i;
+        const mergedKeys = new Set<string>();
+        for (const [key] of groups) {
+            const [username, dir] = key.split("|||");
+            if (discPattern.test(dir)) {
+                const parentDir = dir.replace(discPattern, "");
+                const mergeKey = `${username}|||${parentDir}`;
+                if (!mergedKeys.has(key)) {
+                    // Find all disc subfolders for this user+parent
+                    for (const [otherKey, otherFiles] of groups) {
+                        if (otherKey === key) continue;
+                        const [otherUser, otherDir] = otherKey.split("|||");
+                        if (otherUser === username && discPattern.test(otherDir)) {
+                            const otherParent = otherDir.replace(discPattern, "");
+                            if (otherParent === parentDir) {
+                                // Merge into this group
+                                const currentFiles = groups.get(key) || [];
+                                currentFiles.push(...otherFiles);
+                                groups.set(key, currentFiles);
+                                groups.delete(otherKey);
+                                mergedKeys.add(otherKey);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        const minGroupSize = Math.min(2, tracks.length);
+        for (const [key, files] of groups) {
+            if (files.length < minGroupSize) {
+                groups.delete(key);
+            }
+        }
+
+        if (groups.size === 0) {
+            sessionLog("SOULSEEK", `[Album Search] No directory groups with ${minGroupSize}+ files, falling back to per-track`);
+            return this.searchAndDownloadBatch(
+                tracks.map(t => ({ artist: artistName, title: t.title, album: albumName })),
+                musicPath,
+                2
+            );
+        }
+
+        sessionLog("SOULSEEK", `[Album Search] Found ${groups.size} directory groups from ${audioResults.length} audio files`);
+
+        // --- Phase 3: Match track titles to filenames in each group ---
+        const stripTrackNumber = (name: string): string =>
+            name.replace(/^\d{1,3}\s*[-._)\s]\s*/, "");
+
+        const filenameBase = (filePath: string): string => {
+            const name = filePath.replace(/\\/g, "/").split("/").pop() || filePath;
+            return name.replace(/\.[^.]+$/, "");
+        };
+
+        type GroupScore = {
+            key: string;
+            matchRatio: number;
+            matchedTracks: Map<number, SearchResult>;
+            unmatchedIndices: number[];
+            qualityBonus: number;
+            slotsBonus: number;
+            speedBonus: number;
+            totalScore: number;
+        };
+
+        const scoredGroups: GroupScore[] = [];
+
+        for (const [key, files] of groups) {
+            const fileInfos = files.map(f => {
+                const base = filenameBase(f.file);
+                let stripped = stripTrackNumber(base);
+                // For VA compilations, strip "Artist - " prefix from filenames
+                if (isVA) {
+                    const dashIdx = stripped.indexOf(" - ");
+                    if (dashIdx > 0) {
+                        stripped = stripped.substring(dashIdx + 3);
+                    }
+                }
+                const normalized = normalizeTrackTitle(stripped, 'aggressive').toLowerCase().replace(/[^a-z0-9\s]/g, "");
+                return { file: f, base, stripped, normalized };
+            });
+
+            type MatchCandidate = { trackIdx: number; fileIdx: number; score: number };
+            const candidates: MatchCandidate[] = [];
+
+            for (let ti = 0; ti < tracks.length; ti++) {
+                const trackNorm = normalizeTrackTitle(tracks[ti].title, 'aggressive').toLowerCase().replace(/[^a-z0-9\s]/g, "");
+
+                for (let fi = 0; fi < fileInfos.length; fi++) {
+                    const fileNorm = fileInfos[fi].normalized;
+                    let score = 0;
+
+                    if (fileNorm === trackNorm) {
+                        score = 1.0;
+                    } else if (fileNorm.includes(trackNorm) || trackNorm.includes(fileNorm)) {
+                        score = 0.9;
+                    } else {
+                        const trackWords = trackNorm.split(/\s+/).filter(w => w.length > 1);
+                        const allPresent = trackWords.length > 0 && trackWords.every(w => fileNorm.includes(w));
+                        if (allPresent) {
+                            score = 0.8;
+                        } else {
+                            const ratio = fuzz.ratio(trackNorm, fileNorm);
+                            if (ratio >= 80) {
+                                score = 0.7;
+                            } else if (ratio >= 60) {
+                                score = 0.5;
+                            }
+                        }
+                    }
+
+                    if (score >= 0.5) {
+                        candidates.push({ trackIdx: ti, fileIdx: fi, score });
+                    }
+                }
+            }
+
+            candidates.sort((a, b) => b.score - a.score);
+            const usedTracks = new Set<number>();
+            const usedFiles = new Set<number>();
+            const matchedTracks = new Map<number, SearchResult>();
+
+            for (const c of candidates) {
+                if (usedTracks.has(c.trackIdx) || usedFiles.has(c.fileIdx)) continue;
+                usedTracks.add(c.trackIdx);
+                usedFiles.add(c.fileIdx);
+                matchedTracks.set(c.trackIdx, fileInfos[c.fileIdx].file);
+            }
+
+            const matchRatio = matchedTracks.size / tracks.length;
+            const unmatchedIndices = tracks
+                .map((_, i) => i)
+                .filter(i => !matchedTracks.has(i));
+
+            let qualityBonus = 0;
+            for (const f of files) {
+                const lower = f.file.toLowerCase();
+                if (lower.endsWith(".flac")) qualityBonus += 3;
+                else if (lower.endsWith(".mp3") && (f.bitrate || 0) >= 320) qualityBonus += 2;
+                else if (lower.endsWith(".mp3") && (f.bitrate || 0) >= 256) qualityBonus += 1;
+            }
+
+            const slotsBonus = files.some(f => f.slots) ? 10 : 0;
+            const speedBonus = Math.min(files[0]?.speed || 0, 10000000) / 1000000;
+            const totalScore = matchRatio * 100 + qualityBonus + slotsBonus + speedBonus;
+
+            scoredGroups.push({
+                key,
+                matchRatio,
+                matchedTracks,
+                unmatchedIndices,
+                qualityBonus,
+                slotsBonus,
+                speedBonus,
+                totalScore,
+            });
+        }
+
+        scoredGroups.sort((a, b) => b.totalScore - a.totalScore);
+
+        // Fix 2: Try multiple groups (top 3) before falling back to per-track
+        const groupsToTry = scoredGroups.filter(g => g.matchRatio >= 0.3).slice(0, 3);
+
+        if (groupsToTry.length === 0) {
+            const best = scoredGroups[0];
+            sessionLog("SOULSEEK", `[Album Search] Best group only ${Math.round(best.matchRatio * 100)}% match, falling back to per-track`);
+            return this.searchAndDownloadBatch(
+                tracks.map(t => ({ artist: artistName, title: t.title, album: albumName })),
+                musicPath,
+                2
+            );
+        }
+
+        // --- Phase 4: Download from best groups, trying next group on failure ---
+        const sanitize = (name: string) => name.replace(/[<>:"/\\|?*]/g, "_").trim();
+        const downloadedTrackIndices = new Set<number>();
+
+        for (let gi = 0; gi < groupsToTry.length; gi++) {
+            const group = groupsToTry[gi];
+            const username = group.key.split("|||")[0];
+
+            sessionLog(
+                "SOULSEEK",
+                `[Album Search] Trying group ${gi + 1}/${groupsToTry.length}: ${username} | ` +
+                `match=${Math.round(group.matchRatio * 100)}% (${group.matchedTracks.size}/${tracks.length}) | ` +
+                `score=${group.totalScore.toFixed(1)}`
+            );
+
+            // Only download tracks not yet successfully downloaded
+            const tracksToDownload = new Map<number, SearchResult>();
+            for (const [trackIdx, file] of group.matchedTracks) {
+                if (!downloadedTrackIndices.has(trackIdx)) {
+                    tracksToDownload.set(trackIdx, file);
+                }
+            }
+
+            if (tracksToDownload.size === 0) continue;
+
+            // Fix 4: Parallel downloads with PQueue (concurrency 3)
+            const downloadQueue = new PQueue({ concurrency: 3 });
+            let groupFailures = 0;
+
+            const downloadPromises = Array.from(tracksToDownload.entries()).map(([trackIdx, file]) =>
+                downloadQueue.add(async () => {
+                    const track = tracks[trackIdx];
+                    const ext = path.extname(file.file);
+                    const destPath = path.join(
+                        musicPath,
+                        "Singles",
+                        sanitize(artistName),
+                        sanitize(albumName),
+                        sanitize(track.title) + ext
+                    );
+
+                    const match: TrackMatch = {
+                        username: file.user,
+                        filename: file.file.replace(/\\/g, "/").split("/").pop() || file.file,
+                        fullPath: file.file,
+                        size: file.size,
+                        bitRate: file.bitrate,
+                        quality: this.getQualityFromFilename(file.file, file.bitrate),
+                        score: 100,
+                    };
+
+                    const downloadResult = await this.downloadTrack(match, destPath, 0, true);
+                    if (downloadResult.success) {
+                        results.successful++;
+                        results.files.push(destPath);
+                        downloadedTrackIndices.add(trackIdx);
+                    } else {
+                        groupFailures++;
+                        results.errors.push(`${track.title}: ${downloadResult.error || "download failed"} (user: ${username})`);
+                        sessionLog("SOULSEEK", `[Album Search] Download failed for "${track.title}" from ${username}: ${downloadResult.error}`, "WARN");
+                    }
+                })
+            );
+
+            const downloadSettled = await Promise.allSettled(downloadPromises);
+            for (const result of downloadSettled) {
+                if (result.status === "rejected") {
+                    groupFailures++;
+                    sessionLog("SOULSEEK", `[Album Search] Download promise rejected: ${result.reason}`, "ERROR");
+                }
+            }
+
+            // If this group got all remaining tracks, stop trying groups
+            if (downloadedTrackIndices.size >= tracks.length) {
+                break;
+            }
+
+            // If most downloads from this group failed, user is likely offline -- try next group
+            if (groupFailures > 0 && groupFailures >= tracksToDownload.size * 0.5) {
+                sessionLog("SOULSEEK", `[Album Search] Group ${gi + 1} had ${groupFailures}/${tracksToDownload.size} failures, trying next group`);
+                continue;
+            }
+        }
+
+        // --- Phase 5: Per-track fallback for remaining undownloaded tracks ---
+        const missingIndices = tracks
+            .map((_, i) => i)
+            .filter(i => !downloadedTrackIndices.has(i));
+
+        if (missingIndices.length > 0) {
+            sessionLog(
+                "SOULSEEK",
+                `[Album Search] ${missingIndices.length} tracks need per-track fallback`
+            );
+
+            const fallbackTracks = missingIndices.map(i => ({
+                artist: artistName,
+                title: tracks[i].title,
+                album: albumName,
+            }));
+
+            const fallbackResult = await this.searchAndDownloadBatch(fallbackTracks, musicPath, 2);
+            results.successful += fallbackResult.successful;
+            results.failed += fallbackResult.failed;
+            results.files.push(...fallbackResult.files);
+            results.errors.push(...fallbackResult.errors);
+        }
+
+        sessionLog(
+            "SOULSEEK",
+            `[Album Search] Complete: ${results.successful}/${tracks.length} tracks downloaded`
+        );
+
+        return results;
+    }
+
 async searchAndDownloadBatch(
           tracks: Array<{ artist: string; title: string; album: string }>,
           musicPath: string,
@@ -1199,9 +1672,19 @@ async searchAndDownloadBatch(
                 }))
             )
         );
-        const searchResults = await Promise.all(searchPromises);
+        const searchSettled = await Promise.allSettled(searchPromises);
+        const searchResults: Array<{ track: typeof tracks[0]; result: SearchTrackResult }> = [];
+        for (const settled of searchSettled) {
+            if (settled.status === "fulfilled" && settled.value) {
+                searchResults.push(settled.value);
+            } else if (settled.status === "rejected") {
+                results.failed++;
+                results.errors.push(`Search rejected: ${settled.reason}`);
+                sessionLog("SOULSEEK", `Batch search promise rejected: ${settled.reason}`, "ERROR");
+            }
+        }
 
-const tracksWithMatches = searchResults.filter(
+        const tracksWithMatches = searchResults.filter(
              (r) => r.result.found && r.result.allMatches.length > 0
          );
          sessionLog(
@@ -1240,7 +1723,14 @@ const tracksWithMatches = searchResults.filter(
             })
         );
 
-        await Promise.all(downloadPromises);
+        const downloadSettled = await Promise.allSettled(downloadPromises);
+        for (const settled of downloadSettled) {
+            if (settled.status === "rejected") {
+                results.failed++;
+                results.errors.push(`Download rejected: ${settled.reason}`);
+                sessionLog("SOULSEEK", `Batch download promise rejected: ${settled.reason}`, "ERROR");
+            }
+        }
 
         sessionLog(
             "SOULSEEK",
@@ -1335,6 +1825,10 @@ private async downloadWithRetry(
     }
 
     disconnect(): void {
+        if (this.cooldownCleanupInterval) {
+            clearInterval(this.cooldownCleanupInterval);
+            this.cooldownCleanupInterval = null;
+        }
         if (this.client) {
             try {
                 this.client.destroy();
@@ -1346,6 +1840,31 @@ private async downloadWithRetry(
         this.connectedAt = null;
         soulseekConnectionStatus.set(0);
         sessionLog("SOULSEEK", "Disconnected");
+    }
+
+    /**
+     * Reset all backoff/error counters and force immediate reconnection.
+     * Use this when credentials change or when manually resetting connection state.
+     */
+    async resetAndReconnect(): Promise<void> {
+        sessionLog("SOULSEEK", "Resetting connection state and forcing reconnect...", "DEBUG");
+
+        // Reset all counters
+        this.failedConnectionAttempts = 0;
+        this.consecutiveEmptySearches = 0;
+        this.lastConnectAttempt = 0;
+
+        // Disconnect if connected
+        this.disconnect();
+
+        // Force immediate reconnection (bypasses backoff)
+        try {
+            await this.ensureConnected(true);
+            sessionLog("SOULSEEK", "Reset and reconnect successful", "DEBUG");
+        } catch (err: any) {
+            sessionLog("SOULSEEK", `Reset and reconnect failed: ${err.message}`, "ERROR");
+            throw err;
+        }
     }
 
     async saveSearchSession(sessionId: string, data: unknown, ttlSeconds: number = 300): Promise<void> {

@@ -7,6 +7,20 @@ import { useDownloadProgress } from "@/lib/download-progress-context";
 import { searchResultStore } from "@/lib/search-result-store";
 import { api, getApiBaseUrl } from "@/lib/api";
 
+/**
+ * SSE connections MUST bypass the Next.js rewrite proxy because it buffers
+ * streaming responses. This returns a direct URL to the backend for SSE only.
+ */
+function getSSEBaseUrl(): string {
+    if (typeof window === "undefined") return "";
+    const base = getApiBaseUrl();
+    // If getApiBaseUrl returns a full URL (e.g. http://localhost:3006), use it
+    if (base) return base;
+    // Relative path means we'd go through Next.js proxy -- connect directly instead
+    const apiPort = process.env.NEXT_PUBLIC_BACKEND_PORT || "3006";
+    return `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
+}
+
 export function useEventSource() {
     const { isAuthenticated } = useAuth();
     const queryClient = useQueryClient();
@@ -26,12 +40,13 @@ export function useEventSource() {
             const token = api.getToken();
             if (!token) return;
 
-            const es = new EventSource(`${getApiBaseUrl()}/api/events?token=${token}`);
+            const es = new EventSource(`${getSSEBaseUrl()}/api/events?token=${token}`);
             eventSourceRef.current = es;
 
             es.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
+                    console.log(`[FRONTEND SSE] Received event:`, data.type, data);
 
                     switch (data.type) {
                         case "notification":
@@ -71,11 +86,16 @@ export function useEventSource() {
                             queryClient.invalidateQueries({ queryKey: ["notifications"] });
                             break;
                         case "search:result":
+                            console.log(`[FRONTEND SSE] search:result received - searchId: ${data.searchId}, results: ${data.results?.length || 0}`);
                             if (data.searchId && data.results) {
+                                console.log(`[FRONTEND SSE] Pushing ${data.results.length} results to store for searchId: ${data.searchId}`);
                                 searchResultStore.push(data.searchId, data.results);
+                            } else {
+                                console.warn(`[FRONTEND SSE] search:result missing data - searchId: ${data.searchId}, results: ${data.results}`);
                             }
                             break;
                         case "search:complete":
+                            console.log(`[FRONTEND SSE] search:complete received - searchId: ${data.searchId}`);
                             if (data.searchId) {
                                 searchResultStore.complete(data.searchId);
                             }

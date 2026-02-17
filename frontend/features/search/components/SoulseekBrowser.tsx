@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Download, CheckCircle, Music, ChevronDown, ChevronRight, List, Users } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
@@ -23,7 +23,7 @@ interface SoulseekBrowserProps {
     onBulkDownload: (results: SoulseekResult[]) => void;
 }
 
-const INITIAL_DISPLAY_LIMIT = 100;
+const PAGE_SIZE = 100;
 
 const FORMAT_PILLS: { label: string; value: SoulseekFormatFilter }[] = [
     { label: "All", value: "all" },
@@ -61,7 +61,7 @@ export function SoulseekBrowser({
     const [sortField, setSortField] = useState<SoulseekSortField>("quality");
     const [viewMode, setViewMode] = useState<SoulseekViewMode>("flat");
     const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
-    const [showAll, setShowAll] = useState(false);
+    const [displayLimit, setDisplayLimit] = useState(PAGE_SIZE);
     const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
     const [groupsInitialized, setGroupsInitialized] = useState(false);
 
@@ -107,8 +107,32 @@ export function SoulseekBrowser({
         }
     }, [filtered, sortField]);
 
-    const displayResults = showAll ? sorted : sorted.slice(0, INITIAL_DISPLAY_LIMIT);
-    const hasMore = sorted.length > INITIAL_DISPLAY_LIMIT && !showAll;
+    const [prevSorted, setPrevSorted] = useState(sorted);
+    if (prevSorted !== sorted) {
+        setPrevSorted(sorted);
+        setDisplayLimit(PAGE_SIZE);
+    }
+
+    const displayResults = sorted.slice(0, displayLimit);
+    const hasMore = displayLimit < sorted.length;
+    const sentinelRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const sentinel = sentinelRef.current;
+        if (!sentinel) return;
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0].isIntersecting) {
+                    setDisplayLimit((prev) => prev + PAGE_SIZE);
+                }
+            },
+            { rootMargin: "200px" },
+        );
+
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+    }, [hasMore]);
 
     // Group results by username
     const grouped = useMemo(() => {
@@ -290,14 +314,13 @@ export function SoulseekBrowser({
                 />
             )}
 
-            {/* Show all button */}
-            {hasMore && (
-                <button
-                    onClick={() => setShowAll(true)}
-                    className="w-full py-3 text-sm text-gray-400 hover:text-white bg-[#181818] hover:bg-[#1f1f1f] rounded-lg transition-colors"
-                >
-                    Show all {sorted.length} results
-                </button>
+            {/* Infinite scroll sentinel */}
+            {viewMode === "flat" && hasMore && (
+                <div ref={sentinelRef} className="flex items-center justify-center py-4">
+                    <span className="text-xs text-gray-500">
+                        Showing {displayResults.length} of {sorted.length} results
+                    </span>
+                </div>
             )}
         </div>
     );

@@ -278,7 +278,7 @@ class AcquisitionService {
         // Update queue concurrency from user settings
         await this.updateQueueConcurrency();
 
-        // Wrap acquisition with timeout - fail fast after 5 minutes
+        // Wrap acquisition with timeout
         const MAX_ACQUISITION_TIME = 5 * 60 * 1000; // 5 minutes
         const acquisitionPromise = this.albumQueue.add(() =>
             this.acquireAlbumInternal(request, context)
@@ -289,7 +289,7 @@ class AcquisitionService {
                 resolve({
                     success: false,
                     source: undefined,
-                    error: `Acquisition timed out after ${MAX_ACQUISITION_TIME / 1000}s - tried all available sources`,
+                    error: `Acquisition timed out after ${Math.round(MAX_ACQUISITION_TIME / 1000)}s - tried all available sources`,
                 });
             }, MAX_ACQUISITION_TIME);
         });
@@ -640,18 +640,12 @@ class AcquisitionService {
                 );
             }
 
-            // Prepare tracks for batch download
-            const tracksToDownload = tracks.map((track) => ({
-                artist: request.artistName,
-                title: track.title,
-                album: request.albumTitle,
-            }));
-
-            // Use Soulseek batch download (parallel with concurrency limit)
-            const batchResult = await soulseekService.searchAndDownloadBatch(
-                tracksToDownload,
-                musicPath,
-                settings?.soulseekConcurrentDownloads ?? 4 // concurrency
+            // Use album-level search (1-2 network calls) instead of per-track
+            const batchResult = await soulseekService.searchAndDownloadAlbum(
+                request.artistName,
+                request.albumTitle,
+                tracks,
+                musicPath
             );
 
             if (batchResult.successful === 0) {
@@ -687,11 +681,16 @@ class AcquisitionService {
             );
 
             // Update job metadata with track counts
+            // Read current metadata from DB (job object may be a stub with only id)
+            const currentJob = await prisma.downloadJob.findUnique({
+                where: { id: job.id },
+                select: { metadata: true },
+            });
             await prisma.downloadJob.update({
                 where: { id: job.id },
                 data: {
                     metadata: {
-                        ...job.metadata,
+                        ...((currentJob?.metadata as any) || {}),
                         tracksDownloaded: batchResult.successful,
                         tracksTotal: tracks.length,
                     },
@@ -828,11 +827,15 @@ class AcquisitionService {
         request: AlbumAcquisitionRequest,
         context: AcquisitionContext
     ): Promise<any> {
-        // Check for existing job first
+        // Check for existing job first - return full object (not stub) to preserve metadata
         if (context.existingJobId) {
             logger.debug(
                 `[Acquisition] Using existing download job: ${context.existingJobId}`
             );
+            const existingJob = await prisma.downloadJob.findUnique({
+                where: { id: context.existingJobId },
+            });
+            if (existingJob) return existingJob;
             return { id: context.existingJobId };
         }
 

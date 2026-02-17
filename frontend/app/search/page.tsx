@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { SearchIcon, Sparkles } from "lucide-react";
+import { SearchIcon } from "lucide-react";
 import { useSearchData } from "@/features/search/hooks/useSearchData";
 import { useSoulseekSearch } from "@/features/search/hooks/useSoulseekSearch";
 import { SearchFilters } from "@/features/search/components/SearchFilters";
@@ -82,17 +82,6 @@ export default function SearchPage() {
 
     return (
         <div className="min-h-screen relative overflow-hidden">
-            {/* Animated background gradient that pulses during search */}
-            <div
-                className={`fixed inset-0 pointer-events-none transition-opacity duration-1000 ${
-                    isLoading ? "opacity-100" : "opacity-0"
-                }`}
-            >
-                <div className="absolute inset-0 bg-gradient-to-br from-[#eab308]/5 via-transparent to-[#a855f7]/5 animate-pulse" />
-                <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-[#eab308]/10 rounded-full blur-[120px] animate-float" />
-                <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-[#a855f7]/10 rounded-full blur-[120px] animate-float-delayed" />
-            </div>
-
             {/* Main content */}
             <div className="relative z-10 px-6 py-8 max-w-[1600px] mx-auto">
                 <TVSearchInput initialQuery={query} onSearch={handleTVSearch} />
@@ -101,17 +90,16 @@ export default function SearchPage() {
                 {!hasSearched && (
                     <div className="mb-12 text-center animate-fade-in">
                         <div className="inline-flex items-center gap-3 mb-4 text-[#eab308]">
-                            <Sparkles className="w-6 h-6" />
                             <span className="text-sm font-semibold tracking-wider uppercase">
                                 Discovery Engine
                             </span>
-                            <Sparkles className="w-6 h-6" />
                         </div>
                         <h1 className="text-6xl md:text-7xl font-black mb-4 bg-gradient-to-br from-white via-white to-gray-500 bg-clip-text text-transparent leading-tight">
                             Find Your Sound
                         </h1>
                         <p className="text-lg text-gray-400 max-w-2xl mx-auto">
-                            Search your library, discover new artists, or tap into the P2P network for rare tracks
+                            Search your library, discover new artists, or tap
+                            into the P2P network for rare tracks
                         </p>
                     </div>
                 )}
@@ -127,7 +115,9 @@ export default function SearchPage() {
                                 {isLoading && (
                                     <div className="flex items-center gap-2 text-sm text-[#eab308]">
                                         <div className="w-1 h-1 rounded-full bg-[#eab308] animate-ping" />
-                                        <span className="font-medium">Searching across sources...</span>
+                                        <span className="font-medium">
+                                            Searching across sources...
+                                        </span>
                                     </div>
                                 )}
                             </div>
@@ -154,7 +144,9 @@ export default function SearchPage() {
                 {/* Loading state - only when no results yet */}
                 {hasSearched &&
                     filterTab !== "soulseek" &&
-                    (isLibrarySearching || isDiscoverSearching || isSoulseekSearching) &&
+                    (isLibrarySearching ||
+                        isDiscoverSearching ||
+                        isSoulseekSearching) &&
                     (!libraryResults || !libraryResults.artists?.length) &&
                     discoverResults.length === 0 && (
                         <div className="flex flex-col items-center justify-center py-24 relative">
@@ -187,7 +179,7 @@ export default function SearchPage() {
                 {/* All / Library / Discover Tabs */}
                 {filterTab !== "soulseek" && (
                     <div className="space-y-12">
-                        {show2ColumnLayout ? (
+                        {show2ColumnLayout ?
                             <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.5fr] gap-8">
                                 {/* Featured Result - Larger card */}
                                 <div className="space-y-4">
@@ -196,7 +188,9 @@ export default function SearchPage() {
                                         Top Match
                                     </h2>
                                     <TopResult
-                                        libraryArtist={libraryResults?.artists?.[0]}
+                                        libraryArtist={
+                                            libraryResults?.artists?.[0]
+                                        }
                                         discoveryArtist={topArtist}
                                     />
                                 </div>
@@ -207,34 +201,41 @@ export default function SearchPage() {
                                         <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full" />
                                         Tracks
                                     </h2>
-                                    {filterTab === "all" ? (
+                                    {filterTab === "all" ?
                                         <UnifiedSongsList
-                                            tracks={libraryResults?.tracks ?? []}
+                                            tracks={
+                                                libraryResults?.tracks ?? []
+                                            }
                                             soulseekResults={soulseekResults}
                                             downloadingFiles={downloadingFiles}
                                             onDownload={handleDownload}
                                         />
-                                    ) : filterTab === "library" ? (
+                                    : filterTab === "library" ?
                                         <LibraryTracksList
-                                            tracks={libraryResults?.tracks ?? []}
+                                            tracks={
+                                                libraryResults?.tracks ?? []
+                                            }
                                         />
-                                    ) : null}
+                                    :   null}
                                 </div>
                             </div>
-                        ) : (
-                            <>
-                                {hasSearched && (showDiscover || showLibrary) && hasTopResult && (
-                                    <section>
-                                        <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
-                                            <span className="w-1 h-8 bg-gradient-to-b from-[#eab308] to-[#f59e0b] rounded-full" />
-                                            Top Match
-                                        </h2>
-                                        <TopResult
-                                            libraryArtist={libraryResults?.artists?.[0]}
-                                            discoveryArtist={topArtist}
-                                        />
-                                    </section>
-                                )}
+                        :   <>
+                                {hasSearched &&
+                                    (showDiscover || showLibrary) &&
+                                    hasTopResult && (
+                                        <section>
+                                            <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                                <span className="w-1 h-8 bg-gradient-to-b from-[#eab308] to-[#f59e0b] rounded-full" />
+                                                Top Match
+                                            </h2>
+                                            <TopResult
+                                                libraryArtist={
+                                                    libraryResults?.artists?.[0]
+                                                }
+                                                discoveryArtist={topArtist}
+                                            />
+                                        </section>
+                                    )}
 
                                 {hasSearched && hasTracks && (
                                     <section>
@@ -242,66 +243,90 @@ export default function SearchPage() {
                                             <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full" />
                                             Tracks
                                         </h2>
-                                        {filterTab === "all" ? (
+                                        {filterTab === "all" ?
                                             <UnifiedSongsList
-                                                tracks={libraryResults?.tracks ?? []}
-                                                soulseekResults={soulseekResults}
-                                                downloadingFiles={downloadingFiles}
+                                                tracks={
+                                                    libraryResults?.tracks ?? []
+                                                }
+                                                soulseekResults={
+                                                    soulseekResults
+                                                }
+                                                downloadingFiles={
+                                                    downloadingFiles
+                                                }
                                                 onDownload={handleDownload}
                                             />
-                                        ) : filterTab === "library" ? (
+                                        : filterTab === "library" ?
                                             <LibraryTracksList
-                                                tracks={libraryResults?.tracks ?? []}
+                                                tracks={
+                                                    libraryResults?.tracks ?? []
+                                                }
                                             />
-                                        ) : null}
+                                        :   null}
                                     </section>
                                 )}
                             </>
-                        )}
+                        }
 
                         {/* Albums Grid */}
-                        {hasSearched && showLibrary && (libraryResults?.albums?.length ?? 0) > 0 && (
-                            <section>
-                                <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
-                                    <span className="w-1 h-8 bg-gradient-to-b from-[#22c55e] to-[#16a34a] rounded-full" />
-                                    Albums
-                                </h2>
-                                <LibraryAlbumsGrid albums={libraryResults!.albums!} />
-                            </section>
-                        )}
+                        {hasSearched &&
+                            showLibrary &&
+                            (libraryResults?.albums?.length ?? 0) > 0 && (
+                                <section>
+                                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                        <span className="w-1 h-8 bg-gradient-to-b from-[#22c55e] to-[#16a34a] rounded-full" />
+                                        Albums
+                                    </h2>
+                                    <LibraryAlbumsGrid
+                                        albums={libraryResults!.albums!}
+                                    />
+                                </section>
+                            )}
 
                         {/* Podcasts Grid */}
-                        {hasSearched && showLibrary && (libraryResults?.podcasts?.length ?? 0) > 0 && (
-                            <section>
-                                <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
-                                    <span className="w-1 h-8 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full" />
-                                    Podcasts
-                                </h2>
-                                <LibraryPodcastsGrid podcasts={libraryResults!.podcasts!} />
-                            </section>
-                        )}
+                        {hasSearched &&
+                            showLibrary &&
+                            (libraryResults?.podcasts?.length ?? 0) > 0 && (
+                                <section>
+                                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                        <span className="w-1 h-8 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full" />
+                                        Podcasts
+                                    </h2>
+                                    <LibraryPodcastsGrid
+                                        podcasts={libraryResults!.podcasts!}
+                                    />
+                                </section>
+                            )}
 
                         {/* Audiobooks Grid */}
-                        {hasSearched && showLibrary && (libraryResults?.audiobooks?.length ?? 0) > 0 && (
-                            <section>
-                                <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
-                                    <span className="w-1 h-8 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full" />
-                                    Audiobooks
-                                </h2>
-                                <LibraryAudiobooksGrid audiobooks={libraryResults!.audiobooks!} />
-                            </section>
-                        )}
+                        {hasSearched &&
+                            showLibrary &&
+                            (libraryResults?.audiobooks?.length ?? 0) > 0 && (
+                                <section>
+                                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                        <span className="w-1 h-8 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full" />
+                                        Audiobooks
+                                    </h2>
+                                    <LibraryAudiobooksGrid
+                                        audiobooks={libraryResults!.audiobooks!}
+                                    />
+                                </section>
+                            )}
 
                         {/* Related Artists */}
-                        {hasSearched && showDiscover && similarArtists.length > 0 && (
-                            <section>
-                                <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
-                                    <span className="w-1 h-8 bg-gradient-to-b from-[#ec4899] to-[#db2777] rounded-full" />
-                                    Related Artists
-                                </h2>
-                                <SimilarArtistsGrid similarArtists={similarArtists} />
-                            </section>
-                        )}
+                        {hasSearched &&
+                            showDiscover &&
+                            similarArtists.length > 0 && (
+                                <section>
+                                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                        <span className="w-1 h-8 bg-gradient-to-b from-[#ec4899] to-[#db2777] rounded-full" />
+                                        Related Artists
+                                    </h2>
+                                    <SimilarArtistsGrid
+                                        similarArtists={similarArtists}
+                                    />
+                                </section>
+                            )}
                     </div>
                 )}
 
@@ -326,7 +351,8 @@ export default function SearchPage() {
                                 No matches found
                             </h3>
                             <p className="text-gray-400 mb-2">
-                                Try a different search term or check your spelling
+                                Try a different search term or check your
+                                spelling
                             </p>
                             <p className="text-sm text-gray-500">
                                 Tip: Enable Soulseek to search the P2P network

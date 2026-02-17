@@ -14,6 +14,7 @@ import {
     useRef,
     memo,
     useCallback,
+    useState,
 } from "react";
 
 function getNextTrackInfo(
@@ -204,6 +205,53 @@ export const AudioElement = memo(function AudioElement() {
         savePodcastProgressRef.current = savePodcastProgress;
     }, [saveAudiobookProgress, savePodcastProgress]);
 
+    // --- BroadcastChannel for multi-tab playback coordination ---
+
+    const [tabId] = useState(() =>
+        typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+
+    useEffect(() => {
+        if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return;
+
+        const channel = new BroadcastChannel("kima-audio-playback");
+        broadcastChannelRef.current = channel;
+
+        channel.onmessage = (event: MessageEvent) => {
+            const msg = event.data;
+            if (!msg || typeof msg !== "object") return;
+
+            if (msg.type === "playback-claimed" && msg.tabId !== tabId) {
+                // Another tab claimed playback - pause locally
+                if (lastPlayingStateRef.current) {
+                    setIsPlaying(false);
+                    audioEngine.pause();
+                }
+            }
+        };
+
+        return () => {
+            channel.close();
+            broadcastChannelRef.current = null;
+        };
+    }, [tabId, setIsPlaying]);
+
+    // Broadcast playback claim when this tab starts playing
+    useEffect(() => {
+        if (!isPlaying) return;
+        const channel = broadcastChannelRef.current;
+        if (!channel) return;
+
+        try {
+            channel.postMessage({ type: "playback-claimed", tabId });
+        } catch {
+            // Channel may be closed
+        }
+    }, [isPlaying, tabId]);
+
     // --- Initialize engine ---
 
     useEffect(() => {
@@ -280,12 +328,20 @@ export const AudioElement = memo(function AudioElement() {
         };
 
         const handleError = (data: unknown) => {
-            const { error } = data as { error: string; code?: number };
-            console.error("[AudioElement] Playback error:", error);
+            const { error, code } = data as { error: string; code?: number };
+            console.error("[AudioElement] Playback error:", error, "code:", code);
 
             setIsPlaying(false);
             setIsBuffering(false);
-            setAudioError(typeof error === "string" ? error : "Audio playback error");
+
+            // MEDIA_ERR_NETWORK (code 2) - provide a more descriptive message
+            const errorMessage =
+                code === 2
+                    ? "Playback interrupted - stream may have been taken by another session"
+                    : typeof error === "string"
+                      ? error
+                      : "Audio playback error";
+            setAudioError(errorMessage);
 
             // For tracks: skip to next if queue has more, otherwise clear
             if (playbackTypeRef.current === "track") {

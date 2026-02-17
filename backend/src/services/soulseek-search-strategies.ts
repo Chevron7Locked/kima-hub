@@ -180,7 +180,8 @@ export async function searchWithStrategies(
     trackTitle: string,
     albumName: string | undefined,
     timeoutMs: number,
-    searchId: number
+    searchId: number,
+    onResult?: (result: FileSearchResponse) => void
 ): Promise<FileSearchResponse[]> {
     const audioExtensions = [".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav", ".aac"];
 
@@ -223,7 +224,10 @@ export async function searchWithStrategies(
         );
 
         try {
-            const responses = await client.search(query, { timeout: timeoutMs });
+            const responses = await client.search(query, {
+                timeout: timeoutMs,
+                onResult: onResult
+            });
 
             if (responses && responses.length > 0) {
                 // Count audio files in responses

@@ -416,11 +416,9 @@ export class DiscoverWeeklyService {
             logger.info(`[Discover] Batch complete: ${downloadsStarted} succeeded, ${downloadsFailed} failed`);
 
             // After all download attempts, check if batch should be completed
-            // This handles cases where downloads fail before webhooks are triggered
-            if (downloadsStarted === 0 || downloadsFailed > 0) {
-                logger.debug(`[Discovery] Checking batch completion (started: ${downloadsStarted}, failed: ${downloadsFailed})`);
-                await this.checkBatchCompletion(batch.id);
-            }
+            // Soulseek downloads complete synchronously so we always need to check here
+            logger.debug(`[Discovery] Checking batch completion (started: ${downloadsStarted}, failed: ${downloadsFailed})`);
+            await this.checkBatchCompletion(batch.id);
 
             discoveryLogger.section("GENERATION COMPLETE");
             discoveryLogger.table({
@@ -533,6 +531,8 @@ export class DiscoverWeeklyService {
         const BATCH_TIMEOUT_WITH_COMPLETIONS = 30 * 60 * 1000; // 30 minutes
         const BATCH_TIMEOUT_NO_COMPLETIONS = 60 * 60 * 1000; // 60 minutes
         const ABSOLUTE_MAX_TIMEOUT = 2 * 60 * 60 * 1000; // 2 hours - force fail any batch older than this
+        const SCANNING_RETRY_TIMEOUT = 10 * 60 * 1000; // 10 minutes - retry scan
+        const SCANNING_FAIL_TIMEOUT = 30 * 60 * 1000; // 30 minutes - force fail scanning batch
 
         const stuckBatches = await prisma.discoveryBatch.findMany({
             where: {
@@ -555,7 +555,7 @@ export class DiscoverWeeklyService {
             // Absolute timeout - fail any batch older than 2 hours regardless of state
             if (batchAge > ABSOLUTE_MAX_TIMEOUT) {
                 logger.debug(
-                    `\n⏰ [BATCH FORCE FAIL] Batch ${batch.id} is ${Math.round(
+                    `\n[BATCH FORCE FAIL] Batch ${batch.id} is ${Math.round(
                         batchAge / 3600000
                     )}h old - force failing`
                 );
@@ -583,7 +583,49 @@ export class DiscoverWeeklyService {
                 continue;
             }
 
-            // Check if batch should be force-completed
+            // Handle stuck "scanning" batches separately (shorter timeouts)
+            if (batch.status === "scanning") {
+                if (batchAge > SCANNING_FAIL_TIMEOUT) {
+                    logger.debug(
+                        `\n[BATCH SCAN FAIL] Batch ${batch.id} stuck in scanning for ${Math.round(batchAge / 60000)}min - force failing`
+                    );
+
+                    await updateBatchStatus(batch.id, {
+                        status: "failed",
+                        errorMessage: "Scan timed out after 30 minutes",
+                        completedAt: new Date(),
+                    });
+
+                    forcedCount++;
+                } else if (batchAge > SCANNING_RETRY_TIMEOUT) {
+                    logger.debug(
+                        `\n[BATCH SCAN RETRY] Batch ${batch.id} stuck in scanning for ${Math.round(batchAge / 60000)}min - re-queuing scan`
+                    );
+
+                    // Skip if we already re-queued a scan for this batch
+                    if (batch.errorMessage === "scan-retry-queued") {
+                        continue;
+                    }
+
+                    await scanQueue.add("scan", {
+                        userId: batch.userId,
+                        type: "full",
+                        source: "discover-weekly-completion",
+                        discoveryBatchId: batch.id,
+                    });
+
+                    // Mark as retried to prevent re-queuing every 30s
+                    await prisma.discoveryBatch.update({
+                        where: { id: batch.id },
+                        data: { errorMessage: "scan-retry-queued" },
+                    });
+
+                    forcedCount++;
+                }
+                continue;
+            }
+
+            // Check if batch should be force-completed (downloading status)
             const hasCompletions = completedJobs.length > 0;
             const timeout = hasCompletions
                 ? BATCH_TIMEOUT_WITH_COMPLETIONS
@@ -591,7 +633,7 @@ export class DiscoverWeeklyService {
 
             if (batchAge > timeout && pendingJobs.length > 0) {
                 logger.debug(
-                    `\n⏰ [BATCH TIMEOUT] Batch ${
+                    `\n[BATCH TIMEOUT] Batch ${
                         batch.id
                     } stuck for ${Math.round(batchAge / 60000)}min`
                 );
@@ -686,9 +728,14 @@ export class DiscoverWeeklyService {
             return;
         }
 
-        // Wait for Lidarr to finish importing files
-        logger.debug(`[BATCH ${batchId}] All jobs done! Waiting 60s for Lidarr to finish importing...`);
-        await new Promise(resolve => setTimeout(resolve, 60000));
+        // Only wait for Lidarr import if any jobs used Lidarr (have lidarrRef)
+        const hasLidarrJobs = batch.jobs.some((j) => j.lidarrRef != null);
+        if (hasLidarrJobs) {
+            logger.debug(`[BATCH ${batchId}] All jobs done! Waiting 60s for Lidarr to finish importing...`);
+            await new Promise(resolve => setTimeout(resolve, 60000));
+        } else {
+            logger.debug(`[BATCH ${batchId}] All jobs done via Soulseek, no Lidarr wait needed`);
+        }
         logger.debug(`[BATCH ${batchId}] Transitioning to scan phase...`);
 
         // All jobs finished - use transaction to update batch and create unavailable records
@@ -811,6 +858,12 @@ export class DiscoverWeeklyService {
 
         if (!batch) {
             logger.debug(`   Batch not found`);
+            return;
+        }
+
+        // Idempotency guard: if playlist already built, skip duplicate execution
+        if (batch.status === "completed" || batch.status === "failed") {
+            logger.debug(`   Batch already ${batch.status} (finalSongCount=${batch.finalSongCount}) - skipping duplicate buildFinalPlaylist`);
             return;
         }
 

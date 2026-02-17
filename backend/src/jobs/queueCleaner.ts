@@ -19,6 +19,7 @@ class QueueCleanerService {
     // Cached dynamic imports (lazy-loaded once, reused on subsequent calls)
     private discoverWeeklyService: typeof import("../services/discoverWeekly")["discoverWeeklyService"] | null = null;
     private matchAlbum: typeof import("../utils/fuzzyMatch")["matchAlbum"] | null = null;
+    private spotifyImportService: typeof import("../services/spotifyImport")["spotifyImportService"] | null = null;
 
     /**
      * Get discoverWeeklyService (lazy-loaded and cached)
@@ -29,6 +30,17 @@ class QueueCleanerService {
             this.discoverWeeklyService = module.discoverWeeklyService;
         }
         return this.discoverWeeklyService;
+    }
+
+    /**
+     * Get spotifyImportService (lazy-loaded and cached)
+     */
+    private async getSpotifyImportService() {
+        if (!this.spotifyImportService) {
+            const module = await import("../services/spotifyImport");
+            this.spotifyImportService = module.spotifyImportService;
+        }
+        return this.spotifyImportService;
     }
 
     /**
@@ -133,6 +145,15 @@ class QueueCleanerService {
                     `⏰ Force-completed ${stuckBatchCount} stuck discovery batch(es)`
                 );
                 this.emptyQueueChecks = 0; // Reset counter
+            }
+
+            // PART 0.6: Check for stuck Spotify import jobs (scanning timeout)
+            const stuckImportCount = await this.checkStuckSpotifyImports();
+            if (stuckImportCount > 0) {
+                logger.debug(
+                    `Recovered ${stuckImportCount} stuck Spotify import job(s)`
+                );
+                this.emptyQueueChecks = 0;
             }
 
             // PART 1: Check for stuck downloads needing blocklist + retry
@@ -343,6 +364,81 @@ class QueueCleanerService {
                 this.checkInterval
             );
         }
+    }
+
+    /**
+     * Check for Spotify import jobs stuck in "scanning" or "downloading" status.
+     * Re-triggers scan for jobs stuck scanning, or forces completion check
+     * for jobs stuck downloading.
+     */
+    async checkStuckSpotifyImports(): Promise<number> {
+        const SCANNING_RETRY_TIMEOUT = 10 * 60 * 1000; // 10 minutes - retry scan
+        const SCANNING_FAIL_TIMEOUT = 30 * 60 * 1000; // 30 minutes - force fail
+        const DOWNLOADING_TIMEOUT = 30 * 60 * 1000; // 30 minutes - force completion check
+
+        const stuckJobs = await prisma.spotifyImportJob.findMany({
+            where: {
+                status: { in: ["scanning", "downloading"] },
+            },
+        });
+
+        if (stuckJobs.length === 0) return 0;
+
+        let recoveredCount = 0;
+
+        for (const job of stuckJobs) {
+            const jobAge = Date.now() - job.updatedAt.getTime();
+
+            if (job.status === "scanning") {
+                if (jobAge > SCANNING_FAIL_TIMEOUT) {
+                    logger.debug(
+                        `[IMPORT STUCK] Job ${job.id} stuck in scanning for ${Math.round(jobAge / 60000)}min - force failing`
+                    );
+
+                    await prisma.spotifyImportJob.update({
+                        where: { id: job.id },
+                        data: {
+                            status: "failed",
+                            error: "Scan timed out after 30 minutes",
+                        },
+                    });
+                    recoveredCount++;
+                } else if (jobAge > SCANNING_RETRY_TIMEOUT) {
+                    logger.debug(
+                        `[IMPORT STUCK] Job ${job.id} stuck in scanning for ${Math.round(jobAge / 60000)}min - re-queuing scan`
+                    );
+
+                    await scanQueue.add("scan", {
+                        userId: job.userId,
+                        source: "spotify-import",
+                        spotifyImportJobId: job.id,
+                    });
+
+                    // Touch updatedAt to prevent re-queuing every 30s
+                    await prisma.spotifyImportJob.update({
+                        where: { id: job.id },
+                        data: { progress: job.progress },
+                    });
+                    recoveredCount++;
+                }
+            } else if (job.status === "downloading" && jobAge > DOWNLOADING_TIMEOUT) {
+                logger.debug(
+                    `[IMPORT STUCK] Job ${job.id} stuck in downloading for ${Math.round(jobAge / 60000)}min - forcing completion check`
+                );
+
+                try {
+                    const spotifyImportService = await this.getSpotifyImportService();
+                    await spotifyImportService.checkImportCompletion(job.id);
+                    recoveredCount++;
+                } catch (err: any) {
+                    logger.debug(
+                        `[IMPORT STUCK] Failed to force completion check for ${job.id}: ${err.message}`
+                    );
+                }
+            }
+        }
+
+        return recoveredCount;
     }
 
     /**

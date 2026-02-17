@@ -135,14 +135,23 @@ startDiscoverWeeklyCron();
 // Start data cleanup cron scheduler (daily at 2 AM)
 startDataCleanupCron();
 
+// Running guards to prevent pile-up when tasks take longer than their interval
+let dataIntegrityRunning = false;
+let reconciliationRunning = false;
+let lidarrCleanupRunning = false;
+
 // Self-rescheduling data integrity check (prevents pile-up on slow runs)
 async function runDataIntegrityCycle() {
+    if (dataIntegrityRunning) return;
+    dataIntegrityRunning = true;
     try {
         await runDataIntegrityCheck();
     } catch (err) {
         logger.error("Data integrity check failed:", err);
+    } finally {
+        dataIntegrityRunning = false;
+        timeouts.push(setTimeout(runDataIntegrityCycle, 24 * 60 * 60 * 1000));
     }
-    timeouts.push(setTimeout(runDataIntegrityCycle, 24 * 60 * 60 * 1000));
 }
 
 // First run 10 seconds after startup
@@ -189,6 +198,8 @@ async function withTimeout<T>(
 // Each cycle waits for the previous one to fully complete before scheduling the next.
 // This prevents zombie operations from accumulating when operations exceed their timeout.
 async function runReconciliationCycle() {
+    if (reconciliationRunning) return;
+    reconciliationRunning = true;
     try {
         const { lidarrService } = await import("../services/lidarr");
         const snapshot = await withTimeout(
@@ -245,10 +256,11 @@ async function runReconciliationCycle() {
             "Periodic download cleanup/reconciliation failed:",
             err
         );
+    } finally {
+        reconciliationRunning = false;
+        // Schedule next run AFTER this one completes (prevents pile-up)
+        timeouts.push(setTimeout(runReconciliationCycle, 2 * 60 * 1000));
     }
-
-    // Schedule next run AFTER this one completes (prevents pile-up)
-    timeouts.push(setTimeout(runReconciliationCycle, 2 * 60 * 1000));
 }
 
 // First reconciliation run 2 minutes after startup
@@ -257,6 +269,8 @@ logger.debug("Stale download cleanup scheduled (every 2 minutes, self-rescheduli
 
 // Self-rescheduling Lidarr queue cleanup (replaces setInterval to prevent pile-up)
 async function runLidarrCleanupCycle() {
+    if (lidarrCleanupRunning) return;
+    lidarrCleanupRunning = true;
     try {
         const result = await withTimeout(
             () => simpleDownloadManager.clearLidarrQueue(),
@@ -270,10 +284,11 @@ async function runLidarrCleanupCycle() {
         }
     } catch (err) {
         logger.error("Lidarr queue cleanup failed:", err);
+    } finally {
+        lidarrCleanupRunning = false;
+        // Schedule next run AFTER this one completes (prevents pile-up)
+        timeouts.push(setTimeout(runLidarrCleanupCycle, 5 * 60 * 1000));
     }
-
-    // Schedule next run AFTER this one completes (prevents pile-up)
-    timeouts.push(setTimeout(runLidarrCleanupCycle, 5 * 60 * 1000));
 }
 
 // First Lidarr cleanup 5 minutes after startup (initial cleanup at 30s is separate)

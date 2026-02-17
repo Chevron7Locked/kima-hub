@@ -26,6 +26,7 @@ interface SearchSession {
 
 const searchSessions = new Map<string, SearchSession>();
 const SEARCH_SESSION_TTL = 5 * 60 * 1000; // 5 minutes
+const MAX_SEARCH_SESSIONS = 50;
 
 function formatSearchResult(response: FileSearchResponse) {
     return response.files.map((file) => {
@@ -170,6 +171,19 @@ router.post(
                 `[Soulseek] Starting general search: "${searchQuery}"`,
             );
 
+            // Evict oldest session if at capacity
+            if (searchSessions.size >= MAX_SEARCH_SESSIONS) {
+                let oldestId: string | null = null;
+                let oldestTime = Infinity;
+                for (const [id, session] of searchSessions.entries()) {
+                    if (session.createdAt.getTime() < oldestTime) {
+                        oldestTime = session.createdAt.getTime();
+                        oldestId = id;
+                    }
+                }
+                if (oldestId) searchSessions.delete(oldestId);
+            }
+
             // Create search session
             const searchId = randomUUID();
             searchSessions.set(searchId, {
@@ -181,19 +195,42 @@ router.post(
             // Extract userId for SSE targeting
             const userId = (req as any).user?.id;
 
+            // Track streamed results count to limit UI overload
+            let streamedCount = 0;
+            const MAX_STREAMED_RESULTS = 200;
+            let searchAborted = false;
+
             // Start async search with onResult callback for SSE streaming
+            // Use 10s timeout for faster UI response (plenty of time to get 200+ results)
             soulseekService
-                .searchTrack(searchQuery, "", undefined, false, 45000, (response) => {
+                .searchTrack(searchQuery, "", undefined, false, 10000, (response) => {
+                    // Stop streaming if we've already sent enough results
+                    if (searchAborted || streamedCount >= MAX_STREAMED_RESULTS) {
+                        searchAborted = true;
+                        return;
+                    }
+
                     // Stream each peer response via SSE
                     const formatted = formatSearchResult(response);
-                    if (formatted.length > 0 && userId) {
+
+                    // Filter for decent quality results (FLAC or 128kbps+ MP3, allow unknown bitrate)
+                    const highQuality = formatted.filter(r =>
+                        r.format === "flac" || r.bitrate === 0 || r.bitrate >= 128
+                    );
+
+                    if (highQuality.length > 0 && userId) {
+                        // Limit to remaining quota
+                        const toSend = highQuality.slice(0, MAX_STREAMED_RESULTS - streamedCount);
+                        streamedCount += toSend.length;
+
                         eventBus.emit({
                             type: "search:result",
                             userId,
-                            payload: { searchId, results: formatted },
+                            payload: { searchId, results: toSend },
                         });
                     }
-                    // Also accumulate in session for GET fallback
+
+                    // Also accumulate in session for GET fallback (all results, not filtered)
                     const session = searchSessions.get(searchId);
                     if (session) {
                         session.results.push(...formatted.map((r) => ({
@@ -207,29 +244,37 @@ router.post(
                     }
                 })
                 .then((result) => {
-                    if (userId) {
-                        eventBus.emit({
-                            type: "search:complete",
-                            userId,
-                            payload: { searchId, found: result.found, matchCount: result.allMatches.length },
-                        });
+                    try {
+                        if (userId) {
+                            eventBus.emit({
+                                type: "search:complete",
+                                userId,
+                                payload: { searchId, found: result.found, matchCount: result.allMatches.length },
+                            });
+                        }
+                        logger.debug(
+                            `[Soulseek] Search ${searchId} completed: ${result.allMatches.length} matches`,
+                        );
+                    } catch (emitErr: any) {
+                        logger.error(`[Soulseek] Search ${searchId} post-completion error: ${emitErr.message}`);
                     }
-                    logger.debug(
-                        `[Soulseek] Search ${searchId} completed: ${result.allMatches.length} matches`,
-                    );
                 })
                 .catch((err) => {
-                    if (userId) {
-                        eventBus.emit({
-                            type: "search:complete",
-                            userId,
-                            payload: { searchId, found: false, matchCount: 0, error: err.message },
-                        });
+                    try {
+                        if (userId) {
+                            eventBus.emit({
+                                type: "search:complete",
+                                userId,
+                                payload: { searchId, found: false, matchCount: 0, error: err.message },
+                            });
+                        }
+                        logger.error(
+                            `[Soulseek] Search ${searchId} failed:`,
+                            err.message,
+                        );
+                    } catch (emitErr: any) {
+                        logger.error(`[Soulseek] Search ${searchId} failed (${err.message}) and emit also failed: ${emitErr.message}`);
                     }
-                    logger.error(
-                        `[Soulseek] Search ${searchId} failed:`,
-                        err.message,
-                    );
                 });
 
             res.json({
@@ -368,18 +413,29 @@ router.post(
             const result = await soulseekService.downloadTrack(match, destPath);
 
             if (result.success) {
+                const userId = (req as any).user?.id || null;
+
+                // Notify activity feed
+                eventBus.emit({
+                    type: "download:complete",
+                    userId,
+                    payload: {
+                        jobId: randomUUID(),
+                        subject: `${resolvedArtist} - ${resolvedTitle}`,
+                    },
+                });
+
                 // Trigger library scan to import the new file
                 try {
                     const { scanQueue } = await import("../workers/queues");
                     await scanQueue.add("scan", {
-                        userId: (req as any).user?.id || null,
+                        userId,
                         source: "soulseek-manual-download",
                         artistName: resolvedArtist,
                     });
                     logger.debug(`[Soulseek] Library scan queued for: ${resolvedArtist} - ${resolvedTitle}`);
                 } catch (scanError: any) {
                     logger.warn(`[Soulseek] Failed to queue library scan: ${scanError.message}`);
-                    // Don't fail the request if scan queueing fails
                 }
 
                 res.json({

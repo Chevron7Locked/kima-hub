@@ -61,6 +61,9 @@ router.get("/", async (req: Request, res: Response) => {
     "X-Accel-Buffering": "no",
   });
 
+  // Flush headers immediately to establish SSE connection
+  res.flushHeaders();
+
   res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
 
   if (!connections.has(userId)) {
@@ -74,6 +77,10 @@ router.get("/", async (req: Request, res: Response) => {
     try {
       if (!res.destroyed && !res.writableEnded) {
         res.write(data);
+        // Flush the response to ensure data is sent immediately
+        if (typeof (res as any).flush === 'function') {
+          (res as any).flush();
+        }
         return true;
       }
     } catch {

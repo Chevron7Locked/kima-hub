@@ -207,10 +207,16 @@ router.post("/", async (req, res) => {
 
         if (newUsername !== oldUsername || newPassword !== oldPassword) {
           const { soulseekService } = await import("../services/soulseek");
-          soulseekService.disconnect();
-          logger.debug(
-            "[SYSTEM SETTINGS] Disconnected Soulseek service due to credential change",
-          );
+          try {
+            await soulseekService.resetAndReconnect();
+            logger.debug(
+              "[SYSTEM SETTINGS] Reset Soulseek connection and reconnected with new credentials",
+            );
+          } catch (err: any) {
+            logger.warn(
+              `[SYSTEM SETTINGS] Failed to reconnect Soulseek (will retry on first search): ${err.message}`,
+            );
+          }
         }
       } catch (err) {
         logger.warn("Failed to check/disconnect Soulseek service:", err);

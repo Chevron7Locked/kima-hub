@@ -19,6 +19,7 @@ import {
   ConfigurationError,
   RateLimitError,
 } from '../utils/errors';
+import { distributedLock } from '../utils/distributedLock';
 
 const router = Router();
 
@@ -197,32 +198,57 @@ router.post("/generate", async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        // Check for existing active batch
-        const existingBatch = await prisma.discoveryBatch.findFirst({
-            where: {
-                userId,
-                status: { in: ["downloading", "scanning"] },
-            },
-        });
+        // Use distributed lock to prevent race condition between check and queue
+        const result = await distributedLock.withLock(
+            `discover:generate:${userId}`,
+            30000,
+            async () => {
+                // Check for existing active batch
+                const existingBatch = await prisma.discoveryBatch.findFirst({
+                    where: {
+                        userId,
+                        status: { in: ["downloading", "scanning"] },
+                    },
+                });
 
-        if (existingBatch) {
+                if (existingBatch) {
+                    return {
+                        conflict: true as const,
+                        batchId: existingBatch.id,
+                        status: existingBatch.status,
+                    };
+                }
+
+                logger.debug(`\n Queuing Discover Weekly generation for user ${userId}`);
+
+                // Add generation job to queue
+                const job = await discoverQueue.add("discover-weekly", { userId });
+
+                return { conflict: false as const, jobId: job.id };
+            },
+        );
+
+        if (result.conflict) {
             return res.status(409).json({
                 error: "Generation already in progress",
-                batchId: existingBatch.id,
-                status: existingBatch.status,
+                batchId: result.batchId,
+                status: result.status,
             });
         }
 
-        logger.debug(`\n Queuing Discover Weekly generation for user ${userId}`);
-
-        // Add generation job to queue
-        const job = await discoverQueue.add("discover-weekly", { userId });
-
         res.json({
             message: "Discover Weekly generation started",
-            jobId: job.id,
+            jobId: result.jobId,
         });
     } catch (error) {
+        // Lock acquisition failure means another request is already processing
+        if (error instanceof Error && error.message.startsWith('Failed to acquire lock')) {
+            return res.status(409).json({
+                error: "Generation already in progress",
+                code: 'LOCK_CONFLICT',
+            });
+        }
+
         if (error instanceof UserFacingError) {
             return res.status(error.statusCode).json({
                 error: error.message,
