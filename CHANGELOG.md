@@ -5,6 +5,13 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-02-18
+
+### Fixed
+
+- **SSE streaming through Next.js proxy**: SSE events were buffered by Next.js rewrites, breaking real-time Soulseek search results and download progress in production. Added a dedicated Next.js API route (`app/api/events/route.ts`) that streams SSE responses directly, bypassing the buffering rewrite proxy.
+- **CLAP analyzer startup contention**: CLAP model loaded eagerly on container boot (~20s of CPU/memory), competing with the Essentia audio analyzer during startup. Model now loads lazily on first job, which only arrives after audio analysis completes.
+
 ## [1.5.0] - 2026-02-17
 
 ### Changed

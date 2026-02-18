@@ -10,7 +10,8 @@ import { api, getApiBaseUrl } from "@/lib/api";
 /**
  * Returns the base URL for SSE connections.
  * Uses getApiBaseUrl() directly -- in proxy/all-in-one mode this returns ""
- * (relative path), which routes SSE through the Next.js rewrite to the backend.
+ * (relative path), which hits the dedicated SSE proxy route (app/api/events/route.ts)
+ * that properly streams events without buffering.
  */
 function getSSEBaseUrl(): string {
     if (typeof window === "undefined") return "";

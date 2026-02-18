@@ -705,9 +705,11 @@ def main():
     logger.info(f"  Model idle timeout: {MODEL_IDLE_TIMEOUT}s")
     logger.info("=" * 60)
 
-    # Load model once (shared across all workers)
+    # Model is shared across all workers but loaded lazily on first job
+    # (ensure_model() is called automatically when work arrives).
+    # This avoids ~20s of CPU-heavy model loading at startup when audio
+    # analysis hasn't finished yet and there's no CLAP work to do.
     analyzer = CLAPAnalyzer()
-    analyzer.load_model()
 
     # Stop event for graceful shutdown
     stop_event = threading.Event()
