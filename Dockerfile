@@ -58,27 +58,27 @@ RUN pip3 install --no-cache-dir --break-system-packages --target=/opt/cudnn8 'nv
 # IMPORTANT: Using MusiCNN models to match analyzer.py expectations
 RUN echo "Downloading Essentia ML models for Enhanced vibe matching..." && \
     # Base MusiCNN embedding model (required for all predictions)
-    curl -L --progress-bar -o /app/models/msd-musicnn-1.pb \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/autotagging/msd/msd-musicnn-1.pb" && \
     # Mood classification heads (using MusiCNN architecture)
-    curl -L --progress-bar -o /app/models/mood_happy-msd-musicnn-1.pb \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_happy-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_happy/mood_happy-msd-musicnn-1.pb" && \
-    curl -L --progress-bar -o /app/models/mood_sad-msd-musicnn-1.pb \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_sad-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_sad/mood_sad-msd-musicnn-1.pb" && \
-    curl -L --progress-bar -o /app/models/mood_relaxed-msd-musicnn-1.pb \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_relaxed-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_relaxed/mood_relaxed-msd-musicnn-1.pb" && \
-    curl -L --progress-bar -o /app/models/mood_aggressive-msd-musicnn-1.pb \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_aggressive-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_aggressive/mood_aggressive-msd-musicnn-1.pb" && \
-    curl -L --progress-bar -o /app/models/mood_party-msd-musicnn-1.pb \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_party-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_party/mood_party-msd-musicnn-1.pb" && \
-    curl -L --progress-bar -o /app/models/mood_acoustic-msd-musicnn-1.pb \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_acoustic-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_acoustic/mood_acoustic-msd-musicnn-1.pb" && \
-    curl -L --progress-bar -o /app/models/mood_electronic-msd-musicnn-1.pb \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_electronic-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_electronic/mood_electronic-msd-musicnn-1.pb" && \
     # Other classification heads
-    curl -L --progress-bar -o /app/models/danceability-msd-musicnn-1.pb \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/danceability-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/danceability/danceability-msd-musicnn-1.pb" && \
-    curl -L --progress-bar -o /app/models/voice_instrumental-msd-musicnn-1.pb \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/voice_instrumental-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/voice_instrumental/voice_instrumental-msd-musicnn-1.pb" && \
     echo "ML models downloaded successfully" && \
     ls -lh /app/models/
@@ -110,7 +110,7 @@ COPY services/audio-analyzer-clap/analyzer.py /app/audio-analyzer-clap/
 # Pre-download CLAP model (~600MB) during build to avoid runtime download
 # The analyzer expects the model at /app/models/music_audioset_epoch_15_esc_90.14.pt
 RUN echo "Downloading CLAP model for vibe similarity..." && \
-    curl -L --progress-bar -o /app/models/music_audioset_epoch_15_esc_90.14.pt \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/music_audioset_epoch_15_esc_90.14.pt \
         "https://huggingface.co/lukewys/laion_clap/resolve/main/music_audioset_epoch_15_esc_90.14.pt" && \
     echo "CLAP model downloaded successfully" && \
     ls -lh /app/models/music_audioset_epoch_15_esc_90.14.pt
