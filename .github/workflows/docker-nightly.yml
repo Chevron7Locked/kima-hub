@@ -5,6 +5,7 @@ on:
         branches: [main]
         tags-ignore:
             - "v*" # Don't trigger on version tags - docker-publish handles those
+    workflow_dispatch:
 
 env:
     IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/kima
