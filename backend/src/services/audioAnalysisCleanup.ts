@@ -56,7 +56,7 @@ class AudioAnalysisCleanupService {
             logger.warn(
                 `[AudioAnalysisCleanup] Circuit breaker REOPENED - recovery attempt failed (${this.failureCount} total failures)`
             );
-        } else if (this.failureCount >= CIRCUIT_BREAKER_THRESHOLD) {
+        } else if (this.failureCount >= CIRCUIT_BREAKER_THRESHOLD && this.circuitOpenedAt === null) {
             this.state = "open";
             this.circuitOpenedAt = new Date(); // fixed point — not updated on subsequent failures
             logger.warn(
