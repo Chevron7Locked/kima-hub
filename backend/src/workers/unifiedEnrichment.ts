@@ -41,6 +41,7 @@ let isStopping = false;
 let immediateEnrichmentRequested = false;
 let consecutiveSystemFailures = 0; // Track consecutive system-level failures
 let lastRunTime = 0;
+let audioLastCycleCompletedCount: number | null = null;
 const MIN_INTERVAL_MS = 10000; // Minimum 10s between cycles
 
 // Batch failure tracking
@@ -987,7 +988,7 @@ async function queueVibeEmbeddings(): Promise<number> {
           LEFT JOIN track_embeddings te ON t.id = te.track_id
           WHERE te.track_id IS NULL
             AND t."filePath" IS NOT NULL
-            AND (t."vibeAnalysisStatus" IS NULL OR t."vibeAnalysisStatus" = 'pending')
+            AND (t."vibeAnalysisStatus" IS NULL OR t."vibeAnalysisStatus" <> 'processing')
           LIMIT 1000
       `;
  
@@ -1072,9 +1073,16 @@ async function executeMoodTagsPhase(): Promise<number> {
 }
 
 async function executeAudioPhase(): Promise<number> {
-    const audioCompletedBefore = await prisma.track.count({
+    // Compare completed count to previous cycle (~1 min ago) — a much wider
+    // window than the milliseconds between two counts around cleanupStaleProcessing().
+    const currentCompleted = await prisma.track.count({
         where: { analysisStatus: "completed" },
     });
+
+    if (audioLastCycleCompletedCount !== null && currentCompleted > audioLastCycleCompletedCount) {
+        audioAnalysisCleanupService.recordSuccess();
+    }
+    audioLastCycleCompletedCount = currentCompleted;
 
     const cleanupResult =
         await audioAnalysisCleanupService.cleanupStaleProcessing();
@@ -1082,13 +1090,6 @@ async function executeAudioPhase(): Promise<number> {
         logger.debug(
             `[Enrichment] Audio analysis cleanup: ${cleanupResult.reset} reset, ${cleanupResult.permanentlyFailed} permanently failed, ${cleanupResult.recovered} recovered`,
         );
-    }
-
-    const audioCompletedAfter = await prisma.track.count({
-        where: { analysisStatus: "completed" },
-    });
-    if (audioCompletedAfter > audioCompletedBefore) {
-        audioAnalysisCleanupService.recordSuccess();
     }
 
     if (audioAnalysisCleanupService.isCircuitOpen()) {

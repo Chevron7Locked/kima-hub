@@ -13,11 +13,12 @@ class AudioAnalysisCleanupService {
     private state: CircuitState = "closed";
     private failureCount = 0;
     private lastFailureTime: Date | null = null;
+    private circuitOpenedAt: Date | null = null;
 
     private shouldAttemptReset(): boolean {
-        if (!this.lastFailureTime) return false;
-        const timeSinceFailure = Date.now() - this.lastFailureTime.getTime();
-        return timeSinceFailure >= CIRCUIT_BREAKER_WINDOW_MS;
+        if (!this.circuitOpenedAt) return false;
+        const timeSinceOpen = Date.now() - this.circuitOpenedAt.getTime();
+        return timeSinceOpen >= CIRCUIT_BREAKER_WINDOW_MS;
     }
 
     private onSuccess(): void {
@@ -28,12 +29,14 @@ class AudioAnalysisCleanupService {
             this.state = "closed";
             this.failureCount = 0;
             this.lastFailureTime = null;
+            this.circuitOpenedAt = null;
         } else if (this.state === "closed" && this.failureCount > 0) {
             logger.debug(
                 "[AudioAnalysisCleanup] Resetting failure counter on success"
             );
             this.failureCount = 0;
             this.lastFailureTime = null;
+            this.circuitOpenedAt = null;
         }
     }
 
@@ -48,11 +51,14 @@ class AudioAnalysisCleanupService {
 
         if (this.state === "half-open") {
             this.state = "open";
+            // Don't reset circuitOpenedAt — keep original open time so the
+            // next shouldAttemptReset() fires immediately and retries HALF-OPEN
             logger.warn(
                 `[AudioAnalysisCleanup] Circuit breaker REOPENED - recovery attempt failed (${this.failureCount} total failures)`
             );
         } else if (this.failureCount >= CIRCUIT_BREAKER_THRESHOLD) {
             this.state = "open";
+            this.circuitOpenedAt = new Date(); // fixed point — not updated on subsequent failures
             logger.warn(
                 `[AudioAnalysisCleanup] Circuit breaker OPEN - ${this.failureCount} failures in window. ` +
                     `Pausing audio analysis queuing until analyzer shows signs of life.`
@@ -80,6 +86,7 @@ class AudioAnalysisCleanupService {
         this.state = "closed";
         this.failureCount = 0;
         this.lastFailureTime = null;
+        this.circuitOpenedAt = null;
         logger.debug("[AudioAnalysisCleanup] Circuit breaker reset");
     }
 
