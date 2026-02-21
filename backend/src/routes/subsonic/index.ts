@@ -3,8 +3,8 @@ import rateLimit from "express-rate-limit";
 import { subsonicAuth } from "../../middleware/subsonicAuth";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 
+import { libraryRouter } from "./library";
 // Sub-routers are added in later phases (uncomment as they are implemented):
-// import { libraryRouter } from "./library";
 // import { playbackRouter } from "./playback";
 // import { searchRouter } from "./search";
 // import { playlistRouter } from "./playlists";
@@ -60,7 +60,7 @@ subsonicRouter.all("/getOpenSubsonicExtensions.view", (req: Request, res: Respon
 });
 
 // Sub-routers mounted here (uncomment as phases complete):
-// subsonicRouter.use(libraryRouter);
+subsonicRouter.use(libraryRouter);
 // subsonicRouter.use(playbackRouter);
 // subsonicRouter.use(searchRouter);
 // subsonicRouter.use(playlistRouter);
