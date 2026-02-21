@@ -37,8 +37,7 @@ export const metadata: Metadata = {
     icons: {
         icon: "/assets/images/Kima__favicon.ico",
         apple: [
-            { url: "/assets/icons/icon-192.webp", sizes: "192x192" },
-            { url: "/assets/icons/icon-512.webp", sizes: "512x512" },
+            { url: "/assets/images/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
         ],
     },
     appleWebApp: {

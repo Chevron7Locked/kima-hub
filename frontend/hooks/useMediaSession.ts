@@ -79,6 +79,10 @@ export function useMediaSession() {
         }
 
         // Update metadata when track/audiobook/podcast changes
+        const fallbackArtwork = [
+            { src: getAbsoluteUrl("/assets/icons/icon-512.webp"), sizes: "512x512", type: "image/webp" },
+        ];
+
         if (playbackType === "track" && currentTrack) {
             const coverUrl = currentTrack.album?.coverArt
                 ? getAbsoluteUrl(
@@ -119,7 +123,7 @@ export function useMediaSession() {
                               type: "image/jpeg",
                           },
                       ]
-                    : undefined,
+                    : fallbackArtwork,
             });
         } else if (playbackType === "audiobook" && currentAudiobook) {
             const coverUrl = currentAudiobook.coverUrl
@@ -163,7 +167,7 @@ export function useMediaSession() {
                               type: "image/jpeg",
                           },
                       ]
-                    : undefined,
+                    : fallbackArtwork,
             });
         } else if (playbackType === "podcast" && currentPodcast) {
             const coverUrl = currentPodcast.coverUrl
@@ -205,7 +209,7 @@ export function useMediaSession() {
                               type: "image/jpeg",
                           },
                       ]
-                    : undefined,
+                    : fallbackArtwork,
             });
         } else {
             // Clear metadata when nothing is playing
