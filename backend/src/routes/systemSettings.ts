@@ -311,8 +311,21 @@ router.post("/", async (req, res) => {
           },
         );
 
+        // The Lidarr /api/v1/notification endpoint always returns a flat array,
+        // but some versions or proxies may return a paged envelope ({ records: [...] })
+        // or an error object. Normalise before use.
+        const notificationsRaw = notificationsResponse.data;
+        if (!Array.isArray(notificationsRaw) && !Array.isArray(notificationsRaw?.records)) {
+          throw new Error(
+            `Unexpected response shape from /api/v1/notification: ${typeof notificationsRaw} — aborting webhook setup to prevent duplicate creation`,
+          );
+        }
+        const notifications: any[] = Array.isArray(notificationsRaw)
+          ? notificationsRaw
+          : notificationsRaw.records;
+
         // Find existing Kima webhook by name (primary) or URL pattern (fallback)
-        const existingWebhook = notificationsResponse.data.find(
+        const existingWebhook = notifications.find(
           (n: any) =>
             n.implementation === "Webhook" &&
             // Match by name
@@ -374,6 +387,11 @@ router.post("/", async (req, res) => {
         };
 
         if (existingWebhook) {
+          if (!existingWebhook.id) {
+            throw new Error(
+              `Found existing webhook "${existingWebhook.name}" but it has no id — aborting webhook setup`,
+            );
+          }
           // Update existing webhook
           await axios.put(
             `${lidarrUrl}/api/v1/notification/${existingWebhook.id}?forceSave=true`,

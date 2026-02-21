@@ -143,9 +143,7 @@ export function AlbumHero({
                         <div className="flex flex-wrap items-center gap-1 text-sm text-white/70 mb-1">
                             {album.artist && (
                                 <Link
-                                    href={`/artist/${
-                                        album.artist.mbid || album.artist.id
-                                    }`}
+                                    href={`/artist/${album.artist.id}`}
                                     className="font-medium text-white hover:underline"
                                 >
                                     {album.artist.name}

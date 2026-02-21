@@ -71,14 +71,14 @@ export function ActivityPanel({
             <>
                 {/* Backdrop */}
                 <div
-                    className="fixed inset-0 bg-black/60  z-[100]"
+                    className="fixed inset-0 bg-black/60 z-[100]"
                     onClick={onToggle}
                 />
 
                 {/* Panel - slides in from right */}
                 <div
                     className="fixed inset-y-0 right-0 w-full max-w-md bg-[#0a0a0a] z-[101] flex flex-col"
-                    style={{ paddingTop: "env(safe-area-inset-top)" }}
+                    style={{ paddingTop: "var(--standalone-safe-area-top, 0px)" }}
                 >
                     {/* Header */}
                     <div className="flex items-center justify-between px-4 py-4 border-b border-white/10">

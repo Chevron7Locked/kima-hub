@@ -135,6 +135,18 @@ export function useEventSource() {
                             );
                             queryClient.invalidateQueries({ queryKey: ["discover-playlist"] });
                             break;
+                        case "preview:progress":
+                            queryClient.setQueryData(
+                                ["preview-status", data.jobId],
+                                { status: "running", phase: data.phase, message: data.message, jobId: data.jobId }
+                            );
+                            break;
+                        case "preview:complete":
+                            queryClient.setQueryData(
+                                ["preview-status", data.jobId],
+                                { status: data.error ? "failed" : "completed", preview: data.preview, error: data.error, jobId: data.jobId }
+                            );
+                            break;
                         case "connected":
                             reconnectAttemptsRef.current = 0;
                             // Refresh notifications and downloads on connect/reconnect

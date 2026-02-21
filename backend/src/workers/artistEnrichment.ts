@@ -58,8 +58,13 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                     artist.mbid = realMbid;
                 } else {
                     logger.debug(
-                        `${logPrefix} MusicBrainz: No match found, keeping temp MBID`
+                        `${logPrefix} MusicBrainz: No match found, marking as unresolvable`
                     );
+                    await prisma.artist.update({
+                        where: { id: artist.id },
+                        data: { enrichmentStatus: "unresolvable", lastEnriched: new Date() },
+                    });
+                    return;
                 }
             } catch (error: any) {
                 logger.debug(

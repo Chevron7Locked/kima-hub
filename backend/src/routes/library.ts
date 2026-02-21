@@ -844,16 +844,12 @@ router.get("/artists/:id", async (req, res) => {
 
     // Single query with OR to find artist by ID, name, or MBID
     const decodedName = decodeURIComponent(idParam);
-    const isMbidFormat =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        idParam,
-      );
     const artist = await prisma.artist.findFirst({
       where: {
         OR: [
           { id: idParam },
           { name: { equals: decodedName, mode: "insensitive" } },
-          ...(isMbidFormat ? [{ mbid: idParam }] : []),
+          { mbid: idParam },
         ],
       },
       include: artistInclude,
@@ -869,9 +865,10 @@ router.get("/artists/:id", async (req, res) => {
     const ownedRgMbids = new Set(artist.ownedAlbums.map((o) => o.rgMbid));
     const isEnriched = artist.ownedAlbums.length > 0 || artist.heroUrl !== null;
 
-    // If artist has temp MBID, try to find real MBID by searching MusicBrainz
+    // If artist has temp MBID, try to find real MBID by searching MusicBrainz.
+    // Skip if previously marked unresolvable — avoid burning rate limit quota on known-bad names.
     let effectiveMbid = artist.mbid;
-    if (!effectiveMbid || effectiveMbid.startsWith("temp-")) {
+    if (!effectiveMbid || (effectiveMbid.startsWith("temp-") && artist.enrichmentStatus !== "unresolvable")) {
       logger.debug(
         ` Artist has temp/no MBID, searching MusicBrainz for ${artist.name}...`,
       );

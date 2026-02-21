@@ -98,7 +98,7 @@ interface ImportJob {
     error: string | null;
 }
 
-type Step = "input" | "preview" | "importing" | "complete";
+type Step = "input" | "previewing" | "preview" | "importing" | "complete";
 
 function SpotifyImportPageContent() {
     const router = useRouter();
@@ -111,6 +111,7 @@ function SpotifyImportPageContent() {
     const [step, setStep] = useState<Step>("input");
     const [url, setUrl] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [previewJobId, setPreviewJobId] = useState<string | null>(null);
     const [preview, setPreview] = useState<ImportPreview | null>(null);
     const [selectedAlbums, setSelectedAlbums] = useState<Set<string>>(
         new Set()
@@ -130,32 +131,20 @@ function SpotifyImportPageContent() {
         if (urlParam && !hasAutoFetched.current) {
             hasAutoFetched.current = true;
             setUrl(urlParam);
-            // Auto-trigger preview fetch
             (async () => {
                 setIsLoading(true);
                 try {
-                    const result = await api.post<ImportPreview>(
-                        "/spotify/preview",
-                        {
-                            url: urlParam,
-                        }
+                    const { jobId } = await api.post<{ jobId: string }>(
+                        "/spotify/preview/start",
+                        { url: urlParam }
                     );
-                    setPreview(result);
-                    setPlaylistName(result.playlist.name);
-
-                    // Auto-select all albums using index-based keys to avoid
-                    // deduplication when multiple editions share the same MBID
-                    const downloadableAlbumIds = result.albumsToDownload.map(
-                        (_a, i) => String(i)
-                    );
-                    setSelectedAlbums(new Set(downloadableAlbumIds));
-
-                    setStep("preview");
+                    setPreviewJobId(jobId);
+                    setStep("previewing");
                 } catch (err) {
                     const message =
                         err instanceof Error
                             ? err.message
-                            : "Failed to fetch playlist";
+                            : "Failed to start preview";
                     toast.error(message);
                 } finally {
                     setIsLoading(false);
@@ -163,6 +152,46 @@ function SpotifyImportPageContent() {
             })();
         }
     }, [searchParams, toast]);
+
+    // Preview status — SSE is primary delivery, HTTP poll is fallback for reconnects.
+    // If SSE already populated the cache, the poll sees the terminal status and stops.
+    type PreviewStatus = { status: string; preview?: ImportPreview; error?: string; phase?: string; message?: string };
+    const { data: ssePreviewStatus } = useQuery<PreviewStatus | null>({
+        queryKey: ["preview-status", previewJobId],
+        queryFn: async () => {
+            // Return cache immediately if SSE already delivered a terminal result
+            const cached = queryClient.getQueryData<PreviewStatus>(["preview-status", previewJobId]);
+            if (cached && cached.status !== "running") return cached;
+            // Otherwise poll the backend (handles SSE reconnect gap)
+            return api.get<PreviewStatus>(`/spotify/preview/${previewJobId}`);
+        },
+        enabled: !!previewJobId && step === "previewing",
+        // Poll every 3s while pending/running; stop once terminal
+        refetchInterval: (query) => {
+            const d = query.state.data;
+            if (!d || d.status === "pending" || d.status === "running") return 3000;
+            return false;
+        },
+        staleTime: Infinity,
+        refetchOnWindowFocus: false,
+    });
+
+    // React to SSE-driven preview completion
+    useEffect(() => {
+        if (!ssePreviewStatus || step !== "previewing") return;
+        if (ssePreviewStatus.status === "completed" && ssePreviewStatus.preview) {
+            const result = ssePreviewStatus.preview;
+            setPreview(result);
+            setPlaylistName(result.playlist.name);
+            const downloadableAlbumIds = result.albumsToDownload.map((_a, i) => String(i));
+            setSelectedAlbums(new Set(downloadableAlbumIds));
+            setStep("preview");
+        } else if (ssePreviewStatus.status === "failed") {
+            toast.error(ssePreviewStatus.error || "Failed to generate preview");
+            setStep("input");
+            setPreviewJobId(null);
+        }
+    }, [ssePreviewStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // SSE-populated import status (populated by useEventSource via queryClient.setQueryData)
     const { data: sseImportStatus } = useQuery<(ImportJob & { jobId?: string }) | null>({
@@ -200,7 +229,7 @@ function SpotifyImportPageContent() {
         setUrl(e.target.value);
     };
 
-    // Fetch preview
+    // Fetch preview (async — returns job ID, completion arrives via SSE)
     const handleFetchPreview = async () => {
         if (!url.trim()) {
             toast.error("Please enter a playlist URL");
@@ -209,23 +238,15 @@ function SpotifyImportPageContent() {
 
         setIsLoading(true);
         try {
-            const result = await api.post<ImportPreview>("/spotify/preview", {
-                url,
-            });
-            setPreview(result);
-            setPlaylistName(result.playlist.name);
-
-            // Auto-select all albums using index-based keys to avoid
-            // deduplication when multiple editions share the same MBID
-            const downloadableAlbumIds = result.albumsToDownload.map(
-                (_a, i) => String(i)
+            const { jobId } = await api.post<{ jobId: string }>(
+                "/spotify/preview/start",
+                { url }
             );
-            setSelectedAlbums(new Set(downloadableAlbumIds));
-
-            setStep("preview");
+            setPreviewJobId(jobId);
+            setStep("previewing");
         } catch (err) {
             const message =
-                err instanceof Error ? err.message : "Failed to fetch playlist";
+                err instanceof Error ? err.message : "Failed to start preview";
             toast.error(message);
         } finally {
             setIsLoading(false);
@@ -254,6 +275,7 @@ function SpotifyImportPageContent() {
                     url,
                     playlistName: playlistName || preview.playlist.name,
                     albumMbidsToDownload: Array.from(selectedMbids),
+                    previewJobId: previewJobId ?? undefined,
                 }
             );
 
@@ -429,6 +451,17 @@ function SpotifyImportPageContent() {
                                 "Continue"
                             )}
                         </button>
+                    </div>
+                )}
+
+                {/* Step: Previewing (async job in progress) */}
+                {step === "previewing" && (
+                    <div className="text-center py-12">
+                        <Loader2 className="w-10 h-10 text-[#1DB954] animate-spin mx-auto mb-4" />
+                        <h2 className="text-lg font-bold text-white mb-1">Analysing Playlist</h2>
+                        <p className="text-gray-400 text-sm">
+                            {ssePreviewStatus?.message || "Matching tracks to your library..."}
+                        </p>
                     </div>
                 )}
 

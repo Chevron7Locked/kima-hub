@@ -559,6 +559,15 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
     return download
   }
 
+  /**
+   * Remove a specific download from the tracked downloads array.
+   * Called by the service layer on timeout/error so that cleanupStuckDownloads()
+   * does not redundantly find and re-log the same orphaned entry.
+   */
+  removeDownload(download: Download): void {
+    this.downloads = this.downloads.filter((d) => d !== download)
+  }
+
   private cleanupStuckDownloads(): void {
     const now = Date.now()
     const before = this.downloads.length

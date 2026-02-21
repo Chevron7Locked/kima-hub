@@ -22,6 +22,7 @@ const importSchema = z.object({
     url: z.string().url().optional(),
     playlistName: z.string().min(1).max(200),
     albumMbidsToDownload: z.array(z.string()),
+    previewJobId: z.string().optional(),
 });
 
 /**
@@ -61,61 +62,50 @@ router.post("/parse", async (req, res) => {
 });
 
 /**
- * POST /api/spotify/preview
- * Generate a preview of what will be imported from a Spotify or Deezer playlist
+ * POST /api/spotify/preview/start
+ * Start a background preview job and return a job ID immediately.
+ * Progress is streamed via SSE (preview:progress / preview:complete).
  */
-router.post("/preview", async (req, res) => {
+router.post("/preview/start", async (req, res) => {
     try {
-        const { url } = parseUrlSchema.parse(req.body);
-
-        logger.debug(`[Playlist Import] Generating preview for: ${url}`);
-
-        // Detect if it's a Deezer URL
-        if (url.includes("deezer.com")) {
-            // Extract playlist ID from Deezer URL
-            const deezerMatch = url.match(/playlist[\/:](\d+)/);
-            if (!deezerMatch) {
-                return res
-                    .status(400)
-                    .json({ error: "Invalid Deezer playlist URL" });
-            }
-
-            const playlistId = deezerMatch[1];
-            const deezerPlaylist = await deezerService.getPlaylist(playlistId);
-
-            if (!deezerPlaylist) {
-                return res
-                    .status(404)
-                    .json({ error: "Deezer playlist not found" });
-            }
-
-            // Convert Deezer format to Spotify Import format
-            const preview =
-                await spotifyImportService.generatePreviewFromDeezer(
-                    deezerPlaylist
-                );
-
-            logger.debug(
-                `[Playlist Import] Deezer preview generated: ${preview.summary.total} tracks, ${preview.summary.inLibrary} in library`
-            );
-            res.json(preview);
-        } else {
-            // Handle Spotify URL
-            const preview = await spotifyImportService.generatePreview(url);
-
-            logger.debug(
-                `[Spotify Import] Preview generated: ${preview.summary.total} tracks, ${preview.summary.inLibrary} in library`
-            );
-            res.json(preview);
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
         }
+        const { url } = parseUrlSchema.parse(req.body);
+        logger.debug(`[Playlist Import] Starting preview job for: ${url}`);
+        const { jobId } = await spotifyImportService.startPreviewJob(url, req.user.id);
+        res.json({ jobId });
     } catch (error: any) {
-        logger.error("Playlist preview error:", error);
+        logger.error("Playlist preview start error:", error);
         if (error.name === "ZodError") {
             return res.status(400).json({ error: "Invalid request body" });
         }
-        res.status(500).json({
-            error: error.message || "Failed to generate preview",
-        });
+        res.status(500).json({ error: error.message || "Failed to start preview" });
+    }
+});
+
+/**
+ * GET /api/spotify/preview/:jobId
+ * Poll for a completed preview result stored in Redis.
+ * Returns { status: "pending" } while the background job is still running.
+ */
+router.get("/preview/:jobId", async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+        const { jobId } = req.params;
+        const result = await spotifyImportService.getPreviewResult(jobId);
+        if (!result) {
+            return res.json({ status: "pending" });
+        }
+        if (result.userId && result.userId !== req.user.id) {
+            return res.status(403).json({ error: "Not authorized to view this preview" });
+        }
+        res.json(result);
+    } catch (error: any) {
+        logger.error("Playlist preview fetch error:", error);
+        res.status(500).json({ error: error.message || "Failed to fetch preview" });
     }
 });
 
@@ -128,35 +118,47 @@ router.post("/import", async (req, res) => {
         if (!req.user) {
             return res.status(401).json({ error: "Unauthorized" });
         }
-        const { spotifyPlaylistId, url, playlistName, albumMbidsToDownload } =
+        const { spotifyPlaylistId, url, playlistName, albumMbidsToDownload, previewJobId } =
             importSchema.parse(req.body);
         const userId = req.user.id;
 
-        // Re-generate preview to ensure fresh data
-        const effectiveUrl =
-            url?.trim() ||
-            `https://open.spotify.com/playlist/${spotifyPlaylistId}`;
-
         let preview;
-        if (effectiveUrl.includes("deezer.com")) {
-            const deezerMatch = effectiveUrl.match(/playlist[\/:](\d+)/);
-            if (!deezerMatch) {
-                return res
-                    .status(400)
-                    .json({ error: "Invalid Deezer playlist URL" });
+        if (previewJobId) {
+            // Use cached preview from the async preview job
+            const stored = await spotifyImportService.getPreviewResult(previewJobId);
+            if (!stored || stored.status !== "completed" || !stored.preview) {
+                return res.status(400).json({
+                    error: "Preview not ready or expired. Please generate a new preview.",
+                });
             }
-            const playlistId = deezerMatch[1];
-            const deezerPlaylist = await deezerService.getPlaylist(playlistId);
-            if (!deezerPlaylist) {
-                return res
-                    .status(404)
-                    .json({ error: "Deezer playlist not found" });
+            if (stored.userId && stored.userId !== userId) {
+                return res.status(403).json({ error: "Not authorized to use this preview" });
             }
-            preview = await spotifyImportService.generatePreviewFromDeezer(
-                deezerPlaylist
-            );
+            preview = stored.preview;
         } else {
-            preview = await spotifyImportService.generatePreview(effectiveUrl);
+            // Fallback: regenerate synchronously (backwards compatibility)
+            const effectiveUrl =
+                url?.trim() ||
+                `https://open.spotify.com/playlist/${spotifyPlaylistId}`;
+
+            if (effectiveUrl.includes("deezer.com")) {
+                const deezerMatch = effectiveUrl.match(/playlist[\/:](\d+)/);
+                if (!deezerMatch) {
+                    return res
+                        .status(400)
+                        .json({ error: "Invalid Deezer playlist URL" });
+                }
+                const playlistId = deezerMatch[1];
+                const deezerPlaylist = await deezerService.getPlaylist(playlistId);
+                if (!deezerPlaylist) {
+                    return res
+                        .status(404)
+                        .json({ error: "Deezer playlist not found" });
+                }
+                preview = await spotifyImportService.generatePreviewFromDeezer(deezerPlaylist);
+            } else {
+                preview = await spotifyImportService.generatePreview(effectiveUrl);
+            }
         }
 
         logger.debug(

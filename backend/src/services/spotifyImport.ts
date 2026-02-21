@@ -1,3 +1,5 @@
+import { randomUUID } from "crypto";
+import pLimit from "p-limit";
 import { spotifyService, SpotifyTrack, SpotifyPlaylist } from "./spotify";
 import { logger } from "../utils/logger";
 import { musicBrainzService } from "./musicbrainz";
@@ -105,6 +107,10 @@ export interface ImportJob {
 // Redis key pattern for import jobs
 const IMPORT_JOB_KEY = (id: string) => `import:job:${id}`;
 const IMPORT_JOB_TTL = 24 * 60 * 60; // 24 hours
+
+// Redis key pattern for preview jobs
+const PREVIEW_JOB_KEY = (id: string) => `preview:job:${id}`;
+const PREVIEW_JOB_TTL = 2 * 60 * 60; // 2 hours
 
 /**
  * Save import job to both database and Redis cache for cross-process sharing
@@ -968,13 +974,20 @@ class SpotifyImportService {
       }
     }
 
-    const matchedTracks: MatchedTrack[] = [];
+    // Phase 1: Parallel DB lookups (matchTrack is DB-only, safe to parallelise).
+    // Capped at 8 concurrent queries to avoid exhausting the Prisma connection pool
+    // on large playlists. Promise.all preserves insertion order so matchedTracks[i]
+    // corresponds to tracks[i].
+    const matchLimit = pLimit(8);
+    const matchedTracks: MatchedTrack[] = await Promise.all(
+      tracks.map((track) => matchLimit(() => this.matchTrack(track))),
+    );
+
+    // Second pass: build unmatchedByAlbum from ordered results
     const unmatchedByAlbum = new Map<string, SpotifyTrack[]>();
-
-    for (const track of tracks) {
-      const matched = await this.matchTrack(track);
-      matchedTracks.push(matched);
-
+    for (let i = 0; i < tracks.length; i++) {
+      const track = tracks[i];
+      const matched = matchedTracks[i];
       if (!matched.localTrack) {
         const key = `${track.artist}|||${track.album}`;
         const existing = unmatchedByAlbum.get(key) || [];
@@ -3048,6 +3061,87 @@ class SpotifyImportService {
       title: t.spotifyTitle,
       album: t.spotifyAlbum,
     }));
+  }
+
+  /**
+   * Start a background preview job and return the job ID immediately.
+   * Progress and completion are broadcast via SSE (preview:progress / preview:complete).
+   */
+  async startPreviewJob(url: string, userId: string): Promise<{ jobId: string }> {
+    const jobId = randomUUID();
+
+    (async () => {
+      try {
+        eventBus.emit({
+          type: "preview:progress",
+          userId,
+          payload: { jobId, phase: "fetching", message: "Fetching playlist..." },
+        });
+
+        let preview: ImportPreview;
+        if (url.includes("deezer.com")) {
+          const deezerMatch = url.match(/playlist[\/:](\d+)/);
+          if (!deezerMatch) throw new Error("Invalid Deezer playlist URL");
+          const deezerPlaylist = await deezerService.getPlaylist(deezerMatch[1]);
+          if (!deezerPlaylist) throw new Error("Deezer playlist not found");
+
+          eventBus.emit({
+            type: "preview:progress",
+            userId,
+            payload: { jobId, phase: "matching", message: "Matching tracks to library..." },
+          });
+
+          preview = await this.generatePreviewFromDeezer(deezerPlaylist);
+        } else {
+          eventBus.emit({
+            type: "preview:progress",
+            userId,
+            payload: { jobId, phase: "matching", message: "Matching tracks to library..." },
+          });
+
+          preview = await this.generatePreview(url);
+        }
+
+        await redisClient.setEx(
+          PREVIEW_JOB_KEY(jobId),
+          PREVIEW_JOB_TTL,
+          JSON.stringify({ status: "completed", preview, userId }),
+        ).catch((e) => logger.error("[Preview Job] Failed to persist result to Redis:", e));
+
+        eventBus.emit({
+          type: "preview:complete",
+          userId,
+          payload: { jobId, preview },
+        });
+      } catch (error: any) {
+        logger?.error("[Preview Job] Failed:", error);
+        await redisClient.setEx(
+          PREVIEW_JOB_KEY(jobId),
+          PREVIEW_JOB_TTL,
+          JSON.stringify({ status: "failed", error: error.message, userId }),
+        ).catch((e) => logger.error("[Preview Job] Failed to persist error state to Redis:", e));
+        eventBus.emit({
+          type: "preview:complete",
+          userId,
+          payload: { jobId, error: error.message },
+        });
+      }
+    })().catch((e) => logger?.error("[Preview Job] Unhandled:", e));
+
+    return { jobId };
+  }
+
+  /**
+   * Retrieve a stored preview result from Redis.
+   */
+  async getPreviewResult(jobId: string): Promise<{ status: string; preview?: ImportPreview; error?: string; userId?: string } | null> {
+    try {
+      const raw = await redisClient.get(PREVIEW_JOB_KEY(jobId));
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
   }
 }
 

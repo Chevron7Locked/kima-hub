@@ -28,7 +28,7 @@ export function useMediaInfo(coverSize: number = 100): MediaInfo {
                 ? `/album/${currentTrack.album.id}`
                 : null;
             const artistLink = currentTrack.artist?.id
-                ? `/artist/${currentTrack.artist.mbid || currentTrack.artist.id}`
+                ? `/artist/${currentTrack.artist.id}`
                 : null;
             return {
                 title: currentTrack.title,

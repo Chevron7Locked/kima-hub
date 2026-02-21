@@ -24,7 +24,7 @@ const ArtistCard = memo(
         return (
             <CarouselItem>
                 <Link
-                    href={`/artist/${artist.mbid || artist.id}`}
+                    href={`/artist/${artist.id}`}
                     data-tv-card
                     data-tv-card-index={index}
                     tabIndex={0}

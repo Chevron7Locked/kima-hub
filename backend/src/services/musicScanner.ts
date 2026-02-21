@@ -15,6 +15,7 @@ import {
     extractArtistFromRelativePath,
     extractAlbumFromRelativePath,
     collapseForComparison,
+    sanitizeTagString,
 } from "../utils/artistNormalization";
 import { backfillAllArtistCounts } from "./artistCountsService";
 
@@ -527,7 +528,7 @@ export class MusicScannerService {
 
         // Parse basic info
         const title =
-            metadata.common.title ||
+            sanitizeTagString(metadata.common.title) ||
             path.basename(relativePath, path.extname(relativePath));
         const trackNo = metadata.common.track.no || 0;
         const duration = Math.floor(metadata.format.duration || 0);
@@ -537,10 +538,9 @@ export class MusicScannerService {
         // IMPORTANT: Prefer albumartist over artist to keep albums grouped under the primary artist
         // This prevents featured artists from creating separate album entries
         // e.g., "Artist A feat. Artist B" track should still be under "Artist A"'s album
-        let rawArtistName =
-            metadata.common.albumartist ||
-            metadata.common.artist ||
-            "";
+        let rawArtistName = sanitizeTagString(
+            metadata.common.albumartist || metadata.common.artist
+        );
 
         // Folder/filename fallback: If metadata is empty, try to parse from path structure
         if (!rawArtistName || rawArtistName.trim() === "") {
@@ -575,7 +575,7 @@ export class MusicScannerService {
             }
         }
 
-        const albumTitle = metadata.common.album
+        const albumTitle = sanitizeTagString(metadata.common.album)
             || extractAlbumFromRelativePath(relativePath)
             || "Unknown Album";
         const year = metadata.common.year || null;

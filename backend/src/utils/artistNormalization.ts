@@ -44,6 +44,16 @@ function stripDiacritics(str: string): string {
 }
 
 /**
+ * Strip characters that PostgreSQL rejects in UTF-8 text columns.
+ * Removes null bytes and ASCII control characters (C0 range) while
+ * preserving all legitimate Unicode including accented chars, CJK, emoji.
+ */
+export function sanitizeTagString(value: string | null | undefined): string {
+    if (value == null) return "";
+    return value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
+}
+
+/**
  * Normalize an artist name for case-insensitive comparison
  * - Converts to lowercase
  * - Trims whitespace

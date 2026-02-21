@@ -75,7 +75,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
         <>
             {/* Backdrop */}
             <div
-                className="fixed inset-0 bg-black/60  z-50 transition-opacity"
+                className="fixed inset-0 bg-black/60 z-50 transition-opacity"
                 onClick={onClose}
                 aria-hidden="true"
             />
@@ -84,7 +84,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
             <div
                 className="fixed inset-y-0 left-0 w-[280px] bg-[#0a0a0a] z-100 flex flex-col overflow-hidden transform transition-transform border-r border-white/[0.06]"
                 style={{
-                    paddingTop: "env(safe-area-inset-top)",
+                    paddingTop: "var(--standalone-safe-area-top, 0px)",
                 }}
             >
                 {/* Header */}

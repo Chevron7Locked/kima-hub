@@ -75,7 +75,7 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
         ? `/podcasts/${item.id}`
         : isAudiobook
         ? `/audiobooks/${item.id}`
-        : `/artist/${item.mbid || item.id}`;
+        : `/artist/${item.id}`;
     const hasProgress =
         (isPodcast || isAudiobook) &&
         item.progress &&

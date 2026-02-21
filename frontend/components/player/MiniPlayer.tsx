@@ -199,7 +199,7 @@ export function MiniPlayer() {
                     onClick={() => setIsMinimized(false)}
                     className="fixed right-0 z-50 shadow-2xl transition-transform hover:scale-105 active:scale-95"
                     style={{
-                        bottom: "calc(56px + env(safe-area-inset-bottom, 0px) + 8px)",
+                        bottom: "calc(56px + var(--standalone-safe-area-bottom, 0px) + 8px)",
                     }}
                     aria-label="Show player"
                     title="Show player"
@@ -256,7 +256,7 @@ export function MiniPlayer() {
             <div
                 className="fixed left-2 right-2 z-50 shadow-2xl"
                 style={{
-                    bottom: "calc(56px + env(safe-area-inset-bottom, 0px) + 8px)",
+                    bottom: "calc(56px + var(--standalone-safe-area-bottom, 0px) + 8px)",
                     transform: `translateX(${swipeOffset}px)`,
                     opacity: swipeOpacity,
                     transition:

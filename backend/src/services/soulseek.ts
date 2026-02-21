@@ -1051,6 +1051,7 @@ if (!this.client) {
                                 "WARN"
                             );
                             await this.recordUserFailure(match.username);
+                            this.client?.removeDownload(download);
                             try {
                                 download.stream.destroy();
                             } catch {
@@ -1111,6 +1112,7 @@ if (!this.client) {
                         if (errorInfo.skipUser) {
                             await this.recordUserFailure(match.username);
                         }
+                        this.client?.removeDownload(download);
                         writeStream.destroy();
                         if (fs.existsSync(destPath)) {
                             try {
@@ -1131,6 +1133,7 @@ writeStream.on("error", async (err: Error) => {
                              `Write stream error: ${err.message}`,
                              "ERROR"
                          );
+                         this.client?.removeDownload(download);
                          try {
                              download.stream.destroy();
                          } catch {

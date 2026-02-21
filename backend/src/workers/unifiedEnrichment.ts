@@ -21,7 +21,7 @@ import { enrichmentStateService } from "../services/enrichmentState";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { audioAnalysisCleanupService } from "../services/audioAnalysisCleanup";
 import { rateLimiter } from "../services/rateLimiter";
-import { vibeAnalysisCleanupService } from "../services/vibeAnalysisCleanup";
+import { vibeAnalysisCleanupService, VIBE_MAX_RETRIES } from "../services/vibeAnalysisCleanup";
 import { getSystemSettings } from "../utils/systemSettings";
 import { featureDetection } from "../services/featureDetection";
 import pLimit from "p-limit";
@@ -349,7 +349,7 @@ export async function resetArtistsOnly(): Promise<{ count: number }> {
     logger.debug("[Enrichment] Resetting ONLY artist enrichment status...");
 
     const result = await prisma.artist.updateMany({
-        where: { enrichmentStatus: "completed" },
+        where: { enrichmentStatus: { in: ["completed", "unresolvable"] } },
         data: {
             enrichmentStatus: "pending",
             lastEnriched: null,
@@ -675,11 +675,16 @@ async function enrichArtistsBatch(): Promise<number> {
     const settings = await getSystemSettings();
     const concurrency = settings?.enrichmentConcurrency || 1;
 
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const artists = await prisma.artist.findMany({
         where: {
             OR: [
                 { enrichmentStatus: "pending" },
                 { enrichmentStatus: "failed" },
+                {
+                    enrichmentStatus: "unresolvable",
+                    lastEnriched: { lt: sevenDaysAgo },
+                },
             ],
             albums: { some: {} },
         },
@@ -988,7 +993,8 @@ async function queueVibeEmbeddings(): Promise<number> {
           LEFT JOIN track_embeddings te ON t.id = te.track_id
           WHERE te.track_id IS NULL
             AND t."filePath" IS NOT NULL
-            AND (t."vibeAnalysisStatus" IS NULL OR t."vibeAnalysisStatus" <> 'processing')
+            AND (t."vibeAnalysisStatus" IS NULL OR t."vibeAnalysisStatus" = 'pending' OR t."vibeAnalysisStatus" = 'failed')
+            AND COALESCE(t."vibeAnalysisRetryCount", 0) < ${VIBE_MAX_RETRIES}
           LIMIT 1000
       `;
  
@@ -1194,8 +1200,8 @@ export async function getEnrichmentProgress() {
 
     const artistTotal = artistCounts.reduce((sum, s) => sum + s._count, 0);
     const artistCompleted =
-        artistCounts.find((s) => s.enrichmentStatus === "completed")?._count ||
-        0;
+        (artistCounts.find((s) => s.enrichmentStatus === "completed")?._count || 0) +
+        (artistCounts.find((s) => s.enrichmentStatus === "unresolvable")?._count || 0);
     const artistPending =
         artistCounts.find((s) => s.enrichmentStatus === "pending")?._count || 0;
 

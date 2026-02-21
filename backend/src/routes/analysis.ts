@@ -497,6 +497,10 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
         if (force) {
             await prisma.$executeRaw`DELETE FROM track_embeddings`;
             await enrichmentFailureService.clearAllFailures("vibe");
+            await prisma.track.updateMany({
+                where: { vibeAnalysisStatus: { in: ["failed", "processing"] } },
+                data: { vibeAnalysisStatus: null, vibeAnalysisRetryCount: 0, vibeAnalysisStatusUpdatedAt: null },
+            });
             logger.info("Cleared all vibe embeddings for re-generation");
         }
 
@@ -573,6 +577,12 @@ router.post("/vibe/retry", requireAuth, requireAdmin, async (req, res) => {
             select: { id: true, filePath: true, duration: true, title: true },
         });
 
+        // Reset Track-level retry counts so queueVibeEmbeddings can pick them up again
+        await prisma.track.updateMany({
+            where: { id: { in: trackIds } },
+            data: { vibeAnalysisStatus: null, vibeAnalysisRetryCount: 0, vibeAnalysisStatusUpdatedAt: null },
+        });
+
         // Queue for retry
         const pipeline = redisClient.multi();
         for (const track of tracks) {
@@ -584,7 +594,7 @@ router.post("/vibe/retry", requireAuth, requireAdmin, async (req, res) => {
         }
         await pipeline.exec();
 
-        // Reset retry counts
+        // Reset EnrichmentFailure retry counts
         await enrichmentFailureService.resetRetryCount(failures.map(f => f.id));
 
         logger.info(`Retrying ${tracks.length} failed vibe embeddings`);

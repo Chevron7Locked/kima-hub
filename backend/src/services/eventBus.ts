@@ -14,7 +14,9 @@ export type SSEEventType =
     | "scan:complete"
     | "import:progress"
     | "discover:progress"
-    | "discover:complete";
+    | "discover:complete"
+    | "preview:progress"
+    | "preview:complete";
 
 export interface SSEEvent {
     type: SSEEventType;

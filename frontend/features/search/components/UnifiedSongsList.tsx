@@ -143,7 +143,7 @@ export function UnifiedSongsList({
                             </p>
                             <p className="text-xs text-gray-400 truncate">
                                 <Link
-                                    href={`/artist/${track.album.artist.mbid || track.album.artist.id}`}
+                                    href={`/artist/${track.album.artist.id}`}
                                     className="hover:underline hover:text-white"
                                     onClick={(e) => e.stopPropagation()}
                                 >

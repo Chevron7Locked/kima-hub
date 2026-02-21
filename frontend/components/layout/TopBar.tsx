@@ -182,9 +182,11 @@ export function TopBar() {
         <header
             className="fixed top-0 left-0 right-0 bg-black flex items-center px-3 z-50"
             style={{
-                height: isMobileOrTablet ? "58px" : "64px",
+                height: isMobileOrTablet
+                    ? "calc(58px + var(--standalone-safe-area-top, 0px))"
+                    : "64px",
                 paddingTop: isMobileOrTablet
-                    ? "env(safe-area-inset-top)"
+                    ? "var(--standalone-safe-area-top, 0px)"
                     : undefined,
             }}
         >
