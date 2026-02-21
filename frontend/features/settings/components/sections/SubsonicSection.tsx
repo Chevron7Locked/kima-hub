@@ -45,7 +45,6 @@ export function SubsonicSection() {
         setNewToken(null);
         try {
             const data = await api.post<{ apiKey: string }>("/api-keys", {
-                name: "Subsonic",
                 deviceName: "Subsonic",
             });
             setNewToken(data.apiKey);
@@ -65,12 +64,9 @@ export function SubsonicSection() {
         try {
             await api.delete(`/api-keys/${id}`);
             setApiKeys((prev) => prev.filter((k) => k.id !== id));
-            if (newToken) {
-                // If the revoked key was the newly generated one, clear the display
-                setNewToken(null);
-            }
         } catch {
-            // Ignore — key stays in list
+            setStatus("error");
+            setMessage("Failed to revoke token");
         } finally {
             setRevoking(null);
         }
