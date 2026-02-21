@@ -15,6 +15,7 @@ import {
 
 // Section components
 import { AccountSection } from "@/features/settings/components/sections/AccountSection";
+import { SubsonicSection } from "@/features/settings/components/sections/SubsonicSection";
 import { PlaybackSection } from "@/features/settings/components/sections/PlaybackSection";
 import { DownloadPreferencesSection } from "@/features/settings/components/sections/DownloadPreferencesSection";
 import { LidarrSection } from "@/features/settings/components/sections/LidarrSection";
@@ -28,6 +29,7 @@ import { UserManagementSection } from "@/features/settings/components/sections/U
 // Define sidebar items
 const sidebarItems: SidebarItem[] = [
     { id: "account", label: "Account" },
+    { id: "subsonic", label: "Native Apps" },
     { id: "playback", label: "Playback" },
     { id: "download-preferences", label: "Download Preferences", adminOnly: true },
     { id: "lidarr", label: "Download Services", adminOnly: true },
@@ -142,6 +144,9 @@ export default function SettingsPage() {
             <SettingsLayout sidebarItems={sidebarItems} isAdmin={isAdmin}>
                 {/* Account Section */}
                 <AccountSection />
+
+                {/* Native Apps - Subsonic */}
+                <SubsonicSection />
 
                 {/* Playback Section */}
                 <PlaybackSection
