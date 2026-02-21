@@ -39,7 +39,7 @@ export default function HomePage() {
         return <LoadingScreen />;
     }
 
-    let sectionIndex = 0;
+    const sectionIndex = 0;
 
     return (
         <div className="min-h-screen relative bg-gradient-to-b from-[#0a0a0a] to-black">

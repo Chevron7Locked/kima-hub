@@ -72,9 +72,9 @@ export function usePodcastData() {
     if (podcast || !isAuthenticated || previewLoadState !== 'idle') return;
 
     let cancelled = false;
-    setPreviewLoadState('loading');
 
     async function loadPreviewData() {
+      setPreviewLoadState('loading');
       try {
         const preview = await api.previewPodcast(podcastId);
         if (cancelled) return;
