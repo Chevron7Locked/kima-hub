@@ -147,6 +147,7 @@ Import playlists from Spotify and Deezer, or browse and discover new music direc
 ### Native Apps
 
 -   **OpenSubsonic API** - Use any Subsonic-compatible client (Symfonium, DSub, Ultrasonic, Finamp, etc.) to stream your Kima library
+-   **Standard Subsonic auth** - MD5 token auth supported; enter your API token as the password — works with Amperfy, Symfonium, DSub, and any standard Subsonic client
 -   **Per-client tokens** - Generate named API tokens in Settings > Native Apps; revoke them individually when a device is lost or replaced
 -   **Enrichment-aware** - Genres and artist biographies exposed to clients come from Last.fm enrichment, not just file tags
 
@@ -654,22 +655,22 @@ You can also configure Soulseek as a download source for playlist imports. In Se
 
 Kima implements the [OpenSubsonic](https://opensubsonic.netlify.app/) REST API, making it compatible with any Subsonic client.
 
-**Tested clients:** Symfonium, DSub, Ultrasonic, Finamp
+**Tested clients:** Amperfy (iOS), Symfonium, DSub, Ultrasonic, Finamp
 
 **Setup:**
 
 1. Go to Settings > Native Apps in Kima
-2. Enter a client name (e.g. "Symfonium on Pixel 9") and click **Generate Token**
+2. Enter a client name (e.g. "Amperfy on iPhone") and click **Generate Token**
 3. Copy and save the token — it is only shown once
 4. In your client app, configure:
    - **Server URL** — your Kima server address (e.g. `http://192.168.1.10:3030`)
    - **Username** — your Kima username
-   - **Password / API key** — the token you just generated
+   - **Password** — the token you just generated
 
 **Notes:**
 
+- Standard MD5 token auth is supported — clients that hash their password automatically will work correctly when you enter an API token as the password
 - Each client should have its own token so you can revoke access per device
-- MD5 token authentication is intentionally rejected; use the plaintext `p=` or OpenSubsonic `apiKey` parameter
 - Genres and biographies surfaced to clients come from Last.fm enrichment, not just file tags
 - DISCOVER-location albums are excluded from all library views
 

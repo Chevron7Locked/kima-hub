@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **OpenSubsonic / Subsonic API**: Native client support for Symfonium, DSub, Ultrasonic, Finamp, and any other Subsonic-compatible app
+- **OpenSubsonic / Subsonic API**: Native client support for Amperfy, Symfonium, DSub, Ultrasonic, Finamp, and any other Subsonic-compatible app
   - Full Subsonic REST API v1.16.1 compatibility, with OpenSubsonic extensions declared
+  - **MD5 token auth** — standard Subsonic auth now supported; enter your Kima API token as the password in your client app; the server verifies `md5(token + salt)` against stored API keys, avoiding any need to store plaintext login passwords
   - **OpenSubsonic `apiKey` auth** — generate per-client tokens in Settings > Native Apps; tokens can be named and revoked individually
   - **Endpoints implemented**: `ping`, `getArtists`, `getIndexes`, `getArtist`, `getAlbum`, `getSong`, `getAlbumList2`, `getAlbumList`, `getGenres`, `search3`, `search2`, `getRandomSongs`, `stream`, `download`, `getCoverArt`, `scrobble`, `getPlaylists`, `getPlaylist`, `createPlaylist`, `updatePlaylist`, `deletePlaylist`, `getUser`, `getStarred`, `getStarred2`, `star`, `unstar`, `getArtistInfo2`
   - **Enrichment-aware genres** — genre fields on albums, songs, and search results are sourced from Last.fm-enriched artist tags rather than static file tags; `getGenres` aggregates across the enriched artist catalogue
@@ -18,12 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **HTTP 206 range support** on `stream.view` for seek-capable clients and Firefox/Safari
   - Scrobbles recorded as `SUBSONIC` listen source
   - DISCOVER-location albums are excluded from all library views
-  - MD5 token auth intentionally rejected (error 41) — OpenSubsonic `apiKey` is the preferred auth method
-- **Named API tokens** — Settings > Native Apps token generator now accepts a client name (e.g., "Symfonium", "DSub"); previously all tokens were named "Subsonic"
+- **Named API tokens** — Settings > Native Apps token generator now accepts a client name (e.g., "Amperfy", "Symfonium"); previously all tokens were named "Subsonic"
+- **Public server URL setting** — admins can pin a persistent server URL in Settings > Storage; the Native Apps panel reads this URL and falls back to the browser origin when unset
 
 ### Fixed
 
+- **Subsonic `contentType` and `suffix` wrong for FLAC/MP3**: The library scanner stores codec names (`FLAC`, `MPEG 1 Layer 3`) rather than MIME types. Added `normalizeMime()` to translate codec names to proper MIME types before surfacing them to clients — fixes clients that refused to play tracks due to unrecognised content types
+- **`createPlaylist` returned empty response**: Per OpenSubsonic spec (since 1.14.0), `createPlaylist` must return the full playlist object. Now returns the same shape as `getPlaylist`
+- **DISCOVER albums leaking into search and random**: `getRandomSongs` raw SQL and the `search3`/`search2` shared service had no location filter, allowing DISCOVER-only albums to appear in results. Both are now filtered to `LIBRARY` location only
+- **PWA icons**: Replaced placeholder icons with the Kima brand — amber diagonal gradient with radial bloom; solid black background for maskable variants; `apple-touch-icon` added; MediaSession fallback artwork wired up
 - **Frontend lint errors** (pre-existing): `let sectionIndex` changed to `const` in three pages; `setPreviewLoadState` moved inside the async function to avoid calling setState synchronously in a `useEffect`
+- **Vibe orphaned-completed tracks**: Tracks where `vibeAnalysisStatus = 'completed'` but no embedding row exists (left over from the `reduce_embedding_dimension` migration) are now detected and reset each enrichment cycle so they re-enter the CLAP queue
 
 ## [1.5.4] - 2026-02-21
 

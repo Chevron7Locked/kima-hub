@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import { prisma } from "../utils/db";
 import { subsonicError, SubsonicError } from "../utils/subsonicResponse";
 
@@ -18,13 +19,55 @@ export async function subsonicAuth(
         return;
     }
 
-    // Reject MD5 token auth — cryptographically insecure, not supported
-    if (tokenMd5) {
-        subsonicError(req, res, SubsonicError.TOKEN_AUTH_NOT_SUPPORTED, "Token-based auth is not supported. Use apiKey (OpenSubsonic) instead.");
-        return;
-    }
-
     try {
+        // MD5 token auth — verify against the user's API keys.
+        // Standard Subsonic clients send t=md5(password+salt)&s=salt. Since Kima
+        // stores bcrypt hashes it cannot verify against the login password, so the
+        // user enters an API key as the "password" in their client. The server
+        // computes md5(apiKey+salt) for each of the user's keys and checks for a match.
+        if (tokenMd5) {
+            const salt = req.query.s as string | undefined;
+            if (!salt) {
+                subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: s");
+                return;
+            }
+
+            const user = await prisma.user.findUnique({
+                where: { username },
+                select: { id: true, username: true, role: true },
+            });
+
+            if (!user) {
+                subsonicError(req, res, SubsonicError.WRONG_CREDENTIALS, "Wrong username or password");
+                return;
+            }
+
+            const apiKeys = await prisma.apiKey.findMany({
+                where: { userId: user.id },
+                select: { id: true, key: true },
+            });
+
+            let matchedKeyId: string | null = null;
+            for (const k of apiKeys) {
+                const expected = crypto.createHash("md5").update(k.key + salt).digest("hex");
+                if (expected === tokenMd5) {
+                    matchedKeyId = k.id;
+                    break;
+                }
+            }
+
+            if (!matchedKeyId) {
+                subsonicError(req, res, SubsonicError.WRONG_CREDENTIALS, "Wrong username or password");
+                return;
+            }
+
+            prisma.apiKey.update({ where: { id: matchedKeyId }, data: { lastUsed: new Date() } }).catch(() => {});
+
+            req.user = user;
+            next();
+            return;
+        }
+
         // OpenSubsonic API key auth (preferred)
         if (apiKey) {
             const keyRecord = await prisma.apiKey.findUnique({

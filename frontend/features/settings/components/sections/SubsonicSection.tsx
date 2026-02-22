@@ -134,7 +134,7 @@ export function SubsonicSection() {
                         type="text"
                         value={deviceName}
                         onChange={(e) => setDeviceName(e.target.value)}
-                        placeholder="Client name (e.g. Symfonium, DSub)"
+                        placeholder="Client name (e.g. Amperfy, Symfonium, DSub)"
                         className="text-sm text-white bg-white/5 border border-white/10 px-3 py-2 rounded-lg font-mono
                             placeholder:text-white/20 focus:outline-none focus:border-white/20 w-full"
                     />
