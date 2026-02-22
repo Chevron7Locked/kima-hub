@@ -278,7 +278,7 @@ export function EnhancedVibeOverlay({
                     // Spotify-inspired dark theme
                     "bg-[#121212] text-white relative overflow-hidden",
                     isFloating
-                        ? "fixed bottom-24 right-4 z-50 rounded-xl shadow-2xl w-[380px] border border-[#282828]"
+                        ? "fixed bottom-24 right-4 z-[55] rounded-xl shadow-2xl w-[380px] border border-[#282828]"
                         : "rounded-xl w-full border border-[#282828]",
                     className
                 )}

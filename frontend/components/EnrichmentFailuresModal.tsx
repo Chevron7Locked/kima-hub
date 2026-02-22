@@ -158,7 +158,7 @@ export function EnrichmentFailuresModal({
     const totalPages = Math.ceil((failures?.total || 0) / pageSize);
 
     return (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/80 z-[80] flex items-center justify-center p-4">
             <div className="bg-[#1a1a1a] rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col border border-white/10">
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-white/10">
@@ -402,7 +402,7 @@ export function EnrichmentFailuresModal({
 
             {/* Clear All Confirmation Dialog */}
             {showClearConfirm && (
-                <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
+                <div className="fixed inset-0 bg-black/80 z-[85] flex items-center justify-center p-4">
                     <div className="bg-[#1a1a1a] rounded-lg p-6 max-w-md border border-white/10">
                         <h3 className="text-lg font-bold text-white mb-2">
                             Clear All Failures?

@@ -206,7 +206,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
 
     return (
         <div
-            className={`fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 transition-opacity duration-200 ${
+            className={`fixed inset-0 z-[80] bg-black/80 flex items-center justify-center p-4 transition-opacity duration-200 ${
                 isOpen ? "opacity-100" : "opacity-0"
             }`}
             onClick={onClose}

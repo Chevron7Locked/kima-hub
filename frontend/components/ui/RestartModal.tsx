@@ -30,12 +30,12 @@ export function RestartModal({
         <>
             {/* Backdrop */}
             <div
-                className="fixed inset-0 bg-black/80 z-50 "
+                className="fixed inset-0 bg-black/80 z-[80] "
                 onClick={onClose}
             />
 
             {/* Modal */}
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
                 <div className="bg-[#111] border border-[#1c1c1c] rounded-lg shadow-2xl max-w-md w-full">
                     {/* Header */}
                     <div className="flex items-center justify-between p-6 border-b border-[#1c1c1c]">

@@ -41,7 +41,7 @@ export function Modal({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 ">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60 ">
             <div
                 className={cn(
                     "bg-gradient-to-br from-[#141414] to-[#0f0f0f] border border-[#262626] rounded-sm shadow-2xl max-w-md w-full p-6",

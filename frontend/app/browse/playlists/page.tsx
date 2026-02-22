@@ -543,7 +543,7 @@ export default function BrowsePlaylistsPage() {
             {/* URL Import Modal */}
             {showUrlModal && (
                 <div
-                    className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200"
+                    className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[80] p-4 animate-in fade-in duration-200"
                     onClick={() => setShowUrlModal(false)}
                 >
                     <div
