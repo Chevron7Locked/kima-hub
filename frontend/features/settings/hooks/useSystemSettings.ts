@@ -31,6 +31,8 @@ const defaultSystemSettings: SystemSettings = {
     // Download preferences
     downloadSource: "soulseek",
     primaryFailureFallback: "none",
+    // Server
+    publicUrl: "",
 };
 
 export function useSystemSettings() {

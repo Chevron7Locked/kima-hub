@@ -5,7 +5,6 @@ import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicRe
 
 import { libraryRouter } from "./library";
 import { playbackRouter } from "./playback";
-// Sub-routers are added in later phases (uncomment as they are implemented):
 import { searchRouter } from "./search";
 import { playlistRouter } from "./playlists";
 import { userRouter } from "./user";
@@ -59,7 +58,6 @@ subsonicRouter.all("/getOpenSubsonicExtensions.view", (req: Request, res: Respon
     });
 });
 
-// Sub-routers mounted here (uncomment as phases complete):
 subsonicRouter.use(libraryRouter);
 subsonicRouter.use(playbackRouter);
 subsonicRouter.use(searchRouter);

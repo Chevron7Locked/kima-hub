@@ -45,6 +45,8 @@ export interface SystemSettings {
     // Download Preferences
     downloadSource: "soulseek" | "lidarr";
     primaryFailureFallback: "none" | "lidarr" | "soulseek";
+    // Server
+    publicUrl: string;
 }
 
 export interface ApiKey {

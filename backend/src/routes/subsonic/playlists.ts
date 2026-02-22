@@ -105,6 +105,8 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
             : []
     ).filter(Boolean) as string[];
 
+    let resolvedPlaylistId: string;
+
     if (playlistId) {
         const playlist = await prisma.playlist.findUnique({ where: { id: playlistId } });
         if (!playlist) {
@@ -123,6 +125,7 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
                 }),
             ] : []),
         ]);
+        resolvedPlaylistId = playlistId;
     } else if (name) {
         const playlist = await prisma.playlist.create({
             data: { userId, name, isPublic: false },
@@ -134,11 +137,48 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
                 skipDuplicates: true,
             });
         }
+        resolvedPlaylistId = playlist.id;
     } else {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "playlistId or name is required");
     }
 
-    return subsonicOk(req, res);
+    // Return the full playlist per OpenSubsonic spec (since 1.14.0)
+    const created = await prisma.playlist.findUnique({
+        where: { id: resolvedPlaylistId },
+        include: {
+            user: { select: { username: true } },
+            items: {
+                orderBy: { sort: "asc" },
+                include: { track: { include: { album: { include: { artist: true } } } } },
+            },
+        },
+    });
+
+    if (!created) {
+        return subsonicError(req, res, SubsonicError.NOT_FOUND, "Playlist not found after creation");
+    }
+
+    let totalDuration = 0;
+    const entries = created.items.map((item) => {
+        const { track } = item;
+        const { album } = track;
+        const artistName = album.artist.displayName || album.artist.name;
+        const artistId = album.artist.id;
+        totalDuration += track.duration ?? 0;
+        return mapSong(track, album, artistName, artistId);
+    });
+
+    return subsonicOk(req, res, {
+        playlist: {
+            "@_id": created.id,
+            "@_name": created.name,
+            "@_songCount": created.items.length,
+            "@_duration": Math.round(totalDuration),
+            "@_public": created.isPublic,
+            "@_owner": created.user.username,
+            ...(entries.length > 0 ? { entry: entries } : {}),
+        },
+    });
 }));
 
 playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {

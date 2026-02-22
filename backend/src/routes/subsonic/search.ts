@@ -26,7 +26,7 @@ searchRouter.all(["/search3.view", "/search2.view"], wrap(async (req, res) => {
         return subsonicOk(req, res, { [responseKey]: {} });
     }
 
-    const [artists, albums, tracks] = await Promise.all([
+    const [artists, rawAlbums, tracks] = await Promise.all([
         artistCount > 0
             ? searchService.searchArtists({ query, limit: artistCount, offset: artistOffset })
             : Promise.resolve([]),
@@ -37,6 +37,18 @@ searchRouter.all(["/search3.view", "/search2.view"], wrap(async (req, res) => {
             ? searchService.searchTracks({ query, limit: songCount, offset: songOffset })
             : Promise.resolve([]),
     ]);
+
+    // Exclude DISCOVER albums — only library content is visible via Subsonic
+    let albums = rawAlbums;
+    if (rawAlbums.length > 0) {
+        const libraryIds = new Set(
+            (await prisma.album.findMany({
+                where: { id: { in: rawAlbums.map((a) => a.id) }, location: "LIBRARY" },
+                select: { id: true },
+            })).map((a) => a.id)
+        );
+        albums = rawAlbums.filter((a) => libraryIds.has(a.id));
+    }
 
     // Batch-fetch artist genres for all results in one query
     const artistIds = new Set([
@@ -103,7 +115,10 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
         ? parseInt(req.query.toYear as string, 10)
         : undefined;
 
-    const whereConditions: Prisma.Sql[] = [Prisma.sql`t."filePath" IS NOT NULL`];
+    const whereConditions: Prisma.Sql[] = [
+        Prisma.sql`t."filePath" IS NOT NULL`,
+        Prisma.sql`al.location = 'LIBRARY'`,
+    ];
 
     if (fromYear !== undefined && !isNaN(fromYear) && toYear !== undefined && !isNaN(toYear)) {
         const lo = Math.min(fromYear, toYear);

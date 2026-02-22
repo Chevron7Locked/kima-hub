@@ -12,12 +12,24 @@ interface StoragePathsSectionProps {
 
 export function StoragePathsSection({ settings, onUpdate }: StoragePathsSectionProps) {
     return (
-        <SettingsSection 
-            id="storage" 
+        <SettingsSection
+            id="storage"
             title="Storage"
             description="Configure storage paths for your music library"
         >
-            <SettingsRow 
+            <SettingsRow
+                label="Server URL"
+                description="Public base URL used by native app clients. Leave blank to auto-detect."
+            >
+                <SettingsInput
+                    value={settings.publicUrl}
+                    onChange={(v) => onUpdate({ publicUrl: v })}
+                    placeholder="https://kima.example.com"
+                    className="w-64"
+                />
+            </SettingsRow>
+
+            <SettingsRow
                 label="Music library path"
                 description="Path to your music library"
             >

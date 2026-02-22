@@ -565,6 +565,7 @@ model SystemSettings {
   lastfmApiSecret             String?
   lastfmUserKey               String?
   lastfmEnabled               Boolean?
+  publicUrl                   String?
 }
 
 model Track {

@@ -81,7 +81,7 @@ export function mapSong(
         "@_track": track.trackNo || undefined,
         "@_year": album.year || undefined,
         "@_size": track.fileSize ?? undefined,
-        "@_contentType": track.mime || "audio/mpeg",
+        "@_contentType": normalizeMime(track.mime) || "audio/mpeg",
         "@_suffix": mimeToSuffix(track.mime),
         "@_albumId": album.id,
         "@_artistId": artistId,
@@ -100,18 +100,35 @@ export function firstArtistGenre(genres: unknown, userGenres: unknown): string |
     return arr.find((g) => g && !g.startsWith("_"));
 }
 
+// Normalize codec names stored by the library scanner (e.g. "FLAC", "MPEG 1 Layer 3")
+// to proper MIME types expected by Subsonic clients.
+function normalizeMime(mime: string | null): string | null {
+    if (!mime) return null;
+    const upper = mime.toUpperCase();
+    if (upper === "FLAC") return "audio/flac";
+    if (upper.startsWith("MPEG")) return "audio/mpeg";
+    if (upper === "AAC") return "audio/aac";
+    if (upper === "OGG" || upper === "VORBIS") return "audio/ogg";
+    if (upper === "OPUS") return "audio/opus";
+    if (upper === "WAV") return "audio/wav";
+    if (upper === "ALAC" || upper === "M4A") return "audio/mp4";
+    return mime; // already a proper MIME type or unknown
+}
+
 function estimateBitrateFromMime(mime: string | null): number {
-    if (!mime) return 192;
-    if (mime.includes("flac")) return 900;
-    if (mime.includes("wav")) return 1400;
-    if (mime.includes("aac") || mime.includes("mp4")) return 256;
-    if (mime.includes("ogg") || mime.includes("vorbis")) return 192;
-    if (mime.includes("opus")) return 128;
+    const m = normalizeMime(mime);
+    if (!m) return 192;
+    if (m.includes("flac")) return 900;
+    if (m.includes("wav")) return 1400;
+    if (m.includes("aac") || m.includes("mp4")) return 256;
+    if (m.includes("ogg") || m.includes("vorbis")) return 192;
+    if (m.includes("opus")) return 128;
     return 192;
 }
 
 export function mimeToSuffix(mime: string | null): string {
-    if (!mime) return "mp3";
+    const m = normalizeMime(mime);
+    if (!m) return "mp3";
     const map: Record<string, string> = {
         "audio/flac": "flac",
         "audio/x-flac": "flac",
@@ -125,7 +142,7 @@ export function mimeToSuffix(mime: string | null): string {
         "audio/x-wav": "wav",
         "audio/opus": "opus",
     };
-    return map[mime] || "mp3";
+    return map[m] || "mp3";
 }
 
 export function bitrateToQuality(

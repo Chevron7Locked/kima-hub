@@ -23,6 +23,20 @@ function safeDecrypt(value: string | null): string | null {
   }
 }
 
+// Public (any authenticated user) — returns only the configured server URL
+router.get("/public-config", requireAuth, async (_req, res) => {
+  try {
+    const settings = await prisma.systemSettings.findUnique({
+      where: { id: "default" },
+      select: { publicUrl: true },
+    });
+    res.json({ publicUrl: settings?.publicUrl || "" });
+  } catch (error) {
+    logger.error("Get public config error:", error);
+    res.status(500).json({ error: "Failed to get server config" });
+  }
+});
+
 // Only admins can access system settings
 router.use(requireAuth);
 router.use(requireAdmin);
@@ -81,6 +95,9 @@ const systemSettingsSchema = z.object({
   // Download Preferences
   downloadSource: z.enum(["soulseek", "lidarr"]).optional(),
   primaryFailureFallback: z.enum(["none", "lidarr", "soulseek"]).optional(),
+
+  // Server
+  publicUrl: z.union([z.string().url(), z.literal("")]).optional(),
 });
 
 // GET /system-settings
