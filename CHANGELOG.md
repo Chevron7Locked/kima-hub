@@ -5,6 +5,13 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2026-02-22
+
+### Fixed
+
+- **Z-index stacking order**: MiniPlayer was z-50 (same tier as modals), causing it to appear above open dialogs due to DOM ordering. Established a consistent stacking hierarchy: MiniPlayer z-[45] → TopBar z-50 → VibeOverlay/toasts z-[55] → MobileSidebar backdrop z-[60] / drawer z-[70] → all modals z-[80] → nested confirm z-[85] → toast z-[100] → OverlayPlayer z-[9999]. MobileSidebar was also using non-standard `z-100` which is not a valid Tailwind class.
+- **API token display overflowing viewport on iPhone**: The newly-generated token `<code>` block extended beyond the screen on narrow viewports due to missing `min-w-0` / `overflow-hidden` on its flex container; added both.
+
 ## [1.5.5] - 2026-02-21
 
 ### Added
