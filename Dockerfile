@@ -42,25 +42,38 @@ RUN mkdir -p /app/backend /app/frontend /app/audio-analyzer /app/models \
 # ============================================
 WORKDIR /app/audio-analyzer
 
-# Install Python dependencies for audio analysis
-# Note: TensorFlow must be installed explicitly for Python 3.11+ compatibility
+# Install all Python dependencies in a single layer to minimize image size
+# CPU-only torch/torchaudio: install first via the CPU index so downstream
+# packages (laion-clap, transformers) reuse the already-installed CPU wheels.
+# tensorflow-cpu replaces tensorflow to avoid pulling in CUDA runtime libs.
+# essentia-tensorflow declares a dependency on `tensorflow` (not tensorflow-cpu)
+# so we install it with --no-deps after tensorflow-cpu is already present.
 RUN pip3 install --no-cache-dir --break-system-packages \
-    'tensorflow>=2.13.0,<2.16.0' \
+    torch torchaudio torchvision \
+    --index-url https://download.pytorch.org/whl/cpu \
+    && pip3 install --no-cache-dir --break-system-packages \
+    'tensorflow-cpu>=2.13.0,<2.14.0' \
+    && pip3 install --no-cache-dir --break-system-packages --no-deps \
     essentia-tensorflow \
+    && pip3 install --no-cache-dir --break-system-packages \
     redis \
-    psycopg2-binary
+    psycopg2-binary \
+    'laion-clap>=1.1.4' \
+    'librosa>=0.10.0' \
+    'transformers>=4.30.0' \
+    'pgvector>=0.2.0' \
+    'python-dotenv>=1.0.0' \
+    'requests>=2.31.0' \
+    'bullmq==2.19.5' \
+    && pip cache purge \
+    && find /usr -name "*.pyc" -delete \
+    && find /usr -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
-# Install cuDNN 8 for TensorFlow GPU (separate from PyTorch's cuDNN 9)
-# TF 2.15 needs cuDNN 8, PyTorch needs cuDNN 9 -- installed to isolated path to avoid conflicts
-RUN pip3 install --no-cache-dir --break-system-packages --target=/opt/cudnn8 'nvidia-cudnn-cu12==8.9.7.29'
-
-# Download Essentia ML models (~200MB total) - these enable Enhanced vibe matching
+# Download all ML models in a single layer (~800MB total)
 # IMPORTANT: Using MusiCNN models to match analyzer.py expectations
-RUN echo "Downloading Essentia ML models for Enhanced vibe matching..." && \
-    # Base MusiCNN embedding model (required for all predictions)
+RUN echo "Downloading ML models..." && \
     curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/autotagging/msd/msd-musicnn-1.pb" && \
-    # Mood classification heads (using MusiCNN architecture)
     curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_happy-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_happy/mood_happy-msd-musicnn-1.pb" && \
     curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_sad-msd-musicnn-1.pb \
@@ -75,15 +88,16 @@ RUN echo "Downloading Essentia ML models for Enhanced vibe matching..." && \
         "https://essentia.upf.edu/models/classification-heads/mood_acoustic/mood_acoustic-msd-musicnn-1.pb" && \
     curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_electronic-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_electronic/mood_electronic-msd-musicnn-1.pb" && \
-    # Other classification heads
     curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/danceability-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/danceability/danceability-msd-musicnn-1.pb" && \
     curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/voice_instrumental-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/voice_instrumental/voice_instrumental-msd-musicnn-1.pb" && \
-    echo "ML models downloaded successfully" && \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/music_audioset_epoch_15_esc_90.14.pt \
+        "https://huggingface.co/lukewys/laion_clap/resolve/main/music_audioset_epoch_15_esc_90.14.pt" && \
+    echo "All ML models downloaded" && \
     ls -lh /app/models/
 
-# Copy audio analyzer script
+# Copy audio analyzer scripts
 COPY services/audio-analyzer/analyzer.py /app/audio-analyzer/
 
 # ============================================
@@ -91,29 +105,8 @@ COPY services/audio-analyzer/analyzer.py /app/audio-analyzer/
 # ============================================
 WORKDIR /app/audio-analyzer-clap
 
-# Install CLAP Python dependencies
-# Note: torch is large (~2GB) but required for CLAP embeddings
-RUN pip3 install --no-cache-dir --break-system-packages \
-    'laion-clap>=1.1.4' \
-    'torch>=2.0.0' \
-    'torchaudio>=2.0.0' \
-    'torchvision>=0.15.0' \
-    'librosa>=0.10.0' \
-    'transformers>=4.30.0' \
-    'pgvector>=0.2.0' \
-    'python-dotenv>=1.0.0' \
-    'requests>=2.31.0'
-
 # Copy CLAP analyzer script
 COPY services/audio-analyzer-clap/analyzer.py /app/audio-analyzer-clap/
-
-# Pre-download CLAP model (~600MB) during build to avoid runtime download
-# The analyzer expects the model at /app/models/music_audioset_epoch_15_esc_90.14.pt
-RUN echo "Downloading CLAP model for vibe similarity..." && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/music_audioset_epoch_15_esc_90.14.pt \
-        "https://huggingface.co/lukewys/laion_clap/resolve/main/music_audioset_epoch_15_esc_90.14.pt" && \
-    echo "CLAP model downloaded successfully" && \
-    ls -lh /app/models/music_audioset_epoch_15_esc_90.14.pt
 
 # Create database readiness check script
 RUN cat > /app/wait-for-db.sh << 'EOF'
@@ -166,7 +159,9 @@ RUN npx prisma generate
 # Copy backend source and build
 COPY backend/src ./src
 COPY backend/tsconfig.json ./
-RUN npm run build
+RUN npm run build && \
+    npm prune --production && \
+    rm -rf src tests __tests__ tsconfig*.json
 
 COPY backend/docker-entrypoint.sh ./
 COPY backend/healthcheck.js ./healthcheck-backend.js
@@ -275,7 +270,7 @@ stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
-environment=DATABASE_URL="postgresql://kima:kima@localhost:5432/kima",REDIS_URL="redis://localhost:6379",MUSIC_PATH="/music",BATCH_SIZE="10",SLEEP_INTERVAL="5",MAX_ANALYZE_SECONDS="90",BRPOP_TIMEOUT="30",MODEL_IDLE_TIMEOUT="300",NUM_WORKERS="2",THREADS_PER_WORKER="1",LD_LIBRARY_PATH="/opt/cudnn8/nvidia/cudnn/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cublas/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cufft/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cuda_runtime/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cuda_nvrtc/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cusolver/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cusparse/lib:/usr/local/lib/python3.11/dist-packages/nvidia/nccl/lib"
+environment=DATABASE_URL="postgresql://kima:kima@localhost:5432/kima",REDIS_URL="redis://localhost:6379",MUSIC_PATH="/music",BATCH_SIZE="10",SLEEP_INTERVAL="5",MAX_ANALYZE_SECONDS="90",BRPOP_TIMEOUT="30",MODEL_IDLE_TIMEOUT="300",NUM_WORKERS="2",THREADS_PER_WORKER="1"
 priority=50
 
 [program:audio-analyzer-clap]

@@ -3,6 +3,8 @@ import type { Socket } from 'net'
 import net from 'net'
 import type TypedEventEmitter from 'typed-emitter'
 
+import { logger } from '../../utils/logger'
+
 import type { Address } from './common'
 import type { FromServerMessage } from './messages/from/server'
 import { fromServerMessageParser } from './messages/from/server'
@@ -45,7 +47,7 @@ export class SlskServer extends (EventEmitter as new () => TypedEventEmitter<Sls
           this.emit('message', data)
         }
       } catch (error) {
-        console.error('Failed to parse server message', error)
+        logger.error(`[Soulseek] Failed to parse server message: ${error}`)
       }
     })
   }

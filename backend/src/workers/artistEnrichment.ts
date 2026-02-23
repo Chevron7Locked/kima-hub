@@ -449,7 +449,7 @@ async function enrichAlbumCovers(
 
             await Promise.all(
                 batch.map(async (album) => {
-                    if (!album.rgMbid) return;
+                    if (!album.rgMbid || album.rgMbid.startsWith("temp-")) return;
 
                     try {
                         const coverUrl = await coverArtService.getCoverArt(

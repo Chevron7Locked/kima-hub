@@ -11,6 +11,8 @@ import { soulseekService, SearchResult } from "../services/soulseek";
 import { getSystemSettings } from "../utils/systemSettings";
 import { randomUUID } from "crypto";
 import { eventBus } from "../services/eventBus";
+import { prisma } from "../utils/db";
+import fs from "fs";
 import path from "path";
 import type { FileSearchResponse } from "../lib/soulseek/messages/from/peer";
 import { FileAttribute } from "../lib/soulseek/messages/common";
@@ -353,6 +355,7 @@ router.post(
     requireAuth,
     requireSoulseekConfigured,
     async (req, res) => {
+        let jobId: string | null = null;
         try {
             const { username, filepath, artist, title, album, filename } = req.body;
 
@@ -410,18 +413,47 @@ router.post(
                 score: 0,
             };
 
+            const userId = req.user!.id;
+            const subject = `${resolvedArtist} - ${resolvedTitle}`;
+
+            // Create a DownloadJob so the activity tracker shows this download in progress
+            const job = await prisma.downloadJob.create({
+                data: {
+                    userId,
+                    subject,
+                    type: "soulseek-search",
+                    targetMbid: null,
+                    status: "processing",
+                    startedAt: new Date(),
+                },
+            });
+            jobId = job.id;
+
             const result = await soulseekService.downloadTrack(match, destPath);
 
             if (result.success) {
-                const userId = (req as any).user?.id || null;
+                try {
+                    await fs.promises.access(destPath);
+                } catch {
+                    logger.error(`[Soulseek] Download reported success but file missing: ${destPath}`);
+                    await prisma.downloadJob.update({
+                        where: { id: job.id },
+                        data: { status: "failed", error: "File not written to disk", completedAt: new Date() },
+                    });
+                    return res.status(500).json({ success: false, error: "Download failed: file not written to disk" });
+                }
 
-                // Notify activity feed
+                await prisma.downloadJob.update({
+                    where: { id: job.id },
+                    data: { status: "completed", completedAt: new Date() },
+                });
+
                 eventBus.emit({
                     type: "download:complete",
                     userId,
                     payload: {
-                        jobId: randomUUID(),
-                        subject: `${resolvedArtist} - ${resolvedTitle}`,
+                        jobId: job.id,
+                        subject,
                     },
                 });
 
@@ -444,12 +476,22 @@ router.post(
                     message: "Download complete, scanning library...",
                 });
             } else {
+                await prisma.downloadJob.update({
+                    where: { id: job.id },
+                    data: { status: "failed", error: result.error || "Download failed", completedAt: new Date() },
+                });
                 res.status(500).json({
                     success: false,
                     error: result.error || "Download failed",
                 });
             }
         } catch (error: any) {
+            if (jobId) {
+                await prisma.downloadJob.update({
+                    where: { id: jobId },
+                    data: { status: "failed", error: error.message, completedAt: new Date() },
+                }).catch(() => {});
+            }
             logger.error("Soulseek download error:", error.message);
             res.status(500).json({
                 error: "Download failed",
@@ -458,6 +500,8 @@ router.post(
         }
     },
 );
+
+
 
 /**
  * POST /soulseek/disconnect

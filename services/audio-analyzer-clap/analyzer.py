@@ -15,7 +15,7 @@ Features:
 
 Architecture:
 - CLAPAnalyzer: Model loading and embedding generation
-- Worker: Queue consumer that processes tracks and stores embeddings
+- BullMQVibeWorker: Queue consumer that processes tracks and stores embeddings
 - TextEmbedHandler: Real-time text embedding via Redis pub/sub
 """
 
@@ -26,6 +26,7 @@ import json
 import time
 import logging
 import gc
+import asyncio
 import threading
 from datetime import datetime
 from typing import Optional, Tuple
@@ -44,16 +45,11 @@ os.environ['NUMEXPR_MAX_THREADS'] = str(THREADS_PER_WORKER)
 import torch
 torch.set_num_threads(THREADS_PER_WORKER)
 
-# Device detection - use GPU if available
-if torch.cuda.is_available():
-    DEVICE = torch.device('cuda')
-    GPU_NAME = torch.cuda.get_device_name(0)
-else:
-    DEVICE = torch.device('cpu')
-    GPU_NAME = None
+DEVICE = torch.device('cpu')
 
 import redis
 import psycopg2
+import psycopg2.pool
 from psycopg2.extras import RealDictCursor
 from pgvector.psycopg2 import register_vector
 
@@ -73,7 +69,7 @@ BACKEND_URL = os.getenv('BACKEND_URL', 'http://backend:3006')
 MODEL_IDLE_TIMEOUT = int(os.getenv('MODEL_IDLE_TIMEOUT', '300'))
 
 # Queue and channel names
-ANALYSIS_QUEUE = 'audio:clap:queue'
+VIBE_QUEUE_NAME = 'enrichment-vibe'  # BullMQ queue consumed by BullMQVibeWorker
 TEXT_EMBED_CHANNEL = 'audio:text:embed'
 TEXT_EMBED_RESPONSE_PREFIX = 'audio:text:embed:response:'
 CONTROL_CHANNEL = 'audio:clap:control'
@@ -123,10 +119,7 @@ class CLAPAnalyzer:
                 self._model_loaded = True
                 self.last_work_time = time.time()
 
-                if GPU_NAME:
-                    logger.info(f"CLAP model loaded successfully on GPU: {GPU_NAME}")
-                else:
-                    logger.info("CLAP model loaded successfully on CPU")
+                logger.info("CLAP model loaded successfully on CPU")
             except Exception as e:
                 logger.error(f"Failed to load CLAP model: {e}")
                 traceback.print_exc()
@@ -140,8 +133,6 @@ class CLAPAnalyzer:
             logger.info("Unloading CLAP model to free memory...")
             self.model = None
             self._model_loaded = False
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
             gc.collect()
             # Force glibc to return freed pages to OS (Python/PyTorch hold RSS otherwise)
             try:
@@ -350,197 +341,238 @@ class DatabaseConnection:
             self.conn = None
 
 
-class Worker:
+class BullMQVibeWorker:
     """
-    Queue worker that processes audio files and stores embeddings.
+    BullMQ-based vibe embedding worker.
 
-    Polls the Redis queue for jobs, generates CLAP embeddings,
-    and stores results in PostgreSQL.
+    Replaces the legacy BLPOP-based Worker class. Consumes jobs from
+    'enrichment-vibe' (BullMQ queue) instead of polling 'audio:clap:queue'
+    (raw Redis list). Runs asyncio event loop in a background thread so
+    it does not block TextEmbedHandler or ControlHandler.
+
+    Concurrency: controlled by NUM_WORKERS env var (default 2). Each job
+    gets its own connection from a ThreadedConnectionPool, and all DB calls
+    run via run_in_executor so they never block the asyncio event loop.
+    CLAPAnalyzer._lock still serialises model inference; concurrency > 1
+    allows pipeline parallelism (one job waiting on DB I/O while another
+    runs inference).
     """
 
-    def __init__(self, worker_id: int, analyzer: CLAPAnalyzer, stop_event: threading.Event):
-        self.worker_id = worker_id
+    def __init__(self, analyzer: CLAPAnalyzer, stop_event: threading.Event):
         self.analyzer = analyzer
         self.stop_event = stop_event
-        self.redis_client = None
-        self.db = None
+        self._redis_client = None
+        self._db_pool = None  # psycopg2.pool.ThreadedConnectionPool
 
     def start(self):
-        """Start the worker loop"""
-        logger.info(f"Worker {self.worker_id} starting...")
+        """Start the BullMQ worker in a dedicated asyncio event loop."""
+        logger.info("BullMQVibeWorker starting...")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._run())
+        finally:
+            loop.close()
+            logger.info("BullMQVibeWorker stopped")
+
+    async def _run(self):
+        from bullmq import Worker as BullWorker
+
+        self._redis_client = redis.from_url(REDIS_URL)
+
+        # Thread-safe connection pool — each executor thread gets its own
+        # connection so concurrent jobs never share a psycopg2 connection.
+        pool_size = max(NUM_WORKERS * 2, 4)
+        self._db_pool = psycopg2.pool.ThreadedConnectionPool(
+            minconn=1,
+            maxconn=pool_size,
+            dsn=DATABASE_URL,
+            options="-c client_encoding=UTF8",
+        )
+        logger.info(f"Connected to PostgreSQL (pool size: {pool_size})")
+
+        bullmq_worker = BullWorker(
+            VIBE_QUEUE_NAME,
+            self._process_job,
+            {
+                "connection": REDIS_URL,
+                "concurrency": NUM_WORKERS,
+                "lockDuration": 300000,  # 5 min — CLAP inference can take 30–60s
+            },
+        )
+        bullmq_worker.on("failed", lambda job, err: logger.error(
+            f"[BullMQ] Job {job.id if job else '?'} failed: {err}"
+        ))
+        bullmq_worker.on("error", lambda err: logger.error(f"[BullMQ] Worker error: {err}"))
 
         try:
-            self.redis_client = redis.from_url(REDIS_URL)
-            self.db = DatabaseConnection(DATABASE_URL)
-            self.db.connect()
-
             while not self.stop_event.is_set():
-                # Publish heartbeat for feature detection
+                # Publish heartbeat — featureDetection checks this to enable vibe search.
+                # Run in executor to avoid blocking the async event loop.
                 try:
-                    self.redis_client.set("clap:worker:heartbeat", str(int(time.time() * 1000)))
+                    hb_loop = asyncio.get_running_loop()
+                    hb_val = str(int(time.time() * 1000))
+                    await hb_loop.run_in_executor(
+                        None, lambda: self._redis_client.set("clap:worker:heartbeat", hb_val)
+                    )
                 except Exception:
-                    pass  # Heartbeat is informational, don't crash on Redis failure
-
-                try:
-                    self._process_job()
-                except psycopg2.Error as e:
-                    logger.error(f"Worker {self.worker_id} database error: {e}")
-                    traceback.print_exc()
-                    self.db.reconnect()
-                    time.sleep(SLEEP_INTERVAL)
-                except Exception as e:
-                    logger.error(f"Worker {self.worker_id} error: {e}")
-                    traceback.print_exc()
-                    time.sleep(SLEEP_INTERVAL)
-
+                    pass
+                await asyncio.sleep(30)
         finally:
-            if self.db:
-                self.db.close()
-            logger.info(f"Worker {self.worker_id} stopped")
+            await bullmq_worker.close()
+            if self._db_pool:
+                self._db_pool.closeall()
 
-    def _process_job(self):
-        """Process a single job from the queue"""
-        # Try to get a job from the queue (blocking with timeout)
-        job_data = self.redis_client.blpop(ANALYSIS_QUEUE, timeout=SLEEP_INTERVAL)
-
-        if not job_data:
-            return
-
-        _, raw_job = job_data
-        job = json.loads(raw_job)
-
-        track_id = job.get('trackId')
-        file_path = job.get('filePath', '')
-        duration = job.get('duration')  # Pre-computed duration in seconds
+    async def _process_job(self, job, job_token: str) -> dict:
+        """BullMQ job processor — called for each enrichment-vibe job."""
+        track_id = job.data.get("trackId")
+        file_path = job.data.get("filePath", "")
+        duration = job.data.get("duration")
 
         if not track_id:
-            logger.warning(f"Invalid job (no trackId): {job}")
-            return
+            raise ValueError(f"Invalid job data (no trackId): {job.data}")
 
-        logger.info(f"Worker {self.worker_id} processing track: {track_id}")
+        logger.info(f"[BullMQ] Processing vibe for track: {track_id}")
 
-        # Update track status to processing
-        self._update_track_status(track_id, 'processing')
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._update_track_status, track_id, "processing")
 
-        # Build full path (normalize Windows-style paths)
-        normalized_path = file_path.replace('\\', '/')
+        normalized_path = file_path.replace("\\", "/")
         full_path = os.path.join(MUSIC_PATH, normalized_path)
 
-        # Skip 0-byte / missing files (incomplete downloads, stubs)
         try:
             file_size = os.path.getsize(full_path)
             if file_size == 0:
-                self._mark_failed(track_id, "Empty file (0 bytes) - likely incomplete download")
-                return
+                await loop.run_in_executor(
+                    None, self._mark_failed, track_id,
+                    "Empty file (0 bytes) - likely incomplete download",
+                )
+                raise ValueError("Empty file")
         except OSError:
-            self._mark_failed(track_id, f"File not found: {normalized_path}")
-            return
+            await loop.run_in_executor(
+                None, self._mark_failed, track_id, f"File not found: {normalized_path}"
+            )
+            raise
 
-        # Generate embedding (pass duration to avoid file probe)
-        embedding = self.analyzer.get_audio_embedding(full_path, duration)
+        embedding = await loop.run_in_executor(
+            None, self.analyzer.get_audio_embedding, full_path, duration
+        )
+
+        await job.updateProgress(50)
 
         if embedding is None:
-            self._mark_failed(track_id, "Failed to generate embedding")
-            return
+            await loop.run_in_executor(
+                None, self._mark_failed, track_id, "Failed to generate embedding"
+            )
+            raise RuntimeError("Embedding generation failed")
 
-        # Store embedding in database
-        success = self._store_embedding(track_id, embedding)
+        success = await loop.run_in_executor(None, self._store_embedding, track_id, embedding)
 
         if success:
-            self._update_track_status(track_id, 'completed')
-            logger.info(f"Worker {self.worker_id} completed track: {track_id}")
+            await loop.run_in_executor(None, self._update_track_status, track_id, "completed")
+            await job.updateProgress(100)
+            logger.info(f"[BullMQ] Completed vibe for track: {track_id}")
+            return {"trackId": track_id, "status": "complete"}
         else:
-            self._mark_failed(track_id, "Failed to store embedding")
+            await loop.run_in_executor(
+                None, self._mark_failed, track_id, "Failed to store embedding"
+            )
+            raise RuntimeError("Failed to store embedding")
 
     def _update_track_status(self, track_id: str, status: str):
-        """Update the track's vibe analysis status (CLAP embeddings)"""
-        cursor = self.db.get_cursor()
+        """Update the track's vibe analysis status (runs in executor thread)."""
+        conn = self._db_pool.getconn()
         try:
-            cursor.execute("""
-                UPDATE "Track"
-                SET "vibeAnalysisStatus" = %s
-                WHERE id = %s
-            """, (status, track_id))
-            self.db.commit()
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    'UPDATE "Track" SET "vibeAnalysisStatus" = %s WHERE id = %s',
+                    (status, track_id),
+                )
+            conn.commit()
         except Exception as e:
             logger.error(f"Failed to update track vibe status: {e}")
-            self.db.rollback()
+            conn.rollback()
         finally:
-            cursor.close()
+            self._db_pool.putconn(conn)
 
     def _mark_failed(self, track_id: str, error: str):
-        """Mark track as failed and record in enrichment failures"""
-        cursor = self.db.get_cursor()
+        """Mark track as failed and record in enrichment failures (runs in executor thread)."""
+        track_name = None
+        conn = self._db_pool.getconn()
         try:
-            # Get track name for better failure visibility
-            cursor.execute('SELECT title FROM "Track" WHERE id = %s', (track_id,))
-            row = cursor.fetchone()
-            track_name = row['title'] if row else None
-
-            cursor.execute("""
-                UPDATE "Track"
-                SET
-                    "vibeAnalysisStatus" = 'failed',
-                    "vibeAnalysisError" = %s,
-                    "vibeAnalysisRetryCount" = COALESCE("vibeAnalysisRetryCount", 0) + 1
-                WHERE id = %s
-            """, (error[:500], track_id))
-            self.db.commit()
-            logger.error(f"Track {track_id} failed: {error}")
-
-            # Report failure to backend enrichment failure service
-            try:
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-Internal-Secret": os.getenv("INTERNAL_API_SECRET", "")
-                }
-                requests.post(
-                    f"{BACKEND_URL}/api/analysis/vibe/failure",
-                    json={
-                        "trackId": track_id,
-                        "trackName": track_name,
-                        "errorMessage": error[:500],
-                        "errorCode": "VIBE_EMBEDDING_FAILED"
-                    },
-                    headers=headers,
-                    timeout=5
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute('SELECT title FROM "Track" WHERE id = %s', (track_id,))
+                row = cursor.fetchone()
+                track_name = row['title'] if row else None
+                cursor.execute(
+                    """
+                    UPDATE "Track"
+                    SET
+                        "vibeAnalysisStatus" = 'failed',
+                        "vibeAnalysisError" = %s,
+                        "vibeAnalysisRetryCount" = COALESCE("vibeAnalysisRetryCount", 0) + 1
+                    WHERE id = %s
+                    """,
+                    (error[:500], track_id),
                 )
-            except Exception as report_err:
-                logger.warning(f"Failed to report failure to backend: {report_err}")
-
+            conn.commit()
+            logger.error(f"Track {track_id} failed: {error}")
         except Exception as e:
             logger.error(f"Failed to mark track as failed: {e}")
-            self.db.rollback()
+            conn.rollback()
         finally:
-            cursor.close()
+            # Release connection before making the network call below
+            self._db_pool.putconn(conn)
+
+        # Report failure to backend enrichment failure service
+        try:
+            headers = {
+                "Content-Type": "application/json",
+                "X-Internal-Secret": os.getenv("INTERNAL_API_SECRET", "")
+            }
+            requests.post(
+                f"{BACKEND_URL}/api/analysis/vibe/failure",
+                json={
+                    "trackId": track_id,
+                    "trackName": track_name,
+                    "errorMessage": error[:500],
+                    "errorCode": "VIBE_EMBEDDING_FAILED"
+                },
+                headers=headers,
+                timeout=5
+            )
+        except Exception as report_err:
+            logger.warning(f"Failed to report failure to backend: {report_err}")
 
     def _store_embedding(self, track_id: str, embedding: np.ndarray) -> bool:
-        """Store the embedding in the track_embeddings table"""
-        cursor = self.db.get_cursor()
+        """Store the embedding in track_embeddings (runs in executor thread)."""
+        conn = self._db_pool.getconn()
         try:
-            # Convert numpy array to list for pgvector
+            # pgvector type must be registered per-connection; idempotent on repeat calls
+            register_vector(conn)
             embedding_list = embedding.tolist()
-
-            cursor.execute("""
-                INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-                VALUES (%s, %s::vector, %s, %s)
-                ON CONFLICT (track_id)
-                DO UPDATE SET
-                    embedding = EXCLUDED.embedding,
-                    model_version = EXCLUDED.model_version,
-                    analyzed_at = EXCLUDED.analyzed_at
-            """, (track_id, embedding_list, MODEL_VERSION, datetime.utcnow()))
-
-            self.db.commit()
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
+                    VALUES (%s, %s::vector, %s, %s)
+                    ON CONFLICT (track_id)
+                    DO UPDATE SET
+                        embedding = EXCLUDED.embedding,
+                        model_version = EXCLUDED.model_version,
+                        analyzed_at = EXCLUDED.analyzed_at
+                    """,
+                    (track_id, embedding_list, MODEL_VERSION, datetime.utcnow()),
+                )
+            conn.commit()
             return True
-
         except Exception as e:
             logger.error(f"Failed to store embedding for {track_id}: {e}")
             traceback.print_exc()
-            self.db.rollback()
+            conn.rollback()
             return False
         finally:
-            cursor.close()
+            self._db_pool.putconn(conn)
 
 
 class TextEmbedHandler:
@@ -684,6 +716,9 @@ class ControlHandler:
                 new_count = control.get('count', NUM_WORKERS)
                 logger.info(f"Received worker count change request: {NUM_WORKERS} -> {new_count}")
                 logger.info("Note: Restart the CLAP analyzer container to apply the new worker count")
+            elif command == 'stop':
+                logger.info("Received stop command — signalling worker threads to stop")
+                self.stop_event.set()
             else:
                 logger.warning(f"Unknown control command: {command}")
 
@@ -723,14 +758,13 @@ def main():
 
     threads = []
 
-    # Start worker threads
-    for i in range(NUM_WORKERS):
-        worker = Worker(i, analyzer, stop_event)
-        thread = threading.Thread(target=worker.start, name=f"Worker-{i}")
-        thread.daemon = True
-        thread.start()
-        threads.append(thread)
-        logger.info(f"Started worker thread {i}")
+    # Start BullMQ vibe worker (runs asyncio event loop in its own thread)
+    bullmq_worker = BullMQVibeWorker(analyzer, stop_event)
+    bullmq_thread = threading.Thread(target=bullmq_worker.start, name="BullMQVibeWorker")
+    bullmq_thread.daemon = True
+    bullmq_thread.start()
+    threads.append(bullmq_thread)
+    logger.info("Started BullMQ vibe worker thread")
 
     # Start text embed handler thread
     text_handler = TextEmbedHandler(analyzer, stop_event)
@@ -770,8 +804,7 @@ def main():
                         """)
                         remaining = cursor.fetchone()['cnt']
                         cursor.close()
-                        queue_len = redis.from_url(REDIS_URL).llen(ANALYSIS_QUEUE)
-                        if remaining == 0 and queue_len == 0:
+                        if remaining == 0:
                             analyzer.unload_model()
                             logger.info("All tracks have embeddings, model unloaded (will reload when work arrives)")
                     except Exception as e:

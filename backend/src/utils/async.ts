@@ -23,6 +23,23 @@ export function yieldToEventLoop(): Promise<void> {
 }
 
 /**
+ * Retry a function on transient network errors (ECONNRESET, ETIMEDOUT, AbortError)
+ * with linear backoff (2s, 4s, 6s). Non-retryable errors are re-thrown immediately.
+ */
+export async function withRetry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 2000): Promise<T> {
+    for (let i = 0; i < attempts; i++) {
+        try {
+            return await fn();
+        } catch (err: any) {
+            const isRetryable = err.code === "ECONNRESET" || err.code === "ETIMEDOUT" || err.name === "AbortError";
+            if (!isRetryable || i === attempts - 1) throw err;
+            await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+        }
+    }
+    throw new Error("unreachable");
+}
+
+/**
  * Process items in batches with yielding between batches
  * Checks abort signal to support early termination
  *

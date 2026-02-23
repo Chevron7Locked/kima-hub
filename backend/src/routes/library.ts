@@ -257,7 +257,7 @@ router.get("/scan/status/:jobId", async (req, res) => {
     }
 
     const state = await job.getState();
-    const progress = job.progress();
+    const progress = job.progress;
     const result = job.returnvalue;
 
     res.json({
@@ -650,7 +650,7 @@ router.get("/artists", async (req, res) => {
 
       return {
         id: artist.id,
-        mbid: artist.mbid,
+        mbid: artist.mbid?.startsWith("temp-") ? null : artist.mbid,
         name: artist.name,
         heroUrl: coverArt,
         coverArt, // Alias for frontend consistency
@@ -1430,6 +1430,7 @@ router.get("/artists/:id", async (req, res) => {
 
     res.json({
       ...artist,
+      mbid: artist.mbid?.startsWith("temp-") ? null : artist.mbid,
       coverArt: heroUrl, // Use fetched hero image (falls back to artist.heroUrl)
       bio: getArtistDisplaySummary(artist),
       genres: getMergedGenres(artist),

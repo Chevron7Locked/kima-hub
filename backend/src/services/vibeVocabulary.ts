@@ -5,6 +5,10 @@ import { join } from "path";
 import { logger } from "../utils/logger";
 import { VOCAB_DEFINITIONS, FeatureProfile, TermType } from "../data/featureProfiles";
 
+// Force TypeScript to copy JSON to dist (without actually using it here - runtime reads the file directly)
+import _vocabData from "../data/vibe-vocabulary.json";
+void(_vocabData); // Prevent unused variable warning
+
 export interface VocabTerm {
     name: string;
     type: TermType;

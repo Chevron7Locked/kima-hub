@@ -267,13 +267,6 @@ services:
                     cpus: "4"
                 reservations:
                     memory: 2G
-                    # GPU acceleration (optional) - uncomment to enable
-                    # Requires NVIDIA Container Toolkit on the host:
-                    #   https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
-                    # devices:
-                    #     - driver: nvidia
-                    #       count: 1
-                    #       capabilities: [gpu]
         healthcheck:
             test: ["CMD", "pgrep", "-f", "python.*analyzer"]
             interval: 30s
@@ -317,11 +310,6 @@ services:
                     cpus: "4"
                 reservations:
                     memory: 1G
-                    # GPU acceleration (optional) - uncomment to enable
-                    # devices:
-                    #     - driver: nvidia
-                    #       count: 1
-                    #       capabilities: [gpu]
 
 volumes:
     # Kima core

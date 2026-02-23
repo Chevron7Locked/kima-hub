@@ -1,6 +1,8 @@
 import { useEffect, useCallback, useRef } from "react";
 import { useAudio } from "@/lib/audio-context";
 import { api } from "@/lib/api";
+import { audioEngine } from "@/lib/audio-engine";
+import { silenceKeepalive } from "@/lib/silence-keepalive";
 
 /**
  * Media Session API integration for OS-level media controls
@@ -28,10 +30,15 @@ export function useMediaSession() {
     } = useAudio();
 
     const currentTimeRef = useRef(currentTime);
+    const isPlayingRef = useRef(isPlaying);
 
     useEffect(() => {
         currentTimeRef.current = currentTime;
     }, [currentTime]);
+
+    useEffect(() => {
+        isPlayingRef.current = isPlaying;
+    }, [isPlaying]);
 
     // Track if this device has initiated playback locally
     // Prevents cross-device media session interference from state sync
@@ -239,6 +246,15 @@ export function useMediaSession() {
         // Register action handlers
         navigator.mediaSession.setActionHandler("play", () => {
             resume();
+            // Call the engine directly within the MediaSession user-activation context.
+            // iOS releases the audio session when a backgrounded PWA pauses audio.
+            // By the time React processes the state update chain, the activation window
+            // has expired and audio.play() is blocked. Calling it synchronously here
+            // bypasses that race condition.
+            audioEngine.tryResume();
+            // Prime the silence keepalive element. MediaSession handlers are user-gesture
+            // contexts on both iOS and Android, making this the most reliable unlock point.
+            silenceKeepalive.prime();
         });
 
         navigator.mediaSession.setActionHandler("pause", () => {
@@ -357,4 +373,25 @@ export function useMediaSession() {
             }
         }
     }, [currentTime, currentTrack, currentAudiobook, currentPodcast]);
+
+    // Re-sync MediaSession playbackState when the app comes back to the foreground.
+    // iOS may have shown stale controls while the app was backgrounded.
+    useEffect(() => {
+        if (!("mediaSession" in navigator)) return;
+
+        const handleVisibilityChange = () => {
+            if (!document.hidden) {
+                navigator.mediaSession.playbackState = isPlayingRef.current
+                    ? "playing"
+                    : "paused";
+            }
+        };
+
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+        return () =>
+            document.removeEventListener(
+                "visibilitychange",
+                handleVisibilityChange
+            );
+    }, []);
 }

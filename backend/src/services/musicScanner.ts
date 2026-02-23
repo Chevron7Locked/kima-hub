@@ -759,6 +759,25 @@ export class MusicScannerService {
                 });
             }
 
+            // Cross-artist fallback: if an album with the same title and year already
+            // exists under any artist in the library, reuse it to prevent splitting
+            // multi-artist / VA albums when albumartist tags are inconsistent.
+            // Guards: title must not be generic, year must be known (non-null).
+            if (!album && albumTitle !== "Unknown Album" && albumTitle !== "Unknown" && year !== null) {
+                album = await prisma.album.findFirst({
+                    where: {
+                        title: albumTitle,
+                        year: year,
+                        location: "LIBRARY",
+                    },
+                });
+                if (album) {
+                    logger.debug(
+                        `[Scanner] Cross-artist album match: "${albumTitle}" (${year}) -> album ${album.id} (artist ${album.artistId})`,
+                    );
+                }
+            }
+
             if (!album) {
                 // Create new album (use a temporary MBID for now)
                 const rgMbid =

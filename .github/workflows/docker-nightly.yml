@@ -25,6 +25,9 @@ jobs:
                   sudo rm -rf /usr/local/share/boost
                   sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
+
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@v3
 
@@ -52,5 +55,4 @@ jobs:
                       org.opencontainers.image.version=nightly-${{ steps.sha.outputs.short }}
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
-                  # ARM64 disabled due to QEMU emulation issues with npm packages
-                  platforms: linux/amd64
+                  platforms: linux/amd64,linux/arm64

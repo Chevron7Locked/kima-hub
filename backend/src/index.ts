@@ -308,15 +308,18 @@ app.listen(config.port, "0.0.0.0", async () => {
     const { initializeMusicConfig } = await import("./config");
     await initializeMusicConfig();
 
-    // Initialize Bull queue workers
+    // Initialize BullMQ workers
     await import("./workers");
 
     // Set up Bull Board dashboard
     const { createBullBoard } = await import("@bull-board/api");
-    const { BullAdapter } = await import("@bull-board/api/bullAdapter");
+    const { BullMQAdapter } = await import("@bull-board/api/bullMQAdapter");
     const { ExpressAdapter } = await import("@bull-board/express");
     const { scanQueue, discoverQueue } = await import(
         "./workers/queues"
+    );
+    const { artistQueue, trackQueue, vibeQueue, podcastQueue } = await import(
+        "./workers/enrichmentQueues"
     );
 
     const serverAdapter = new ExpressAdapter();
@@ -324,8 +327,12 @@ app.listen(config.port, "0.0.0.0", async () => {
 
     createBullBoard({
         queues: [
-            new BullAdapter(scanQueue),
-            new BullAdapter(discoverQueue),
+            new BullMQAdapter(scanQueue),
+            new BullMQAdapter(discoverQueue),
+            new BullMQAdapter(artistQueue),
+            new BullMQAdapter(trackQueue),
+            new BullMQAdapter(vibeQueue),
+            new BullMQAdapter(podcastQueue),
         ],
         serverAdapter,
     });

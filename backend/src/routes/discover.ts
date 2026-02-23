@@ -149,12 +149,12 @@ router.delete("/batch", async (req, res) => {
             logger.info(`[Discover Cancel] Marked batch ${batch.id} as completed`);
         }
 
-        // Find and cancel any active Bull queue jobs for this user
+        // Find and cancel any active BullMQ jobs for this user
         const activeJobs = await discoverQueue.getActive();
         for (const job of activeJobs) {
             if (job.data.userId === userId) {
                 try {
-                    await job.moveToFailed({ message: "Cancelled by user" }, true);
+                    await job.moveToFailed(new Error("Cancelled by user"), "");
                     jobsCancelled++;
                     logger.info(`[Discover Cancel] Cancelled Bull job ${job.id}`);
                 } catch (jobError) {
@@ -193,7 +193,7 @@ router.delete("/batch", async (req, res) => {
     }
 });
 
-// POST /discover/generate - Generate new Discover Weekly playlist (using Bull queue)
+// POST /discover/generate - Generate new Discover Weekly playlist
 router.post("/generate", async (req, res) => {
     try {
         const userId = req.user!.id;
@@ -297,7 +297,7 @@ router.get("/generate/status/:jobId", async (req, res) => {
         }
 
         const state = await job.getState();
-        const progress = job.progress();
+        const progress = job.progress;
         const result = job.returnvalue;
 
         res.json({
@@ -827,6 +827,77 @@ router.post("/retry-unavailable", async (req, res) => {
             return res.json({ success: true, queued: 0, message: "No unavailable albums to retry" });
         }
 
+        // Apply the same filtering used by GET /current to exclude albums that are
+        // already in the library. Without this, the retry would re-download albums
+        // the user already has, importing duplicate tracks.
+
+        // Filter 1: albums with a successful DiscoveryAlbum record this week
+        const successfulDiscovery = await prisma.discoveryAlbum.findMany({
+            where: {
+                userId,
+                weekStartDate: weekStart,
+                status: { in: ["ACTIVE", "LIKED"] },
+            },
+            select: { rgMbid: true },
+        });
+        const successfulMbids = new Set(successfulDiscovery.map((da) => da.rgMbid));
+
+        // Filter 2: albums already present in the library by MBID
+        const allMbids = unavailableAlbums.map((a) => a.albumMbid).filter(Boolean);
+        const existingByMbid = new Set(
+            (await prisma.album.findMany({
+                where: { rgMbid: { in: allMbids } },
+                select: { rgMbid: true },
+            })).map((a) => a.rgMbid)
+        );
+
+        // Filter 3: fuzzy title+artist match against the full library
+        const libraryAlbums = await prisma.album.findMany({
+            select: { title: true, artist: { select: { name: true } } },
+        });
+        const libraryIndex = libraryAlbums.map((a) => ({
+            title: a.title.toLowerCase().trim(),
+            artist: a.artist.name.toLowerCase().trim(),
+        }));
+
+        const staleIds: string[] = [];
+        const retriableAlbums = unavailableAlbums.filter((album) => {
+            if (successfulMbids.has(album.albumMbid)) {
+                staleIds.push(album.id);
+                return false;
+            }
+            if (existingByMbid.has(album.albumMbid)) {
+                staleIds.push(album.id);
+                return false;
+            }
+            const normalizedArtist = album.artistName.toLowerCase().trim();
+            const normalizedTitle = album.albumTitle
+                .toLowerCase()
+                .replace(/\(.*?\)/g, "")
+                .replace(/\[.*?\]/g, "")
+                .trim();
+            const existsInLibrary = libraryIndex.some(
+                (lib) =>
+                    lib.title.includes(normalizedTitle) &&
+                    lib.artist.includes(normalizedArtist)
+            );
+            if (existsInLibrary) {
+                staleIds.push(album.id);
+                return false;
+            }
+            return true;
+        });
+
+        // Delete stale UnavailableAlbum records so they don't reappear next retry
+        if (staleIds.length > 0) {
+            await prisma.unavailableAlbum.deleteMany({ where: { id: { in: staleIds } } });
+            logger.info(`[Discover Retry] Cleared ${staleIds.length} stale unavailable records (already in library)`);
+        }
+
+        if (retriableAlbums.length === 0) {
+            return res.json({ success: true, queued: 0, message: "All unavailable albums are already in your library" });
+        }
+
         const settings = await getSystemSettings();
         if (!settings?.musicPath) {
             return res.status(400).json({ error: "Music path not configured" });
@@ -838,22 +909,22 @@ router.post("/retry-unavailable", async (req, res) => {
                 data: {
                     userId,
                     weekStart,
-                    targetSongCount: unavailableAlbums.length,
+                    targetSongCount: retriableAlbums.length,
                     status: "downloading",
-                    totalAlbums: unavailableAlbums.length,
+                    totalAlbums: retriableAlbums.length,
                     completedAlbums: 0,
                     failedAlbums: 0,
                     logs: [
                         {
                             timestamp: new Date().toISOString(),
                             level: "info",
-                            message: `Retry: ${unavailableAlbums.length} unavailable albums`,
+                            message: `Retry: ${retriableAlbums.length} unavailable albums`,
                         },
                     ] as any,
                 },
             });
 
-            for (const album of unavailableAlbums) {
+            for (const album of retriableAlbums) {
                 await tx.downloadJob.create({
                     data: {
                         userId,
@@ -888,13 +959,13 @@ router.post("/retry-unavailable", async (req, res) => {
             return newBatch;
         });
 
-        logger.info(`[Discover Retry] Created batch ${batch.id} with ${unavailableAlbums.length} albums`);
+        logger.info(`[Discover Retry] Created batch ${batch.id} with ${retriableAlbums.length} albums`);
 
         res.json({
             success: true,
-            queued: unavailableAlbums.length,
+            queued: retriableAlbums.length,
             batchId: batch.id,
-            message: `Retrying ${unavailableAlbums.length} unavailable albums`,
+            message: `Retrying ${retriableAlbums.length} unavailable albums`,
         });
 
         // Process downloads in background using acquisition service
@@ -1529,7 +1600,7 @@ router.delete("/clear", async (req, res) => {
             // Find completed jobs that didn't make the playlist AND aren't from liked artists
             const extraJobs = completedJobs.filter((job) => {
                 // If MBID matches a discovery album, not an "extra"
-                if (discoveryMbids.has(job.targetMbid)) return false;
+                if (discoveryMbids.has(job.targetMbid!)) return false;
 
                 // If this job's artist has any LIKED albums, don't clean it up
                 const metadata = job.metadata as any;

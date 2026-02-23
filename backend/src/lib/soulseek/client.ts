@@ -2,6 +2,8 @@ import crypto from 'crypto'
 import EventEmitter from 'events'
 import net from 'net'
 import stream from 'stream'
+
+import { logger } from '../../utils/logger'
 import type TypedEventEmitter from 'typed-emitter'
 
 import type { Address } from './common'
@@ -224,7 +226,7 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
                         d.username === msg.username && downloadHasToken(d) && d.token === token
                     )
                     if (!download_) {
-                      console.error('No download found for', msg)
+                      logger.error(`[Soulseek] No download found for ${JSON.stringify(msg)}`)
                       conn.end()
                       return
                     }
@@ -323,7 +325,7 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
               )
 
               if (existingDownloadIndex === -1) {
-                console.error('No download found for', msg)
+                logger.error(`[Soulseek] No download found for ${JSON.stringify(msg)}`)
                 return
               }
 
@@ -348,7 +350,7 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
             )
 
             if (existingDownloadIndex === -1) {
-              console.error('No download found for', msg)
+              logger.error(`[Soulseek] No download found for ${JSON.stringify(msg)}`)
               return
             }
 

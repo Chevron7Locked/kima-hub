@@ -88,6 +88,11 @@ class DataCacheService {
         albumId: string,
         rgMbid: string
     ): Promise<string | null> {
+        // Skip temp MBIDs - no cover art available for unscanned albums
+        if (!rgMbid || rgMbid.startsWith("temp-")) {
+            return null;
+        }
+
         const cacheKey = `album-cover:${albumId}`;
 
         // 1. Check DB first

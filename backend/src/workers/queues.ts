@@ -1,51 +1,37 @@
-import Bull from "bull";
+import { Queue } from "bullmq";
+import type { ConnectionOptions } from "bullmq";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 
-const redisUrl = new URL(config.redisUrl);
-const redisConfig = {
-    host: redisUrl.hostname,
-    port: parseInt(redisUrl.port),
-};
+function getConnectionOptions(): ConnectionOptions {
+    const url = new URL(config.redisUrl);
+    return {
+        host: url.hostname,
+        port: parseInt(url.port, 10) || 6379,
+        password: url.password || undefined,
+        maxRetriesPerRequest: null,
+        enableReadyCheck: false,
+    };
+}
 
-const defaultQueueSettings: Bull.QueueOptions["settings"] = {
-    stalledInterval: 30000,
-    lockDuration: 30000,
-    maxStalledCount: 1,
-};
-
-const defaultJobOptions: Bull.JobOptions = {
+const defaultJobOptions = {
     removeOnComplete: 100,
     removeOnFail: 50,
+    attempts: 3,
+    backoff: { type: "exponential" as const, delay: 5000 },
 };
 
-export const scanQueue = new Bull("library-scan", {
-    redis: redisConfig,
-    settings: defaultQueueSettings,
+// v2 suffix avoids key conflict with old Bull v4 data still in Redis
+export const scanQueue = new Queue("library-scan-v2", {
+    connection: getConnectionOptions(),
     defaultJobOptions,
 });
 
-export const discoverQueue = new Bull("discover-weekly", {
-    redis: redisConfig,
-    settings: defaultQueueSettings,
+export const discoverQueue = new Queue("discover-weekly-v2", {
+    connection: getConnectionOptions(),
     defaultJobOptions,
 });
 
 export const queues = [scanQueue, discoverQueue];
 
-queues.forEach((queue) => {
-    queue.on("error", (error) => {
-        logger.error(`Bull queue error (${queue.name}):`, {
-            message: error.message,
-            stack: error.stack,
-        });
-    });
-
-    queue.on("stalled", (job) => {
-        logger.warn(`Bull job stalled (${queue.name}):`, {
-            jobId: job.id,
-        });
-    });
-});
-
-logger.debug("Bull queues initialized with stability settings");
+logger.debug("BullMQ queues initialized (library-scan-v2, discover-weekly-v2)");

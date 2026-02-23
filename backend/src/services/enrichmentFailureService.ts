@@ -10,7 +10,7 @@ import { prisma } from "../utils/db";
 
 export interface EnrichmentFailure {
     id: string;
-    entityType: "artist" | "track" | "audio" | "vibe";
+    entityType: "artist" | "track" | "audio" | "vibe" | "podcast";
     entityId: string;
     entityName: string | null;
     errorMessage: string | null;
@@ -27,7 +27,7 @@ export interface EnrichmentFailure {
 }
 
 export interface RecordFailureInput {
-    entityType: "artist" | "track" | "audio" | "vibe";
+    entityType: "artist" | "track" | "audio" | "vibe" | "podcast";
     entityId: string;
     entityName?: string;
     errorMessage: string;
@@ -36,7 +36,7 @@ export interface RecordFailureInput {
 }
 
 export interface GetFailuresOptions {
-    entityType?: "artist" | "track" | "audio" | "vibe";
+    entityType?: "artist" | "track" | "audio" | "vibe" | "podcast";
     includeSkipped?: boolean;
     includeResolved?: boolean;
     limit?: number;
@@ -252,7 +252,7 @@ class EnrichmentFailureService {
     /**
      * Clear all unresolved failures (optionally filtered by type)
      */
-    async clearAllFailures(entityType?: "artist" | "track" | "audio" | "vibe"): Promise<number> {
+    async clearAllFailures(entityType?: "artist" | "track" | "audio" | "vibe" | "podcast"): Promise<number> {
         const where: any = {
             resolved: false,
             skipped: false,
@@ -357,6 +357,15 @@ class EnrichmentFailureService {
                     select: { id: true },
                 });
                 exists = !!track;
+            } else if (failure.entityType === "podcast") {
+                const podcast = await prisma.podcast.findUnique({
+                    where: { id: failure.entityId },
+                    select: { id: true },
+                });
+                exists = !!podcast;
+            } else {
+                // Unknown entity type — treat as existing to avoid silent deletion
+                exists = true;
             }
 
             if (!exists) {

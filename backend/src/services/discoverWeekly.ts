@@ -749,12 +749,12 @@ export class DiscoverWeeklyService {
                             userId_weekStartDate_albumMbid: {
                                 userId: batch.userId,
                                 weekStartDate: batch.weekStart,
-                                albumMbid: job.targetMbid,
+                                albumMbid: job.targetMbid!,
                             },
                         },
                         create: {
                             userId: batch.userId,
-                            albumMbid: job.targetMbid,
+                            albumMbid: job.targetMbid!,
                             artistName: metadata?.artistName || "Unknown",
                             albumTitle: metadata?.albumTitle || "Unknown",
                             similarity: metadata?.similarity || 0.5,
@@ -2072,7 +2072,7 @@ export class DiscoverWeeklyService {
             where: { discoveryBatchId: batch.id },
         });
         for (const job of batchJobs) {
-            attemptedMbids.add(job.targetMbid);
+            if (job.targetMbid) attemptedMbids.add(job.targetMbid);
             const jobMeta = job.metadata as any;
             if (jobMeta?.artistMbid) {
                 attemptedArtistMbids.add(jobMeta.artistMbid);

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { withRetry } from "../utils/async";
 import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { spotifyService } from "../services/spotify";
@@ -117,7 +118,7 @@ router.get("/playlists/search", async (req, res) => {
 router.get("/playlists/:id", async (req, res) => {
     try {
         const { id } = req.params;
-        const playlist = await deezerService.getPlaylist(id);
+        const playlist = await withRetry(() => deezerService.getPlaylist(id));
 
         if (!playlist) {
             return res.status(404).json({ error: "Playlist not found" });
@@ -130,7 +131,11 @@ router.get("/playlists/:id", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("Playlist fetch error:", error);
-        res.status(500).json({ error: error.message || "Failed to fetch playlist" });
+        const isNetworkError = ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED"].includes(error.code);
+        const userMessage = isNetworkError
+            ? "Deezer API is temporarily unavailable. Please try again in a moment."
+            : (error.message || "Failed to fetch playlist");
+        res.status(500).json({ error: userMessage });
     }
 });
 

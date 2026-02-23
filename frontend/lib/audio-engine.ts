@@ -247,6 +247,23 @@ class AudioEngine {
     }
 
     /**
+     * Attempt to resume playback without emitting error events.
+     * Used for direct resumption from MediaSession handlers or visibility recovery,
+     * where a failed play should not trigger the error→skip-track flow.
+     * Returns true if playback started successfully.
+     */
+    async tryResume(): Promise<boolean> {
+        if (!this.audio || !this.audio.src) return false;
+        if (!this.audio.paused) return true;
+        try {
+            await this.audio.play();
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
      * Pause audio.
      */
     pause(): void {

@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { withRetry } from "../utils/async";
 import pLimit from "p-limit";
 import { spotifyService, SpotifyTrack, SpotifyPlaylist } from "./spotify";
 import { logger } from "../utils/logger";
@@ -3082,7 +3083,7 @@ class SpotifyImportService {
         if (url.includes("deezer.com")) {
           const deezerMatch = url.match(/playlist[\/:](\d+)/);
           if (!deezerMatch) throw new Error("Invalid Deezer playlist URL");
-          const deezerPlaylist = await deezerService.getPlaylist(deezerMatch[1]);
+          const deezerPlaylist = await withRetry(() => deezerService.getPlaylist(deezerMatch[1]));
           if (!deezerPlaylist) throw new Error("Deezer playlist not found");
 
           eventBus.emit({
@@ -3115,15 +3116,19 @@ class SpotifyImportService {
         });
       } catch (error: any) {
         logger?.error("[Preview Job] Failed:", error);
+        const isNetworkError = ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED"].includes(error.code);
+        const userMessage = isNetworkError
+            ? "Deezer API is temporarily unavailable. Please try again in a moment."
+            : (error.message || "Import failed");
         await redisClient.setEx(
           PREVIEW_JOB_KEY(jobId),
           PREVIEW_JOB_TTL,
-          JSON.stringify({ status: "failed", error: error.message, userId }),
+          JSON.stringify({ status: "failed", error: userMessage, userId }),
         ).catch((e) => logger.error("[Preview Job] Failed to persist error state to Redis:", e));
         eventBus.emit({
           type: "preview:complete",
           userId,
-          payload: { jobId, error: error.message },
+          payload: { jobId, error: userMessage },
         });
       }
     })().catch((e) => logger?.error("[Preview Job] Unhandled:", e));

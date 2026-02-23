@@ -13,18 +13,28 @@
 
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
-import { enrichSimilarArtist } from "./artistEnrichment";
 import { lastFmService } from "../services/lastfm";
 import Redis from "ioredis";
 import { config } from "../config";
+import type { Worker as BullWorker } from "bullmq";
+import {
+    artistQueue,
+    trackQueue,
+    vibeQueue,
+    podcastQueue,
+    closeEnrichmentQueues,
+} from "./enrichmentQueues";
+import { startArtistEnrichmentWorker } from "./artistEnrichmentWorker";
+import { startTrackEnrichmentWorker } from "./trackEnrichmentWorker";
+import { startPodcastEnrichmentWorker } from "./podcastEnrichmentWorker";
+import {
+    startAudioCompletionSubscriber,
+    stopAudioCompletionSubscriber,
+} from "./audioCompletionSubscriber";
 import { enrichmentStateService } from "../services/enrichmentState";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { audioAnalysisCleanupService } from "../services/audioAnalysisCleanup";
-import { rateLimiter } from "../services/rateLimiter";
-import { vibeAnalysisCleanupService, VIBE_MAX_RETRIES } from "../services/vibeAnalysisCleanup";
-import { getSystemSettings } from "../utils/systemSettings";
 import { featureDetection } from "../services/featureDetection";
-import pLimit from "p-limit";
 
 // Configuration
 const ARTIST_BATCH_SIZE = 10;
@@ -39,6 +49,7 @@ let controlSubscriber: Redis | null = null;
 let isPaused = false;
 let isStopping = false;
 let immediateEnrichmentRequested = false;
+let activeEnrichmentWorkers: BullWorker[] = [];
 let consecutiveSystemFailures = 0; // Track consecutive system-level failures
 let lastRunTime = 0;
 let audioLastCycleCompletedCount: number | null = null;
@@ -58,6 +69,12 @@ let currentBatchFailures: BatchFailures = {
 
 // Session-level failure counter (accumulates across cycles, reset on enrichment start)
 let sessionFailureCount = { artists: 0, tracks: 0, audio: 0 };
+
+// Timestamp for once-per-hour orphaned failure record cleanup
+let lastOrphanedFailuresCleanup: Date | null = null;
+
+// Timestamp for once-per-day resolved failure record cleanup (>30 days old)
+let lastResolvedCleanup: Date | null = null;
 
 // Mood tags to extract from Last.fm
 const MOOD_TAGS = new Set([
@@ -192,9 +209,11 @@ async function setupControlChannel() {
                 if (message === "pause") {
                     isPaused = true;
                     logger.debug("[Enrichment] Paused");
+                    Promise.all(activeEnrichmentWorkers.map((w) => w.pause())).catch(() => {});
                 } else if (message === "resume") {
                     isPaused = false;
                     logger.debug("[Enrichment] Resumed");
+                    Promise.all(activeEnrichmentWorkers.map((w) => w.resume())).catch(() => {});
                 } else if (message === "stop") {
                     isStopping = true;
                     isPaused = true;
@@ -202,6 +221,8 @@ async function setupControlChannel() {
                         "[Enrichment] Stopping gracefully - completing current item...",
                     );
                     // DO NOT override state - let enrichmentStateService.stop() handle it
+                    // Signal CLAP Python container to stop draining its queue
+                    getRedis().publish("audio:clap:control", JSON.stringify({ command: "stop" })).catch(() => {});
                 }
             }
         });
@@ -227,7 +248,7 @@ export async function startUnifiedEnrichmentWorker() {
      });
      const orphanedVibe = await prisma.track.updateMany({
          where: { vibeAnalysisStatus: "processing" },
-         data: { vibeAnalysisStatus: "pending", vibeAnalysisStartedAt: null },
+         data: { vibeAnalysisStatus: null, vibeAnalysisStartedAt: null },
      });
      if (orphanedAudio.count > 0 || orphanedVibe.count > 0) {
          logger.info(
@@ -254,6 +275,16 @@ export async function startUnifiedEnrichmentWorker() {
      // Initialize state
      await enrichmentStateService.initializeState();
 
+    // Start BullMQ Workers (artist, track, podcast)
+    activeEnrichmentWorkers = await Promise.all([
+        startArtistEnrichmentWorker(),
+        startTrackEnrichmentWorker(),
+        startPodcastEnrichmentWorker(),
+    ]);
+
+    // Start audio completion subscriber (Essentia → vibe queue bridge)
+    startAudioCompletionSubscriber();
+
     // Setup control channel subscription
     await setupControlChannel();
 
@@ -278,7 +309,7 @@ function scheduleNextEnrichmentCycle() {
 /**
  * Stop the enrichment worker
  */
-export function stopUnifiedEnrichmentWorker() {
+export async function stopUnifiedEnrichmentWorker() {
     if (enrichmentInterval) {
         clearTimeout(enrichmentInterval);
         enrichmentInterval = null;
@@ -293,8 +324,14 @@ export function stopUnifiedEnrichmentWorker() {
         controlSubscriber = null;
     }
 
+    // Close BullMQ Workers, audio subscriber, and Queues
+    await Promise.all(activeEnrichmentWorkers.map((w) => w.close())).catch(() => {});
+    activeEnrichmentWorkers = [];
+    await stopAudioCompletionSubscriber().catch(() => {});
+    await closeEnrichmentQueues().catch(() => {});
+
     // Mark as stopped in state
-    enrichmentStateService
+    await enrichmentStateService
         .updateState({
             status: "idle",
             currentPhase: null,
@@ -421,6 +458,13 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
 
     immediateEnrichmentRequested = false;
     lastRunTime = now;
+
+    // Detect hangs: warn if enrichment has been "running" > 15 min with no state update
+    const isHung = await enrichmentStateService.detectHang();
+    if (isHung) {
+        logger.warn("[Enrichment] Hang detected — enrichment has been running > 15 min with no activity");
+    }
+
     isRunning = true;
 
     let artistsProcessed = 0;
@@ -449,19 +493,27 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         }
         audioQueued = audioResult;
 
-        const vibeResult = await runPhase("vibe", executeVibePhase);
-        if (vibeResult === null) {
-            return { artists: artistsProcessed, tracks: tracksProcessed, audioQueued };
-        }
-        const vibeQueued = vibeResult;
-
         // Podcast refresh phase -- only runs if subscriptions exist
         await runPhase("podcasts", executePodcastRefreshPhase);
+
+        // Orphaned failure cleanup -- runs at most once per hour, never during stop/pause
+        const ONE_HOUR_MS = 60 * 60 * 1000;
+        if (!isStopping && !isPaused && (!lastOrphanedFailuresCleanup || Date.now() - lastOrphanedFailuresCleanup.getTime() > ONE_HOUR_MS)) {
+            await enrichmentFailureService.cleanupOrphanedFailures();
+            lastOrphanedFailuresCleanup = new Date();
+        }
+
+        // Daily: clean up old resolved failures (>30 days)
+        const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+        if (!isStopping && !isPaused && (!lastResolvedCleanup || Date.now() - lastResolvedCleanup.getTime() > ONE_DAY_MS)) {
+            lastResolvedCleanup = new Date();
+            await enrichmentFailureService.cleanupOldResolved();
+        }
 
         const features = await featureDetection.getFeatures();
 
          // Log progress (only if work was done)
-         if (artistsProcessed > 0 || tracksProcessed > 0 || audioQueued > 0 || vibeQueued > 0) {
+         if (artistsProcessed > 0 || tracksProcessed > 0 || audioQueued > 0) {
             const progress = await getEnrichmentProgress();
             logger.debug(`\n[Enrichment Progress]`);
             logger.debug(
@@ -667,135 +719,14 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
     return { artists: artistsProcessed, tracks: tracksProcessed, audioQueued };
 }
 
-/**
- * Step 1: Enrich artist metadata
- */
-async function enrichArtistsBatch(): Promise<number> {
-    // Get concurrency setting from system settings
-    const settings = await getSystemSettings();
-    const concurrency = settings?.enrichmentConcurrency || 1;
-
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const artists = await prisma.artist.findMany({
-        where: {
-            OR: [
-                { enrichmentStatus: "pending" },
-                { enrichmentStatus: "failed" },
-                {
-                    enrichmentStatus: "unresolvable",
-                    lastEnriched: { lt: sevenDaysAgo },
-                },
-            ],
-            albums: { some: {} },
-        },
-        orderBy: { name: "asc" },
-        take: ARTIST_BATCH_SIZE,
-    });
-
-    if (artists.length === 0) return 0;
-
-    logger.debug(
-        `[Artists] Processing ${artists.length} artists (concurrency: ${concurrency})...`,
-    );
-
-    // Use p-limit to control concurrency
-    const limit = pLimit(concurrency);
-
-    const results = await Promise.allSettled(
-        artists.map((artist) =>
-            limit(async () => {
-                // Check if paused before processing
-                if (isPaused) {
-                    throw new Error("Paused");
-                }
-
-                // Update state with current artist
-                await enrichmentStateService.updateState({
-                    artists: {
-                        current: artist.name,
-                    } as any,
-                });
-
-                try {
-                    // Add timeout to prevent hanging on rate-limited requests
-                    // 60s to accommodate multiple sequential API calls (MusicBrainz, Wikidata, Last.fm, Fanart.tv, Deezer, covers)
-                    await withTimeout(
-                        enrichSimilarArtist(artist),
-                        60000, // 60 second max per artist
-                        `Timeout enriching artist: ${artist.name}`,
-                    );
-                    logger.debug(`✓ ${artist.name}`);
-                    return artist.name;
-                } catch (error) {
-                    logger.error(`✗ ${artist.name}:`, error);
-
-                    // Collect failure for batch reporting
-                    currentBatchFailures.artists.push({
-                        name: artist.name,
-                        error:
-                            error instanceof Error ?
-                                error.message
-                            :   String(error),
-                    });
-
-                    // Record failure
-                    await enrichmentFailureService.recordFailure({
-                        entityType: "artist",
-                        entityId: artist.id,
-                        entityName: artist.name,
-                        errorMessage:
-                            error instanceof Error ?
-                                error.message
-                            :   String(error),
-                        errorCode:
-                            (
-                                error instanceof Error &&
-                                error.message.includes("Timeout")
-                            ) ?
-                                "TIMEOUT_ERROR"
-                            :   "ENRICHMENT_ERROR",
-                        metadata: {
-                            mbid: artist.mbid,
-                        },
-                    });
-                    throw error;
-                }
-            }),
-        ),
-    );
-
-    // Count successful enrichments
-    const processed = results.filter((r) => r.status === "fulfilled").length;
-
-    if (processed > 0) {
-        logger.debug(
-            `[Artists] Successfully enriched ${processed}/${artists.length} artists`,
-        );
-    }
-
-    return processed;
-}
 
 /**
- * Step 2: Enrich track mood tags from Last.fm
- * Note: No longer waits for artist enrichment - runs in parallel
+ * Enrich a single track's tags from Last.fm.
+ * Used by the BullMQ track enrichment Worker (Phase 4).
  */
-async function enrichTrackTagsBatch(): Promise<number> {
-    // Get concurrency setting from system settings
-    const settings = await getSystemSettings();
-    const concurrency = settings?.enrichmentConcurrency || 1;
-
-    // Note: Nested orderBy on relations doesn't work with isEmpty filtering in Prisma
-    // Track tag enrichment doesn't depend on artist enrichment status, so we just order by recency
-    // Match both empty array AND null (newly scanned tracks have null, not [])
-    const tracks = await prisma.track.findMany({
-        where: {
-            OR: [
-                { lastfmTags: { equals: [] } },
-                { lastfmTags: { isEmpty: true } },
-                { lastfmTags: { equals: null } },
-            ],
-        },
+export async function enrichSingleTrack(trackId: string): Promise<void> {
+    const track = await prisma.track.findUnique({
+        where: { id: trackId },
         include: {
             album: {
                 include: {
@@ -803,119 +734,39 @@ async function enrichTrackTagsBatch(): Promise<number> {
                 },
             },
         },
-        take: TRACK_BATCH_SIZE,
-        orderBy: [{ fileModified: "desc" }],
     });
 
-    if (tracks.length === 0) return 0;
-
-    logger.debug(
-        `[Track Tags] Processing ${tracks.length} tracks (concurrency: ${concurrency})...`,
-    );
-
-    // Use p-limit to control concurrency
-    const limit = pLimit(concurrency);
-
-    const results = await Promise.allSettled(
-        tracks.map((track) =>
-            limit(async () => {
-                // Check if paused before processing
-                if (isPaused) {
-                    throw new Error("Paused");
-                }
-
-                // Update state with current track
-                await enrichmentStateService.updateState({
-                    tracks: {
-                        current: `${track.album.artist.name} - ${track.title}`,
-                    } as any,
-                });
-
-                try {
-                    const artistName = track.album.artist.name;
-
-                    // Add timeout to prevent hanging on rate-limited requests
-                    const trackInfo = await withTimeout(
-                        lastFmService.getTrackInfo(artistName, track.title),
-                        30000, // 30 second max per track
-                        `Timeout enriching track: ${track.title}`,
-                    );
-
-                    if (trackInfo?.toptags?.tag) {
-                        const allTags = trackInfo.toptags.tag.map(
-                            (t: any) => t.name,
-                        );
-                        const moodTags = filterMoodTags(allTags);
-
-                        await prisma.track.update({
-                            where: { id: track.id },
-                            data: {
-                                lastfmTags:
-                                    moodTags.length > 0 ?
-                                        moodTags
-                                    :   ["_no_mood_tags"],
-                            },
-                        });
-
-                        if (moodTags.length > 0) {
-                            logger.debug(
-                                `   ✓ ${track.title}: [${moodTags
-                                    .slice(0, 3)
-                                    .join(", ")}...]`,
-                            );
-                        }
-                    } else {
-                        await prisma.track.update({
-                            where: { id: track.id },
-                            data: { lastfmTags: ["_not_found"] },
-                        });
-                    }
-
-                    // Small delay between requests
-                    await new Promise((resolve) => setTimeout(resolve, 200));
-                    return track.title;
-                } catch (error: any) {
-                    logger.error(
-                        `✗ ${track.title}: ${error?.message || error}`,
-                    );
-
-                    // Collect failure for batch reporting
-                    currentBatchFailures.tracks.push({
-                        name: `${track.album.artist.name} - ${track.title}`,
-                        error: error?.message || String(error),
-                    });
-
-                    // Record failure
-                    await enrichmentFailureService.recordFailure({
-                        entityType: "track",
-                        entityId: track.id,
-                        entityName: `${track.album.artist.name} - ${track.title}`,
-                        errorMessage: error?.message || String(error),
-                        errorCode:
-                            error?.message?.includes("Timeout") ?
-                                "TIMEOUT_ERROR"
-                            :   "LASTFM_ERROR",
-                        metadata: {
-                            albumId: track.albumId,
-                            filePath: track.filePath,
-                        },
-                    });
-                    throw error;
-                }
-            }),
-        ),
-    );
-
-    // Count successful enrichments
-    const processed = results.filter((r) => r.status === "fulfilled").length;
-
-    if (processed > 0) {
-        logger.debug(
-            `[Track Tags] Successfully enriched ${processed}/${tracks.length} tracks`,
-        );
+    if (!track) {
+        const err = new Error(`ENTITY_NOT_FOUND: Track ${trackId} deleted`);
+        (err as any).entityNotFound = true;
+        throw err;
     }
 
-    return processed;
+    const artistName = track.album.artist.name;
+    const trackInfo = await withTimeout(
+        lastFmService.getTrackInfo(artistName, track.title),
+        30000,
+        `Timeout enriching track: ${track.title}`,
+    );
+
+    if (trackInfo?.toptags?.tag) {
+        const allTags = trackInfo.toptags.tag.map((t: any) => t.name);
+        const moodTags = filterMoodTags(allTags);
+        await prisma.track.update({
+            where: { id: track.id },
+            data: {
+                lastfmTags: moodTags.length > 0 ? moodTags : ["_no_mood_tags"],
+            },
+        });
+        if (moodTags.length > 0) {
+            logger.debug(`   ✓ ${track.title}: [${moodTags.slice(0, 3).join(", ")}...]`);
+        }
+    } else {
+        await prisma.track.update({
+            where: { id: track.id },
+            data: { lastfmTags: ["_not_found"] },
+        });
+    }
 }
 
 /**
@@ -983,57 +834,6 @@ async function queueAudioAnalysis(): Promise<number> {
 }
 
 /**
- * Step 4: Queue tracks for CLAP vibe embeddings
- * Only runs if CLAP analyzer is available
- */
-async function queueVibeEmbeddings(): Promise<number> {
-      const tracks = await prisma.$queryRaw<{ id: string; filePath: string; vibeAnalysisStatus: string | null }[]>`
-          SELECT t.id, t."filePath", t."vibeAnalysisStatus"
-          FROM "Track" t
-          LEFT JOIN track_embeddings te ON t.id = te.track_id
-          WHERE te.track_id IS NULL
-            AND t."filePath" IS NOT NULL
-            AND (t."vibeAnalysisStatus" IS NULL OR t."vibeAnalysisStatus" <> 'processing')
-            AND COALESCE(t."vibeAnalysisRetryCount", 0) < ${VIBE_MAX_RETRIES}
-          LIMIT 1000
-      `;
- 
-     if (tracks.length === 0) {
-         return 0;
-     }
-
- const redis = getRedis();
-      let queued = 0;
-
-      for (const track of tracks) {
-          try {
-              await prisma.track.update({
-                  where: { id: track.id },
-                  data: {
-                      vibeAnalysisStatus: 'processing',
-                      vibeAnalysisStartedAt: new Date(),
-                      vibeAnalysisStatusUpdatedAt: new Date(),
-                  },
-              });
-              
-              await redis.rpush(
-                  "audio:clap:queue",
-                  JSON.stringify({
-                      trackId: track.id,
-                      filePath: track.filePath,
-                  })
-              );
-              
-              queued++;
-          } catch (error) {
-              logger.error(`   Failed to queue vibe embedding for ${track.id}:`, error);
-          }
-      }
-
-      return queued;
- }
-
-/**
  * Check if enrichment should stop and handle state cleanup if stopping.
  * Returns true if cycle should halt (either stopping or paused).
  */
@@ -1053,7 +853,7 @@ async function shouldHaltCycle(): Promise<boolean> {
  * Run a phase and return result. Returns null if cycle should halt.
  */
 async function runPhase(
-    phaseName: "artists" | "tracks" | "audio" | "vibe" | "podcasts",
+    phaseName: "artists" | "tracks" | "audio" | "podcasts",
     executor: () => Promise<number>,
 ): Promise<number | null> {
     await enrichmentStateService.updateState({
@@ -1071,11 +871,102 @@ async function runPhase(
 }
 
 async function executeArtistsPhase(): Promise<number> {
-    return enrichArtistsBatch();
+    // Reset temp-MBID artists that have been unresolvable for >24h
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await prisma.artist.updateMany({
+        where: {
+            mbid: { startsWith: "temp-" },
+            enrichmentStatus: "unresolvable",
+            lastEnriched: { lt: oneDayAgo },
+        },
+        data: { enrichmentStatus: "pending" },
+    });
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const pendingArtists = await prisma.artist.findMany({
+        where: {
+            OR: [
+                { enrichmentStatus: "pending" },
+                { enrichmentStatus: "failed" },
+                { enrichmentStatus: "unresolvable", lastEnriched: { lt: sevenDaysAgo } },
+            ],
+            albums: { some: {} },
+        },
+        select: { id: true, name: true },
+        take: ARTIST_BATCH_SIZE,
+    });
+
+    if (pendingArtists.length === 0) return 0;
+
+    let queued = 0;
+    for (const artist of pendingArtists) {
+        try {
+            // Add FIRST — if Redis is down, status stays "pending" and retries naturally
+            await artistQueue.add(
+                "enrich",
+                { artistId: artist.id, artistName: artist.name },
+                { jobId: `artist-${artist.id}` }, // dedup — no-op if already queued
+            );
+            // Update AFTER successful add
+            await prisma.artist.update({
+                where: { id: artist.id },
+                data: { enrichmentStatus: "enriching" },
+            });
+            queued++;
+        } catch (err) {
+            logger.warn(`[Enrichment] Failed to queue artist ${artist.id}: ${(err as Error).message}`);
+        }
+    }
+
+    if (queued > 0) {
+        logger.debug(`[Enrichment] Queued ${queued} artists`);
+    }
+    return queued;
 }
 
 async function executeMoodTagsPhase(): Promise<number> {
-    return enrichTrackTagsBatch();
+    const tracks = await prisma.track.findMany({
+        where: {
+            OR: [
+                { lastfmTags: { equals: [] } },
+                { lastfmTags: { isEmpty: true } },
+            ],
+            // Exclude tracks already queued this cycle — prevents re-adding the
+            // same tracks on every 5s tick before the worker can process them.
+            // The worker always overwrites ["_queued"] with real data or a
+            // terminal sentinel (["_no_mood_tags"], ["_not_found"]).
+            NOT: { lastfmTags: { has: "_queued" } },
+        },
+        select: { id: true, title: true },
+        take: TRACK_BATCH_SIZE,
+        orderBy: [{ fileModified: "desc" }],
+    });
+
+    if (tracks.length === 0) return 0;
+
+    const queuedIds: string[] = [];
+    for (const track of tracks) {
+        try {
+            await trackQueue.add(
+                "enrich",
+                { trackId: track.id, trackTitle: track.title },
+                { jobId: `track-${track.id}` }, // dedup — no-op if already queued
+            );
+            queuedIds.push(track.id);
+        } catch (err) {
+            logger.warn(`[Enrichment] Failed to queue track ${track.id}: ${(err as Error).message}`);
+        }
+    }
+
+    if (queuedIds.length > 0) {
+        // Mark as in-flight so the next orchestrator tick skips them
+        await prisma.track.updateMany({
+            where: { id: { in: queuedIds } },
+            data: { lastfmTags: ["_queued"] },
+        });
+        logger.debug(`[Enrichment] Queued ${queuedIds.length} tracks`);
+    }
+    return queuedIds.length;
 }
 
 async function executeAudioPhase(): Promise<number> {
@@ -1098,6 +989,21 @@ async function executeAudioPhase(): Promise<number> {
         );
     }
 
+    // Drain purgatory: tracks stuck as pending but retryCount >= MAX_RETRIES will never complete
+    const purgatoryDrained = await prisma.track.updateMany({
+        where: {
+            analysisStatus: "pending",
+            analysisRetryCount: { gte: 3 },
+        },
+        data: {
+            analysisStatus: "failed",
+            analysisError: "Exceeded retry limit — track may be corrupted or unsupported",
+        },
+    });
+    if (purgatoryDrained.count > 0) {
+        logger.warn(`[Enrichment] Drained ${purgatoryDrained.count} purgatory tracks to failed`);
+    }
+
     if (audioAnalysisCleanupService.isCircuitOpen()) {
         logger.warn(
             "[Enrichment] Audio analysis circuit breaker OPEN - skipping queue",
@@ -1112,79 +1018,33 @@ async function executePodcastRefreshPhase(): Promise<number> {
     const podcastCount = await prisma.podcast.count();
     if (podcastCount === 0) return 0;
 
-    // Only refresh once per hour (check oldest lastRefreshed)
     const ONE_HOUR = 60 * 60 * 1000;
     const staleThreshold = new Date(Date.now() - ONE_HOUR);
     const stalePodcasts = await prisma.podcast.findMany({
-        where: {
-            lastRefreshed: { lt: staleThreshold },
-        },
+        where: { lastRefreshed: { lt: staleThreshold } },
         select: { id: true, title: true },
     });
 
     if (stalePodcasts.length === 0) return 0;
 
-    logger.debug(`[Enrichment] Refreshing ${stalePodcasts.length} podcast feeds...`);
-
-    const { refreshPodcastFeed } = await import("../routes/podcasts");
-    let refreshed = 0;
-
+    let queued = 0;
     for (const podcast of stalePodcasts) {
-        if (isPaused || isStopping) break;
-
         try {
-            const result = await withTimeout(
-                refreshPodcastFeed(podcast.id),
-                30000,
-                `Timeout refreshing podcast: ${podcast.title}`,
+            await podcastQueue.add(
+                "refresh",
+                { podcastId: podcast.id, podcastTitle: podcast.title },
+                { jobId: `podcast-${podcast.id}` }, // dedup — no-op if already queued
             );
-            if (result.newEpisodesCount > 0) {
-                logger.debug(`   [Podcast] ${podcast.title}: ${result.newEpisodesCount} new episodes`);
-            }
-            refreshed++;
-        } catch (error) {
-            logger.error(`   [Podcast] Failed to refresh ${podcast.title}:`, error);
+            queued++;
+        } catch (err) {
+            logger.warn(`[Enrichment] Failed to queue podcast ${podcast.id}: ${(err as Error).message}`);
         }
     }
 
-    if (refreshed > 0) {
-        logger.debug(`[Enrichment] Refreshed ${refreshed} podcast feeds`);
+    if (queued > 0) {
+        logger.debug(`[Enrichment] Queued ${queued} podcast refreshes`);
     }
-
-    return refreshed;
-}
-
-async function executeVibePhase(): Promise<number> {
-    const features = await featureDetection.getFeatures();
-    if (!features.vibeEmbeddings) {
-        return 0;
-    }
-
-    const audioProcessing = await prisma.track.count({
-        where: { analysisStatus: "processing" },
-    });
-    const audioQueue = await getRedis().llen("audio:analysis:queue");
-    if (audioProcessing > 0 || audioQueue > 0) {
-        logger.debug(
-            `[Enrichment] Skipping vibe phase - audio still running (${audioProcessing} processing, ${audioQueue} queued)`,
-        );
-        return 0;
-    }
-
-    const { reset } = await vibeAnalysisCleanupService.cleanupStaleProcessing();
-    if (reset > 0) {
-        logger.info(`[ENRICHMENT] Cleaned up ${reset} stale vibe processing entries`);
-    }
-
-    const orphanedResult = await vibeAnalysisCleanupService.cleanupOrphanedCompleted();
-    if (orphanedResult.reset > 0) {
-        logger.info(`[ENRICHMENT] Reset ${orphanedResult.reset} orphaned completed tracks (total orphaned: ${orphanedResult.totalOrphaned})`);
-    }
-
-    const result = await queueVibeEmbeddings();
-    logger.info(`[ENRICHMENT] Queued ${result} tracks for vibe embedding`);
-
-    return result;
+    return queued;
 }
 
  /**
@@ -1234,18 +1094,19 @@ export async function getEnrichmentProgress() {
     });
 
     // CLAP embedding progress (for vibe similarity)
-    const [clapEmbeddingCount, clapProcessing, clapQueueLength, clapFailedCount] = await Promise.all([
+    const [clapEmbeddingCount, clapProcessing, clapQueueCounts, clapFailedCount] = await Promise.all([
         prisma.$queryRaw<{ count: bigint }[]>`
             SELECT COUNT(*) as count FROM track_embeddings
         `,
         prisma.track.count({
             where: { vibeAnalysisStatus: "processing" },
         }),
-        getRedis().llen("audio:clap:queue"),
+        vibeQueue.getJobCounts("active", "waiting", "delayed"),
         prisma.track.count({
             where: { vibeAnalysisStatus: "failed" },
         }),
     ]);
+    const clapQueueLength = (clapQueueCounts.active ?? 0) + (clapQueueCounts.waiting ?? 0) + (clapQueueCounts.delayed ?? 0);
     const clapCompleted = Number(clapEmbeddingCount[0]?.count || 0);
     const clapFailed = clapFailedCount;
 
@@ -1333,7 +1194,8 @@ export async function triggerEnrichmentNow(): Promise<{
     // Reset pause state when triggering enrichment
     isPaused = false;
 
-    // Set flag to bypass isRunning check (prevents race conditions)
+    // Set flag to bypass the minimum interval check (does NOT bypass isRunning —
+    // a concurrent cycle will still cause this call to return an empty result)
     immediateEnrichmentRequested = true;
 
     return runEnrichmentCycle(false);
@@ -1383,6 +1245,10 @@ export async function triggerEnrichmentNow(): Promise<{
  export async function reRunAudioAnalysisOnly(): Promise<number> {
      logger.debug("[Enrichment] Re-running audio analysis only...");
 
+     // Reset circuit breaker first so cleanupStaleProcessing doesn't increment a failure
+     // count that we're about to discard anyway
+     audioAnalysisCleanupService.resetCircuitBreaker();
+
      await audioAnalysisCleanupService.cleanupStaleProcessing();
 
      // Reset all non-pending tracks so they get re-queued
@@ -1393,14 +1259,23 @@ export async function triggerEnrichmentNow(): Promise<{
          data: {
              analysisStatus: "pending",
              analysisStartedAt: null,
+             analysisRetryCount: 0,
          },
      });
 
      logger.debug(`[Enrichment] Reset ${reset.count} tracks to pending for audio re-analysis`);
 
+
      const queued = await queueAudioAnalysis();
 
      logger.debug(`[Enrichment] Queued ${queued} tracks for audio analysis`);
+
+     // Trigger a cycle immediately so the UI shows running and progress updates
+     isPaused = false;
+     immediateEnrichmentRequested = true;
+     runEnrichmentCycle(false).catch((err) =>
+         logger.error("[Enrichment] reRunAudioAnalysisOnly cycle error:", err)
+     );
 
      return queued;
  }
@@ -1418,11 +1293,45 @@ export async function triggerEnrichmentNow(): Promise<{
          return 0;
      }
 
-     await vibeAnalysisCleanupService.cleanupStaleProcessing();
+     // Reset all tracks so they can be re-embedded.
+     // Only reset tracks whose audio analysis is complete (no point embedding incomplete audio).
+     await prisma.track.updateMany({
+         where: {
+             analysisStatus: "completed",
+             vibeAnalysisStatus: { not: null },
+         },
+         data: {
+             vibeAnalysisStatus: null,
+             vibeAnalysisRetryCount: 0,
+             vibeAnalysisStartedAt: null,
+             vibeAnalysisStatusUpdatedAt: null,
+         },
+     });
 
-     const queued = await queueVibeEmbeddings();
+     const tracks = await prisma.$queryRaw<{ id: string; filePath: string }[]>`
+         SELECT t.id, t."filePath"
+         FROM "Track" t
+         LEFT JOIN track_embeddings te ON t.id = te.track_id
+         WHERE te.track_id IS NULL
+           AND t."analysisStatus" = 'completed'
+           AND t."filePath" IS NOT NULL
+         LIMIT 5000
+     `;
+
+     let queued = 0;
+     for (const track of tracks) {
+         try {
+             await vibeQueue.add(
+                 "embed",
+                 { trackId: track.id, filePath: track.filePath },
+                 { jobId: `vibe-${track.id}` },
+             );
+             queued++;
+         } catch (err) {
+             logger.error(`[Enrichment] Failed to queue vibe job for ${track.id}: ${(err as Error).message}`);
+         }
+     }
 
      logger.debug(`[Enrichment] Queued ${queued} tracks for vibe embeddings`);
-
      return queued;
  }

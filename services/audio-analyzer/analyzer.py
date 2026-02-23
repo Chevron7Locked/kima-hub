@@ -110,8 +110,6 @@ except ImportError as e:
 # Worker processes import TF independently via spawn mode.
 # TF_MODELS_AVAILABLE is set after MODELS dict is defined below.
 TF_MODELS_AVAILABLE = False
-TF_GPU_AVAILABLE = False  # Detected in worker processes
-TF_GPU_NAME = None
 TensorflowPredictMusiCNN = None  # Loaded in worker processes
 
 # Configuration from environment
@@ -311,19 +309,7 @@ class AudioAnalyzer:
             return
 
         try:
-            import tensorflow as tf
-
-            # Detect and configure GPU (runs in worker processes only)
-            gpus = tf.config.experimental.list_physical_devices('GPU')
-            if gpus:
-                for gpu in gpus:
-                    try:
-                        tf.config.experimental.set_memory_growth(gpu, True)
-                    except RuntimeError:
-                        pass
-                logger.info(f"TensorFlow GPU detected: {gpus[0].name}")
-            else:
-                logger.info("TensorFlow running on CPU")
+            logger.info("TensorFlow running on CPU")
 
             from essentia.standard import TensorflowPredict2D, TensorflowPredictMusiCNN
             logger.info("Loading MusiCNN models...")
@@ -1308,7 +1294,8 @@ class AnalysisWorker:
                 UPDATE "Track" t
                 SET
                     "analysisStatus" = 'pending',
-                    "analysisError" = NULL
+                    "analysisError" = NULL,
+                    "analysisRetryCount" = 0
                 WHERE t."analysisStatus" = 'failed'
                 AND COALESCE(t."analysisRetryCount", 0) < %s
                 AND NOT EXISTS (SELECT 1 FROM track_embeddings te WHERE te.track_id = t.id)
@@ -1652,6 +1639,20 @@ class AnalysisWorker:
                 track_id
             ))
             self.db.commit()
+
+            # Publish completion event for Node audio completion subscriber
+            # Node subscribes and queues a BullMQ vibe embedding job (enrichment:vibe)
+            try:
+                completion_event = json.dumps({
+                    "trackId": track_id,
+                    "filePath": file_path,
+                    "status": "complete",
+                })
+                self.redis.publish("audio:analysis:complete", completion_event)
+                logger.debug(f"[Essentia] Published completion for track {track_id}")
+            except Exception as pub_err:
+                logger.warning(f"[Essentia] Failed to publish completion event for {track_id}: {pub_err}")
+
         except Exception as e:
             logger.error(f"Failed to save results for {track_id}: {e}")
             self.db.rollback()

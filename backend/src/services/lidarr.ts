@@ -242,7 +242,6 @@ class LidarrService {
     ): Promise<LidarrArtist[]> {
         await this.ensureInitialized();
 
-        // DEBUG: Log exact parameters received
         logger.debug(
             `[LIDARR_SEARCH_ARTIST] artistName="${artistName}", mbid="${mbid}"`
         );
@@ -392,7 +391,6 @@ class LidarrService {
     ): Promise<LidarrArtist | null> {
         await this.ensureInitialized();
 
-        // DEBUG: Log exact parameters received
         logger.debug(
             `[LIDARR_ADD_ARTIST] artistName="${artistName}", mbid="${mbid}"`
         );

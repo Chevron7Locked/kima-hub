@@ -3,6 +3,8 @@ import type { Server, Socket } from 'net'
 import net from 'net'
 import type TypedEventEmitter from 'typed-emitter'
 
+import { logger } from '../../utils/logger'
+
 import type { Address } from './common'
 import type { FromPeerInitMessage } from './messages/from/peer-init'
 import { fromPeerInitMessageParser } from './messages/from/peer-init'
@@ -39,7 +41,7 @@ export class SlskListen extends (EventEmitter as new () => TypedEventEmitter<Sls
             this.emit('message', data, { host, port }, c)
           }
         } catch (error) {
-          console.error('Failed to parse peer init message', error)
+          logger.error(`[Soulseek] Failed to parse peer init message: ${error}`)
         }
       })
     })

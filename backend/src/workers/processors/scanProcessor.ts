@@ -1,4 +1,4 @@
-import { Job } from "bull";
+import type { Job } from "bullmq";
 import { logger } from "../../utils/logger";
 import { MusicScannerService } from "../../services/musicScanner";
 import { config } from "../../config";
@@ -183,7 +183,7 @@ export async function processScan(
     logger.debug(`═══════════════════════════════════════════════`);
 
     // Report progress
-    await job.progress(0);
+    await job.updateProgress(0);
 
     // Prepare cover cache path (store alongside transcode cache)
     const coverCachePath = path.join(
@@ -197,7 +197,7 @@ export async function processScan(
         const percent = Math.floor(
             (progress.filesScanned / progress.filesTotal) * 100
         );
-        job.progress(percent).catch((err) =>
+        job.updateProgress(percent).catch((err) =>
             logger.error(`Failed to update job progress:`, err)
         );
         // Emit SSE every 2% to avoid flooding
@@ -219,7 +219,7 @@ export async function processScan(
     try {
         const result = await scanner.scanLibrary(scanPath);
 
-        await job.progress(100);
+        await job.updateProgress(100);
 
         if (userId) {
             eventBus.emit({

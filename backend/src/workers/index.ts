@@ -1,3 +1,4 @@
+import { Worker } from "bullmq";
 import { logger } from "../utils/logger";
 import {
     scanQueue,
@@ -5,6 +6,7 @@ import {
 } from "./queues";
 import { processScan } from "./processors/scanProcessor";
 import { processDiscoverWeekly } from "./processors/discoverProcessor";
+import { createWorkerConnection } from "./enrichmentQueues";
 import {
     startUnifiedEnrichmentWorker,
     stopUnifiedEnrichmentWorker,
@@ -31,9 +33,18 @@ import { enrichmentStateService } from "../services/enrichmentState";
 // Track timeouts for cleanup
 const timeouts: NodeJS.Timeout[] = [];
 
-// Register processors with named job types
-scanQueue.process("scan", processScan);
-discoverQueue.process("discover-weekly", processDiscoverWeekly);
+// BullMQ workers for scan and discover queues
+const scanWorker = new Worker("library-scan-v2", processScan, {
+    connection: createWorkerConnection(),
+    concurrency: 1,
+    lockDuration: 300000, // 5 minutes — scans can be slow
+});
+
+const discoverWorker = new Worker("discover-weekly-v2", processDiscoverWeekly, {
+    connection: createWorkerConnection(),
+    concurrency: 1,
+    lockDuration: 120000,
+});
 
 // Register download queue callback for unavailable albums
 downloadQueueManager.onUnavailableAlbum(async (info) => {
@@ -93,23 +104,27 @@ startMoodBucketWorker().catch((err) => {
     logger.error("Failed to start mood bucket worker:", err);
 });
 
-// Event handlers for scan queue
-scanQueue.on("completed", (job, result) => {
+// Event handlers for scan worker
+scanWorker.on("completed", (job, result) => {
     logger.debug(
         `Scan job ${job.id} completed: +${result.tracksAdded} ~${result.tracksUpdated} -${result.tracksRemoved}`
     );
 });
 
-scanQueue.on("failed", (job, err) => {
-    logger.error(`Scan job ${job.id} failed:`, err.message);
+scanWorker.on("failed", (job, err) => {
+    logger.error(`Scan job ${job?.id} failed:`, err.message);
 });
 
-scanQueue.on("active", (job) => {
+scanWorker.on("active", (job) => {
     logger.debug(` Scan job ${job.id} started`);
 });
 
-// Event handlers for discover queue
-discoverQueue.on("completed", (job, result) => {
+scanWorker.on("error", (err) => {
+    logger.error("Scan worker error:", err.message);
+});
+
+// Event handlers for discover worker
+discoverWorker.on("completed", (job, result) => {
     if (result.success) {
         logger.debug(
             `Discover job ${job.id} completed: ${result.playlistName} (${result.songCount} songs)`
@@ -119,15 +134,19 @@ discoverQueue.on("completed", (job, result) => {
     }
 });
 
-discoverQueue.on("failed", (job, err) => {
-    logger.error(`Discover job ${job.id} failed:`, err.message);
+discoverWorker.on("failed", (job, err) => {
+    logger.error(`Discover job ${job?.id} failed:`, err.message);
 });
 
-discoverQueue.on("active", (job) => {
+discoverWorker.on("active", (job) => {
     logger.debug(` Discover job ${job.id} started for user ${job.data.userId}`);
 });
 
-logger.debug("Worker processors registered and event handlers attached");
+discoverWorker.on("error", (err) => {
+    logger.error("Discover worker error:", err.message);
+});
+
+logger.debug("BullMQ workers registered and event handlers attached");
 
 // Start Discovery Weekly cron scheduler (Sundays at 8 PM)
 startDiscoverWeeklyCron();
@@ -320,8 +339,8 @@ timeouts.push(
 export async function shutdownWorkers(): Promise<void> {
     logger.debug("Shutting down workers...");
 
-    // Stop unified enrichment worker
-    stopUnifiedEnrichmentWorker();
+    // Stop unified enrichment worker (async — closes BullMQ workers and queues)
+    await stopUnifiedEnrichmentWorker();
 
     // Disconnect enrichment state service Redis connections (2 connections)
     try {
@@ -349,15 +368,9 @@ export async function shutdownWorkers(): Promise<void> {
     }
     timeouts.length = 0;
 
-    // Remove all event listeners to prevent memory leaks
-    scanQueue.removeAllListeners();
-    discoverQueue.removeAllListeners();
-
-    // Close all queues gracefully
-    await Promise.all([
-        scanQueue.close(),
-        discoverQueue.close(),
-    ]);
+    // Close workers first so in-flight jobs complete, then close queues
+    await Promise.all([scanWorker.close(), discoverWorker.close()]);
+    await Promise.all([scanQueue.close(), discoverQueue.close()]);
 
     logger.debug("Workers shutdown complete");
 }

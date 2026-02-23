@@ -640,7 +640,7 @@ class DownloadQueueManager {
             this.activeDownloads.set(job.lidarrRef || job.id, {
                 downloadId: job.lidarrRef || job.id,
                 albumTitle: job.subject,
-                albumMbid: job.targetMbid,
+                albumMbid: job.targetMbid ?? "",
                 artistName: metadata.artistName || "Unknown",
                 artistMbid: metadata.artistMbid,
                 albumId: metadata.lidarrAlbumId,

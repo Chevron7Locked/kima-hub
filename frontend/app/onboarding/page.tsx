@@ -81,6 +81,13 @@ export default function OnboardingPage() {
 
         setLoading(true);
         try {
+            try {
+                const healthRes = await fetch("/api/health", { method: "GET" });
+                if (!healthRes.ok) throw new Error("not ready");
+            } catch {
+                setError("Cannot reach the server. Check that Kima is fully started and try again.");
+                return;
+            }
             const response = await api.post<{
                 token: string;
                 user: { id: string; username: string };

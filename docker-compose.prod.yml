@@ -32,6 +32,9 @@ services:
     # Makes host.docker.internal work on Linux (already works on Docker Desktop)
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Fix Redis memory overcommit warning
+    sysctls:
+      - vm.overcommit_memory=1
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "/app/healthcheck.js"]

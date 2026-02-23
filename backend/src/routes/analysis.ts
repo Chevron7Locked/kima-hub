@@ -5,13 +5,13 @@ import { redisClient } from "../utils/redis";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { getSystemSettings, invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
+import { vibeQueue } from "../workers/enrichmentQueues";
 import os from "os";
 
 const router = Router();
 
-// Redis queue key for audio analysis
+// Redis queue key for audio analysis (Essentia uses raw Redis BRPOP, not BullMQ)
 const ANALYSIS_QUEUE = "audio:analysis:queue";
-const VIBE_QUEUE = "audio:clap:queue";
 
 /**
  * GET /api/analysis/status
@@ -130,6 +130,7 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (req, res) => {
             data: {
                 analysisStatus: "pending",
                 analysisError: null,
+                analysisRetryCount: 0,
             },
         });
 
@@ -504,13 +505,16 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             logger.info("Cleared all vibe embeddings for re-generation");
         }
 
-        // Find tracks without vibe embeddings (all tracks if force was used)
+        // Find analyzed tracks without vibe embeddings (all tracks if force was used).
+        // Requires analysisStatus = "completed" to match the reactive pub/sub path
+        // in audioCompletionSubscriber.ts.
         const tracks = await prisma.$queryRaw<{ id: string; filePath: string; duration: number; title: string }[]>`
             SELECT t.id, t."filePath", t.duration, t.title
             FROM "Track" t
             LEFT JOIN track_embeddings te ON t.id = te.track_id
             WHERE te.track_id IS NULL
             AND t."filePath" IS NOT NULL
+            AND t."analysisStatus" = 'completed'
             ORDER BY t."fileModified" DESC
             LIMIT ${limit}
         `;
@@ -522,16 +526,14 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             });
         }
 
-        // Queue tracks for CLAP embedding
-        const pipeline = redisClient.multi();
-        for (const track of tracks) {
-            pipeline.rPush(VIBE_QUEUE, JSON.stringify({
-                trackId: track.id,
-                filePath: track.filePath,
-                duration: track.duration,
-            }));
-        }
-        await pipeline.exec();
+        // Queue tracks for CLAP embedding via BullMQ (jobId deduplication)
+        await vibeQueue.addBulk(
+            tracks.map((track) => ({
+                name: "embed",
+                data: { trackId: track.id, filePath: track.filePath, duration: track.duration },
+                opts: { jobId: `vibe-${track.id}` },
+            })),
+        );
 
         // Clear any existing vibe failures for these tracks
         for (const track of tracks) {
@@ -577,22 +579,20 @@ router.post("/vibe/retry", requireAuth, requireAdmin, async (req, res) => {
             select: { id: true, filePath: true, duration: true, title: true },
         });
 
-        // Reset Track-level retry counts so queueVibeEmbeddings can pick them up again
+        // Reset Track-level retry counts so the vibe queue can pick them up again
         await prisma.track.updateMany({
             where: { id: { in: trackIds } },
             data: { vibeAnalysisStatus: null, vibeAnalysisRetryCount: 0, vibeAnalysisStatusUpdatedAt: null },
         });
 
-        // Queue for retry
-        const pipeline = redisClient.multi();
-        for (const track of tracks) {
-            pipeline.rPush(VIBE_QUEUE, JSON.stringify({
-                trackId: track.id,
-                filePath: track.filePath,
-                duration: track.duration,
-            }));
-        }
-        await pipeline.exec();
+        // Queue for retry via BullMQ (jobId deduplication)
+        await vibeQueue.addBulk(
+            tracks.map((track) => ({
+                name: "embed",
+                data: { trackId: track.id, filePath: track.filePath, duration: track.duration },
+                opts: { jobId: `vibe-${track.id}` },
+            })),
+        );
 
         // Reset EnrichmentFailure retry counts
         await enrichmentFailureService.resetRetryCount(failures.map(f => f.id));

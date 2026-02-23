@@ -2,7 +2,6 @@
 laion-clap>=1.1.4
 torch>=2.0.0
 torchaudio>=2.0.0
-torchvision>=0.15.0
 transformers>=4.30.0
 librosa>=0.10.0
 
@@ -10,6 +9,7 @@ librosa>=0.10.0
 redis>=4.5.0
 psycopg2-binary>=2.9.0
 pgvector>=0.2.0
+bullmq==2.19.5
 
 # Utilities
 python-dotenv>=1.0.0

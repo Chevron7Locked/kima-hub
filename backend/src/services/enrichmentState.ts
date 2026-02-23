@@ -258,8 +258,8 @@ class EnrichmentStateService {
      * Cleanup connections
      */
     async disconnect(): Promise<void> {
-        await this.redis.quit();
-        await this.publisher.quit();
+        await this.redis.quit().catch(() => {});
+        await this.publisher.quit().catch(() => {});
     }
 }
 

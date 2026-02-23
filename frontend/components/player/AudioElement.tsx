@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { audioEngine } from "@/lib/audio-engine";
 import { audioSeekEmitter } from "@/lib/audio-seek-emitter";
 import { dispatchQueryEvent } from "@/lib/query-events";
+import { silenceKeepalive } from "@/lib/silence-keepalive";
 import {
     useEffect,
     useLayoutEffect,
@@ -105,6 +106,9 @@ export const AudioElement = memo(function AudioElement() {
     const nextPodcastEpisodeRef = useRef(nextPodcastEpisode);
     const pauseRef = useRef(pause);
     const queueRef = useRef(queue);
+    const currentIndexRef = useRef(currentIndex);
+    const isShuffleRef = useRef(isShuffle);
+    const shuffleIndicesRef = useRef(shuffleIndices);
     const setCurrentTrackRef = useRef(setCurrentTrack);
     const setCurrentAudiobookRef = useRef(setCurrentAudiobook);
     const setCurrentPodcastRef = useRef(setCurrentPodcast);
@@ -120,6 +124,9 @@ export const AudioElement = memo(function AudioElement() {
         nextPodcastEpisodeRef.current = nextPodcastEpisode;
         pauseRef.current = pause;
         queueRef.current = queue;
+        currentIndexRef.current = currentIndex;
+        isShuffleRef.current = isShuffle;
+        shuffleIndicesRef.current = shuffleIndices;
         setCurrentTrackRef.current = setCurrentTrack;
         setCurrentAudiobookRef.current = setCurrentAudiobook;
         setCurrentPodcastRef.current = setCurrentPodcast;
@@ -300,6 +307,17 @@ export const AudioElement = memo(function AudioElement() {
 
         const handlePlaying = () => {
             setIsBuffering(false);
+            // Main audio is playing — the engine holds the session, keepalive not needed.
+            // Also attempt a prime here for Android and permissive iOS contexts; the
+            // definitive iOS prime comes from the MediaSession handler in useMediaSession.
+            silenceKeepalive.prime();
+            silenceKeepalive.stop();
+            // If audio started playing while React state says we're paused
+            // (e.g. direct tryResume() call from MediaSession handler bypassed the
+            // React update chain), sync state back to playing so the UI reflects reality.
+            if (!lastPlayingStateRef.current) {
+                setIsPlaying(true);
+            }
         };
 
         const handleEnded = () => {
@@ -320,6 +338,29 @@ export const AudioElement = memo(function AudioElement() {
                     audioEngine.seek(0);
                     audioEngine.play();
                 } else {
+                    // Compute and load the next track synchronously within this 'ended'
+                    // event handler. iOS may reclaim the audio session during any silence
+                    // between tracks — the same mechanism that blocks background resume.
+                    // Loading here keeps audio output continuous and the session alive.
+                    // The React track-change effect will see lastTrackIdRef already matches
+                    // and skip the load, preventing a double-fetch.
+                    // Compute and load synchronously to avoid a silence gap.
+                    // getNextTrackInfo mirrors the index-advancement logic in next().
+                    // If either is updated, keep the other in sync.
+                    const nextTrackInfo = getNextTrackInfo(
+                        queueRef.current,
+                        currentIndexRef.current,
+                        isShuffleRef.current,
+                        shuffleIndicesRef.current,
+                        repeatModeRef.current
+                    );
+                    if (nextTrackInfo) {
+                        // Load directly — do NOT pre-set lastTrackIdRef here.
+                        // The load effect detects this via currentSrc comparison and
+                        // skips the duplicate fetch, keeping lastTrackIdRef in sync.
+                        audioEngine.load(api.getStreamUrl(nextTrackInfo.id), true);
+                    }
+                    // Always call next() to keep React state and UI in sync
                     nextRef.current();
                 }
             } else {
@@ -422,6 +463,13 @@ export const AudioElement = memo(function AudioElement() {
 
         if (!streamUrl) return;
 
+        // handleEnded may have already loaded this URL directly (gapless track transition).
+        // If the engine is already on this source, sync the ref and skip the duplicate load.
+        if (audioEngine.getState().currentSrc === streamUrl) {
+            lastTrackIdRef.current = currentMediaId;
+            return;
+        }
+
         // Determine autoplay: play if user was playing or if isPlaying was set (e.g., by next())
         const shouldAutoPlay = lastPlayingStateRef.current;
 
@@ -459,6 +507,68 @@ export const AudioElement = memo(function AudioElement() {
             audioEngine.pause();
         }
     }, [isPlaying, setIsPlaying]);
+
+    // --- Silence keepalive: hold the audio session while paused in background ---
+    //
+    // iOS and Android reclaim the audio session after a backgrounded PWA pauses.
+    // Playing near-silent audio prevents this, keeping MediaSession controls and
+    // subsequent audio.play() calls functional without opening the app.
+    useEffect(() => {
+        const hasMedia = !!(currentTrack || currentAudiobook || currentPodcast);
+
+        const sync = () => {
+            if (document.hidden && !isPlaying && hasMedia) {
+                silenceKeepalive.start();
+            } else {
+                silenceKeepalive.stop();
+            }
+        };
+
+        sync();
+        document.addEventListener("visibilitychange", sync);
+        return () => {
+            document.removeEventListener("visibilitychange", sync);
+            silenceKeepalive.stop();
+        };
+    }, [isPlaying, currentTrack, currentAudiobook, currentPodcast]);
+
+    // --- Foreground recovery: retry play if we should be playing but aren't ---
+    //
+    // Handles two iOS PWA scenarios:
+    // 1. visibilitychange: App was backgrounded. The audioEngine.tryResume() call in the
+    //    MediaSession play handler may have been deferred by iOS. When foregrounded, if
+    //    state says we should be playing but the audio element is still paused, retry.
+    // 2. pageshow: iOS restores pages from the back-forward cache (bfcache). Audio
+    //    state is preserved in React but the audio element may be reset.
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.hidden) return;
+            if (lastPlayingStateRef.current && !audioEngine.isPlaying()) {
+                audioEngine.tryResume().then((started) => {
+                    if (!started) setIsPlaying(false);
+                });
+            }
+        };
+
+        const handlePageShow = (event: PageTransitionEvent) => {
+            if (!event.persisted) return; // Only handle bfcache restores
+            if (lastPlayingStateRef.current && !audioEngine.isPlaying()) {
+                audioEngine.tryResume().then((started) => {
+                    if (!started) setIsPlaying(false);
+                });
+            }
+        };
+
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+        window.addEventListener("pageshow", handlePageShow);
+        return () => {
+            document.removeEventListener(
+                "visibilitychange",
+                handleVisibilityChange
+            );
+            window.removeEventListener("pageshow", handlePageShow);
+        };
+    }, [setIsPlaying]);
 
     // --- Volume/mute sync ---
 
@@ -557,6 +667,7 @@ export const AudioElement = memo(function AudioElement() {
             }
 
             audioEngine.cleanup();
+            silenceKeepalive.destroy();
             lastTrackIdRef.current = null;
 
             if (progressSaveIntervalRef.current) {

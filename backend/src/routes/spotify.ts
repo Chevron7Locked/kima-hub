@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { withRetry } from "../utils/async";
 import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { z } from "zod";
@@ -149,7 +150,7 @@ router.post("/import", async (req, res) => {
                         .json({ error: "Invalid Deezer playlist URL" });
                 }
                 const playlistId = deezerMatch[1];
-                const deezerPlaylist = await deezerService.getPlaylist(playlistId);
+                const deezerPlaylist = await withRetry(() => deezerService.getPlaylist(playlistId));
                 if (!deezerPlaylist) {
                     return res
                         .status(404)
@@ -186,9 +187,11 @@ router.post("/import", async (req, res) => {
         if (error.name === "ZodError") {
             return res.status(400).json({ error: "Invalid request body" });
         }
-        res.status(500).json({
-            error: error.message || "Failed to start import",
-        });
+        const isNetworkError = ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED"].includes(error.code);
+        const userMessage = isNetworkError
+            ? "Deezer API is temporarily unavailable. Please try again in a moment."
+            : (error.message || "Failed to start import");
+        res.status(500).json({ error: userMessage });
     }
 });
 

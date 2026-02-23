@@ -251,7 +251,9 @@ async function performDownload(
                 if (episode?.fileSize && episode.fileSize > 0) {
                     expectedBytes = episode.fileSize;
                 }
-            } catch {}
+            } catch (err) {
+                logger.warn(`[PODCAST-DL] Could not fetch episode fileSize: ${(err as Error).message}`);
+            }
         }
 
         logger.debug(

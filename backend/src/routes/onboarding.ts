@@ -155,7 +155,7 @@ router.post("/register", async (req, res) => {
                 .status(400)
                 .json({ error: "Invalid request", details: err.errors });
         }
-        logger.error("Registration error:", err);
+        logger.error("[ONBOARDING] Registration error:", { message: err.message, code: err.code, stack: err.stack });
         res.status(500).json({ error: "Failed to create account" });
     }
 });
