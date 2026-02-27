@@ -36,7 +36,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
         <section>
             <SectionHeader color="tracks" title="Popular" />
             <div data-tv-section="tracks">
-                {tracks.slice(0, 5).map((track, index) => {
+                {tracks.slice(0, 10).map((track, index) => {
                     const isPlaying = currentTrackId === track.id;
                     const isPreviewPlaying =
                         previewTrack === track.id && previewPlaying;

@@ -19,10 +19,10 @@ function stripAttrPrefix(obj: unknown): unknown {
     if (Array.isArray(obj)) return obj.map(stripAttrPrefix);
     if (obj !== null && typeof obj === "object") {
         return Object.fromEntries(
-            Object.entries(obj as Record<string, unknown>).map(([k, v]) => [
-                k.startsWith("@_") ? k.slice(2) : k,
-                stripAttrPrefix(v),
-            ])
+            Object.entries(obj as Record<string, unknown>).map(([k, v]) => {
+                const key = k === "#text" ? "value" : k.startsWith("@_") ? k.slice(2) : k;
+                return [key, stripAttrPrefix(v)];
+            })
         );
     }
     return obj;

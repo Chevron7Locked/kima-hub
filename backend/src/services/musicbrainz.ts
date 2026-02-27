@@ -8,7 +8,7 @@ class MusicBrainzService {
 
     constructor() {
         this.client = axios.create({
-            baseURL: "https://musicbrainz.org/ws/2",
+            baseURL: process.env.MUSICBRAINZ_BASE_URL || "https://musicbrainz.org/ws/2",
             timeout: 10000,
             headers: {
                 "User-Agent":

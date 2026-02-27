@@ -5,7 +5,7 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.9] - 2026-02-27
+## [1.5.10] - 2026-02-27
 
 ### Added
 
@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Enrichment pipeline: "Reset Vibe Embeddings" incomplete**: `reRunVibeEmbeddingsOnly()` reset `vibeAnalysisStatus` but did not delete existing `track_embeddings` rows, so the re-queue query (which uses LEFT JOIN) silently skipped tracks that already had embeddings. Now deletes all embeddings first for full regeneration.
 - **Feature detection: CLAP reported available when disabled**: When `DISABLE_CLAP=true` was set, `checkCLAP()` skipped the file-existence check but still fell through to heartbeat and data checks. If old embeddings existed in the database, it returned `true`, causing the vibe sweep to queue jobs that no CLAP worker would ever process. Now returns `false` immediately when disabled.
 - **docker-compose.server.yml healthcheck using removed tool**: Healthcheck used `wget` which is removed from the production image during security hardening. Changed to `node /app/healthcheck.js` to match docker-compose.prod.yml.
+- **#126 Subsonic JSON `getGenres.view` breaking Symfonium**: Genre responses used `#text` for the genre name in JSON output -- correct for XML but violates the Subsonic JSON convention which uses `value`. Symfonium's strict JSON parser rejected the response. Fixed `stripAttrPrefix()` to map `#text` to `value` in all JSON responses.
+- **#126 Subsonic `getBookmarks.view` not implemented**: Symfonium calls `getBookmarks.view` during sync and expects a valid response with a `bookmarks` key. The endpoint hit the catch-all "not implemented" handler, returning an error without the required key. Added an empty stub returning `{ bookmarks: {} }`.
+- **#91 Artist page only showing 5 popular tracks**: Frontend sliced popular tracks to 5 even though the backend returned 10. Now displays all 10.
+- **#63 MusicBrainz base URL hardcoded**: MusicBrainz API URL was hardcoded, preventing use of self-hosted mirrors. Now configurable via `MUSICBRAINZ_BASE_URL` environment variable (defaults to `https://musicbrainz.org/ws/2`).
 
 ## [1.5.8] - 2026-02-26
 
