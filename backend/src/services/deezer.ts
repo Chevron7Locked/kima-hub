@@ -260,9 +260,12 @@ class DeezerService {
     }
 
     /**
-     * Fetch a playlist by ID
+     * Fetch a playlist by ID, paginating through all tracks if the playlist exceeds one page.
      */
-    async getPlaylist(playlistId: string): Promise<DeezerPlaylist | null> {
+    async getPlaylist(
+        playlistId: string,
+        onProgress?: (fetched: number, total: number) => void,
+    ): Promise<DeezerPlaylist | null> {
         try {
             logger.debug(`Deezer: Fetching playlist ${playlistId}...`);
 
@@ -276,7 +279,51 @@ class DeezerService {
                 return null;
             }
 
-            const tracks: DeezerTrack[] = (data.tracks?.data || []).map((track: any) => ({
+            let allTrackData: any[] = data.tracks?.data || [];
+            const totalTracks = data.nb_tracks || allTrackData.length;
+
+            // Paginate if the initial response doesn't contain all tracks
+            if (totalTracks > allTrackData.length && allTrackData.length > 0) {
+                let index = allTrackData.length;
+                const limit = 100;
+
+                logger.debug(`Deezer: Playlist has ${totalTracks} tracks, fetched ${allTrackData.length}, paginating remainder...`);
+
+                while (index < totalTracks) {
+                    try {
+                        const pageResponse = await axios.get(
+                            `${DEEZER_API}/playlist/${playlistId}/tracks`,
+                            { params: { index, limit }, timeout: 15000 }
+                        );
+
+                        const pageData = pageResponse.data;
+                        if (pageData.error) {
+                            logger.error("Deezer pagination error:", pageData.error);
+                            break;
+                        }
+
+                        const pageTracks = pageData.data || [];
+                        if (pageTracks.length === 0) break;
+
+                        allTrackData.push(...pageTracks);
+                        index += pageTracks.length;
+                        onProgress?.(allTrackData.length, totalTracks);
+
+                        logger.debug(`Deezer: Fetched ${allTrackData.length}/${totalTracks} tracks`);
+
+                        if (!pageData.next) break;
+
+                        if (index < totalTracks) {
+                            await new Promise(r => setTimeout(r, 200));
+                        }
+                    } catch (error: any) {
+                        logger.error(`Deezer: Pagination failed at index ${index}:`, error.message);
+                        break;
+                    }
+                }
+            }
+
+            const tracks: DeezerTrack[] = allTrackData.map((track: any) => ({
                 deezerId: String(track.id),
                 title: track.title || "Unknown",
                 artist: track.artist?.name || "Unknown Artist",
@@ -288,7 +335,7 @@ class DeezerService {
                 coverUrl: track.album?.cover_medium || track.album?.cover || null,
             }));
 
-            logger.debug(`Deezer: Fetched playlist "${data.title}" with ${tracks.length} tracks`);
+            logger.debug(`Deezer: Fetched playlist "${data.title}" with ${tracks.length}/${totalTracks} tracks`);
 
             return {
                 id: String(data.id),

@@ -1168,17 +1168,23 @@ class SpotifyImportService {
   /**
    * Generate a preview of what will be imported
    */
-  async generatePreview(spotifyUrl: string): Promise<ImportPreview> {
+  async generatePreview(
+    spotifyUrl: string,
+    onFetchProgress?: (fetched: number, total: number) => void,
+    onMatchingStart?: () => void,
+  ): Promise<ImportPreview> {
     // Clear any stale null cache entries before processing
     // This ensures we retry previously failed lookups
     await musicBrainzService.clearStaleRecordingCaches();
 
-    const playlist = await spotifyService.getPlaylist(spotifyUrl);
+    const playlist = await spotifyService.getPlaylist(spotifyUrl, onFetchProgress);
     if (!playlist) {
       throw new Error(
         "Could not fetch playlist from Spotify. Make sure it's a valid public playlist URL.",
       );
     }
+
+    onMatchingStart?.();
 
     return this.buildPreviewFromTracklist(
       playlist.tracks,
@@ -3120,11 +3126,19 @@ class SpotifyImportService {
           payload: { jobId, phase: "fetching", message: "Fetching playlist..." },
         });
 
+        const emitFetchProgress = (fetched: number, total: number) => {
+          eventBus.emit({
+            type: "preview:progress",
+            userId,
+            payload: { jobId, phase: "fetching", message: `Fetching tracks: ${fetched.toLocaleString()} of ${total.toLocaleString()}...` },
+          });
+        };
+
         let preview: ImportPreview;
         if (url.includes("deezer.com")) {
           const deezerMatch = url.match(/playlist[\/:](\d+)/);
           if (!deezerMatch) throw new Error("Invalid Deezer playlist URL");
-          const deezerPlaylist = await withRetry(() => deezerService.getPlaylist(deezerMatch[1]));
+          const deezerPlaylist = await withRetry(() => deezerService.getPlaylist(deezerMatch[1], emitFetchProgress));
           if (!deezerPlaylist) throw new Error("Deezer playlist not found");
 
           eventBus.emit({
@@ -3135,13 +3149,15 @@ class SpotifyImportService {
 
           preview = await this.generatePreviewFromDeezer(deezerPlaylist);
         } else {
-          eventBus.emit({
-            type: "preview:progress",
-            userId,
-            payload: { jobId, phase: "matching", message: "Matching tracks to library..." },
-          });
+          const emitMatchingStart = () => {
+            eventBus.emit({
+              type: "preview:progress",
+              userId,
+              payload: { jobId, phase: "matching", message: "Matching tracks to library..." },
+            });
+          };
 
-          preview = await this.generatePreview(url);
+          preview = await this.generatePreview(url, emitFetchProgress, emitMatchingStart);
         }
 
         await redisClient.setEx(

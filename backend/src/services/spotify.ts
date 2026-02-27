@@ -532,9 +532,85 @@ class SpotifyService {
     }
 
     /**
+     * Paginate through all tracks in a Spotify playlist via the dedicated tracks endpoint.
+     * Called when the initial /playlists/{id} response contains fewer items than tracks.total.
+     */
+    private async fetchAllPlaylistTracks(
+        playlistId: string,
+        token: string,
+        total: number,
+        firstPageItems: any[],
+        onProgress?: (fetched: number, total: number) => void,
+    ): Promise<any[]> {
+        const allItems = [...firstPageItems];
+        const limit = 50;
+        let offset = firstPageItems.length;
+        let currentToken = token;
+        let hasRefreshedToken = false;
+        const trackFields = "items(track(id,name,artists(id,name),album(id,name,images),duration_ms,track_number,preview_url,external_ids)),next,total";
+
+        logger.debug(`Spotify: Playlist has ${total} tracks, fetched ${allItems.length}, paginating remainder...`);
+
+        while (offset < total) {
+            try {
+                const response = await axios.get(
+                    `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
+                    {
+                        headers: {
+                            Authorization: `Bearer ${currentToken}`,
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        },
+                        params: { offset, limit, fields: trackFields },
+                        timeout: 15000,
+                    }
+                );
+
+                const items = response.data?.items || [];
+                if (items.length === 0) break;
+
+                allItems.push(...items);
+                offset += items.length;
+                onProgress?.(allItems.length, total);
+
+                logger.debug(`Spotify: Fetched ${allItems.length}/${total} tracks`);
+
+                if (offset < total) {
+                    await new Promise(r => setTimeout(r, 100));
+                }
+            } catch (error: any) {
+                if (error.response?.status === 429) {
+                    const retryAfter = parseInt(error.response?.headers?.["retry-after"] || "5", 10);
+                    logger.warn(`Spotify: Rate limited, waiting ${retryAfter}s...`);
+                    await new Promise(r => setTimeout(r, retryAfter * 1000));
+                    continue;
+                }
+                if (error.response?.status === 401 && !hasRefreshedToken) {
+                    hasRefreshedToken = true;
+                    logger.warn("Spotify: Token expired mid-pagination, refreshing...");
+                    this.anonymousToken = null;
+                    this.tokenExpiry = 0;
+                    const newToken = await this.getAnonymousToken();
+                    if (newToken) {
+                        currentToken = newToken;
+                        continue;
+                    }
+                    break;
+                }
+                logger.error(`Spotify: Pagination failed at offset ${offset}:`, error.message);
+                break;
+            }
+        }
+
+        return allItems;
+    }
+
+    /**
      * Fetch playlist via anonymous token
      */
-    private async fetchPlaylistViaAnonymousApi(playlistId: string): Promise<SpotifyPlaylist | null> {
+    private async fetchPlaylistViaAnonymousApi(
+        playlistId: string,
+        onProgress?: (fetched: number, total: number) => void,
+    ): Promise<SpotifyPlaylist | null> {
         const token = await this.getAnonymousToken();
         if (!token) {
             return await this.fetchPlaylistViaEmbedHtml(playlistId);
@@ -558,12 +634,21 @@ class SpotifyService {
             );
 
             const playlist = playlistResponse.data;
-            logger.debug(`Spotify: Fetched playlist "${playlist.name}" with ${playlist.tracks?.items?.length || 0} tracks`);
+            const totalTracks = playlist.tracks?.total || 0;
+            let allItems = playlist.tracks?.items || [];
+
+            if (totalTracks > allItems.length && allItems.length > 0) {
+                allItems = await this.fetchAllPlaylistTracks(
+                    playlistId, token, totalTracks, allItems, onProgress
+                );
+            }
+
+            logger.debug(`Spotify: Fetched playlist "${playlist.name}" with ${allItems.length}/${totalTracks} tracks`);
 
             const tracks: SpotifyTrack[] = [];
             let unknownAlbumCount = 0;
 
-            for (const item of playlist.tracks?.items || []) {
+            for (const item of allItems) {
                 const track = item.track;
                 if (!track || !track.id) {
                     continue;
@@ -844,7 +929,10 @@ class SpotifyService {
     /**
      * Fetch a playlist by ID or URL
      */
-    async getPlaylist(urlOrId: string): Promise<SpotifyPlaylist | null> {
+    async getPlaylist(
+        urlOrId: string,
+        onProgress?: (fetched: number, total: number) => void,
+    ): Promise<SpotifyPlaylist | null> {
         // Extract ID from URL if needed
         let playlistId = urlOrId;
         const parsed = this.parseUrl(urlOrId);
@@ -856,7 +944,7 @@ class SpotifyService {
         }
 
         logger.debug("Spotify: Fetching public playlist via anonymous token");
-        return await this.fetchPlaylistViaAnonymousApi(playlistId);
+        return await this.fetchPlaylistViaAnonymousApi(playlistId, onProgress);
     }
 
     /**
