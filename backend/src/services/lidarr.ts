@@ -70,6 +70,8 @@ class LidarrService {
     private client: AxiosInstance | null = null;
     private enabled: boolean;
     private initialized: boolean = false;
+    private qualityProfileId: number = 1;
+    private metadataProfileId: number = 1;
 
     // API timeouts
     private readonly API_TIMEOUT_DEFAULT = 30000;
@@ -122,6 +124,8 @@ class LidarrService {
                             "X-Api-Key": apiKey,
                         },
                     });
+                    this.qualityProfileId = settings.lidarrQualityProfileId ?? 1;
+                    this.metadataProfileId = settings.lidarrMetadataProfileId ?? 1;
                     this.enabled = true;
                 } else {
                     logger.warn("  Lidarr enabled but missing URL or API key");
@@ -294,8 +298,8 @@ class LidarrService {
                             links: [],
                             artistType: mbArtist.type || "Person",
                             monitored: false,
-                            qualityProfileId: 1,
-                            metadataProfileId: 1,
+                            qualityProfileId: this.qualityProfileId,
+                            metadataProfileId: this.metadataProfileId,
                             rootFolderPath: "/music",
                             tags: [],
                             statistics: {
@@ -351,8 +355,8 @@ class LidarrService {
                             links: [],
                             artistType: mbArtist.type || "Person",
                             monitored: false,
-                            qualityProfileId: 1,
-                            metadataProfileId: 1,
+                            qualityProfileId: this.qualityProfileId,
+                            metadataProfileId: this.metadataProfileId,
                             rootFolderPath: "/music",
                             tags: [],
                             statistics: {
@@ -662,8 +666,8 @@ class LidarrService {
                 foreignArtistId: artistData.foreignArtistId,
                 artistName: artistData.artistName,
                 rootFolderPath: validRootFolder,
-                qualityProfileId: 1, // Uses default profile - could be made configurable via settings
-                metadataProfileId: 1,
+                qualityProfileId: this.qualityProfileId,
+                metadataProfileId: this.metadataProfileId,
                 monitored: true,
                 monitorNewItems: monitorAllAlbums ? "all" : "none",
                 addOptions: {

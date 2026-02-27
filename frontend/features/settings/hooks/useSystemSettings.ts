@@ -28,6 +28,8 @@ const defaultSystemSettings: SystemSettings = {
     autoEnrichMetadata: true,
     audioAnalyzerWorkers: 2,
     soulseekConcurrentDownloads: 4,
+    lidarrQualityProfileId: null,
+    lidarrMetadataProfileId: null,
     // Download preferences
     downloadSource: "soulseek",
     primaryFailureFallback: "none",

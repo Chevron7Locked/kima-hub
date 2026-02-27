@@ -5,6 +5,13 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.11] - 2026-02-27
+
+### Added
+
+- **#25** Full playlist pagination for Spotify and Deezer imports -- playlists of any size are now fully imported instead of silently capping at 100 (Spotify) or 25 (Deezer) tracks. Paginated fetch with rate limit handling, partial result recovery, and SSE progress reporting ("Fetching tracks: X of Y...").
+- **#8** Configurable Lidarr quality and metadata profiles -- previously hardcoded to profile ID 1. New dropdowns in Settings > Download Services appear after a successful connection test, populated from Lidarr's API. Stored in system settings and used for all artist/album additions.
+
 ## [1.5.10] - 2026-02-27
 
 ### Added

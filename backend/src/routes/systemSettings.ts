@@ -48,6 +48,8 @@ const systemSettingsSchema = z.object({
   lidarrUrl: z.string().optional(),
   lidarrApiKey: z.string().nullable().optional(),
   lidarrWebhookSecret: z.string().nullable().optional(),
+  lidarrQualityProfileId: z.number().int().positive().nullable().optional(),
+  lidarrMetadataProfileId: z.number().int().positive().nullable().optional(),
 
   // AI Services
   openaiEnabled: z.boolean().optional(),
@@ -497,6 +499,33 @@ router.post("/test-lidarr", async (req, res) => {
     });
   } catch (error) {
     safeError(res, "Lidarr connection test", error);
+  }
+});
+
+// POST /system-settings/lidarr-profiles
+router.post("/lidarr-profiles", async (req, res) => {
+  try {
+    const { url, apiKey } = req.body;
+    if (!url || !apiKey) {
+      return res.status(400).json({ error: "URL and API key are required" });
+    }
+
+    const normalizedUrl = url.replace(/\/+$/, "");
+    const axios = require("axios");
+    const headers = { "X-Api-Key": apiKey };
+    const timeout = 10000;
+
+    const [qualityRes, metadataRes] = await Promise.all([
+      axios.get(`${normalizedUrl}/api/v1/qualityprofile`, { headers, timeout }),
+      axios.get(`${normalizedUrl}/api/v1/metadataprofile`, { headers, timeout }),
+    ]);
+
+    res.json({
+      qualityProfiles: (qualityRes.data || []).map((p: any) => ({ id: p.id, name: p.name })),
+      metadataProfiles: (metadataRes.data || []).map((p: any) => ({ id: p.id, name: p.name })),
+    });
+  } catch (error) {
+    safeError(res, "Lidarr profile fetch", error);
   }
 });
 
