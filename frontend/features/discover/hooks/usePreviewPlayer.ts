@@ -1,9 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useToast } from "@/lib/toast-context";
 import { audioEngine } from "@/lib/audio-engine";
+import { useAudioState } from "@/lib/audio-state-context";
 
 export function usePreviewPlayer() {
     const { toast } = useToast();
+    const { volume, isMuted } = useAudioState();
     const [currentPreview, setCurrentPreview] = useState<string | null>(null);
     const [previewAudios, setPreviewAudios] = useState<
         Map<string, HTMLAudioElement>
@@ -11,10 +13,20 @@ export function usePreviewPlayer() {
     const mainPlayerWasPausedRef = useRef(false);
     const previewAudiosRef = useRef<Map<string, HTMLAudioElement>>(new Map());
 
+    const applyCurrentPlayerVolume = useCallback((audio: HTMLAudioElement) => {
+        audio.volume = isMuted ? 0 : volume;
+    }, [volume, isMuted]);
+
     // Keep ref in sync
     useEffect(() => {
         previewAudiosRef.current = previewAudios;
     });
+
+    useEffect(() => {
+        previewAudiosRef.current.forEach((audio) => {
+            applyCurrentPlayerVolume(audio);
+        });
+    }, [applyCurrentPlayerVolume]);
 
     // Cleanup only on unmount
     useEffect(() => {
@@ -75,6 +87,7 @@ export function usePreviewPlayer() {
                 let audio = previewAudios.get(albumId);
                 if (!audio) {
                     audio = new Audio(previewUrl);
+                    applyCurrentPlayerVolume(audio);
                     audio.onended = () => {
                         setCurrentPreview(null);
                         // Resume main player if it was playing before
@@ -96,6 +109,8 @@ export function usePreviewPlayer() {
                     setPreviewAudios(newMap);
                 }
 
+                applyCurrentPlayerVolume(audio);
+
                 audio
                     .play()
                     .then(() => {
@@ -106,7 +121,7 @@ export function usePreviewPlayer() {
                     });
             }
         },
-        [toast, currentPreview, previewAudios]
+        [toast, currentPreview, previewAudios, applyCurrentPlayerVolume]
     );
 
     return {

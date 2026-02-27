@@ -6,6 +6,7 @@ import Image from "next/image";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { api } from "@/lib/api";
 import { useAudioState, useAudioPlayback, useAudioControls, Track as AudioTrack } from "@/lib/audio-context";
+import { audioEngine } from "@/lib/audio-engine";
 import { cn } from "@/utils/cn";
 import { shuffleArray } from "@/utils/shuffle";
 import { formatTime } from "@/utils/formatTime";
@@ -111,7 +112,8 @@ export default function PlaylistDetailPage() {
             const previewUrl = result.previewUrl;
 
             const audio = new Audio(previewUrl);
-            audio.volume = 0.5;
+            const { volume, isMuted } = audioEngine.getState();
+            audio.volume = isMuted ? 0 : volume;
             audio.onended = () => setPlayingPreviewId(null);
             audio.onerror = (e) => {
                 console.error("Deezer preview playback failed:", e);

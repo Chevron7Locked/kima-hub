@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast-context";
 import { audioEngine } from "@/lib/audio-engine";
+import { useAudioState } from "@/lib/audio-state-context";
 
 interface PreviewableTrack {
     id: string;
@@ -10,6 +11,7 @@ interface PreviewableTrack {
 
 export function useTrackPreview<T extends PreviewableTrack>() {
     const { toast } = useToast();
+    const { volume, isMuted } = useAudioState();
     const [previewTrack, setPreviewTrack] = useState<string | null>(null);
     const [previewPlaying, setPreviewPlaying] = useState(false);
     const previewAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -18,6 +20,10 @@ export function useTrackPreview<T extends PreviewableTrack>() {
     const noPreviewTrackIdsRef = useRef<Set<string>>(new Set());
     const toastShownForNoPreviewRef = useRef<Set<string>>(new Set());
     const inFlightTrackIdRef = useRef<string | null>(null);
+
+    const applyCurrentPlayerVolume = useCallback((audio: HTMLAudioElement) => {
+        audio.volume = isMuted ? 0 : volume;
+    }, [volume, isMuted]);
 
     const isAbortError = (err: unknown) => {
         if (!err || typeof err !== "object") return false;
@@ -55,6 +61,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
         // If the same track is paused, resume it
         if (previewTrack === track.id && !previewPlaying && previewAudioRef.current) {
             try {
+                applyCurrentPlayerVolume(previewAudioRef.current);
                 await previewAudioRef.current.play();
             } catch (err: unknown) {
                 if (isAbortError(err)) return;
@@ -97,6 +104,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
             }
 
             const audio = new Audio(response.previewUrl);
+            applyCurrentPlayerVolume(audio);
             previewAudioRef.current = audio;
 
             audio.onended = () => {
@@ -151,6 +159,12 @@ export function useTrackPreview<T extends PreviewableTrack>() {
             }
         }
     };
+
+    useEffect(() => {
+        if (previewAudioRef.current) {
+            applyCurrentPlayerVolume(previewAudioRef.current);
+        }
+    }, [applyCurrentPlayerVolume]);
 
     useEffect(() => {
         const stopPreview = () => {

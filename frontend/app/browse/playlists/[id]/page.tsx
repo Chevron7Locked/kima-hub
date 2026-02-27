@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { formatTime } from "@/utils/formatTime";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
@@ -19,6 +19,8 @@ import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast-context";
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
+import { useAudioState } from "@/lib/audio-state-context";
+import { useAudioControls } from "@/lib/audio-controls-context";
 
 const DeezerIcon = ({ className }: { className?: string }) => (
     <svg viewBox="0 0 24 24" className={className} fill="currentColor">
@@ -61,12 +63,16 @@ export default function DeezerPlaylistDetailPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isImporting] = useState(false);
+    const { volume, isMuted } = useAudioState();
+    const { toggleMute } = useAudioControls();
 
     const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
     const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
-    const [previewVolume] = useState(0.5);
-    const [isMuted, setIsMuted] = useState(false);
     const audioRef = useRef<HTMLAudioElement | null>(null);
+
+    const applyCurrentPlayerVolume = useCallback((audio: HTMLAudioElement) => {
+        audio.volume = isMuted ? 0 : volume;
+    }, [volume, isMuted]);
 
     useEffect(() => {
         async function fetchPlaylist() {
@@ -86,6 +92,12 @@ export default function DeezerPlaylistDetailPage() {
         }
         fetchPlaylist();
     }, [playlistId]);
+
+    useEffect(() => {
+        if (audioRef.current) {
+            applyCurrentPlayerVolume(audioRef.current);
+        }
+    }, [applyCurrentPlayerVolume]);
 
     useEffect(() => {
         return () => {
@@ -109,6 +121,7 @@ export default function DeezerPlaylistDetailPage() {
                 audioRef.current.pause();
                 setIsPreviewPlaying(false);
             } else if (audioRef.current) {
+                applyCurrentPlayerVolume(audioRef.current);
                 audioRef.current.play().catch(() => setIsPreviewPlaying(false));
                 setIsPreviewPlaying(true);
             }
@@ -122,7 +135,7 @@ export default function DeezerPlaylistDetailPage() {
         }
 
         const audio = new Audio(track.previewUrl);
-        audio.volume = isMuted ? 0 : previewVolume;
+        applyCurrentPlayerVolume(audio);
         audioRef.current = audio;
 
         audio.onended = () => {
@@ -155,11 +168,11 @@ export default function DeezerPlaylistDetailPage() {
         setIsPreviewPlaying(false);
     };
 
-    const toggleMute = () => {
+    const handleToggleMute = () => {
+        toggleMute();
         if (audioRef.current) {
-            audioRef.current.volume = isMuted ? previewVolume : 0;
+            applyCurrentPlayerVolume(audioRef.current);
         }
-        setIsMuted(!isMuted);
     };
 
     const handleImport = () => {
@@ -326,7 +339,7 @@ export default function DeezerPlaylistDetailPage() {
                             {playingTrackId && (
                                 <div className="flex items-center gap-2">
                                     <button
-                                        onClick={toggleMute}
+                                        onClick={handleToggleMute}
                                         className="p-2 rounded-lg text-white/40 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all"
                                     >
                                         {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
