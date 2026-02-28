@@ -189,6 +189,7 @@ class AudioEngine {
 
         // Check if this source is preloaded for gapless switching
         if (this.preloadSrc === src && this.preloadAudio && this.preloadAudio.readyState >= 2) {
+            this.cancelNetworkRetry();
             const oldAudio = this.audio;
 
             // Detach native listeners from old element

@@ -95,6 +95,7 @@ export const AudioElement = memo(function AudioElement() {
     const preloadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastPreloadedTrackIdRef = useRef<string | null>(null);
     const pendingStartTimeRef = useRef<number>(0);
+    const consecutiveErrorCountRef = useRef<number>(0);
 
     // Refs for stable event handler access (avoids re-subscribing engine events)
     const playbackTypeRef = useRef(playbackType);
@@ -289,6 +290,7 @@ export const AudioElement = memo(function AudioElement() {
             setDuration(dur || fallback);
             setIsBuffering(false);
             setAudioError(null);
+            consecutiveErrorCountRef.current = 0;
 
             // Seek to saved position for audiobooks/podcasts
             if (pendingStartTimeRef.current > 0) {
@@ -307,6 +309,7 @@ export const AudioElement = memo(function AudioElement() {
 
         const handlePlaying = () => {
             setIsBuffering(false);
+            consecutiveErrorCountRef.current = 0;
             // If audio started playing while React state says we're paused
             // (e.g. direct tryResume() call from MediaSession handler bypassed the
             // React update chain), sync state back to playing so the UI reflects reality.
@@ -333,15 +336,9 @@ export const AudioElement = memo(function AudioElement() {
                     audioEngine.seek(0);
                     audioEngine.play();
                 } else {
-                    // Compute and load the next track synchronously within this 'ended'
-                    // event handler. iOS may reclaim the audio session during any silence
-                    // between tracks — the same mechanism that blocks background resume.
-                    // Loading here keeps audio output continuous and the session alive.
-                    // The React track-change effect will see lastTrackIdRef already matches
-                    // and skip the load, preventing a double-fetch.
-                    // Compute and load synchronously to avoid a silence gap.
-                    // getNextTrackInfo mirrors the index-advancement logic in next().
-                    // If either is updated, keep the other in sync.
+                    // Load next track synchronously to avoid iOS reclaiming the audio
+                    // session during silence. lastTrackIdRef is pre-set so the React
+                    // track-change effect skips the duplicate load.
                     const nextTrackInfo = getNextTrackInfo(
                         queueRef.current,
                         currentIndexRef.current,
@@ -350,9 +347,7 @@ export const AudioElement = memo(function AudioElement() {
                         repeatModeRef.current
                     );
                     if (nextTrackInfo) {
-                        // Load directly — do NOT pre-set lastTrackIdRef here.
-                        // The load effect detects this via currentSrc comparison and
-                        // skips the duplicate fetch, keeping lastTrackIdRef in sync.
+                        lastTrackIdRef.current = nextTrackInfo.id;
                         audioEngine.load(api.getStreamUrl(nextTrackInfo.id), true);
                     }
                     // Always call next() to keep React state and UI in sync
@@ -379,15 +374,15 @@ export const AudioElement = memo(function AudioElement() {
                       : "Audio playback error";
             setAudioError(errorMessage);
 
-            // For tracks: skip to next if queue has more, otherwise clear
             if (playbackTypeRef.current === "track") {
-                if (queueRef.current.length > 1) {
-                    lastTrackIdRef.current = null;
-                    nextRef.current();
-                } else {
-                    lastTrackIdRef.current = null;
+                consecutiveErrorCountRef.current++;
+                lastTrackIdRef.current = null;
+
+                if (consecutiveErrorCountRef.current >= 3 || queueRef.current.length <= 1) {
                     setCurrentTrackRef.current(null);
                     setPlaybackTypeRef.current(null);
+                } else {
+                    nextRef.current();
                 }
             } else if (playbackTypeRef.current === "audiobook") {
                 setCurrentAudiobookRef.current(null);
@@ -458,10 +453,8 @@ export const AudioElement = memo(function AudioElement() {
 
         if (!streamUrl) return;
 
-        // handleEnded may have already loaded this URL directly (gapless track transition).
-        // If the engine is already on this source, sync the ref and skip the duplicate load.
+        // handleEnded may have already loaded this URL via the gapless path.
         if (audioEngine.getState().currentSrc === streamUrl) {
-            lastTrackIdRef.current = currentMediaId;
             return;
         }
 
@@ -494,6 +487,7 @@ export const AudioElement = memo(function AudioElement() {
                 // The track change effect will pick it up on next render
                 return;
             }
+            if (audioEngine.isPlaying()) return;
             audioEngine.play().catch(() => {
                 // play() failed (autoplay blocked, no audio loaded, etc.)
                 setIsPlaying(false);

@@ -19,7 +19,6 @@ import {
 import { useAudioPlayback } from "./audio-playback-context";
 import { api } from "@/lib/api";
 import { audioEngine } from "@/lib/audio-engine";
-import { silenceKeepalive } from "@/lib/silence-keepalive";
 import { audioSeekEmitter } from "./audio-seek-emitter";
 
 function queueDebugEnabled(): boolean {
@@ -345,7 +344,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const resumeWithGesture = useCallback(() => {
         playback.setIsPlaying(true);
         audioEngine.tryResume();
-        silenceKeepalive.prime();
     }, [playback]);
 
     const seek = useCallback(
