@@ -39,6 +39,7 @@ export function useAudio() {
 
         // Playback
         isPlaying: playback.isPlaying,
+        setIsPlaying: playback.setIsPlaying,
         currentTime: playback.currentTime,
         duration: playback.duration,
         isBuffering: playback.isBuffering,

@@ -1,16 +1,15 @@
 import { useEffect, useCallback, useRef } from "react";
 import { useAudio } from "@/lib/audio-context";
+import { audioEngine } from "@/lib/audio-engine";
+import { silenceKeepalive } from "@/lib/silence-keepalive";
 import { api } from "@/lib/api";
 
 /**
  * Media Session API integration for OS-level media controls
  *
- * Features:
- * - Lock screen controls (iOS/Android)
- * - Media keys (play/pause, next, previous)
- * - Now playing notification
- * - Album art display
- * - Seek controls (on supported platforms)
+ * playbackState is driven by audio engine events (the source of truth),
+ * not React state, to avoid async timing issues that cause inverted
+ * lock screen controls on iOS.
  */
 export function useMediaSession() {
     const {
@@ -19,8 +18,8 @@ export function useMediaSession() {
         currentPodcast,
         playbackType,
         isPlaying,
+        setIsPlaying,
         pause,
-        resumeWithGesture,
         next,
         previous,
         seek,
@@ -28,71 +27,102 @@ export function useMediaSession() {
     } = useAudio();
 
     const currentTimeRef = useRef(currentTime);
-    const isPlayingRef = useRef(isPlaying);
+    const pauseRef = useRef(pause);
+    const nextRef = useRef(next);
+    const previousRef = useRef(previous);
+    const seekRef = useRef(seek);
+    const setIsPlayingRef = useRef(setIsPlaying);
+    const playbackTypeRef = useRef(playbackType);
+    const currentTrackRef = useRef(currentTrack);
+    const currentAudiobookRef = useRef(currentAudiobook);
+    const currentPodcastRef = useRef(currentPodcast);
 
-    useEffect(() => {
-        currentTimeRef.current = currentTime;
-    }, [currentTime]);
-
-    useEffect(() => {
-        isPlayingRef.current = isPlaying;
-    }, [isPlaying]);
+    useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
+    useEffect(() => { pauseRef.current = pause; }, [pause]);
+    useEffect(() => { nextRef.current = next; }, [next]);
+    useEffect(() => { previousRef.current = previous; }, [previous]);
+    useEffect(() => { seekRef.current = seek; }, [seek]);
+    useEffect(() => { setIsPlayingRef.current = setIsPlaying; }, [setIsPlaying]);
+    useEffect(() => { playbackTypeRef.current = playbackType; }, [playbackType]);
+    useEffect(() => { currentTrackRef.current = currentTrack; }, [currentTrack]);
+    useEffect(() => { currentAudiobookRef.current = currentAudiobook; }, [currentAudiobook]);
+    useEffect(() => { currentPodcastRef.current = currentPodcast; }, [currentPodcast]);
 
     // Track if this device has initiated playback locally
-    // Prevents cross-device media session interference from state sync
     const hasPlayedLocallyRef = useRef(false);
+    // Track if action handlers have been registered (one-time gate)
+    const handlersRegisteredRef = useRef(false);
 
-    // Set flag when playback starts on this device
     useEffect(() => {
         if (isPlaying) {
             hasPlayedLocallyRef.current = true;
         }
     }, [isPlaying]);
 
-    // Reset flag when all media is cleared
     useEffect(() => {
         if (!currentTrack && !currentAudiobook && !currentPodcast) {
             hasPlayedLocallyRef.current = false;
+            handlersRegisteredRef.current = false;
         }
     }, [currentTrack, currentAudiobook, currentPodcast]);
 
-    // Convert relative URLs to absolute (required for iOS)
     const getAbsoluteUrl = useCallback((url: string): string => {
         if (!url) return "";
         if (url.startsWith("http://") || url.startsWith("https://")) {
             return url;
         }
-        // Construct absolute URL
         if (typeof window !== "undefined") {
             return `${window.location.origin}${url}`;
         }
         return url;
     }, []);
 
+    // Drive playbackState from audio engine events, not React state.
+    // This fires synchronously when the audio element actually starts/stops,
+    // eliminating the async gap that caused inverted lock screen controls.
     useEffect(() => {
-        // Check if Media Session API is supported
-        if (!("mediaSession" in navigator)) {
-            console.warn("[MediaSession] Media Session API not supported");
-            return;
-        }
+        if (!("mediaSession" in navigator)) return;
 
-        // Only set metadata if this device has initiated playback
-        // Prevents cross-device interference from state sync
+        const handlePlay = () => {
+            if (hasPlayedLocallyRef.current) {
+                navigator.mediaSession.playbackState = "playing";
+            }
+        };
+
+        const handlePause = () => {
+            if (hasPlayedLocallyRef.current) {
+                navigator.mediaSession.playbackState = "paused";
+            }
+        };
+
+        audioEngine.on("play", handlePlay);
+        audioEngine.on("pause", handlePause);
+        audioEngine.on("ended", handlePause);
+
+        return () => {
+            audioEngine.off("play", handlePlay);
+            audioEngine.off("pause", handlePause);
+            audioEngine.off("ended", handlePause);
+        };
+    }, []);
+
+    // Metadata updates -- still driven by React state since metadata
+    // changes are infrequent and not timing-sensitive like playbackState.
+    useEffect(() => {
+        if (!("mediaSession" in navigator)) return;
+
         if (!hasPlayedLocallyRef.current) {
             navigator.mediaSession.metadata = null;
             return;
         }
 
-        // Update metadata when track/audiobook/podcast changes
         const fallbackArtwork = [
             { src: getAbsoluteUrl("/assets/icons/icon-512.webp"), sizes: "512x512", type: "image/webp" },
         ];
 
         if (playbackType === "track" && currentTrack) {
             const coverUrl = currentTrack.album?.coverArt
-                ? getAbsoluteUrl(
-                      api.getCoverArtUrl(currentTrack.album.coverArt, 512)
-                  )
+                ? getAbsoluteUrl(api.getCoverArtUrl(currentTrack.album.coverArt, 512))
                 : undefined;
 
             navigator.mediaSession.metadata = new MediaMetadata({
@@ -102,39 +132,17 @@ export function useMediaSession() {
                 artwork: coverUrl
                     ? [
                           { src: coverUrl, sizes: "96x96", type: "image/jpeg" },
-                          {
-                              src: coverUrl,
-                              sizes: "128x128",
-                              type: "image/jpeg",
-                          },
-                          {
-                              src: coverUrl,
-                              sizes: "192x192",
-                              type: "image/jpeg",
-                          },
-                          {
-                              src: coverUrl,
-                              sizes: "256x256",
-                              type: "image/jpeg",
-                          },
-                          {
-                              src: coverUrl,
-                              sizes: "384x384",
-                              type: "image/jpeg",
-                          },
-                          {
-                              src: coverUrl,
-                              sizes: "512x512",
-                              type: "image/jpeg",
-                          },
+                          { src: coverUrl, sizes: "128x128", type: "image/jpeg" },
+                          { src: coverUrl, sizes: "192x192", type: "image/jpeg" },
+                          { src: coverUrl, sizes: "256x256", type: "image/jpeg" },
+                          { src: coverUrl, sizes: "384x384", type: "image/jpeg" },
+                          { src: coverUrl, sizes: "512x512", type: "image/jpeg" },
                       ]
                     : fallbackArtwork,
             });
         } else if (playbackType === "audiobook" && currentAudiobook) {
             const coverUrl = currentAudiobook.coverUrl
-                ? getAbsoluteUrl(
-                      api.getCoverArtUrl(currentAudiobook.coverUrl, 512)
-                  )
+                ? getAbsoluteUrl(api.getCoverArtUrl(currentAudiobook.coverUrl, 512))
                 : undefined;
 
             navigator.mediaSession.metadata = new MediaMetadata({
@@ -146,39 +154,17 @@ export function useMediaSession() {
                 artwork: coverUrl
                     ? [
                           { src: coverUrl, sizes: "96x96", type: "image/jpeg" },
-                          {
-                              src: coverUrl,
-                              sizes: "128x128",
-                              type: "image/jpeg",
-                          },
-                          {
-                              src: coverUrl,
-                              sizes: "192x192",
-                              type: "image/jpeg",
-                          },
-                          {
-                              src: coverUrl,
-                              sizes: "256x256",
-                              type: "image/jpeg",
-                          },
-                          {
-                              src: coverUrl,
-                              sizes: "384x384",
-                              type: "image/jpeg",
-                          },
-                          {
-                              src: coverUrl,
-                              sizes: "512x512",
-                              type: "image/jpeg",
-                          },
+                          { src: coverUrl, sizes: "128x128", type: "image/jpeg" },
+                          { src: coverUrl, sizes: "192x192", type: "image/jpeg" },
+                          { src: coverUrl, sizes: "256x256", type: "image/jpeg" },
+                          { src: coverUrl, sizes: "384x384", type: "image/jpeg" },
+                          { src: coverUrl, sizes: "512x512", type: "image/jpeg" },
                       ]
                     : fallbackArtwork,
             });
         } else if (playbackType === "podcast" && currentPodcast) {
             const coverUrl = currentPodcast.coverUrl
-                ? getAbsoluteUrl(
-                      api.getCoverArtUrl(currentPodcast.coverUrl, 512)
-                  )
+                ? getAbsoluteUrl(api.getCoverArtUrl(currentPodcast.coverUrl, 512))
                 : undefined;
 
             navigator.mediaSession.metadata = new MediaMetadata({
@@ -188,41 +174,17 @@ export function useMediaSession() {
                 artwork: coverUrl
                     ? [
                           { src: coverUrl, sizes: "96x96", type: "image/jpeg" },
-                          {
-                              src: coverUrl,
-                              sizes: "128x128",
-                              type: "image/jpeg",
-                          },
-                          {
-                              src: coverUrl,
-                              sizes: "192x192",
-                              type: "image/jpeg",
-                          },
-                          {
-                              src: coverUrl,
-                              sizes: "256x256",
-                              type: "image/jpeg",
-                          },
-                          {
-                              src: coverUrl,
-                              sizes: "384x384",
-                              type: "image/jpeg",
-                          },
-                          {
-                              src: coverUrl,
-                              sizes: "512x512",
-                              type: "image/jpeg",
-                          },
+                          { src: coverUrl, sizes: "128x128", type: "image/jpeg" },
+                          { src: coverUrl, sizes: "192x192", type: "image/jpeg" },
+                          { src: coverUrl, sizes: "256x256", type: "image/jpeg" },
+                          { src: coverUrl, sizes: "384x384", type: "image/jpeg" },
+                          { src: coverUrl, sizes: "512x512", type: "image/jpeg" },
                       ]
                     : fallbackArtwork,
             });
         } else {
-            // Clear metadata when nothing is playing
             navigator.mediaSession.metadata = null;
         }
-
-        // Update playback state
-        navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
     }, [
         currentTrack,
         currentAudiobook,
@@ -232,110 +194,74 @@ export function useMediaSession() {
         getAbsoluteUrl,
     ]);
 
+    // Register action handlers once when first playback occurs. Uses refs
+    // so handlers always access current values without re-registration.
     useEffect(() => {
         if (!("mediaSession" in navigator)) return;
+        if (!hasPlayedLocallyRef.current) return;
+        if (handlersRegisteredRef.current) return;
+        handlersRegisteredRef.current = true;
 
-        // Only register handlers if this device has initiated playback
-        // Prevents cross-device interference from state sync
-        if (!hasPlayedLocallyRef.current) {
-            return;
-        }
-
-        // Register action handlers
+        // Play handler: call audioEngine directly to preserve iOS user gesture
+        // context, then sync React state from the audio element event.
         navigator.mediaSession.setActionHandler("play", () => {
-            resumeWithGesture();
+            silenceKeepalive.prime();
+            audioEngine.tryResume().then((started) => {
+                if (started) {
+                    setIsPlayingRef.current(true);
+                }
+            });
         });
 
         navigator.mediaSession.setActionHandler("pause", () => {
-            pause();
+            audioEngine.pause();
+            setIsPlayingRef.current(false);
         });
 
         navigator.mediaSession.setActionHandler("previoustrack", () => {
-            if (playbackType === "track") {
-                previous();
+            if (playbackTypeRef.current === "track") {
+                previousRef.current();
             } else {
-                // For audiobooks/podcasts, seek backward 30s
-                seek(Math.max(currentTimeRef.current - 30, 0));
+                seekRef.current(Math.max(currentTimeRef.current - 30, 0));
             }
         });
 
         navigator.mediaSession.setActionHandler("nexttrack", () => {
-            if (playbackType === "track") {
-                next();
+            if (playbackTypeRef.current === "track") {
+                nextRef.current();
             } else {
-                // For audiobooks/podcasts, seek forward 30s
                 const duration =
-                    currentAudiobook?.duration || currentPodcast?.duration || 0;
-                seek(Math.min(currentTimeRef.current + 30, duration));
+                    currentAudiobookRef.current?.duration ||
+                    currentPodcastRef.current?.duration || 0;
+                seekRef.current(Math.min(currentTimeRef.current + 30, duration));
             }
         });
 
-        // Seek controls (may not be supported on all platforms)
         try {
-            navigator.mediaSession.setActionHandler(
-                "seekbackward",
-                (details) => {
-                    const skipTime = details.seekOffset || 10;
-                    seek(Math.max(currentTimeRef.current - skipTime, 0));
-                }
-            );
+            navigator.mediaSession.setActionHandler("seekbackward", (details) => {
+                const skipTime = details.seekOffset || 10;
+                seekRef.current(Math.max(currentTimeRef.current - skipTime, 0));
+            });
 
-            navigator.mediaSession.setActionHandler(
-                "seekforward",
-                (details) => {
-                    const skipTime = details.seekOffset || 10;
-                    const duration =
-                        currentTrack?.duration ||
-                        currentAudiobook?.duration ||
-                        currentPodcast?.duration ||
-                        0;
-                    seek(Math.min(currentTimeRef.current + skipTime, duration));
-                }
-            );
+            navigator.mediaSession.setActionHandler("seekforward", (details) => {
+                const skipTime = details.seekOffset || 10;
+                const duration =
+                    currentTrackRef.current?.duration ||
+                    currentAudiobookRef.current?.duration ||
+                    currentPodcastRef.current?.duration || 0;
+                seekRef.current(Math.min(currentTimeRef.current + skipTime, duration));
+            });
 
             navigator.mediaSession.setActionHandler("seekto", (details) => {
                 if (details.seekTime !== undefined) {
-                    seek(details.seekTime);
+                    seekRef.current(details.seekTime);
                 }
             });
         } catch {
             // Seek actions not supported on this platform
         }
 
-        // Cleanup
-        return () => {
-            if ("mediaSession" in navigator) {
-                navigator.mediaSession.setActionHandler("play", null);
-                navigator.mediaSession.setActionHandler("pause", null);
-                navigator.mediaSession.setActionHandler("previoustrack", null);
-                navigator.mediaSession.setActionHandler("nexttrack", null);
-                try {
-                    navigator.mediaSession.setActionHandler(
-                        "seekbackward",
-                        null
-                    );
-                    navigator.mediaSession.setActionHandler(
-                        "seekforward",
-                        null
-                    );
-                    navigator.mediaSession.setActionHandler("seekto", null);
-                } catch {
-                    // Ignore cleanup errors
-                }
-            }
-        };
-    }, [
-        pause,
-        resumeWithGesture,
-        next,
-        previous,
-        seek,
-        playbackType,
-        isPlaying,
-        currentTrack,
-        currentAudiobook,
-        currentPodcast,
-    ]);
+    }, [isPlaying]);
 
     // Update position state for scrubbing on lock screen
     useEffect(() => {
@@ -355,23 +281,19 @@ export function useMediaSession() {
                     position: Math.min(currentTime, duration),
                 });
             } catch (error) {
-                // Some browsers may not support position state
-                console.warn(
-                    "[MediaSession] Failed to set position state:",
-                    error
-                );
+                console.warn("[MediaSession] Failed to set position state:", error);
             }
         }
     }, [currentTime, currentTrack, currentAudiobook, currentPodcast]);
 
-    // Re-sync MediaSession playbackState when the app comes back to the foreground.
-    // iOS may have shown stale controls while the app was backgrounded.
+    // Re-sync playbackState on foreground restore.
+    // Uses audioEngine.isPlaying() (ground truth) instead of React ref.
     useEffect(() => {
         if (!("mediaSession" in navigator)) return;
 
         const handleVisibilityChange = () => {
-            if (!document.hidden) {
-                navigator.mediaSession.playbackState = isPlayingRef.current
+            if (!document.hidden && hasPlayedLocallyRef.current) {
+                navigator.mediaSession.playbackState = audioEngine.isPlaying()
                     ? "playing"
                     : "paused";
             }
@@ -379,9 +301,6 @@ export function useMediaSession() {
 
         document.addEventListener("visibilitychange", handleVisibilityChange);
         return () =>
-            document.removeEventListener(
-                "visibilitychange",
-                handleVisibilityChange
-            );
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
     }, []);
 }

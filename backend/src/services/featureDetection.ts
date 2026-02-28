@@ -68,7 +68,12 @@ class FeatureDetectionService {
 
     private async checkCLAP(): Promise<boolean> {
         try {
-            // Analyzer script bundled in image = feature is available
+            // If explicitly disabled via env var, CLAP is not available
+            const disabled = process.env.DISABLE_CLAP;
+            if (disabled === "true" || disabled === "1") {
+                return false;
+            }
+
             if (existsSync(CLAP_ANALYZER_PATH)) {
                 return true;
             }

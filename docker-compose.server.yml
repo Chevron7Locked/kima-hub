@@ -27,6 +27,7 @@ services:
             # Default uses host.docker.internal which works on most setups with extra_hosts below
             # Override if using custom Docker networks: e.g., http://192.168.0.20:3030
             - KIMA_CALLBACK_URL=${KIMA_CALLBACK_URL:-http://host.docker.internal:3030}
+            - DISABLE_CLAP=${DISABLE_CLAP:-}
         # Makes host.docker.internal work on Linux (already works on Docker Desktop)
         extra_hosts:
             - "host.docker.internal:host-gateway"
@@ -35,15 +36,7 @@ services:
             - vm.overcommit_memory=1
         restart: unless-stopped
         healthcheck:
-            test:
-                [
-                    "CMD",
-                    "wget",
-                    "--no-verbose",
-                    "--tries=1",
-                    "--spider",
-                    "http://localhost:3030",
-                ]
+            test: ["CMD", "node", "/app/healthcheck.js"]
             interval: 30s
             timeout: 10s
             retries: 3

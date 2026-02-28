@@ -336,7 +336,7 @@ function SpotifyImportPageContent() {
 
         setIsCancelling(true);
         try {
-            await api.post<{
+            const cancelResult = await api.post<{
                 message: string;
                 playlistId: string | null;
                 tracksMatched: number;
@@ -347,8 +347,8 @@ function SpotifyImportPageContent() {
                     ? {
                           ...prev,
                           status: "cancelled",
-                          createdPlaylistId: null,
-                          tracksMatched: 0,
+                          createdPlaylistId: cancelResult.playlistId ?? null,
+                          tracksMatched: cancelResult.tracksMatched ?? 0,
                       }
                     : prev
             );
@@ -967,7 +967,9 @@ function SpotifyImportPageContent() {
                             </p>
                         ) : importJob.status === "cancelled" ? (
                             <p className="text-sm text-gray-400">
-                                Import was cancelled. No playlist was created.
+                                {importJob.createdPlaylistId
+                                    ? `Import cancelled. A playlist was created with ${importJob.tracksMatched} matched track${importJob.tracksMatched === 1 ? "" : "s"}.`
+                                    : "Import cancelled. No tracks had been matched yet."}
                             </p>
                         ) : (
                             <>

@@ -31,6 +31,8 @@ import {
     Loader2,
     ArrowLeft,
 } from "lucide-react";
+import { useTrackFormat } from "@/hooks/useTrackFormat";
+import { formatTrackDisplay } from "@/lib/track-format";
 
 interface Track {
     id: string;
@@ -73,6 +75,7 @@ export default function PlaylistDetailPage() {
     const queryClient = useQueryClient();
     const { toast } = useToast();
     const { currentTrack } = useAudioState();
+    const { format: trackFormat } = useTrackFormat();
     const { isPlaying } = useAudioPlayback();
     const { playTracks, addToQueue, pause, resumeWithGesture } = useAudioControls();
     const playlistId = params.id as string;
@@ -792,7 +795,14 @@ export default function PlaylistDetailPage() {
                                                                     : "text-white"
                                                             )}
                                                         >
-                                                            {playlistItem.track.title}
+                                                            {formatTrackDisplay(
+                                                                {
+                                                                    title: playlistItem.track.title,
+                                                                    artist: playlistItem.track.album.artist.name,
+                                                                    album: playlistItem.track.album.title,
+                                                                },
+                                                                trackFormat,
+                                                            )}
                                                         </p>
                                                         <p className="text-[10px] font-mono text-white/40 truncate uppercase tracking-wider">
                                                             {playlistItem.track.album.artist.name}

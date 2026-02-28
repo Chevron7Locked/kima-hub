@@ -276,7 +276,7 @@ priority=50
 [program:audio-analyzer-clap]
 command=/bin/bash -c "/app/wait-for-db.sh 120 && cd /app/audio-analyzer-clap && python3 analyzer.py"
 autostart=true
-autorestart=unexpected
+autorestart=true
 startretries=3
 startsecs=30
 stdout_logfile=/dev/stdout
@@ -490,7 +490,24 @@ TRANSCODE_CACHE_PATH=/data/cache/transcodes
 SESSION_SECRET=$SESSION_SECRET
 SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY
 INTERNAL_API_SECRET=kima-internal-aio
+DISABLE_CLAP=${DISABLE_CLAP:-}
 ENVEOF
+
+# Optionally disable CLAP audio analyzer (for low-memory deployments)
+if [ "${DISABLE_CLAP:-false}" = "true" ] || [ "${DISABLE_CLAP:-0}" = "1" ]; then
+    python3 -c "
+import re
+conf = open('/etc/supervisor/conf.d/kima.conf').read()
+conf = re.sub(
+    r'(\[program:audio-analyzer-clap\][^\[]*autostart=)true',
+    r'\g<1>false',
+    conf,
+    flags=re.DOTALL
+)
+open('/etc/supervisor/conf.d/kima.conf', 'w').write(conf)
+"
+    echo "CLAP audio analyzer disabled (DISABLE_CLAP=${DISABLE_CLAP})"
+fi
 
 echo "Starting Kima..."
 exec env \

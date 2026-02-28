@@ -5,6 +5,31 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.10] - 2026-02-27
+
+### Added
+
+- **#122** `DISABLE_CLAP=true` environment variable to disable the CLAP audio embedding analyzer on startup in the all-in-one container (useful for low-memory deployments)
+- **#123** Foobar2000-style track title formatting in Settings > Playback -- configure a format string with `%field%`, `[conditional blocks]`, `$if2()`, `$filepart()` syntax; applied in playlist view
+- **#124** Cancelling a playlist import now creates a partial playlist from all tracks already matched to your library, instead of discarding progress
+
+### Fixed
+
+- **#124** Cancel button previously promised "Playlist will be created with tracks downloaded so far" but discarded all progress -- now delivers on that promise
+- **iOS lock screen controls inverted**: MediaSession `playbackState` was driven by React `useEffect` on `isPlaying` state, which fires asynchronously after render -- not synchronously with the actual audio state change. This caused lock screen controls to show the opposite state (play when playing, pause when paused). Rewrote MediaSession to drive `playbackState` directly from `audioEngine` events, call the engine directly from action handlers to preserve iOS user-gesture context, and use ref-based one-time handler registration to avoid re-registration churn.
+- **Favicon showing old Lidify icon or wrong Kima logo**: Browser tab showed the pre-rebrand Lidify favicon. Replaced with the waveform-only icon generated from `kima-black.webp` as a proper multi-size ICO (16/32/48/64/128/256px) with tight cropping so the waveform fills the tab space.
+- **Enrichment pipeline: no periodic vibe sweep**: The enrichment cycle had no phase for queueing vibe/CLAP embedding jobs. The only automatic path was a lossy pub/sub event from Essentia completion -- if missed (crash, restart, migration wipe), tracks were orphaned forever. Added Phase 5 that sweeps for tracks with completed audio but missing embedding rows via LEFT JOIN.
+- **Enrichment pipeline: crash recovery dead end**: Crash recovery reset `vibeAnalysisStatus` from `processing` to `null`, which nothing in the regular cycle re-queued. Changed to reset to `pending` so the periodic sweep picks them up.
+- **Enrichment pipeline: CLAP analyzer permanent death**: When enrichment was stopped, the backend sent a stop command causing the CLAP analyzer to exit cleanly (code 0). Supervisor's `autorestart=unexpected` treated this as expected and never restarted. Changed to `autorestart=true` and removed the stop signal entirely -- the analyzer has its own idle timeout.
+- **Enrichment pipeline: completion never triggers**: `isFullyComplete` required `clapCompleted + clapFailed >= trackTotal`, which was impossible after `track_embeddings` was wiped by migration. Now checks for actual un-embedded tracks via LEFT JOIN.
+- **Enrichment pipeline: "Reset Vibe Embeddings" incomplete**: `reRunVibeEmbeddingsOnly()` reset `vibeAnalysisStatus` but did not delete existing `track_embeddings` rows, so the re-queue query (which uses LEFT JOIN) silently skipped tracks that already had embeddings. Now deletes all embeddings first for full regeneration.
+- **Feature detection: CLAP reported available when disabled**: When `DISABLE_CLAP=true` was set, `checkCLAP()` skipped the file-existence check but still fell through to heartbeat and data checks. If old embeddings existed in the database, it returned `true`, causing the vibe sweep to queue jobs that no CLAP worker would ever process. Now returns `false` immediately when disabled.
+- **docker-compose.server.yml healthcheck using removed tool**: Healthcheck used `wget` which is removed from the production image during security hardening. Changed to `node /app/healthcheck.js` to match docker-compose.prod.yml.
+- **#126 Subsonic JSON `getGenres.view` breaking Symfonium**: Genre responses used `#text` for the genre name in JSON output -- correct for XML but violates the Subsonic JSON convention which uses `value`. Symfonium's strict JSON parser rejected the response. Fixed `stripAttrPrefix()` to map `#text` to `value` in all JSON responses.
+- **#126 Subsonic `getBookmarks.view` not implemented**: Symfonium calls `getBookmarks.view` during sync and expects a valid response with a `bookmarks` key. The endpoint hit the catch-all "not implemented" handler, returning an error without the required key. Added an empty stub returning `{ bookmarks: {} }`.
+- **#91 Artist page only showing 5 popular tracks**: Frontend sliced popular tracks to 5 even though the backend returned 10. Now displays all 10.
+- **#63 MusicBrainz base URL hardcoded**: MusicBrainz API URL was hardcoded, preventing use of self-hosted mirrors. Now configurable via `MUSICBRAINZ_BASE_URL` environment variable (defaults to `https://musicbrainz.org/ws/2`).
+
 ## [1.5.8] - 2026-02-26
 
 ### Fixed

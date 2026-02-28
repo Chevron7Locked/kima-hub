@@ -221,8 +221,9 @@ async function setupControlChannel() {
                         "[Enrichment] Stopping gracefully - completing current item...",
                     );
                     // DO NOT override state - let enrichmentStateService.stop() handle it
-                    // Signal CLAP Python container to stop draining its queue
-                    getRedis().publish("audio:clap:control", JSON.stringify({ command: "stop" })).catch(() => {});
+                    // DO NOT kill the CLAP analyzer — it has its own idle timeout (MODEL_IDLE_TIMEOUT=300s)
+                    // and will unload the model when the vibe queue is empty. Killing it caused
+                    // permanent death because supervisor's autorestart didn't revive clean exits.
                 }
             }
         });
@@ -248,7 +249,7 @@ export async function startUnifiedEnrichmentWorker() {
      });
      const orphanedVibe = await prisma.track.updateMany({
          where: { vibeAnalysisStatus: "processing" },
-         data: { vibeAnalysisStatus: null, vibeAnalysisStartedAt: null },
+         data: { vibeAnalysisStatus: "pending", vibeAnalysisStartedAt: null },
      });
      if (orphanedAudio.count > 0 || orphanedVibe.count > 0) {
          logger.info(
@@ -495,6 +496,9 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
 
         // Podcast refresh phase -- only runs if subscriptions exist
         await runPhase("podcasts", executePodcastRefreshPhase);
+
+        // Vibe embedding sweep — catches tracks missed by the event-driven subscriber
+        await runPhase("vibe", executeVibePhase);
 
         // Orphaned failure cleanup -- runs at most once per hour, never during stop/pause
         const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -853,7 +857,7 @@ async function shouldHaltCycle(): Promise<boolean> {
  * Run a phase and return result. Returns null if cycle should halt.
  */
 async function runPhase(
-    phaseName: "artists" | "tracks" | "audio" | "podcasts",
+    phaseName: "artists" | "tracks" | "audio" | "podcasts" | "vibe",
     executor: () => Promise<number>,
 ): Promise<number | null> {
     await enrichmentStateService.updateState({
@@ -1014,6 +1018,69 @@ async function executeAudioPhase(): Promise<number> {
     return queueAudioAnalysis();
 }
 
+const VIBE_SWEEP_BATCH_SIZE = 100;
+
+async function executeVibePhase(): Promise<number> {
+    const features = await featureDetection.getFeatures();
+    if (!features.vibeEmbeddings) {
+        return 0;
+    }
+
+    // Find tracks with completed audio analysis but no embedding row.
+    // This catches:
+    //   - Tracks orphaned by migration wiping track_embeddings
+    //   - Tracks whose pub/sub completion event was missed (crash, restart)
+    //   - Tracks reset to null/pending by crash recovery
+    //   - Tracks with vibeAnalysisStatus='completed' but no actual embedding (stale status)
+    const tracks = await prisma.$queryRaw<{ id: string; filePath: string }[]>`
+        SELECT t.id, t."filePath"
+        FROM "Track" t
+        LEFT JOIN track_embeddings te ON t.id = te.track_id
+        WHERE te.track_id IS NULL
+          AND t."analysisStatus" = 'completed'
+          AND t."filePath" IS NOT NULL
+          AND (t."vibeAnalysisStatus" IS NULL
+               OR t."vibeAnalysisStatus" = 'pending'
+               OR t."vibeAnalysisStatus" = 'completed')
+          AND (t."vibeAnalysisStatus" IS DISTINCT FROM 'processing')
+        LIMIT ${VIBE_SWEEP_BATCH_SIZE}
+    `;
+
+    if (tracks.length === 0) {
+        return 0;
+    }
+
+    // Reset stale vibeAnalysisStatus for these tracks before queuing
+    const trackIds = tracks.map((t) => t.id);
+    await prisma.track.updateMany({
+        where: { id: { in: trackIds } },
+        data: {
+            vibeAnalysisStatus: "pending",
+            vibeAnalysisError: null,
+        },
+    });
+
+    let queued = 0;
+    for (const track of tracks) {
+        try {
+            await vibeQueue.add(
+                "embed",
+                { trackId: track.id, filePath: track.filePath },
+                { jobId: `vibe-${track.id}` },
+            );
+            queued++;
+        } catch (err) {
+            // jobId dedup: if already queued, BullMQ throws — that's fine
+        }
+    }
+
+    if (queued > 0) {
+        logger.debug(`[Enrichment] Vibe sweep: queued ${queued} tracks for embedding`);
+    }
+
+    return queued;
+}
+
 async function executePodcastRefreshPhase(): Promise<number> {
     const podcastCount = await prisma.podcast.count();
     if (podcastCount === 0) return 0;
@@ -1094,7 +1161,7 @@ export async function getEnrichmentProgress() {
     });
 
     // CLAP embedding progress (for vibe similarity)
-    const [clapEmbeddingCount, clapProcessing, clapQueueCounts, clapFailedCount] = await Promise.all([
+    const [clapEmbeddingCount, clapProcessing, clapQueueCounts, clapFailedCount, clapUnembeddedCount] = await Promise.all([
         prisma.$queryRaw<{ count: bigint }[]>`
             SELECT COUNT(*) as count FROM track_embeddings
         `,
@@ -1105,10 +1172,21 @@ export async function getEnrichmentProgress() {
         prisma.track.count({
             where: { vibeAnalysisStatus: "failed" },
         }),
+        // Tracks with completed audio but no embedding and not failed
+        prisma.$queryRaw<{ count: bigint }[]>`
+            SELECT COUNT(*) as count
+            FROM "Track" t
+            LEFT JOIN track_embeddings te ON t.id = te.track_id
+            WHERE te.track_id IS NULL
+              AND t."analysisStatus" = 'completed'
+              AND t."filePath" IS NOT NULL
+              AND (t."vibeAnalysisStatus" IS DISTINCT FROM 'failed')
+        `,
     ]);
     const clapQueueLength = (clapQueueCounts.active ?? 0) + (clapQueueCounts.waiting ?? 0) + (clapQueueCounts.delayed ?? 0);
     const clapCompleted = Number(clapEmbeddingCount[0]?.count || 0);
     const clapFailed = clapFailedCount;
+    const clapUnembedded = Number(clapUnembeddedCount[0]?.count || 0);
 
     // Core enrichment is complete when artists and track tags are done
     // Audio analysis is separate - it runs in background and doesn't block
@@ -1175,7 +1253,7 @@ export async function getEnrichmentProgress() {
             audioProcessing === 0 &&
             clapProcessing === 0 &&
             clapQueueLength === 0 &&
-            clapCompleted + clapFailed >= trackTotal,
+            clapUnembedded === 0,
     };
 }
 
@@ -1293,12 +1371,14 @@ export async function triggerEnrichmentNow(): Promise<{
          return 0;
      }
 
+     // Delete all existing embeddings so tracks get fully regenerated
+     const deleted = await prisma.trackEmbedding.deleteMany({});
+     logger.debug(`[Enrichment] Deleted ${deleted.count} existing embeddings for full regeneration`);
+
      // Reset all tracks so they can be re-embedded.
-     // Only reset tracks whose audio analysis is complete (no point embedding incomplete audio).
      await prisma.track.updateMany({
          where: {
              analysisStatus: "completed",
-             vibeAnalysisStatus: { not: null },
          },
          data: {
              vibeAnalysisStatus: null,
@@ -1311,9 +1391,7 @@ export async function triggerEnrichmentNow(): Promise<{
      const tracks = await prisma.$queryRaw<{ id: string; filePath: string }[]>`
          SELECT t.id, t."filePath"
          FROM "Track" t
-         LEFT JOIN track_embeddings te ON t.id = te.track_id
-         WHERE te.track_id IS NULL
-           AND t."analysisStatus" = 'completed'
+         WHERE t."analysisStatus" = 'completed'
            AND t."filePath" IS NOT NULL
          LIMIT 5000
      `;

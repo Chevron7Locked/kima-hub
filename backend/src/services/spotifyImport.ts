@@ -2644,16 +2644,57 @@ class SpotifyImportService {
       },
     });
 
-    // Mark job as cancelled - do NOT create a playlist
+    // Collect tracks already matched to the library before cancellation
+    const matchedTrackIds = [
+      ...new Set(
+        (job.pendingTracks || [])
+          .map((t) => t.preMatchedTrackId)
+          .filter((id): id is string => !!id),
+      ),
+    ];
+
+    let createdPlaylistId: string | null = null;
+
+    if (matchedTrackIds.length > 0) {
+      try {
+        const playlist = await prisma.playlist.create({
+          data: {
+            userId: job.userId,
+            name: job.playlistName,
+            isPublic: false,
+            spotifyPlaylistId: job.spotifyPlaylistId,
+            items: {
+              create: matchedTrackIds.map((trackId, index) => ({
+                trackId,
+                sort: index,
+              })),
+            },
+          },
+        });
+        createdPlaylistId = playlist.id;
+        logger?.info(
+          `Partial playlist created with ${matchedTrackIds.length} tracks: ${playlist.id}`,
+        );
+      } catch (err: any) {
+        logger?.warn(
+          `Failed to create partial playlist on cancel: ${err?.message}`,
+        );
+      }
+    }
+
     job.status = "cancelled";
+    job.createdPlaylistId = createdPlaylistId;
+    job.tracksMatched = matchedTrackIds.length;
     job.updatedAt = new Date();
     await saveImportJob(job);
-    logger?.info(`Import cancelled by user - no playlist created`);
+    logger?.info(
+      `Import cancelled by user — ${createdPlaylistId ? "partial playlist created" : "no tracks matched"}`,
+    );
 
     return {
-      playlistCreated: false,
-      playlistId: null,
-      tracksMatched: 0,
+      playlistCreated: !!createdPlaylistId,
+      playlistId: createdPlaylistId,
+      tracksMatched: matchedTrackIds.length,
     };
   }
 

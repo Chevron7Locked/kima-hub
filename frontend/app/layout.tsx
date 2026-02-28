@@ -35,7 +35,6 @@ export const metadata: Metadata = {
     description: "Self-hosted music streaming platform",
     manifest: "/manifest.webmanifest",
     icons: {
-        icon: "/assets/images/Kima__favicon.ico",
         apple: [
             { url: "/assets/images/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
         ],
