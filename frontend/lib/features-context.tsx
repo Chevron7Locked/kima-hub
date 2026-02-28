@@ -21,22 +21,24 @@ export function FeaturesProvider({ children }: { children: ReactNode }) {
     const [state, setState] = useState<FeaturesState>(defaultState);
 
     useEffect(() => {
-        api.getFeatures()
-            .then((features) => {
-                setState({
-                    musicCNN: features.musicCNN,
-                    vibeEmbeddings: features.vibeEmbeddings,
-                    loading: false,
+        const fetchFeatures = () => {
+            api.getFeatures()
+                .then((features) => {
+                    setState({
+                        musicCNN: features.musicCNN,
+                        vibeEmbeddings: features.vibeEmbeddings,
+                        loading: false,
+                    });
+                })
+                .catch((error) => {
+                    console.error("Failed to fetch features:", error);
+                    setState((prev) => ({ ...prev, loading: false }));
                 });
-            })
-            .catch((error) => {
-                console.error("Failed to fetch features:", error);
-                setState({
-                    musicCNN: false,
-                    vibeEmbeddings: false,
-                    loading: false,
-                });
-            });
+        };
+
+        fetchFeatures();
+        const interval = setInterval(fetchFeatures, 60000);
+        return () => clearInterval(interval);
     }, []);
 
     const value = useMemo(() => state, [state]);
