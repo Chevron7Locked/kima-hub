@@ -793,8 +793,8 @@ def main():
                 if idle_seconds >= MODEL_IDLE_TIMEOUT > 0:
                     analyzer.unload_model()
                     logger.info(f"Model idle for {idle_seconds:.0f}s, unloaded to free memory (will reload when work arrives)")
-                elif idle_seconds >= SLEEP_INTERVAL * 2:
-                    # Check if all work is truly done -- unload immediately
+                elif idle_seconds >= MODEL_IDLE_TIMEOUT:
+                    # All embedding work done and idle long enough -- unload
                     try:
                         cursor = idle_db.get_cursor()
                         cursor.execute("""
@@ -806,7 +806,7 @@ def main():
                         cursor.close()
                         if remaining == 0:
                             analyzer.unload_model()
-                            logger.info("All tracks have embeddings, model unloaded (will reload when work arrives)")
+                            logger.info("All tracks have embeddings and idle for 5min, model unloaded")
                     except Exception as e:
                         logger.debug(f"Idle check failed: {e}")
                         idle_db.reconnect()

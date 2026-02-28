@@ -141,7 +141,7 @@ router.post("/search", requireAuth, async (req, res) => {
 
             const timeout = setTimeout(() => {
                 rejectEmbedding!(new Error("Text embedding request timed out"));
-            }, 30000);
+            }, 60000);
 
             // Subscribe and wait for Redis to confirm before publishing
             await subscriber.subscribe(responseChannel, (message) => {
