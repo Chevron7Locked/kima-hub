@@ -10,7 +10,6 @@ import {
   reRunArtistsOnly,
   reRunMoodTagsOnly,
   reRunAudioAnalysisOnly,
-  reRunVibeEmbeddingsOnly,
   triggerEnrichmentNow,
 } from "../workers/unifiedEnrichment";
 import { enrichmentStateService } from "../services/enrichmentState";
@@ -182,26 +181,6 @@ router.post("/reset-audio-analysis", requireAdmin, async (req, res) => {
   } catch (error) {
     logger.error("Reset audio analysis error:", error);
     res.status(500).json({ error: "Failed to reset audio analysis" });
-  }
-});
-
-/**
- * POST /enrichment/reset-vibe-embeddings
- * Reset only vibe embeddings (keeps all other enrichment intact)
- * Admin only - selective re-enrichment for large libraries
- */
-router.post("/reset-vibe-embeddings", requireAdmin, async (req, res) => {
-  try {
-    const queued = await reRunVibeEmbeddingsOnly();
-
-    res.json({
-      message: "Vibe embeddings reset",
-      description: `${queued} tracks queued for vibe embedding re-analysis`,
-      count: queued,
-    });
-  } catch (error) {
-    logger.error("Reset vibe embeddings error:", error);
-    res.status(500).json({ error: "Failed to reset vibe embeddings" });
   }
 });
 
