@@ -627,6 +627,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                             if (failureCounts.track > 0) parts.push(`${failureCounts.track} track(s)`);
                             if (failureCounts.audio > 0) parts.push(`${failureCounts.audio} audio analysis`);
                             if (failureCounts.vibe > 0) parts.push(`${failureCounts.vibe} vibe embedding(s)`);
+                            if (failureCounts.podcast > 0) parts.push(`${failureCounts.podcast} podcast(s)`);
 
                             await notificationService.create({
                                 userId: user.id,

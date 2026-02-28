@@ -155,9 +155,10 @@ class EnrichmentFailureService {
         track: number;
         audio: number;
         vibe: number;
+        podcast: number;
         total: number;
     }> {
-        const [artistCount, trackCount, audioCount, vibeCount] = await Promise.all([
+        const [artistCount, trackCount, audioCount, vibeCount, podcastCount] = await Promise.all([
             prisma.enrichmentFailure.count({
                 where: {
                     entityType: "artist",
@@ -174,6 +175,9 @@ class EnrichmentFailureService {
             prisma.enrichmentFailure.count({
                 where: { entityType: "vibe", resolved: false, skipped: false },
             }),
+            prisma.enrichmentFailure.count({
+                where: { entityType: "podcast", resolved: false, skipped: false },
+            }),
         ]);
 
         return {
@@ -181,7 +185,8 @@ class EnrichmentFailureService {
             track: trackCount,
             audio: audioCount,
             vibe: vibeCount,
-            total: artistCount + trackCount + audioCount + vibeCount,
+            podcast: podcastCount,
+            total: artistCount + trackCount + audioCount + vibeCount + podcastCount,
         };
     }
 
