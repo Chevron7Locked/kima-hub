@@ -55,21 +55,6 @@ let lastRunTime = 0;
 let audioLastCycleCompletedCount: number | null = null;
 const MIN_INTERVAL_MS = 10000; // Minimum 10s between cycles
 
-// Batch failure tracking
-interface BatchFailures {
-    artists: { name: string; error: string }[];
-    tracks: { name: string; error: string }[];
-    audio: { name: string; error: string }[];
-}
-let currentBatchFailures: BatchFailures = {
-    artists: [],
-    tracks: [],
-    audio: [],
-};
-
-// Session-level failure counter (accumulates across cycles, reset on enrichment start)
-let sessionFailureCount = { artists: 0, tracks: 0, audio: 0 };
-
 // Timestamp for once-per-hour orphaned failure record cleanup
 let lastOrphanedFailuresCleanup: Date | null = null;
 
@@ -557,17 +542,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                 completionNotificationSent: false, // Reset flag when new work is processed
             });
 
-            // Reset session failure counter when new work begins
-            sessionFailureCount = { artists: 0, tracks: 0, audio: 0 };
         }
-
-        // Accumulate cycle failures into session counter before resetting
-        sessionFailureCount.artists += currentBatchFailures.artists.length;
-        sessionFailureCount.tracks += currentBatchFailures.tracks.length;
-        sessionFailureCount.audio += currentBatchFailures.audio.length;
-
-        // Reset batch failures (failures are viewable in Settings > Enrichment)
-        currentBatchFailures = { artists: [], tracks: [], audio: [] };
 
         // If everything is complete, mark as idle and send notification (only once)
         const progress = await getEnrichmentProgress();
@@ -638,33 +613,26 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                 }
             }
 
-            // Send completion notification only if not already sent
             const state = await enrichmentStateService.getState();
             if (!state?.completionNotificationSent) {
                 try {
-                    const { notificationService } =
-                        await import("../services/notificationService");
-                    // Get all users to notify (in a multi-user system, notify everyone)
-                    const users = await prisma.user.findMany({
-                        select: { id: true },
-                    });
-                    const totalSessionFailures =
-                        sessionFailureCount.artists +
-                        sessionFailureCount.tracks +
-                        sessionFailureCount.audio;
+                    const { notificationService } = await import("../services/notificationService");
+                    const users = await prisma.user.findMany({ select: { id: true } });
+                    const failureCounts = await enrichmentFailureService.getFailureCounts();
 
                     for (const user of users) {
-                        if (totalSessionFailures > 0) {
+                        if (failureCounts.total > 0) {
                             const parts: string[] = [];
-                            if (sessionFailureCount.artists > 0) parts.push(`${sessionFailureCount.artists} artist(s)`);
-                            if (sessionFailureCount.tracks > 0) parts.push(`${sessionFailureCount.tracks} track(s)`);
-                            if (sessionFailureCount.audio > 0) parts.push(`${sessionFailureCount.audio} audio analysis`);
+                            if (failureCounts.artist > 0) parts.push(`${failureCounts.artist} artist(s)`);
+                            if (failureCounts.track > 0) parts.push(`${failureCounts.track} track(s)`);
+                            if (failureCounts.audio > 0) parts.push(`${failureCounts.audio} audio analysis`);
+                            if (failureCounts.vibe > 0) parts.push(`${failureCounts.vibe} vibe embedding(s)`);
 
                             await notificationService.create({
                                 userId: user.id,
                                 type: "error",
                                 title: "Enrichment Completed with Errors",
-                                message: `${totalSessionFailures} failures: ${parts.join(", ")}. Check Settings > Enrichment for details.`,
+                                message: `${failureCounts.total} failures: ${parts.join(", ")}. Check Settings > Enrichment for details.`,
                             });
                         }
 
@@ -675,16 +643,10 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                         );
                     }
 
-                    // Mark notification as sent
-                    await enrichmentStateService.updateState({
-                        completionNotificationSent: true,
-                    });
+                    await enrichmentStateService.updateState({ completionNotificationSent: true });
                     logger.debug("[Enrichment] Completion notification sent");
                 } catch (error) {
-                    logger.error(
-                        "[Enrichment] Failed to send completion notification:",
-                        error,
-                    );
+                    logger.error("[Enrichment] Failed to send completion notification:", error);
                 }
             }
         }
