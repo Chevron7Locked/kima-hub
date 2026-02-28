@@ -109,22 +109,37 @@ class EnrichmentStateService {
 
     /**
      * Update specific fields in state
-     * Auto-initializes state if it doesn't exist
+     * Only auto-initializes if the caller is explicitly starting enrichment.
      */
     async updateState(
         updates: Partial<EnrichmentState>
     ): Promise<EnrichmentState> {
         let current = await this.getState();
 
-        // Auto-initialize if state doesn't exist
         if (!current) {
-            logger.debug("[Enrichment State] State not found, initializing...");
-            current = await this.initializeState();
+            if (updates.status === "running") {
+                logger.debug("[Enrichment State] State not found, initializing...");
+                current = await this.initializeState();
+            } else {
+                logger.debug("[Enrichment State] State not found, skipping update (not a start request)");
+                return this.createDefaultIdleState();
+            }
         }
 
         const updated = { ...current, ...updates };
         await this.setState(updated);
         return updated;
+    }
+
+    private createDefaultIdleState(): EnrichmentState {
+        return {
+            status: "idle",
+            currentPhase: null,
+            lastActivity: new Date().toISOString(),
+            artists: { total: 0, completed: 0, failed: 0 },
+            tracks: { total: 0, completed: 0, failed: 0 },
+            audio: { total: 0, completed: 0, failed: 0, processing: 0 },
+        };
     }
 
     /**
