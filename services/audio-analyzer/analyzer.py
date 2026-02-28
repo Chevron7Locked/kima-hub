@@ -1295,7 +1295,7 @@ class AnalysisWorker:
                 SET
                     "analysisStatus" = 'pending',
                     "analysisError" = NULL,
-                    "analysisRetryCount" = 0
+                    "analysisRetryCount" = COALESCE(t."analysisRetryCount", 0)
                 WHERE t."analysisStatus" = 'failed'
                 AND COALESCE(t."analysisRetryCount", 0) < %s
                 AND NOT EXISTS (SELECT 1 FROM track_embeddings te WHERE te.track_id = t.id)
