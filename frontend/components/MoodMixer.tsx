@@ -251,7 +251,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                                 const config = MOOD_CONFIG[mood];
                                 const Icon = config.icon;
                                 const trackCount = getTrackCount(mood);
-                                const isDisabled = trackCount < 5;
+                                const isDisabled = trackCount < 8;
                                 const isGenerating = generating === mood;
 
                                 return (
@@ -271,7 +271,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                                         `}
                                         title={
                                             isDisabled
-                                                ? `Need at least 5 tracks (have ${trackCount})`
+                                                ? `Need at least 8 tracks (have ${trackCount})`
                                                 : config.description
                                         }
                                     >
