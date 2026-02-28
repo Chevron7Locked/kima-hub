@@ -61,6 +61,7 @@ export interface FailureCounts {
     track: number;
     audio: number;
     vibe: number;
+    podcast: number;
     total: number;
 }
 
