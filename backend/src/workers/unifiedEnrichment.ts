@@ -1050,6 +1050,9 @@ async function executeVibePhase(): Promise<number> {
         return 0;
     }
 
+    // Clean completed jobs to prevent jobId dedup from silently losing re-queued tracks
+    await vibeQueue.clean(0, 0, 'completed');
+
     // Reset stale vibeAnalysisStatus for these tracks before queuing
     const trackIds = tracks.map((t) => t.id);
     await prisma.track.updateMany({
@@ -1371,6 +1374,9 @@ export async function triggerEnrichmentNow(): Promise<{
          return 0;
      }
 
+     // Clean completed jobs so re-queued tracks aren't silently deduped by BullMQ jobId matching
+     await vibeQueue.clean(0, 0, 'completed');
+
      // Delete all existing embeddings so tracks get fully regenerated
      const deleted = await prisma.trackEmbedding.deleteMany({});
      logger.debug(`[Enrichment] Deleted ${deleted.count} existing embeddings for full regeneration`);
@@ -1393,7 +1399,6 @@ export async function triggerEnrichmentNow(): Promise<{
          FROM "Track" t
          WHERE t."analysisStatus" = 'completed'
            AND t."filePath" IS NOT NULL
-         LIMIT 5000
      `;
 
      let queued = 0;
@@ -1411,5 +1416,13 @@ export async function triggerEnrichmentNow(): Promise<{
      }
 
      logger.debug(`[Enrichment] Queued ${queued} tracks for vibe embeddings`);
+
+     // Restart enrichment cycle to sweep remaining tracks beyond LIMIT 5000
+     isPaused = false;
+     immediateEnrichmentRequested = true;
+     runEnrichmentCycle(false).catch((err) =>
+         logger.error("[Enrichment] reRunVibeEmbeddingsOnly cycle error:", err)
+     );
+
      return queued;
  }
