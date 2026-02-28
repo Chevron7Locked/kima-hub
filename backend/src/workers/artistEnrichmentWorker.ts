@@ -58,13 +58,14 @@ export async function startArtistEnrichmentWorker(): Promise<Worker> {
             await prisma.artist
                 .update({
                     where: { id: artistId },
-                    data: { enrichmentStatus: "pending" },
+                    data: { enrichmentStatus: "failed" },
                 })
                 .catch(() => {});
 
             await enrichmentFailureService.recordFailure({
                 entityType: "artist",
                 entityId: artistId,
+                entityName: job.data.artistName,
                 errorMessage: err.message,
             });
         }
