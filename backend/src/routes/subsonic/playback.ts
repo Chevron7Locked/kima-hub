@@ -3,7 +3,7 @@ import path from "path";
 import fs from "fs";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { AudioStreamingService } from "../../services/audioStreaming";
+import { getAudioStreamingService } from "../../services/audioStreaming";
 import { config } from "../../config";
 import { bitrateToQuality, wrap } from "./mappers";
 import { ListenSource } from "@prisma/client";
@@ -37,24 +37,19 @@ playbackRouter.all("/stream.view", wrap(async (req, res) => {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
     }
 
-    const streamingService = new AudioStreamingService(
+    const streamingService = getAudioStreamingService(
         config.music.musicPath,
         config.music.transcodeCachePath,
         config.music.transcodeCacheMaxGb,
     );
 
-    try {
-        const { filePath, mimeType } = await streamingService.getStreamFilePath(
-            track.id,
-            quality,
-            track.fileModified,
-            absolutePath,
-        );
-        await streamingService.streamFileWithRangeSupport(req, res, filePath, mimeType);
-    } finally {
-        // destroy() only clears the cache eviction interval — does not abort the active stream
-        streamingService.destroy();
-    }
+    const { filePath, mimeType } = await streamingService.getStreamFilePath(
+        track.id,
+        quality,
+        track.fileModified,
+        absolutePath,
+    );
+    await streamingService.streamFileWithRangeSupport(req, res, filePath, mimeType);
 }));
 
 playbackRouter.all("/download.view", wrap(async (req, res) => {
@@ -73,24 +68,19 @@ playbackRouter.all("/download.view", wrap(async (req, res) => {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
     }
 
-    const streamingService = new AudioStreamingService(
+    const streamingService = getAudioStreamingService(
         config.music.musicPath,
         config.music.transcodeCachePath,
         config.music.transcodeCacheMaxGb,
     );
 
-    try {
-        const { filePath, mimeType } = await streamingService.getStreamFilePath(
-            track.id,
-            "original",
-            track.fileModified,
-            absolutePath,
-        );
-        await streamingService.streamFileWithRangeSupport(req, res, filePath, mimeType);
-    } finally {
-        // destroy() only clears the cache eviction interval — does not abort the active stream
-        streamingService.destroy();
-    }
+    const { filePath, mimeType } = await streamingService.getStreamFilePath(
+        track.id,
+        "original",
+        track.fileModified,
+        absolutePath,
+    );
+    await streamingService.streamFileWithRangeSupport(req, res, filePath, mimeType);
 }));
 
 // ===================== COVER ART =====================

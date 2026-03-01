@@ -36,16 +36,47 @@ export function useKeyboardShortcuts() {
     currentPodcast,
   } = useAudio();
 
+  const isPlayingRef = useRef(isPlaying);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+
+  const pauseRef = useRef(pause);
+  useEffect(() => { pauseRef.current = pause; }, [pause]);
+
+  const resumeWithGestureRef = useRef(resumeWithGesture);
+  useEffect(() => { resumeWithGestureRef.current = resumeWithGesture; }, [resumeWithGesture]);
+
+  const nextRef = useRef(next);
+  useEffect(() => { nextRef.current = next; }, [next]);
+
+  const previousRef = useRef(previous);
+  useEffect(() => { previousRef.current = previous; }, [previous]);
+
+  const seekRef = useRef(seek);
+  useEffect(() => { seekRef.current = seek; }, [seek]);
+
   const currentTimeRef = useRef(currentTime);
+  useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
+
+  const setVolumeRef = useRef(setVolume);
+  useEffect(() => { setVolumeRef.current = setVolume; }, [setVolume]);
+
   const volumeRef = useRef(volume);
+  useEffect(() => { volumeRef.current = volume; }, [volume]);
 
-  useEffect(() => {
-    currentTimeRef.current = currentTime;
-  }, [currentTime]);
+  const toggleMuteRef = useRef(toggleMute);
+  useEffect(() => { toggleMuteRef.current = toggleMute; }, [toggleMute]);
 
-  useEffect(() => {
-    volumeRef.current = volume;
-  }, [volume]);
+  const toggleShuffleRef = useRef(toggleShuffle);
+  useEffect(() => { toggleShuffleRef.current = toggleShuffle; }, [toggleShuffle]);
+
+  const currentTrackRef = useRef(currentTrack);
+  useEffect(() => { currentTrackRef.current = currentTrack; }, [currentTrack]);
+
+  const currentAudiobookRef = useRef(currentAudiobook);
+  useEffect(() => { currentAudiobookRef.current = currentAudiobook; }, [currentAudiobook]);
+
+  const currentPodcastRef = useRef(currentPodcast);
+  useEffect(() => { currentPodcastRef.current = currentPodcast; }, [currentPodcast]);
 
   useEffect(() => {
     // Disable keyboard shortcuts on TV - use remote's media keys instead
@@ -72,53 +103,53 @@ export function useKeyboardShortcuts() {
 
       switch (e.key.toLowerCase()) {
         case ' ': // Space - Play/Pause
-          if (isPlaying) {
-            pause();
+          if (isPlayingRef.current) {
+            pauseRef.current();
           } else {
-            resumeWithGesture();
+            resumeWithGestureRef.current();
           }
           break;
 
         case 'arrowright': // Right arrow - Seek forward 10s
           if (playbackType === 'track' || playbackType === 'audiobook' || playbackType === 'podcast') {
-            const duration = currentTrack?.duration || currentAudiobook?.duration || currentPodcast?.duration || 0;
-            seek(Math.min(currentTimeRef.current + 10, duration));
+            const duration = currentTrackRef.current?.duration || currentAudiobookRef.current?.duration || currentPodcastRef.current?.duration || 0;
+            seekRef.current(Math.min(currentTimeRef.current + 10, duration));
           }
           break;
 
         case 'arrowleft': // Left arrow - Seek backward 10s
           if (playbackType === 'track' || playbackType === 'audiobook' || playbackType === 'podcast') {
-            seek(Math.max(currentTimeRef.current - 10, 0));
+            seekRef.current(Math.max(currentTimeRef.current - 10, 0));
           }
           break;
 
         case 'arrowup': // Up arrow - Volume up 10%
-          setVolume(Math.min(volumeRef.current + 0.1, 1));
+          setVolumeRef.current(Math.min(volumeRef.current + 0.1, 1));
           break;
 
         case 'arrowdown': // Down arrow - Volume down 10%
-          setVolume(Math.max(volumeRef.current - 0.1, 0));
+          setVolumeRef.current(Math.max(volumeRef.current - 0.1, 0));
           break;
 
         case 'm': // M - Toggle mute
-          toggleMute();
+          toggleMuteRef.current();
           break;
 
         case 'n': // N - Next track
           if (playbackType === 'track') {
-            next();
+            nextRef.current();
           }
           break;
 
         case 'p': // P - Previous track
           if (playbackType === 'track' && !e.shiftKey) { // Avoid conflict with Shift+P
-            previous();
+            previousRef.current();
           }
           break;
 
         case 's': // S - Toggle shuffle
           if (playbackType === 'track') {
-            toggleShuffle();
+            toggleShuffleRef.current();
           }
           break;
 
@@ -129,20 +160,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [
-    isTV,
-    isPlaying,
-    pause,
-    resumeWithGesture,
-    next,
-    previous,
-    seek,
-    setVolume,
-    toggleMute,
-    toggleShuffle,
-    playbackType,
-    currentTrack,
-    currentAudiobook,
-    currentPodcast,
-  ]);
+  }, [isTV, playbackType]);
 }

@@ -36,6 +36,7 @@ export class AudioStreamingService {
     private transcodeCachePath: string;
     private transcodeCacheMaxGb: number;
     private evictionInterval: NodeJS.Timeout | null = null;
+    private inFlightTranscodes = new Map<string, Promise<string>>();
 
     constructor(
         musicPath: string,
@@ -134,16 +135,25 @@ export class AudioStreamingService {
             await this.evictCache(this.transcodeCacheMaxGb * 0.8);
         }
 
-        // Transcode to cache
-        logger.debug(
-            `[STREAM] Transcoding to ${quality} quality: ${sourceAbsolutePath}`
-        );
-        const transcodedPath = await this.transcodeToCache(
-            trackId,
-            quality,
-            sourceAbsolutePath,
-            sourceModified
-        );
+        // Transcode to cache (deduplicated for concurrent requests)
+        const dedupeKey = `${trackId}-${quality}`;
+        let transcodedPath: string;
+
+        if (this.inFlightTranscodes.has(dedupeKey)) {
+            logger.debug(`[STREAM] Waiting for in-flight transcode: ${dedupeKey}`);
+            transcodedPath = await this.inFlightTranscodes.get(dedupeKey)!;
+        } else {
+            logger.debug(
+                `[STREAM] Transcoding to ${quality} quality: ${sourceAbsolutePath}`
+            );
+            const promise = this.transcodeToCache(trackId, quality, sourceAbsolutePath, sourceModified);
+            this.inFlightTranscodes.set(dedupeKey, promise);
+            try {
+                transcodedPath = await promise;
+            } finally {
+                this.inFlightTranscodes.delete(dedupeKey);
+            }
+        }
 
         return {
             filePath: transcodedPath,
@@ -482,4 +492,17 @@ export class AudioStreamingService {
             this.evictionInterval = null;
         }
     }
+}
+
+let singletonInstance: AudioStreamingService | null = null;
+
+export function getAudioStreamingService(
+    musicPath: string,
+    transcodeCachePath: string,
+    transcodeCacheMaxGb: number
+): AudioStreamingService {
+    if (!singletonInstance) {
+        singletonInstance = new AudioStreamingService(musicPath, transcodeCachePath, transcodeCacheMaxGb);
+    }
+    return singletonInstance;
 }

@@ -315,7 +315,15 @@ export function useImageColor(imageUrl: string | null | undefined) {
                 if (cancelled) return;
                 setColors(palette);
                 setIsLoading(false);
-                try { localStorage.setItem(cacheKey, JSON.stringify(palette)); } catch { /* ignore */ }
+                try {
+                    const MAX_COLOR_CACHE = 500;
+                    const allKeys = Object.keys(localStorage).filter(k => k.startsWith("color_cache_"));
+                    if (allKeys.length >= MAX_COLOR_CACHE) {
+                        const toRemove = allKeys.slice(0, Math.ceil(MAX_COLOR_CACHE * 0.2));
+                        toRemove.forEach(k => localStorage.removeItem(k));
+                    }
+                    localStorage.setItem(cacheKey, JSON.stringify(palette));
+                } catch { /* ignore */ }
             })
             .catch((error) => {
                 if (cancelled) return;

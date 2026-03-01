@@ -346,10 +346,12 @@ export async function runFullEnrichment(): Promise<{
 
     // Reset all statuses to pending
     await prisma.artist.updateMany({
+        where: { enrichmentStatus: { not: "processing" } },
         data: { enrichmentStatus: "pending" },
     });
 
     await prisma.track.updateMany({
+        where: { analysisStatus: { not: "processing" } },
         data: {
             lastfmTags: [],
             analysisStatus: "pending",

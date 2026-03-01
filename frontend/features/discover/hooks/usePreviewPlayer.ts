@@ -57,6 +57,9 @@ export function usePreviewPlayer() {
                     audio.src = "";
                     audio.load();
                 }
+                const newMap = new Map(previewAudios);
+                newMap.delete(currentPreview);
+                setPreviewAudios(newMap);
             }
 
             // Toggle the clicked preview

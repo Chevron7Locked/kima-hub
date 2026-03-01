@@ -16,7 +16,7 @@ import { deezerService } from "../services/deezer";
 import { musicBrainzService } from "../services/musicbrainz";
 import { coverArtService } from "../services/coverArt";
 import { getSystemSettings } from "../utils/systemSettings";
-import { AudioStreamingService } from "../services/audioStreaming";
+import { getAudioStreamingService } from "../services/audioStreaming";
 import { scanQueue } from "../workers/queues";
 import { lrclibService } from "../services/lrclib";
 import { rateLimiter } from "../services/rateLimiter";
@@ -2351,8 +2351,8 @@ router.get("/tracks/:id/stream", async (req, res) => {
     // Check if track has native file path
     if (track.filePath && track.fileModified) {
       try {
-        // Initialize streaming service
-        const streamingService = new AudioStreamingService(
+        // Get streaming service singleton
+        const streamingService = getAudioStreamingService(
           config.music.musicPath,
           config.music.transcodeCachePath,
           config.music.transcodeCacheMaxGb,
@@ -2389,7 +2389,6 @@ router.get("/tracks/:id/stream", async (req, res) => {
           filePath,
           mimeType,
         );
-        streamingService.destroy();
         logger.debug(
           `[STREAM] File sent successfully: ${path.basename(filePath)}`,
         );
@@ -2410,7 +2409,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
             fallbackFilePath,
           );
 
-          const streamingService = new AudioStreamingService(
+          const streamingService = getAudioStreamingService(
             config.music.musicPath,
             config.music.transcodeCachePath,
             config.music.transcodeCacheMaxGb,
@@ -2430,7 +2429,6 @@ router.get("/tracks/:id/stream", async (req, res) => {
             filePath,
             mimeType,
           );
-          streamingService.destroy();
           return;
         }
 
