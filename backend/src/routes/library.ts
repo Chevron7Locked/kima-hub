@@ -131,6 +131,22 @@ function registerStream(userId: string, trackId: string, res: Response): void {
   });
 }
 
+// Periodic sweep for stale stream entries (1 hour TTL)
+const STREAM_TTL_MS = 60 * 60 * 1000;
+setInterval(() => {
+    const now = Date.now();
+    for (const [userId, streams] of activeStreams) {
+        for (const stream of streams) {
+            if (now - stream.startedAt > STREAM_TTL_MS) {
+                streams.delete(stream);
+            }
+        }
+        if (streams.size === 0) {
+            activeStreams.delete(userId);
+        }
+    }
+}, STREAM_TTL_MS);
+
 const ARTIST_SORT_MAP: Record<string, any> = {
   name: { name: "asc" as const },
   "name-desc": { name: "desc" as const },

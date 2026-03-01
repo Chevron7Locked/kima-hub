@@ -57,6 +57,12 @@ router.post("/lidarr", async (req, res) => {
         }
 
         // Verify webhook secret if configured
+        if (!settings.lidarrWebhookSecret) {
+            logger.warn(
+                "[WEBHOOK] No webhook secret configured. Set lidarrWebhookSecret in settings for security."
+            );
+        }
+
         if (settings.lidarrWebhookSecret) {
             const providedSecret = req.headers["x-webhook-secret"] as string;
 
