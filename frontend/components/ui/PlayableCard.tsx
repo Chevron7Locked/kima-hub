@@ -82,7 +82,9 @@ const PlayableCard = memo(function PlayableCard({
                             <div className="w-12 h-12 bg-[#3e3e3e] rounded-full" />
                         )
                     }
-                    <div className="absolute inset-0 bg-gradient-to-b from-black/0 to-black/30 opacity-0 group-hover:opacity-100 pointer-events-none" />
+                    {showPlayButton && onPlay && (
+                        <div className="absolute inset-0 bg-gradient-to-b from-black/0 to-black/30 opacity-0 group-hover:opacity-100 pointer-events-none" />
+                    )}
                 </div>
 
                 {/* Play Button */}
