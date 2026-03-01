@@ -2407,17 +2407,58 @@ class LidarrService {
         }
 
         try {
+            const fetchAlbumsForSnapshot = async (): Promise<LidarrAlbum[]> => {
+                const albums: LidarrAlbum[] = [];
+
+                const artistsResponse = await this.client!.get("/api/v1/artist");
+                const artists = Array.isArray(artistsResponse.data)
+                    ? (artistsResponse.data as LidarrArtist[])
+                    : [];
+
+                const artistBatchSize = 25;
+                for (let start = 0; start < artists.length; start += artistBatchSize) {
+                    const batch = artists.slice(start, start + artistBatchSize);
+                    const batchResponses = await Promise.all(
+                        batch.map((artist) =>
+                            this.client!
+                                .get("/api/v1/album", {
+                                    params: { artistId: artist.id },
+                                })
+                                .catch((err: any) => {
+                                    logger.warn(
+                                        `[LIDARR] Failed to fetch albums for artist ${artist.id} during snapshot:`,
+                                        err.message
+                                    );
+                                    return { data: [] };
+                                })
+                        )
+                    );
+
+                    for (const response of batchResponses) {
+                        if (Array.isArray(response.data)) {
+                            albums.push(...(response.data as LidarrAlbum[]));
+                        }
+                    }
+                }
+
+                logger.debug(
+                    `[LIDARR] Snapshot album fetch: ${artists.length} artists, ${albums.length} albums fetched`
+                );
+
+                return albums;
+            };
+
             // Fetch queue and albums in parallel
             const [queueResponse, albumsResponse] = await Promise.all([
                 this.client.get("/api/v1/queue", {
                     params: { page: 1, pageSize: 1000, includeUnknownArtistItems: true },
-                }).catch((err) => {
+                }).catch((err: any) => {
                     logger.error("[LIDARR] Failed to fetch queue for snapshot:", err.message);
                     return { data: { records: [] } };
                 }),
-                this.client.get("/api/v1/album").catch((err) => {
+                fetchAlbumsForSnapshot().catch((err: any) => {
                     logger.error("[LIDARR] Failed to fetch albums for snapshot:", err.message);
-                    return { data: [] };
+                    return [];
                 }),
             ]);
 
@@ -2438,7 +2479,7 @@ class LidarrService {
             }
 
             // Index albums by MBID and normalized title
-            const albums = albumsResponse.data || [];
+            const albums = albumsResponse || [];
             for (const album of albums) {
                 const hasFiles = album.statistics?.percentOfTracks > 0;
                 if (!hasFiles) continue; // Only index albums with files
