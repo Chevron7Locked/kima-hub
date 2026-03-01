@@ -26,7 +26,8 @@ export function UniversalPlayer() {
     const lastMediaIdRef = useRef<string | null>(null);
     const hasAutoSwitchedRef = useRef(false);
 
-    // Auto-switch to overlay mode on mobile/tablet when user starts playing new media
+    // Auto-switch to overlay mode on mobile/tablet when user starts playing media.
+    // Only fires once per mount -- auto-advances don't re-open the overlay.
     useEffect(() => {
         if (!isMobileOrTablet) return;
 
@@ -36,20 +37,11 @@ export function UniversalPlayer() {
             currentPodcast?.id ||
             null;
 
-        // Only switch to overlay if:
-        // 1. Media changed to a new track
-        // 2. User is actively playing (not just page load with paused track)
-        // 3. We haven't already auto-switched for this track
         const mediaChanged = currentMediaId && currentMediaId !== lastMediaIdRef.current;
 
         if (mediaChanged && isPlaying && !hasAutoSwitchedRef.current) {
             setPlayerMode("overlay");
             hasAutoSwitchedRef.current = true;
-        }
-
-        // Reset flag when media changes
-        if (currentMediaId !== lastMediaIdRef.current) {
-            hasAutoSwitchedRef.current = false;
         }
 
         lastMediaIdRef.current = currentMediaId;

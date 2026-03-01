@@ -23,7 +23,7 @@ export function usePlayerMode() {
         const isOnCurrentMediaPage =
             (currentTrack && pathname === `/album/${currentTrack.album?.id}`) ||
             (currentAudiobook && pathname === `/audiobooks/${currentAudiobook.id}`) ||
-            (currentPodcast && pathname.includes(`/podcasts/${currentPodcast.id}`));
+            (currentPodcast && pathname.includes(`/podcasts/${currentPodcast.id.split(":")[0]}`));
 
         // Auto-expand to full when on the current media page
         // But don't auto-minimize - let users keep it expanded if they want

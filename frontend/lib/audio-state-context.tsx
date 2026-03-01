@@ -5,6 +5,7 @@ import {
     useContext,
     useState,
     useEffect,
+    useRef,
     ReactNode,
     useMemo,
 } from "react";
@@ -234,6 +235,16 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         () => typeof window !== "undefined"
     );
     const [lastServerSync, setLastServerSync] = useState<Date | null>(null);
+
+    // Refs for polling effect to avoid restarting the interval on every state change
+    const lastServerSyncRef = useRef(lastServerSync);
+    useEffect(() => { lastServerSyncRef.current = lastServerSync; }, [lastServerSync]);
+    const queueRef = useRef(queue);
+    useEffect(() => { queueRef.current = queue; }, [queue]);
+    const currentIndexRef = useRef(currentIndex);
+    useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+    const isShuffleRef = useRef(isShuffle);
+    useEffect(() => { isShuffleRef.current = isShuffle; }, [isShuffle]);
 
     // Vibe mode state
     const [vibeMode, setVibeMode] = useState(false);
@@ -520,7 +531,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
 
                 const serverUpdatedAt = new Date(serverState.updatedAt);
 
-                if (lastServerSync && serverUpdatedAt <= lastServerSync) {
+                if (lastServerSyncRef.current && serverUpdatedAt <= lastServerSyncRef.current) {
                     return;
                 }
 
@@ -610,7 +621,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     if (!mounted) return;
                     if (
                         JSON.stringify(serverState.queue) !==
-                        JSON.stringify(queue)
+                        JSON.stringify(queueRef.current)
                     ) {
                         setQueue(serverState.queue || []);
                         setCurrentIndex(serverState.currentIndex || 0);
@@ -641,10 +652,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         currentTrack?.id,
         currentAudiobook?.id,
         currentPodcast?.id,
-        queue,
-        currentIndex,
-        isShuffle,
-        lastServerSync,
     ]);
 
     // Memoize the context value to prevent unnecessary re-renders

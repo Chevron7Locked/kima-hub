@@ -426,6 +426,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const previous = useCallback(() => {
         if (state.queue.length === 0) return;
 
+        // If more than 3 seconds in, restart current track
+        if (playback.currentTime > 3) {
+            playback.setCurrentTime(0);
+            seek(0);
+            return;
+        }
+
         state.setRepeatOneCount(0);
 
         let prevIndex: number;
@@ -436,12 +443,18 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             if (currentShufflePos > 0) {
                 prevIndex = state.shuffleIndices[currentShufflePos - 1];
             } else {
+                // At start of shuffle -- restart current track
+                playback.setCurrentTime(0);
+                seek(0);
                 return;
             }
         } else {
             if (state.currentIndex > 0) {
                 prevIndex = state.currentIndex - 1;
             } else {
+                // At start of queue -- restart current track
+                playback.setCurrentTime(0);
+                seek(0);
                 return;
             }
         }
@@ -450,7 +463,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         state.setCurrentTrack(state.queue[prevIndex]);
         playback.setCurrentTime(0);
         playback.setIsPlaying(true);
-    }, [state, playback]);
+    }, [state, playback, seek]);
 
     const addToQueue = useCallback(
         (track: Track) => {
@@ -531,13 +544,16 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
                 if (index < curIdx) {
                     state.setCurrentIndex((prevIndex) => prevIndex - 1);
-                } else if (index === curIdx && index === newQueue.length) {
-                    state.setCurrentIndex(0);
-                    if (newQueue.length > 0) {
-                        state.setCurrentTrack(newQueue[0]);
-                    } else {
+                } else if (index === curIdx) {
+                    if (newQueue.length === 0) {
                         state.setCurrentTrack(null);
                         playback.setIsPlaying(false);
+                    } else if (index >= newQueue.length) {
+                        state.setCurrentIndex(0);
+                        state.setCurrentTrack(newQueue[0]);
+                    } else {
+                        // Removed current track from middle -- advance to next
+                        state.setCurrentTrack(newQueue[index]);
                     }
                 }
 
