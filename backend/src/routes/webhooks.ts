@@ -24,6 +24,7 @@ import { webhookEventStore } from "../services/webhookEventStore";
 import { webhookEventsTotal, webhookProcessingDuration } from "../utils/metrics";
 
 const router = Router();
+let webhookSecretWarned = false;
 
 // GET /webhooks/lidarr/verify - Webhook verification endpoint
 router.get("/lidarr/verify", (req, res) => {
@@ -57,10 +58,11 @@ router.post("/lidarr", async (req, res) => {
         }
 
         // Verify webhook secret if configured
-        if (!settings.lidarrWebhookSecret) {
+        if (!settings.lidarrWebhookSecret && !webhookSecretWarned) {
             logger.warn(
                 "[WEBHOOK] No webhook secret configured. Set lidarrWebhookSecret in settings for security."
             );
+            webhookSecretWarned = true;
         }
 
         if (settings.lidarrWebhookSecret) {
