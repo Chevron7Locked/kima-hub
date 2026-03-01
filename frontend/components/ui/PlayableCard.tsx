@@ -185,7 +185,7 @@ const PlayableCard = memo(function PlayableCard({
 
     if (href) {
         return (
-            <Link href={href} onClick={handleLinkClick} prefetch={false} {...tvNavProps}>
+            <Link href={href} onClick={handleLinkClick} {...tvNavProps}>
                 <Card variant={variant} className={cardClassName} {...props}>
                     {cardContent}
                 </Card>

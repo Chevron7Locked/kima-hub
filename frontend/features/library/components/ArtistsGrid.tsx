@@ -58,7 +58,7 @@ const ArtistCardItem = memo(
         return (
             <Link
                 href={`/artist/${artist.id}`}
-                prefetch={false}
+                prefetch={true}
                 data-tv-card
                 data-tv-card-index={index}
                 tabIndex={0}
