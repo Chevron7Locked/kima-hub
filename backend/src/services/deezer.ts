@@ -123,13 +123,25 @@ class DeezerService {
         if (cached) return cached === "null" ? null : cached;
 
         try {
-            const response = await axios.get(`${DEEZER_API}/search/album`, {
+            // Try structured query first, fall back to unstructured if no results.
+            // Deezer's structured syntax (artist:"..." album:"...") fails for some albums.
+            let albums: any[] = [];
+
+            const structured = await axios.get(`${DEEZER_API}/search/album`, {
                 params: { q: `artist:"${artistName}" album:"${albumName}"`, limit: 5 },
                 timeout: 5000,
             });
+            albums = structured.data?.data || [];
+
+            if (albums.length === 0) {
+                const unstructured = await axios.get(`${DEEZER_API}/search/album`, {
+                    params: { q: `${artistName} ${albumName}`, limit: 5 },
+                    timeout: 5000,
+                });
+                albums = unstructured.data?.data || [];
+            }
 
             // Find the best match
-            const albums = response.data?.data || [];
             let bestMatch = albums[0];
 
             for (const album of albums) {

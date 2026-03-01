@@ -181,12 +181,16 @@ export function OverlayPlayer() {
 
             {/* Main Content - Portrait vs Landscape */}
             <div className="flex-1 flex flex-col landscape:flex-row items-center justify-center px-6 pb-6 landscape:px-8 landscape:gap-8 overflow-hidden">
+                {/* Lyrics crawl above artwork */}
+                {lyricsMode && isMobileOrTablet && (
+                    <div className="w-full max-w-[280px] h-16 flex-shrink-0 mb-3">
+                        <LyricsCrawl />
+                    </div>
+                )}
+
                 {/* Artwork */}
                 <div
-                    className={cn(
-                        "w-full max-w-[320px] landscape:max-w-[240px] landscape:w-[240px] aspect-square flex-shrink-0 relative",
-                        !(lyricsMode && isMobileOrTablet) && "mb-6 landscape:mb-0"
-                    )}
+                    className="w-full max-w-[280px] landscape:max-w-[220px] landscape:w-[220px] aspect-square flex-shrink-0 relative mb-6 landscape:mb-0"
                     style={{
                         transform: `translateX(${swipeOffset * 0.5}px)`,
                         opacity: 1 - Math.abs(swipeOffset) / 200,
@@ -240,13 +244,6 @@ export function OverlayPlayer() {
                             </div>
                         )}
                 </div>
-
-                {/* Lyrics crawl below artwork */}
-                {lyricsMode && isMobileOrTablet && (
-                    <div className="w-full max-w-[320px] h-16 flex-shrink-0">
-                        <LyricsCrawl />
-                    </div>
-                )}
 
                 {/* Info & Controls Section */}
                 <div className="w-full max-w-[320px] landscape:max-w-[280px] landscape:flex-1 flex flex-col">
