@@ -5,6 +5,30 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0-pre.2] - 2026-03-01 (nightly)
+
+### Fixed
+
+- **Enrichment: vibe progress jumps 0% to 100%**: CLAP analyzer reported completion via internal HTTP callbacks but never emitted SSE events. Added `enrichment:progress` SSE event type with broadcast support (`userId: "*"`), emitted from vibe success/failure endpoints. Frontend SSE handler invalidates the `enrichment-progress` query on each event for immediate re-fetch.
+- **SSRF protection**: Added `validateUrlForFetch()` to podcast stream and download paths to block requests to internal networks.
+- **CORS enforcement**: Reject unlisted CORS origins instead of allowing all.
+- **Encryption KDF**: Always derive encryption key via SHA-256 with legacy fallback.
+- **Query limits**: Clamp `/plays` limit to max 200.
+- **Webhook secret comparison**: Use `crypto.timingSafeEqual` for timing-safe webhook secret validation.
+- **Webhook log spam**: Rate-limit missing webhook secret warning to once per process.
+- **Stream TTL sweep**: Add 1-hour TTL sweep for stale `activeStreams` entries.
+- **Transcode race condition**: Deduplicate concurrent transcodes via in-flight map.
+- **Streaming singleton**: Make `AudioStreamingService` a singleton to prevent duplicate instances.
+- **Enrichment reset**: Exclude processing tracks from full enrichment reset.
+- **Image cache eviction**: Add LRU eviction to `useImageColor` localStorage cache (max 500 entries).
+- **Preview audio leak**: Remove old preview audio elements from map when switching tracks.
+- **Keyboard shortcut re-renders**: Move keyboard shortcut deps to refs for stable effect.
+- **Player polling loop**: Move `lastServerSync`/queue/index/shuffle to refs in poll effect.
+- **Queue desync on track removal**: Handle removing current track from middle of queue.
+- **Overlay re-open on auto-advance**: Don't re-open overlay on auto-advance after first play.
+- **Previous track restart**: Restart current track if position > 3s on previous button press.
+- **Podcast detection**: Split podcast composite ID before URL comparison.
+
 ## [1.6.1] - 2026-03-01
 
 ### Added
