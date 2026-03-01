@@ -146,107 +146,57 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                         }
                     }
 
-                    // Try Fanart.tv for image (only with real MBID)
-                    if (!heroUrl && !artist.mbid.startsWith("temp-")) {
-                        logger.debug(
-                            `${logPrefix} Fanart.tv: Fetching for MBID ${artist.mbid}...`
-                        );
-                        try {
-                            heroUrl = await fanartService.getArtistImage(
-                                artist.mbid
-                            );
-                            if (heroUrl) {
-                                imageSource = "fanart.tv";
-                                logger.debug(
-                                    `${logPrefix} Fanart.tv: SUCCESS - ${heroUrl.substring(
-                                        0,
-                                        60
-                                    )}...`
-                                );
-                            } else {
-                                logger.debug(
-                                    `${logPrefix} Fanart.tv: No image found`
-                                );
-                            }
-                        } catch (error: any) {
-                            logger.debug(
-                                `${logPrefix} Fanart.tv: FAILED - ${
-                                    error?.message || error
-                                }`
-                            );
-                        }
-                    }
-
-                    // Fallback to Deezer
-                    if (!heroUrl) {
-                        logger.debug(
-                            `${logPrefix} Deezer: Fetching for "${artist.name}"...`
-                        );
-                        try {
-                            heroUrl = await deezerService.getArtistImage(
-                                artist.name
-                            );
-                            if (heroUrl) {
-                                imageSource = "deezer";
-                                logger.debug(
-                                    `${logPrefix} Deezer: SUCCESS - ${heroUrl.substring(
-                                        0,
-                                        60
-                                    )}...`
-                                );
-                            } else {
-                                logger.debug(
-                                    `${logPrefix} Deezer: No image found`
-                                );
-                            }
-                        } catch (error: any) {
-                            logger.debug(
-                                `${logPrefix} Deezer: FAILED - ${
-                                    error?.message || error
-                                }`
-                            );
-                        }
-                    }
-
-                    // Last fallback to Last.fm's own image
-                    if (!heroUrl && lastfmInfo.image) {
-                        const imageArray = lastfmInfo.image as any[];
-                        if (Array.isArray(imageArray)) {
-                            const bestImage =
-                                imageArray.find(
-                                    (img) => img.size === "extralarge"
-                                )?.["#text"] ||
-                                imageArray.find(
-                                    (img) => img.size === "large"
-                                )?.["#text"] ||
-                                imageArray.find(
-                                    (img) => img.size === "medium"
-                                )?.["#text"];
-                            // Filter out Last.fm's placeholder images
-                            if (
-                                bestImage &&
-                                !bestImage.includes(
-                                    "2a96cbd8b46e442fc41c2b86b821562f"
-                                )
-                            ) {
-                                heroUrl = bestImage;
-                                imageSource = "lastfm";
-                                logger.debug(
-                                    `${logPrefix} Last.fm image: SUCCESS`
-                                );
-                            } else {
-                                logger.debug(
-                                    `${logPrefix} Last.fm image: Placeholder/none`
-                                );
-                            }
-                        }
-                    }
                 } else {
                     logger.debug(`${logPrefix} Last.fm: No data returned`);
                 }
             } catch (error: any) {
                 logger.debug(
                     `${logPrefix} Last.fm: FAILED - ${error?.message || error}`
+                );
+            }
+        }
+
+        // Image fallbacks run independently of Last.fm success
+        // Try Fanart.tv (only with real MBID)
+        if (!heroUrl && !artist.mbid.startsWith("temp-")) {
+            logger.debug(
+                `${logPrefix} Fanart.tv: Fetching for MBID ${artist.mbid}...`
+            );
+            try {
+                heroUrl = await fanartService.getArtistImage(artist.mbid);
+                if (heroUrl) {
+                    imageSource = "fanart.tv";
+                    logger.debug(
+                        `${logPrefix} Fanart.tv: SUCCESS - ${heroUrl.substring(0, 60)}...`
+                    );
+                } else {
+                    logger.debug(`${logPrefix} Fanart.tv: No image found`);
+                }
+            } catch (error: any) {
+                logger.debug(
+                    `${logPrefix} Fanart.tv: FAILED - ${error?.message || error}`
+                );
+            }
+        }
+
+        // Fallback to Deezer
+        if (!heroUrl) {
+            logger.debug(
+                `${logPrefix} Deezer: Fetching for "${artist.name}"...`
+            );
+            try {
+                heroUrl = await deezerService.getArtistImage(artist.name);
+                if (heroUrl) {
+                    imageSource = "deezer";
+                    logger.debug(
+                        `${logPrefix} Deezer: SUCCESS - ${heroUrl.substring(0, 60)}...`
+                    );
+                } else {
+                    logger.debug(`${logPrefix} Deezer: No image found`);
+                }
+            } catch (error: any) {
+                logger.debug(
+                    `${logPrefix} Deezer: FAILED - ${error?.message || error}`
                 );
             }
         }
