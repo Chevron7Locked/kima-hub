@@ -9,10 +9,20 @@ import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/hooks/useQueries";
 import { useAuth } from "@/lib/auth-context";
 import { useAudioControls } from "@/lib/audio-context";
-import { Play, Music, Eye, EyeOff, ListMusic } from "lucide-react";
+import {
+    Play,
+    Music,
+    Eye,
+    EyeOff,
+    ListMusic,
+    Pencil,
+    Check,
+    X,
+} from "lucide-react";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { api } from "@/lib/api";
 import { cn } from "@/utils/cn";
+import { useToast } from "@/lib/toast-context";
 
 interface PlaylistItem {
     id: string;
@@ -26,6 +36,7 @@ interface PlaylistItem {
 interface Playlist {
     id: string;
     name: string;
+    isPublic?: boolean;
     trackCount?: number;
     items?: PlaylistItem[];
     isOwner?: boolean;
@@ -129,15 +140,24 @@ function PlaylistCard({
     onPlay,
     onToggleHide,
     isHiddenView = false,
+    onRename,
 }: {
     playlist: Playlist;
     index: number;
     onPlay: (playlistId: string) => void;
     onToggleHide: (playlistId: string, hide: boolean) => void;
     isHiddenView?: boolean;
+    onRename: (playlistId: string, name: string, isPublic: boolean) => Promise<void>;
 }) {
     const isShared = playlist.isOwner === false;
     const [isHiding, setIsHiding] = useState(false);
+    const [isEditingName, setIsEditingName] = useState(false);
+    const [editedName, setEditedName] = useState(playlist.name);
+    const [isSavingName, setIsSavingName] = useState(false);
+
+    useEffect(() => {
+        setEditedName(playlist.name);
+    }, [playlist.name]);
 
     const handleToggleHide = async (e: React.MouseEvent) => {
         e.preventDefault();
@@ -150,8 +170,42 @@ function PlaylistCard({
         }
     };
 
+    const handleStartEditing = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setEditedName(playlist.name);
+        setIsEditingName(true);
+    };
+
+    const handleCancelEditing = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setEditedName(playlist.name);
+        setIsEditingName(false);
+    };
+
+    const handleSaveName = async (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const trimmedName = editedName.trim();
+        if (!trimmedName || trimmedName === playlist.name) {
+            setIsEditingName(false);
+            setEditedName(playlist.name);
+            return;
+        }
+
+        setIsSavingName(true);
+        try {
+            await onRename(playlist.id, trimmedName, !!playlist.isPublic);
+            setIsEditingName(false);
+        } finally {
+            setIsSavingName(false);
+        }
+    };
+
     return (
-        <Link href={`/playlist/${playlist.id}`}>
+        <Link href={isEditingName ? "#" : `/playlist/${playlist.id}`}>
             <div
                 className={cn(
                     "group cursor-pointer p-3 rounded-lg transition-all border border-transparent hover:bg-white/[0.03] hover:border-white/5",
@@ -219,14 +273,71 @@ function PlaylistCard({
                 </div>
 
                 {/* Title and info */}
-                <h3
-                    className={cn(
-                        "text-sm font-black truncate tracking-tight",
-                        isHiddenView ? "text-white/40" : "text-white"
+                <div className="flex items-center gap-2">
+                    {isEditingName ? (
+                        <>
+                            <input
+                                autoFocus
+                                value={editedName}
+                                onChange={(e) => setEditedName(e.target.value)}
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                }}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                        void handleSaveName(
+                                            e as unknown as React.MouseEvent
+                                        );
+                                    }
+                                    if (e.key === "Escape") {
+                                        handleCancelEditing(
+                                            e as unknown as React.MouseEvent
+                                        );
+                                    }
+                                }}
+                                className="flex-1 min-w-0 bg-black/40 border border-white/20 rounded px-2 py-1 text-sm font-black tracking-tight text-white focus:outline-none focus:border-[#fca208]"
+                                maxLength={200}
+                            />
+                            <button
+                                onClick={(e) => void handleSaveName(e)}
+                                disabled={isSavingName || !editedName.trim()}
+                                className="p-1 rounded hover:bg-white/10 text-green-400 disabled:opacity-40"
+                                title="Save"
+                            >
+                                <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                                onClick={handleCancelEditing}
+                                disabled={isSavingName}
+                                className="p-1 rounded hover:bg-white/10 text-white/50"
+                                title="Cancel"
+                            >
+                                <X className="w-3.5 h-3.5" />
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <h3
+                                className={cn(
+                                    "text-sm font-black truncate tracking-tight flex-1 min-w-0",
+                                    isHiddenView ? "text-white/40" : "text-white"
+                                )}
+                            >
+                                {playlist.name}
+                            </h3>
+                            {playlist.isOwner && (
+                                <button
+                                    onClick={handleStartEditing}
+                                    className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/10 text-white/40 hover:text-white transition-all"
+                                    title="Rename playlist"
+                                >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                            )}
+                        </>
                     )}
-                >
-                    {playlist.name}
-                </h3>
+                </div>
                 <p className="text-[10px] font-mono text-white/30 mt-0.5 truncate uppercase tracking-wider">
                     {isShared && playlist.user?.username ? (
                         <span>
@@ -246,6 +357,7 @@ export default function PlaylistsPage() {
     useAuth();
     const { playTracks } = useAudioControls();
     const queryClient = useQueryClient();
+    const { toast } = useToast();
     const [showHiddenTab, setShowHiddenTab] = useState(false);
 
     const { data: playlists = [], isLoading } = usePlaylistsQuery();
@@ -316,6 +428,25 @@ export default function PlaylistsPage() {
             queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
         } catch (error) {
             console.error("Failed to toggle playlist visibility:", error);
+        }
+    };
+
+    const handleRenamePlaylist = async (
+        playlistId: string,
+        name: string,
+        isPublic: boolean
+    ) => {
+        try {
+            await api.updatePlaylist(playlistId, name, isPublic);
+            queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
+            window.dispatchEvent(
+                new CustomEvent("playlist-updated", { detail: { playlistId } })
+            );
+            toast.success("Playlist renamed");
+        } catch (error) {
+            console.error("Failed to rename playlist:", error);
+            toast.error("Failed to rename playlist");
+            throw error;
         }
     };
 
@@ -431,6 +562,7 @@ export default function PlaylistsPage() {
                                             onPlay={handlePlayPlaylist}
                                             onToggleHide={handleToggleHide}
                                             isHiddenView={showHiddenTab}
+                                            onRename={handleRenamePlaylist}
                                         />
                                     )
                                 )}
