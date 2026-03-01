@@ -28,6 +28,8 @@ import {
     RefreshCw,
     AlertCircle,
     X,
+    Check,
+    Pencil,
     Loader2,
     ArrowLeft,
 } from "lucide-react";
@@ -86,6 +88,9 @@ export default function PlaylistDetailPage() {
     const [retryingTrackId, setRetryingTrackId] = useState<string | null>(null);
     const [removingTrackId, setRemovingTrackId] = useState<string | null>(null);
     const [retryingAll, setRetryingAll] = useState(false);
+    const [isEditingName, setIsEditingName] = useState(false);
+    const [editedName, setEditedName] = useState("");
+    const [isSavingName, setIsSavingName] = useState(false);
     const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
     useEffect(() => {
@@ -206,6 +211,12 @@ export default function PlaylistDetailPage() {
 
     const { data: playlist, isLoading } = usePlaylistQuery(playlistId);
 
+    useEffect(() => {
+        if (playlist?.name) {
+            setEditedName(playlist.name);
+        }
+    }, [playlist?.name]);
+
     const isShared = playlist?.isOwner === false;
 
     const handleToggleHide = async () => {
@@ -283,6 +294,41 @@ export default function PlaylistDetailPage() {
             router.push("/playlists");
         } catch (error) {
             console.error("Failed to delete playlist:", error);
+        }
+    };
+
+    const handleSavePlaylistName = async () => {
+        if (!playlist) return;
+        const trimmedName = editedName.trim();
+
+        if (!trimmedName || trimmedName === playlist.name) {
+            setIsEditingName(false);
+            setEditedName(playlist.name);
+            return;
+        }
+
+        setIsSavingName(true);
+        try {
+            await api.updatePlaylist(
+                playlistId,
+                trimmedName,
+                !!playlist.isPublic
+            );
+
+            queryClient.invalidateQueries({ queryKey: ["playlist", playlistId] });
+            queryClient.invalidateQueries({ queryKey: ["playlists"] });
+
+            window.dispatchEvent(
+                new CustomEvent("playlist-updated", { detail: { playlistId } })
+            );
+
+            toast.success("Playlist renamed");
+            setIsEditingName(false);
+        } catch (error) {
+            console.error("Failed to rename playlist:", error);
+            toast.error("Failed to rename playlist");
+        } finally {
+            setIsSavingName(false);
         }
     };
 
@@ -474,9 +520,63 @@ export default function PlaylistDetailPage() {
 
                             {/* Playlist Info */}
                             <div className="flex-1 min-w-0 pb-1">
-                                <h1 className="text-2xl md:text-4xl lg:text-5xl font-black text-white leading-tight line-clamp-2 mb-2 tracking-tighter">
-                                    {playlist.name}
-                                </h1>
+                                {playlist.isOwner && isEditingName ? (
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <input
+                                            autoFocus
+                                            value={editedName}
+                                            onChange={(e) => setEditedName(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter") {
+                                                    void handleSavePlaylistName();
+                                                }
+                                                if (e.key === "Escape") {
+                                                    setEditedName(playlist.name);
+                                                    setIsEditingName(false);
+                                                }
+                                            }}
+                                            className="w-full max-w-2xl bg-black/40 border border-white/20 rounded px-3 py-2 text-2xl md:text-4xl font-black text-white tracking-tighter leading-tight focus:outline-none focus:border-[#fca208]"
+                                            maxLength={200}
+                                        />
+                                        <button
+                                            onClick={() => void handleSavePlaylistName()}
+                                            disabled={isSavingName || !editedName.trim()}
+                                            className="p-2 rounded-lg hover:bg-white/10 text-green-400 disabled:opacity-40"
+                                            title="Save"
+                                        >
+                                            <Check className="w-5 h-5" />
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setEditedName(playlist.name);
+                                                setIsEditingName(false);
+                                            }}
+                                            disabled={isSavingName}
+                                            className="p-2 rounded-lg hover:bg-white/10 text-white/50"
+                                            title="Cancel"
+                                        >
+                                            <X className="w-5 h-5" />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <h1 className="text-2xl md:text-4xl lg:text-5xl font-black text-white leading-tight line-clamp-2 tracking-tighter flex-1 min-w-0">
+                                            {playlist.name}
+                                        </h1>
+                                        {playlist.isOwner && (
+                                            <button
+                                                onClick={() => {
+                                                    setEditedName(playlist.name);
+                                                    setIsEditingName(true);
+                                                }}
+                                                className="p-2 rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+                                                title="Rename playlist"
+                                            >
+                                                <Pencil className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
 
                                 <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-white/50 uppercase tracking-wider">
                                     {isShared && playlist.user?.username && (

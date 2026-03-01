@@ -668,6 +668,13 @@ class ApiClient {
         });
     }
 
+    async updatePlaylist(id: string, name: string, isPublic = false) {
+        return this.request<ApiData>(`/playlists/${id}`, {
+            method: "PUT",
+            body: JSON.stringify({ name, isPublic }),
+        });
+    }
+
     async deletePlaylist(id: string) {
         return this.request<void>(`/playlists/${id}`, {
             method: "DELETE",
