@@ -811,6 +811,7 @@ async function shouldHaltCycle(): Promise<boolean> {
             currentPhase: null,
         });
         isStopping = false;
+        isPaused = false;
         return true;
     }
     return isPaused;

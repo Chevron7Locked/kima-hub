@@ -470,6 +470,7 @@ class BullMQVibeWorker:
 
         if success:
             await loop.run_in_executor(None, self._update_track_status, track_id, "completed")
+            await loop.run_in_executor(None, self._report_success, track_id)
             await job.updateProgress(100)
             logger.info(f"[BullMQ] Completed vibe for track: {track_id}")
             return {"trackId": track_id, "status": "complete"}
@@ -543,6 +544,22 @@ class BullMQVibeWorker:
             )
         except Exception as report_err:
             logger.warning(f"Failed to report failure to backend: {report_err}")
+
+    def _report_success(self, track_id: str):
+        """Resolve stale failure records for a track that succeeded on retry."""
+        try:
+            headers = {
+                "Content-Type": "application/json",
+                "X-Internal-Secret": os.getenv("INTERNAL_API_SECRET", "")
+            }
+            requests.post(
+                f"{BACKEND_URL}/api/analysis/vibe/success",
+                json={"trackId": track_id},
+                headers=headers,
+                timeout=5
+            )
+        except Exception as report_err:
+            logger.warning(f"Failed to report success to backend: {report_err}")
 
     def _store_embedding(self, track_id: str, embedding: np.ndarray) -> bool:
         """Store the embedding in track_embeddings (runs in executor thread)."""

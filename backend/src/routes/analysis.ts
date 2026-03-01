@@ -6,6 +6,7 @@ import { requireAuth, requireAdmin } from "../middleware/auth";
 import { getSystemSettings, invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { vibeQueue } from "../workers/enrichmentQueues";
+import { triggerEnrichmentNow } from "../workers/unifiedEnrichment";
 import os from "os";
 
 const router = Router();
@@ -526,6 +527,9 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             });
         }
 
+        // Clean completed jobs to prevent jobId dedup from silently dropping re-queued tracks
+        await vibeQueue.clean(0, 0, "completed");
+
         // Queue tracks for CLAP embedding via BullMQ (jobId deduplication)
         await vibeQueue.addBulk(
             tracks.map((track) => ({
@@ -539,6 +543,9 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
         for (const track of tracks) {
             await enrichmentFailureService.clearFailure("vibe", track.id);
         }
+
+        // Restart the enrichment cycle so executeVibePhase sweeps remaining tracks
+        await triggerEnrichmentNow();
 
         logger.info(`Queued ${tracks.length} tracks for vibe embedding${force ? " (force reset)" : ""}`);
 
@@ -585,6 +592,9 @@ router.post("/vibe/retry", requireAuth, requireAdmin, async (req, res) => {
             data: { vibeAnalysisStatus: null, vibeAnalysisRetryCount: 0, vibeAnalysisStatusUpdatedAt: null },
         });
 
+        // Clean completed jobs to prevent jobId dedup from silently dropping re-queued tracks
+        await vibeQueue.clean(0, 0, "completed");
+
         // Queue for retry via BullMQ (jobId deduplication)
         await vibeQueue.addBulk(
             tracks.map((track) => ({
@@ -596,6 +606,9 @@ router.post("/vibe/retry", requireAuth, requireAdmin, async (req, res) => {
 
         // Reset EnrichmentFailure retry counts
         await enrichmentFailureService.resetRetryCount(failures.map(f => f.id));
+
+        // Restart the enrichment cycle so executeVibePhase sweeps remaining tracks
+        await triggerEnrichmentNow();
 
         logger.info(`Retrying ${tracks.length} failed vibe embeddings`);
 

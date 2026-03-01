@@ -378,10 +378,24 @@ class EnrichmentFailureService {
             }
         }
 
+        // Resolve failures for entities that subsequently succeeded on retry
+        const staleSucceeded = await prisma.$queryRaw<{ id: string }[]>`
+            SELECT ef.id FROM "EnrichmentFailure" ef
+            JOIN "Track" t ON ef."entityId" = t.id
+            WHERE ef.resolved = false AND ef.skipped = false
+            AND (
+                (ef."entityType" = 'audio' AND t."analysisStatus" = 'completed')
+                OR (ef."entityType" = 'vibe' AND t."vibeAnalysisStatus" = 'completed')
+            )
+        `;
+        for (const row of staleSucceeded) {
+            toResolve.push(row.id);
+        }
+
         if (toResolve.length > 0) {
             await this.resolveFailures(toResolve);
             logger.debug(
-                `[Enrichment Failures] Cleaned up ${toResolve.length} orphaned failures`
+                `[Enrichment Failures] Cleaned up ${toResolve.length} orphaned/stale failures`
             );
         }
 
