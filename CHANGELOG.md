@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Podcast progress bar reverts on pause**: `savePodcastProgress` saved to the API but did not update React state, so the progress sync effect read a stale position on pause. Now mirrors the audiobook pattern by updating `currentPodcast` state after save.
 - **Mobile: permanent pause after phone call/Siri**: Audio interruptions (phone calls, Siri, other apps) triggered the MediaSession pause handler which permanently set `isPlaying=false` with no recovery path. Now tracks pre-interruption state and attempts auto-resume when the user returns to the app.
 
+### Removed
+
+- **Swagger API documentation**: Removed `swagger-jsdoc`, `swagger-ui-express`, and all 16 `@openapi` annotations. Only covered ~10% of endpoints and pulled in deprecated transitive dependencies (`inflight`, old `glob`, `lodash.get`, `lodash.isequal`). 30 packages eliminated.
+- **Debug logging**: Removed 20 debug `console.log`/`console.warn` statements (SSE connection tracing, search store internals, queue debug infrastructure).
+- **Unused dependencies**: Removed `react-virtuoso` (never imported), `silence-keepalive.ts` (caused Bluetooth/CarPlay theft), commented-out Vibe sidebar route, dead `pauseRef` in MediaSession hook.
+
 ### Changed
 
 - **Playlist import performance**: Parallelized MusicBrainz lookups via Promise.all (PQueue rate limiter still serializes HTTP calls, but event loop stays unblocked for SSE progress updates). Batch-loaded all library tracks in `buildPlaylist()` and `refreshJobMatches()` -- reduced ~3000 per-track DB queries to 2 batch queries with in-memory matching.
