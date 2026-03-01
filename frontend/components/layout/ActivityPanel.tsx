@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
+import { useActivityPanelSettings } from "@/lib/activity-panel-settings-context";
 
 type ActivityTab = "notifications" | "active" | "history" | "settings";
 
@@ -30,8 +31,6 @@ interface ActivityPanelProps {
     onToggle: () => void;
     activeTab?: ActivityTab;
     onTabChange?: (tab: ActivityTab) => void;
-    settingsContent?: React.ReactNode;
-    onSettingsDismissed?: () => void;
 }
 
 export function ActivityPanel({
@@ -39,9 +38,8 @@ export function ActivityPanel({
     onToggle,
     activeTab,
     onTabChange,
-    settingsContent,
-    onSettingsDismissed,
 }: ActivityPanelProps) {
+    const { settingsContent, setSettingsContent } = useActivityPanelSettings();
     const [internalActiveTab, setInternalActiveTab] =
         useState<ActivityTab>("notifications");
     const resolvedActiveTab = activeTab ?? internalActiveTab;
@@ -54,10 +52,10 @@ export function ActivityPanel({
 
     const handleTabClick = useCallback((tab: ActivityTab) => {
         if (tab !== "settings" && resolvedActiveTab === "settings" && settingsContent) {
-            onSettingsDismissed?.();
+            setSettingsContent(null);
         }
         setResolvedActiveTab(tab);
-    }, [resolvedActiveTab, settingsContent, onSettingsDismissed, setResolvedActiveTab]);
+    }, [resolvedActiveTab, settingsContent, setSettingsContent, setResolvedActiveTab]);
 
     // If settings tab is active but no settings content provided, default to notifications
     useEffect(() => {

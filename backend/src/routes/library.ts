@@ -1115,23 +1115,38 @@ router.get("/artists/:id", async (req, res) => {
           .trim();
       };
 
+      // Aggressive normalization: strips all parenthetical/bracket suffixes
+      // AND dash-separated suffixes like "- Remastered 2023", "- Single Version"
+      const stripSuffixes = (title: string): string => {
+        return title
+          .toLowerCase()
+          .replace(/\s*[\(\[][^\)\]]*[\)\]]/g, '')
+          .replace(/\s+-\s*(?:remaster(?:ed)?|deluxe|single|bonus|acoustic|live|remix|clean|explicit|anniversary|expanded|special|mono|stereo)(?:\s[^-]*)?$/gi, '')
+          .trim();
+      };
+
       const isLiveTrack = (title: string): boolean => {
         return /\(live[^)]*\)/i.test(title) || /\s-\s*live\b/i.test(title);
       };
 
-      // Build lookup maps: exact title first, then normalized fallback
+      // Build lookup maps: exact title first, then normalized fallback, then stripped fallback
       // Excludes live versions from matching. First match wins (keeps first album version found).
       const tracksByExactTitle = new Map<string, (typeof allTracks)[0]>();
       const tracksByNormTitle = new Map<string, (typeof allTracks)[0]>();
+      const tracksByStrippedTitle = new Map<string, (typeof allTracks)[0]>();
       for (const track of allTracks) {
         if (isLiveTrack(track.title)) continue;
         const exact = track.title.toLowerCase();
         const norm = normalizeTitle(track.title);
+        const stripped = stripSuffixes(track.title);
         if (!tracksByExactTitle.has(exact)) {
           tracksByExactTitle.set(exact, track);
         }
         if (!tracksByNormTitle.has(norm)) {
           tracksByNormTitle.set(norm, track);
+        }
+        if (!tracksByStrippedTitle.has(stripped)) {
+          tracksByStrippedTitle.set(stripped, track);
         }
       }
 
@@ -1142,10 +1157,11 @@ router.get("/artists/:id", async (req, res) => {
         // Skip live tracks from Last.fm results
         if (isLiveTrack(lfmTrack.name)) continue;
 
-        // Try exact match first, then normalized match
+        // Try exact match first, then normalized, then aggressively stripped
         const exactKey = lfmTrack.name.toLowerCase();
         const normKey = normalizeTitle(lfmTrack.name);
-        const matchedTrack = tracksByExactTitle.get(exactKey) || tracksByNormTitle.get(normKey);
+        const strippedKey = stripSuffixes(lfmTrack.name);
+        const matchedTrack = tracksByExactTitle.get(exactKey) || tracksByNormTitle.get(normKey) || tracksByStrippedTitle.get(strippedKey);
 
         if (matchedTrack) {
           // Track exists in library - include user play count
@@ -1172,6 +1188,7 @@ router.get("/artists/:id", async (req, res) => {
             url: lfmTrack.url,
             album: {
               title: lfmTrack.album?.["#text"] || "Unknown Album",
+              coverArt: artist.heroUrl || null,
             },
             userPlayCount: 0,
             // NO album.id - this indicates track is not in library
@@ -2469,25 +2486,10 @@ router.get("/tracks/:id/stream", async (req, res) => {
 // GET /library/tracks/:id/lyrics
 router.get("/tracks/:id/lyrics", async (req, res) => {
   try {
-    const track = await prisma.track.findUnique({
-      where: { id: req.params.id },
-      include: {
-        album: {
-          include: {
-            artist: {
-              select: { name: true },
-            },
-          },
-        },
-        trackLyrics: true,
-      },
+    // Check cache first (lightweight query)
+    const existing = await prisma.trackLyrics.findUnique({
+      where: { track_id: req.params.id },
     });
-
-    if (!track) {
-      return res.status(404).json({ error: "Track not found" });
-    }
-
-    const existing = track.trackLyrics;
 
     // Return cached lyrics if available and not "none"
     if (existing && existing.source !== "none") {
@@ -2508,6 +2510,24 @@ router.get("/tracks/:id/lyrics", async (req, res) => {
           source: "none",
         });
       }
+    }
+
+    // Cache miss or stale -- load full track with relations for LRCLIB lookup
+    const track = await prisma.track.findUnique({
+      where: { id: req.params.id },
+      include: {
+        album: {
+          include: {
+            artist: {
+              select: { name: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!track) {
+      return res.status(404).json({ error: "Track not found" });
     }
 
     // Fetch from LRCLIB

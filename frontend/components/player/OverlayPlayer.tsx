@@ -4,7 +4,7 @@ import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-c
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import Image from "next/image";
 import Link from "next/link";
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState } from "react";
 import {
     Play,
     Pause,
@@ -77,20 +77,12 @@ export function OverlayPlayer() {
     const [swipeOffset, setSwipeOffset] = useState(0);
     const [isVibeLoading, setIsVibeLoading] = useState(false);
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
-    const [lyricsMode, setLyricsMode] = useState(false);
-    const mobileToggle = isMobileOrTablet ? () => setLyricsMode(prev => !prev) : undefined;
-    const { handleLyricsToggle, isLyricsOpen } = useLyricsToggle({ onMobileToggle: mobileToggle });
-    const { title, subtitle, coverUrl, artistLink, mediaLink } = useMediaInfo(500);
-
-    // Mobile: reset crawl on track change. Desktop: lyrics panel persists (re-fetches internally).
-    useEffect(() => {
-        setLyricsMode(false);
-    }, [currentTrack?.id]);
+    const { handleLyricsToggle, isLyricsActive } = useLyricsToggle({ isMobile: isMobileOrTablet });
+    const { title, subtitle, coverUrl, artistLink, mediaLink, hasMedia } = useMediaInfo(500);
 
     if (!currentTrack && !currentAudiobook && !currentPodcast) return null;
 
     const canSkip = playbackType === "track";
-    const hasMedia = !!(currentTrack || currentAudiobook || currentPodcast);
 
     const handleSeek = (time: number) => {
         seek(time);
@@ -182,7 +174,7 @@ export function OverlayPlayer() {
             {/* Main Content - Portrait vs Landscape */}
             <div className="flex-1 flex flex-col landscape:flex-row items-center justify-center px-6 pb-6 landscape:px-8 landscape:gap-8 overflow-hidden">
                 {/* Lyrics crawl above artwork */}
-                {lyricsMode && isMobileOrTablet && (
+                {isLyricsActive && isMobileOrTablet && (
                     <div className="w-full max-w-[280px] h-16 flex-shrink-0 mb-3">
                         <LyricsCrawl />
                     </div>
@@ -484,7 +476,7 @@ export function OverlayPlayer() {
                                     "transition-colors",
                                     !hasMedia
                                         ? "text-gray-700 cursor-not-allowed"
-                                        : (isMobileOrTablet ? lyricsMode : isLyricsOpen)
+                                        : isLyricsActive
                                         ? "text-brand"
                                         : "text-gray-500 hover:text-brand"
                                 )}

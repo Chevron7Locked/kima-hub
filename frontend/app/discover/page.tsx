@@ -75,6 +75,8 @@ export default function DiscoverWeeklyPage() {
 
     // Build discover settings element (stable across renders via the effect dep array)
     const discoverSettingsRef = useRef<React.ReactNode>(null);
+    const settingsOwnerRef = useRef(settingsOwner);
+    settingsOwnerRef.current = settingsOwner;
 
     useEffect(() => {
         const handleBackToActivity = () => {
@@ -103,14 +105,14 @@ export default function DiscoverWeeklyPage() {
         discoverSettingsRef.current = element;
 
         // Auto-set on mount/update only if lyrics isn't active
-        if (settingsOwner !== "lyrics") {
+        if (settingsOwnerRef.current !== "lyrics") {
             setSettingsContent(element, "discover");
         }
 
         return () => {
             setSettingsContent(null);
         };
-    }, [config, setConfig, reloadData, refreshBatchStatus, setPendingGeneration, setSettingsContent, settingsOwner]);
+    }, [config, setConfig, reloadData, refreshBatchStatus, setPendingGeneration, setSettingsContent]);
 
     // Handle settings button click - user actively wants discover settings, overrides lyrics
     const handleOpenSettings = () => {

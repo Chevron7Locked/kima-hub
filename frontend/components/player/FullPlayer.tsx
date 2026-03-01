@@ -86,7 +86,7 @@ export function FullPlayer() {
 
     const [isVibeLoading, setIsVibeLoading] = useState(false);
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
-    const { handleLyricsToggle, isLyricsOpen } = useLyricsToggle();
+    const { handleLyricsToggle, isLyricsActive } = useLyricsToggle({ isMobile: false });
 
     // Get current track's audio features for vibe comparison
     const currentTrackFeatures = queue[currentIndex]?.audioFeatures || null;
@@ -462,7 +462,7 @@ export function FullPlayer() {
                                         "transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                         !hasMedia
                                             ? "text-gray-600"
-                                            : isLyricsOpen
+                                            : isLyricsActive
                                             ? "text-brand hover:text-brand-hover"
                                             : "text-gray-400 hover:text-brand"
                                     )}

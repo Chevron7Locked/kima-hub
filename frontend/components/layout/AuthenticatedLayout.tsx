@@ -17,7 +17,6 @@ import { ReactNode } from "react";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { useIsTV } from "@/lib/tv-utils";
 import { useActivityPanel } from "@/hooks/useActivityPanel";
-import { useActivityPanelSettings } from "@/lib/activity-panel-settings-context";
 
 const publicPaths = ["/login", "/register", "/onboarding", "/sync"];
 
@@ -29,7 +28,6 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
     const isTV = useIsTV();
     const isMobileOrTablet = isMobile || isTablet;
     const activityPanel = useActivityPanel();
-    const { settingsContent, setSettingsContent } = useActivityPanelSettings();
 
     // Listen for activity panel events (toggle/open/close/tab)
     useEffect(() => {
@@ -120,8 +118,6 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                             onToggle={activityPanel.toggle}
                             activeTab={activityPanel.activeTab}
                             onTabChange={activityPanel.setActiveTab}
-                            settingsContent={settingsContent}
-                            onSettingsDismissed={() => setSettingsContent(null)}
                         />
 
                         {/* Main content area with rounded corners */}
@@ -178,8 +174,6 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                             onToggle={activityPanel.toggle}
                             activeTab={activityPanel.activeTab}
                             onTabChange={activityPanel.setActiveTab}
-                            settingsContent={settingsContent}
-                            onSettingsDismissed={() => setSettingsContent(null)}
                         />
                     </div>
                     <UniversalPlayer />

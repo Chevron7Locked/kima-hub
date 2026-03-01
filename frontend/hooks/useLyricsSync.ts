@@ -83,10 +83,10 @@ export function useLyricsSync(): LyricsSyncState {
         if (!isSynced || lines.length === 0) return -1;
 
         const timeMs = currentTime * 1000;
+        if (timeMs < lines[0].time) return -1;
+
         let lo = 0;
         let hi = lines.length - 1;
-
-        if (timeMs < lines[0].time) return -1;
 
         while (lo <= hi) {
             const mid = (lo + hi) >>> 1;
