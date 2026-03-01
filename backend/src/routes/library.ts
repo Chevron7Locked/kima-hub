@@ -18,6 +18,8 @@ import { coverArtService } from "../services/coverArt";
 import { getSystemSettings } from "../utils/systemSettings";
 import { AudioStreamingService } from "../services/audioStreaming";
 import { scanQueue } from "../workers/queues";
+import { lrclibService } from "../services/lrclib";
+import { rateLimiter } from "../services/rateLimiter";
 import { validateUrlForFetch } from "../utils/ssrf";
 import { safeError } from "../utils/errors";
 import { organizeSingles } from "../workers/organizeSingles";
@@ -2461,6 +2463,124 @@ router.get("/tracks/:id/stream", async (req, res) => {
   } catch (error) {
     logger.error("Stream track error:", error);
     res.status(500).json({ error: "Failed to stream track" });
+  }
+});
+
+// GET /library/tracks/:id/lyrics
+router.get("/tracks/:id/lyrics", async (req, res) => {
+  try {
+    const track = await prisma.track.findUnique({
+      where: { id: req.params.id },
+      include: {
+        album: {
+          include: {
+            artist: {
+              select: { name: true },
+            },
+          },
+        },
+        trackLyrics: true,
+      },
+    });
+
+    if (!track) {
+      return res.status(404).json({ error: "Track not found" });
+    }
+
+    const existing = track.trackLyrics;
+
+    // Return cached lyrics if available and not "none"
+    if (existing && existing.source !== "none") {
+      return res.json({
+        plainLyrics: existing.plain_lyrics,
+        syncedLyrics: existing.synced_lyrics,
+        source: existing.source,
+      });
+    }
+
+    // Return cached "none" if checked within 30 days
+    if (existing && existing.source === "none") {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      if (existing.fetched_at > thirtyDaysAgo) {
+        return res.json({
+          plainLyrics: null,
+          syncedLyrics: null,
+          source: "none",
+        });
+      }
+    }
+
+    // Fetch from LRCLIB
+    const artistName = track.album?.artist?.name || "";
+    const albumName = track.album?.title || "";
+    const durationSecs = track.duration || 0;
+
+    try {
+      const result = await rateLimiter.execute("lrclib", () =>
+        lrclibService.fetchLyrics(
+          track.title,
+          artistName,
+          albumName,
+          durationSecs
+        )
+      );
+
+      if (result) {
+        await prisma.trackLyrics.upsert({
+          where: { track_id: track.id },
+          create: {
+            track_id: track.id,
+            plain_lyrics: result.plainLyrics,
+            synced_lyrics: result.syncedLyrics,
+            source: "lrclib",
+            lrclib_id: result.id,
+          },
+          update: {
+            plain_lyrics: result.plainLyrics,
+            synced_lyrics: result.syncedLyrics,
+            source: "lrclib",
+            lrclib_id: result.id,
+            fetched_at: new Date(),
+          },
+        });
+
+        return res.json({
+          plainLyrics: result.plainLyrics,
+          syncedLyrics: result.syncedLyrics,
+          source: "lrclib",
+        });
+      }
+
+      // LRCLIB returned 404 -- cache as "none"
+      await prisma.trackLyrics.upsert({
+        where: { track_id: track.id },
+        create: {
+          track_id: track.id,
+          source: "none",
+        },
+        update: {
+          source: "none",
+          fetched_at: new Date(),
+        },
+      });
+
+      return res.json({
+        plainLyrics: null,
+        syncedLyrics: null,
+        source: "none",
+      });
+    } catch (fetchError) {
+      logger.error("[LYRICS] LRCLIB fetch failed:", fetchError);
+      // Return what we have (or empty) -- don't cache failures
+      return res.json({
+        plainLyrics: existing?.plain_lyrics || null,
+        syncedLyrics: existing?.synced_lyrics || null,
+        source: existing?.source || "none",
+      });
+    }
+  } catch (error) {
+    logger.error("Get lyrics error:", error);
+    res.status(500).json({ error: "Failed to fetch lyrics" });
   }
 });
 

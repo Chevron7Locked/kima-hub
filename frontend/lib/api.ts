@@ -530,6 +530,14 @@ class ApiClient {
         return this.request<ApiData>(`/library/tracks/${id}`);
     }
 
+    async getTrackLyrics(trackId: string) {
+        return this.request<{
+            plainLyrics: string | null;
+            syncedLyrics: string | null;
+            source: string;
+        }>(`/library/tracks/${trackId}/lyrics`);
+    }
+
     async getRadioTracks(type: string, value?: string, limit = 50) {
         const params = new URLSearchParams({ type, limit: String(limit) });
         if (value) params.append("value", value);

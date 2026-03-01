@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useActiveDownloads } from "@/hooks/useNotifications";
 import { NotificationsTab } from "@/components/activity/NotificationsTab";
@@ -31,6 +31,7 @@ interface ActivityPanelProps {
     activeTab?: ActivityTab;
     onTabChange?: (tab: ActivityTab) => void;
     settingsContent?: React.ReactNode;
+    onSettingsDismissed?: () => void;
 }
 
 export function ActivityPanel({
@@ -39,6 +40,7 @@ export function ActivityPanel({
     activeTab,
     onTabChange,
     settingsContent,
+    onSettingsDismissed,
 }: ActivityPanelProps) {
     const [internalActiveTab, setInternalActiveTab] =
         useState<ActivityTab>("notifications");
@@ -49,6 +51,13 @@ export function ActivityPanel({
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;
+
+    const handleTabClick = useCallback((tab: ActivityTab) => {
+        if (tab !== "settings" && resolvedActiveTab === "settings" && settingsContent) {
+            onSettingsDismissed?.();
+        }
+        setResolvedActiveTab(tab);
+    }, [resolvedActiveTab, settingsContent, onSettingsDismissed, setResolvedActiveTab]);
 
     // If settings tab is active but no settings content provided, default to notifications
     useEffect(() => {
@@ -108,7 +117,7 @@ export function ActivityPanel({
                             return (
                                 <button
                                     key={tab.id}
-                                    onClick={() => setResolvedActiveTab(tab.id)}
+                                    onClick={() => handleTabClick(tab.id)}
                                     className={cn(
                                         "flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors relative",
                                         resolvedActiveTab === tab.id
@@ -155,13 +164,13 @@ export function ActivityPanel({
     return (
         <div
             className="shrink-0 h-full relative z-10"
-            style={{ width: isOpen ? 400 : 48 }}
+            style={{ width: isOpen ? 450 : 48 }}
         >
             {/* Panel container - slides via transform (GPU-accelerated, no layout recalc) */}
             <div
-                className="absolute inset-y-0 right-0 w-[400px] bg-[#0a0a0a] flex flex-col overflow-hidden transition-transform duration-200 ease-out"
+                className="absolute inset-y-0 right-0 w-[450px] bg-[#0a0a0a] flex flex-col overflow-hidden transition-transform duration-200 ease-out"
                 style={{
-                    transform: isOpen ? 'translateX(0)' : 'translateX(352px)',
+                    transform: isOpen ? 'translateX(0)' : 'translateX(402px)',
                     willChange: 'transform',
                 }}
             >
@@ -220,7 +229,7 @@ export function ActivityPanel({
                         return (
                             <button
                                 key={tab.id}
-                                onClick={() => setResolvedActiveTab(tab.id)}
+                                onClick={() => handleTabClick(tab.id)}
                                 className={cn(
                                     "flex-1 flex items-center justify-center gap-2 py-2.5 px-2 text-xs font-mono font-bold uppercase tracking-wider transition-all relative whitespace-nowrap border-l-2",
                                     resolvedActiveTab === tab.id

@@ -1,10 +1,11 @@
 "use client";
 
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, ReactNode } from "react";
 
 interface ActivityPanelSettingsContextType {
     settingsContent: ReactNode | null;
-    setSettingsContent: (content: ReactNode | null) => void;
+    settingsOwner: string | null;
+    setSettingsContent: (content: ReactNode | null, owner?: string | null) => void;
 }
 
 const ActivityPanelSettingsContext = createContext<ActivityPanelSettingsContextType | undefined>(
@@ -12,10 +13,16 @@ const ActivityPanelSettingsContext = createContext<ActivityPanelSettingsContextT
 );
 
 export function ActivityPanelSettingsProvider({ children }: { children: ReactNode }) {
-    const [settingsContent, setSettingsContent] = useState<ReactNode | null>(null);
+    const [settingsContent, setContent] = useState<ReactNode | null>(null);
+    const [settingsOwner, setOwner] = useState<string | null>(null);
+
+    const setSettingsContent = useCallback((content: ReactNode | null, owner: string | null = null) => {
+        setContent(content);
+        setOwner(content ? owner : null);
+    }, []);
 
     return (
-        <ActivityPanelSettingsContext.Provider value={{ settingsContent, setSettingsContent }}>
+        <ActivityPanelSettingsContext.Provider value={{ settingsContent, settingsOwner, setSettingsContent }}>
             {children}
         </ActivityPanelSettingsContext.Provider>
     );

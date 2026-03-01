@@ -4,7 +4,7 @@ import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-c
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import Image from "next/image";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import {
     Play,
     Pause,
@@ -20,6 +20,7 @@ import {
     RotateCcw,
     RotateCw,
     RefreshCw,
+    MicVocal,
 } from "lucide-react";
 import { formatTime, formatTimeRemaining } from "@/utils/formatTime";
 import { cn } from "@/utils/cn";
@@ -28,6 +29,8 @@ import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { useToast } from "@/lib/toast-context";
 import { SeekSlider } from "./SeekSlider";
 import { useFeatures } from "@/lib/features-context";
+import { LyricsCrawl } from "@/components/lyrics/LyricsCrawl";
+import { useLyricsToggle } from "@/hooks/useLyricsToggle";
 
 export function OverlayPlayer() {
     const { toast } = useToast();
@@ -74,7 +77,15 @@ export function OverlayPlayer() {
     const [swipeOffset, setSwipeOffset] = useState(0);
     const [isVibeLoading, setIsVibeLoading] = useState(false);
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
+    const [lyricsMode, setLyricsMode] = useState(false);
+    const mobileToggle = isMobileOrTablet ? () => setLyricsMode(prev => !prev) : undefined;
+    const { handleLyricsToggle, isLyricsOpen } = useLyricsToggle({ onMobileToggle: mobileToggle });
     const { title, subtitle, coverUrl, artistLink, mediaLink } = useMediaInfo(500);
+
+    // Mobile: reset crawl on track change. Desktop: lyrics panel persists (re-fetches internally).
+    useEffect(() => {
+        setLyricsMode(false);
+    }, [currentTrack?.id]);
 
     if (!currentTrack && !currentAudiobook && !currentPodcast) return null;
 
@@ -170,9 +181,12 @@ export function OverlayPlayer() {
 
             {/* Main Content - Portrait vs Landscape */}
             <div className="flex-1 flex flex-col landscape:flex-row items-center justify-center px-6 pb-6 landscape:px-8 landscape:gap-8 overflow-hidden">
-                {/* Artwork Section */}
+                {/* Artwork */}
                 <div
-                    className="w-full max-w-[320px] landscape:max-w-[240px] landscape:w-[240px] aspect-square flex-shrink-0 mb-6 landscape:mb-0 relative"
+                    className={cn(
+                        "w-full max-w-[320px] landscape:max-w-[240px] landscape:w-[240px] aspect-square flex-shrink-0 relative",
+                        !(lyricsMode && isMobileOrTablet) && "mb-6 landscape:mb-0"
+                    )}
                     style={{
                         transform: `translateX(${swipeOffset * 0.5}px)`,
                         opacity: 1 - Math.abs(swipeOffset) / 200,
@@ -188,7 +202,7 @@ export function OverlayPlayer() {
                         )}
                     />
 
-                    {/* Album art - always show album art, even in vibe mode */}
+                    {/* Album art */}
                     <div className="relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-2xl overflow-hidden shadow-2xl">
                         {coverUrl ? (
                             <Image
@@ -226,6 +240,13 @@ export function OverlayPlayer() {
                             </div>
                         )}
                 </div>
+
+                {/* Lyrics crawl below artwork */}
+                {lyricsMode && isMobileOrTablet && (
+                    <div className="w-full max-w-[320px] h-16 flex-shrink-0">
+                        <LyricsCrawl />
+                    </div>
+                )}
 
                 {/* Info & Controls Section */}
                 <div className="w-full max-w-[320px] landscape:max-w-[280px] landscape:flex-1 flex flex-col">
@@ -332,7 +353,7 @@ export function OverlayPlayer() {
                             className={cn(
                                 "w-16 h-16 rounded-full flex items-center justify-center hover:scale-105 transition-all shadow-xl",
                                 audioError
-                                    ? "bg-red-500 text-white hover:bg-red-400"
+                                    ? "bg-red-500 text-black hover:bg-red-400"
                                     : isBuffering
                                     ? "bg-[#fca200]/80 text-black"
                                     : "bg-[#fca200] text-black"
@@ -455,6 +476,26 @@ export function OverlayPlayer() {
                                 ) : (
                                     <AudioWaveform className="w-5 h-5" />
                                 )}
+                            </button>
+                        )}
+
+                        {/* Lyrics Toggle */}
+                        {playbackType === "track" && (
+                            <button
+                                onClick={handleLyricsToggle}
+                                className={cn(
+                                    "transition-colors",
+                                    !hasMedia
+                                        ? "text-gray-700 cursor-not-allowed"
+                                        : (isMobileOrTablet ? lyricsMode : isLyricsOpen)
+                                        ? "text-brand"
+                                        : "text-gray-500 hover:text-brand"
+                                )}
+                                disabled={!hasMedia}
+                                aria-label="Toggle lyrics"
+                                title="Show lyrics"
+                            >
+                                <MicVocal className="w-5 h-5" />
                             </button>
                         )}
                     </div>

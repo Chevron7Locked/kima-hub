@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useToast } from "@/lib/toast-context";
@@ -23,7 +23,7 @@ export default function DiscoverWeeklyPage() {
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();
-    const { setSettingsContent } = useActivityPanelSettings();
+    const { setSettingsContent, settingsOwner } = useActivityPanelSettings();
     const queryClient = useQueryClient();
 
     // Custom hooks - single source of truth for batch status from useDiscoverData
@@ -73,7 +73,9 @@ export default function DiscoverWeeklyPage() {
         (t) => t.id === currentTrack?.id
     );
 
-    // Provide settings content to activity panel
+    // Build discover settings element (stable across renders via the effect dep array)
+    const discoverSettingsRef = useRef<React.ReactNode>(null);
+
     useEffect(() => {
         const handleBackToActivity = () => {
             window.dispatchEvent(
@@ -84,13 +86,12 @@ export default function DiscoverWeeklyPage() {
         };
 
         const handlePlaylistCleared = async () => {
-            // Clear stuck generation state and refresh from backend
             setPendingGeneration(false);
             await refreshBatchStatus();
             await reloadData();
         };
 
-        setSettingsContent(
+        const element = (
             <DiscoverSettingsTab
                 config={config}
                 onUpdateConfig={setConfig}
@@ -99,14 +100,23 @@ export default function DiscoverWeeklyPage() {
             />
         );
 
-        // Cleanup when leaving the page
+        discoverSettingsRef.current = element;
+
+        // Auto-set on mount/update only if lyrics isn't active
+        if (settingsOwner !== "lyrics") {
+            setSettingsContent(element, "discover");
+        }
+
         return () => {
             setSettingsContent(null);
         };
-    }, [config, setConfig, reloadData, refreshBatchStatus, setPendingGeneration, setSettingsContent]);
+    }, [config, setConfig, reloadData, refreshBatchStatus, setPendingGeneration, setSettingsContent, settingsOwner]);
 
-    // Handle settings button click
+    // Handle settings button click - user actively wants discover settings, overrides lyrics
     const handleOpenSettings = () => {
+        if (discoverSettingsRef.current) {
+            setSettingsContent(discoverSettingsRef.current, "discover");
+        }
         window.dispatchEvent(new CustomEvent("open-activity-panel"));
         window.dispatchEvent(
             new CustomEvent("set-activity-panel-tab", {
@@ -117,25 +127,17 @@ export default function DiscoverWeeklyPage() {
 
     // Handle cancel generation - cancels stuck backend batch and clears frontend state
     const handleCancelGeneration = async () => {
-        console.log('[DiscoverWeekly] === CANCEL CLICKED ===');
-
-        // Immediately clear frontend state for instant UI feedback
         setPendingGeneration(false);
         queryClient.setQueryData(["discover-batch-status"], {
             active: false,
             status: null,
             batchId: null
         });
-        console.log('[DiscoverWeekly] Frontend state cleared');
 
-        // Cancel the backend batch (if it exists)
         try {
-            console.log('[DiscoverWeekly] Calling backend cancel API...');
-            const result = await api.cancelDiscoverBatch();
-            console.log('[DiscoverWeekly] Backend cancel result:', result);
+            await api.cancelDiscoverBatch();
         } catch (error) {
             console.error('[DiscoverWeekly] Backend cancel failed:', error);
-            // Frontend is already cleared, so non-fatal
         }
     };
 

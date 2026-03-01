@@ -5,6 +5,23 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-02-28
+
+### Added
+
+- **Synchronized lyrics**: LRCLIB integration fetches timed `.lrc` lyrics during library scan. Full-player and overlay-player display synced lyrics with a 3-line stacked view (previous/current/next). Lyrics toggle in activity panel with owner-based priority so Discovery settings don't override an active lyrics view.
+- **LRCLIB rate limiting**: Lyrics API calls go through the global rate limiter (2 req/s, concurrency 1) to respect upstream limits.
+
+### Fixed
+
+- **Enrichment pipeline**: Fixed 7 issues -- vibe re-run no-ops (dedup cache not cleared), completion notification never firing (dead in-memory counters replaced with DB query), infinite artist retry loop (final attempt reset status to pending), phantom state after shutdown, podcast failures excluded from counts, orphaned frontend type, and removed dead vibe reset endpoint.
+- **Feature flags go stale**: Now polls every 60s instead of fetching once on mount.
+- **Mood mixer threshold mismatch**: Frontend threshold now matches backend minimum (8 tracks).
+- **iOS Safari audio playback**: Reset stale network retry count on preload swap, removed competing silence keepalive from resume gesture, guarded redundant `play()` calls, pre-set track ref for deterministic deduplication, and capped error cascade at 3 consecutive failures.
+- **iOS AirPod/lock-screen resume**: Silence keepalive `prime()` in the MediaSession play handler consumed the iOS user gesture budget before the actual audio resume. Moved keepalive priming to the pause handler so the play handler's full gesture is available for `tryResume()`.
+- **Audio analyzer retry loop**: Failed tracks had retry count reset to 0 on re-queue, bypassing the max-retries guard. Now preserves count so broken tracks are excluded after 3 attempts.
+- **CLAP search timeouts**: Model unloaded after 10s idle when all tracks were embedded, causing ~20s cold-start on every vibe search. Now uses standard 5-minute idle timeout. Backend search timeout increased to 60s.
+
 ## [1.5.11] - 2026-02-27
 
 ### Added

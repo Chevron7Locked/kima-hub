@@ -29,7 +29,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
     const isTV = useIsTV();
     const isMobileOrTablet = isMobile || isTablet;
     const activityPanel = useActivityPanel();
-    const { settingsContent } = useActivityPanelSettings();
+    const { settingsContent, setSettingsContent } = useActivityPanelSettings();
 
     // Listen for activity panel events (toggle/open/close/tab)
     useEffect(() => {
@@ -121,6 +121,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                             activeTab={activityPanel.activeTab}
                             onTabChange={activityPanel.setActiveTab}
                             settingsContent={settingsContent}
+                            onSettingsDismissed={() => setSettingsContent(null)}
                         />
 
                         {/* Main content area with rounded corners */}
@@ -178,6 +179,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                             activeTab={activityPanel.activeTab}
                             onTabChange={activityPanel.setActiveTab}
                             settingsContent={settingsContent}
+                            onSettingsDismissed={() => setSettingsContent(null)}
                         />
                     </div>
                     <UniversalPlayer />

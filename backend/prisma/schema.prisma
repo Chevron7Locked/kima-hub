@@ -636,6 +636,7 @@ model Track {
   trackGenres                 TrackGenre[]
   transcodedFiles             TranscodedFile[]
   trackEmbedding              TrackEmbedding?
+  trackLyrics                 TrackLyrics?
 
   @@index([analysisStatus])
   @@index([vibeAnalysisStatus])
@@ -800,6 +801,19 @@ model TrackEmbedding {
   @@index([embedding])
   @@index([model_version])
   @@map("track_embeddings")
+}
+
+model TrackLyrics {
+  track_id      String   @id
+  plain_lyrics  String?  @db.Text
+  synced_lyrics String?  @db.Text
+  source        String   @db.VarChar(20)
+  lrclib_id     Int?
+  fetched_at    DateTime @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime @updatedAt
+  track         Track    @relation(fields: [track_id], references: [id], onDelete: Cascade)
+
+  @@map("track_lyrics")
 }
 
 enum AlbumLocation {

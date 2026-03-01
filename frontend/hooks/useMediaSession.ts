@@ -204,8 +204,10 @@ export function useMediaSession() {
 
         // Play handler: call audioEngine directly to preserve iOS user gesture
         // context, then sync React state from the audio element event.
+        // Do NOT call silenceKeepalive.prime() here -- it would consume the iOS
+        // user gesture budget before tryResume() can use it, breaking AirPod
+        // and lock-screen resume.
         navigator.mediaSession.setActionHandler("play", () => {
-            silenceKeepalive.prime();
             audioEngine.tryResume().then((started) => {
                 if (started) {
                     setIsPlayingRef.current(true);
@@ -213,7 +215,11 @@ export function useMediaSession() {
             });
         });
 
+        // Prime the silence keepalive on explicit pause (user taps pause on
+        // lock screen or AirPod). This unlocks the keepalive audio element
+        // for future programmatic play() calls when the app backgrounds.
         navigator.mediaSession.setActionHandler("pause", () => {
+            silenceKeepalive.prime();
             audioEngine.pause();
             setIsPlayingRef.current(false);
         });

@@ -903,7 +903,7 @@ export class MusicScannerService {
         }
 
         // Upsert track
-        await prisma.track.upsert({
+        const track = await prisma.track.upsert({
             where: { filePath: relativePath },
             create: {
                 albumId: album.id,
@@ -925,5 +925,73 @@ export class MusicScannerService {
                 fileSize: stats.size,
             },
         });
+
+        // Extract embedded lyrics
+        try {
+            let plainLyrics: string | null = null;
+            let syncedLyrics: string | null = null;
+
+            // Check metadata.common.lyrics (ILyricsTag[])
+            const lyricsArr = metadata.common.lyrics;
+            if (lyricsArr && lyricsArr.length > 0) {
+                for (const tag of lyricsArr) {
+                    // Synced lyrics: convert syncText[] to LRC format
+                    if (tag.syncText && tag.syncText.length > 0 && !syncedLyrics) {
+                        syncedLyrics = tag.syncText
+                            .map((entry) => {
+                                const totalMs = entry.timestamp ?? 0;
+                                const mins = Math.floor(totalMs / 60000);
+                                const secs = Math.floor((totalMs % 60000) / 1000);
+                                const cs = Math.floor((totalMs % 1000) / 10);
+                                return `[${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}.${String(cs).padStart(2, "0")}] ${entry.text}`;
+                            })
+                            .join("\n");
+                    }
+                    // Plain lyrics
+                    if (tag.text && !plainLyrics) {
+                        plainLyrics = tag.text;
+                    }
+                }
+            }
+
+            // Check raw Vorbis LYRICS tag for FLAC (may contain LRC directly)
+            if (!syncedLyrics) {
+                const nativeTags = metadata.native;
+                for (const format of Object.keys(nativeTags)) {
+                    const tags = nativeTags[format];
+                    for (const tag of tags) {
+                        if (tag.id === "LYRICS" && typeof tag.value === "string") {
+                            const val = tag.value.trim();
+                            // Detect LRC format by timestamp pattern
+                            if (/^\[\d{2}:\d{2}/.test(val)) {
+                                syncedLyrics = val;
+                            } else if (!plainLyrics && val.length > 0) {
+                                plainLyrics = val;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (plainLyrics || syncedLyrics) {
+                await prisma.trackLyrics.upsert({
+                    where: { track_id: track.id },
+                    create: {
+                        track_id: track.id,
+                        plain_lyrics: plainLyrics,
+                        synced_lyrics: syncedLyrics,
+                        source: "embedded",
+                    },
+                    update: {
+                        plain_lyrics: plainLyrics,
+                        synced_lyrics: syncedLyrics,
+                        source: "embedded",
+                    },
+                });
+            }
+        } catch (error) {
+            // Non-critical -- don't fail the scan for lyrics
+            logger.debug(`[Scanner] Failed to extract lyrics for ${relativePath}:`, error);
+        }
     }
 }

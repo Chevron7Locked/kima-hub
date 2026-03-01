@@ -24,6 +24,7 @@ import {
     Loader2,
     AudioWaveform,
     RefreshCw,
+    MicVocal,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import { useToast } from "@/lib/toast-context";
@@ -32,6 +33,7 @@ import { cn } from "@/utils/cn";
 import { useFeatures } from "@/lib/features-context";
 import { formatTime, formatTimeRemaining } from "@/utils/formatTime";
 import { SeekSlider } from "./SeekSlider";
+import { useLyricsToggle } from "@/hooks/useLyricsToggle";
 
 
 /**
@@ -84,6 +86,7 @@ export function FullPlayer() {
 
     const [isVibeLoading, setIsVibeLoading] = useState(false);
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
+    const { handleLyricsToggle, isLyricsOpen } = useLyricsToggle();
 
     // Get current track's audio features for vibe comparison
     const currentTrackFeatures = queue[currentIndex]?.audioFeatures || null;
@@ -146,7 +149,6 @@ export function FullPlayer() {
 
     const { title, subtitle, coverUrl, artistLink, mediaLink, hasMedia } = useMediaInfo(100);
 
-    // Determine if seeking is allowed
     const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const newVolume = parseInt(e.target.value) / 100;
         setVolume(newVolume);
@@ -449,6 +451,26 @@ export function FullPlayer() {
                                     ) : (
                                         <AudioWaveform className="w-4 h-4" />
                                     )}
+                                </button>
+                            )}
+
+                            {/* Lyrics Toggle */}
+                            {playbackType === "track" && (
+                                <button
+                                    onClick={handleLyricsToggle}
+                                    className={cn(
+                                        "transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
+                                        !hasMedia
+                                            ? "text-gray-600"
+                                            : isLyricsOpen
+                                            ? "text-brand hover:text-brand-hover"
+                                            : "text-gray-400 hover:text-brand"
+                                    )}
+                                    disabled={!hasMedia}
+                                    aria-label="Toggle lyrics"
+                                    title="Show lyrics"
+                                >
+                                    <MicVocal className="w-4 h-4" />
                                 </button>
                             )}
                         </div>

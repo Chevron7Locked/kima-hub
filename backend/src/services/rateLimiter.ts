@@ -27,6 +27,7 @@ interface ServiceConfig {
     deezer: RateLimitConfig;
     lidarr: RateLimitConfig;
     coverart: RateLimitConfig;
+    lrclib: RateLimitConfig;
 }
 
 // Service-specific rate limit configurations
@@ -64,6 +65,13 @@ const SERVICE_CONFIGS: ServiceConfig = {
         interval: 1000,
         concurrency: 3,
         maxRetries: 2,
+        baseDelay: 1000,
+    },
+    lrclib: {
+        intervalCap: 2, // LRCLIB - conservative
+        interval: 1000,
+        concurrency: 1,
+        maxRetries: 1,
         baseDelay: 1000,
     },
 };
