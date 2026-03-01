@@ -179,41 +179,6 @@ router.use((req, res, next) => {
   return apiLimiter(req, res, next);
 });
 
-/**
- * @openapi
- * /library/scan:
- *   post:
- *     summary: Start a library scan job
- *     description: Initiates a background job to scan the music directory and index all audio files
- *     tags: [Library]
- *     security:
- *       - sessionAuth: []
- *       - apiKeyAuth: []
- *     responses:
- *       200:
- *         description: Library scan started successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   example: "Library scan started"
- *                 jobId:
- *                   type: string
- *                   description: Job ID to track progress
- *                   example: "123"
- *                 musicPath:
- *                   type: string
- *                   example: "/path/to/music"
- *       500:
- *         description: Failed to start scan
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 router.post("/scan", async (req, res) => {
   try {
     if (!config.music.musicPath) {

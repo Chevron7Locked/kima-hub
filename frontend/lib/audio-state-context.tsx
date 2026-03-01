@@ -11,23 +11,6 @@ import {
 import { api } from "@/lib/api";
 import type { Episode } from "@/features/podcast/types";
 
-function queueDebugEnabled(): boolean {
-    try {
-        return (
-            typeof window !== "undefined" &&
-            window.localStorage?.getItem("kimaQueueDebug") === "1"
-        );
-    } catch {
-        // Intentionally ignored: localStorage may throw in SSR or restricted contexts
-        return false;
-    }
-}
-
-function queueDebugLog(message: string, data?: Record<string, unknown>) {
-    if (!queueDebugEnabled()) return;
-    console.log(`[QueueDebug] ${message}`, data || {});
-}
-
 export type PlayerMode = "full" | "mini" | "overlay";
 
 // Audio features for vibe mode visualization
@@ -489,14 +472,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     isShuffle,
                 });
                 setLastServerSync(new Date(result.updatedAt));
-                queueDebugLog("Saved playback state to server", {
-                    playbackType,
-                    trackId: currentTrack?.id,
-                    queueLen: limitedQueue?.length || 0,
-                    currentIndex: adjustedIndex,
-                    isShuffle,
-                    updatedAt: result.updatedAt,
-                });
             } catch (err: unknown) {
                 if (err instanceof Error && err.message !== "Not authenticated") {
                     console.error(
@@ -637,15 +612,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         JSON.stringify(serverState.queue) !==
                         JSON.stringify(queue)
                     ) {
-                        queueDebugLog("Polling applied server queue", {
-                            serverQueueLen: serverState.queue?.length || 0,
-                            localQueueLen: queue?.length || 0,
-                            serverCurrentIndex: serverState.currentIndex || 0,
-                            localCurrentIndex: currentIndex,
-                            serverIsShuffle: serverState.isShuffle,
-                            localIsShuffle: isShuffle,
-                            serverUpdatedAt: serverState.updatedAt,
-                        });
                         setQueue(serverState.queue || []);
                         setCurrentIndex(serverState.currentIndex || 0);
                         setIsShuffle(serverState.isShuffle || false);

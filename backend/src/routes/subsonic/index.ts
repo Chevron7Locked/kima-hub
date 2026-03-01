@@ -14,7 +14,7 @@ export const subsonicRouter = Router();
 // Rate limit the Subsonic API separately: auth does a DB query on every request
 const subsonicLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 300, // 300 req/min per IP — enough for library sync, not brute-force
+    max: 1500, // 1500 req/min per IP — Symfonium fires per-album requests during sync
     standardHeaders: true,
     legacyHeaders: false,
 });

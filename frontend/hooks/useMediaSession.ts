@@ -1,7 +1,6 @@
 import { useEffect, useCallback, useRef } from "react";
 import { useAudio } from "@/lib/audio-context";
 import { audioEngine } from "@/lib/audio-engine";
-import { silenceKeepalive } from "@/lib/silence-keepalive";
 import { api } from "@/lib/api";
 
 /**
@@ -19,7 +18,6 @@ export function useMediaSession() {
         playbackType,
         isPlaying,
         setIsPlaying,
-        pause,
         next,
         previous,
         seek,
@@ -27,7 +25,6 @@ export function useMediaSession() {
     } = useAudio();
 
     const currentTimeRef = useRef(currentTime);
-    const pauseRef = useRef(pause);
     const nextRef = useRef(next);
     const previousRef = useRef(previous);
     const seekRef = useRef(seek);
@@ -38,7 +35,6 @@ export function useMediaSession() {
     const currentPodcastRef = useRef(currentPodcast);
 
     useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
-    useEffect(() => { pauseRef.current = pause; }, [pause]);
     useEffect(() => { nextRef.current = next; }, [next]);
     useEffect(() => { previousRef.current = previous; }, [previous]);
     useEffect(() => { seekRef.current = seek; }, [seek]);
@@ -52,6 +48,10 @@ export function useMediaSession() {
     const hasPlayedLocallyRef = useRef(false);
     // Track if action handlers have been registered (one-time gate)
     const handlersRegisteredRef = useRef(false);
+    // Track pre-interruption state for auto-resume after phone calls/Siri
+    const wasPlayingBeforeInterruptionRef = useRef(false);
+    const isPlayingRef = useRef(isPlaying);
+    useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
     useEffect(() => {
         if (isPlaying) {
@@ -63,6 +63,9 @@ export function useMediaSession() {
         if (!currentTrack && !currentAudiobook && !currentPodcast) {
             hasPlayedLocallyRef.current = false;
             handlersRegisteredRef.current = false;
+            if ("mediaSession" in navigator) {
+                navigator.mediaSession.playbackState = "none";
+            }
         }
     }, [currentTrack, currentAudiobook, currentPodcast]);
 
@@ -98,11 +101,13 @@ export function useMediaSession() {
         audioEngine.on("play", handlePlay);
         audioEngine.on("pause", handlePause);
         audioEngine.on("ended", handlePause);
+        audioEngine.on("error", handlePause);
 
         return () => {
             audioEngine.off("play", handlePlay);
             audioEngine.off("pause", handlePause);
             audioEngine.off("ended", handlePause);
+            audioEngine.off("error", handlePause);
         };
     }, []);
 
@@ -190,7 +195,6 @@ export function useMediaSession() {
         currentAudiobook,
         currentPodcast,
         playbackType,
-        isPlaying,
         getAbsoluteUrl,
     ]);
 
@@ -204,10 +208,8 @@ export function useMediaSession() {
 
         // Play handler: call audioEngine directly to preserve iOS user gesture
         // context, then sync React state from the audio element event.
-        // Do NOT call silenceKeepalive.prime() here -- it would consume the iOS
-        // user gesture budget before tryResume() can use it, breaking AirPod
-        // and lock-screen resume.
         navigator.mediaSession.setActionHandler("play", () => {
+            wasPlayingBeforeInterruptionRef.current = false;
             audioEngine.tryResume().then((started) => {
                 if (started) {
                     setIsPlayingRef.current(true);
@@ -215,11 +217,8 @@ export function useMediaSession() {
             });
         });
 
-        // Prime the silence keepalive on explicit pause (user taps pause on
-        // lock screen or AirPod). This unlocks the keepalive audio element
-        // for future programmatic play() calls when the app backgrounds.
         navigator.mediaSession.setActionHandler("pause", () => {
-            silenceKeepalive.prime();
+            wasPlayingBeforeInterruptionRef.current = isPlayingRef.current;
             audioEngine.pause();
             setIsPlayingRef.current(false);
         });
@@ -302,6 +301,17 @@ export function useMediaSession() {
                 navigator.mediaSession.playbackState = audioEngine.isPlaying()
                     ? "playing"
                     : "paused";
+
+                // If playback was interrupted (phone call, Siri, etc.), try to resume
+                if (wasPlayingBeforeInterruptionRef.current && !audioEngine.isPlaying()) {
+                    wasPlayingBeforeInterruptionRef.current = false;
+                    audioEngine.tryResume().then((started) => {
+                        if (started) {
+                            setIsPlayingRef.current(true);
+                            navigator.mediaSession.playbackState = "playing";
+                        }
+                    });
+                }
             }
         };
 

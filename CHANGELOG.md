@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **GHCR publishing**: Docker images now published to GitHub Container Registry alongside Docker Hub on tagged releases. Credit to @SupremeMortal (#48).
 - **#134 Lidarr batch album fetching**: Large Lidarr libraries no longer crash with V8 string overflow -- albums are fetched in paginated batches. Credit to @cachamber.
 - **#132 Preview volume sync**: Preview audio volume now syncs with the global player volume. Credit to @cachamber.
+- **Safari audio session hint**: Explicitly sets `navigator.audioSession.type = "playback"` on Safari 16.4+ to ensure the correct AVAudioSession category before first playback.
 
 ### Fixed
 
@@ -19,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Card hover overlay regression**: Dark gradient overlays caused blackout effect on album art hover. Made overlay conditional on playable cards, softened opacity on grid cards.
 - **Album navigation delay**: First click to album pages felt unresponsive due to `prefetch={false}` on all card Links. Enabled Next.js prefetching for instant navigation.
 - **GHCR image name casing**: `github.repository_owner` preserves uppercase but GHCR requires all-lowercase. Compute image name at runtime with bash lowercase conversion.
+- **#128 Subsonic rate limit too low for Symfonium sync**: Large libraries (2000+ songs) hit the 300 req/min rate limit during Symfonium sync. Bumped to 1500 req/min -- self-hosted service behind auth, no brute-force risk.
+- **Mobile: lock screen always shows "playing" / steals Bluetooth/CarPlay**: Removed the silence keepalive system that looped near-silent audio to maintain the OS audio session while paused. This caused iOS/Android to treat Kima as actively playing -- stealing Bluetooth priority from other apps, interrupting podcasts, and showing permanent "playing" state on lock screen. No other web music player uses this pattern; the tradeoff (lock screen controls disappearing after ~30s pause) matches Navidrome, Jellyfin, and all other self-hosted web players.
+- **Mobile: resumeWithGesture shows "playing" when blocked by OS**: `resumeWithGesture()` set UI to "playing" before confirming the audio engine actually started. On iOS where autoplay is restricted, this left the UI in a false "playing" state with no audio. Now awaits confirmation and reverts on failure.
+- **Audiobook progress overwritten on track end**: When an audiobook track ended naturally, the `isFinished` completion flag was immediately overwritten by the pause-triggered progress save (which saved without the flag). Audiobooks that were fully listened to would show as in-progress instead of complete.
+- **Duplicate "play" event firing**: The audio engine emitted the custom `"play"` event on both the native `play` and `playing` events, causing downstream handlers (MediaSession, React state sync) to fire twice per play action. Now emits only on `playing` (when audio is actually producing sound).
+- **MediaSession metadata unnecessary re-renders**: Metadata update effect depended on `isPlaying`, causing it to re-run on every play/pause toggle despite metadata not changing. Removed the dependency.
+- **Mobile: lock screen stuck on "playing" after errors**: MediaSession playbackState listeners did not include the audio engine's `error` event, so after network errors exhausted retries, the lock screen stayed on "playing" indefinitely. Also set playbackState to `"none"` when the queue clears.
+- **Mobile: audio stops silently in background**: Network retry `play().catch(() => {})` swallowed failures in iOS background (no user gesture context), leaving the player in a broken state with no visible error. Now emits a proper error so the UI can update. Additionally, network errors (code 2) now preserve the current track/podcast/audiobook instead of clearing it, allowing foreground recovery.
+- **Mobile: foreground recovery too narrow**: Returning to the app after a background error showed an error state instead of the player. Now clears the error on foreground return so users can tap play to resume.
+- **Podcast progress bar reverts on pause**: `savePodcastProgress` saved to the API but did not update React state, so the progress sync effect read a stale position on pause. Now mirrors the audiobook pattern by updating `currentPodcast` state after save.
+- **Mobile: permanent pause after phone call/Siri**: Audio interruptions (phone calls, Siri, other apps) triggered the MediaSession pause handler which permanently set `isPlaying=false` with no recovery path. Now tracks pre-interruption state and attempts auto-resume when the user returns to the app.
 
 ### Changed
 

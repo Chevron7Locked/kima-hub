@@ -50,9 +50,6 @@ import {
     apiLimiter,
     imageLimiter,
 } from "./middleware/rateLimiter";
-import swaggerUi from "swagger-ui-express";
-import { swaggerSpec } from "./config/swagger";
-
 const app = express();
 
 // Middleware
@@ -191,29 +188,6 @@ app.get("/api/metrics", requireAuth, async (req, res) => {
         logger.error("Error generating metrics:", error);
         res.status(500).send("Error generating metrics");
     }
-});
-
-// Swagger API Documentation
-// In production: require auth unless DOCS_PUBLIC=true
-// In development: always public for easier testing
-const docsMiddleware =
-    config.nodeEnv === "production" && process.env.DOCS_PUBLIC !== "true"
-        ? [requireAuth]
-        : [];
-
-app.use(
-    "/api/docs",
-    ...docsMiddleware,
-    swaggerUi.serve,
-    swaggerUi.setup(swaggerSpec, {
-        customCss: ".swagger-ui .topbar { display: none }",
-        customSiteTitle: "Kima API Documentation",
-    })
-);
-
-// Serve raw OpenAPI spec
-app.get("/api/docs.json", ...docsMiddleware, (req, res) => {
-    res.json(swaggerSpec);
 });
 
 // Error handler

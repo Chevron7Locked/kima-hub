@@ -16,7 +16,6 @@ import { MobileSidebar } from "./MobileSidebar";
 
 const navigation = [
     { name: "Collection", href: "/library" },
-    // { name: "Vibe", href: "/vibe" }, // Hidden until UI refinement complete
     { name: "Radio", href: "/radio" },
     { name: "Discovery", href: "/discover" },
     { name: "Audiobooks", href: "/audiobooks" },

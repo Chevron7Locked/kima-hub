@@ -18,57 +18,6 @@ const getRequestUserId = (req: any): string | null => {
     return req.user?.id || req.session?.userId || null;
 };
 
-/**
- * @openapi
- * /mixes:
- *   get:
- *     summary: Get all programmatic mixes
- *     description: Returns all auto-generated mixes (era-based, genre-based, top tracks, rediscover, artist similar, random discovery)
- *     tags: [Mixes]
- *     security:
- *       - sessionAuth: []
- *       - apiKeyAuth: []
- *     responses:
- *       200:
- *         description: List of programmatic mixes
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id:
- *                     type: string
- *                     example: "era-2000"
- *                   type:
- *                     type: string
- *                     enum: [era, genre, top-tracks, rediscover, artist-similar, random-discovery]
- *                   name:
- *                     type: string
- *                     example: "Your 2000s Mix"
- *                   description:
- *                     type: string
- *                     example: "Music from the 2000s in your library"
- *                   trackIds:
- *                     type: array
- *                     items:
- *                       type: string
- *                   coverUrls:
- *                     type: array
- *                     items:
- *                       type: string
- *                     description: Album covers for mosaic display (up to 4)
- *                   trackCount:
- *                     type: integer
- *                     example: 42
- *       401:
- *         description: Not authenticated
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 router.get("/", async (req, res) => {
     try {
         const userId = getRequestUserId(req);
@@ -99,83 +48,6 @@ router.get("/", async (req, res) => {
     }
 });
 
-/**
- * @openapi
- * /mixes/mood:
- *   post:
- *     summary: Generate a custom mood-based mix on demand
- *     description: Creates a personalized mix based on audio features like valence, energy, tempo, etc.
- *     tags: [Mixes]
- *     security:
- *       - sessionAuth: []
- *       - apiKeyAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               valence:
- *                 type: object
- *                 properties:
- *                   min:
- *                     type: number
- *                     minimum: 0
- *                     maximum: 1
- *                   max:
- *                     type: number
- *                     minimum: 0
- *                     maximum: 1
- *               energy:
- *                 type: object
- *                 properties:
- *                   min:
- *                     type: number
- *                   max:
- *                     type: number
- *               danceability:
- *                 type: object
- *                 properties:
- *                   min:
- *                     type: number
- *                   max:
- *                     type: number
- *               acousticness:
- *                 type: object
- *                 properties:
- *                   min:
- *                     type: number
- *                   max:
- *                     type: number
- *               instrumentalness:
- *                 type: object
- *                 properties:
- *                   min:
- *                     type: number
- *                   max:
- *                     type: number
- *               bpm:
- *                 type: object
- *                 properties:
- *                   min:
- *                     type: number
- *                   max:
- *                     type: number
- *               keyScale:
- *                 type: string
- *                 enum: [major, minor]
- *               limit:
- *                 type: integer
- *                 default: 15
- *     responses:
- *       200:
- *         description: Generated mood mix with full track details
- *       400:
- *         description: Not enough tracks matching criteria
- *       401:
- *         description: Not authenticated
- */
 router.post("/mood", async (req, res) => {
     try {
         const userId = getRequestUserId(req);
@@ -440,20 +312,6 @@ router.post("/mood/save-preferences", async (req, res) => {
     }
 });
 
-/**
- * @openapi
- * /mixes/mood/buckets/presets:
- *   get:
- *     summary: Get mood presets with track counts
- *     description: Returns available mood categories with how many tracks are available for each
- *     tags: [Mixes]
- *     security:
- *       - sessionAuth: []
- *       - apiKeyAuth: []
- *     responses:
- *       200:
- *         description: List of mood presets with track counts
- */
 router.get("/mood/buckets/presets", async (req, res) => {
     try {
         const presets = await moodBucketService.getMoodPresets();
@@ -464,30 +322,6 @@ router.get("/mood/buckets/presets", async (req, res) => {
     }
 });
 
-/**
- * @openapi
- * /mixes/mood/buckets/{mood}:
- *   get:
- *     summary: Get a mood mix for a specific mood
- *     description: Fast lookup from pre-computed mood bucket table
- *     tags: [Mixes]
- *     security:
- *       - sessionAuth: []
- *       - apiKeyAuth: []
- *     parameters:
- *       - in: path
- *         name: mood
- *         required: true
- *         schema:
- *           type: string
- *           enum: [happy, sad, chill, energetic, party, focus, melancholy, aggressive, acoustic]
- *         description: Mood category
- *     responses:
- *       200:
- *         description: Mood mix with track details
- *       400:
- *         description: Invalid mood or not enough tracks
- */
 router.get("/mood/buckets/:mood", async (req, res) => {
     try {
         const mood = req.params.mood as MoodType;
@@ -537,29 +371,6 @@ router.get("/mood/buckets/:mood", async (req, res) => {
     }
 });
 
-/**
- * @openapi
- * /mixes/mood/buckets/{mood}/save:
- *   post:
- *     summary: Save a mood as user's active mood mix
- *     description: Generates a mix for the mood and saves it as the user's "Your X Mix" on the home page
- *     tags: [Mixes]
- *     security:
- *       - sessionAuth: []
- *       - apiKeyAuth: []
- *     parameters:
- *       - in: path
- *         name: mood
- *         required: true
- *         schema:
- *           type: string
- *           enum: [happy, sad, chill, energetic, party, focus, melancholy, aggressive, acoustic]
- *     responses:
- *       200:
- *         description: Mood mix saved and returned for immediate playback
- *       400:
- *         description: Invalid mood or not enough tracks
- */
 router.post("/mood/buckets/:mood/save", async (req, res) => {
     try {
         const userId = getRequestUserId(req);
@@ -625,20 +436,6 @@ router.post("/mood/buckets/:mood/save", async (req, res) => {
     }
 });
 
-/**
- * @openapi
- * /mixes/mood/buckets/backfill:
- *   post:
- *     summary: Backfill mood buckets for all analyzed tracks
- *     description: Admin endpoint to populate mood buckets for existing tracks
- *     tags: [Mixes]
- *     security:
- *       - sessionAuth: []
- *       - apiKeyAuth: []
- *     responses:
- *       200:
- *         description: Backfill completed
- */
 router.post("/mood/buckets/backfill", requireAdmin, async (req, res) => {
     try {
         const userId = getRequestUserId(req);
@@ -663,38 +460,6 @@ router.post("/mood/buckets/backfill", requireAdmin, async (req, res) => {
     }
 });
 
-/**
- * @openapi
- * /mixes/refresh:
- *   post:
- *     summary: Force refresh all mixes
- *     description: Clears cache and regenerates all programmatic mixes
- *     tags: [Mixes]
- *     security:
- *       - sessionAuth: []
- *       - apiKeyAuth: []
- *     responses:
- *       200:
- *         description: Mixes refreshed successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   example: "Mixes refreshed"
- *                 mixes:
- *                   type: array
- *                   items:
- *                     type: object
- *       401:
- *         description: Not authenticated
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 router.post("/refresh", async (req, res) => {
     try {
         const userId = getRequestUserId(req);
@@ -722,60 +487,6 @@ router.post("/refresh", async (req, res) => {
     }
 });
 
-/**
- * @openapi
- * /mixes/{id}/save:
- *   post:
- *     summary: Save a mix as a playlist
- *     description: Creates a new playlist with all tracks from the specified mix
- *     tags: [Mixes]
- *     security:
- *       - sessionAuth: []
- *       - apiKeyAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *         description: Mix ID to save as playlist
- *     requestBody:
- *       required: false
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               name:
- *                 type: string
- *                 description: Optional custom name for the playlist (defaults to mix name)
- *     responses:
- *       200:
- *         description: Playlist created successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 id:
- *                   type: string
- *                 name:
- *                   type: string
- *                 trackCount:
- *                   type: integer
- *       404:
- *         description: Mix not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       401:
- *         description: Not authenticated
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 router.post("/:id/save", async (req, res) => {
     try {
         const userId = getRequestUserId(req);
@@ -860,65 +571,6 @@ router.post("/:id/save", async (req, res) => {
     }
 });
 
-/**
- * @openapi
- * /mixes/{id}:
- *   get:
- *     summary: Get a specific mix with full track details
- *     tags: [Mixes]
- *     security:
- *       - sessionAuth: []
- *       - apiKeyAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *         description: Mix ID (e.g., "era-2000", "genre-rock", "top-tracks")
- *     responses:
- *       200:
- *         description: Mix with full track details
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 id:
- *                   type: string
- *                 type:
- *                   type: string
- *                 name:
- *                   type: string
- *                 description:
- *                   type: string
- *                 trackIds:
- *                   type: array
- *                   items:
- *                     type: string
- *                 coverUrls:
- *                   type: array
- *                   items:
- *                     type: string
- *                 trackCount:
- *                   type: integer
- *                 tracks:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/Track'
- *       404:
- *         description: Mix not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       401:
- *         description: Not authenticated
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 router.get("/:id", async (req, res) => {
     try {
         const userId = getRequestUserId(req);

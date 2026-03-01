@@ -26,41 +26,6 @@ const loginSchema = z.object({
 const encrypt2FASecret = encrypt;
 const decrypt2FASecret = decrypt;
 
-/**
- * @openapi
- * /auth/login:
- *   post:
- *     summary: Login with username and password
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - username
- *               - password
- *             properties:
- *               username:
- *                 type: string
- *               password:
- *                 type: string
- *                 format: password
- *     responses:
- *       200:
- *         description: Login successful
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/User'
- *       401:
- *         description: Invalid credentials
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 // POST /auth/login
 router.post("/login", async (req, res) => {
     try {
@@ -221,28 +186,6 @@ router.post("/refresh", async (req, res) => {
     }
 });
 
-/**
- * @openapi
- * /auth/me:
- *   get:
- *     summary: Get current authenticated user
- *     tags: [Authentication]
- *     security:
- *       - sessionAuth: []
- *     responses:
- *       200:
- *         description: Current user information
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/User'
- *       401:
- *         description: Not authenticated
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 // GET /auth/me
 router.get("/me", requireAuth, async (req, res) => {
     try {

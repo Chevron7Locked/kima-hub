@@ -43,7 +43,6 @@ export function useEventSource() {
             es.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    console.log(`[FRONTEND SSE] Received event:`, data.type, data);
 
                     switch (data.type) {
                         case "notification":
@@ -83,16 +82,11 @@ export function useEventSource() {
                             queryClient.invalidateQueries({ queryKey: ["notifications"] });
                             break;
                         case "search:result":
-                            console.log(`[FRONTEND SSE] search:result received - searchId: ${data.searchId}, results: ${data.results?.length || 0}`);
                             if (data.searchId && data.results) {
-                                console.log(`[FRONTEND SSE] Pushing ${data.results.length} results to store for searchId: ${data.searchId}`);
                                 searchResultStore.push(data.searchId, data.results);
-                            } else {
-                                console.warn(`[FRONTEND SSE] search:result missing data - searchId: ${data.searchId}, results: ${data.results}`);
                             }
                             break;
                         case "search:complete":
-                            console.log(`[FRONTEND SSE] search:complete received - searchId: ${data.searchId}`);
                             if (data.searchId) {
                                 searchResultStore.complete(data.searchId);
                             }

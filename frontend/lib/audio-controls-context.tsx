@@ -21,23 +21,6 @@ import { api } from "@/lib/api";
 import { audioEngine } from "@/lib/audio-engine";
 import { audioSeekEmitter } from "./audio-seek-emitter";
 
-function queueDebugEnabled(): boolean {
-    try {
-        return (
-            typeof window !== "undefined" &&
-            window.localStorage?.getItem("kimaQueueDebug") === "1"
-        );
-    } catch {
-        // Intentionally ignored: localStorage may throw in SSR or restricted contexts
-        return false;
-    }
-}
-
-function queueDebugLog(message: string, data?: Record<string, unknown>) {
-    if (!queueDebugEnabled()) return;
-    console.log(`[QueueDebug] ${message}`, data || {});
-}
-
 interface AudioControlsContextType {
     // Track methods
     playTrack: (track: Track) => void;
@@ -114,13 +97,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     // Stable ref for setCurrentTime to avoid adding unstable `playback` to skip deps
     const setCurrentTimeRef = useRef(playback.setCurrentTime);
 
-    // Cleanup on unmount
-    useEffect(() => {
-        queueDebugLog("AudioControlsProvider mounted");
-        return () => {
-            queueDebugLog("AudioControlsProvider unmounted");
-        };
-    }, []);
 
     // Keep a stable "Up Next" insertion cursor like Spotify:
     // - When the current track changes, reset to "right after current"
@@ -162,14 +138,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
         lastCursorTrackIndexRef.current = state.currentIndex;
         lastCursorIsShuffleRef.current = state.isShuffle;
-        queueDebugLog("Cursor updated", {
-            currentIndex: state.currentIndex,
-            isShuffle: state.isShuffle,
-            upNextCursor: upNextInsertRef.current,
-            shuffleCursor: shuffleInsertPosRef.current,
-            shuffleIndicesLen: state.shuffleIndices?.length || 0,
-            queueLen: state.queue?.length || 0,
-        });
     }, [
         state.currentIndex,
         state.playbackType,
@@ -222,14 +190,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             if (tracks.length === 0) {
                 return;
             }
-            queueDebugLog("playTracks()", {
-                tracksLen: tracks.length,
-                startIndex,
-                firstTrackId: tracks[0]?.id,
-                startTrackId: tracks[startIndex]?.id,
-                isVibeQueue,
-            });
-
             // If not a vibe queue and vibe mode is on, disable it
             if (!isVibeQueue && state.vibeMode) {
                 state.setVibeMode(false);
@@ -343,7 +303,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const resumeWithGesture = useCallback(() => {
         playback.setIsPlaying(true);
-        audioEngine.tryResume();
+        audioEngine.tryResume().then((started) => {
+            if (!started) playback.setIsPlaying(false);
+        });
     }, [playback]);
 
     const seek = useCallback(
@@ -432,11 +394,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             const currentShufflePos = state.shuffleIndices.indexOf(
                 state.currentIndex
             );
-            queueDebugLog("next() shuffle", {
-                currentIndex: state.currentIndex,
-                currentShufflePos,
-                shuffleIndicesLen: state.shuffleIndices.length,
-            });
             if (currentShufflePos < state.shuffleIndices.length - 1) {
                 nextIndex = state.shuffleIndices[currentShufflePos + 1];
             } else {
@@ -460,12 +417,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             }
         }
 
-        queueDebugLog("next() chosen", {
-            isShuffle: state.isShuffle,
-            nextIndex,
-            nextTrackId: state.queue[nextIndex]?.id,
-            queueLen: state.queue.length,
-        });
         state.setCurrentIndex(nextIndex);
         state.setCurrentTrack(state.queue[nextIndex]);
         playback.setCurrentTime(0);
@@ -503,15 +454,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const addToQueue = useCallback(
         (track: Track) => {
-            queueDebugLog("addToQueue() entry", {
-                trackId: track?.id,
-                queueLen: state.queue.length,
-                currentIndex: state.currentIndex,
-                playbackType: state.playbackType,
-                isShuffle: state.isShuffle,
-                upNextCursor: upNextInsertRef.current,
-                shuffleCursor: shuffleInsertPosRef.current,
-            });
             // If no tracks are playing (empty queue or non-track playback), start fresh
             if (state.queue.length === 0 || state.playbackType !== "track") {
                 state.setPlaybackType("track");
@@ -523,9 +465,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 playback.setIsPlaying(true);
                 playback.setCurrentTime(0);
                 state.setShuffleIndices([0]);
-                queueDebugLog("addToQueue() started fresh queue", {
-                    trackId: track?.id,
-                });
                 return;
             }
 
@@ -543,17 +482,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 newQueue.splice(insertAt, 0, track);
                 upNextInsertRef.current = insertAt + 1;
                 lastQueueInsertAtRef.current = insertAt;
-                queueDebugLog("addToQueue() applied", {
-                    plannedInsertAt,
-                    insertAt,
-                    playingIdx,
-                    prevLen: prevQueue.length,
-                    newLen: newQueue.length,
-                    insertedTrackId: track?.id,
-                    nextUpSliceIds: newQueue
-                        .slice(state.currentIndex + 1, state.currentIndex + 6)
-                        .map((t) => t?.id),
-                });
 
                 return newQueue;
             });
@@ -585,18 +513,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     const newIndices = [...shifted];
                     newIndices.splice(insertPos, 0, insertAt);
                     shuffleInsertPosRef.current = insertPos + 1;
-                    const currentIdx = playingIdx;
-                    queueDebugLog("addToQueue() shuffleIndices updated", {
-                        currentIdx,
-                        insertAt,
-                        insertPos,
-                        prevIndicesLen: prevIndices.length,
-                        newIndicesLen: newIndices.length,
-                        nextShuffleSlice: newIndices.slice(
-                            Math.max(0, insertPos - 2),
-                            insertPos + 3
-                        ),
-                    });
 
                     return newIndices;
                 });

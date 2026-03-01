@@ -9,61 +9,6 @@ const router = Router();
 // All API key routes require authentication (session-based)
 router.use(requireAuth);
 
-/**
- * @openapi
- * /api-keys:
- *   post:
- *     summary: Create a new API key for mobile/external authentication
- *     tags: [API Keys]
- *     security:
- *       - sessionAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - deviceName
- *             properties:
- *               deviceName:
- *                 type: string
- *                 description: Name of the device (e.g., "iPhone 14", "Android Tablet")
- *                 example: "iPhone 14"
- *     responses:
- *       201:
- *         description: API key created successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 apiKey:
- *                   type: string
- *                   description: The generated API key (64-character hex string)
- *                   example: "a1b2c3d4e5f6..."
- *                 name:
- *                   type: string
- *                   example: "iPhone 14"
- *                 createdAt:
- *                   type: string
- *                   format: date-time
- *                 message:
- *                   type: string
- *                   example: "API key created successfully. Save this key - you won't see it again!"
- *       400:
- *         description: Invalid request
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       401:
- *         description: Not authenticated
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 router.post("/", async (req, res) => {
     try {
         const { deviceName } = req.body;
@@ -104,33 +49,6 @@ router.post("/", async (req, res) => {
     }
 });
 
-/**
- * @openapi
- * /api-keys:
- *   get:
- *     summary: List all API keys for the current user
- *     tags: [API Keys]
- *     security:
- *       - sessionAuth: []
- *     responses:
- *       200:
- *         description: List of API keys (without the actual key values for security)
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 apiKeys:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/ApiKey'
- *       401:
- *         description: Not authenticated
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 router.get("/", async (req, res) => {
     try {
         // Use req.user.id (set by requireAuth middleware) - supports both session and JWT auth
@@ -158,45 +76,6 @@ router.get("/", async (req, res) => {
     }
 });
 
-/**
- * @openapi
- * /api-keys/{id}:
- *   delete:
- *     summary: Revoke an API key
- *     tags: [API Keys]
- *     security:
- *       - sessionAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *         description: The API key ID
- *     responses:
- *       200:
- *         description: API key revoked successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   example: "API key revoked successfully"
- *       404:
- *         description: API key not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       401:
- *         description: Not authenticated
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 router.delete("/:id", async (req, res) => {
     try {
         // Use req.user.id (set by requireAuth middleware) - supports both session and JWT auth

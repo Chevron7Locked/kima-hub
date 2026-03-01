@@ -12,12 +12,9 @@ class SearchResultStore {
     private listeners = new Map<string, Set<Listener>>();
 
     push(searchId: string, results: SoulseekResult[]): void {
-        console.log(`[STORE] push() called - searchId: ${searchId}, adding ${results.length} results`);
         const session = this.sessions.get(searchId) || { results: [], complete: false };
-        const previousLength = session.results.length;
         session.results = [...session.results, ...results];
         this.sessions.set(searchId, session);
-        console.log(`[STORE] Total results for ${searchId}: ${previousLength} -> ${session.results.length}`);
         this.notify(searchId);
     }
 
@@ -53,7 +50,6 @@ class SearchResultStore {
 
     private notify(searchId: string): void {
         const set = this.listeners.get(searchId);
-        console.log(`[STORE] notify() called for ${searchId} - ${set?.size || 0} listeners`);
         if (set) {
             for (const listener of set) {
                 listener();

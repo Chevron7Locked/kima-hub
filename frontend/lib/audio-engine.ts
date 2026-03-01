@@ -51,6 +51,18 @@ class AudioEngine {
             this.audio = new Audio();
             this.audio.preload = "auto";
             this.attachNativeListeners(this.audio);
+
+            // Explicitly request the playback audio session category on Safari 16.4+.
+            // <audio> elements get this automatically, but setting it explicitly
+            // ensures the session category is correct before first playback.
+            try {
+                const nav = navigator as { audioSession?: { type: string } };
+                if (nav.audioSession) {
+                    nav.audioSession.type = "playback";
+                }
+            } catch {
+                // Not supported on this platform
+            }
         }
     }
 
@@ -65,7 +77,6 @@ class AudioEngine {
 
         add("play", () => {
             this.startTimeUpdates();
-            this.emit("play");
         });
 
         add("pause", () => {
@@ -91,7 +102,9 @@ class AudioEngine {
             this.emit("waiting");
         });
 
-        // "playing" fires when playback resumes after buffering
+        // "playing" fires when audio data is actually being rendered.
+        // This is the single source of truth for "audio is producing sound" --
+        // the native "play" event fires too early (before buffering completes).
         add("playing", () => {
             this.emit("play");
         });
@@ -114,7 +127,21 @@ class AudioEngine {
                     if (this.audio && this.state.currentSrc) {
                         this.retrySeekTime = this.audio.currentTime || null;
                         this.audio.load();
-                        this.audio.play().catch(() => {});
+                        this.audio.play().catch((playErr) => {
+                            // play() failed (e.g. iOS background, no gesture context).
+                            // Emit error so UI/MediaSession can update instead of
+                            // silently leaving state as "playing".
+                            console.warn("[AudioEngine] Retry play() failed:", playErr);
+                            // Exhaust retry count so any subsequent native error from
+                            // the load() falls through to the terminal error path
+                            // instead of creating an infinite retry loop.
+                            this.networkRetryCount = this.MAX_NETWORK_RETRIES;
+                            this.stopTimeUpdates();
+                            this.emit("error", {
+                                error: "Playback interrupted - unable to resume in background",
+                                code: 2,
+                            });
+                        });
                     }
                 }, delay);
                 return;

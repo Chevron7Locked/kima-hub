@@ -8,7 +8,6 @@ import { api } from "@/lib/api";
 import { audioEngine } from "@/lib/audio-engine";
 import { audioSeekEmitter } from "@/lib/audio-seek-emitter";
 import { dispatchQueryEvent } from "@/lib/query-events";
-import { silenceKeepalive } from "@/lib/silence-keepalive";
 import {
     useEffect,
     useLayoutEffect,
@@ -96,6 +95,8 @@ export const AudioElement = memo(function AudioElement() {
     const lastPreloadedTrackIdRef = useRef<string | null>(null);
     const pendingStartTimeRef = useRef<number>(0);
     const consecutiveErrorCountRef = useRef<number>(0);
+    // Guards against the pause-triggered save overwriting a just-completed isFinished flag
+    const justFinishedRef = useRef<boolean>(false);
 
     // Refs for stable event handler access (avoids re-subscribing engine events)
     const playbackTypeRef = useRef(playbackType);
@@ -197,12 +198,26 @@ export const AudioElement = memo(function AudioElement() {
                     duration,
                     isFinished
                 );
+                setCurrentPodcast((prev) => {
+                    if (!prev || prev.id !== currentPodcast.id) return prev;
+                    const dur = prev.duration || 0;
+                    const pos = isFinished ? dur : currentTime;
+                    return {
+                        ...prev,
+                        progress: {
+                            currentTime: pos,
+                            progress: dur > 0 ? (pos / dur) * 100 : 0,
+                            isFinished,
+                            lastPlayedAt: new Date(),
+                        },
+                    };
+                });
                 dispatchQueryEvent("podcast-progress-updated");
             } catch (err) {
                 console.error("[AudioElement] Failed to save podcast progress:", err);
             }
         },
-        [currentPodcast]
+        [currentPodcast, setCurrentPodcast]
     );
 
     // Keep save callbacks in refs for stable engine event handlers
@@ -319,10 +334,14 @@ export const AudioElement = memo(function AudioElement() {
         };
 
         const handleEnded = () => {
-            // Save final progress for audiobooks/podcasts
+            // Save final progress for audiobooks/podcasts.
+            // Set justFinishedRef to prevent the pause-triggered save from
+            // overwriting the isFinished flag with a non-finished save.
             if (playbackTypeRef.current === "audiobook") {
+                justFinishedRef.current = true;
                 saveAudiobookProgressRef.current(true);
             } else if (playbackTypeRef.current === "podcast") {
+                justFinishedRef.current = true;
                 savePodcastProgressRef.current(true);
             }
 
@@ -365,7 +384,6 @@ export const AudioElement = memo(function AudioElement() {
             setIsPlaying(false);
             setIsBuffering(false);
 
-            // MEDIA_ERR_NETWORK (code 2) - provide a more descriptive message
             const errorMessage =
                 code === 2
                     ? "Playback interrupted - stream may have been taken by another session"
@@ -374,6 +392,11 @@ export const AudioElement = memo(function AudioElement() {
                       : "Audio playback error";
             setAudioError(errorMessage);
 
+            // Network errors (code 2): preserve current media for foreground recovery.
+            // The user can tap play to retry when they return to the app.
+            if (code === 2) return;
+
+            // Non-recoverable errors: clear media
             if (playbackTypeRef.current === "track") {
                 consecutiveErrorCountRef.current++;
                 lastTrackIdRef.current = null;
@@ -497,30 +520,6 @@ export const AudioElement = memo(function AudioElement() {
         }
     }, [isPlaying, setIsPlaying]);
 
-    // --- Silence keepalive: hold the audio session while paused in background ---
-    //
-    // iOS and Android reclaim the audio session after a backgrounded PWA pauses.
-    // Playing near-silent audio prevents this, keeping MediaSession controls and
-    // subsequent audio.play() calls functional without opening the app.
-    useEffect(() => {
-        const hasMedia = !!(currentTrack || currentAudiobook || currentPodcast);
-
-        const sync = () => {
-            if (document.hidden && !isPlaying && hasMedia) {
-                silenceKeepalive.start();
-            } else {
-                silenceKeepalive.stop();
-            }
-        };
-
-        sync();
-        document.addEventListener("visibilitychange", sync);
-        return () => {
-            document.removeEventListener("visibilitychange", sync);
-            silenceKeepalive.stop();
-        };
-    }, [isPlaying, currentTrack, currentAudiobook, currentPodcast]);
-
     // --- Foreground recovery: retry play if we should be playing but aren't ---
     //
     // Handles two iOS PWA scenarios:
@@ -532,10 +531,25 @@ export const AudioElement = memo(function AudioElement() {
     useEffect(() => {
         const handleVisibilityChange = () => {
             if (document.hidden) return;
+
+            // Case 1: Was playing but engine stopped (iOS throttling, audio focus loss)
             if (lastPlayingStateRef.current && !audioEngine.isPlaying()) {
                 audioEngine.tryResume().then((started) => {
                     if (!started) setIsPlaying(false);
                 });
+            }
+
+            // Case 2: Error occurred in background. Clear the error on foreground
+            // so the UI shows the track (not an error state) and user can tap play.
+            // The track/audiobook/podcast is preserved (network errors), ready for manual retry.
+            if (!lastPlayingStateRef.current && playbackTypeRef.current) {
+                const hasMedia =
+                    currentTrackRef.current ||
+                    currentAudiobookRef.current ||
+                    currentPodcastRef.current;
+                if (hasMedia) {
+                    setAudioError(null);
+                }
             }
         };
 
@@ -557,7 +571,7 @@ export const AudioElement = memo(function AudioElement() {
             );
             window.removeEventListener("pageshow", handlePageShow);
         };
-    }, [setIsPlaying]);
+    }, [setIsPlaying, setAudioError]);
 
     // --- Volume/mute sync ---
 
@@ -613,9 +627,12 @@ export const AudioElement = memo(function AudioElement() {
             return;
         }
 
-        // Save on pause
+        // Save on pause -- but skip if we just saved a finished state from handleEnded,
+        // otherwise this would overwrite isFinished=true with a non-finished save.
         if (!isPlaying) {
-            if (playbackType === "audiobook") {
+            if (justFinishedRef.current) {
+                justFinishedRef.current = false;
+            } else if (playbackType === "audiobook") {
                 saveAudiobookProgressRef.current();
             } else if (playbackType === "podcast") {
                 savePodcastProgressRef.current();
@@ -656,7 +673,6 @@ export const AudioElement = memo(function AudioElement() {
             }
 
             audioEngine.cleanup();
-            silenceKeepalive.destroy();
             lastTrackIdRef.current = null;
 
             if (progressSaveIntervalRef.current) {
