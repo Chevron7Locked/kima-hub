@@ -60,6 +60,7 @@ Thanks for your patience while I work through this.
 -   **Stream your library** - FLAC, MP3, AAC, OGG, and other common formats work out of the box
 -   **Automatic cataloging** - Kima scans your library and enriches it with metadata from MusicBrainz and Last.fm
 -   **Audio transcoding** - Stream at original quality or transcode on-the-fly (320kbps, 192kbps, or 128kbps)
+-   **Lyrics** - Displays embedded lyrics or fetches them automatically from LRCLIB. Timed lyrics get line-by-line sync during playback; untimed lyrics display as static text. Coverage is good for major artists but varies for niche or independent music\*
 -   **Ultra-wide support** - Library grid scales up to 8 columns on large displays
 
 <p align="center">

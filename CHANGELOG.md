@@ -5,6 +5,26 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-03-01
+
+### Added
+
+- **GHCR publishing**: Docker images now published to GitHub Container Registry alongside Docker Hub on tagged releases. Credit to @SupremeMortal (#48).
+- **#134 Lidarr batch album fetching**: Large Lidarr libraries no longer crash with V8 string overflow -- albums are fetched in paginated batches. Credit to @cachamber.
+- **#132 Preview volume sync**: Preview audio volume now syncs with the global player volume. Credit to @cachamber.
+
+### Fixed
+
+- **Artist page popular tracks**: Improved title matching with three-tier fallback (exact, normalized, aggressively stripped) so remaster/deluxe variants match correctly as owned. Unowned tracks now show artist hero image instead of gray placeholder.
+- **Card hover overlay regression**: Dark gradient overlays caused blackout effect on album art hover. Made overlay conditional on playable cards, softened opacity on grid cards.
+- **Album navigation delay**: First click to album pages felt unresponsive due to `prefetch={false}` on all card Links. Enabled Next.js prefetching for instant navigation.
+- **GHCR image name casing**: `github.repository_owner` preserves uppercase but GHCR requires all-lowercase. Compute image name at runtime with bash lowercase conversion.
+
+### Changed
+
+- **Playlist import performance**: Parallelized MusicBrainz lookups via Promise.all (PQueue rate limiter still serializes HTTP calls, but event loop stays unblocked for SSE progress updates). Batch-loaded all library tracks in `buildPlaylist()` and `refreshJobMatches()` -- reduced ~3000 per-track DB queries to 2 batch queries with in-memory matching.
+- **Dependencies**: Updated safe patches -- @bull-board 6.20.3, axios 1.13.6, bullmq 5.70.1, ioredis 5.10.0, fast-xml-parser 5.4.1 (stack overflow CVE fix), tailwindcss 4.2.1, framer-motion 12.34.3, tailwind-merge 3.5.0. Fixed npm audit vulnerabilities (ajv ReDoS, minimatch ReDoS).
+
 ## [1.6.0] - 2026-02-28
 
 ### Added
