@@ -65,7 +65,7 @@ function RadioStationCard({
             <div className={cn(
                 "absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r",
                 station.accentGradient,
-                "transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-center"
+                "transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150 origin-center"
             )} />
 
             {/* Loading overlay */}

@@ -96,7 +96,7 @@ export default function HomePage() {
                                                 {isRefreshingMixes ? (
                                                     <GradientSpinner size="sm" />
                                                 ) : (
-                                                    <RefreshCw className="w-3.5 h-3.5 group-hover:rotate-180 transition-transform duration-500" />
+                                                    <RefreshCw className="w-3.5 h-3.5 group-hover:rotate-180 transition-transform duration-150" />
                                                 )}
                                                 <span className="hidden sm:inline">
                                                     {isRefreshingMixes ? "Refreshing..." : "Refresh"}

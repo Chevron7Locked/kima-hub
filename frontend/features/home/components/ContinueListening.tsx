@@ -99,7 +99,7 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
                                     src={imageSrc}
                                     alt={item.name}
                                     fill
-                                    className="object-cover group-hover:scale-110 transition-transform duration-500"
+                                    className="object-cover group-hover:scale-110 transition-transform duration-150"
                                     sizes="180px"
                                     priority={false}
                                     unoptimized
@@ -121,7 +121,7 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
                             </div>
                         )}
                         {!hasProgress && (
-                            <div className={`absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r ${colors.accent} transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300`} />
+                            <div className={`absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r ${colors.accent} transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150`} />
                         )}
                     </div>
                     <div className="p-3 bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]">

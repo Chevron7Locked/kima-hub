@@ -58,7 +58,7 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
                                 alt={name}
                                 fill
                                 sizes="128px"
-                                className="object-cover group-hover:scale-110 transition-transform duration-500"
+                                className="object-cover group-hover:scale-110 transition-transform duration-150"
                                 loading="lazy"
                                 unoptimized
                             />
@@ -84,14 +84,14 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
                         </h3>
                         <div className="flex items-center gap-2 text-gray-400 group-hover:text-gray-300 transition-colors">
                             <span className="text-sm font-medium">View Profile</span>
-                            <ExternalLink className="w-4 h-4 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform duration-300" />
+                            <ExternalLink className="w-4 h-4 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform duration-150" />
                         </div>
                     </div>
                 </div>
             </div>
 
             {/* Accent Line */}
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-[#eab308] via-[#f59e0b] to-[#eab308] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-center" />
+            <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-[#eab308] via-[#f59e0b] to-[#eab308] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150 origin-center" />
         </Link>
     );
 }

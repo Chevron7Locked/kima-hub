@@ -209,7 +209,7 @@ export default function BrowsePlaylistsPage() {
                         alt={item.title}
                         fill
                         sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, (max-width: 1536px) 16vw, 14vw"
-                        className="object-cover group-hover:scale-105 transition-transform duration-300"
+                        className="object-cover group-hover:scale-105 transition-transform duration-150"
                         unoptimized
                     />
                 :   <div className="w-full h-full flex items-center justify-center">
@@ -218,7 +218,7 @@ export default function BrowsePlaylistsPage() {
                 }
 
                 {/* Hover accent line */}
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#a855f7] to-[#c026d3] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-center" />
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#a855f7] to-[#c026d3] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150 origin-center" />
             </div>
             <h3 className="text-sm font-black text-white truncate tracking-tight">
                 {item.title}
@@ -241,7 +241,7 @@ export default function BrowsePlaylistsPage() {
                     alt={genre.name}
                     fill
                     sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
-                    className="object-cover group-hover:scale-105 transition-transform duration-300"
+                    className="object-cover group-hover:scale-105 transition-transform duration-150"
                     unoptimized
                 />
             :   <div className="w-full h-full bg-gradient-to-br from-[#a855f7]/30 to-[#c026d3]/10" />
@@ -254,7 +254,7 @@ export default function BrowsePlaylistsPage() {
             </div>
 
             {/* Hover accent line */}
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#a855f7] to-[#c026d3] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-center" />
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#a855f7] to-[#c026d3] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150 origin-center" />
         </div>
     );
 
