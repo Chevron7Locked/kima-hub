@@ -55,7 +55,7 @@ router.get("/", async (req, res) => {
         const plays = await prisma.play.findMany({
             where: { userId },
             orderBy: { playedAt: "desc" },
-            take: parseInt(limit as string, 10),
+            take: Math.min(Math.max(parseInt(limit as string, 10) || 50, 1), 200),
             include: {
                 track: {
                     include: {

@@ -4,6 +4,7 @@ import { config } from "../config";
 import fs from "fs/promises";
 import path from "path";
 import axios from "axios";
+import { validateUrlForFetch } from "../utils/ssrf";
 
 /**
  * PodcastDownloadService - Background download and caching of podcast episodes
@@ -201,6 +202,12 @@ async function performDownload(
         // Clean up any partial temp files from previous attempts
         await fs.unlink(tempPath).catch(() => {});
         
+        // SSRF protection
+        const ssrfError = await validateUrlForFetch(audioUrl);
+        if (ssrfError) {
+            throw new Error(`SSRF blocked: ${ssrfError}`);
+        }
+
         // Download the file with longer timeout for large podcasts
         const response = await axios.get(audioUrl, {
             responseType: 'stream',

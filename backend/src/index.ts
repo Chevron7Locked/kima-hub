@@ -81,12 +81,10 @@ app.use(
                 if (config.allowedOrigins.includes(origin)) {
                     callback(null, true);
                 } else {
-                    // For self-hosted: allow anyway but log it
-                    // Users shouldn't have to configure CORS for their own app
                     logger.debug(
-                        `[CORS] Origin ${origin} not in allowlist, allowing anyway (self-hosted)`
+                        `[CORS] Origin ${origin} not in allowlist, rejecting`
                     );
-                    callback(null, true);
+                    callback(new Error("Not allowed by CORS"));
                 }
             } else {
                 // No restrictions - allow all (self-hosted default)

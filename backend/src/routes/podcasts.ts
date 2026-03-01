@@ -6,6 +6,7 @@ import { rssParserService } from "../services/rss-parser";
 import { podcastCacheService } from "../services/podcastCache";
 import { parseRangeHeader } from "../utils/rangeParser";
 import { safeError } from "../utils/errors";
+import { validateUrlForFetch } from "../utils/ssrf";
 import axios from "axios";
 import fs from "fs";
 
@@ -966,6 +967,13 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
         if (userId && !isDownloading(episodeId)) {
             logger.debug(`   Triggering background download for caching`);
             downloadInBackground(episodeId, episode.audioUrl, userId);
+        }
+
+        // SSRF protection: validate audio URL before fetching
+        const ssrfError = await validateUrlForFetch(episode.audioUrl);
+        if (ssrfError) {
+            logger.warn(`[PODCAST STREAM] SSRF blocked: ${ssrfError} for ${episode.audioUrl}`);
+            return res.status(400).json({ error: "Invalid audio URL" });
         }
 
         // Stream from RSS URL

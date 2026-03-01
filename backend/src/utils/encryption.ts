@@ -31,15 +31,22 @@ function getEncryptionKey(): Buffer {
     }
 
     if (key.length < 32) {
-        logger.warn("SETTINGS_ENCRYPTION_KEY is shorter than 32 characters -- deriving key via SHA-256. Consider using a 32+ char key.");
-        return crypto.createHash("sha256").update(key).digest();
+        logger.warn("SETTINGS_ENCRYPTION_KEY is shorter than 32 characters. Consider using a 32+ char key.");
     }
-    // Truncate if too long
-    return Buffer.from(key.slice(0, 32));
+    // Always derive key via SHA-256 for consistent 256-bit key regardless of input length
+    return crypto.createHash("sha256").update(key).digest();
 }
 
 // Validate encryption key on module load to fail fast
 const ENCRYPTION_KEY = getEncryptionKey();
+
+// Legacy key derivation for backward compatibility with data encrypted before SHA-256 normalization
+function getLegacyEncryptionKey(): Buffer | null {
+    const key = process.env.SETTINGS_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
+    if (!key || key.length < 32) return null; // Short keys already used SHA-256
+    return Buffer.from(key.slice(0, 32));
+}
+const LEGACY_KEY = getLegacyEncryptionKey();
 
 /**
  * Encrypt a string using AES-256-CBC
@@ -78,11 +85,23 @@ export function decrypt(text: string): string {
         decrypted = Buffer.concat([decrypted, decipher.final()]);
         return decrypted.toString();
     } catch (error: any) {
-        // If it's a decryption error (wrong key), throw so callers know the value is corrupt
+        if (error.code === 'ERR_OSSL_BAD_DECRYPT' && LEGACY_KEY) {
+            // Try legacy key derivation (pre-SHA256 normalization)
+            try {
+                const parts = text.split(":");
+                const iv = Buffer.from(parts[0], "hex");
+                const encryptedText = Buffer.from(parts.slice(1).join(":"), "hex");
+                const decipher = crypto.createDecipheriv(ALGORITHM, LEGACY_KEY, iv);
+                let decrypted = decipher.update(encryptedText);
+                decrypted = Buffer.concat([decrypted, decipher.final()]);
+                return decrypted.toString();
+            } catch {
+                throw error;
+            }
+        }
         if (error.code === 'ERR_OSSL_BAD_DECRYPT') {
             throw error;
         }
-        // For other errors, log and return original (might be unencrypted)
         logger.error("Decryption error:", error);
         return text;
     }
