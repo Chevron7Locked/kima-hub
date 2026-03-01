@@ -5,6 +5,7 @@ import { redisClient } from "../utils/redis";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { getSystemSettings, invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
+import { eventBus } from "../services/eventBus";
 import { vibeQueue } from "../workers/enrichmentQueues";
 import { triggerEnrichmentNow } from "../workers/unifiedEnrichment";
 import os from "os";
@@ -479,6 +480,7 @@ router.post("/vibe/failure", async (req, res) => {
         });
 
         res.json({ message: "Failure recorded" });
+        eventBus.emit({ type: "enrichment:progress", userId: "*", payload: { phase: "vibe" } });
     } catch (error: any) {
         logger.error("Record vibe failure error:", error);
         res.status(500).json({ error: "Failed to record failure" });
@@ -644,6 +646,7 @@ router.post("/vibe/success", async (req, res) => {
         await enrichmentFailureService.resolveByEntity("vibe", trackId);
 
         res.json({ message: "Stale failures resolved" });
+        eventBus.emit({ type: "enrichment:progress", userId: "*", payload: { phase: "vibe" } });
     } catch (error: any) {
         logger.error("Resolve vibe failure error:", error);
         res.status(500).json({ error: "Failed to resolve failures" });

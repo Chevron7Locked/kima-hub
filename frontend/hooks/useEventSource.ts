@@ -106,6 +106,9 @@ export function useEventSource() {
                             queryClient.invalidateQueries({ queryKey: ["enrichment-progress"] });
                             queryClient.invalidateQueries({ queryKey: ["library", "recently-added"] });
                             break;
+                        case "enrichment:progress":
+                            queryClient.invalidateQueries({ queryKey: ["enrichment-progress"] });
+                            break;
                         case "import:progress":
                             queryClient.setQueryData(
                                 ["import-status", data.jobId],
