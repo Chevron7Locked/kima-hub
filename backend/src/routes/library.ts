@@ -13,6 +13,7 @@ import fs from "fs";
 import { config } from "../config";
 import { fanartService } from "../services/fanart";
 import { deezerService } from "../services/deezer";
+import { lidarrService } from "../services/lidarr";
 import { musicBrainzService } from "../services/musicbrainz";
 import { coverArtService } from "../services/coverArt";
 import { getSystemSettings } from "../utils/systemSettings";
@@ -1572,11 +1573,43 @@ router.get("/albums/:id", async (req, res) => {
 
     const artistData = album.artist;
 
+    let missingTracks: Array<{
+      title: string;
+      trackNumber: number | null;
+      previewUrl: string | null;
+    }> = [];
+
+    if (album.rgMbid) {
+      const lidarrMissingTracks = await lidarrService.getMissingTracksByAlbumMbid(
+        album.rgMbid
+      );
+
+      if (lidarrMissingTracks.length > 0) {
+        missingTracks = await Promise.all(
+          lidarrMissingTracks.map(async (track) => {
+            let previewUrl: string | null = null;
+            if (artistData?.name) {
+              previewUrl = await deezerService.getTrackPreview(
+                artistData.name,
+                track.title
+              );
+            }
+            return {
+              title: track.title,
+              trackNumber: track.trackNumber,
+              previewUrl,
+            };
+          })
+        );
+      }
+    }
+
     res.json({
       ...album,
       artist: artistData,
       owned: isOwned,
       coverArt: album.coverUrl,
+      missingTracks,
     });
   } catch (error) {
     logger.error("Get album error:", error);

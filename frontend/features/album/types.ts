@@ -20,15 +20,25 @@ export interface Album {
     rgMbid?: string;
     owned?: boolean;
     tracks?: Track[];
+    missingTracks?: MissingTrack[];
     similarAlbums?: SimilarAlbum[];
+}
+
+export interface MissingTrack {
+    title: string;
+    trackNumber: number | null;
+    previewUrl: string | null;
 }
 
 export interface Track {
     id: string;
     title: string;
     duration: number;
+    trackNo?: number;
     trackNumber?: number;
     discNumber?: number;
+    isMissing?: boolean;
+    previewUrl?: string | null;
     playCount?: number;
     artist?: {
         id?: string;
