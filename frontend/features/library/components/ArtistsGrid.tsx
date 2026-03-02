@@ -72,7 +72,7 @@ const ArtistCardItem = memo(
                                     src={coverArtUrl}
                                     alt={artist.name}
                                     fill
-                                    className="object-cover group-hover:scale-110 transition-transform duration-500"
+                                    className="object-cover group-hover:scale-110 transition-transform duration-150"
                                     sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 16vw"
                                 />
                             ) : (
@@ -101,7 +101,7 @@ const ArtistCardItem = memo(
                         </button>
 
                         {/* Color accent bar */}
-                        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-[#ec4899] to-[#db2777] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300" />
+                        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-[#ec4899] to-[#db2777] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150" />
                     </div>
 
                     {/* Info section with monospace data */}

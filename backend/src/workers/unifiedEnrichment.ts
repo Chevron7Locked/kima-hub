@@ -360,6 +360,19 @@ export async function runFullEnrichment(): Promise<{
         },
     });
 
+    // Reset vibe embeddings so executeVibePhase re-queues everything
+    await prisma.$executeRaw`DELETE FROM track_embeddings`;
+    await prisma.track.updateMany({
+        where: { vibeAnalysisStatus: { not: null } },
+        data: {
+            vibeAnalysisStatus: null,
+            vibeAnalysisRetryCount: 0,
+            vibeAnalysisStatusUpdatedAt: null,
+            vibeAnalysisError: null,
+        },
+    });
+    await enrichmentFailureService.clearAllFailures("vibe");
+
     // Now run the enrichment cycle
     const result = await runEnrichmentCycle(true);
 

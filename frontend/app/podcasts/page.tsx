@@ -54,7 +54,7 @@ function PodcastCard({
                         alt={podcast.title}
                         fill
                         sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 20vw"
-                        className="object-cover group-hover:scale-105 transition-transform duration-500"
+                        className="object-cover group-hover:scale-105 transition-transform duration-150"
                         unoptimized
                     />
                 ) : (
@@ -73,7 +73,7 @@ function PodcastCard({
             </div>
             <div className={cn(
                 "h-0.5 bg-gradient-to-r from-[#3b82f6] to-[#2563eb]",
-                "transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-center"
+                "transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150 origin-center"
             )} />
         </button>
     );

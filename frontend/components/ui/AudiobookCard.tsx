@@ -86,7 +86,7 @@ export function AudiobookCard({
                         )}
 
                         {/* Hover accent line */}
-                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#f59e0b] to-[#d97706] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-center" />
+                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#f59e0b] to-[#d97706] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150 origin-center" />
                     </div>
                 </div>
 

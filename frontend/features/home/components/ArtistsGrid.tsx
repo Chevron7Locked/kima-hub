@@ -38,7 +38,7 @@ const ArtistCard = memo(
                                         src={imageSrc}
                                         alt={artist.name}
                                         fill
-                                        className="object-cover group-hover:scale-110 transition-transform duration-500"
+                                        className="object-cover group-hover:scale-110 transition-transform duration-150"
                                         sizes="180px"
                                         priority={false}
                                         unoptimized
@@ -47,7 +47,7 @@ const ArtistCard = memo(
                                     <Music className="w-10 h-10 text-gray-700" />
                                 )}
                             </div>
-                            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#ec4899] to-[#db2777] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300" />
+                            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#ec4899] to-[#db2777] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150" />
                         </div>
                         <div className="p-3 bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]">
                             <h3 className="text-sm font-black text-white truncate tracking-tight">

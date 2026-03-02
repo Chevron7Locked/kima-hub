@@ -57,7 +57,7 @@ export function MediaCard({
                                 alt={title}
                                 fill
                                 sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 16vw"
-                                className="object-cover group-hover:scale-110 transition-transform duration-500"
+                                className="object-cover group-hover:scale-110 transition-transform duration-150"
                                 loading="lazy"
                                 unoptimized
                             />
@@ -82,7 +82,7 @@ export function MediaCard({
                     {/* Color accent bar */}
                     <div
                         className={cn(
-                            "absolute bottom-0 left-0 right-0 h-1 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300",
+                            "absolute bottom-0 left-0 right-0 h-1 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150",
                             accentColor.gradient,
                         )}
                     />
