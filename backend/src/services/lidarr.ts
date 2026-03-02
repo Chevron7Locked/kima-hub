@@ -7,6 +7,7 @@ import { lidarrApiCallsTotal, lidarrApiDuration } from "../utils/metrics";
 import type {
     LidarrAlbum,
     LidarrArtist,
+    LidarrTrack,
     LidarrTag,
     LidarrRootFolder,
     LidarrQualityProfile,
@@ -1820,6 +1821,110 @@ class LidarrService {
         } catch (error: any) {
             logger.error("Lidarr album check by title error:", error.message);
             return false;
+        }
+    }
+
+    /**
+     * Get missing tracks for an album by release-group MBID.
+     * Returns tracks that exist in Lidarr metadata but do not have files yet.
+     */
+    async getMissingTracksByAlbumMbid(
+        albumMbid: string
+    ): Promise<Array<{ title: string; trackNumber: number | null }>> {
+        await this.ensureInitialized();
+
+        if (!this.enabled || !this.client || !albumMbid) {
+            return [];
+        }
+
+        try {
+            const albumResponse = await this.client.get<LidarrAlbum[]>(
+                "/api/v1/album",
+                {
+                    params: { foreignAlbumId: albumMbid },
+                }
+            );
+
+            const lidarrAlbum = (albumResponse.data || []).find(
+                (a: LidarrAlbum) => a.foreignAlbumId === albumMbid
+            );
+
+            if (!lidarrAlbum) {
+                return [];
+            }
+
+            const tracksResponse = await this.client.get<LidarrTrack[]>(
+                "/api/v1/track",
+                {
+                    params: { albumId: lidarrAlbum.id },
+                }
+            );
+
+            const tracks: LidarrTrack[] = tracksResponse.data || [];
+            const parseTrackNumber = (
+                track: LidarrTrack
+            ): number | null => {
+                const rawCandidates = [
+                    track.trackNumber,
+                    track.absoluteTrackNumber,
+                    track.position,
+                ];
+
+                for (const rawValue of rawCandidates) {
+                    const parsedValue = Number(rawValue);
+                    if (Number.isFinite(parsedValue) && parsedValue > 0) {
+                        return parsedValue;
+                    }
+                }
+
+                const title = track.title || "";
+                const titleNumberMatch = title.match(/^\s*(\d{1,3})\b/);
+                if (titleNumberMatch) {
+                    const parsedFromTitle = Number(titleNumberMatch[1]);
+                    if (
+                        Number.isFinite(parsedFromTitle) &&
+                        parsedFromTitle > 0
+                    ) {
+                        return parsedFromTitle;
+                    }
+                }
+
+                return null;
+            };
+
+            const missingTracks = tracks
+                .filter((track: LidarrTrack) =>
+                    track.hasFile === undefined
+                        ? !track.trackFileId
+                        : !track.hasFile
+                )
+                .map((track: LidarrTrack) => ({
+                    title: track.title,
+                    trackNumber: parseTrackNumber(track),
+                }))
+                .filter((track: { title: string; trackNumber: number | null }) =>
+                    !!track.title
+                )
+                .sort(
+                    (
+                        a: { title: string; trackNumber: number | null },
+                        b: { title: string; trackNumber: number | null }
+                    ) => {
+                    if (a.trackNumber === null && b.trackNumber === null) {
+                        return a.title.localeCompare(b.title);
+                    }
+                    if (a.trackNumber === null) return 1;
+                    if (b.trackNumber === null) return -1;
+                    return a.trackNumber - b.trackNumber;
+                    }
+                );
+
+            return missingTracks;
+        } catch (error: any) {
+            logger.debug(
+                `[LIDARR] Failed to fetch missing tracks for album MBID ${albumMbid}: ${error?.message || error}`
+            );
+            return [];
         }
     }
 

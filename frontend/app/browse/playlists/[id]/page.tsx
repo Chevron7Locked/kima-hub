@@ -74,6 +74,15 @@ export default function DeezerPlaylistDetailPage() {
         audio.volume = isMuted ? 0 : volume;
     }, [volume, isMuted]);
 
+    const teardownPreviewAudio = useCallback((audio: HTMLAudioElement | null) => {
+        if (!audio) return;
+        audio.onended = null;
+        audio.onerror = null;
+        audio.pause();
+        audio.src = "";
+        audio.load();
+    }, []);
+
     useEffect(() => {
         async function fetchPlaylist() {
             setIsLoading(true);
@@ -102,13 +111,11 @@ export default function DeezerPlaylistDetailPage() {
     useEffect(() => {
         return () => {
             if (audioRef.current) {
-                audioRef.current.pause();
-                audioRef.current.src = "";
-                audioRef.current.load();
+                teardownPreviewAudio(audioRef.current);
                 audioRef.current = null;
             }
         };
-    }, []);
+    }, [teardownPreviewAudio]);
 
     const handlePlayPreview = (track: DeezerTrack) => {
         if (!track.previewUrl) {
@@ -129,9 +136,7 @@ export default function DeezerPlaylistDetailPage() {
         }
 
         if (audioRef.current) {
-            audioRef.current.pause();
-            audioRef.current.src = "";
-            audioRef.current.load();
+            teardownPreviewAudio(audioRef.current);
         }
 
         const audio = new Audio(track.previewUrl);
@@ -139,14 +144,18 @@ export default function DeezerPlaylistDetailPage() {
         audioRef.current = audio;
 
         audio.onended = () => {
+            if (audioRef.current !== audio) return;
             setPlayingTrackId(null);
             setIsPreviewPlaying(false);
+            audioRef.current = null;
         };
 
         audio.onerror = () => {
+            if (audioRef.current !== audio) return;
             toast.error("Failed to play preview");
             setPlayingTrackId(null);
             setIsPreviewPlaying(false);
+            audioRef.current = null;
         };
 
         audio.play().catch(() => {
@@ -159,9 +168,7 @@ export default function DeezerPlaylistDetailPage() {
 
     const stopPreview = () => {
         if (audioRef.current) {
-            audioRef.current.pause();
-            audioRef.current.src = "";
-            audioRef.current.load();
+            teardownPreviewAudio(audioRef.current);
             audioRef.current = null;
         }
         setPlayingTrackId(null);

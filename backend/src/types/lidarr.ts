@@ -60,6 +60,18 @@ export interface LidarrMedia {
   mediumFormat: string;
 }
 
+export interface LidarrTrack {
+  id: number;
+  albumId: number;
+  title: string;
+  trackNumber?: number | string;
+  absoluteTrackNumber?: number | string;
+  position?: number | string;
+  mediumNumber?: number;
+  hasFile?: boolean;
+  trackFileId?: number;
+}
+
 export interface LidarrArtist {
   id: number;
   foreignArtistId: string;
