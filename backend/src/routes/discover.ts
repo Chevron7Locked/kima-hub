@@ -222,7 +222,10 @@ router.post("/generate", async (req, res) => {
                 logger.debug(`\n Queuing Discover Weekly generation for user ${userId}`);
 
                 // Add generation job to queue
-                const job = await discoverQueue.add("discover-weekly", { userId });
+                const weekKey = startOfWeek(new Date(), { weekStartsOn: 1 }).toISOString().split('T')[0];
+                const job = await discoverQueue.add("discover-weekly", { userId }, {
+                    jobId: `discover-weekly-${userId}-${weekKey}`,
+                });
 
                 return { conflict: false as const, jobId: job.id };
             },

@@ -30,6 +30,8 @@ import { startPodcastEnrichmentWorker } from "./podcastEnrichmentWorker";
 import {
     startAudioCompletionSubscriber,
     stopAudioCompletionSubscriber,
+    haltVibeQueuing,
+    resumeVibeQueuing,
 } from "./audioCompletionSubscriber";
 import { enrichmentStateService } from "../services/enrichmentState";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
@@ -48,6 +50,7 @@ let redis: Redis | null = null;
 let controlSubscriber: Redis | null = null;
 let isPaused = false;
 let isStopping = false;
+let userStopped = false; // True after explicit stop; prevents auto-restart via timer
 let immediateEnrichmentRequested = false;
 let activeEnrichmentWorkers: BullWorker[] = [];
 let consecutiveSystemFailures = 0; // Track consecutive system-level failures
@@ -55,11 +58,34 @@ let lastRunTime = 0;
 let audioLastCycleCompletedCount: number | null = null;
 const MIN_INTERVAL_MS = 10000; // Minimum 10s between cycles
 
+const AUDIO_ANALYSIS_CONTROL_CHANNEL = "audio:analysis:control";
+
 // Timestamp for once-per-hour orphaned failure record cleanup
 let lastOrphanedFailuresCleanup: Date | null = null;
 
 // Timestamp for once-per-day resolved failure record cleanup (>30 days old)
 let lastResolvedCleanup: Date | null = null;
+
+/**
+ * Reset all pause/stop flags and resume the Python audio analyzer.
+ * Called by every function that (re)starts enrichment.
+ */
+async function clearPauseState(): Promise<void> {
+    isPaused = false;
+    isStopping = false;
+    userStopped = false;
+    // Resume BullMQ enrichment workers + vibe queue
+    Promise.all(activeEnrichmentWorkers.map((w) => w.resume())).catch(() => {});
+    resumeVibeQueuing();
+    // Resume the Python audio analyzer in case it was paused by a prior stop
+    try {
+        const pub = new Redis(config.redisUrl);
+        await pub.publish(AUDIO_ANALYSIS_CONTROL_CHANNEL, "resume");
+        await pub.quit();
+    } catch (err) {
+        logger.warn(`[Enrichment] Failed to resume audio analyzer: ${(err as Error).message}`);
+    }
+}
 
 // Mood tags to extract from Last.fm
 const MOOD_TAGS = new Set([
@@ -195,17 +221,21 @@ async function setupControlChannel() {
                     isPaused = true;
                     logger.debug("[Enrichment] Paused");
                     Promise.all(activeEnrichmentWorkers.map((w) => w.pause())).catch(() => {});
+                    haltVibeQueuing();
                 } else if (message === "resume") {
                     isPaused = false;
                     logger.debug("[Enrichment] Resumed");
                     Promise.all(activeEnrichmentWorkers.map((w) => w.resume())).catch(() => {});
+                    resumeVibeQueuing();
                 } else if (message === "stop") {
                     isStopping = true;
                     isPaused = true;
                     logger.debug(
                         "[Enrichment] Stopping gracefully - completing current item...",
                     );
-                    // DO NOT override state - let enrichmentStateService.stop() handle it
+                    // Pause all BullMQ workers + halt vibe queuing
+                    Promise.all(activeEnrichmentWorkers.map((w) => w.pause())).catch(() => {});
+                    haltVibeQueuing();
                     // DO NOT kill the CLAP analyzer — it has its own idle timeout (MODEL_IDLE_TIMEOUT=300s)
                     // and will unload the model when the vibe queue is empty. Killing it caused
                     // permanent death because supervisor's autorestart didn't revive clean exits.
@@ -227,7 +257,7 @@ export async function startUnifiedEnrichmentWorker() {
     logger.debug(`   Interval: ${ENRICHMENT_INTERVAL_MS / 1000}s`);
     logger.debug("");
 
-     // Crash recovery: reset orphaned tracks stuck in "processing" from a previous crash
+     // Crash recovery: reset orphaned entities stuck mid-processing from a previous crash
      const orphanedAudio = await prisma.track.updateMany({
          where: { analysisStatus: "processing" },
          data: { analysisStatus: "pending", analysisStartedAt: null },
@@ -236,9 +266,18 @@ export async function startUnifiedEnrichmentWorker() {
          where: { vibeAnalysisStatus: "processing" },
          data: { vibeAnalysisStatus: "pending", vibeAnalysisStartedAt: null },
      });
-     if (orphanedAudio.count > 0 || orphanedVibe.count > 0) {
+     const orphanedArtists = await prisma.artist.updateMany({
+         where: { enrichmentStatus: "enriching" },
+         data: { enrichmentStatus: "pending" },
+     });
+     const orphanedQueued = await prisma.track.updateMany({
+         where: { lastfmTags: { has: "_queued" } },
+         data: { lastfmTags: [] },
+     });
+     const totalOrphaned = orphanedAudio.count + orphanedVibe.count + orphanedArtists.count + orphanedQueued.count;
+     if (totalOrphaned > 0) {
          logger.info(
-             `[Enrichment] Crash recovery: reset ${orphanedAudio.count} orphaned audio + ${orphanedVibe.count} orphaned vibe tracks to pending`
+             `[Enrichment] Crash recovery: reset ${orphanedAudio.count} audio, ${orphanedVibe.count} vibe, ${orphanedArtists.count} artists, ${orphanedQueued.count} _queued tracks`
          );
      }
 
@@ -248,6 +287,7 @@ export async function startUnifiedEnrichmentWorker() {
      // Reset local flags from any previous session
      isPaused = false;
      isStopping = false;
+     userStopped = false;
 
      // Check if there's existing state that might be problematic
      const existingState = await enrichmentStateService.getState();
@@ -338,8 +378,7 @@ export async function runFullEnrichment(): Promise<{
 }> {
     logger.debug("\n=== FULL ENRICHMENT: Re-enriching everything ===\n");
 
-    // Reset pause state when starting full enrichment
-    isPaused = false;
+    await clearPauseState();
 
     // Initialize state for new enrichment
     await enrichmentStateService.initializeState();
@@ -433,11 +472,62 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
 }> {
     const emptyResult = { artists: 0, tracks: 0, audioQueued: 0 };
 
-    // Sync local pause flag with state service
-    if (!isPaused) {
+    // Handle stopping state: transition to idle before checking isPaused.
+    // This must run first because stop sets both isStopping AND isPaused.
+    // If we checked isPaused first, we'd return early and never clear isStopping.
+    if (isStopping) {
+        // Reset tracks the Python analyzer claimed but never processed
+        const orphanedAudio = await prisma.track.updateMany({
+            where: { analysisStatus: "processing" },
+            data: { analysisStatus: "pending", analysisStartedAt: null },
+        });
+        const orphanedVibe = await prisma.track.updateMany({
+            where: { vibeAnalysisStatus: "processing" },
+            data: { vibeAnalysisStatus: "pending", vibeAnalysisStartedAt: null },
+        });
+        if (orphanedAudio.count > 0 || orphanedVibe.count > 0) {
+            logger.info(
+                `[Enrichment] Stop cleanup: reset ${orphanedAudio.count} audio + ${orphanedVibe.count} vibe processing tracks to pending`
+            );
+        }
+        await enrichmentStateService.updateState({ status: "idle", currentPhase: null });
+        isStopping = false;
+        isPaused = false;
+        userStopped = true;
+        return emptyResult;
+    }
+
+    // User explicitly stopped -- don't auto-restart via timer.
+    // Only explicit actions (re-run, full enrich, triggerEnrichmentNow) clear this.
+    if (userStopped && !fullMode && !immediateEnrichmentRequested) {
+        return emptyResult;
+    }
+
+    // Sync local flags with state service (fallback for missed control messages)
+    if (isPaused) {
+        // Reverse sync: if state says running but local isPaused is true, resume
         const state = await enrichmentStateService.getState();
-        if (state?.status === "paused" || state?.status === "stopping") {
+        if (state?.status === "running") {
+            isPaused = false;
+            logger.debug("[Enrichment] Reverse sync: state is running, clearing stale local pause");
+        }
+    } else {
+        const state = await enrichmentStateService.getState();
+        if (state?.status === "paused") {
             isPaused = true;
+        } else if (state?.status === "stopping") {
+            // State says stopping but we missed the control message
+            await prisma.track.updateMany({
+                where: { analysisStatus: "processing" },
+                data: { analysisStatus: "pending", analysisStartedAt: null },
+            });
+            await prisma.track.updateMany({
+                where: { vibeAnalysisStatus: "processing" },
+                data: { vibeAnalysisStatus: "pending", vibeAnalysisStartedAt: null },
+            });
+            await enrichmentStateService.updateState({ status: "idle", currentPhase: null });
+            userStopped = true;
+            return emptyResult;
         }
     }
 
@@ -1251,8 +1341,7 @@ export async function triggerEnrichmentNow(): Promise<{
 }> {
     logger.debug("[Enrichment] Triggering immediate enrichment cycle...");
 
-    // Reset pause state when triggering enrichment
-    isPaused = false;
+    await clearPauseState();
 
     // Set flag to bypass the minimum interval check (does NOT bypass isRunning —
     // a concurrent cycle will still cause this call to return an empty result)
@@ -1271,7 +1360,7 @@ export async function triggerEnrichmentNow(): Promise<{
      const result = await resetArtistsOnly();
 
      logger.debug("[Enrichment] Starting sequential enrichment from artists phase...");
-     isPaused = false;
+     await clearPauseState();
      immediateEnrichmentRequested = true;
 
      // Run full cycle but it will stop after artists phase if paused/stopped
@@ -1290,7 +1379,7 @@ export async function triggerEnrichmentNow(): Promise<{
      const result = await resetMoodTagsOnly();
 
      logger.debug("[Enrichment] Starting sequential enrichment from mood tags phase...");
-     isPaused = false;
+     await clearPauseState();
      immediateEnrichmentRequested = true;
 
      const cycleResult = await runEnrichmentCycle(false);
@@ -1331,7 +1420,7 @@ export async function triggerEnrichmentNow(): Promise<{
      logger.debug(`[Enrichment] Queued ${queued} tracks for audio analysis`);
 
      // Trigger a cycle immediately so the UI shows running and progress updates
-     isPaused = false;
+     await clearPauseState();
      immediateEnrichmentRequested = true;
      runEnrichmentCycle(false).catch((err) =>
          logger.error("[Enrichment] reRunAudioAnalysisOnly cycle error:", err)

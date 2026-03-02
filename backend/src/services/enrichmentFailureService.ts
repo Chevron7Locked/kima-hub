@@ -57,52 +57,36 @@ class EnrichmentFailureService {
             metadata,
         } = input;
 
-        // Try to find existing failure
-        const existing = await prisma.enrichmentFailure.findUnique({
+        const serializedMeta = metadata
+            ? JSON.parse(JSON.stringify(metadata))
+            : null;
+
+        return await prisma.enrichmentFailure.upsert({
             where: {
-                entityType_entityId: {
-                    entityType,
-                    entityId,
-                },
+                entityType_entityId: { entityType, entityId },
             },
-        });
-
-        if (existing) {
-            // Update existing failure - cap retry count at maxRetries to prevent unbounded increment
-            const newRetryCount = Math.min(
-                existing.retryCount + 1,
-                existing.maxRetries
-            );
-
-            return await prisma.enrichmentFailure.update({
-                where: { id: existing.id },
-                data: {
-                    errorMessage,
-                    errorCode,
-                    retryCount: newRetryCount,
-                    lastFailedAt: new Date(),
-                    metadata: metadata
-                        ? JSON.parse(JSON.stringify(metadata))
-                        : existing.metadata,
-                },
-            }) as EnrichmentFailure;
-        } else {
-            // Create new failure
-            return await prisma.enrichmentFailure.create({
-                data: {
-                    entityType,
-                    entityId,
-                    entityName,
-                    errorMessage,
-                    errorCode,
-                    retryCount: 1,
-                    maxRetries: 3,
-                    metadata: metadata
-                        ? JSON.parse(JSON.stringify(metadata))
-                        : null,
-                },
-            }) as EnrichmentFailure;
-        }
+            create: {
+                entityType,
+                entityId,
+                entityName,
+                errorMessage,
+                errorCode,
+                retryCount: 1,
+                maxRetries: 3,
+                metadata: serializedMeta,
+            },
+            update: {
+                errorMessage,
+                errorCode,
+                retryCount: { increment: 1 },
+                lastFailedAt: new Date(),
+                resolved: false,
+                resolvedAt: null,
+                metadata: metadata
+                    ? serializedMeta
+                    : undefined,
+            },
+        }) as EnrichmentFailure;
     }
 
     /**

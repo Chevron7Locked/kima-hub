@@ -277,11 +277,17 @@ export class AudioStreamingService {
                             const stats = await fs.promises.stat(cachePath);
 
                             // Save to database
-                            await prisma.transcodedFile.create({
-                                data: {
+                            await prisma.transcodedFile.upsert({
+                                where: { cachePath: cacheFileName },
+                                create: {
                                     trackId,
                                     quality,
                                     cachePath: cacheFileName,
+                                    cacheSize: stats.size,
+                                    sourceModified,
+                                    lastAccessed: new Date(),
+                                },
+                                update: {
                                     cacheSize: stats.size,
                                     sourceModified,
                                     lastAccessed: new Date(),

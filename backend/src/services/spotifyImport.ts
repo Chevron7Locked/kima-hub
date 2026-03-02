@@ -1432,6 +1432,12 @@ class SpotifyImportService {
     const logger = jobLoggers.get(job.id);
 
     try {
+      // Guard: if cancelled between startImport() and here, abort
+      if (job.status === "cancelled") {
+        logger?.info("[Spotify Import] Job cancelled before downloading started");
+        return;
+      }
+
       // Phase 1: Download albums using AcquisitionService
       if (albumMbidsToDownload.length > 0) {
         job.status = "downloading";
@@ -1677,6 +1683,12 @@ class SpotifyImportService {
       return;
     }
 
+    // Guard: don't re-process if already past the download phase
+    if (["completed", "failed", "cancelled", "scanning", "creating_playlist"].includes(job.status)) {
+      logger?.debug(`   Job already in ${job.status} state, skipping`);
+      return;
+    }
+
     const jobLogger = jobLoggers.get(importJobId);
 
     // Check download jobs for this import
@@ -1810,6 +1822,12 @@ class SpotifyImportService {
       return;
     }
 
+    // Guard: job already reached a terminal state from a previous scan
+    if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+      logger?.debug(`   Job already ${job.status}, skipping playlist build`);
+      return;
+    }
+
     await this.buildPlaylist(job);
   }
 
@@ -1818,6 +1836,12 @@ class SpotifyImportService {
    */
   private async buildPlaylist(job: ImportJob): Promise<void> {
     const logger = jobLoggers.get(job.id);
+
+    // Guard: playlist already created for this job
+    if (job.createdPlaylistId) {
+      logger?.debug(`   Playlist already created: ${job.createdPlaylistId}, skipping`);
+      return;
+    }
 
     job.status = "creating_playlist";
     job.progress = 90;

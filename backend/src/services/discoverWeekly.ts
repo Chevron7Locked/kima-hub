@@ -736,6 +736,19 @@ export class DiscoverWeeklyService {
         } else {
             logger.debug(`[BATCH ${batchId}] All jobs done via Soulseek, no Lidarr wait needed`);
         }
+
+        // Re-check batch status after wait to prevent concurrent callers from both proceeding
+        const freshBatch = await prisma.discoveryBatch.findUnique({
+            where: { id: batchId },
+            select: { status: true },
+        });
+        if (!freshBatch || freshBatch.status !== "downloading") {
+            logger.debug(
+                `\n[BATCH ${batchId}] Status changed to ${freshBatch?.status} during wait, aborting (handled by other caller)`
+            );
+            return;
+        }
+
         logger.debug(`[BATCH ${batchId}] Transitioning to scan phase...`);
 
         // All jobs finished - use transaction to update batch and create unavailable records
@@ -781,6 +794,7 @@ export class DiscoverWeeklyService {
                     batchId,
                     {
                         status: "failed",
+                        expectedStatus: "downloading",
                         completedAlbums: 0,
                         failedAlbums: failed,
                         errorMessage: "All downloads failed",
@@ -794,6 +808,7 @@ export class DiscoverWeeklyService {
                     batchId,
                     {
                         status: "scanning",
+                        expectedStatus: "downloading",
                         completedAlbums: completed,
                         failedAlbums: failed,
                     },
@@ -1346,7 +1361,6 @@ export class DiscoverWeeklyService {
                                 status: "ACTIVE",
                             },
                             update: {
-                                // Refresh data on regeneration
                                 artistName: track.album.artist.name,
                                 artistMbid: track.album.artist.mbid,
                                 albumTitle: track.album.title,
@@ -1354,7 +1368,6 @@ export class DiscoverWeeklyService {
                                 similarity: storedSimilarity,
                                 tier: storedTier,
                                 downloadedAt: new Date(),
-                                status: "ACTIVE", // Reset to active on regeneration
                             },
                         });
 

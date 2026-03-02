@@ -15,6 +15,7 @@ import { logger } from "../utils/logger";
 import { webhookEventStore } from "../services/webhookEventStore";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { getSystemSettings } from "../utils/systemSettings";
+import { prisma } from "../utils/db";
 
 class WebhookReconciliationService {
     private isRunning = false;
@@ -104,13 +105,23 @@ class WebhookReconciliationService {
                 }
             }
 
-            const lidarrResult = await simpleDownloadManager.reconcileWithLidarr();
+            const processingJobCount = await prisma.downloadJob.count({
+                where: { status: "processing" },
+            });
+
+            let reconciledCount = 0;
+            if (processingJobCount > 0) {
+                const lidarrResult = await simpleDownloadManager.reconcileWithLidarr();
+                reconciledCount = lidarrResult.reconciled;
+            } else {
+                logger.debug("[WEBHOOK-RECONCILE] No processing jobs, skipping Lidarr reconciliation");
+            }
 
             const duration = Date.now() - startTime;
             logger.debug(
                 `[WEBHOOK-RECONCILE] Cycle complete in ${duration}ms: ` +
                 `${processedCount} events processed, ${failedCount} failed, ` +
-                `${lidarrResult.reconciled} jobs reconciled from Lidarr`
+                `${reconciledCount} jobs reconciled from Lidarr`
             );
         } catch (error: any) {
             logger.error("[WEBHOOK-RECONCILE] Reconciliation cycle failed:", error.message);

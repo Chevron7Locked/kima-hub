@@ -9,6 +9,7 @@ import { logger } from "../utils/logger";
 import cron, { ScheduledTask } from "node-cron";
 import { prisma } from "../utils/db";
 import { discoverQueue } from "./queues";
+import { startOfWeek } from "date-fns";
 
 let cronTask: ScheduledTask | null = null;
 
@@ -45,8 +46,11 @@ export function startDiscoverWeeklyCron() {
             for (const config of configs) {
                 logger.debug(`   Queueing job for user ${config.userId}...`);
 
+                const weekKey = startOfWeek(new Date(), { weekStartsOn: 1 }).toISOString().split('T')[0];
                 await discoverQueue.add("discover-weekly", {
                     userId: config.userId,
+                }, {
+                    jobId: `discover-weekly-${config.userId}-${weekKey}`,
                 });
             }
 

@@ -191,4 +191,34 @@ describe('updateBatchStatus with optimistic locking', () => {
 
         expect(batch?.errorMessage).toBeNull();
     });
+
+    it('should include expectedStatus in WHERE clause when provided', async () => {
+        // Update batch status with expectedStatus
+        const result = await updateBatchStatus(testBatchId, {
+            status: 'scanning',
+            expectedStatus: 'downloading',
+        });
+
+        expect(result.success).toBe(true);
+
+        // Verify the batch was actually updated
+        const updated = await prisma.discoveryBatch.findUnique({
+            where: { id: testBatchId },
+        });
+        expect(updated?.status).toBe('scanning');
+    });
+
+    it('should fail when expectedStatus does not match current status', async () => {
+        // First update to 'scanning'
+        await updateBatchStatus(testBatchId, { status: 'scanning' });
+
+        // Now try to update with expectedStatus 'downloading' (mismatch)
+        const result = await updateBatchStatus(testBatchId, {
+            status: 'completed',
+            expectedStatus: 'downloading',
+        }, { maxRetries: 2 });
+
+        // Should fail because status is 'scanning', not 'downloading'
+        expect(result.success).toBe(false);
+    });
 });

@@ -5,6 +5,35 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-03-02
+
+### Fixed
+
+- **Enrichment: failure count inflation**: Python audio analyzer recorded EnrichmentFailure on every attempt, not just after max retries. Removed Python writer; Node.js audioAnalysisCleanup is now the sole writer. Added success resolution in `_save_results()` for immediate cleanup instead of hourly sweep lag.
+- **Enrichment: isPaused permanently stuck after Stop**: Stop control message set `isPaused=true` which was never cleared because `shouldHaltCycle()` was unreachable from the early return. Moved `isStopping` handler to top of `runEnrichmentCycle()`. Added `userStopped` flag to prevent auto-restart via timer while allowing explicit re-run/enrich actions.
+- **Enrichment: Stop doesn't reach Python analyzer**: `enrichmentState.stop()` only published to `enrichment:control`. Now also publishes `pause` to `audio:analysis:control` (not `stop`, which would exit the process). Resume publishes `resume` to both channels. All re-run functions resume the Python analyzer via `clearPauseState()`.
+- **Enrichment: state sync stopping deadlock**: If `enrichment:control` message was lost but state service showed `stopping`, the sync set `isPaused=true` with no `isStopping` to clear it. State sync now handles `stopping` directly by transitioning to idle.
+- **Enrichment: reverse sync for missed resume**: If local `isPaused` was stale but state service showed `running`, the cycle stayed paused. Added reverse sync to detect and clear the mismatch.
+- **Enrichment: crash recovery gaps**: Startup now resets artists stuck in `enriching` status and tracks with `_queued` sentinel in `lastfmTags`, in addition to existing audio/vibe processing resets.
+- **Import: duplicate playlists on large imports**: `checkImportCompletion()`, `buildPlaylistAfterScan()`, and `buildPlaylist()` lacked idempotency guards. Late download callbacks and queueCleaner re-queued scans that each created a new playlist. Added status guards at all three layers.
+- **Import: processImport overwrites cancel**: Setting `status="downloading"` without checking if already cancelled. Added cancel guard.
+- **Enrichment failures: TOCTOU race in recordFailure**: Find-then-create pattern replaced with atomic `prisma.enrichmentFailure.upsert()`. Also resets `resolved=false` on re-failure (previously hidden from UI).
+- **Enrichment failures: Python/Node.js Track status race**: Added `WHERE analysisStatus='processing'` optimistic lock to `_save_results()` and `_save_failed()`. Prevents stale writes when cleanup resets a track near the 15-minute threshold.
+- **Discovery: duplicate Discover Weekly jobs**: `discoverQueue.add()` now uses deterministic `jobId` based on userId + week, preventing cron/manual trigger overlap.
+- **Discovery: checkBatchCompletion race**: Re-reads batch status after 60s Lidarr wait. Added `expectedStatus` parameter to `updateBatchStatus` optimistic locking for belt-and-suspenders protection.
+- **Discovery: album status reset on regeneration**: `discoveryAlbum.upsert()` update branch no longer sets `status: "ACTIVE"`, preserving user's LIKED/DELETED decisions.
+- **Scanner: ownedAlbum duplicate constraint violation**: Replaced `create()` with `upsert()` using compound key.
+- **Streaming: transcodedFile duplicate constraint violation**: Replaced `create()` with `upsert()` on `cachePath`.
+- **Downloads: notification retry creates duplicates**: Added dedup check before `downloadJob.create()` at all 3 retry handlers.
+- **Webhook: unnecessary Lidarr API calls**: Skip reconciliation when no processing download jobs exist.
+- **Infrastructure: audio-analyzer supervisor autorestart**: Changed from `unexpected` to `true` (matching backend fix).
+- **Infrastructure: Redis startup race**: Added Redis readiness loop to `wait-for-db.sh` with separate counter. Backend supervisor changed to `autorestart=true`.
+- **Python: deprecated datetime.utcnow()**: Replaced with `datetime.now(timezone.utc)`.
+
+### Added
+
+- 37 new tests across 9 test files covering enrichment state machine, idempotency guards, queue dedup, notification dedup, and Python optimistic locking.
+
 ## [1.6.0-pre.2] - 2026-03-01 (nightly)
 
 ### Fixed

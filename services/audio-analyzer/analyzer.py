@@ -56,7 +56,7 @@ import json
 import time
 import logging
 import gc
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple
 import traceback
 import numpy as np
@@ -84,7 +84,7 @@ except RuntimeError:
 
 import redis
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from psycopg2.extras import RealDictCursor
 
 # Configure logging
 logging.basicConfig(
@@ -1571,7 +1571,7 @@ class AnalysisWorker:
         logger.info(f"Batch complete: {completed} succeeded, {failed} failed in {elapsed:.1f}s ({rate:.1f} tracks/sec)")
     
     def _save_results(self, track_id: str, file_path: str, features: Dict[str, Any]):
-        """Save analysis results to database"""
+        """Save analysis results to database and resolve any stale EnrichmentFailure record."""
         cursor = self.db.get_cursor()
         try:
             cursor.execute("""
@@ -1607,7 +1607,7 @@ class AnalysisWorker:
                     "analysisVersion" = %s,
                     "analyzedAt" = %s,
                     "analysisError" = NULL
-                WHERE id = %s
+                WHERE id = %s AND "analysisStatus" = 'processing'
             """, (
                 features['bpm'],
                 features['beatsCount'],
@@ -1635,9 +1635,20 @@ class AnalysisWorker:
                 features.get('danceabilityMl'),
                 features.get('analysisMode', 'standard'),
                 ESSENTIA_VERSION,
-                datetime.utcnow(),
+                datetime.now(timezone.utc),
                 track_id
             ))
+            if cursor.rowcount == 0:
+                logger.warning(f"Track {track_id} was reset by cleanup before save completed, skipping")
+                self.db.rollback()
+                return
+            # Resolve any stale EnrichmentFailure record from a previous attempt
+            cursor.execute("""
+                UPDATE "EnrichmentFailure"
+                SET resolved = true, "resolvedAt" = NOW()
+                WHERE "entityType" = 'audio' AND "entityId" = %s AND resolved = false
+            """, (track_id,))
+
             self.db.commit()
 
             # Publish completion event for Node audio completion subscriber
@@ -1660,17 +1671,14 @@ class AnalysisWorker:
             cursor.close()
     
     def _save_failed(self, track_id: str, error: str):
-        """Mark track as failed, increment retry count, and record in EnrichmentFailure table"""
+        """Mark track as failed and increment retry count.
+
+        EnrichmentFailure records are created by the Node.js audioAnalysisCleanup
+        service only after max retries are exhausted, avoiding premature failure
+        visibility and competing writers.
+        """
         cursor = self.db.get_cursor()
         try:
-            # Get track details for failure recording
-            cursor.execute("""
-                SELECT title, "filePath", "artistId"
-                FROM "Track"
-                WHERE id = %s
-            """, (track_id,))
-            track = cursor.fetchone()
-            
             # Update track status
             cursor.execute("""
                 UPDATE "Track"
@@ -1678,41 +1686,18 @@ class AnalysisWorker:
                     "analysisStatus" = 'failed',
                     "analysisError" = %s,
                     "analysisRetryCount" = COALESCE("analysisRetryCount", 0) + 1
-                WHERE id = %s
+                WHERE id = %s AND "analysisStatus" = 'processing'
                 RETURNING "analysisRetryCount"
             """, (error[:500], track_id))
-            
+
+            if cursor.rowcount == 0:
+                logger.warning(f"Track {track_id} was reset by cleanup before failure marked, skipping")
+                self.db.rollback()
+                return
+
             result = cursor.fetchone()
             retry_count = result['analysisRetryCount'] if result else 0
-            
-            # Record failure in EnrichmentFailure table for user visibility
-            if track:
-                cursor.execute("""
-                    INSERT INTO "EnrichmentFailure" (
-                        "entityType", "entityId", "entityName", "errorMessage",
-                        "lastFailedAt", "retryCount", metadata
-                    ) VALUES (%s, %s, %s, %s, NOW(), 1, %s)
-                    ON CONFLICT ("entityType", "entityId")
-                    DO UPDATE SET
-                        "errorMessage" = EXCLUDED."errorMessage",
-                        "lastFailedAt" = NOW(),
-                        "retryCount" = "EnrichmentFailure"."retryCount" + 1,
-                        metadata = EXCLUDED.metadata,
-                        resolved = false,
-                        skipped = false
-                """, (
-                    'audio',
-                    track_id,
-                    track.get('title', 'Unknown Track'),
-                    error[:500],
-                    Json({
-                        'filePath': track.get('filePath'),
-                        'artistId': track.get('artistId'),
-                        'retryCount': retry_count,
-                        'maxRetries': MAX_RETRIES
-                    })
-                ))
-            
+
             if retry_count >= MAX_RETRIES:
                 logger.warning(f"Track {track_id} has permanently failed after {retry_count} attempts")
             else:

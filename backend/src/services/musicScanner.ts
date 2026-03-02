@@ -833,12 +833,19 @@ export class MusicScannerService {
                 // Only create OwnedAlbum record for library albums (not discovery)
                 // Discovery albums are temporary and should not appear in the user's library
                 if (!isDiscoveryAlbum) {
-                    await prisma.ownedAlbum.create({
-                        data: {
+                    await prisma.ownedAlbum.upsert({
+                        where: {
+                            artistId_rgMbid: {
+                                artistId: artist.id,
+                                rgMbid,
+                            },
+                        },
+                        create: {
                             rgMbid,
                             artistId: artist.id,
                             source: "native_scan",
                         },
+                        update: {},
                     });
                 }
             }

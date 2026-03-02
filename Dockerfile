@@ -114,7 +114,24 @@ RUN cat > /app/wait-for-db.sh << 'EOF'
 TIMEOUT=${1:-120}
 COUNTER=0
 
-echo "[wait-for-db] Waiting for database schema (timeout: ${TIMEOUT}s)..."
+echo "[wait-for-db] Waiting for Redis and database schema (timeout: ${TIMEOUT}s)..."
+
+# Wait for Redis to finish loading
+echo "[wait-for-db] Checking Redis readiness..."
+REDIS_COUNTER=0
+while [ $REDIS_COUNTER -lt $TIMEOUT ]; do
+    if redis-cli -h localhost ping 2>/dev/null | grep -q PONG; then
+        echo "[wait-for-db] ✓ Redis is ready!"
+        break
+    fi
+    sleep 1
+    REDIS_COUNTER=$((REDIS_COUNTER + 1))
+done
+
+if [ $REDIS_COUNTER -ge $TIMEOUT ]; then
+    echo "[wait-for-db] ERROR: Redis not ready after ${TIMEOUT}s"
+    exit 1
+fi
 
 # Quick check for schema ready flag
 if [ -f /data/.schema_ready ]; then
@@ -239,7 +256,7 @@ priority=20
 [program:backend]
 command=/bin/bash -c "/app/wait-for-db.sh 120 && cd /app/backend && node dist/index.js"
 autostart=true
-autorestart=unexpected
+autorestart=true
 startretries=3
 startsecs=10
 stdout_logfile=/dev/stdout
@@ -263,7 +280,7 @@ priority=40
 [program:audio-analyzer]
 command=/bin/bash -c "/app/wait-for-db.sh 120 && cd /app/audio-analyzer && python3 analyzer.py"
 autostart=true
-autorestart=unexpected
+autorestart=true
 startretries=3
 startsecs=10
 stdout_logfile=/dev/stdout

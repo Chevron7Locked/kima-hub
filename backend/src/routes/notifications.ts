@@ -316,6 +316,24 @@ router.post(
                     pendingTrack.artistMbid ||
                     `pendingTrack:${pendingTrack.id}`;
 
+                // Dedup: check for existing active download job
+                const existingActiveJob = await prisma.downloadJob.findFirst({
+                    where: {
+                        userId: req.user!.id,
+                        targetMbid: retryTargetId,
+                        status: { in: ["pending", "processing", "downloading"] },
+                        cleared: { not: true },
+                    },
+                });
+
+                if (existingActiveJob) {
+                    return res.json({
+                        success: true,
+                        newJobId: existingActiveJob.id,
+                        deduplicated: true,
+                    });
+                }
+
                 const newJobRecord = await prisma.downloadJob.create({
                     data: {
                         userId: req.user!.id,
@@ -494,6 +512,26 @@ router.post(
                     });
                 }
 
+                // Dedup: check for existing active download job (skip for synthetic retry_ MBIDs)
+                if (failedJob.targetMbid && !failedJob.targetMbid.startsWith('retry_')) {
+                    const existingActiveJob = await prisma.downloadJob.findFirst({
+                        where: {
+                            userId: req.user!.id,
+                            targetMbid: failedJob.targetMbid,
+                            status: { in: ["pending", "processing", "downloading"] },
+                            cleared: { not: true },
+                        },
+                    });
+
+                    if (existingActiveJob) {
+                        return res.json({
+                            success: true,
+                            newJobId: existingActiveJob.id,
+                            deduplicated: true,
+                        });
+                    }
+                }
+
                 // Mark old job as cleared
                 await prisma.downloadJob.update({
                     where: { id: failedJob.id },
@@ -659,6 +697,24 @@ router.post(
                 return res
                     .status(400)
                     .json({ error: "Cannot retry: missing album MBID" });
+            }
+
+            // Dedup: check for existing active download job
+            const existingActiveJob = await prisma.downloadJob.findFirst({
+                where: {
+                    userId: req.user!.id,
+                    targetMbid: failedJob.targetMbid,
+                    status: { in: ["pending", "processing", "downloading"] },
+                    cleared: { not: true },
+                },
+            });
+
+            if (existingActiveJob) {
+                return res.json({
+                    success: true,
+                    newJobId: existingActiveJob.id,
+                    deduplicated: true,
+                });
             }
 
             // Mark old job as cleared

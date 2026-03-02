@@ -11,6 +11,7 @@ import { Prisma } from '@prisma/client';
 
 export interface BatchUpdateData {
     status?: string;
+    expectedStatus?: string;
     totalAlbums?: number;
     completedAlbums?: number;
     failedAlbums?: number;
@@ -76,13 +77,16 @@ export async function updateBatchStatus(
             const currentVersion = current.version ?? 0;
             const nextVersion = currentVersion + 1;
 
+            const { expectedStatus, ...updateData } = data;
+
             const updated = await client.discoveryBatch.update({
                 where: {
                     id: batchId,
                     version: currentVersion,
+                    ...(expectedStatus ? { status: expectedStatus } : {}),
                 },
                 data: {
-                    ...data,
+                    ...updateData,
                     version: nextVersion,
                 },
             });

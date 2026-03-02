@@ -18,6 +18,7 @@ interface AudioCompletionEvent {
 let subscriber: Redis | null = null;
 let quietTimer: ReturnType<typeof setTimeout> | null = null;
 let vibePaused = false;
+let enrichmentHalted = false;
 
 function pauseVibe(): void {
     if (!vibePaused) {
@@ -41,9 +42,48 @@ function scheduleVibeResume(): void {
     }, ESSENTIA_QUIET_MS);
 }
 
-export function startAudioCompletionSubscriber(): void {
-    // Resume in case a previous crash left the queue paused in Redis
-    vibeQueue.resume().catch(() => {});
+/**
+ * Halt vibe queuing and pause the vibe queue. Called on stop/pause.
+ * Tracks completing audio analysis after this point will NOT be queued for vibe.
+ */
+export function haltVibeQueuing(): void {
+    enrichmentHalted = true;
+    // Cancel any pending vibe resume timer
+    if (quietTimer) {
+        clearTimeout(quietTimer);
+        quietTimer = null;
+    }
+    // Pause the vibe BullMQ queue so CLAP stops picking up jobs
+    vibeQueue.pause().catch((err: Error) => {
+        logger.warn(`[AudioSub] Failed to pause vibe queue on halt: ${err.message}`);
+    });
+    logger.debug("[AudioSub] Vibe queuing halted (enrichment stopped/paused)");
+}
+
+/**
+ * Resume vibe queuing and unpause the vibe queue. Called on resume/re-run.
+ */
+export function resumeVibeQueuing(): void {
+    enrichmentHalted = false;
+    vibeQueue.resume().catch((err: Error) => {
+        logger.warn(`[AudioSub] Failed to resume vibe queue: ${err.message}`);
+    });
+    logger.debug("[AudioSub] Vibe queuing resumed");
+}
+
+export async function startAudioCompletionSubscriber(): Promise<void> {
+    // Only resume the vibe queue if no audio analysis is in progress.
+    // If audio is running, the pauseVibe/scheduleVibeResume mechanism
+    // will handle resuming after Essentia goes quiet.
+    const audioProcessing = await prisma.track.count({
+        where: { analysisStatus: "processing" },
+    }).catch(() => 0);
+
+    if (audioProcessing === 0) {
+        vibeQueue.resume().catch(() => {});
+    } else {
+        logger.debug(`[AudioSub] ${audioProcessing} tracks in audio processing, keeping vibe queue paused`);
+    }
 
     subscriber = new Redis(config.redisUrl);
 
@@ -65,6 +105,9 @@ export function startAudioCompletionSubscriber(): void {
         }
 
         if (event.status !== "complete" || !event.trackId) return;
+
+        // Skip vibe queuing when enrichment is stopped/paused
+        if (enrichmentHalted) return;
 
         // Gate CLAP behind Essentia: pause vibe queue while Essentia is active,
         // resume after ESSENTIA_QUIET_MS of silence. Prevents both ML models
@@ -115,6 +158,7 @@ export function startAudioCompletionSubscriber(): void {
 }
 
 export async function stopAudioCompletionSubscriber(): Promise<void> {
+    enrichmentHalted = false;
     if (quietTimer) {
         clearTimeout(quietTimer);
         quietTimer = null;
