@@ -75,6 +75,7 @@ export const SubsonicError = {
     SERVER_TOO_OLD: 30,
     WRONG_CREDENTIALS: 40,
     TOKEN_AUTH_NOT_SUPPORTED: 41,
+    INVALID_API_KEY: 44,
     NOT_AUTHORIZED: 50,
     NOT_FOUND: 70,
 } as const;

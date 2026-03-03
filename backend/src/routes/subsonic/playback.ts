@@ -1,38 +1,30 @@
-import { Router } from "express";
-import path from "path";
+import { Router, Request, Response } from "express";
 import fs from "fs";
+import path from "path";
+import { ListenSource } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { getAudioStreamingService } from "../../services/audioStreaming";
 import { config } from "../../config";
-import { bitrateToQuality, wrap } from "./mappers";
-import { ListenSource } from "@prisma/client";
+import { bitrateToQuality, wrap, mapSong, firstArtistGenre } from "./mappers";
 
 export const playbackRouter = Router();
 
-// ===================== STREAMING =====================
-
-playbackRouter.all("/stream.view", wrap(async (req, res) => {
-    const id = req.query.id as string;
-    if (!id) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
-
+async function streamTrackById(
+    req: Request,
+    res: Response,
+    id: string,
+    quality: "original" | "high" | "medium" | "low"
+) {
     const track = await prisma.track.findUnique({ where: { id } });
-    if (!track || !track.filePath) return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
-
-    const format = req.query.format as string | undefined;
-    const quality = format === "raw"
-        ? "original"
-        : bitrateToQuality(req.query.maxBitRate as string | undefined);
-
-    // Play logging is handled exclusively by scrobble.view to avoid double-counting.
-    // Subsonic clients call scrobble.view on track completion; logging here would produce
-    // two Play rows per listen for clients that implement both behaviors (Symfonium, DSub).
+    if (!track || !track.filePath) {
+        return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
+    }
 
     const normalizedFilePath = track.filePath.replace(/\\/g, "/");
     const resolvedMusicPath = path.resolve(config.music.musicPath);
     const absolutePath = path.resolve(resolvedMusicPath, normalizedFilePath);
 
-    // Security: ensure resolved path stays within the music directory
     if (!absolutePath.startsWith(resolvedMusicPath + path.sep)) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
     }
@@ -50,6 +42,156 @@ playbackRouter.all("/stream.view", wrap(async (req, res) => {
         absolutePath,
     );
     await streamingService.streamFileWithRangeSupport(req, res, filePath, mimeType);
+}
+
+// ===================== NOW PLAYING =====================
+
+playbackRouter.all("/getNowPlaying.view", wrap(async (req, res) => {
+    const staleCutoff = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+    const states = await prisma.playbackState.findMany({
+        where: {
+            playbackType: "track",
+            trackId: { not: null },
+            updatedAt: { gte: staleCutoff },
+        },
+        include: {
+            user: { select: { username: true } },
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 50,
+    });
+
+    const trackIds = states
+        .map((state) => state.trackId)
+        .filter((trackId): trackId is string => Boolean(trackId));
+
+    const tracks = trackIds.length > 0
+        ? await prisma.track.findMany({
+              where: { id: { in: trackIds } },
+              include: {
+                  album: {
+                      include: {
+                          artist: {
+                              select: {
+                                  id: true,
+                                  name: true,
+                                  displayName: true,
+                                  genres: true,
+                                  userGenres: true,
+                              },
+                          },
+                      },
+                  },
+              },
+          })
+        : [];
+
+    const trackById = new Map(tracks.map((track) => [track.id, track]));
+
+    const entries = states.flatMap((state) => {
+        if (!state.trackId) return [];
+        const track = trackById.get(state.trackId);
+        if (!track) return [];
+
+        const artistName = track.album.artist.displayName || track.album.artist.name;
+        const genre = firstArtistGenre(track.album.artist.genres, track.album.artist.userGenres);
+        const minutesAgo = Math.max(0, Math.floor((Date.now() - state.updatedAt.getTime()) / 60000));
+
+        return [{
+            ...mapSong(track, track.album, artistName, track.album.artist.id, genre),
+            "@_username": state.user.username,
+            "@_minutesAgo": minutesAgo,
+            "@_playerName": "Kima",
+            "@_playerId": 0,
+        }];
+    });
+
+    return subsonicOk(req, res, {
+        nowPlaying: entries.length > 0 ? { entry: entries } : {},
+    });
+}));
+
+// ===================== STREAMING =====================
+
+playbackRouter.all("/hls.m3u8", wrap(async (req, res) => {
+    const id = req.query.id as string | undefined;
+    if (!id) {
+        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
+    }
+
+    const streamParams = new URLSearchParams();
+    streamParams.set("id", id);
+
+    const bitRateRaw = req.query.bitRate;
+    const firstBitRate = Array.isArray(bitRateRaw) ? bitRateRaw[0] : bitRateRaw;
+    if (typeof firstBitRate === "string" && firstBitRate.trim()) {
+        const numeric = firstBitRate.split("@")[0];
+        streamParams.set("maxBitRate", numeric);
+    }
+
+    for (const passthroughKey of ["u", "p", "t", "s", "v", "c", "f", "apiKey"]) {
+        const value = req.query[passthroughKey];
+        if (typeof value === "string" && value.length > 0) {
+            streamParams.set(passthroughKey, value);
+        }
+    }
+
+    const streamUrl = `${req.protocol}://${req.get("host")}/rest/stream.view?${streamParams.toString()}`;
+    const playlist = `#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:-1,${id}\n${streamUrl}\n`;
+
+    res.set("Content-Type", "application/vnd.apple.mpegurl");
+    return res.send(playlist);
+}));
+
+playbackRouter.all("/getTranscodeStream.view", wrap(async (req, res) => {
+    const mediaId = req.query.mediaId as string | undefined;
+    const mediaType = (req.query.mediaType as string | undefined)?.toLowerCase();
+    const transcodeParams = req.query.transcodeParams as string | undefined;
+
+    if (!mediaId) {
+        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: mediaId");
+    }
+    if (!mediaType) {
+        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: mediaType");
+    }
+    if (!transcodeParams) {
+        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: transcodeParams");
+    }
+
+    if (mediaType === "song") {
+        const quality = bitrateToQuality(req.query.maxBitRate as string | undefined);
+        return streamTrackById(req, res, mediaId, quality);
+    }
+
+    if (mediaType === "podcast") {
+        const episode = await prisma.podcastEpisode.findUnique({
+            where: { id: mediaId },
+            select: { audioUrl: true },
+        });
+        if (!episode?.audioUrl) {
+            return subsonicError(req, res, SubsonicError.NOT_FOUND, "Podcast episode not found");
+        }
+        return res.redirect(302, episode.audioUrl);
+    }
+
+    return subsonicError(req, res, SubsonicError.GENERIC, "Unsupported mediaType");
+}));
+
+playbackRouter.all("/stream.view", wrap(async (req, res) => {
+    const id = req.query.id as string;
+    if (!id) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
+
+    const format = req.query.format as string | undefined;
+    const quality = format === "raw"
+        ? "original"
+        : bitrateToQuality(req.query.maxBitRate as string | undefined);
+
+    // Play logging is handled exclusively by scrobble.view to avoid double-counting.
+    // Subsonic clients call scrobble.view on track completion; logging here would produce
+    // two Play rows per listen for clients that implement both behaviors (Symfonium, DSub).
+
+    await streamTrackById(req, res, id, quality);
 }));
 
 playbackRouter.all("/download.view", wrap(async (req, res) => {
