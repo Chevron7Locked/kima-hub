@@ -437,7 +437,7 @@ router.post(
                         pendingTrack.spotifyTitle,
                         albumName,
                         searchResult.allMatches,
-                        settings.musicPath
+                        settings.downloadPath || settings.musicPath,
                     )
                     .then(async (result) => {
                         if (result.success) {

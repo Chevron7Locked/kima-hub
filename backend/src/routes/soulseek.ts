@@ -367,7 +367,7 @@ router.post(
             }
 
             const settings = await getSystemSettings();
-            const musicPath = settings?.musicPath;
+            const musicPath = settings?.downloadPath || settings?.musicPath;
 
             if (!musicPath) {
                 return res.status(400).json({

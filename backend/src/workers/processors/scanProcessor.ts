@@ -3,6 +3,7 @@ import { logger } from "../../utils/logger";
 import { MusicScannerService } from "../../services/musicScanner";
 import { config } from "../../config";
 import { eventBus } from "../../services/eventBus";
+import { callImportWebhook } from "../../utils/importWebhook";
 import * as path from "path";
 
 /**
@@ -182,6 +183,10 @@ export async function processScan(
         logger.debug(`[ScanJob ${job.id}] Artist MBID: ${artistMbid}`);
     }
     logger.debug(`═══════════════════════════════════════════════`);
+
+    // Call the external import webhook (if IMPORT_WEBHOOK_URL is set) and wait for
+    // it to finish before scanning, so any external file organisation is visible.
+    await callImportWebhook();
 
     // Report progress
     await job.updateProgress(0);

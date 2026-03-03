@@ -793,7 +793,7 @@ router.post("/:id/pending/retry-all", async (req, res) => {
                         pendingTrack.spotifyTitle,
                         albumName,
                         searchResult.allMatches,
-                        settings.musicPath
+                        settings.downloadPath || settings.musicPath
                     );
 
                     if (result.success) {
@@ -1047,7 +1047,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
                 pendingTrack.spotifyTitle,
                 albumName,
                 searchResult.allMatches,
-                settings.musicPath
+                settings.downloadPath || settings.musicPath
             )
             .then(async (result) => {
                 if (result.success) {

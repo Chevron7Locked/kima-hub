@@ -2618,7 +2618,7 @@ class SpotifyImportService {
           track.title,
           albumName,
           searchResult.allMatches,
-          settings.musicPath,
+          settings.downloadPath || settings.musicPath,
         );
 
         if (result.success) {

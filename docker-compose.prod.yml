@@ -30,6 +30,15 @@ services:
       # Override if using custom Docker networks: e.g., http://192.168.0.20:3030
       - KIMA_CALLBACK_URL=${KIMA_CALLBACK_URL:-http://host.docker.internal:3030}
       - DISABLE_CLAP=${DISABLE_CLAP:-}
+      # Webhooks for beets - how Kima reaches beets to trigger imports and updates
+      - IMPORT_WEBHOOK_0_URL=http://beets:5555/update?mode=block
+      - IMPORT_WEBHOOK_0_POST='["-F","deleted"]'
+      - IMPORT_WEBHOOK_1_URL=http://beets:5555/import?mode=block
+      - IMPORT_WEBHOOK_1_POST='["-q","/downloads"]'
+      - IMPORT_WEBHOOK_2_URL=http://beets:5555/duplicates?mode=block
+      - IMPORT_WEBHOOK_2_POST='[]'
+      # Trigger Plex library refresh after imports - requires PLEX_WIDGET_KEY env var
+      - IMPORT_WEBHOOK_3_URL=http://plex:32400/library/sections/6/refresh?force=0&X-Plex-Token=${PLEX_WIDGET_KEY}
     # Makes host.docker.internal work on Linux (already works on Docker Desktop)
     extra_hosts:
       - "host.docker.internal:host-gateway"

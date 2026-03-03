@@ -95,4 +95,21 @@ export const config = {
     allowedOrigins:
         process.env.ALLOWED_ORIGINS?.split(",").map((o) => o.trim()) ||
         (process.env.NODE_ENV === "development" ? true : []),
+
+    // External library import webhooks - called sequentially before each library scan.
+    // Configure with IMPORT_WEBHOOK_0_URL, IMPORT_WEBHOOK_1_URL, … and optional JSON body
+    // payloads via IMPORT_WEBHOOK_0_POST, IMPORT_WEBHOOK_1_POST, …
+    // When set, the external service is expected to process (e.g. move/tag) the files before
+    // Kima scans the library. Internal logic must not rely on original file paths after the
+    // webhooks have been called.
+    importWebhooks: (() => {
+        const hooks: Array<{ url: string; post?: string }> = [];
+        for (let i = 0; ; i++) {
+            const url = process.env[`IMPORT_WEBHOOK_${i}_URL`];
+            if (!url) break;
+            const post = process.env[`IMPORT_WEBHOOK_${i}_POST`] || undefined;
+            hooks.push({ url, post });
+        }
+        return hooks;
+    })(),
 };
