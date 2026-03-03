@@ -34,10 +34,12 @@ export default function PodcastDetailPage() {
 
     const {
         isSubscribing,
+        isRefreshing,
         showDeleteConfirm,
         setShowDeleteConfirm,
         handleSubscribe,
         handleRemovePodcast,
+        handleRefresh,
         handlePlayEpisode,
         handlePlayPauseEpisode,
         handleMarkEpisodeComplete,
@@ -112,6 +114,8 @@ export default function PodcastDetailPage() {
                     onPlayLatest={isSubscribed ? handlePlayLatest : undefined}
                     isPlayingPodcast={isPlayingPodcast}
                     onPause={pause}
+                    onRefresh={handleRefresh}
+                    isRefreshing={isRefreshing}
                 />
             </PodcastHero>
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { ExternalLink, Trash2, Plus, Loader2, Play, Pause } from "lucide-react";
+import { ExternalLink, Trash2, Plus, Loader2, Play, Pause, RefreshCw } from "lucide-react";
+import { cn } from "@/utils/cn";
 import type { ColorPalette } from "@/hooks/useImageColor";
 
 interface PodcastActionBarProps {
@@ -15,6 +16,8 @@ interface PodcastActionBarProps {
     onPlayLatest?: () => void;
     isPlayingPodcast?: boolean;
     onPause?: () => void;
+    onRefresh?: () => Promise<unknown>;
+    isRefreshing?: boolean;
 }
 
 export function PodcastActionBar({
@@ -28,6 +31,8 @@ export function PodcastActionBar({
     onPlayLatest,
     isPlayingPodcast,
     onPause,
+    onRefresh,
+    isRefreshing,
 }: PodcastActionBarProps) {
     return (
         <div className="flex items-center gap-3">
@@ -42,6 +47,18 @@ export function PodcastActionBar({
                     ) : (
                         <Play className="w-4 h-4 text-white ml-0.5" fill="white" />
                     )}
+                </button>
+            )}
+
+            {/* Refresh */}
+            {isSubscribed && onRefresh && (
+                <button
+                    onClick={onRefresh}
+                    disabled={isRefreshing}
+                    className="p-2.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all disabled:opacity-50"
+                    title="Check for new episodes"
+                >
+                    <RefreshCw className={cn("w-4 h-4", isRefreshing && "animate-spin")} />
                 </button>
             )}
 

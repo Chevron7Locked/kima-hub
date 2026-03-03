@@ -1181,6 +1181,19 @@ class ApiClient {
         );
     }
 
+    async refreshPodcast(podcastId: string) {
+        return this.request<{ success: boolean; newEpisodesCount: number; totalEpisodes: number; message: string }>(
+            `/podcasts/${podcastId}/refresh`
+        );
+    }
+
+    async refreshAllPodcasts() {
+        return this.request<{ queued: number; total: number; message: string }>(
+            "/podcasts/refresh-all",
+            { method: "POST" }
+        );
+    }
+
     // Playback State (cross-device sync)
     async getPlaybackState() {
         return this.request<ApiData>("/playback-state");

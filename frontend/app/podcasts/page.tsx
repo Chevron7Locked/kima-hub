@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState, useRef, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { Mic2, Search, Plus, ChevronLeft, ChevronRight } from "lucide-react";
+import { Mic2, Search, Plus, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
-import { usePodcastsQuery, useTopPodcastsQuery } from "@/hooks/useQueries";
+import { usePodcastsQuery, useTopPodcastsQuery, queryKeys } from "@/hooks/useQueries";
 import Image from "next/image";
 import { cn } from "@/utils/cn";
 
@@ -112,6 +112,7 @@ export default function PodcastsPage() {
     const dropdownRef = useRef<HTMLDivElement>(null);
     const { isAuthenticated } = useAuth();
     const router = useRouter();
+    const queryClient = useQueryClient();
 
     const { data: podcasts = [], isLoading: isLoadingPodcasts } =
         usePodcastsQuery();
@@ -134,6 +135,21 @@ export default function PodcastsPage() {
     const [currentPage, setCurrentPage] = useState(1);
 
     const isLoading = isLoadingPodcasts || isLoadingTopPodcasts;
+    const [isRefreshingAll, setIsRefreshingAll] = useState(false);
+
+    const handleRefreshAll = async () => {
+        setIsRefreshingAll(true);
+        try {
+            await api.refreshAllPodcasts();
+            setTimeout(() => {
+                queryClient.invalidateQueries({ queryKey: queryKeys.podcasts() });
+            }, 3000);
+        } catch (error) {
+            console.error("Failed to refresh podcasts:", error);
+        } finally {
+            setIsRefreshingAll(false);
+        }
+    };
 
     const sortedPodcasts = useMemo(() => {
         const sorted = [...podcasts];
@@ -354,6 +370,15 @@ export default function PodcastsPage() {
                                     count={podcasts.length}
                                     rightAction={
                                         <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={handleRefreshAll}
+                                                disabled={isRefreshingAll}
+                                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all text-xs font-mono uppercase tracking-wider disabled:opacity-50"
+                                                title="Check all podcasts for new episodes"
+                                            >
+                                                <RefreshCw className={cn("w-3.5 h-3.5", isRefreshingAll && "animate-spin")} />
+                                                <span className="hidden md:inline">{isRefreshingAll ? "Refreshing..." : "Refresh All"}</span>
+                                            </button>
                                             <select
                                                 value={sortBy}
                                                 onChange={(e) => setSortBy(e.target.value as SortOption)}

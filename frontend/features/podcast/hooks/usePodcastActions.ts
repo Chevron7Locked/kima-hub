@@ -18,6 +18,7 @@ export function usePodcastActions(podcastId: string, sortedEpisodes?: Episode[])
     const { setPodcastEpisodeQueue } = useAudioState();
 
     const [isSubscribing, setIsSubscribing] = useState(false);
+    const [isRefreshing, setIsRefreshing] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     const handleSubscribe = useCallback(
@@ -126,12 +127,28 @@ export function usePodcastActions(podcastId: string, sortedEpisodes?: Episode[])
         [podcastId, queryClient]
     );
 
+    const handleRefresh = useCallback(async () => {
+        setIsRefreshing(true);
+        try {
+            const result = await api.refreshPodcast(podcastId);
+            queryClient.invalidateQueries({ queryKey: queryKeys.podcast(podcastId) });
+            return result;
+        } catch (error) {
+            console.error("Failed to refresh podcast:", error);
+            throw error;
+        } finally {
+            setIsRefreshing(false);
+        }
+    }, [podcastId, queryClient]);
+
     return {
         isSubscribing,
+        isRefreshing,
         showDeleteConfirm,
         setShowDeleteConfirm,
         handleSubscribe,
         handleRemovePodcast,
+        handleRefresh,
         handlePlayEpisode,
         handlePlayPauseEpisode,
         handleMarkEpisodeComplete,
