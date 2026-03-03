@@ -1726,6 +1726,31 @@ class ApiClient {
             method: "DELETE",
         });
     }
+
+    // M3U Import (uses raw fetch -- FormData requires browser-set Content-Type)
+    async importM3U(
+        file: File,
+        playlistName: string
+    ): Promise<{ playlistId: string; matched: number; unmatched: number; total: number }> {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("playlistName", playlistName);
+
+        const response = await fetch(`${this.getBaseUrl()}/api/spotify/import/m3u`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${this.token}` },
+            body: formData,
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(
+                (error as Record<string, string>).error || "M3U import failed"
+            );
+        }
+
+        return response.json();
+    }
 }
 
 // Create a singleton instance without passing baseUrl - it will be determined dynamically

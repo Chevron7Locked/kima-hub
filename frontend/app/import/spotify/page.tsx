@@ -14,6 +14,8 @@ import {
     ExternalLink,
     ChevronDown,
     ChevronUp,
+    Upload,
+    FileMusic,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
@@ -124,6 +126,22 @@ function SpotifyImportPageContent() {
     const [expandedSection, setExpandedSection] = useState<
         "matched" | "download" | "notfound" | null
     >("matched");
+
+    // M3U import state
+    type ImportTab = "url" | "file";
+    const [activeTab, setActiveTab] = useState<ImportTab>("url");
+    const [m3uFile, setM3uFile] = useState<File | null>(null);
+    const [m3uPlaylistName, setM3uPlaylistName] = useState("");
+    const [m3uLoading, setM3uLoading] = useState(false);
+    const [m3uResult, setM3uResult] = useState<{
+        playlistId: string;
+        matched: number;
+        unmatched: number;
+        total: number;
+    } | null>(null);
+    const [m3uError, setM3uError] = useState<string | null>(null);
+    const [isDragOver, setIsDragOver] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Auto-fetch preview if URL is provided in query params
     useEffect(() => {
@@ -365,6 +383,58 @@ function SpotifyImportPageContent() {
     };
 
 
+    const handleFileSelect = (file: File) => {
+        const ext = file.name.toLowerCase();
+        if (!ext.endsWith(".m3u") && !ext.endsWith(".m3u8")) {
+            toast.error("Please select an .m3u or .m3u8 file");
+            return;
+        }
+        setM3uFile(file);
+        setM3uError(null);
+        setM3uResult(null);
+        const nameWithoutExt = file.name.replace(/\.m3u8?$/i, "");
+        setM3uPlaylistName(nameWithoutExt);
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragOver(false);
+        const file = e.dataTransfer.files[0];
+        if (file) handleFileSelect(file);
+    };
+
+    const handleM3uImport = async () => {
+        if (!m3uFile) return;
+        const name = m3uPlaylistName.trim();
+        if (!name || name.length > 200) {
+            toast.error("Playlist name must be 1-200 characters");
+            return;
+        }
+
+        setM3uLoading(true);
+        setM3uError(null);
+        try {
+            const result = await api.importM3U(m3uFile, name);
+            setM3uResult(result);
+            queryClient.invalidateQueries({ queryKey: ["playlists"] });
+        } catch (err) {
+            const message =
+                err instanceof Error ? err.message : "M3U import failed";
+            setM3uError(message);
+            toast.error(message);
+        } finally {
+            setM3uLoading(false);
+        }
+    };
+
+    const handleM3uReset = () => {
+        setM3uFile(null);
+        setM3uPlaylistName("");
+        setM3uResult(null);
+        setM3uError(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+    };
+
     return (
         <div className="min-h-screen">
             <div className="max-w-3xl mx-auto px-6 py-6">
@@ -381,27 +451,204 @@ function SpotifyImportPageContent() {
                             Import Playlist
                         </h1>
                         <p className="text-sm text-gray-400">
-                            Import from Spotify or Deezer and download missing
-                            albums
+                            Import from Spotify, Deezer, or M3U files
                         </p>
                     </div>
                 </div>
 
-                {/* Browse Link */}
-                <div className="mb-6 p-4 bg-white/5 rounded-lg border border-white/10">
-                    <p className="text-sm text-gray-300">
-                        Looking for playlists to import?{" "}
-                        <Link
-                            href="/browse/playlists"
-                            className="text-[#ecb200] hover:underline font-medium"
+                {/* Tabs -- only visible during input step (URL flow) or file tab */}
+                {(step === "input" || activeTab === "file") && (
+                    <div className="flex gap-6 mb-6 border-b border-white/10">
+                        <button
+                            onClick={() => setActiveTab("url")}
+                            className={
+                                "pb-2.5 text-sm font-medium transition-colors relative " +
+                                (activeTab === "url"
+                                    ? "text-[#ecb200]"
+                                    : "text-gray-400 hover:text-gray-200")
+                            }
                         >
-                            Browse Deezer playlists & radio stations →
-                        </Link>
-                    </p>
-                </div>
+                            URL Import
+                            {activeTab === "url" && (
+                                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#ecb200] rounded-full" />
+                            )}
+                        </button>
+                        <button
+                            onClick={() => setActiveTab("file")}
+                            className={
+                                "pb-2.5 text-sm font-medium transition-colors relative " +
+                                (activeTab === "file"
+                                    ? "text-[#ecb200]"
+                                    : "text-gray-400 hover:text-gray-200")
+                            }
+                        >
+                            File Import
+                            {activeTab === "file" && (
+                                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#ecb200] rounded-full" />
+                            )}
+                        </button>
+                    </div>
+                )}
+
+                {/* M3U File Import Tab */}
+                {activeTab === "file" && !m3uResult && (
+                    <div className="space-y-4">
+                        {/* Drop zone */}
+                        <div
+                            onDragOver={(e) => {
+                                e.preventDefault();
+                                setIsDragOver(true);
+                            }}
+                            onDragLeave={() => setIsDragOver(false)}
+                            onDrop={handleDrop}
+                            onClick={() => fileInputRef.current?.click()}
+                            className={
+                                "border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors " +
+                                (isDragOver
+                                    ? "border-[#ecb200] bg-[#ecb200]/5"
+                                    : m3uFile
+                                    ? "border-green-500/50 bg-green-500/5"
+                                    : "border-white/20 hover:border-white/40 bg-white/5")
+                            }
+                        >
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept=".m3u,.m3u8"
+                                className="hidden"
+                                onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) handleFileSelect(file);
+                                }}
+                            />
+                            {m3uFile ? (
+                                <div className="flex flex-col items-center gap-2">
+                                    <FileMusic className="w-10 h-10 text-green-400" />
+                                    <p className="text-sm text-white font-medium">
+                                        {m3uFile.name}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                        Click to change file
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col items-center gap-2">
+                                    <Upload className="w-10 h-10 text-gray-400" />
+                                    <p className="text-sm text-gray-300">
+                                        Drop an M3U file here or click to browse
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                        Supports .m3u and .m3u8 playlist files
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Playlist name input */}
+                        {m3uFile && (
+                            <>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                                        Playlist Name
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={m3uPlaylistName}
+                                        onChange={(e) =>
+                                            setM3uPlaylistName(e.target.value)
+                                        }
+                                        maxLength={200}
+                                        placeholder="My Playlist"
+                                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#ecb200]/50 focus:border-[#ecb200] transition-colors"
+                                        onKeyDown={(e) =>
+                                            e.key === "Enter" && handleM3uImport()
+                                        }
+                                    />
+                                </div>
+
+                                {m3uError && (
+                                    <p className="text-sm text-red-400">
+                                        {m3uError}
+                                    </p>
+                                )}
+
+                                <button
+                                    onClick={handleM3uImport}
+                                    disabled={
+                                        m3uLoading ||
+                                        !m3uPlaylistName.trim()
+                                    }
+                                    className="w-full py-3 rounded-full font-medium bg-[#ecb200] text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                                >
+                                    {m3uLoading ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                            Importing...
+                                        </>
+                                    ) : (
+                                        "Create Playlist"
+                                    )}
+                                </button>
+                            </>
+                        )}
+                    </div>
+                )}
+
+                {/* M3U Import Result */}
+                {activeTab === "file" && m3uResult && (
+                    <div className="text-center py-12">
+                        <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 bg-[#ecb200]">
+                            <Check className="w-7 h-7 text-black" />
+                        </div>
+                        <h2 className="text-lg font-bold text-white mb-1">
+                            Playlist Created
+                        </h2>
+                        <p className="text-sm text-gray-400">
+                            Matched {m3uResult.matched} of {m3uResult.total} tracks
+                            {m3uResult.unmatched > 0 && (
+                                <span className="text-amber-400">
+                                    {" "}({m3uResult.unmatched} unmatched)
+                                </span>
+                            )}
+                        </p>
+                        <div className="flex items-center justify-center gap-3 mt-6">
+                            <button
+                                onClick={handleM3uReset}
+                                className="px-5 py-2.5 rounded-full text-sm font-medium text-gray-300 hover:text-white hover:bg-white/5 transition-colors"
+                            >
+                                Import Another
+                            </button>
+                            <button
+                                onClick={() =>
+                                    router.push(
+                                        `/playlist/${m3uResult.playlistId}`
+                                    )
+                                }
+                                className="px-5 py-2.5 rounded-full text-sm font-medium bg-[#ecb200] text-black hover:brightness-110 transition-all"
+                            >
+                                View Playlist
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Browse Link -- only shown on URL tab */}
+                {activeTab === "url" && step === "input" && (
+                    <div className="mb-6 p-4 bg-white/5 rounded-lg border border-white/10">
+                        <p className="text-sm text-gray-300">
+                            Looking for playlists to import?{" "}
+                            <Link
+                                href="/browse/playlists"
+                                className="text-[#ecb200] hover:underline font-medium"
+                            >
+                                Browse Deezer playlists & radio stations →
+                            </Link>
+                        </p>
+                    </div>
+                )}
 
                 {/* Step: Input */}
-                {step === "input" && (
+                {activeTab === "url" && step === "input" && (
                     <div className="space-y-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -443,7 +690,7 @@ function SpotifyImportPageContent() {
                 )}
 
                 {/* Step: Previewing (async job in progress) */}
-                {step === "previewing" && (
+                {activeTab === "url" && step === "previewing" && (
                     <div className="text-center py-12">
                         <Loader2 className="w-10 h-10 text-[#1DB954] animate-spin mx-auto mb-4" />
                         <h2 className="text-lg font-bold text-white mb-1">Analysing Playlist</h2>
@@ -454,7 +701,7 @@ function SpotifyImportPageContent() {
                 )}
 
                 {/* Step: Preview */}
-                {step === "preview" && preview && (
+                {activeTab === "url" && step === "preview" && preview && (
                     <div className="space-y-4">
                         {/* Playlist Info */}
                         <div className="flex items-start gap-4 p-4 bg-white/5 rounded-lg">
@@ -850,7 +1097,7 @@ function SpotifyImportPageContent() {
                 )}
 
                 {/* Step: Importing */}
-                {step === "importing" && importJob && (
+                {activeTab === "url" && step === "importing" && importJob && (
                     <div className="text-center py-12">
                         <Loader2 className="w-10 h-10 text-[#1DB954] animate-spin mx-auto mb-4" />
                         <h2 className="text-lg font-bold text-white mb-1">
@@ -921,7 +1168,7 @@ function SpotifyImportPageContent() {
                 )}
 
                 {/* Step: Complete */}
-                {step === "complete" && importJob && (
+                {activeTab === "url" && step === "complete" && importJob && (
                     <div className="text-center py-12">
                         <div
                             className={
