@@ -6,10 +6,12 @@ import { useActiveDownloads } from "@/hooks/useNotifications";
 import { NotificationsTab } from "@/components/activity/NotificationsTab";
 import { ActiveDownloadsTab } from "@/components/activity/ActiveDownloadsTab";
 import { HistoryTab } from "@/components/activity/HistoryTab";
+import { QueueTab } from "@/components/activity/QueueTab";
 import {
     Bell,
     Download,
     History,
+    ListMusic,
     ChevronLeft,
     ChevronRight,
     X,
@@ -17,13 +19,15 @@ import {
 import { cn } from "@/utils/cn";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { useActivityPanelSettings } from "@/lib/activity-panel-settings-context";
+import { useAudioState } from "@/lib/audio-state-context";
 
-type ActivityTab = "notifications" | "active" | "history" | "settings";
+type ActivityTab = "notifications" | "active" | "history" | "queue" | "settings";
 
 const TABS: { id: ActivityTab; label: string; icon: React.ElementType }[] = [
     { id: "notifications", label: "Notifications", icon: Bell },
     { id: "active", label: "Active", icon: Download },
     { id: "history", label: "History", icon: History },
+    { id: "queue", label: "Queue", icon: ListMusic },
 ];
 
 interface ActivityPanelProps {
@@ -46,6 +50,7 @@ export function ActivityPanel({
     const setResolvedActiveTab = onTabChange ?? setInternalActiveTab;
     const { unreadCount } = useNotifications();
     const { downloads: activeDownloads } = useActiveDownloads();
+    const { queue, currentIndex, playbackType } = useAudioState();
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;
@@ -66,8 +71,9 @@ export function ActivityPanel({
 
     // Badge counts
     const notificationBadge = unreadCount > 0 ? unreadCount : null;
-    const activeBadge =
-        activeDownloads.length > 0 ? activeDownloads.length : null;
+    const activeBadge = activeDownloads.length > 0 ? activeDownloads.length : null;
+    const upNextCount = playbackType === "track" ? queue.slice(currentIndex + 1).length : 0;
+    const queueBadge = upNextCount > 0 ? upNextCount : null;
     const hasActivity = unreadCount > 0 || activeDownloads.length > 0;
 
     // Mobile/Tablet: Full-screen overlay
@@ -110,6 +116,8 @@ export function ActivityPanel({
                                     ? notificationBadge
                                     : tab.id === "active"
                                     ? activeBadge
+                                    : tab.id === "queue"
+                                    ? queueBadge
                                     : null;
 
                             return (
@@ -151,6 +159,7 @@ export function ActivityPanel({
                             <ActiveDownloadsTab />
                         )}
                         {resolvedActiveTab === "history" && <HistoryTab />}
+                        {resolvedActiveTab === "queue" && <QueueTab />}
                         {resolvedActiveTab === "settings" && settingsContent}
                     </div>
                 </div>
@@ -222,6 +231,8 @@ export function ActivityPanel({
                                 ? notificationBadge
                                 : tab.id === "active"
                                 ? activeBadge
+                                : tab.id === "queue"
+                                ? queueBadge
                                 : null;
 
                         return (
@@ -254,6 +265,7 @@ export function ActivityPanel({
                     )}
                     {resolvedActiveTab === "active" && <ActiveDownloadsTab />}
                     {resolvedActiveTab === "history" && <HistoryTab />}
+                    {resolvedActiveTab === "queue" && <QueueTab />}
                     {resolvedActiveTab === "settings" && settingsContent}
                 </div>
                 </div>

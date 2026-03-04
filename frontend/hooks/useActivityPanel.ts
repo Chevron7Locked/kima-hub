@@ -9,7 +9,7 @@ export function useActivityPanel() {
         if (typeof window === "undefined") return false;
         return localStorage.getItem(ACTIVITY_PANEL_KEY) === "true";
     });
-    const [activeTab, setActiveTab] = useState<"notifications" | "active" | "history" | "settings">("notifications");
+    const [activeTab, setActiveTab] = useState<"notifications" | "active" | "history" | "queue" | "settings">("notifications");
 
     // Persist state to localStorage
     useEffect(() => {
