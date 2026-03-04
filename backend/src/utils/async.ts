@@ -39,35 +39,3 @@ export async function withRetry<T>(fn: () => Promise<T>, attempts = 3, delayMs =
     throw new Error("unreachable");
 }
 
-/**
- * Process items in batches with yielding between batches
- * Checks abort signal to support early termination
- *
- * @param items - Array of items to process
- * @param batchSize - Number of items per batch
- * @param processor - Function to process each batch
- * @param signal - Optional AbortSignal for early termination
- * @returns Flattened array of all processor results
- */
-export async function processBatched<T, R>(
-    items: T[],
-    batchSize: number,
-    processor: (batch: T[]) => Promise<R[]>,
-    signal?: AbortSignal
-): Promise<R[]> {
-    const results: R[] = [];
-    const chunks = chunkArray(items, batchSize);
-
-    for (const chunk of chunks) {
-        if (signal?.aborted) {
-            break; // Exit early if operation was cancelled
-        }
-
-        const batchResults = await processor(chunk);
-        results.push(...batchResults);
-
-        await yieldToEventLoop();
-    }
-
-    return results;
-}

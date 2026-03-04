@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.6.2] - 2026-03-03
 
+Closes #32. Partially addresses #25, #90, #124, #139.
+
 ### Added
+
+- **Skip MusicBrainz when Lidarr disabled (#90, #124)**: Playlist imports no longer call MusicBrainz for MBID resolution when Lidarr is not configured. Soulseek searches by artist+album+track text and never uses MBIDs, so MB API calls were pure waste for Soulseek-only users. A 170-song import that took ~15 minutes now generates its preview in seconds. Albums without MBIDs route directly to Soulseek instead of being blocked or misrouted to track-based acquisition.
+- **Import cancellation with AbortSignal**: Cancelling a playlist import now immediately aborts all in-flight and queued Soulseek searches and downloads. Previously, `cancelJob()` only marked DB records as failed while rate-limiter-queued searches continued executing for minutes. AbortSignal threads from `cancelJob()` through the PQueue album pipeline, acquisition service, rate limiter, search strategies, and download retry loop.
 
 - **Playlist action hub**: Create, Import URL, Import File (M3U), and Browse buttons directly on the playlists page. No more navigating through Browse to import.
 - **Sidebar create playlist**: The "+" button in the sidebar now opens an inline create dialog instead of navigating away.

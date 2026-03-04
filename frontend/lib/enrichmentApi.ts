@@ -227,13 +227,6 @@ export const enrichmentApi = {
     },
 
     /**
-     * Retry failed vibe embeddings
-     */
-    retryVibeEmbeddings: async (): Promise<{ message: string; queued: number }> => {
-        return api.post("/analysis/vibe/retry", {});
-    },
-
-    /**
      * Reset all vibe embeddings (queue all tracks for re-embedding)
      */
     resetVibeEmbeddings: async (): Promise<{ message: string; queued: number }> => {

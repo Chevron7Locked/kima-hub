@@ -75,7 +75,7 @@ export async function isImageBackfillNeeded(): Promise<{
 /**
  * Backfill artist images - download external URLs and store locally
  */
-export async function backfillArtistImages(): Promise<void> {
+async function backfillArtistImages(): Promise<void> {
     if (backfillProgress.inProgress) {
         logger.warn("[ImageBackfill] Backfill already in progress");
         return;
@@ -186,7 +186,7 @@ export async function backfillArtistImages(): Promise<void> {
 /**
  * Backfill album covers - download external URLs and store locally
  */
-export async function backfillAlbumCovers(): Promise<void> {
+async function backfillAlbumCovers(): Promise<void> {
     if (backfillProgress.inProgress) {
         logger.warn("[ImageBackfill] Backfill already in progress");
         return;

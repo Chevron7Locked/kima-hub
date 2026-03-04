@@ -3,12 +3,6 @@
  *
  * Consolidates album/track acquisition logic from Discovery Weekly and Playlist Import.
  * Handles download source selection, behavior matrix routing, and job tracking.
- *
- * Phase 2.1: Initial implementation
- * - Behavior matrix logic for primary/fallback source selection
- * - Soulseek album acquisition (track list → batch download)
- * - Lidarr album acquisition (webhook-based completion)
- * - DownloadJob management with context-based tracking
  */
 
 import { logger } from "../utils/logger";
@@ -38,6 +32,7 @@ export interface AcquisitionContext {
     spotifyImportJobId?: string;
     existingJobId?: string;
     retryCount?: number;
+    signal?: AbortSignal;
 }
 
 /**
@@ -135,9 +130,6 @@ class AcquisitionService {
 
         // Case 1: No sources available
         if (!hasSoulseek && !hasLidarr) {
-            logger.debug(
-                "[Acquisition] Available sources: Lidarr=false, Soulseek=false"
-            );
             logger.error("[Acquisition] No download sources configured");
             return {
                 hasPrimarySource: false,
@@ -149,15 +141,7 @@ class AcquisitionService {
 
         // Case 2: Only one source available - use it regardless of preference
         if (hasSoulseek && !hasLidarr) {
-            logger.debug(
-                "[Acquisition] Available sources: Lidarr=false, Soulseek=true"
-            );
-            logger.debug(
-                "[Acquisition] Using Soulseek as primary source (only source available)"
-            );
-            logger.debug(
-                "[Acquisition] No fallback configured (only one source available)"
-            );
+            logger.debug("[Acquisition] Source config: primary=soulseek, fallback=none (only source)");
             return {
                 hasPrimarySource: true,
                 primarySource: "soulseek",
@@ -167,15 +151,7 @@ class AcquisitionService {
         }
 
         if (hasLidarr && !hasSoulseek) {
-            logger.debug(
-                "[Acquisition] Available sources: Lidarr=true, Soulseek=false"
-            );
-            logger.debug(
-                "[Acquisition] Using Lidarr as primary source (only source available)"
-            );
-            logger.debug(
-                "[Acquisition] No fallback configured (only one source available)"
-            );
+            logger.debug("[Acquisition] Source config: primary=lidarr, fallback=none (only source)");
             return {
                 hasPrimarySource: true,
                 primarySource: "lidarr",
@@ -203,15 +179,7 @@ class AcquisitionService {
         }
 
         logger.debug(
-            "[Acquisition] Available sources: Lidarr=true, Soulseek=true"
-        );
-        logger.debug(
-            `[Acquisition] Using ${userPrimary} as primary source (user preference)`
-        );
-        logger.debug(
-            `[Acquisition] Fallback configured: ${
-                useFallback ? alternative : "none"
-            }`
+            `[Acquisition] Source config: primary=${userPrimary}, fallback=${useFallback ? alternative : "none"}`
         );
 
         return {
@@ -282,6 +250,10 @@ class AcquisitionService {
         // actual processing time, not time spent waiting for a queue slot.
         const MAX_ACQUISITION_TIME = 5 * 60 * 1000; // 5 minutes
         const result = await this.albumQueue.add(async () => {
+            if (context.signal?.aborted) {
+                return { success: false, error: 'Import cancelled' } as AcquisitionResult;
+            }
+
             let timeoutId: NodeJS.Timeout;
             const timeoutPromise = new Promise<AcquisitionResult>((resolve) => {
                 timeoutId = setTimeout(() => {
@@ -301,7 +273,7 @@ class AcquisitionService {
             } finally {
                 clearTimeout(timeoutId!);
             }
-        });
+        }, context.signal ? { signal: context.signal } : {});
 
         return result as AcquisitionResult;
     }
@@ -313,15 +285,14 @@ class AcquisitionService {
         request: AlbumAcquisitionRequest,
         context: AcquisitionContext
     ): Promise<AcquisitionResult> {
+        if (context.signal?.aborted) {
+            return { success: false, error: 'Import cancelled' };
+        }
+
         const startTime = Date.now();
         logger.debug(
             `\n[Acquisition] Acquiring album: ${request.artistName} - ${request.albumTitle} (queue: ${this.albumQueue.size} pending, ${this.albumQueue.pending} active)`
         );
-
-        // Validate inputs
-        if (!request.mbid) {
-            throw new UserFacingError('Album MBID is required', 400, 'INVALID_INPUT');
-        }
 
         // Check configuration
         const soulseekAvailable = await soulseekService.isAvailable();
@@ -336,6 +307,11 @@ class AcquisitionService {
             throw new ConfigurationError(
                 'No download sources configured. Please configure Soulseek or Lidarr in settings.'
             );
+        }
+
+        // MBID only required when Soulseek is unavailable (Lidarr needs it)
+        if (!request.mbid && !soulseekAvailable) {
+            throw new UserFacingError('Album MBID is required when Soulseek is not available', 400, 'INVALID_INPUT');
         }
 
         // Verify artist name before acquisition
@@ -378,7 +354,8 @@ class AcquisitionService {
 
                     if (
                         behavior.hasFallbackSource &&
-                        behavior.fallbackSource === "lidarr"
+                        behavior.fallbackSource === "lidarr" &&
+                        request.mbid
                     ) {
                         logger.debug(
                             `[Acquisition] Attempting Lidarr fallback...`
@@ -391,30 +368,36 @@ class AcquisitionService {
                     }
                 }
             } else if (behavior.primarySource === "lidarr") {
-                logger.debug(`[Acquisition] Trying primary: Lidarr`);
-                result = await this.acquireAlbumViaLidarr(request, context);
+                if (!request.mbid) {
+                    // No MBID -- Lidarr requires it, skip directly to Soulseek
+                    logger.info(`[Acquisition] No MBID for "${request.albumTitle}", skipping Lidarr, trying Soulseek directly`);
+                    result = await this.acquireAlbumViaSoulseek(request, context);
+                } else {
+                    logger.debug(`[Acquisition] Trying primary: Lidarr`);
+                    result = await this.acquireAlbumViaLidarr(request, context);
 
-                // Fallback to Soulseek if Lidarr fails and fallback is configured
-                if (!result.success) {
-                    logger.debug(
-                        `[Acquisition] Lidarr failed: ${result.error || "unknown error"}`
-                    );
-                    logger.debug(
-                        `[Acquisition] Fallback available: hasFallback=${behavior.hasFallbackSource}, source=${behavior.fallbackSource}`
-                    );
+                    // Fallback to Soulseek if Lidarr fails and fallback is configured
+                    if (!result.success) {
+                        logger.debug(
+                            `[Acquisition] Lidarr failed: ${result.error || "unknown error"}`
+                        );
+                        logger.debug(
+                            `[Acquisition] Fallback available: hasFallback=${behavior.hasFallbackSource}, source=${behavior.fallbackSource}`
+                        );
 
-                    if (
-                        behavior.hasFallbackSource &&
-                        behavior.fallbackSource === "soulseek"
-                    ) {
-                        logger.debug(
-                            `[Acquisition] Attempting Soulseek fallback...`
-                        );
-                        result = await this.acquireAlbumViaSoulseek(request, context);
-                    } else {
-                        logger.debug(
-                            `[Acquisition] No fallback configured or fallback not Soulseek`
-                        );
+                        if (
+                            behavior.hasFallbackSource &&
+                            behavior.fallbackSource === "soulseek"
+                        ) {
+                            logger.debug(
+                                `[Acquisition] Attempting Soulseek fallback...`
+                            );
+                            result = await this.acquireAlbumViaSoulseek(request, context);
+                        } else {
+                            logger.debug(
+                                `[Acquisition] No fallback configured or fallback not Soulseek`
+                            );
+                        }
                     }
                 }
             } else {
@@ -504,7 +487,8 @@ class AcquisitionService {
             const batchResult = await soulseekService.searchAndDownloadBatch(
                 tracksToDownload,
                 musicPath,
-                settings?.soulseekConcurrentDownloads ?? 4 // concurrency
+                settings?.soulseekConcurrentDownloads ?? 4, // concurrency
+                context.signal
             );
 
             logger.debug(
@@ -532,6 +516,12 @@ class AcquisitionService {
 
             return results;
         } catch (error: any) {
+            if (error?.name === 'AbortError' || context.signal?.aborted) {
+                return requests.map(() => ({
+                    success: false,
+                    error: 'Import cancelled',
+                }));
+            }
             logger.error(
                 `[Acquisition] Batch track download error: ${error.message}`
             );
@@ -566,10 +556,10 @@ class AcquisitionService {
             return { success: false, error: "Music path not configured" };
         }
 
-        if (!request.mbid) {
+        if (!request.mbid && (!request.requestedTracks || request.requestedTracks.length === 0)) {
             return {
                 success: false,
-                error: "Album MBID required for Soulseek download",
+                error: "Album MBID or track list required for Soulseek download",
             };
         }
 
@@ -596,8 +586,8 @@ class AcquisitionService {
                     `[Acquisition/Soulseek] Using ${tracks.length} requested tracks (not full album)`
                 );
             } else {
-                // Strategy 1: Get track list from MusicBrainz
-                tracks = await musicBrainzService.getAlbumTracks(request.mbid);
+                // Strategy 1: Get track list from MusicBrainz (mbid guaranteed by early guard above)
+                tracks = await musicBrainzService.getAlbumTracks(request.mbid!);
 
                 // Strategy 2: Fallback to Last.fm (always try when MusicBrainz fails)
                 if (!tracks || tracks.length === 0) {
@@ -653,7 +643,8 @@ class AcquisitionService {
                 request.artistName,
                 request.albumTitle,
                 tracks,
-                musicPath
+                musicPath,
+                context.signal
             );
 
             if (batchResult.successful === 0) {
@@ -716,6 +707,12 @@ class AcquisitionService {
                     : `Only ${batchResult.successful}/${tracks.length} tracks found`,
             };
         } catch (error: any) {
+            if (error?.name === 'AbortError' || context.signal?.aborted) {
+                if (job) {
+                    await this.updateJobStatus(job.id, "failed", "Import cancelled").catch(() => {});
+                }
+                return { success: false, error: 'Import cancelled' };
+            }
             logger.error(`[Acquisition/Soulseek] Error: ${error.message}`);
             // Update job status if job was created
             if (job) {
@@ -745,6 +742,10 @@ class AcquisitionService {
         request: AlbumAcquisitionRequest,
         context: AcquisitionContext
     ): Promise<AcquisitionResult> {
+        if (context.signal?.aborted) {
+            return { success: false, error: 'Import cancelled' };
+        }
+
         logger.debug(
             `[Acquisition/Lidarr] Downloading: ${request.artistName} - ${request.albumTitle}`
         );
@@ -860,39 +861,39 @@ class AcquisitionService {
             throw new Error(`Invalid userId in acquisition context: ${context.userId}`);
         }
 
-        if (!request.mbid) {
-            throw new Error('Album MBID required for download job creation');
-        }
+        // Dedup key: use MBID if available, otherwise use artist+album as identifier
+        const dedupKey = request.mbid || `${request.artistName}::${request.albumTitle}`;
 
         // Check for existing active download job (before acquiring lock)
+        const existingJobWhere: any = {
+            userId: context.userId,
+            discoveryBatchId: context.discoveryBatchId || null,
+            status: { in: ['pending', 'downloading'] },
+        };
+        if (request.mbid) {
+            existingJobWhere.targetMbid = request.mbid;
+        } else {
+            existingJobWhere.subject = `${request.artistName} - ${request.albumTitle}`;
+        }
+
         const existingJob = await prisma.downloadJob.findFirst({
-            where: {
-                userId: context.userId,
-                targetMbid: request.mbid,
-                discoveryBatchId: context.discoveryBatchId || null,
-                status: { in: ['pending', 'downloading'] },
-            },
+            where: existingJobWhere,
         });
 
         if (existingJob) {
             logger.info(
-                `[Acquisition] Download job already exists for album ${request.mbid}, returning existing job ${existingJob.id}`
+                `[Acquisition] Download job already exists for album ${dedupKey}, returning existing job ${existingJob.id}`
             );
             return existingJob;
         }
 
         // Use distributed lock to prevent race condition
-        const lockKey = `download-job:${context.userId}:${request.mbid}:${context.discoveryBatchId || 'null'}`;
+        const lockKey = `download-job:${context.userId}:${dedupKey}:${context.discoveryBatchId || 'null'}`;
 
         return await distributedLock.withLock(lockKey, 5000, async () => {
             // Double-check after acquiring lock (another request might have created it)
             const doubleCheck = await prisma.downloadJob.findFirst({
-                where: {
-                    userId: context.userId,
-                    targetMbid: request.mbid,
-                    discoveryBatchId: context.discoveryBatchId || null,
-                    status: { in: ['pending', 'downloading'] },
-                },
+                where: existingJobWhere,
             });
 
             if (doubleCheck) {
@@ -907,12 +908,12 @@ class AcquisitionService {
                 userId: context.userId,
                 subject: `${request.artistName} - ${request.albumTitle}`,
                 type: "album",
-                targetMbid: request.mbid,
+                targetMbid: request.mbid || null,
                 status: "pending",
                 metadata: {
                     artistName: request.artistName,
                     albumTitle: request.albumTitle,
-                    albumMbid: request.mbid,
+                    albumMbid: request.mbid || null,
                 },
             };
 

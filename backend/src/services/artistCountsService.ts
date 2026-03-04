@@ -25,7 +25,7 @@ interface ArtistCounts {
 /**
  * Calculate counts for a single artist
  */
-export async function calculateArtistCounts(
+async function calculateArtistCounts(
   artistId: string
 ): Promise<ArtistCounts> {
   const [libraryAlbums, discoveryAlbums, trackCount] = await Promise.all([
@@ -74,63 +74,6 @@ export async function updateArtistCounts(artistId: string): Promise<void> {
   } catch (error) {
     logger.error(`[ArtistCounts] Failed to update counts for ${artistId}:`, error);
     throw error;
-  }
-}
-
-/**
- * Update counts for multiple artists (batch operation)
- */
-export async function updateMultipleArtistCounts(
-  artistIds: string[]
-): Promise<{ updated: number; errors: number }> {
-  let updated = 0;
-  let errors = 0;
-
-  for (const artistId of artistIds) {
-    try {
-      await updateArtistCounts(artistId);
-      updated++;
-    } catch (error) {
-      errors++;
-    }
-  }
-
-  return { updated, errors };
-}
-
-/**
- * Update counts for an artist by album ID (useful after album changes)
- */
-export async function updateArtistCountsByAlbumId(
-  albumId: string
-): Promise<void> {
-  const album = await prisma.album.findUnique({
-    where: { id: albumId },
-    select: { artistId: true },
-  });
-
-  if (album) {
-    await updateArtistCounts(album.artistId);
-  }
-}
-
-/**
- * Update counts for an artist by track ID (useful after track changes)
- */
-export async function updateArtistCountsByTrackId(
-  trackId: string
-): Promise<void> {
-  const track = await prisma.track.findUnique({
-    where: { id: trackId },
-    select: {
-      album: {
-        select: { artistId: true },
-      },
-    },
-  });
-
-  if (track?.album) {
-    await updateArtistCounts(track.album.artistId);
   }
 }
 
@@ -272,18 +215,3 @@ export async function getBackfillProgress(): Promise<{
   };
 }
 
-/**
- * Recalculate counts for all artists (force refresh)
- * Use sparingly - this resets countsLastUpdated to null first
- */
-export async function forceRecalculateAllCounts(): Promise<void> {
-  logger.info("[ArtistCounts] Force recalculating all counts...");
-
-  // Reset countsLastUpdated to trigger backfill
-  await prisma.artist.updateMany({
-    data: { countsLastUpdated: null },
-  });
-
-  // Run backfill
-  await backfillAllArtistCounts();
-}

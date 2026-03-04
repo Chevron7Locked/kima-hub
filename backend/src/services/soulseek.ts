@@ -47,6 +47,145 @@ export interface SearchTrackResult {
     allMatches: TrackMatch[];
 }
 
+/**
+ * Sliding window rate limiter for Soulseek searches.
+ * Empirically safe limit from slsk-batchdl: 34 searches / 220s.
+ * We use 30/220s for extra safety (~8.2/min).
+ */
+interface RateLimiterWaiter {
+    resolve: () => void;
+    reject: (err: Error) => void;
+    settled: boolean;
+    timeout: NodeJS.Timeout | null;
+}
+
+class SlidingWindowRateLimiter {
+    private timestamps: number[] = [];
+    private waitQueue: RateLimiterWaiter[] = [];
+    private drainTimer: NodeJS.Timeout | null = null;
+
+    constructor(
+        private readonly maxRequests: number = 30,
+        private readonly windowMs: number = 220_000,
+        private readonly maxWaitMs: number = 600_000
+    ) {}
+
+    async acquire(signal?: AbortSignal): Promise<void> {
+        if (signal?.aborted) {
+            throw new DOMException('The operation was aborted.', 'AbortError');
+        }
+
+        const now = Date.now();
+        const windowStart = now - this.windowMs;
+        this.timestamps = this.timestamps.filter(t => t > windowStart);
+
+        if (this.timestamps.length < this.maxRequests) {
+            this.timestamps.push(now);
+            return;
+        }
+
+        // Window is full -- wait for the oldest entry to expire
+        const oldestInWindow = this.timestamps[0];
+        const waitMs = oldestInWindow + this.windowMs - now;
+
+        if (waitMs > this.maxWaitMs) {
+            throw new Error(`Rate limiter wait ${Math.round(waitMs / 1000)}s exceeds max ${Math.round(this.maxWaitMs / 1000)}s`);
+        }
+
+        return new Promise<void>((resolve, reject) => {
+            const entry: RateLimiterWaiter = { resolve, reject, settled: false, timeout: null };
+            this.waitQueue.push(entry);
+
+            const onAbort = () => {
+                if (entry.settled) return;
+                entry.settled = true;
+                if (entry.timeout) clearTimeout(entry.timeout);
+                const idx = this.waitQueue.indexOf(entry);
+                if (idx !== -1) this.waitQueue.splice(idx, 1);
+                reject(new DOMException('The operation was aborted.', 'AbortError'));
+            };
+
+            signal?.addEventListener('abort', onAbort, { once: true });
+
+            entry.timeout = setTimeout(() => {
+                if (entry.settled) return;
+                entry.settled = true;
+                const idx = this.waitQueue.indexOf(entry);
+                if (idx !== -1) {
+                    this.waitQueue.splice(idx, 1);
+                }
+                signal?.removeEventListener('abort', onAbort);
+                this.timestamps.push(Date.now());
+                resolve();
+            }, waitMs);
+
+            // Schedule drain to process queued waiters
+            if (!this.drainTimer && this.waitQueue.length === 1) {
+                this.drainTimer = setTimeout(() => {
+                    this.drainTimer = null;
+                    this.drainQueue();
+                }, waitMs);
+            }
+        });
+    }
+
+    private drainQueue(): void {
+        const now = Date.now();
+        const windowStart = now - this.windowMs;
+        this.timestamps = this.timestamps.filter(t => t > windowStart);
+
+        while (this.waitQueue.length > 0 && this.timestamps.length < this.maxRequests) {
+            const entry = this.waitQueue.shift()!;
+            if (entry.settled) continue;
+            entry.settled = true;
+            if (entry.timeout) {
+                clearTimeout(entry.timeout);
+            }
+            this.timestamps.push(now);
+            entry.resolve();
+        }
+
+        // Schedule next drain if still waiting
+        if (this.waitQueue.length > 0 && this.timestamps.length > 0) {
+            const oldestInWindow = this.timestamps[0];
+            const waitMs = oldestInWindow + this.windowMs - Date.now();
+            if (waitMs > 0) {
+                this.drainTimer = setTimeout(() => {
+                    this.drainTimer = null;
+                    this.drainQueue();
+                }, waitMs);
+            }
+        }
+    }
+
+    destroy(): void {
+        if (this.drainTimer) {
+            clearTimeout(this.drainTimer);
+            this.drainTimer = null;
+        }
+        for (const entry of this.waitQueue) {
+            if (entry.timeout) {
+                clearTimeout(entry.timeout);
+            }
+            if (!entry.settled) {
+                entry.settled = true;
+                entry.reject(new Error('Rate limiter destroyed'));
+            }
+        }
+        this.waitQueue = [];
+        this.timestamps = [];
+    }
+
+    get remaining(): number {
+        const windowStart = Date.now() - this.windowMs;
+        return Math.max(0, this.maxRequests - this.timestamps.filter(t => t > windowStart).length);
+    }
+
+    get waiting(): number {
+        return this.waitQueue.length;
+    }
+}
+
 export class SoulseekService {
     private client: SlskClient | null = null;
     private connecting = false;
@@ -79,6 +218,8 @@ export class SoulseekService {
     // slskd-inspired timeout values (from slskd.example.yml)
     private readonly CONNECT_TIMEOUT = 10000; // 10s (slskd default)
     private readonly LOGIN_TIMEOUT = 10000; // 10s (reduced from 15s)
+
+    private searchRateLimiter = new SlidingWindowRateLimiter(30, 220_000);
 
     constructor() {
         this.connectEagerly();
@@ -341,7 +482,10 @@ export class SoulseekService {
                     this.forceDisconnect();
                 }
 
-                // Apply exponential backoff (slskd practice)
+                // Apply exponential backoff (slskd practice).
+                // NOTE: This sleeps inside the distributed lock. Lock TTL (360s) exceeds max
+                // backoff (300s). Other callers hitting the lock fall through to waitForConnection()
+                // which polls for 30s -- acceptable since long backoffs only occur after many failures.
                 const backoffDelay = force ? 0 : this.getReconnectDelay();
                 if (backoffDelay > 0) {
                     const now = Date.now();
@@ -356,9 +500,7 @@ export class SoulseekService {
                             `Exponential backoff: waiting ${Math.round(waitMs / 1000)}s before reconnect attempt (attempt #${this.failedConnectionAttempts})`,
                             "WARN"
                         );
-                        throw new Error(
-                            `Connection backoff - wait ${Math.round(waitMs / 1000)}s before retry (attempt ${this.failedConnectionAttempts})`
-                        );
+                        await new Promise(resolve => setTimeout(resolve, waitMs));
                     }
                 }
 
@@ -459,6 +601,32 @@ export class SoulseekService {
     }
 
     /**
+     * Rate-limited search that gates on the sliding window and waits through backoff.
+     * Search timeout measures only network time, not rate limiter wait.
+     */
+    private async rateLimitedSearch(
+        query: string,
+        options?: { timeout?: number; onResult?: (result: FileSearchResponse) => void; signal?: AbortSignal }
+    ): Promise<FileSearchResponse[]> {
+        if (options?.signal?.aborted) {
+            throw new DOMException('The operation was aborted.', 'AbortError');
+        }
+        if (this.searchRateLimiter.remaining === 0) {
+            sessionLog(
+                "SOULSEEK",
+                `Rate limiter full (${this.searchRateLimiter.waiting} waiting), throttling search`,
+                "WARN"
+            );
+        }
+        await this.searchRateLimiter.acquire(options?.signal);
+        if (options?.signal?.aborted) {
+            throw new DOMException('The operation was aborted.', 'AbortError');
+        }
+        await this.ensureConnected();
+        return this.client!.search(query, options ?? {});
+    }
+
+    /**
      * Search for a track on Soulseek
      *
      * @param timeoutMs Default 15s per research (slsk-batchdl uses 6s, community recommends 10-15s)
@@ -470,8 +638,12 @@ export class SoulseekService {
         albumName?: string,
         isRetry: boolean = false,
         timeoutMs: number = 15000,
-        onResult?: (result: FileSearchResponse) => void
+        onResult?: (result: FileSearchResponse) => void,
+        signal?: AbortSignal
     ): Promise<SearchTrackResult> {
+        if (signal?.aborted) {
+            return { found: false, bestMatch: null, allMatches: [] };
+        }
         const metricsStartTime = Date.now();
         this.totalSearches++;
         const searchId = this.totalSearches;
@@ -479,6 +651,9 @@ export class SoulseekService {
             ? Math.round((Date.now() - this.connectedAt.getTime()) / 1000)
             : 0;
 
+        // Pre-flight connection check -- fail fast before consuming rate limiter slots.
+        // rateLimitedSearch also calls ensureConnected, but this avoids wasting a slot
+        // when credentials are missing or the service is disabled.
         try {
             await this.ensureConnected();
         } catch (err: any) {
@@ -508,10 +683,15 @@ export class SoulseekService {
 
         const searchStartTime = Date.now();
 
+        // Inject signal into bound search function so strategies abort on cancellation
+        const boundSearch = signal
+            ? (query: string, opts?: any) => this.rateLimitedSearch(query, { ...opts, signal })
+            : this.rateLimitedSearch.bind(this);
+
         try {
             // Delegate to optimized multi-strategy search
             const responses = await searchWithStrategies(
-                this.client,
+                boundSearch,
                 artistName,
                 trackTitle,
                 albumName,
@@ -589,7 +769,8 @@ export class SoulseekService {
                             albumName,
                             true,
                             timeoutMs,
-                            onResult
+                            onResult,
+                            signal
                         );
                     }
                 }
@@ -1238,11 +1419,12 @@ async searchAndDownloadAlbum(
         artistName: string,
         albumName: string,
         tracks: Array<{ title: string; position?: number }>,
-        musicPath: string
+        musicPath: string,
+        signal?: AbortSignal
     ): Promise<{ successful: number; failed: number; files: string[]; errors: string[] }> {
         const results = { successful: 0, failed: 0, files: [] as string[], errors: [] as string[] };
 
-        if (tracks.length === 0) {
+        if (signal?.aborted || tracks.length === 0) {
             return results;
         }
 
@@ -1259,23 +1441,6 @@ async searchAndDownloadAlbum(
 
         sessionLog("SOULSEEK", `[Album Search] "${query}" (${tracks.length} tracks, VA=${isVA})`);
 
-        // Fix 5: Wrap ensureConnected + search in try/catch
-        try {
-            await this.ensureConnected();
-        } catch (err: any) {
-            sessionLog("SOULSEEK", `[Album Search] Connection failed: ${err.message}, falling back to per-track`, "WARN");
-            return this.searchAndDownloadBatch(
-                tracks.map(t => ({ artist: artistName, title: t.title, album: albumName })),
-                musicPath,
-                2
-            );
-        }
-        if (!this.client) {
-            results.failed = tracks.length;
-            results.errors.push("Not connected to Soulseek");
-            return results;
-        }
-
         const audioExtensions = [".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav", ".aac"];
 
         const countAudioFiles = (resps: FileSearchResponse[]): number => {
@@ -1290,25 +1455,26 @@ async searchAndDownloadAlbum(
             return count;
         };
 
-        // Fix 5: Wrap search calls in try/catch
-        // Fix 6: Reduced timeouts (8s primary, 6s fallback) per slsk-batchdl/Soularr practice
+        // Rate-limited searches with reduced timeouts (8s primary, 6s fallback) per slsk-batchdl/Soularr practice
         let responses: FileSearchResponse[];
         let audioCount: number;
         try {
-            responses = await this.client.search(query, { timeout: 8000 });
+            responses = await this.rateLimitedSearch(query, { timeout: 8000, signal });
             audioCount = countAudioFiles(responses);
 
             if (audioCount === 0 && !isVA) {
                 sessionLog("SOULSEEK", `[Album Search] Primary query returned 0 audio files, trying album-only fallback`);
-                responses = await this.client.search(normalizedAlbum, { timeout: 6000 });
+                responses = await this.rateLimitedSearch(normalizedAlbum, { timeout: 6000, signal });
                 audioCount = countAudioFiles(responses);
             }
         } catch (err: any) {
+            if (err?.name === 'AbortError') throw err;
             sessionLog("SOULSEEK", `[Album Search] Search failed: ${err.message}, falling back to per-track`, "WARN");
             return this.searchAndDownloadBatch(
                 tracks.map(t => ({ artist: artistName, title: t.title, album: albumName })),
                 musicPath,
-                2
+                2,
+                signal
             );
         }
 
@@ -1317,14 +1483,15 @@ async searchAndDownloadAlbum(
             return this.searchAndDownloadBatch(
                 tracks.map(t => ({ artist: artistName, title: t.title, album: albumName })),
                 musicPath,
-                2
+                2,
+                signal
             );
         }
 
         // --- Phase 2: Group results by user + parent directory ---
         const flatResults = this.flattenSearchResults(responses);
 
-        // Fix 3: Filter blocked users before grouping
+        // Filter blocked users before grouping
         const blockChecks = await Promise.all(
             flatResults.map(async (r) => ({
                 result: r,
@@ -1389,7 +1556,8 @@ async searchAndDownloadAlbum(
             return this.searchAndDownloadBatch(
                 tracks.map(t => ({ artist: artistName, title: t.title, album: albumName })),
                 musicPath,
-                2
+                2,
+                signal
             );
         }
 
@@ -1510,7 +1678,7 @@ async searchAndDownloadAlbum(
 
         scoredGroups.sort((a, b) => b.totalScore - a.totalScore);
 
-        // Fix 2: Try multiple groups (top 3) before falling back to per-track
+        // Try multiple groups (top 3) before falling back to per-track
         const groupsToTry = scoredGroups.filter(g => g.matchRatio >= 0.3).slice(0, 3);
 
         if (groupsToTry.length === 0) {
@@ -1519,7 +1687,8 @@ async searchAndDownloadAlbum(
             return this.searchAndDownloadBatch(
                 tracks.map(t => ({ artist: artistName, title: t.title, album: albumName })),
                 musicPath,
-                2
+                2,
+                signal
             );
         }
 
@@ -1548,12 +1717,16 @@ async searchAndDownloadAlbum(
 
             if (tracksToDownload.size === 0) continue;
 
-            // Fix 4: Parallel downloads with PQueue (concurrency 3)
+            // Parallel downloads with PQueue (concurrency 3)
             const downloadQueue = new PQueue({ concurrency: 3 });
             let groupFailures = 0;
 
+            signal?.addEventListener('abort', () => { downloadQueue.clear(); }, { once: true });
+
             const downloadPromises = Array.from(tracksToDownload.entries()).map(([trackIdx, file]) =>
                 downloadQueue.add(async () => {
+                    if (signal?.aborted) return;
+
                     const track = tracks[trackIdx];
                     const ext = path.extname(file.file);
                     const destPath = path.join(
@@ -1584,7 +1757,7 @@ async searchAndDownloadAlbum(
                         results.errors.push(`${track.title}: ${downloadResult.error || "download failed"} (user: ${username})`);
                         sessionLog("SOULSEEK", `[Album Search] Download failed for "${track.title}" from ${username}: ${downloadResult.error}`, "WARN");
                     }
-                })
+                }, signal ? { signal } : {})
             );
 
             const downloadSettled = await Promise.allSettled(downloadPromises);
@@ -1624,7 +1797,7 @@ async searchAndDownloadAlbum(
                 album: albumName,
             }));
 
-            const fallbackResult = await this.searchAndDownloadBatch(fallbackTracks, musicPath, 2);
+            const fallbackResult = await this.searchAndDownloadBatch(fallbackTracks, musicPath, 2, signal);
             results.successful += fallbackResult.successful;
             results.failed += fallbackResult.failed;
             results.files.push(...fallbackResult.files);
@@ -1642,14 +1815,14 @@ async searchAndDownloadAlbum(
 async searchAndDownloadBatch(
           tracks: Array<{ artist: string; title: string; album: string }>,
           musicPath: string,
-          concurrency?: number
+          concurrency?: number,
+          signal?: AbortSignal
       ): Promise<{
          successful: number;
          failed: number;
          files: string[];
          errors: string[];
      }> {
-         const downloadQueue = new PQueue({ concurrency: concurrency ?? 2 });
          const results: {
              successful: number;
              failed: number;
@@ -1662,17 +1835,27 @@ async searchAndDownloadBatch(
              errors: [],
          };
 
+         if (signal?.aborted) return results;
+
+         const downloadQueue = new PQueue({ concurrency: concurrency ?? 2 });
+         const searchQueue = new PQueue({ concurrency: concurrency ?? 2 });
+
+         signal?.addEventListener('abort', () => {
+             searchQueue.clear();
+             downloadQueue.clear();
+         }, { once: true });
+
          sessionLog(
              "SOULSEEK",
              `Searching for ${tracks.length} tracks with concurrency ${concurrency ?? 2}...`
          );
-         const searchQueue = new PQueue({ concurrency: concurrency ?? 2 });
         const searchPromises = tracks.map((track) =>
             searchQueue.add(() =>
-                this.searchTrack(track.artist, track.title, track.album).then((result) => ({
+                this.searchTrack(track.artist, track.title, track.album, false, 15000, undefined, signal).then((result) => ({
                     track,
                     result,
-                }))
+                })),
+                signal ? { signal } : {}
             )
         );
         const searchSettled = await Promise.allSettled(searchPromises);
@@ -1712,7 +1895,8 @@ async searchAndDownloadBatch(
                     track.title,
                     track.album,
                     result.allMatches,
-                    musicPath
+                    musicPath,
+                    signal
                 );
                 if (downloadResult.success && downloadResult.filePath) {
                     results.successful++;
@@ -1723,7 +1907,7 @@ async searchAndDownloadBatch(
                         `${track.artist} - ${track.title}: ${downloadResult.error || "Unknown error"}`
                     );
                 }
-            })
+            }, signal ? { signal } : {})
         );
 
         const downloadSettled = await Promise.allSettled(downloadPromises);
@@ -1748,7 +1932,8 @@ private async downloadWithRetry(
          trackTitle: string,
          albumName: string,
          allMatches: TrackMatch[],
-         musicPath: string
+         musicPath: string,
+         signal?: AbortSignal
      ): Promise<{ success: boolean; filePath?: string; error?: string }> {
          const sanitize = (name: string) =>
              name.replace(/[<>:"/\\|?*]/g, "_").trim();
@@ -1758,6 +1943,9 @@ private async downloadWithRetry(
          const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
          for (let attempt = 0; attempt < matchesToTry.length; attempt++) {
+             if (signal?.aborted) {
+                 return { success: false, error: 'Import cancelled' };
+             }
              const match = matchesToTry[attempt];
 
              sessionLog(
@@ -1841,6 +2029,8 @@ private async downloadWithRetry(
         }
         this.client = null;
         this.connectedAt = null;
+        this.searchRateLimiter.destroy();
+        this.searchRateLimiter = new SlidingWindowRateLimiter(30, 220_000);
         soulseekConnectionStatus.set(0);
         sessionLog("SOULSEEK", "Disconnected");
     }

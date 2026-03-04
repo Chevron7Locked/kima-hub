@@ -10,9 +10,13 @@
  * 5. Artist + Album + Title - last resort for highly specific searches
  */
 
-import { SlskClient } from "../lib/soulseek/client";
 import type { FileSearchResponse } from "../lib/soulseek/messages/from/peer";
 import { sessionLog } from "../utils/playlistLogger";
+
+export type SearchFn = (
+    query: string,
+    options?: { timeout?: number; onResult?: (result: FileSearchResponse) => void }
+) => Promise<FileSearchResponse[]>;
 
 export interface SearchStrategy {
     name: string;
@@ -175,7 +179,7 @@ export const SEARCH_STRATEGIES: SearchStrategy[] = [
  * Execute multi-strategy search with fallbacks
  */
 export async function searchWithStrategies(
-    client: SlskClient,
+    search: SearchFn,
     artistName: string,
     trackTitle: string,
     albumName: string | undefined,
@@ -224,7 +228,7 @@ export async function searchWithStrategies(
         );
 
         try {
-            const responses = await client.search(query, {
+            const responses = await search(query, {
                 timeout: timeoutMs,
                 onResult: onResult
             });
