@@ -93,6 +93,118 @@ libraryRouter.all("/getArtist.view", wrap(async (req, res) => {
 
 // ===================== ALBUMS =====================
 
+libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
+    const id = req.query.id as string | undefined;
+    if (!id) {
+        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
+    }
+
+    if (id === "1") {
+        const artists = await prisma.artist.findMany({
+            where: { libraryAlbumCount: { gt: 0 } },
+            orderBy: { name: "asc" },
+            select: { id: true, name: true, displayName: true },
+        });
+
+        return subsonicOk(req, res, {
+            directory: {
+                "@_id": "1",
+                "@_name": "Music",
+                ...(artists.length > 0
+                    ? {
+                          child: artists.map((artist) => {
+                              const artistName = artist.displayName || artist.name;
+                              return {
+                                  "@_id": artist.id,
+                                  "@_parent": "1",
+                                  "@_isDir": true,
+                                  "@_title": artistName,
+                                  "@_artist": artistName,
+                                  "@_coverArt": `ar-${artist.id}`,
+                              };
+                          }),
+                      }
+                    : {}),
+            },
+        });
+    }
+
+    const artistId = id.startsWith("artist:")
+        ? id.slice("artist:".length)
+        : id.startsWith("ar-")
+        ? id.slice("ar-".length)
+        : id;
+    const artist = await prisma.artist.findUnique({
+        where: { id: artistId },
+        include: {
+            albums: {
+                where: { location: "LIBRARY", tracks: { some: {} } },
+                orderBy: { year: "desc" },
+            },
+        },
+    });
+
+    if (artist) {
+        const artistName = artist.displayName || artist.name;
+        return subsonicOk(req, res, {
+            directory: {
+                "@_id": artist.id,
+                "@_parent": "1",
+                "@_name": artistName,
+                ...(artist.albums.length > 0
+                    ? {
+                          child: artist.albums.map((album) => ({
+                              "@_id": album.id,
+                              "@_parent": artist.id,
+                              "@_isDir": true,
+                              "@_title": album.displayTitle || album.title,
+                              "@_album": album.displayTitle || album.title,
+                              "@_artist": artistName,
+                              "@_artistId": artist.id,
+                              "@_coverArt": album.id,
+                          })),
+                      }
+                    : {}),
+            },
+        });
+    }
+
+    const albumId = id.startsWith("album:")
+        ? id.slice("album:".length)
+        : id.startsWith("al-")
+        ? id.slice("al-".length)
+        : id;
+    const album = await prisma.album.findUnique({
+        where: { id: albumId },
+        include: {
+            artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
+            tracks: { orderBy: { trackNo: "asc" } },
+        },
+    });
+
+    if (!album || album.location !== "LIBRARY") {
+        return subsonicError(req, res, SubsonicError.NOT_FOUND, "Directory not found");
+    }
+
+    const artistName = album.artist.displayName || album.artist.name;
+    const genre = firstArtistGenre(album.artist.genres, album.artist.userGenres);
+
+    return subsonicOk(req, res, {
+        directory: {
+            "@_id": album.id,
+            "@_parent": album.artist.id,
+            "@_name": album.displayTitle || album.title,
+            ...(album.tracks.length > 0
+                ? {
+                      child: album.tracks.map((track) =>
+                          mapSong(track, album, artistName, album.artist.id, genre)
+                      ),
+                  }
+                : {}),
+        },
+    });
+}));
+
 libraryRouter.all("/getAlbum.view", wrap(async (req, res) => {
     const id = req.query.id as string;
     if (!id) {

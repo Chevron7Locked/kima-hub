@@ -175,3 +175,7 @@ export function parseIntParam(raw: string | undefined, defaultVal: number): numb
     const n = parseInt(raw, 10);
     return isNaN(n) ? defaultVal : n;
 }
+
+export function parseRepeatedQueryParam(raw: unknown): string[] {
+    return Array.isArray(raw) ? (raw as string[]) : raw ? [raw as string] : [];
+}

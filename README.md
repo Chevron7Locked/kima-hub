@@ -674,6 +674,30 @@ Kima implements the [OpenSubsonic](https://opensubsonic.netlify.app/) REST API, 
 - Each client should have its own token so you can revoke access per device
 - Genres and biographies surfaced to clients come from Last.fm enrichment, not just file tags
 - DISCOVER-location albums are excluded from all library views
+- OpenSubsonic extensions exposed: `apiKeyAuthentication`, `songLyrics`, `indexBasedQueue`, and `getPodcastEpisode`
+- Additional OpenSubsonic endpoints supported: `tokenInfo`, `startScan`, `getScanStatus`, `search`, `search2`, `search3`, `getUser`, `getUsers`, `createUser`, `updateUser`, `deleteUser`, `changePassword`, `getPlaylists`, `getPlaylist`, `createPlaylist`, `updatePlaylist`, `deletePlaylist`, `setRating`, `getPlayQueue`, `getPlayQueueByIndex`, `savePlayQueue`, `savePlayQueueByIndex`, `getBookmarks`, `createBookmark`, `deleteBookmark`, `getInternetRadioStations`, `createInternetRadioStation`, `updateInternetRadioStation`, `deleteInternetRadioStation`, `getAvatar`, `getShares`, `createShare`, `updateShare`, `deleteShare`, `getChatMessages`, `addChatMessage`, `getVideos`, `getVideoInfo`, `getCaptions`, `jukeboxControl`, `getTranscodeDecision`, `getTranscodeStream`, `hls`, `getLyricsBySongId`, `getLyrics`, `getNowPlaying`, `getTopSongs`, `getSongsByGenre`, `getSimilarSongs`, `getSimilarSongs2`, `getMusicDirectory`, `getPodcasts`, `getNewestPodcasts`, `getPodcastEpisode`, `refreshPodcasts`
+
+**Subsonic route module layout (backend):**
+
+- `backend/src/routes/subsonic/index.ts` — top-level router composition, auth/rate-limit, system endpoints
+- `library.ts` — artists/albums/tracks browsing and directory traversal
+- `search.ts` — `search`/`search2`/`search3`, genre/top/similar discovery
+- `playback.ts` — stream/download/cover-art/scrobble/now-playing plus `hls`/`getTranscodeStream`
+- `playlists.ts` — playlist list/read/create/update/delete
+- `queue.ts` — play queue get/save (ID-based and index-based)
+- `starred.ts` — star/unstar, starred lists, `setRating`
+- `artistInfo.ts` / `lyrics.ts` — artist metadata and lyric endpoints
+- `userManagement.ts` / `profile.ts` — user admin endpoints and `getUser`
+- `podcasts.ts` — podcast subscription and episode endpoints
+- `compat.ts` — compatibility/stub endpoints for clients that expect optional APIs
+
+**When adding a Subsonic endpoint:**
+
+1. Add the handler in the module that matches endpoint ownership (or create a new focused module if needed).
+2. Validate required query params and return Subsonic-compatible errors via `subsonicError`.
+3. Return response payloads through `subsonicOk` using existing mapper helpers where possible.
+4. Register the router in `backend/src/routes/subsonic/index.ts` (preserve catch-all behavior).
+5. Update the endpoint support list in this README and run diagnostics on touched Subsonic route files.
 
 ---
 
