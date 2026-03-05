@@ -1354,9 +1354,9 @@ class AnalysisWorker:
                 cursor.execute("""
                     UPDATE "Track"
                     SET "analysisStatus" = 'processing',
-                        "analysisStartedAt" = NOW()
+                        "analysisStartedAt" = %s
                     WHERE id = ANY(%s)
-                """, (track_ids,))
+                """, (datetime.now(timezone.utc), track_ids))
                 self.db.commit()
                 pipe = self.redis.pipeline()
                 for t in tracks:
@@ -1530,9 +1530,9 @@ class AnalysisWorker:
             cursor.execute("""
                 UPDATE "Track"
                 SET "analysisStatus" = 'processing',
-                    "analysisStartedAt" = NOW()
+                    "analysisStartedAt" = %s
                 WHERE id = ANY(%s)
-            """, (track_ids,))
+            """, (datetime.now(timezone.utc), track_ids))
             self.db.commit()
         except Exception as e:
             logger.error(f"Failed to mark tracks as processing: {e}")
@@ -1645,9 +1645,9 @@ class AnalysisWorker:
             # Resolve any stale EnrichmentFailure record from a previous attempt
             cursor.execute("""
                 UPDATE "EnrichmentFailure"
-                SET resolved = true, "resolvedAt" = NOW()
+                SET resolved = true, "resolvedAt" = %s
                 WHERE "entityType" = 'audio' AND "entityId" = %s AND resolved = false
-            """, (track_id,))
+            """, (datetime.now(timezone.utc), track_id))
 
             self.db.commit()
 
