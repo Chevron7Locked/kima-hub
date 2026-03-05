@@ -28,6 +28,7 @@ interface ServiceConfig {
     lidarr: RateLimitConfig;
     coverart: RateLimitConfig;
     lrclib: RateLimitConfig;
+    songlink: RateLimitConfig;
 }
 
 // Service-specific rate limit configurations
@@ -72,6 +73,13 @@ const SERVICE_CONFIGS: ServiceConfig = {
         interval: 1000,
         concurrency: 1,
         maxRetries: 1,
+        baseDelay: 1000,
+    },
+    songlink: {
+        intervalCap: 5,
+        interval: 1000,
+        concurrency: 2,
+        maxRetries: 2,
         baseDelay: 1000,
     },
 };
