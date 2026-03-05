@@ -20,6 +20,7 @@ import { lastFmService } from "./lastfm";
 import { musicBrainzService } from "./musicbrainz";
 import { imageProviderService } from "./imageProvider";
 import { downloadAndStoreImage, isNativePath } from "./imageStorage";
+import { trackIdentityService } from "./trackIdentity";
 
 export interface EnrichmentSettings {
     enabled: boolean;
@@ -550,6 +551,56 @@ export class EnrichmentService {
         }
     }
 
+    /**
+     * Enrich tracks that have no ISRC by searching MusicBrainz recordings.
+     * Runs as part of the enrichment cycle, after artist enrichment.
+     */
+    async enrichTrackIdentity(limit = 100): Promise<number> {
+        const tracks = await prisma.track.findMany({
+            where: {
+                isrc: null,
+                corrupt: false,
+                album: { location: "LIBRARY" },
+            },
+            include: {
+                album: { include: { artist: { select: { name: true } } } },
+            },
+            take: limit,
+        });
+
+        let enriched = 0;
+        for (const track of tracks) {
+            try {
+                const recording = await musicBrainzService.searchRecording(
+                    track.title,
+                    track.album.artist.name,
+                );
+                if (!recording) continue;
+
+                // Look up ISRC from recording
+                const isrcData = await musicBrainzService.getRecordingIsrc(recording.trackMbid);
+                if (isrcData) {
+                    await trackIdentityService.storeIsrc(track.id, isrcData, "musicbrainz");
+                }
+
+                // Fetch and store genres
+                const genreData = await musicBrainzService.getRecordingGenres(recording.trackMbid);
+                if (genreData && genreData.genres.length > 0) {
+                    const topGenres = genreData.genres
+                        .sort((a, b) => b.count - a.count)
+                        .slice(0, 5)
+                        .map((g) => g.name);
+                    await trackIdentityService.populateTrackGenres(track.id, topGenres);
+                }
+
+                enriched++;
+            } catch {
+                // Non-fatal, continue
+            }
+        }
+
+        return enriched;
+    }
 }
 
 export const enrichmentService = new EnrichmentService();

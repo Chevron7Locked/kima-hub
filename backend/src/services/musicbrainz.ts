@@ -901,6 +901,24 @@ class MusicBrainzService {
             }
         });
     }
+    /**
+     * Get ISRCs for a recording MBID.
+     * Returns the first ISRC or null.
+     */
+    async getRecordingIsrc(recordingId: string): Promise<string | null> {
+        const cacheKey = `mb:recording:isrc:${recordingId}`;
+        return this.cachedRequest(cacheKey, async () => {
+            try {
+                const response = await this.rateLimitedGet(`/recording/${recordingId}`, {
+                    params: { fmt: "json", inc: "isrcs" },
+                });
+                const isrcs = response.data.isrcs || [];
+                return isrcs[0] || null;
+            } catch {
+                return null;
+            }
+        });
+    }
 }
 
 export const musicBrainzService = new MusicBrainzService();
