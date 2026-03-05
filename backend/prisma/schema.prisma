@@ -406,6 +406,7 @@ model PlaylistPendingTrack {
   albumMbid        String?
   artistMbid       String?
   deezerPreviewUrl String?
+  isrc             String?
   missingFromDisk  Boolean  @default(false)
   sort             Int
   createdAt        DateTime @default(now())
@@ -590,6 +591,8 @@ model Track {
   filePath                    String                   @unique
   fileModified                DateTime
   fileSize                    Int
+  isrc                        String?
+  isrcSource                  String?
   corrupt                     Boolean                  @default(false)
   bpm                         Float?
   beatsCount                  Int?
@@ -647,6 +650,7 @@ model Track {
   @@index([analysisStatus])
   @@index([vibeAnalysisStatus])
   @@index([analysisStatus, vibeAnalysisStatus])
+  @@index([isrc])
 }
 
 model TrackGenre {
