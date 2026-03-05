@@ -29,6 +29,7 @@ export function stripTrackSuffix(str: string): string {
         " ",
       )
       .replace(/\s*\([^)]*remaster[^)]*\)\s*/gi, " ")
+      .replace(/\s*\([^)]*(?:radio edit|radio mix|remix|acoustic|bonus track|clean|explicit|single edit|album edit|edit)\s*\)\s*/gi, " ")
       .replace(/\s*\([^)]*version[^)]*\)\s*/gi, " ")
       .replace(/\s*\([^)]*edition[^)]*\)\s*/gi, " ")
       .replace(/\s*\(\s*live\s*(\d{4})?\s*\)\s*/gi, " ")
