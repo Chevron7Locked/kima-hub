@@ -135,7 +135,7 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
         whereConditions.push(Prisma.sql`EXISTS (
             SELECT 1 FROM jsonb_array_elements_text(
                 COALESCE(NULLIF(NULLIF(ar."userGenres", 'null'::jsonb), '[]'::jsonb), ar.genres)
-            ) g WHERE g ILIKE ${"%" + genre + "%"}
+            ) g WHERE g ILIKE '%' || ${genre} || '%'
         )`);
     }
 
@@ -231,7 +231,7 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
           AND EXISTS (
             SELECT 1 FROM jsonb_array_elements_text(
                 COALESCE(NULLIF(NULLIF(ar."userGenres", 'null'::jsonb), '[]'::jsonb), ar.genres)
-            ) g WHERE g ILIKE ${"%" + genre + "%"}
+            ) g WHERE g ILIKE '%' || ${genre} || '%'
           )
         ORDER BY ar.name ASC, al.title ASC, t."trackNo" ASC
         LIMIT ${count} OFFSET ${offset}

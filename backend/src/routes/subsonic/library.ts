@@ -361,7 +361,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
                   AND EXISTS (
                     SELECT 1 FROM jsonb_array_elements_text(
                         COALESCE(NULLIF(NULLIF(ar."userGenres", 'null'::jsonb), '[]'::jsonb), ar.genres)
-                    ) g WHERE g ILIKE ${"%" + genre + "%"}
+                    ) g WHERE g ILIKE '%' || ${genre} || '%'
                 )
                   AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id)
                 ORDER BY a.title ASC
