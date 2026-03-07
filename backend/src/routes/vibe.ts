@@ -199,7 +199,7 @@ router.post("/search", requireAuth, async (req, res) => {
                     ar.name as "artistName",
                     t.energy,
                     t.valence,
-                    t.danceability,
+                    t."danceabilityMl" as danceability,
                     t.acousticness,
                     t.instrumentalness,
                     t.arousal,

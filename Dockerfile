@@ -91,10 +91,14 @@ RUN echo "Downloading ML models..." && \
         "https://essentia.upf.edu/models/classification-heads/mood_electronic/mood_electronic-msd-musicnn-1.pb" && \
     curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/danceability-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/danceability/danceability-msd-musicnn-1.pb" && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/voice_instrumental-msd-musicnn-1.pb \
-        "https://essentia.upf.edu/models/classification-heads/voice_instrumental/voice_instrumental-msd-musicnn-1.pb" && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/music_audioset_epoch_15_esc_90.14.pt \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/deam-msd-musicnn-2.pb \
+        "https://essentia.upf.edu/models/classification-heads/deam/deam-msd-musicnn-2.pb" && \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/emomusic-msd-musicnn-2.pb \
+        "https://essentia.upf.edu/models/classification-heads/emomusic/emomusic-msd-musicnn-2.pb" && \
+    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 600 -o /tmp/clap_full.pt \
         "https://huggingface.co/lukewys/laion_clap/resolve/main/music_audioset_epoch_15_esc_90.14.pt" && \
+    python3 -c "import torch; ckpt = torch.load('/tmp/clap_full.pt', map_location='cpu', weights_only=False); torch.save({'state_dict': ckpt['state_dict']}, '/app/models/music_audioset_epoch_15_esc_90.14.pt')" && \
+    rm /tmp/clap_full.pt && \
     echo "All ML models downloaded" && \
     ls -lh /app/models/
 

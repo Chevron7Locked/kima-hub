@@ -20,7 +20,7 @@ export interface FeatureProfile {
     speechiness?: number;
 }
 
-export type TermType = "genre" | "mood" | "vibe" | "descriptor";
+export type TermType = "genre" | "subgenre" | "mood" | "vibe" | "descriptor" | "instrumentation" | "production" | "context" | "era" | "vocal";
 
 export interface VocabTermDefinition {
     type: TermType;
@@ -381,5 +381,113 @@ export const VOCAB_DEFINITIONS: Record<string, VocabTermDefinition> = {
         featureProfile: { instrumentalness: 0.95, acousticness: 0.85 },
         related: ["classical", "cinematic", "epic"]
     },
+
+    // === SUB-GENRES ===
+    shoegaze: { type: "subgenre", featureProfile: { energy: 0.6, acousticness: 0.2, instrumentalness: 0.5, valence: 0.4 }, related: ["dreamy", "ethereal", "reverb-heavy", "alternative"] },
+    "post-punk": { type: "subgenre", featureProfile: { energy: 0.65, valence: 0.35, danceability: 0.5, acousticness: 0.2 }, related: ["punk", "dark", "alternative"] },
+    "post-rock": { type: "subgenre", featureProfile: { energy: 0.5, instrumentalness: 0.8, acousticness: 0.3, arousal: 0.5 }, related: ["cinematic", "atmospheric", "epic"] },
+    synthwave: { type: "subgenre", featureProfile: { energy: 0.65, instrumentalness: 0.7, acousticness: 0.05, danceability: 0.6 }, related: ["electronic", "retro", "synth"] },
+    "new wave": { type: "subgenre", featureProfile: { energy: 0.6, danceability: 0.6, acousticness: 0.15, valence: 0.55 }, related: ["pop", "electronic", "punk"] },
+    grunge: { type: "subgenre", featureProfile: { energy: 0.75, valence: 0.3, acousticness: 0.2, danceability: 0.35 }, related: ["rock", "alternative", "heavy"] },
+    psychedelic: { type: "subgenre", featureProfile: { energy: 0.5, valence: 0.55, acousticness: 0.3, instrumentalness: 0.4 }, related: ["rock", "dreamy", "atmospheric"] },
+    "hard rock": { type: "subgenre", featureProfile: { energy: 0.85, valence: 0.5, acousticness: 0.1, danceability: 0.45 }, related: ["rock", "metal", "heavy"] },
+    "death metal": { type: "subgenre", featureProfile: { energy: 0.95, valence: 0.2, acousticness: 0.05, instrumentalness: 0.4 }, related: ["metal", "aggressive", "heavy"] },
+    "doom metal": { type: "subgenre", featureProfile: { energy: 0.6, valence: 0.15, acousticness: 0.1, danceability: 0.15, arousal: 0.4 }, related: ["metal", "heavy", "slow", "dark"] },
+    "smooth jazz": { type: "subgenre", featureProfile: { energy: 0.3, valence: 0.6, acousticness: 0.6, instrumentalness: 0.7, danceability: 0.4 }, related: ["jazz", "relaxed", "mellow"] },
+    "deep house": { type: "subgenre", featureProfile: { energy: 0.55, danceability: 0.8, acousticness: 0.05, instrumentalness: 0.7 }, related: ["house", "electronic", "groovy"] },
+    "progressive house": { type: "subgenre", featureProfile: { energy: 0.6, danceability: 0.75, acousticness: 0.05, instrumentalness: 0.75 }, related: ["house", "electronic", "trance"] },
+    industrial: { type: "subgenre", featureProfile: { energy: 0.85, valence: 0.2, acousticness: 0.05, danceability: 0.5 }, related: ["electronic", "aggressive", "dark"] },
+    "trip-hop": { type: "subgenre", featureProfile: { energy: 0.35, valence: 0.4, danceability: 0.5, acousticness: 0.3 }, related: ["electronic", "hip-hop", "atmospheric", "downtempo"] },
+    downtempo: { type: "subgenre", featureProfile: { energy: 0.3, danceability: 0.45, instrumentalness: 0.6, acousticness: 0.25 }, related: ["electronic", "chill", "ambient"] },
+    "neo-soul": { type: "subgenre", featureProfile: { energy: 0.4, valence: 0.6, danceability: 0.55, acousticness: 0.4 }, related: ["soul", "r&b", "groovy"] },
+    gospel: { type: "subgenre", featureProfile: { energy: 0.65, valence: 0.75, acousticness: 0.5, speechiness: 0.15 }, related: ["soul", "choir singing", "uplifting"] },
+    "bossa nova": { type: "subgenre", featureProfile: { energy: 0.25, valence: 0.6, danceability: 0.5, acousticness: 0.7 }, related: ["jazz", "latin music", "relaxed"] },
+    reggaeton: { type: "subgenre", featureProfile: { energy: 0.7, danceability: 0.85, acousticness: 0.1, valence: 0.65 }, related: ["latin music", "hip-hop", "danceable"] },
+    drill: { type: "subgenre", featureProfile: { energy: 0.7, valence: 0.25, danceability: 0.6, acousticness: 0.05 }, related: ["hip-hop", "trap", "dark"] },
+    grime: { type: "subgenre", featureProfile: { energy: 0.75, danceability: 0.65, acousticness: 0.05, speechiness: 0.3 }, related: ["electronic", "hip-hop", "aggressive"] },
+    "boom bap": { type: "subgenre", featureProfile: { energy: 0.55, danceability: 0.65, acousticness: 0.15, valence: 0.45 }, related: ["hip-hop", "drums", "groovy"] },
+    hardcore: { type: "subgenre", featureProfile: { energy: 0.95, danceability: 0.5, acousticness: 0.05, valence: 0.3 }, related: ["punk", "metal", "aggressive", "fast"] },
+    breakbeat: { type: "subgenre", featureProfile: { energy: 0.7, danceability: 0.75, instrumentalness: 0.7, acousticness: 0.05 }, related: ["electronic", "drums", "dnb"] },
+    darkwave: { type: "subgenre", featureProfile: { energy: 0.5, valence: 0.2, acousticness: 0.1, danceability: 0.5 }, related: ["electronic", "dark", "synth", "post-punk"] },
+    chillwave: { type: "subgenre", featureProfile: { energy: 0.3, valence: 0.55, acousticness: 0.2, danceability: 0.4 }, related: ["electronic", "dreamy", "lofi", "relaxed"] },
+    dub: { type: "subgenre", featureProfile: { energy: 0.45, danceability: 0.6, acousticness: 0.2, instrumentalness: 0.6 }, related: ["reggae", "bass", "reverb-heavy"] },
+    "garage rock": { type: "subgenre", featureProfile: { energy: 0.8, valence: 0.5, acousticness: 0.15, danceability: 0.5 }, related: ["rock", "punk", "raw"] },
+    "progressive rock": { type: "subgenre", featureProfile: { energy: 0.55, instrumentalness: 0.5, acousticness: 0.3, valence: 0.45 }, related: ["rock", "cinematic", "epic"] },
+    "classic rock": { type: "subgenre", featureProfile: { energy: 0.7, valence: 0.55, acousticness: 0.25, danceability: 0.45 }, related: ["rock", "guitar", "retro"] },
+    "thrash metal": { type: "subgenre", featureProfile: { energy: 0.95, valence: 0.25, acousticness: 0.05, danceability: 0.35 }, related: ["metal", "aggressive", "fast", "heavy"] },
+    "minimal techno": { type: "subgenre", featureProfile: { energy: 0.5, danceability: 0.75, instrumentalness: 0.95, acousticness: 0.05 }, related: ["techno", "electronic", "sparse", "hypnotic"] },
+    // === CULTURAL / REGIONAL ===
+    afrobeat: { type: "genre", featureProfile: { energy: 0.7, danceability: 0.8, acousticness: 0.3, valence: 0.65 }, related: ["drums", "groovy", "percussion"] },
+    "latin music": { type: "genre", featureProfile: { energy: 0.65, danceability: 0.8, valence: 0.65, acousticness: 0.35 }, related: ["reggaeton", "bossa nova", "percussion"] },
+    "k-pop": { type: "genre", featureProfile: { energy: 0.75, danceability: 0.8, valence: 0.7, acousticness: 0.1 }, related: ["pop", "electronic", "danceable"] },
+    flamenco: { type: "genre", featureProfile: { energy: 0.6, acousticness: 0.8, danceability: 0.55, valence: 0.4 }, related: ["acoustic guitar", "percussion", "dramatic"] },
+    "middle eastern music": { type: "genre", featureProfile: { energy: 0.5, acousticness: 0.6, valence: 0.4, instrumentalness: 0.5 }, related: ["percussion", "strings"] },
+    celtic: { type: "genre", featureProfile: { energy: 0.5, acousticness: 0.75, valence: 0.55, danceability: 0.5 }, related: ["folk", "acoustic", "violin"] },
+    caribbean: { type: "genre", featureProfile: { energy: 0.6, danceability: 0.75, valence: 0.7, acousticness: 0.4 }, related: ["reggae", "percussion"] },
+    // === INSTRUMENTATION ===
+    strings: { type: "instrumentation", featureProfile: { acousticness: 0.8, instrumentalness: 0.7 }, related: ["violin", "cello", "orchestral", "classical"] },
+    violin: { type: "instrumentation", featureProfile: { acousticness: 0.8, instrumentalness: 0.6 }, related: ["strings", "classical", "folk"] },
+    cello: { type: "instrumentation", featureProfile: { acousticness: 0.8, instrumentalness: 0.7, energy: 0.4 }, related: ["strings", "classical", "cinematic"] },
+    saxophone: { type: "instrumentation", featureProfile: { acousticness: 0.6, instrumentalness: 0.5 }, related: ["jazz", "soul", "smooth jazz"] },
+    trumpet: { type: "instrumentation", featureProfile: { acousticness: 0.5, energy: 0.6 }, related: ["jazz", "brass", "latin music"] },
+    flute: { type: "instrumentation", featureProfile: { acousticness: 0.7, instrumentalness: 0.6, energy: 0.3 }, related: ["classical", "folk", "celtic"] },
+    drums: { type: "instrumentation", featureProfile: { energy: 0.7, danceability: 0.65, instrumentalness: 0.6 }, related: ["percussion", "rock", "breakbeat"] },
+    "electric guitar": { type: "instrumentation", featureProfile: { energy: 0.7, acousticness: 0.1 }, related: ["rock", "metal", "guitar"] },
+    "acoustic guitar": { type: "instrumentation", featureProfile: { acousticness: 0.9, energy: 0.35 }, related: ["folk", "acoustic", "guitar"] },
+    organ: { type: "instrumentation", featureProfile: { acousticness: 0.4, instrumentalness: 0.6 }, related: ["gospel", "classical", "rock"] },
+    harmonica: { type: "instrumentation", featureProfile: { acousticness: 0.7, energy: 0.4 }, related: ["blues", "folk", "country"] },
+    percussion: { type: "instrumentation", featureProfile: { energy: 0.65, danceability: 0.7, instrumentalness: 0.7 }, related: ["drums", "afrobeat", "latin music"] },
+    // === PRODUCTION QUALITIES ===
+    "reverb-heavy": { type: "production", featureProfile: { acousticness: 0.3, energy: 0.4 }, related: ["shoegaze", "dreamy", "atmospheric"] },
+    distorted: { type: "production", featureProfile: { energy: 0.8, acousticness: 0.05 }, related: ["rock", "metal", "heavy"] },
+    "clean production": { type: "production", featureProfile: { acousticness: 0.3, energy: 0.5 }, related: ["pop", "polished"] },
+    warm: { type: "production", featureProfile: { acousticness: 0.4, energy: 0.4 }, related: ["analog", "vintage", "soft"] },
+    raw: { type: "production", featureProfile: { energy: 0.7, acousticness: 0.2 }, related: ["garage rock", "punk", "grunge"] },
+    polished: { type: "production", featureProfile: { energy: 0.55 }, related: ["pop", "clean production"] },
+    sparse: { type: "production", featureProfile: { energy: 0.25, instrumentalness: 0.6 }, related: ["minimal techno", "ambient", "calm"] },
+    layered: { type: "production", featureProfile: { energy: 0.75 }, related: ["orchestral", "epic", "dense"] },
+    glitchy: { type: "production", featureProfile: { energy: 0.5, acousticness: 0.05, instrumentalness: 0.7 }, related: ["electronic", "experimental"] },
+    // === VOCAL STYLES ===
+    rapping: { type: "vocal", featureProfile: { speechiness: 0.5, instrumentalness: 0.1, energy: 0.65 }, related: ["hip-hop", "trap", "boom bap"] },
+    falsetto: { type: "vocal", featureProfile: { energy: 0.4, valence: 0.5 }, related: ["r&b", "soul", "pop"] },
+    "growling vocals": { type: "vocal", featureProfile: { energy: 0.9, instrumentalness: 0.1, valence: 0.15 }, related: ["death metal", "metal", "aggressive"] },
+    "a cappella": { type: "vocal", featureProfile: { instrumentalness: 0.0, acousticness: 0.8, speechiness: 0.3 }, related: ["choir singing", "vocal"] },
+    "choir singing": { type: "vocal", featureProfile: { instrumentalness: 0.2, acousticness: 0.6, energy: 0.55 }, related: ["gospel", "classical", "epic"] },
+    "spoken word": { type: "vocal", featureProfile: { speechiness: 0.7, instrumentalness: 0.1, energy: 0.25 }, related: ["calm", "acoustic"] },
+    autotune: { type: "vocal", featureProfile: { acousticness: 0.05, energy: 0.6 }, related: ["hip-hop", "pop", "trap"] },
+    // === USE-CASE / CONTEXT ===
+    "workout music": { type: "context", featureProfile: { energy: 0.85, danceability: 0.75, arousal: 0.8, valence: 0.6 }, related: ["energetic", "upbeat", "fast"] },
+    "study music": { type: "context", featureProfile: { energy: 0.2, instrumentalness: 0.8, valence: 0.5, arousal: 0.2 }, related: ["calm", "ambient", "lofi"] },
+    "sleep music": { type: "context", featureProfile: { energy: 0.1, instrumentalness: 0.9, arousal: 0.1, valence: 0.5 }, related: ["ambient", "calm", "peaceful"] },
+    "driving music": { type: "context", featureProfile: { energy: 0.7, danceability: 0.6, arousal: 0.65, valence: 0.55 }, related: ["rock", "energetic", "upbeat"] },
+    "meditation music": { type: "context", featureProfile: { energy: 0.1, instrumentalness: 0.95, arousal: 0.1, acousticness: 0.5 }, related: ["ambient", "peaceful", "calm"] },
+    "background music": { type: "context", featureProfile: { energy: 0.25, instrumentalness: 0.7, arousal: 0.25 }, related: ["ambient", "lofi", "mellow"] },
+    lullaby: { type: "context", featureProfile: { energy: 0.1, valence: 0.55, arousal: 0.1, acousticness: 0.7 }, related: ["calm", "soft", "sleep music"] },
+    // === MOOD / VIBE EXPANSION ===
+    scary: { type: "mood", featureProfile: { valence: 0.15, arousal: 0.6, energy: 0.5 }, related: ["dark", "eerie", "cinematic"] },
+    tender: { type: "mood", featureProfile: { valence: 0.6, arousal: 0.2, energy: 0.2, acousticness: 0.6 }, related: ["soft", "romantic", "gentle"] },
+    exciting: { type: "mood", featureProfile: { valence: 0.7, arousal: 0.8, energy: 0.8, danceability: 0.65 }, related: ["energetic", "upbeat", "happy"] },
+    triumphant: { type: "mood", featureProfile: { valence: 0.8, arousal: 0.75, energy: 0.75 }, related: ["epic", "uplifting", "cinematic"] },
+    mysterious: { type: "mood", featureProfile: { valence: 0.35, arousal: 0.4, energy: 0.35 }, related: ["dark", "atmospheric", "cinematic"] },
+    eerie: { type: "mood", featureProfile: { valence: 0.15, arousal: 0.45, energy: 0.3 }, related: ["scary", "dark", "atmospheric"] },
+    haunting: { type: "mood", featureProfile: { valence: 0.25, arousal: 0.35, energy: 0.3 }, related: ["ethereal", "atmospheric", "dark"] },
+    soothing: { type: "mood", featureProfile: { valence: 0.6, arousal: 0.15, energy: 0.2, acousticness: 0.5 }, related: ["calm", "relaxed", "peaceful"] },
+    dramatic: { type: "mood", featureProfile: { arousal: 0.7, energy: 0.65 }, related: ["cinematic", "epic", "orchestral"] },
+    bittersweet: { type: "mood", featureProfile: { valence: 0.4, arousal: 0.35, energy: 0.4 }, related: ["melancholic", "nostalgic", "tender"] },
+    wistful: { type: "mood", featureProfile: { valence: 0.35, arousal: 0.25, energy: 0.3, acousticness: 0.5 }, related: ["nostalgic", "melancholic", "calm"] },
+    serene: { type: "mood", featureProfile: { valence: 0.6, arousal: 0.1, energy: 0.15, acousticness: 0.6 }, related: ["peaceful", "calm", "ambient"] },
+    contemplative: { type: "mood", featureProfile: { valence: 0.4, arousal: 0.2, energy: 0.25, instrumentalness: 0.5 }, related: ["calm", "atmospheric", "mellow"] },
+    gritty: { type: "mood", featureProfile: { energy: 0.7, valence: 0.35, acousticness: 0.15 }, related: ["raw", "dark", "aggressive"] },
+    uplifting: { type: "vibe", featureProfile: { valence: 0.75, arousal: 0.65, energy: 0.65 }, related: ["happy", "hopeful", "bright"] },
+    // === ERA / DECADE ===
+    "80s synth pop": { type: "era", featureProfile: { energy: 0.6, danceability: 0.7, acousticness: 0.05, valence: 0.6 }, related: ["synth", "pop", "electronic", "new wave"] },
+    "90s alternative": { type: "era", featureProfile: { energy: 0.7, valence: 0.4, acousticness: 0.2, danceability: 0.4 }, related: ["grunge", "alternative", "rock"] },
+    "70s funk": { type: "era", featureProfile: { energy: 0.7, danceability: 0.85, valence: 0.7, acousticness: 0.3 }, related: ["funk", "groovy", "disco"] },
+    retro: { type: "era", featureProfile: { acousticness: 0.3 }, related: ["vintage", "classic rock", "70s funk"] },
+    vintage: { type: "era", featureProfile: { acousticness: 0.35 }, related: ["retro", "warm", "analog"] },
+    futuristic: { type: "era", featureProfile: { acousticness: 0.05, instrumentalness: 0.6, energy: 0.6 }, related: ["electronic", "synth", "synthwave"] },
+    "modern electronic": { type: "era", featureProfile: { acousticness: 0.05, energy: 0.65, danceability: 0.7 }, related: ["electronic", "house", "techno"] },
 };
+
+export const VOCABULARY_TERMS = Object.keys(VOCAB_DEFINITIONS);
 

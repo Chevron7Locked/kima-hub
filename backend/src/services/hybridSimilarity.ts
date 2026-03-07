@@ -74,7 +74,7 @@ async function findSimilarHybrid(
         WITH source AS (
             SELECT
                 te.embedding,
-                t.energy, t.valence, t.bpm, t.danceability,
+                t.energy, t.valence, t.bpm, t."danceabilityMl",
                 t.acousticness, t.instrumentalness, t.key, t."keyScale"
             FROM track_embeddings te
             JOIN "Track" t ON te.track_id = t.id
@@ -83,7 +83,7 @@ async function findSimilarHybrid(
         clap_candidates AS (
             SELECT
                 te.track_id,
-                1 - (te.embedding <=> (SELECT embedding FROM source)) as clap_sim
+                GREATEST(0, 1 - (te.embedding <=> (SELECT embedding FROM source))) as clap_sim
             FROM track_embeddings te
             WHERE te.track_id != ${trackId}
             ORDER BY te.embedding <=> (SELECT embedding FROM source)
@@ -95,12 +95,17 @@ async function findSimilarHybrid(
             c.clap_sim as distance,
             (
                 ${WEIGHTS.clap} * c.clap_sim +
-                ${WEIGHTS.features.energy} * (1 - ABS(COALESCE(t.energy, 0.5) - COALESCE(s.energy, 0.5))) +
-                ${WEIGHTS.features.valence} * (1 - ABS(COALESCE(t.valence, 0.5) - COALESCE(s.valence, 0.5))) +
+                CASE WHEN t.energy IS NOT NULL AND s.energy IS NOT NULL
+                    THEN ${WEIGHTS.features.energy} * (1 - ABS(t.energy - s.energy)) ELSE 0 END +
+                CASE WHEN t.valence IS NOT NULL AND s.valence IS NOT NULL
+                    THEN ${WEIGHTS.features.valence} * (1 - ABS(t.valence - s.valence)) ELSE 0 END +
                 ${WEIGHTS.features.bpm} * bpm_similarity(t.bpm, s.bpm) +
-                ${WEIGHTS.features.danceability} * (1 - ABS(COALESCE(t.danceability, 0.5) - COALESCE(s.danceability, 0.5))) +
-                ${WEIGHTS.features.acousticness} * (1 - ABS(COALESCE(t.acousticness, 0.5) - COALESCE(s.acousticness, 0.5))) +
-                ${WEIGHTS.features.instrumentalness} * (1 - ABS(COALESCE(t.instrumentalness, 0.5) - COALESCE(s.instrumentalness, 0.5))) +
+                CASE WHEN t."danceabilityMl" IS NOT NULL AND s."danceabilityMl" IS NOT NULL
+                    THEN ${WEIGHTS.features.danceability} * (1 - ABS(t."danceabilityMl" - s."danceabilityMl")) ELSE 0 END +
+                CASE WHEN t.acousticness IS NOT NULL AND s.acousticness IS NOT NULL
+                    THEN ${WEIGHTS.features.acousticness} * (1 - ABS(t.acousticness - s.acousticness)) ELSE 0 END +
+                CASE WHEN t.instrumentalness IS NOT NULL AND s.instrumentalness IS NOT NULL
+                    THEN ${WEIGHTS.features.instrumentalness} * (1 - ABS(t.instrumentalness - s.instrumentalness)) ELSE 0 END +
                 ${WEIGHTS.features.key} * key_similarity(t.key, t."keyScale", s.key, s."keyScale")
             ) as similarity,
             a.id as "albumId",
@@ -132,7 +137,7 @@ async function findSimilarClapOnly(
             t.id,
             t.title,
             te.embedding <=> (SELECT embedding FROM source) as distance,
-            1 - (te.embedding <=> (SELECT embedding FROM source)) as similarity,
+            GREATEST(0, 1 - (te.embedding <=> (SELECT embedding FROM source))) as similarity,
             a.id as "albumId",
             a.title as "albumTitle",
             a."coverUrl" as "albumCoverUrl",
@@ -156,7 +161,7 @@ async function findSimilarFeaturesOnly(
 ): Promise<SimilarTrack[]> {
     const results = await prisma.$queryRaw<SimilarTrack[]>`
         WITH source AS (
-            SELECT energy, valence, bpm, danceability, acousticness, instrumentalness, key, "keyScale"
+            SELECT energy, valence, bpm, "danceabilityMl", acousticness, instrumentalness, key, "keyScale"
             FROM "Track"
             WHERE id = ${trackId}
         )
@@ -165,12 +170,17 @@ async function findSimilarFeaturesOnly(
             t.title,
             0 as distance,
             (
-                ${FEATURES_ONLY_WEIGHTS.energy} * (1 - ABS(COALESCE(t.energy, 0.5) - COALESCE(s.energy, 0.5))) +
-                ${FEATURES_ONLY_WEIGHTS.valence} * (1 - ABS(COALESCE(t.valence, 0.5) - COALESCE(s.valence, 0.5))) +
+                CASE WHEN t.energy IS NOT NULL AND s.energy IS NOT NULL
+                    THEN ${FEATURES_ONLY_WEIGHTS.energy} * (1 - ABS(t.energy - s.energy)) ELSE 0 END +
+                CASE WHEN t.valence IS NOT NULL AND s.valence IS NOT NULL
+                    THEN ${FEATURES_ONLY_WEIGHTS.valence} * (1 - ABS(t.valence - s.valence)) ELSE 0 END +
                 ${FEATURES_ONLY_WEIGHTS.bpm} * bpm_similarity(t.bpm, s.bpm) +
-                ${FEATURES_ONLY_WEIGHTS.danceability} * (1 - ABS(COALESCE(t.danceability, 0.5) - COALESCE(s.danceability, 0.5))) +
-                ${FEATURES_ONLY_WEIGHTS.acousticness} * (1 - ABS(COALESCE(t.acousticness, 0.5) - COALESCE(s.acousticness, 0.5))) +
-                ${FEATURES_ONLY_WEIGHTS.instrumentalness} * (1 - ABS(COALESCE(t.instrumentalness, 0.5) - COALESCE(s.instrumentalness, 0.5))) +
+                CASE WHEN t."danceabilityMl" IS NOT NULL AND s."danceabilityMl" IS NOT NULL
+                    THEN ${FEATURES_ONLY_WEIGHTS.danceability} * (1 - ABS(t."danceabilityMl" - s."danceabilityMl")) ELSE 0 END +
+                CASE WHEN t.acousticness IS NOT NULL AND s.acousticness IS NOT NULL
+                    THEN ${FEATURES_ONLY_WEIGHTS.acousticness} * (1 - ABS(t.acousticness - s.acousticness)) ELSE 0 END +
+                CASE WHEN t.instrumentalness IS NOT NULL AND s.instrumentalness IS NOT NULL
+                    THEN ${FEATURES_ONLY_WEIGHTS.instrumentalness} * (1 - ABS(t.instrumentalness - s.instrumentalness)) ELSE 0 END +
                 ${FEATURES_ONLY_WEIGHTS.key} * key_similarity(t.key, t."keyScale", s.key, s."keyScale")
             ) as similarity,
             a.id as "albumId",

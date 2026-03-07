@@ -64,9 +64,7 @@ RUN curl -L -o /app/models/mood_happy-msd-musicnn-1.pb \
 
 # Other classification heads
 RUN curl -L -o /app/models/danceability-msd-musicnn-1.pb \
-    "https://essentia.upf.edu/models/classification-heads/danceability/danceability-msd-musicnn-1.pb" && \
-    curl -L -o /app/models/voice_instrumental-msd-musicnn-1.pb \
-    "https://essentia.upf.edu/models/classification-heads/voice_instrumental/voice_instrumental-msd-musicnn-1.pb"
+    "https://essentia.upf.edu/models/classification-heads/danceability/danceability-msd-musicnn-1.pb"
 
 # Verify models downloaded
 RUN echo "Models downloaded:" && ls -lh /app/models/

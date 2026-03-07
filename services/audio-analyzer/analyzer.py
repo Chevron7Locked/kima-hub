@@ -231,7 +231,7 @@ CONTROL_CHANNEL = 'audio:analysis:control'
 MODEL_DIR = '/app/models'
 
 # MusiCNN model file paths (official Essentia models from essentia.upf.edu/models/)
-# Note: Valence and arousal are derived from mood models (no direct models exist)
+# Valence/arousal use DEAM regression model when available, heuristic fallback otherwise
 MODELS = {
     # Base MusiCNN embedding model (for auto-tagging)
     'musicnn': os.path.join(MODEL_DIR, 'msd-musicnn-1.pb'),
@@ -246,7 +246,10 @@ MODELS = {
     'mood_acoustic': os.path.join(MODEL_DIR, 'mood_acoustic-msd-musicnn-1.pb'),
     'mood_electronic': os.path.join(MODEL_DIR, 'mood_electronic-msd-musicnn-1.pb'),
     'danceability': os.path.join(MODEL_DIR, 'danceability-msd-musicnn-1.pb'),
-    'voice_instrumental': os.path.join(MODEL_DIR, 'voice_instrumental-msd-musicnn-1.pb'),
+    # voice_instrumental excluded: broken head, CLAP zero-shot replaces it
+    # Valence/Arousal regression (outputs [valence, arousal], range 1-9)
+    'deam': os.path.join(MODEL_DIR, 'deam-msd-musicnn-2.pb'),
+    'emomusic': os.path.join(MODEL_DIR, 'emomusic-msd-musicnn-2.pb'),
 }
 
 # Now that MODELS is defined, check if model files exist on disk
@@ -346,7 +349,8 @@ class AudioAnalyzer:
                 'mood_acoustic': MODELS['mood_acoustic'],
                 'mood_electronic': MODELS['mood_electronic'],
                 'danceability': MODELS['danceability'],
-                'voice_instrumental': MODELS['voice_instrumental'],
+                # voice_instrumental excluded: broken head (81% of vocal tracks score 0.9+)
+                # CLAP zero-shot in vibe phase is the sole writer for instrumentalness
             }
             
             for model_name, model_path in heads_to_load.items():
@@ -361,7 +365,20 @@ class AudioAnalyzer:
                         logger.warning(f"Failed to load {model_name}: {e}")
                 else:
                     logger.warning(f"Model not found: {model_path}")
-            
+
+            # Load valence/arousal regression models (different output layer)
+            for va_model in ['deam', 'emomusic']:
+                va_path = MODELS.get(va_model)
+                if va_path and os.path.exists(va_path):
+                    try:
+                        self.prediction_models[va_model] = TensorflowPredict2D(
+                            graphFilename=va_path,
+                            output="model/Identity"
+                        )
+                        logger.info(f"Loaded {va_model} valence/arousal regression model")
+                    except Exception as e:
+                        logger.warning(f"Failed to load {va_model} model: {e}")
+
             # Enable enhanced mode if we have the key mood models
             # (valence and arousal are derived from mood predictions)
             required = ['mood_happy', 'mood_sad', 'mood_relaxed', 'mood_aggressive']
@@ -579,8 +596,9 @@ class AudioAnalyzer:
             result['_zcr'] = avg_zcr
 
             # Basic Danceability (non-ML)
+            # Essentia Danceability() returns [0, 3], normalize to [0, 1]
             danceability, _ = self.danceability_extractor(audio_44k)
-            result['danceability'] = round(max(0.0, min(1.0, float(danceability))), 3)
+            result['danceability'] = round(max(0.0, min(1.0, float(danceability) / 3.0)), 3)
 
             # === ENHANCED MODE: Use ML models ===
             if self.enhanced_mode:
@@ -597,6 +615,8 @@ class AudioAnalyzer:
                     self._apply_standard_estimates(result, scale, bpm)
             else:
                 self._apply_standard_estimates(result, scale, bpm)
+
+            # Acousticness set by CLAP zero-shot in the vibe phase (not derived from dynamicRange).
 
             # Generate mood tags based on all features
             result['moodTags'] = self._generate_mood_tags(result)
@@ -699,20 +719,28 @@ class AudioAnalyzer:
         raw_values = {k: v[0] for k, v in raw_moods.items()}
         logger.info(f"ML Raw Moods: H={raw_values.get('moodHappy')}, S={raw_values.get('moodSad')}, R={raw_values.get('moodRelaxed')}, A={raw_values.get('moodAggressive')}")
         
-        # === DETECT UNRELIABLE PREDICTIONS ===
-        # MusiCNN was trained on pop/rock (MSD). For classical/piano/ambient music,
-        # the model often outputs high values for ALL contradictory moods.
-        # Detect this and normalize ALL moods to preserve relative ordering.
+        # === DETECT UNRELIABLE PREDICTIONS (Entropy-based) ===
+        # Shannon entropy detects confused predictions better than min/max range.
+        # When the model is OOD, all moods fire high and uniformly.
         all_mood_keys = list(raw_moods.keys())
-        all_mood_values = [raw_moods[m][0] for m in all_mood_keys]
+        all_mood_values = np.array([raw_moods[m][0] for m in all_mood_keys])
 
         if len(all_mood_values) >= 4:
-            min_mood = min(all_mood_values)
-            max_mood = max(all_mood_values)
+            # Shannon entropy normalized to [0, 1]
+            total = all_mood_values.sum()
+            if total > 1e-6:
+                probs = all_mood_values / total
+                entropy = -np.sum(probs * np.log(probs + 1e-10)) / np.log(len(probs))
+            else:
+                entropy = 0.0
 
-            if min_mood > 0.7 and (max_mood - min_mood) < 0.3:
-                logger.warning(f"Detected out-of-distribution audio: all moods high ({min_mood:.2f}-{max_mood:.2f}). Normalizing...")
+            mean_val = float(np.mean(all_mood_values))
 
+            # High entropy + high mean = classic OOD (everything fires high)
+            if entropy > 0.85 and mean_val > 0.5:
+                logger.warning(f"Detected OOD audio (entropy={entropy:.3f}, mean={mean_val:.3f}). Normalizing moods...")
+                min_mood = float(np.min(all_mood_values))
+                max_mood = float(np.max(all_mood_values))
                 for mood_key in all_mood_keys:
                     old_val = raw_moods[mood_key][0]
                     if max_mood > min_mood:
@@ -720,38 +748,74 @@ class AudioAnalyzer:
                     else:
                         normalized = 0.5
                     raw_moods[mood_key] = (round(normalized, 3), raw_moods[mood_key][1])
+                logger.info(f"Normalized moods: H={raw_moods.get('moodHappy', (0,0))[0]}, S={raw_moods.get('moodSad', (0,0))[0]}")
 
-                logger.info(f"Normalized moods: H={raw_moods.get('moodHappy', (0,0))[0]}, S={raw_moods.get('moodSad', (0,0))[0]}, R={raw_moods.get('moodRelaxed', (0,0))[0]}, A={raw_moods.get('moodAggressive', (0,0))[0]}")
-        
+        # === GROUPED SOFTMAX ON CONTRADICTORY PAIRS ===
+        # Force competition between semantically opposed moods.
+        # happy/sad and relaxed/aggressive cannot both be high simultaneously.
+        # Other moods (party, acoustic, electronic) remain independent.
+        contradictory_groups = [
+            ['moodHappy', 'moodSad'],
+            ['moodRelaxed', 'moodAggressive'],
+        ]
+        for group in contradictory_groups:
+            present = [k for k in group if k in raw_moods]
+            if len(present) < 2:
+                continue
+            values = np.array([raw_moods[k][0] for k in present])
+            values_clamped = np.clip(values, 0.01, 0.99)
+            logits = np.log(values_clamped / (1 - values_clamped))
+            # Temperature 1.5: moderate competition
+            scaled = logits / 1.5
+            exp_scaled = np.exp(scaled - np.max(scaled))
+            softmax_probs = exp_scaled / exp_scaled.sum()
+            for i, k in enumerate(present):
+                raw_moods[k] = (round(float(softmax_probs[i]), 3), raw_moods[k][1])
+
+        # === VARIANCE-BASED UNCERTAINTY SHRINKAGE ===
+        # High per-frame variance = model oscillating = uncertain prediction.
+        # Shrink uncertain predictions toward 0.5 (neutral).
+        for mood_key in all_mood_keys:
+            val, var = raw_moods[mood_key]
+            if var > 0.02:
+                shrinkage = min(1.0, var / 0.1)
+                shrunk = val * (1 - shrinkage) + 0.5 * shrinkage
+                raw_moods[mood_key] = (round(shrunk, 3), var)
+
         # Store final mood values in result
         for mood_key, (val, var) in raw_moods.items():
             result[mood_key] = val
         
-        # === VALENCE (derived from mood models) ===
-        # Valence = emotional positivity: happy/party vs sad
-        happy = result.get('moodHappy', 0.5)
-        sad = result.get('moodSad', 0.5)
-        party = result.get('moodParty', 0.5)
-        result['valence'] = round(max(0.0, min(1.0, happy * 0.5 + party * 0.3 + (1 - sad) * 0.2)), 3)
+        # === VALENCE & AROUSAL (ensemble of available regression models) ===
+        va_models = [m for m in ['deam', 'emomusic'] if m in self.prediction_models]
+        if va_models:
+            # Each model outputs [frames, 2] = [valence, arousal] in range [1, 9]
+            valence_preds = []
+            arousal_preds = []
+            for model_name in va_models:
+                try:
+                    preds = self.prediction_models[model_name](embeddings)
+                    valence_preds.append(float(np.mean(preds[:, 0])))
+                    arousal_preds.append(float(np.mean(preds[:, 1])))
+                except Exception as e:
+                    logger.warning(f"{model_name} prediction failed: {e}")
+            if valence_preds:
+                valence_raw = sum(valence_preds) / len(valence_preds)
+                arousal_raw = sum(arousal_preds) / len(arousal_preds)
+                # Temperature scaling: amplify deviation from center (5.0 in [1,9] space)
+                # to spread compressed predictions before normalizing to [0,1]
+                center = 5.0
+                temperature = 2.5
+                valence_scaled = max(1.0, min(9.0, center + (valence_raw - center) * temperature))
+                arousal_scaled = max(1.0, min(9.0, center + (arousal_raw - center) * temperature))
+                result['valence'] = round(max(0.0, min(1.0, (valence_scaled - 1.0) / 8.0)), 3)
+                result['arousal'] = round(max(0.0, min(1.0, (arousal_scaled - 1.0) / 8.0)), 3)
+            else:
+                self._heuristic_valence_arousal(result)
+        else:
+            self._heuristic_valence_arousal(result)
         
-        # === AROUSAL (derived from mood models) ===
-        # Arousal = energy level: aggressive/party/electronic vs relaxed/acoustic
-        aggressive = result.get('moodAggressive', 0.5)
-        relaxed = result.get('moodRelaxed', 0.5)
-        acoustic = result.get('moodAcoustic', 0.5)
-        electronic = result.get('moodElectronic', 0.5)
-        result['arousal'] = round(max(0.0, min(1.0, aggressive * 0.35 + party * 0.25 + electronic * 0.2 + (1 - relaxed) * 0.1 + (1 - acoustic) * 0.1)), 3)
-        
-        # === INSTRUMENTALNESS & SPEECHINESS (voice/instrumental) ===
-        if 'voice_instrumental' in self.prediction_models:
-            val, var = safe_predict(self.prediction_models['voice_instrumental'], embeddings, 'voice_instrumental')
-            result['instrumentalness'] = val
-            # Derive speechiness: inverse of instrumentalness, scaled down
-            result['speechiness'] = round(max(0.0, min(1.0, (1.0 - val) * 0.6)), 3)
-
-        # === ACOUSTICNESS (from mood_acoustic model) ===
-        if 'moodAcoustic' in result:
-            result['acousticness'] = result['moodAcoustic']
+        # instrumentalness, acousticness, speechiness: CLAP zero-shot is sole writer (vibe phase).
 
         # === ML DANCEABILITY ===
         if 'danceability' in self.prediction_models:
@@ -760,6 +824,15 @@ class AudioAnalyzer:
 
         return result
     
+    def _heuristic_valence_arousal(self, result: Dict[str, Any]):
+        """Derive valence/arousal from mood model predictions when V/A regression models are unavailable."""
+        result['valence'] = round(max(0.0, min(1.0,
+            result.get('moodHappy', 0.5) * 0.5 + result.get('moodParty', 0.5) * 0.3 + (1 - result.get('moodSad', 0.5)) * 0.2)), 3)
+        result['arousal'] = round(max(0.0, min(1.0,
+            result.get('moodAggressive', 0.5) * 0.35 + result.get('moodParty', 0.5) * 0.25 +
+            result.get('moodElectronic', 0.5) * 0.2 + (1 - result.get('moodRelaxed', 0.5)) * 0.1 +
+            (1 - result.get('moodAcoustic', 0.5)) * 0.1)), 3)
+
     def _apply_standard_estimates(self, result: Dict[str, Any], scale: str, bpm: float):
         """
         Apply heuristic estimates for Standard mode.
@@ -848,22 +921,8 @@ class AudioAnalyzer:
         else:
             zcr_instrumental = 0.5  # Moderate = uncertain
         
-        result['instrumentalness'] = round(
-            flatness_normalized * 0.6 + zcr_instrumental * 0.4,
-            3
-        )
-        
-        # === ACOUSTICNESS ===
-        # High dynamic range = acoustic (natural dynamics)
-        # Low dynamic range = compressed/electronic
-        result['acousticness'] = round(min(1.0, dynamic_range / 12), 3)
-        
-        # === SPEECHINESS ===
-        # Speech has characteristic ZCR pattern and moderate spectral centroid
-        if zcr > 0.08 and zcr < 0.2 and spectral_centroid > 0.1 and spectral_centroid < 0.4:
-            result['speechiness'] = round(min(0.5, zcr * 3), 3)
-        else:
-            result['speechiness'] = 0.1
+        # instrumentalness, acousticness, speechiness: CLAP zero-shot is the sole writer.
+        # Do NOT set them here -- they will be populated during the vibe phase.
     
     def _generate_mood_tags(self, features: Dict[str, Any]) -> List[str]:
         """
@@ -1329,7 +1388,7 @@ class AnalysisWorker:
     
     def _run_db_reconciliation(self) -> bool:
         """
-        Check database for pending tracks that may have been missed by Redis queue.
+        Check database for pending/queued tracks that may have been missed by Redis queue.
         Handles edge cases: manual DB edits, crash recovery, queue loss.
         Marks tracks as 'processing' in DB first (prevents backend double-queuing),
         then pushes them into the Redis queue so BRPOP picks them up.
@@ -1341,7 +1400,7 @@ class AnalysisWorker:
             cursor.execute("""
                 SELECT id, "filePath"
                 FROM "Track"
-                WHERE "analysisStatus" = 'pending'
+                WHERE "analysisStatus" IN ('pending', 'queued')
                 AND COALESCE("analysisRetryCount", 0) < %s
                 ORDER BY "fileModified" DESC
                 LIMIT %s
@@ -1349,7 +1408,7 @@ class AnalysisWorker:
 
             tracks = cursor.fetchall()
             if tracks:
-                logger.info(f"DB reconciliation found {len(tracks)} pending tracks, queuing...")
+                logger.info(f"DB reconciliation found {len(tracks)} pending/queued tracks, queuing...")
                 track_ids = [t['id'] for t in tracks]
                 cursor.execute("""
                     UPDATE "Track"
@@ -1395,6 +1454,24 @@ class AnalysisWorker:
 
         self.db.connect()
         self.running = True
+
+        # Reset "queued" tracks to "pending" -- Redis queue may have been lost during restart
+        cursor = self.db.get_cursor()
+        try:
+            cursor.execute("""
+                UPDATE "Track"
+                SET "analysisStatus" = 'pending'
+                WHERE "analysisStatus" = 'queued'
+            """)
+            queued_reset = cursor.rowcount
+            self.db.commit()
+            if queued_reset > 0:
+                logger.info(f"Reset {queued_reset} queued tracks to pending (Redis queue lost on restart)")
+        except Exception as e:
+            logger.error(f"Failed to reset queued tracks: {e}")
+            self.db.rollback()
+        finally:
+            cursor.close()
 
         logger.info("Cleaning up stale processing tracks...")
         self._cleanup_stale_processing()
