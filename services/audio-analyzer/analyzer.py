@@ -289,7 +289,7 @@ class AudioAnalyzer:
         # Additional extractors for better Standard mode
         self.spectral_centroid = es.Centroid(range=22050)  # For brightness
         self.spectral_flatness = es.FlatnessDB()  # For instrumentalness
-        self.zcr = es.ZeroCrossingRate()  # For speechiness
+        self.zcr = es.ZeroCrossingRate()
         self.rms = es.RMS()  # For proper energy calculation
         self.spectrum = es.Spectrum()
         self.windowing = es.Windowing(type='hann')
@@ -477,7 +477,6 @@ class AudioAnalyzer:
             'arousal': None,
             'instrumentalness': None,
             'acousticness': None,
-            'speechiness': None,
             'moodTags': [],
             'moodHappy': None,
             'moodSad': None,
@@ -815,7 +814,7 @@ class AudioAnalyzer:
         else:
             self._heuristic_valence_arousal(result)
         
-        # instrumentalness, acousticness, speechiness: CLAP zero-shot is sole writer (vibe phase).
+        # instrumentalness, acousticness: CLAP zero-shot is sole writer (vibe phase).
 
         # === ML DANCEABILITY ===
         if 'danceability' in self.prediction_models:
@@ -921,7 +920,7 @@ class AudioAnalyzer:
         else:
             zcr_instrumental = 0.5  # Moderate = uncertain
         
-        # instrumentalness, acousticness, speechiness: CLAP zero-shot is the sole writer.
+        # instrumentalness, acousticness: CLAP zero-shot is the sole writer.
         # Do NOT set them here -- they will be populated during the vibe phase.
     
     def _generate_mood_tags(self, features: Dict[str, Any]) -> List[str]:
@@ -1667,7 +1666,6 @@ class AnalysisWorker:
                     arousal = %s,
                     instrumentalness = %s,
                     acousticness = %s,
-                    speechiness = %s,
                     "moodTags" = %s,
                     "essentiaGenres" = %s,
                     "moodHappy" = %s,
@@ -1699,7 +1697,6 @@ class AnalysisWorker:
                 features['arousal'],
                 features['instrumentalness'],
                 features['acousticness'],
-                features['speechiness'],
                 features['moodTags'],
                 features['essentiaGenres'],
                 features.get('moodHappy'),

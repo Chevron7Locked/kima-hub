@@ -2,7 +2,7 @@
 //
 // One-time script to apply post-processing fixes to existing analyzed tracks:
 // 1. NULL out acousticness (was dynamicRange proxy, CLAP zero-shot is now sole writer)
-// 2. NULL out V/A + instrumentalness + speechiness for CLAP re-detection
+// 2. NULL out V/A + instrumentalness for CLAP re-detection
 // 3. Reset analysis + vibe status to trigger full re-analysis
 
 import { PrismaClient } from "@prisma/client";
@@ -25,7 +25,7 @@ async function recalibrate() {
     // Re-analysis will populate them from DEAM models with temperature scaling + CLAP vocal detection.
     const vaResult = await prisma.$executeRaw`
         UPDATE "Track"
-        SET valence = NULL, arousal = NULL, instrumentalness = NULL, speechiness = NULL
+        SET valence = NULL, arousal = NULL, instrumentalness = NULL
         WHERE "analysisStatus" = 'completed'
     `;
     console.log(`Cleared V/A + instrumentalness for re-analysis: ${vaResult} tracks`);

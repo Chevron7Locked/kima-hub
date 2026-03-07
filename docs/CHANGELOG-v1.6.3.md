@@ -54,10 +54,10 @@ Closes #143, #141.
 - **Vibe vocabulary expansion** -- 69 to 166 pre-computed CLAP text embeddings. New categories: sub-genres (35), cultural/regional (7), instrumentation (12), production (9), vocal styles (7), use-cases (7), moods (14), eras (7). Added subgenre TermType to genreConfidence matching
 - **Danceability saturation fix** -- Essentia `Danceability()` returns [0,3], was clamped to [0,1] causing 95% of tracks to score 1.0. Fixed by normalizing with `/3.0`. Similarity system switched from `danceability` to `danceabilityMl`
 - **Acousticness aliasing fix** -- `mood_acoustic` (a mood classifier) was directly aliased as acousticness, causing vocal pop/rock to score 0.999. Now detected by CLAP zero-shot ("acoustic instruments" vs "electronic synthesizers")
-- **CLAP zero-shot acousticness** -- Replaces `dynamicRange / 12` proxy with CLAP text-audio similarity. Same zero-shot pattern as vocal detection, zero new dependencies
-- **CLAP zero-shot speechiness** -- Replaces `(1-instrumentalness)*0.6` stub with actual speech/rap detection. Distinguishes rapping/spoken word from melodic singing using 3+3 text prompt ensemble
+- **CLAP zero-shot acousticness** -- Replaces `dynamicRange / 12` proxy with CLAP text-audio similarity. Prompts target unplugged/unamplified vs produced/amplified distinction per Spotify's acousticness definition
 - **CLAP valence/arousal blend** -- Zero-shot emotion detection blended with DEAM regression (70/30 valence, 50/50 arousal). Provides full V/A signal when DEAM unavailable. Different failure modes reduce compression artifacts
-- **Speechiness NULL default fix** -- Vibe re-ranking NULL default for speechiness changed from 0.5 to 0.0 (most music has no speech). Prevents inflated match scores for rap/spoken word terms on unanalyzed tracks
+- **Temperature-scaled softmax (T=15)** -- All CLAP zero-shot detectors now use T=15 to amplify small cosine similarity differences. Without temperature scaling, raw sims (~0.2-0.3) collapse to ~0.5 after softmax
+- **Speechiness removed** -- CLAP zero-shot cannot reliably distinguish rap from energetic singing. Feature removed from all detectors, feature profiles, vibe re-ranking, and API responses. DB column retained but unused
 
 ## Background Playlist Import
 

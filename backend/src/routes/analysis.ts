@@ -254,7 +254,6 @@ router.get("/track/:trackId", requireAuth, async (req, res) => {
                 arousal: true,
                 instrumentalness: true,
                 acousticness: true,
-                speechiness: true,
                 // MusiCNN mood predictions
                 moodHappy: true,
                 moodSad: true,

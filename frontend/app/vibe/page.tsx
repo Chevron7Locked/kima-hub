@@ -28,7 +28,6 @@ interface TrackFeatures {
     danceability: number;
     instrumentalness: number;
     acousticness: number;
-    speechiness: number;
     bpm: number | null;
     key: string | null;
     moodHappy: number | null;
@@ -653,7 +652,6 @@ function VibePageContent() {
                     danceability: analysis.danceability ?? 0.5,
                     instrumentalness: analysis.instrumentalness ?? 0.5,
                     acousticness: analysis.acousticness ?? 0.5,
-                    speechiness: analysis.speechiness ?? 0.1,
                     bpm: analysis.bpm,
                     key: analysis.key ? `${analysis.key}${analysis.keyScale ? ` ${analysis.keyScale}` : ""}` : null,
                     moodHappy: analysis.moodHappy ?? null,
@@ -681,7 +679,7 @@ function VibePageContent() {
                 similarity: trackInfo.similarity ?? (trackInfo.distance !== undefined ? distanceToSimilarity(trackInfo.distance) : undefined),
                 features: {
                     energy: 0.5, valence: 0.5, arousal: 0.5, danceability: 0.5,
-                    instrumentalness: 0.5, acousticness: 0.5, speechiness: 0.1,
+                    instrumentalness: 0.5, acousticness: 0.5,
                     bpm: null, key: null,
                     moodHappy: null, moodSad: null, moodRelaxed: null,
                     moodAggressive: null, moodParty: null, moodAcoustic: null, moodElectronic: null,

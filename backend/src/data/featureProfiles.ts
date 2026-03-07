@@ -17,7 +17,6 @@ export interface FeatureProfile {
     acousticness?: number;
     instrumentalness?: number;
     arousal?: number;
-    speechiness?: number;
 }
 
 export type TermType = "genre" | "subgenre" | "mood" | "vibe" | "descriptor" | "instrumentation" | "production" | "context" | "era" | "vocal";
@@ -62,7 +61,7 @@ export const VOCAB_DEFINITIONS: Record<string, VocabTermDefinition> = {
     },
     "hip-hop": {
         type: "genre",
-        featureProfile: { instrumentalness: 0.2, acousticness: 0.15, danceability: 0.75, speechiness: 0.3 },
+        featureProfile: { instrumentalness: 0.2, acousticness: 0.15, danceability: 0.75 },
         related: ["rap", "trap", "r&b"]
     },
     rock: {
@@ -92,7 +91,7 @@ export const VOCAB_DEFINITIONS: Record<string, VocabTermDefinition> = {
     },
     classical: {
         type: "genre",
-        featureProfile: { instrumentalness: 0.95, acousticness: 0.9, speechiness: 0.05, danceability: 0.25 },
+        featureProfile: { instrumentalness: 0.95, acousticness: 0.9, danceability: 0.25 },
         related: ["orchestral", "piano", "instrumental"]
     },
     folk: {
@@ -343,12 +342,12 @@ export const VOCAB_DEFINITIONS: Record<string, VocabTermDefinition> = {
     },
     vocal: {
         type: "descriptor",
-        featureProfile: { instrumentalness: 0.1, speechiness: 0.2 },
+        featureProfile: { instrumentalness: 0.1 },
         related: ["singing", "lyrics"]
     },
     instrumental: {
         type: "descriptor",
-        featureProfile: { instrumentalness: 0.9, speechiness: 0.05 },
+        featureProfile: { instrumentalness: 0.9 },
         related: ["no vocals"]
     },
     danceable: {
@@ -400,11 +399,11 @@ export const VOCAB_DEFINITIONS: Record<string, VocabTermDefinition> = {
     "trip-hop": { type: "subgenre", featureProfile: { energy: 0.35, valence: 0.4, danceability: 0.5, acousticness: 0.3 }, related: ["electronic", "hip-hop", "atmospheric", "downtempo"] },
     downtempo: { type: "subgenre", featureProfile: { energy: 0.3, danceability: 0.45, instrumentalness: 0.6, acousticness: 0.25 }, related: ["electronic", "chill", "ambient"] },
     "neo-soul": { type: "subgenre", featureProfile: { energy: 0.4, valence: 0.6, danceability: 0.55, acousticness: 0.4 }, related: ["soul", "r&b", "groovy"] },
-    gospel: { type: "subgenre", featureProfile: { energy: 0.65, valence: 0.75, acousticness: 0.5, speechiness: 0.15 }, related: ["soul", "choir singing", "uplifting"] },
+    gospel: { type: "subgenre", featureProfile: { energy: 0.65, valence: 0.75, acousticness: 0.5 }, related: ["soul", "choir singing", "uplifting"] },
     "bossa nova": { type: "subgenre", featureProfile: { energy: 0.25, valence: 0.6, danceability: 0.5, acousticness: 0.7 }, related: ["jazz", "latin music", "relaxed"] },
     reggaeton: { type: "subgenre", featureProfile: { energy: 0.7, danceability: 0.85, acousticness: 0.1, valence: 0.65 }, related: ["latin music", "hip-hop", "danceable"] },
     drill: { type: "subgenre", featureProfile: { energy: 0.7, valence: 0.25, danceability: 0.6, acousticness: 0.05 }, related: ["hip-hop", "trap", "dark"] },
-    grime: { type: "subgenre", featureProfile: { energy: 0.75, danceability: 0.65, acousticness: 0.05, speechiness: 0.3 }, related: ["electronic", "hip-hop", "aggressive"] },
+    grime: { type: "subgenre", featureProfile: { energy: 0.75, danceability: 0.65, acousticness: 0.05 }, related: ["electronic", "hip-hop", "aggressive"] },
     "boom bap": { type: "subgenre", featureProfile: { energy: 0.55, danceability: 0.65, acousticness: 0.15, valence: 0.45 }, related: ["hip-hop", "drums", "groovy"] },
     hardcore: { type: "subgenre", featureProfile: { energy: 0.95, danceability: 0.5, acousticness: 0.05, valence: 0.3 }, related: ["punk", "metal", "aggressive", "fast"] },
     breakbeat: { type: "subgenre", featureProfile: { energy: 0.7, danceability: 0.75, instrumentalness: 0.7, acousticness: 0.05 }, related: ["electronic", "drums", "dnb"] },
@@ -448,12 +447,12 @@ export const VOCAB_DEFINITIONS: Record<string, VocabTermDefinition> = {
     layered: { type: "production", featureProfile: { energy: 0.75 }, related: ["orchestral", "epic", "dense"] },
     glitchy: { type: "production", featureProfile: { energy: 0.5, acousticness: 0.05, instrumentalness: 0.7 }, related: ["electronic", "experimental"] },
     // === VOCAL STYLES ===
-    rapping: { type: "vocal", featureProfile: { speechiness: 0.5, instrumentalness: 0.1, energy: 0.65 }, related: ["hip-hop", "trap", "boom bap"] },
+    rapping: { type: "vocal", featureProfile: { instrumentalness: 0.1, energy: 0.65 }, related: ["hip-hop", "trap", "boom bap"] },
     falsetto: { type: "vocal", featureProfile: { energy: 0.4, valence: 0.5 }, related: ["r&b", "soul", "pop"] },
     "growling vocals": { type: "vocal", featureProfile: { energy: 0.9, instrumentalness: 0.1, valence: 0.15 }, related: ["death metal", "metal", "aggressive"] },
-    "a cappella": { type: "vocal", featureProfile: { instrumentalness: 0.0, acousticness: 0.8, speechiness: 0.3 }, related: ["choir singing", "vocal"] },
+    "a cappella": { type: "vocal", featureProfile: { instrumentalness: 0.0, acousticness: 0.8 }, related: ["choir singing", "vocal"] },
     "choir singing": { type: "vocal", featureProfile: { instrumentalness: 0.2, acousticness: 0.6, energy: 0.55 }, related: ["gospel", "classical", "epic"] },
-    "spoken word": { type: "vocal", featureProfile: { speechiness: 0.7, instrumentalness: 0.1, energy: 0.25 }, related: ["calm", "acoustic"] },
+    "spoken word": { type: "vocal", featureProfile: { instrumentalness: 0.1, energy: 0.25 }, related: ["calm", "acoustic"] },
     autotune: { type: "vocal", featureProfile: { acousticness: 0.05, energy: 0.6 }, related: ["hip-hop", "pop", "trap"] },
     // === USE-CASE / CONTEXT ===
     "workout music": { type: "context", featureProfile: { energy: 0.85, danceability: 0.75, arousal: 0.8, valence: 0.6 }, related: ["energetic", "upbeat", "fast"] },

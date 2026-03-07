@@ -197,7 +197,7 @@ export function blendFeatureProfiles(terms: VocabTerm[]): FeatureProfile {
     if (terms.length === 0) return {};
 
     const features = ["energy", "valence", "danceability", "acousticness",
-                      "instrumentalness", "arousal", "speechiness"] as const;
+                      "instrumentalness", "arousal"] as const;
 
     const result: FeatureProfile = {};
 
@@ -228,7 +228,6 @@ export function calculateFeatureMatch(
         acousticness: 0.5,
         instrumentalness: 0.5,
         arousal: 0.5,
-        speechiness: 0.0,
     };
 
     let score = 0;
@@ -258,7 +257,6 @@ export function rerankWithFeatures<T extends {
     acousticness?: number | null;
     instrumentalness?: number | null;
     arousal?: number | null;
-    speechiness?: number | null;
 }>(
     candidates: T[],
     matchedTerms: VocabTerm[],
@@ -288,7 +286,6 @@ export function rerankWithFeatures<T extends {
             acousticness: track.acousticness ?? null,
             instrumentalness: track.instrumentalness ?? null,
             arousal: track.arousal ?? null,
-            speechiness: track.speechiness ?? null
         };
 
         const featureScore = Object.keys(targetProfile).length > 0

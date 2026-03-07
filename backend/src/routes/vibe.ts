@@ -36,7 +36,6 @@ interface TextSearchResult {
     acousticness: number | null;
     instrumentalness: number | null;
     arousal: number | null;
-    speechiness: number | null;
 }
 
 /**
@@ -202,8 +201,7 @@ router.post("/search", requireAuth, async (req, res) => {
                     t."danceabilityMl" as danceability,
                     t.acousticness,
                     t.instrumentalness,
-                    t.arousal,
-                    t.speechiness
+                    t.arousal
                 FROM track_embeddings te
                 JOIN "Track" t ON te.track_id = t.id
                 JOIN "Album" a ON t."albumId" = a.id

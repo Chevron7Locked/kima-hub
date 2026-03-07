@@ -1713,7 +1713,6 @@ class ApiClient {
             arousal: number | null;
             instrumentalness: number | null;
             acousticness: number | null;
-            speechiness: number | null;
             // MusiCNN mood predictions
             moodHappy: number | null;
             moodSad: number | null;
