@@ -173,8 +173,12 @@ export async function computeMapProjection(): Promise<MapResponse> {
         computedAt: new Date().toISOString(),
     };
 
-    // Cache for 24 hours
-    await redisClient.setEx(cacheKey, 86400, JSON.stringify(result));
+    // Cache for 24 hours -- non-fatal if Redis is down
+    try {
+        await redisClient.setEx(cacheKey, 86400, JSON.stringify(result));
+    } catch (e) {
+        logger.warn("[VIBE-MAP] Failed to cache projection:", (e as Error).message);
+    }
 
     const elapsed = Date.now() - startTime;
     logger.info(`[VIBE-MAP] UMAP projection computed in ${elapsed}ms for ${tracks.length} tracks`);

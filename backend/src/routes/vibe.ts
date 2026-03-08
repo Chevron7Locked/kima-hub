@@ -71,8 +71,8 @@ router.post("/path", requireAuth, async (req, res) => {
     try {
         const { startTrackId, endTrackId, length, mode } = req.body;
 
-        if (!startTrackId || !endTrackId) {
-            return res.status(400).json({ error: "startTrackId and endTrackId are required" });
+        if (!startTrackId || !endTrackId || typeof startTrackId !== "string" || typeof endTrackId !== "string") {
+            return res.status(400).json({ error: "startTrackId and endTrackId are required strings" });
         }
 
         if (startTrackId === endTrackId) {
@@ -115,6 +115,14 @@ router.post("/alchemy", requireAuth, async (req, res) => {
 
         if (subtract && (!Array.isArray(subtract) || subtract.length > 10)) {
             return res.status(400).json({ error: "'subtract' must be an array of at most 10 tracks" });
+        }
+
+        if (!add.every((id: unknown) => typeof id === "string" && id.length > 0)) {
+            return res.status(400).json({ error: "'add' must contain non-empty string track IDs" });
+        }
+
+        if (subtract && !subtract.every((id: unknown) => typeof id === "string" && id.length > 0)) {
+            return res.status(400).json({ error: "'subtract' must contain non-empty string track IDs" });
         }
 
         const limit = Math.min(Math.max(1, requestedLimit || 20), 100);
