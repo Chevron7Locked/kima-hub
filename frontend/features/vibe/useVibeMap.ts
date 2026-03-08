@@ -121,5 +121,6 @@ export function useVibeMap() {
         completePathPicking,
         resetMode,
         setMode,
+        setHighlightedIds,
     };
 }

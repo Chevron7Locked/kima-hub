@@ -26,10 +26,11 @@ export default function VibePage() {
         completePathPicking,
         resetMode,
         setMode,
+        setHighlightedIds,
     } = useVibeMap();
 
-    const [similarTracks, setSimilarTracks] = useState<any[]>([]);
-    const [searchResults, setSearchResults] = useState<any[]>([]);
+    const [similarTracks, setSimilarTracks] = useState<Array<{ id: string; title: string; similarity?: number; album: { id: string; title: string; coverUrl: string | null }; artist: { id: string; name: string } }>>([]);
+    const [searchResults, setSearchResults] = useState<Array<{ id: string; title: string; similarity?: number; album: { id: string; title: string; coverUrl: string | null }; artist: { id: string; name: string } }>>([]);
     const [showPathPicker, setShowPathPicker] = useState(false);
     const [showAlchemy, setShowAlchemy] = useState(false);
 
@@ -74,9 +75,9 @@ export default function VibePage() {
         await completePathPicking(endId);
     }, [startPathPicking, completePathPicking]);
 
-    const handleAlchemyHighlight = useCallback((_ids: Set<string>) => {
-        // VibeAlchemy manages its own highlight state
-    }, []);
+    const handleAlchemyHighlight = useCallback((ids: Set<string>) => {
+        setHighlightedIds(ids);
+    }, [setHighlightedIds]);
 
     const handleClose = useCallback(() => {
         resetMode();

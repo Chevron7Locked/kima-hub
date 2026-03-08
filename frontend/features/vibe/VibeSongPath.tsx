@@ -15,8 +15,6 @@ export function VibeSongPath({ onStartPath, onClose }: VibeSongPathProps) {
     const [endQuery, setEndQuery] = useState("");
     const [startTrackId, setStartTrackId] = useState<string | null>(null);
     const [endTrackId, setEndTrackId] = useState<string | null>(null);
-    const [, setStartTrackName] = useState("");
-    const [, setEndTrackName] = useState("");
     const [activeInput, setActiveInput] = useState<"start" | "end" | null>(null);
 
     const { data: searchResults } = useQuery({
@@ -35,12 +33,10 @@ export function VibeSongPath({ onStartPath, onClose }: VibeSongPathProps) {
         const label = `${track.title} - ${track.artist.name}`;
         if (activeInput === "start") {
             setStartTrackId(track.id);
-            setStartTrackName(label);
             setStartQuery(label);
             setActiveInput("end");
         } else {
             setEndTrackId(track.id);
-            setEndTrackName(label);
             setEndQuery(label);
             setActiveInput(null);
         }
