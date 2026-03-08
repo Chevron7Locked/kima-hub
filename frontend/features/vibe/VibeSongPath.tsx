@@ -17,17 +17,29 @@ export function VibeSongPath({ onStartPath, onClose }: VibeSongPathProps) {
     const [endTrackId, setEndTrackId] = useState<string | null>(null);
     const [activeInput, setActiveInput] = useState<"start" | "end" | null>(null);
 
-    const { data: searchResults } = useQuery({
-        queryKey: ["track-search", activeInput === "start" ? startQuery : endQuery],
+    const { data: startResults } = useQuery({
+        queryKey: ["track-search", "start", startQuery],
         queryFn: async () => {
-            const q = activeInput === "start" ? startQuery : endQuery;
-            if (q.length < 2) return [];
-            const result = await api.vibeSearch(q, 10);
+            if (startQuery.length < 2) return [];
+            const result = await api.vibeSearch(startQuery, 10);
             return result.tracks;
         },
-        enabled: (activeInput === "start" ? startQuery : endQuery).length >= 2,
+        enabled: startQuery.length >= 2 && activeInput === "start",
         staleTime: 30000,
     });
+
+    const { data: endResults } = useQuery({
+        queryKey: ["track-search", "end", endQuery],
+        queryFn: async () => {
+            if (endQuery.length < 2) return [];
+            const result = await api.vibeSearch(endQuery, 10);
+            return result.tracks;
+        },
+        enabled: endQuery.length >= 2 && activeInput === "end",
+        staleTime: 30000,
+    });
+
+    const searchResults = activeInput === "start" ? startResults : activeInput === "end" ? endResults : undefined;
 
     const selectTrack = useCallback((track: { id: string; title: string; artist: { name: string } }) => {
         const label = `${track.title} - ${track.artist.name}`;

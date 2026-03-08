@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { X, Plus, Minus, FlaskConical, Search, Play } from "lucide-react";
 import { api } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
@@ -20,6 +20,8 @@ interface SelectedTrack {
 
 export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
     const { playTracks } = useAudioControls();
+    const mountedRef = useRef(true);
+    useEffect(() => () => { mountedRef.current = false; }, []);
     const [addTracks, setAddTracks] = useState<SelectedTrack[]>([]);
     const [subtractTracks, setSubtractTracks] = useState<SelectedTrack[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
@@ -90,12 +92,14 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
                 subtractTracks.map((t) => t.id),
                 30,
             );
+            if (!mountedRef.current) return;
             setResults(result.tracks);
             onHighlight(new Set(result.tracks.map((t) => t.id)));
         } catch {
+            if (!mountedRef.current) return;
             setResults([]);
         } finally {
-            setIsComputing(false);
+            if (mountedRef.current) setIsComputing(false);
         }
     }, [addTracks, subtractTracks, onHighlight]);
 
