@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { X, Plus, Minus, FlaskConical, Search, Play } from "lucide-react";
 import { api } from "@/lib/api";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import type { Track } from "@/lib/audio-state-context";
 
@@ -20,8 +20,6 @@ interface SelectedTrack {
 
 export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
     const { playTracks } = useAudioControls();
-    const mountedRef = useRef(true);
-    useEffect(() => () => { mountedRef.current = false; }, []);
     const [addTracks, setAddTracks] = useState<SelectedTrack[]>([]);
     const [subtractTracks, setSubtractTracks] = useState<SelectedTrack[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
@@ -36,7 +34,7 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
             artist: { id: string; name: string };
         }>
     >([]);
-    const [isComputing, setIsComputing] = useState(false);
+    const [computeError, setComputeError] = useState<string | null>(null);
 
     const { data: searchResults } = useQuery({
         queryKey: ["alchemy-search", searchQuery],
@@ -83,25 +81,23 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
         [],
     );
 
-    const compute = useCallback(async () => {
-        if (addTracks.length === 0) return;
-        setIsComputing(true);
-        try {
-            const result = await api.getVibeAlchemy(
+    const mutation = useMutation({
+        mutationFn: () =>
+            api.getVibeAlchemy(
                 addTracks.map((t) => t.id),
                 subtractTracks.map((t) => t.id),
                 30,
-            );
-            if (!mountedRef.current) return;
+            ),
+        onSuccess: (result) => {
             setResults(result.tracks);
             onHighlight(new Set(result.tracks.map((t) => t.id)));
-        } catch {
-            if (!mountedRef.current) return;
+            setComputeError(null);
+        },
+        onError: () => {
             setResults([]);
-        } finally {
-            if (mountedRef.current) setIsComputing(false);
-        }
-    }, [addTracks, subtractTracks, onHighlight]);
+            setComputeError("Failed to compute blend");
+        },
+    });
 
     const handlePlayResults = useCallback(() => {
         const playable: Track[] = results.map((t) => ({
@@ -215,13 +211,14 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
                     )}
 
                 <button
-                    onClick={compute}
-                    disabled={addTracks.length === 0 || isComputing}
+                    onClick={() => mutation.mutate()}
+                    disabled={addTracks.length === 0 || mutation.isPending}
                     className="w-full px-3 py-2 bg-white/10 hover:bg-white/15 disabled:opacity-30 rounded-lg text-sm text-white/80 hover:text-white flex items-center justify-center gap-2"
                 >
                     <FlaskConical className="w-4 h-4" />{" "}
-                    {isComputing ? "Computing..." : "Blend"}
+                    {mutation.isPending ? "Computing..." : "Blend"}
                 </button>
+                {computeError && <p className="text-xs text-rose-400/70 text-center mt-1">{computeError}</p>}
             </div>
 
             {results.length > 0 && (

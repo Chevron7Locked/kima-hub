@@ -7,6 +7,7 @@ import { requireAuth } from "../middleware/auth";
 import { findSimilarTracks } from "../services/hybridSimilarity";
 import { computeMapProjection } from "../services/umapProjection";
 import { generateSongPath } from "../services/songPath";
+import { parseEmbedding } from "../utils/embedding";
 import {
     getVocabulary,
     expandQueryWithVocabulary,
@@ -108,6 +109,14 @@ router.post("/alchemy", requireAuth, async (req, res) => {
             return res.status(400).json({ error: "At least one track ID in 'add' is required" });
         }
 
+        if (add.length > 10) {
+            return res.status(400).json({ error: "'add' may contain at most 10 tracks" });
+        }
+
+        if (subtract && (!Array.isArray(subtract) || subtract.length > 10)) {
+            return res.status(400).json({ error: "'subtract' must be an array of at most 10 tracks" });
+        }
+
         const limit = Math.min(Math.max(1, requestedLimit || 20), 100);
         const allInputIds = [...add, ...(subtract || [])];
 
@@ -123,7 +132,7 @@ router.post("/alchemy", requireAuth, async (req, res) => {
 
         const embMap = new Map<string, number[]>();
         for (const row of embeddings) {
-            embMap.set(row.track_id, row.embedding.replace(/[\[\]]/g, "").split(",").map(Number));
+            embMap.set(row.track_id, parseEmbedding(row.embedding));
         }
 
         // Verify all requested tracks have embeddings
@@ -193,7 +202,7 @@ router.post("/alchemy", requireAuth, async (req, res) => {
                 title: t.title,
                 duration: t.duration,
                 distance: t.distance,
-                similarity: Math.max(0, 1 - t.distance / 2),
+                similarity: distanceToSimilarity(t.distance),
                 album: { id: t.albumId, title: t.albumTitle, coverUrl: t.albumCoverUrl },
                 artist: { id: t.artistId, name: t.artistName },
             })),
@@ -270,6 +279,12 @@ router.post("/search", requireAuth, async (req, res) => {
         if (!query || typeof query !== "string" || query.trim().length < 2) {
             return res.status(400).json({
                 error: "Query must be at least 2 characters",
+            });
+        }
+
+        if (query.length > 500) {
+            return res.status(400).json({
+                error: "Query must be at most 500 characters",
             });
         }
 

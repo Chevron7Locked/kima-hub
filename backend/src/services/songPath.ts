@@ -1,5 +1,8 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { parseEmbedding } from "../utils/embedding";
+
+const MIN_PATH_DISTANCE = 0.15;
 
 interface PathTrack {
     id: string;
@@ -62,7 +65,7 @@ export async function generateSongPath(
 
     const distance = cosineDistance(startEmb, endEmb);
 
-    if (distance < 0.15) {
+    if (distance < MIN_PATH_DISTANCE) {
         throw new Error("TRACKS_TOO_SIMILAR");
     }
 
@@ -173,7 +176,7 @@ async function getEmbedding(trackId: string): Promise<number[] | null> {
         SELECT embedding::text as embedding FROM track_embeddings WHERE track_id = ${trackId}
     `;
     if (!result[0]) return null;
-    return result[0].embedding.replace(/[\[\]]/g, "").split(",").map(Number);
+    return parseEmbedding(result[0].embedding);
 }
 
 function cosineDistance(a: number[], b: number[]): number {

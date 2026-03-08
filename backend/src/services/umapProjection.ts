@@ -2,6 +2,9 @@ import { UMAP } from "umap-js";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
+import { parseEmbedding } from "../utils/embedding";
+
+const MIN_TRACKS_FOR_UMAP = 5;
 
 interface MapTrack {
     id: string;
@@ -101,12 +104,17 @@ export async function computeMapProjection(): Promise<MapResponse> {
         JOIN "Artist" ar ON a."artistId" = ar.id
     `;
 
-    if (rows.length < 2) {
+    if (rows.length < MIN_TRACKS_FOR_UMAP) {
+        // Too few tracks for meaningful UMAP -- place in a simple grid
         const result: MapResponse = {
-            tracks: rows.map(r => {
+            tracks: rows.map((r, i) => {
                 const dominant = getDominantMood(r as any);
+                const angle = (2 * Math.PI * i) / rows.length;
                 return {
-                    id: r.track_id, x: 0.5, y: 0.5, title: r.title,
+                    id: r.track_id,
+                    x: 0.5 + 0.3 * Math.cos(angle),
+                    y: 0.5 + 0.3 * Math.sin(angle),
+                    title: r.title,
                     artist: r.artistName, artistId: r.artistId, albumId: r.albumId,
                     coverUrl: r.coverUrl, dominantMood: dominant.mood,
                     moodScore: dominant.score, energy: r.energy, valence: r.valence,
@@ -118,16 +126,12 @@ export async function computeMapProjection(): Promise<MapResponse> {
         return result;
     }
 
-    // Parse embeddings from pgvector text format "[0.1,0.2,...]"
-    const embeddings: number[][] = rows.map(r => {
-        const cleaned = r.embedding.replace(/[\[\]]/g, "");
-        return cleaned.split(",").map(Number);
-    });
+    const embeddings: number[][] = rows.map(r => parseEmbedding(r.embedding));
 
     // Run UMAP: 512-dim -> 2-dim
     const umap = new UMAP({
         nComponents: 2,
-        nNeighbors: Math.min(15, Math.floor(rows.length / 2)),
+        nNeighbors: Math.min(15, Math.max(2, Math.floor(rows.length / 2))),
         minDist: 0.1,
         spread: 1.0,
     });
