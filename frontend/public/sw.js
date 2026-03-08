@@ -1,5 +1,5 @@
 // Kima Service Worker
-const CACHE_NAME = 'kima-v1';
+const CACHE_NAME = 'kima-v2';
 const IMAGE_CACHE_NAME = 'kima-images-v3';
 const MAX_IMAGE_CACHE_ENTRIES = 2000;
 const MAX_CONCURRENT_IMAGE_REQUESTS = 8;
@@ -7,7 +7,6 @@ const REQUEST_DELAY_MS = 10;
 
 // Assets to cache on install (app shell)
 const PRECACHE_ASSETS = [
-  '/',
   '/manifest.webmanifest',
   '/assets/images/kima.webp',
 ];
@@ -177,36 +176,9 @@ self.addEventListener('fetch', (event) => {
   // Skip other API requests - always go to network
   if (url.pathname.startsWith('/api/')) return;
 
-  // For everything else, try network first, then cache
-  event.respondWith(
-    fetch(request)
-      .then((response) => {
-        // Clone the response before caching
-        const responseClone = response.clone();
-
-        // Cache successful responses
-        if (response.status === 200) {
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(request, responseClone);
-          });
-        }
-
-        return response;
-      })
-      .catch(() => {
-        // Network failed, try cache
-        return caches.match(request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-
-          // Return a fallback for navigation requests
-          if (request.mode === 'navigate') {
-            return caches.match('/');
-          }
-
-          return new Response('Offline', { status: 503 });
-        });
-      })
-  );
+  // Let Next.js handle its own static assets and navigation - don't cache them.
+  // Next.js already uses immutable cache headers on /_next/static/ and manages
+  // HTML responses with proper cache-control. Caching these in the SW causes
+  // stale CSS/JS after rebuilds (old HTML references old chunk hashes).
+  return;
 });
