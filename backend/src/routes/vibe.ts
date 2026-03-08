@@ -6,6 +6,7 @@ import { redisClient } from "../utils/redis";
 import { requireAuth } from "../middleware/auth";
 import { findSimilarTracks } from "../services/hybridSimilarity";
 import { computeMapProjection } from "../services/umapProjection";
+import { generateSongPath } from "../services/songPath";
 import {
     getVocabulary,
     expandQueryWithVocabulary,
@@ -58,6 +59,39 @@ router.get("/map", requireAuth, async (req, res) => {
     } catch (error: any) {
         logger.error("Vibe map error:", error);
         res.status(500).json({ error: "Failed to compute map projection" });
+    }
+});
+
+/**
+ * POST /api/vibe/path
+ * Generate a smooth musical journey between two tracks.
+ */
+router.post("/path", requireAuth, async (req, res) => {
+    try {
+        const { startTrackId, endTrackId, length, mode } = req.body;
+
+        if (!startTrackId || !endTrackId) {
+            return res.status(400).json({ error: "startTrackId and endTrackId are required" });
+        }
+
+        if (startTrackId === endTrackId) {
+            return res.status(400).json({ error: "Start and end tracks must be different" });
+        }
+
+        const result = await generateSongPath(startTrackId, endTrackId, {
+            length: length ? Math.max(5, Math.min(50, length)) : undefined,
+            mode: mode === "discovery" ? "discovery" : "smooth",
+        });
+
+        res.json(result);
+    } catch (error: any) {
+        if (error.message === "TRACKS_TOO_SIMILAR") {
+            return res.status(400).json({
+                error: "These tracks are too similar for a meaningful journey. Try \"Similar Tracks\" instead.",
+            });
+        }
+        logger.error("Song path error:", error);
+        res.status(500).json({ error: "Failed to generate song path" });
     }
 });
 
