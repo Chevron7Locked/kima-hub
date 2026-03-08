@@ -31,6 +31,7 @@ import { cn } from "@/utils/cn";
 import { useState, useRef, useEffect, lazy, Suspense } from "react";
 import { KeyboardShortcutsTooltip } from "./KeyboardShortcutsTooltip";
 import { SeekSlider } from "./SeekSlider";
+import { SleepTimer } from "./SleepTimer";
 import { useFeatures } from "@/lib/features-context";
 import { usePlaybackProgress } from "@/hooks/usePlaybackProgress";
 
@@ -582,6 +583,9 @@ export function MiniPlayer() {
 
                     {/* Playback Controls */}
                     <div className="flex items-center justify-between gap-1">
+                        {/* Sleep Timer */}
+                        <SleepTimer size="sm" />
+
                         {/* Shuffle */}
                         <button
                             onClick={toggleShuffle}

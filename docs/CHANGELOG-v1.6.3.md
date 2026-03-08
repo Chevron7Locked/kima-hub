@@ -89,6 +89,19 @@ Closes #143, #141.
 - **Import toast notifications** -- SSE events trigger toast notifications on import completion, failure, or cancellation via custom DOM events
 - **Onboarding simplification** -- Removed informational step 3, onboarding is now Account + Integrations + done
 
+## Sleep Timer
+
+- **Sleep timer** -- Configurable auto-pause timer on all player modes (mini, full, overlay). Presets at 15/30/45/60/90/120 minutes plus custom input. Countdown displays next to timer icon when active
+- **Shared timer state** -- Timer persists across player mode switches via module-level shared state with `useSyncExternalStore`
+
+## Audio Analysis Bug Fixes
+
+- **Retry count reset on crash recovery** -- Startup crash recovery and stop-cleanup now reset `analysisRetryCount` to 0 alongside `analysisStatus`, preventing tracks from hitting max retries after a restart
+- **Per-track processing marks** -- Python analyzer marks each track as `processing` individually before submitting to the process pool, instead of batch-marking. Prevents stale status on tracks that never started
+- **Batch timeout handling** -- `ProcessPoolExecutor.as_completed()` now catches `TimeoutError`, cancels incomplete futures, saves failure records, and recreates the pool instead of silently hanging
+- **BRPOP timeout reduced** -- Redis BRPOP timeout reduced from 30s to 5s, improving responsiveness to new work and stop signals
+- **Throttled userStopped warning** -- Enrichment loop logs a single warning when `userStopped=true` with pending tracks, instead of silently skipping every tick
+
 ## Audit Fixes
 
 - Removed dead `enrichTrackIdentity()` method from enrichment.ts

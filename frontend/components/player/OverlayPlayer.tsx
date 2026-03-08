@@ -28,6 +28,7 @@ import { usePlaybackProgress } from "@/hooks/usePlaybackProgress";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { useToast } from "@/lib/toast-context";
 import { SeekSlider } from "./SeekSlider";
+import { SleepTimer } from "./SleepTimer";
 import { useFeatures } from "@/lib/features-context";
 import { MobileLyricsView } from "@/components/lyrics/MobileLyricsView";
 import { useLyricsToggle } from "@/hooks/useLyricsToggle";
@@ -395,6 +396,8 @@ export function OverlayPlayer() {
 
                     {/* Secondary Controls */}
                     <div className="flex items-center justify-center gap-8">
+                        <SleepTimer />
+
                         <button
                             onClick={toggleShuffle}
                             disabled={!canSkip}

@@ -53,6 +53,7 @@ let controlSubscriber: Redis | null = null;
 let isPaused = false;
 let isStopping = false;
 let userStopped = false; // True after explicit stop; prevents auto-restart via timer
+let userStoppedWarned = false; // Throttle warning log to once per stop
 let immediateEnrichmentRequested = false;
 let activeEnrichmentWorkers: BullWorker[] = [];
 let consecutiveSystemFailures = 0; // Track consecutive system-level failures
@@ -76,6 +77,7 @@ async function clearPauseState(): Promise<void> {
     isPaused = false;
     isStopping = false;
     userStopped = false;
+    userStoppedWarned = false;
     // Resume BullMQ enrichment workers + vibe queue
     Promise.all(activeEnrichmentWorkers.map((w) => w.resume())).catch(() => {});
     resumeVibeQueuing();
@@ -263,7 +265,7 @@ export async function startUnifiedEnrichmentWorker() {
      // Include "queued" -- Redis queue may have been lost during restart
      const orphanedAudio = await prisma.track.updateMany({
          where: { analysisStatus: { in: ["processing", "queued"] } },
-         data: { analysisStatus: "pending", analysisStartedAt: null },
+         data: { analysisStatus: "pending", analysisStartedAt: null, analysisRetryCount: 0 },
      });
      const orphanedVibe = await prisma.track.updateMany({
          where: { vibeAnalysisStatus: "processing" },
@@ -482,7 +484,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         // Reset tracks the Python analyzer claimed but never processed
         const orphanedAudio = await prisma.track.updateMany({
             where: { analysisStatus: "processing" },
-            data: { analysisStatus: "pending", analysisStartedAt: null },
+            data: { analysisStatus: "pending", analysisStartedAt: null, analysisRetryCount: 0 },
         });
         const orphanedVibe = await prisma.track.updateMany({
             where: { vibeAnalysisStatus: "processing" },
@@ -503,6 +505,13 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
     // User explicitly stopped -- don't auto-restart via timer.
     // Only explicit actions (re-run, full enrich, triggerEnrichmentNow) clear this.
     if (userStopped && !fullMode && !immediateEnrichmentRequested) {
+        if (!userStoppedWarned) {
+            const pendingCount = await prisma.track.count({ where: { analysisStatus: "pending" } });
+            if (pendingCount > 0) {
+                logger.warn(`[Enrichment] userStopped=true but ${pendingCount} tracks are pending. Use "Run Enrichment" or "Full Enrichment" to resume.`);
+                userStoppedWarned = true;
+            }
+        }
         return emptyResult;
     }
 
@@ -522,7 +531,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
             // State says stopping but we missed the control message
             await prisma.track.updateMany({
                 where: { analysisStatus: "processing" },
-                data: { analysisStatus: "pending", analysisStartedAt: null },
+                data: { analysisStatus: "pending", analysisStartedAt: null, analysisRetryCount: 0 },
             });
             await prisma.track.updateMany({
                 where: { vibeAnalysisStatus: "processing" },
@@ -883,7 +892,7 @@ async function queueAudioAnalysis(): Promise<number> {
         return 0;
     }
 
-    const batchSize = Math.min(10, MAX_QUEUE_DEPTH - queueLength);
+    const batchSize = MAX_QUEUE_DEPTH - queueLength;
 
     const tracks = await prisma.track.findMany({
         where: {

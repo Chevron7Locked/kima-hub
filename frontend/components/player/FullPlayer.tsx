@@ -38,6 +38,7 @@ import { cn } from "@/utils/cn";
 import { useFeatures } from "@/lib/features-context";
 import { formatTime, formatTimeRemaining } from "@/utils/formatTime";
 import { SeekSlider } from "./SeekSlider";
+import { SleepTimer } from "./SleepTimer";
 import { useLyricsToggle } from "@/hooks/useLyricsToggle";
 
 
@@ -253,6 +254,7 @@ export function FullPlayer() {
                                 </span>
                             )}
                         </div>
+                        <SleepTimer />
                     </div>
 
                     {/* Controls */}

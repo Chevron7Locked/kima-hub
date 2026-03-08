@@ -1591,6 +1591,23 @@ class AnalysisWorker:
         self._process_tracks_parallel(queued_jobs)
         return True
     
+    def _mark_track_processing(self, track_id: str):
+        """Mark a single track as processing just before its worker starts."""
+        cursor = self.db.get_cursor()
+        try:
+            cursor.execute("""
+                UPDATE "Track"
+                SET "analysisStatus" = 'processing',
+                    "analysisStartedAt" = %s
+                WHERE id = %s AND "analysisStatus" != 'processing'
+            """, (datetime.now(timezone.utc), track_id))
+            self.db.commit()
+        except Exception as e:
+            logger.error(f"Failed to mark track {track_id} as processing: {e}")
+            self.db.rollback()
+        finally:
+            cursor.close()
+
     def _process_tracks_parallel(self, tracks: List[Tuple[str, str]]):
         """Process multiple tracks in parallel using the process pool"""
         if not tracks:
@@ -1598,50 +1615,51 @@ class AnalysisWorker:
 
         self._ensure_pool()
         logger.info(f"Processing batch of {len(tracks)} tracks with {NUM_WORKERS} workers...")
-        
-        # Mark all as processing
-        cursor = self.db.get_cursor()
-        try:
-            track_ids = [t[0] for t in tracks]
-            cursor.execute("""
-                UPDATE "Track"
-                SET "analysisStatus" = 'processing',
-                    "analysisStartedAt" = %s
-                WHERE id = ANY(%s)
-            """, (datetime.now(timezone.utc), track_ids))
-            self.db.commit()
-        except Exception as e:
-            logger.error(f"Failed to mark tracks as processing: {e}")
-            self.db.rollback()
-        finally:
-            cursor.close()
-        
-        # Submit all tracks to the process pool
+
+        # Mark tracks processing individually as they are submitted
         start_time = time.time()
         completed = 0
         failed = 0
-        
-        futures = {self.executor.submit(_analyze_track_in_process, t): t for t in tracks}
-        
-        for future in as_completed(futures, timeout=900):  # 15 min timeout per batch (increased from 5 min to handle hi-res files)
-            try:
-                track_id, file_path, features = future.result(timeout=180)  # 3 min per track (increased from 1 min for hi-res FLAC)
-                
-                if features.get('_error'):
-                    self._save_failed(track_id, features['_error'])
+
+        futures = {}
+        for t in tracks:
+            self._mark_track_processing(t[0])
+            futures[self.executor.submit(_analyze_track_in_process, t)] = t
+
+        try:
+            for future in as_completed(futures, timeout=900):
+                try:
+                    track_id, file_path, features = future.result(timeout=180)
+
+                    if features.get('_error'):
+                        self._save_failed(track_id, features['_error'])
+                        failed += 1
+                        logger.error(f"✗ Failed: {file_path} - {features['_error']}")
+                    else:
+                        self._save_results(track_id, file_path, features)
+                        completed += 1
+                        logger.info(f"✓ Completed: {file_path}")
+                except Exception as e:
+                    track_info = futures[future]
+                    self._save_failed(track_info[0], f"Timeout or error: {e}")
                     failed += 1
-                    logger.error(f"✗ Failed: {file_path} - {features['_error']}")
-                else:
-                    self._save_results(track_id, file_path, features)
-                    completed += 1
-                    logger.info(f"✓ Completed: {file_path}")
-            except Exception as e:
-                # Handle timeout or other errors
-                track_info = futures[future]
-                self._save_failed(track_info[0], f"Timeout or error: {e}")
-                failed += 1
-                logger.error(f"✗ Failed: {track_info[1]} - {e}")
-        
+                    logger.error(f"✗ Failed: {track_info[1]} - {e}")
+        except TimeoutError:
+            # Mark every future that never completed so they don't rot as 'processing'
+            for future, track_info in futures.items():
+                if not future.done():
+                    future.cancel()
+                    self._save_failed(track_info[0], "Batch timeout: analysis exceeded 15 minutes")
+                    failed += 1
+                    logger.error(f"✗ Batch timeout: {track_info[1]}")
+            # Restart the pool to evict any stuck worker processes
+            try:
+                self.executor.shutdown(wait=False)
+            except Exception:
+                pass
+            self.executor = None
+            self.pool_active = False
+
         elapsed = time.time() - start_time
         rate = len(tracks) / elapsed if elapsed > 0 else 0
         logger.info(f"Batch complete: {completed} succeeded, {failed} failed in {elapsed:.1f}s ({rate:.1f} tracks/sec)")
