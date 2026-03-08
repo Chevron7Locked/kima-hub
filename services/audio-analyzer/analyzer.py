@@ -60,7 +60,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple
 import traceback
 import numpy as np
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 import multiprocessing
 
 # BrokenProcessPool was added in Python 3.9, provide compatibility for Python 3.8
@@ -119,6 +119,15 @@ MUSIC_PATH = os.getenv('MUSIC_PATH', '/music')
 BATCH_SIZE = int(os.getenv('BATCH_SIZE', '10'))
 SLEEP_INTERVAL = int(os.getenv('SLEEP_INTERVAL', '5'))
 
+# Redis fail-safe configuration
+REDIS_SOCKET_TIMEOUT = float(os.getenv('REDIS_SOCKET_TIMEOUT', '5'))
+REDIS_SOCKET_CONNECT_TIMEOUT = float(os.getenv('REDIS_SOCKET_CONNECT_TIMEOUT', '5'))
+REDIS_RETRY_ATTEMPTS = max(1, int(os.getenv('REDIS_RETRY_ATTEMPTS', '3')))
+
+# File safety limits
+MAX_AUDIO_FILE_SIZE_MB = max(1, int(os.getenv('MAX_AUDIO_FILE_SIZE_MB', '2048')))
+MAX_AUDIO_FILE_SIZE_BYTES = MAX_AUDIO_FILE_SIZE_MB * 1024 * 1024
+
 # BRPOP timeout: how long to block waiting for work (seconds)
 # Also serves as the DB reconciliation interval
 # Uses SLEEP_INTERVAL for backward compatibility, minimum 5s
@@ -144,34 +153,56 @@ class DatabaseConnection:
         if not self.url:
             raise ValueError("DATABASE_URL not set")
 
-        self.conn = psycopg2.connect(
-            self.url,
-            options="-c client_encoding=UTF8"
-        )
-        self.conn.set_client_encoding('UTF8')
-        self.conn.autocommit = False
-        logger.info("Connected to PostgreSQL with UTF-8 encoding")
+        try:
+            self.conn = psycopg2.connect(
+                self.url,
+                options="-c client_encoding=UTF8"
+            )
+            self.conn.set_client_encoding('UTF8')
+            self.conn.autocommit = False
+            logger.info("Connected to PostgreSQL with UTF-8 encoding")
+        except Exception as e:
+            self.conn = None
+            logger.error(f"Failed to connect to PostgreSQL: {e}")
+            raise
+
+    def is_connected(self) -> bool:
+        """Check whether DB connection object exists and is open."""
+        return self.conn is not None and getattr(self.conn, 'closed', 1) == 0
+
+    def ensure_connection(self):
+        """Ensure active DB connection, reconnect if needed."""
+        if not self.is_connected():
+            self.connect()
 
     def get_cursor(self):
         """Get a database cursor"""
-        if not self.conn:
+        try:
+            self.ensure_connection()
+            return self.conn.cursor(cursor_factory=RealDictCursor)
+        except (psycopg2.InterfaceError, psycopg2.OperationalError):
+            logger.warning("DB cursor creation failed, reconnecting...")
+            self.close()
             self.connect()
-        return self.conn.cursor(cursor_factory=RealDictCursor)
+            return self.conn.cursor(cursor_factory=RealDictCursor)
 
     def commit(self):
         """Commit transaction"""
-        if self.conn:
+        if self.is_connected():
             self.conn.commit()
 
     def rollback(self):
         """Rollback transaction"""
-        if self.conn:
+        if self.is_connected():
             self.conn.rollback()
 
     def close(self):
         """Close connection"""
         if self.conn:
-            self.conn.close()
+            try:
+                self.conn.close()
+            except Exception:
+                pass
             self.conn = None
 
 
@@ -180,8 +211,9 @@ def _get_workers_from_db() -> int:
     Fetch worker count from SystemSettings table.
     Falls back to env var or default if database query fails.
     """
+    db = DatabaseConnection(DATABASE_URL)
+    cursor = None
     try:
-        db = DatabaseConnection(DATABASE_URL)
         db.connect()
         cursor = db.get_cursor()
         
@@ -193,9 +225,6 @@ def _get_workers_from_db() -> int:
         """)
         
         result = cursor.fetchone()
-        cursor.close()
-        db.close()
-        
         if result and result['audioAnalyzerWorkers'] is not None:
             workers = int(result['audioAnalyzerWorkers'])
             # Validate range (1-8)
@@ -210,11 +239,18 @@ def _get_workers_from_db() -> int:
         logger.warning(f"Failed to fetch worker count from database: {e}")
         logger.info("Falling back to env var or default")
         return int(os.getenv('NUM_WORKERS', str(DEFAULT_WORKERS)))
+    finally:
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        db.close()
 # Conservative default: 2 workers (stable on any system)
 # Previous default used auto-scaling which could cause OOM on memory-constrained systems
 DEFAULT_WORKERS = 2
-# Try to load from database first, fall back to env var or default
-NUM_WORKERS = _get_workers_from_db()
+# Startup default. DB override is loaded lazily by AnalysisWorker.start().
+NUM_WORKERS = int(os.getenv('NUM_WORKERS', str(DEFAULT_WORKERS)))
 ESSENTIA_VERSION = '2.1b6-enhanced-v2'
 
 # Retry configuration
@@ -504,6 +540,7 @@ class AudioAnalyzer:
             result['_error'] = 'MemoryError: audio file too large'
             return result
         if audio_44k is None:
+            result['_error'] = 'Audio load failed'
             return result
 
         # Validate audio before analysis
@@ -626,6 +663,7 @@ class AudioAnalyzer:
             result['_error'] = 'MemoryError: analysis exceeded memory limits'
         except Exception as e:
             logger.error(f"Analysis error: {e}")
+            result['_error'] = f"Analysis failed: {e}"
             traceback.print_exc()
         finally:
             for k in ['_spectral_centroid', '_spectral_flatness', '_zcr']:
@@ -1065,8 +1103,18 @@ def _analyze_track_in_process(args: Tuple[str, str]) -> Tuple[str, str, Dict[str
             file_path = file_path.decode('utf-8', errors='replace')
         
         # Normalize path separators (Windows paths -> Unix)
-        normalized_path = file_path.replace('\\', '/')
-        full_path = os.path.join(MUSIC_PATH, normalized_path)
+        normalized_path = file_path.replace('\\', '/').strip()
+        if not normalized_path:
+            return (track_id, file_path, {'_error': 'Empty file path'})
+
+        if os.path.isabs(normalized_path):
+            return (track_id, file_path, {'_error': 'Absolute paths are not allowed'})
+
+        # Prevent path traversal: real path must remain inside MUSIC_PATH
+        music_root = os.path.realpath(MUSIC_PATH)
+        full_path = os.path.realpath(os.path.join(music_root, normalized_path.lstrip('/')))
+        if not (full_path == music_root or full_path.startswith(music_root + os.sep)):
+            return (track_id, file_path, {'_error': 'Path traversal detected'})
         
         # Use os.fsencode/fsdecode for filesystem-safe encoding
         try:
@@ -1077,8 +1125,26 @@ def _analyze_track_in_process(args: Tuple[str, str]) -> Tuple[str, str, Dict[str
         if not os.path.exists(full_path):
             return (track_id, file_path, {'_error': 'File not found'})
 
-        if os.path.getsize(full_path) == 0:
+        if not os.path.isfile(full_path):
+            return (track_id, file_path, {'_error': 'Path is not a regular file'})
+
+        if not os.access(full_path, os.R_OK):
+            return (track_id, file_path, {'_error': 'File is not readable'})
+
+        try:
+            file_size = os.path.getsize(full_path)
+        except OSError as e:
+            return (track_id, file_path, {'_error': f'Failed to read file size: {e}'})
+
+        if file_size == 0:
             return (track_id, file_path, {'_error': 'Empty file (0 bytes) - likely incomplete download'})
+
+        if file_size > MAX_AUDIO_FILE_SIZE_BYTES:
+            return (
+                track_id,
+                file_path,
+                {'_error': f'File too large ({file_size} bytes), max allowed {MAX_AUDIO_FILE_SIZE_BYTES} bytes'}
+            )
 
         # Run analysis
         features = _process_analyzer.analyze(full_path)
@@ -1098,7 +1164,7 @@ class AnalysisWorker:
     IDLE_SHUTDOWN_CYCLES = 10  # Shut down pool after this many empty cycles (~50s at 5s interval)
 
     def __init__(self):
-        self.redis = redis.from_url(REDIS_URL)
+        self.redis = self._create_redis_client()
         self.db = DatabaseConnection(DATABASE_URL)
         self.running = False
         self.executor = None
@@ -1110,11 +1176,101 @@ class AnalysisWorker:
         self._last_work_time = time.time()
         self._pending_resize: int | None = None
         self._pending_resize_time: float = 0.0
+        self._validate_required_config()
+        self._ensure_redis_connection(initial=True)
         self._setup_control_channel()
+
+    def _validate_required_config(self):
+        """Validate required runtime configuration and log fail-safe defaults."""
+        if not DATABASE_URL:
+            logger.warning("DATABASE_URL is empty; DB operations will fail until configured")
+        if not REDIS_URL:
+            logger.warning("REDIS_URL is empty; queue operations will fail until configured")
+        if not os.path.isdir(MUSIC_PATH):
+            logger.warning(f"MUSIC_PATH does not exist or is not a directory: {MUSIC_PATH}")
+
+    def _refresh_worker_count_from_db(self):
+        """Refresh worker count from DB at runtime (lazy, after service startup)."""
+        global NUM_WORKERS
+        db_workers = _get_workers_from_db()
+        if db_workers != NUM_WORKERS:
+            logger.info(f"Worker count updated from DB: {NUM_WORKERS} -> {db_workers}")
+            NUM_WORKERS = db_workers
+        else:
+            logger.info(f"Worker count from DB unchanged: {NUM_WORKERS}")
+
+    def _create_redis_client(self):
+        """Create Redis client with socket timeouts and health checks."""
+        # socket_timeout must be greater than BRPOP timeout for blocking reads,
+        # otherwise redis-py raises "Timeout reading from socket" during idle periods.
+        effective_socket_timeout = max(REDIS_SOCKET_TIMEOUT, float(BRPOP_TIMEOUT + 2))
+        return redis.from_url(
+            REDIS_URL,
+            socket_timeout=effective_socket_timeout,
+            socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT,
+            retry_on_timeout=True,
+            health_check_interval=30,
+        )
+
+    def _ensure_redis_connection(self, initial: bool = False) -> bool:
+        """Ensure Redis is reachable; recreate client when needed."""
+        for attempt in range(1, REDIS_RETRY_ATTEMPTS + 1):
+            try:
+                self.redis.ping()
+                return True
+            except Exception as e:
+                level = logging.ERROR if initial else logging.WARNING
+                logger.log(level, f"Redis ping failed (attempt {attempt}/{REDIS_RETRY_ATTEMPTS}): {e}")
+                try:
+                    self.redis = self._create_redis_client()
+                except Exception as create_err:
+                    logger.error(f"Failed to recreate Redis client: {create_err}")
+                time.sleep(min(2, attempt))
+
+        return False
+
+    def _get_db_cursor(self, context: str):
+        """Get DB cursor with one reconnect attempt."""
+        for attempt in range(1, 3):
+            try:
+                return self.db.get_cursor()
+            except Exception as e:
+                logger.warning(f"DB cursor failed in {context} (attempt {attempt}/2): {e}")
+                try:
+                    self.db.close()
+                    time.sleep(0.5)
+                    self.db.connect()
+                except Exception as reconnect_error:
+                    logger.error(f"DB reconnect failed in {context}: {reconnect_error}")
+        return None
+
+    def _decode_job_payload(self, job_data) -> Optional[Tuple[str, str]]:
+        """Parse and validate queue payload."""
+        try:
+            payload = job_data.decode('utf-8') if isinstance(job_data, bytes) else job_data
+            job = json.loads(payload)
+            if not isinstance(job, dict):
+                logger.warning("Invalid queue payload type (expected object)")
+                return None
+
+            track_id = job.get('trackId')
+            if track_id is None:
+                logger.warning("Queue payload missing trackId")
+                return None
+
+            file_path = job.get('filePath', '')
+            return (str(track_id), str(file_path or ''))
+        except Exception as e:
+            logger.warning(f"Failed to decode queue payload: {e}")
+            return None
     
     def _setup_control_channel(self):
         """Subscribe to control channel for pause/resume/stop signals"""
         try:
+            if not self._ensure_redis_connection():
+                logger.warning("Skipping control channel setup: Redis unavailable")
+                self.pubsub = None
+                return
             self.pubsub = self.redis.pubsub()
             self.pubsub.subscribe(CONTROL_CHANNEL)
             logger.info(f"Subscribed to control channel: {CONTROL_CHANNEL}")
@@ -1291,7 +1447,7 @@ class AnalysisWorker:
             pass
         logger.info("Worker pool shut down (will restart when work arrives)")
 
-    def _recreate_pool(self):
+    def _recreate_pool(self, force_terminate: bool = False):
         """
         Safely terminate the broken pool and create a new one.
         This is the critical recovery mechanism for Issue #21.
@@ -1300,6 +1456,20 @@ class AnalysisWorker:
 
         # Attempt graceful shutdown first
         if self.executor:
+            if force_terminate:
+                # Best-effort hard stop for stuck tasks in worker processes.
+                # Uses private internals because ProcessPoolExecutor has no public kill API.
+                try:
+                    processes = getattr(self.executor, "_processes", {}) or {}
+                    for proc in processes.values():
+                        if proc is not None and proc.is_alive():
+                            proc.terminate()
+                    time.sleep(0.2)
+                    for proc in processes.values():
+                        if proc is not None and proc.is_alive():
+                            proc.kill()
+                except Exception as e:
+                    logger.warning(f"Forced worker termination failed: {e}")
             try:
                 self.executor.shutdown(wait=False)
             except Exception as e:
@@ -1318,7 +1488,9 @@ class AnalysisWorker:
         """Reset tracks stuck in 'processing' status (from crashed workers).
         Checks for existing embeddings first to avoid resetting completed work.
         """
-        cursor = self.db.get_cursor()
+        cursor = self._get_db_cursor("_cleanup_stale_processing")
+        if cursor is None:
+            return
         try:
             # First: recover tracks that have embeddings but are stuck in processing
             cursor.execute("""
@@ -1331,9 +1503,9 @@ class AnalysisWorker:
                 WHERE t.id = te.track_id
                 AND t."analysisStatus" = 'processing'
                 AND (
-                    (t."analysisStartedAt" IS NOT NULL AND t."analysisStartedAt" < NOW() - INTERVAL '%s minutes')
+                    (t."analysisStartedAt" IS NOT NULL AND t."analysisStartedAt" < NOW() - (%s * INTERVAL '1 minute'))
                     OR
-                    (t."analysisStartedAt" IS NULL AND t."updatedAt" < NOW() - INTERVAL '%s minutes')
+                    (t."analysisStartedAt" IS NULL AND t."updatedAt" < NOW() - (%s * INTERVAL '1 minute'))
                 )
                 RETURNING t.id
             """, (STALE_PROCESSING_MINUTES, STALE_PROCESSING_MINUTES))
@@ -1352,9 +1524,9 @@ class AnalysisWorker:
                     "analysisStartedAt" = NULL
                 WHERE t."analysisStatus" = 'processing'
                 AND (
-                    (t."analysisStartedAt" IS NOT NULL AND t."analysisStartedAt" < NOW() - INTERVAL '%s minutes')
+                    (t."analysisStartedAt" IS NOT NULL AND t."analysisStartedAt" < NOW() - (%s * INTERVAL '1 minute'))
                     OR
-                    (t."analysisStartedAt" IS NULL AND t."updatedAt" < NOW() - INTERVAL '%s minutes')
+                    (t."analysisStartedAt" IS NULL AND t."updatedAt" < NOW() - (%s * INTERVAL '1 minute'))
                 )
                 AND COALESCE(t."analysisRetryCount", 0) < %s
                 AND NOT EXISTS (SELECT 1 FROM track_embeddings te WHERE te.track_id = t.id)
@@ -1378,7 +1550,9 @@ class AnalysisWorker:
         """Retry failed tracks that haven't exceeded max retries.
         Recovers tracks that have embeddings but are incorrectly marked failed.
         """
-        cursor = self.db.get_cursor()
+        cursor = self._get_db_cursor("_retry_failed_tracks")
+        if cursor is None:
+            return
         try:
             # First: recover tracks marked failed that actually have embeddings
             cursor.execute("""
@@ -1441,10 +1615,9 @@ class AnalysisWorker:
         Pushes tracks into the Redis queue only -- does NOT pre-mark as 'processing'.
         _mark_track_processing() atomically claims each track when BRPOP dequeues it.
         """
-        if self.is_paused or self._is_gate_closed():
+        cursor = self._get_db_cursor("_run_db_reconciliation")
+        if cursor is None:
             return False
-
-        cursor = self.db.get_cursor()
         try:
             cursor.execute("""
                 SELECT id, "filePath"
@@ -1457,14 +1630,44 @@ class AnalysisWorker:
 
             tracks = cursor.fetchall()
             if tracks:
-                logger.info(f"DB reconciliation found {len(tracks)} pending/queued tracks, pushing to queue...")
-                pipe = self.redis.pipeline()
-                for t in tracks:
-                    pipe.rpush(ANALYSIS_QUEUE, json.dumps({
-                        'trackId': t['id'],
-                        'filePath': t['filePath']
-                    }))
-                pipe.execute()
+                logger.info(f"DB reconciliation found {len(tracks)} pending/queued tracks, queuing...")
+                track_ids = [t['id'] for t in tracks]
+                cursor.execute("""
+                    UPDATE "Track"
+                    SET "analysisStatus" = 'processing',
+                        "analysisStartedAt" = %s
+                    WHERE id = ANY(%s)
+                """, (datetime.now(timezone.utc), track_ids))
+                self.db.commit()
+                if not self._ensure_redis_connection():
+                    logger.error("Redis unavailable during reconciliation; resetting tracks back to pending")
+                    cursor.execute("""
+                        UPDATE "Track"
+                        SET "analysisStatus" = 'pending',
+                            "analysisStartedAt" = NULL
+                        WHERE id = ANY(%s)
+                    """, (track_ids,))
+                    self.db.commit()
+                    return False
+
+                try:
+                    pipe = self.redis.pipeline()
+                    for t in tracks:
+                        pipe.rpush(ANALYSIS_QUEUE, json.dumps({
+                            'trackId': t['id'],
+                            'filePath': t['filePath']
+                        }))
+                    pipe.execute()
+                except Exception as queue_err:
+                    logger.error(f"Failed to queue reconciled tracks in Redis: {queue_err}")
+                    cursor.execute("""
+                        UPDATE "Track"
+                        SET "analysisStatus" = 'pending',
+                            "analysisStartedAt" = NULL
+                        WHERE id = ANY(%s)
+                    """, (track_ids,))
+                    self.db.commit()
+                    return False
                 return True
             return False
         except Exception as e:
@@ -1474,10 +1677,77 @@ class AnalysisWorker:
         finally:
             cursor.close()
 
+    def _publish_completion_event(self, track_id: str, file_path: str) -> bool:
+        """Publish completion event with retries and reconnect attempts."""
+        completion_event = json.dumps({
+            "trackId": track_id,
+            "filePath": file_path,
+            "status": "complete",
+        })
+        attempts = max(1, REDIS_RETRY_ATTEMPTS)
+
+        for attempt in range(1, attempts + 1):
+            try:
+                if not self._ensure_redis_connection():
+                    raise RuntimeError("Redis unavailable")
+                self.redis.publish("audio:analysis:complete", completion_event)
+                logger.debug(f"Essentia completion event published for track {track_id}")
+                return True
+            except Exception as e:
+                logger.warning(
+                    f"Failed to publish completion event for {track_id} "
+                    f"(attempt {attempt}/{attempts}): {e}"
+                )
+                time.sleep(min(2, attempt))
+
+        return False
+
+    def _republish_missing_completion_events(self, limit: int = 100):
+        """
+        Republish completion events for recently analyzed tracks without embeddings.
+        This heals temporary Redis outages after DB commit.
+        """
+        cursor = self._get_db_cursor("_republish_missing_completion_events")
+        if cursor is None:
+            return
+
+        try:
+            cursor.execute("""
+                SELECT id, "filePath"
+                FROM "Track"
+                WHERE "analysisStatus" = 'completed'
+                AND "analyzedAt" IS NOT NULL
+                AND "analyzedAt" > NOW() - INTERVAL '24 hours'
+                AND NOT EXISTS (
+                    SELECT 1 FROM track_embeddings te WHERE te.track_id = "Track".id
+                )
+                ORDER BY "analyzedAt" DESC
+                LIMIT %s
+            """, (limit,))
+
+            rows = cursor.fetchall()
+            if not rows:
+                return
+
+            published = 0
+            for row in rows:
+                track_id = str(row['id'])
+                file_path = str(row.get('filePath') or '')
+                if self._publish_completion_event(track_id, file_path):
+                    published += 1
+
+            if published > 0:
+                logger.info(f"Republished {published} completion events from DB reconciliation")
+        except Exception as e:
+            logger.warning(f"Failed to republish missing completion events: {e}")
+        finally:
+            cursor.close()
+
     def start(self):
         """Start processing jobs with BRPOP-driven event loop"""
         cpu_count = os.cpu_count() or 4
 
+        self._refresh_worker_count_from_db()
         logger.info("=" * 60)
         logger.info("Starting Audio Analysis Worker (BRPOP MODE)")
         logger.info("=" * 60)
@@ -1533,6 +1803,8 @@ class AnalysisWorker:
 
         logger.info("Checking for failed tracks to retry...")
         self._retry_failed_tracks()
+        logger.info("Republishing missing completion events...")
+        self._republish_missing_completion_events(limit=BATCH_SIZE * 5)
 
         # Check for any already-queued work before entering BRPOP loop
         self._run_db_reconciliation()
@@ -1542,7 +1814,8 @@ class AnalysisWorker:
                 try:
                     # Publish heartbeat
                     try:
-                        self.redis.set("audio:worker:heartbeat", str(int(time.time() * 1000)))
+                        if self._ensure_redis_connection():
+                            self.redis.set("audio:worker:heartbeat", str(int(time.time() * 1000)))
                     except Exception:
                         pass
 
@@ -1588,6 +1861,7 @@ class AnalysisWorker:
                             self._cleanup_stale_processing()
                             self.redis.set('audio:cleanup:last_run', str(time.time()), ex=120)
                             self._retry_failed_tracks()
+                            self._republish_missing_completion_events(limit=BATCH_SIZE * 5)
                             self.consecutive_empty = 0
 
                 except KeyboardInterrupt:
@@ -1635,24 +1909,45 @@ class AnalysisWorker:
         Returns:
             True if there was work to process, False if BRPOP timed out
         """
-        if self._is_gate_closed():
+        if not self._ensure_redis_connection():
+            time.sleep(1)
             return False
 
-        result = self.redis.brpop(ANALYSIS_QUEUE, timeout=BRPOP_TIMEOUT)
+        try:
+            result = self.redis.brpop(ANALYSIS_QUEUE, timeout=BRPOP_TIMEOUT)
+        except redis.exceptions.TimeoutError:
+            # Expected when no jobs arrive before socket timeout on some clients/networks.
+            # Treat as idle cycle, not as an error.
+            logger.debug("Redis BRPOP socket timeout (idle)")
+            return False
+        except Exception as e:
+            logger.error(f"Redis BRPOP failed: {e}")
+            time.sleep(1)
+            return False
 
         if result is None:
             return False
 
         _, first_job_data = result
-        first_job = json.loads(first_job_data)
-        queued_jobs = [(first_job['trackId'], first_job.get('filePath', ''))]
+        first_parsed = self._decode_job_payload(first_job_data)
+        if first_parsed is None:
+            logger.warning("Skipping invalid first queue payload")
+            return True
+
+        queued_jobs = [first_parsed]
 
         while len(queued_jobs) < BATCH_SIZE:
-            job_data = self.redis.lpop(ANALYSIS_QUEUE)
+            try:
+                job_data = self.redis.lpop(ANALYSIS_QUEUE)
+            except Exception as e:
+                logger.warning(f"Redis LPOP failed while draining batch: {e}")
+                break
             if not job_data:
                 break
-            job = json.loads(job_data)
-            queued_jobs.append((job['trackId'], job.get('filePath', '')))
+
+            parsed = self._decode_job_payload(job_data)
+            if parsed is not None:
+                queued_jobs.append(parsed)
 
         self._process_tracks_parallel(queued_jobs)
         return True
@@ -1684,23 +1979,47 @@ class AnalysisWorker:
 
         self._ensure_pool()
         logger.info(f"Processing batch of {len(tracks)} tracks with {NUM_WORKERS} workers...")
+        
+        # Mark all as processing
+        cursor = self._get_db_cursor("_process_tracks_parallel")
+        if cursor is None:
+            logger.error("Skipping batch: database unavailable")
+            return
+        try:
+            track_ids = [t[0] for t in tracks]
+            cursor.execute("""
+                UPDATE "Track"
+                SET "analysisStatus" = 'processing',
+                    "analysisStartedAt" = %s
+                WHERE id = ANY(%s)
+                AND "analysisStatus" IN ('pending', 'failed', 'processing')
+                RETURNING id
+            """, (track_ids,))
+            claimed_ids = {str(row['id']) for row in cursor.fetchall()}
+            self.db.commit()
+        except Exception as e:
+            logger.error(f"Failed to mark tracks as processing: {e}")
+            self.db.rollback()
+            claimed_ids = set()
+        finally:
+            cursor.close()
 
-        # Mark tracks processing individually as they are submitted
+        tracks = [t for t in tracks if t[0] in claimed_ids]
+        if not tracks:
+            logger.warning("No tracks were eligible for processing in this batch")
+            return
+        
+        # Submit all tracks to the process pool
         start_time = time.time()
         completed = 0
         failed = 0
-
-        futures = {}
-        for t in tracks:
-            if not self._mark_track_processing(t[0]):
-                logger.debug(f"Track {t[0]} already claimed, skipping")
-                continue
-            futures[self.executor.submit(_analyze_track_in_process, t)] = t
+        
+        futures = {self.executor.submit(_analyze_track_in_process, t): t for t in tracks}
 
         try:
-            for future in as_completed(futures, timeout=900):
+            for future in as_completed(futures, timeout=900):  # 15 min timeout per batch (increased from 5 min to handle hi-res files)
                 try:
-                    track_id, file_path, features = future.result(timeout=180)
+                    track_id, file_path, features = future.result(timeout=180)  # 3 min per track (increased from 1 min for hi-res FLAC)
 
                     if features.get('_error'):
                         self._save_failed(track_id, features['_error'])
@@ -1710,53 +2029,34 @@ class AnalysisWorker:
                         self._save_results(track_id, file_path, features)
                         completed += 1
                         logger.info(f"✓ Completed: {file_path}")
-                except BrokenProcessPool:
-                    # Worker died (OOM, segfault) -- not the track's fault
-                    track_info = futures[future]
-                    self._save_failed(track_info[0], "Worker process died (OOM/crash)", is_timeout=True)
-                    failed += 1
-                    logger.error(f"✗ Worker death (no penalty): {track_info[1]}")
                 except Exception as e:
+                    # Handle timeout or other errors
                     track_info = futures[future]
-                    is_pool_death = "abruptly terminated" in str(e) or "broken" in str(e).lower()
-                    self._save_failed(track_info[0], f"Timeout or error: {e}", is_timeout=is_pool_death)
+                    self._save_failed(track_info[0], f"Timeout or error: {e}")
                     failed += 1
-                    if is_pool_death:
-                        logger.error(f"✗ Worker death (no penalty): {track_info[1]} - {e}")
-                    else:
-                        logger.error(f"✗ Failed: {track_info[1]} - {e}")
-        except BrokenProcessPool:
-            # Pool broke during iteration -- all remaining futures are innocent
-            logger.error("BrokenProcessPool during batch -- resetting remaining tracks without penalty")
+                    logger.error(f"✗ Failed: {track_info[1]} - {e}")
+        except FuturesTimeoutError:
+            logger.error("Batch-level timeout exceeded; cancelling unfinished tasks")
             for future, track_info in futures.items():
                 if not future.done():
                     future.cancel()
-                    self._save_failed(track_info[0], "Worker pool crashed (OOM/crash)", is_timeout=True)
+                    self._save_failed(track_info[0], "Batch timeout exceeded")
                     failed += 1
-                    logger.error(f"✗ Pool crash (no penalty): {track_info[1]}")
-            self._recreate_pool()
-        except TimeoutError:
-            for future, track_info in futures.items():
-                if not future.done():
-                    future.cancel()
-                    self._save_failed(track_info[0], "Batch timeout: analysis exceeded 15 minutes", is_timeout=True)
-                    failed += 1
-                    logger.error(f"✗ Batch timeout (no penalty): {track_info[1]}")
-            # Restart the pool to evict any stuck worker processes
-            try:
-                self.executor.shutdown(wait=False)
-            except Exception:
-                pass
-            self.executor = None
-            self.pool_active = False
-
+                    logger.error(f"✗ Failed: {track_info[1]} - Batch timeout exceeded")
+            # Cancel does not stop already running process tasks.
+            # Recreate pool aggressively to drop stuck worker processes.
+            self._recreate_pool(force_terminate=True)
+        
         elapsed = time.time() - start_time
         rate = len(tracks) / elapsed if elapsed > 0 else 0
         logger.info(f"Batch complete: {completed} succeeded, {failed} failed in {elapsed:.1f}s ({rate:.1f} tracks/sec)")
     
     def _save_results(self, track_id: str, file_path: str, features: Dict[str, Any]):
         """Save analysis results to database and resolve any stale EnrichmentFailure record."""
-        cursor = self.db.get_cursor()
+        cursor = self._get_db_cursor("_save_results")
+        if cursor is None:
+            logger.error(f"Failed to save results for {track_id}: database unavailable")
+            return
         try:
             cursor.execute("""
                 UPDATE "Track"
@@ -1831,20 +2131,12 @@ class AnalysisWorker:
                 WHERE "entityType" = 'audio' AND "entityId" = %s AND resolved = false
             """, (datetime.now(timezone.utc), track_id))
 
-            self.db.commit()
+            # Publish completion event before commit to avoid lost events after commit.
+            # If publish fails, rollback so track remains eligible for retry.
+            if not self._publish_completion_event(track_id, file_path):
+                raise RuntimeError(f"Completion event publish failed for {track_id}")
 
-            # Publish completion event for Node audio completion subscriber
-            # Node subscribes and queues a BullMQ vibe embedding job (enrichment:vibe)
-            try:
-                completion_event = json.dumps({
-                    "trackId": track_id,
-                    "filePath": file_path,
-                    "status": "complete",
-                })
-                self.redis.publish("audio:analysis:complete", completion_event)
-                logger.debug(f"[Essentia] Published completion for track {track_id}")
-            except Exception as pub_err:
-                logger.warning(f"[Essentia] Failed to publish completion event for {track_id}: {pub_err}")
+            self.db.commit()
 
         except Exception as e:
             logger.error(f"Failed to save results for {track_id}: {e}")
@@ -1859,7 +2151,10 @@ class AnalysisWorker:
         do NOT increment retryCount. Just reset to 'pending' so it gets
         requeued without penalty.
         """
-        cursor = self.db.get_cursor()
+        cursor = self._get_db_cursor("_save_failed")
+        if cursor is None:
+            logger.error(f"Failed to mark track {track_id} as failed: database unavailable")
+            return
         try:
             if is_timeout:
                 cursor.execute("""
@@ -2032,4 +2327,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
