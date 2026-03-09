@@ -52,7 +52,10 @@ const TrackRow = memo(
         onAddToPlaylist,
         onPreview,
     }: TrackRowProps) {
-        const isPreviewOnly = !isOwned;
+        const isMissingTrack = !!track.isMissing;
+        const isPreviewOnly = !isOwned || isMissingTrack;
+        const displayTrackNumber =
+            typeof track.trackNumber === "number" ? track.trackNumber : index + 1;
 
         const handleAddToQueue = useCallback(
             (e: React.MouseEvent) => {
@@ -140,7 +143,7 @@ const TrackRow = memo(
                                     : "text-gray-500"
                             )}
                         >
-                            {index + 1}
+                            {displayTrackNumber}
                         </span>
                         <Play
                             className="hidden group-hover:inline-block w-4 h-4 text-white"
@@ -159,6 +162,11 @@ const TrackRow = memo(
                         <span className="truncate">
                             {track.displayTitle ?? track.title}
                         </span>
+                        {isMissingTrack && (
+                            <span className="shrink-0 text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/30 font-medium">
+                                MISSING
+                            </span>
+                        )}
                         {isPreviewOnly && (
                             <span className="shrink-0 text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30 font-medium">
                                 PREVIEW
@@ -182,7 +190,7 @@ const TrackRow = memo(
                         </div>
                     )}
 
-                {isOwned && (
+                {isOwned && !isMissingTrack && (
                     <>
                         <button
                             onClick={handleAddToQueue}
@@ -203,7 +211,7 @@ const TrackRow = memo(
                     </>
                 )}
 
-                {isPreviewOnly && (
+                {isPreviewOnly ? (
                     <button
                         onClick={handlePreview}
                         className="p-2 rounded-full bg-[#1a1a1a] hover:bg-[#2a2a2a] transition-colors text-white"
@@ -217,7 +225,7 @@ const TrackRow = memo(
                             <Volume2 className="w-4 h-4" />
                         )}
                     </button>
-                )}
+                ) : null}
 
                 {track.duration && (
                     <div className="text-xs md:text-sm text-gray-400 w-10 md:w-12 text-right font-mono tabular-nums">

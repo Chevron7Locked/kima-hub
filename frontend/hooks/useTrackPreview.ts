@@ -7,6 +7,7 @@ import { useAudioState } from "@/lib/audio-state-context";
 interface PreviewableTrack {
     id: string;
     title: string;
+    previewUrl?: string | null;
 }
 
 export function useTrackPreview<T extends PreviewableTrack>() {
@@ -45,6 +46,15 @@ export function useTrackPreview<T extends PreviewableTrack>() {
         toast.info("No Deezer preview available");
     };
 
+    const teardownPreviewAudio = useCallback((audio: HTMLAudioElement | null) => {
+        if (!audio) return;
+        audio.onended = null;
+        audio.onerror = null;
+        audio.pause();
+        audio.src = "";
+        audio.load();
+    }, []);
+
     const handlePreview = async (
         track: T,
         artistName: string,
@@ -74,15 +84,16 @@ export function useTrackPreview<T extends PreviewableTrack>() {
 
         // Different track -- stop current and fully destroy old Audio element
         if (previewAudioRef.current) {
-            previewAudioRef.current.pause();
-            previewAudioRef.current.src = "";
-            previewAudioRef.current.load();
+            teardownPreviewAudio(previewAudioRef.current);
             previewAudioRef.current = null;
         }
 
         try {
             if (inFlightTrackIdRef.current === track.id) return;
-            if (noPreviewTrackIdsRef.current.has(track.id)) {
+            if (
+                noPreviewTrackIdsRef.current.has(track.id) &&
+                !track.previewUrl
+            ) {
                 showNoPreviewToast(track.id);
                 return;
             }
@@ -90,13 +101,18 @@ export function useTrackPreview<T extends PreviewableTrack>() {
             const requestId = ++previewRequestIdRef.current;
             inFlightTrackIdRef.current = track.id;
 
-            const response = await api.getTrackPreview(artistName, track.title);
-            if (requestId !== previewRequestIdRef.current) return;
+            let resolvedPreviewUrl = track.previewUrl || null;
 
-            if (!response.previewUrl) {
-                noPreviewTrackIdsRef.current.add(track.id);
-                showNoPreviewToast(track.id);
-                return;
+            if (!resolvedPreviewUrl) {
+                const response = await api.getTrackPreview(artistName, track.title);
+                if (requestId !== previewRequestIdRef.current) return;
+                resolvedPreviewUrl = response.previewUrl || null;
+
+                if (!resolvedPreviewUrl) {
+                    noPreviewTrackIdsRef.current.add(track.id);
+                    showNoPreviewToast(track.id);
+                    return;
+                }
             }
 
             if (controller?.isPlaying()) {
@@ -104,13 +120,15 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 mainPlayerWasPausedRef.current = true;
             }
 
-            const audio = new Audio(response.previewUrl);
+            const audio = new Audio(resolvedPreviewUrl);
             applyCurrentPlayerVolume(audio);
             previewAudioRef.current = audio;
 
             audio.onended = () => {
+                if (previewAudioRef.current !== audio) return;
                 setPreviewPlaying(false);
                 setPreviewTrack(null);
+                previewAudioRef.current = null;
                 if (mainPlayerWasPausedRef.current) {
                     controller?.play();
                     mainPlayerWasPausedRef.current = false;
@@ -118,9 +136,11 @@ export function useTrackPreview<T extends PreviewableTrack>() {
             };
 
             audio.onerror = () => {
+                if (previewAudioRef.current !== audio) return;
                 toast.error("Failed to play preview");
                 setPreviewPlaying(false);
                 setPreviewTrack(null);
+                previewAudioRef.current = null;
                 if (mainPlayerWasPausedRef.current) {
                     controller?.play();
                     mainPlayerWasPausedRef.current = false;
@@ -133,6 +153,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 if (isAbortError(err)) return;
                 throw err;
             }
+
             setPreviewTrack(track.id);
             setPreviewPlaying(true);
         } catch (error: unknown) {
@@ -170,9 +191,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
     useEffect(() => {
         const stopPreview = () => {
             if (previewAudioRef.current) {
-                previewAudioRef.current.pause();
-                previewAudioRef.current.src = "";
-                previewAudioRef.current.load();
+                teardownPreviewAudio(previewAudioRef.current);
                 previewAudioRef.current = null;
                 setPreviewPlaying(false);
                 setPreviewTrack(null);
@@ -184,14 +203,12 @@ export function useTrackPreview<T extends PreviewableTrack>() {
         return () => {
             controller?.off("play", stopPreview);
         };
-    }, [controller]);
+    }, [controller, teardownPreviewAudio]);
 
     useEffect(() => {
         return () => {
             if (previewAudioRef.current) {
-                previewAudioRef.current.pause();
-                previewAudioRef.current.src = "";
-                previewAudioRef.current.load();
+                teardownPreviewAudio(previewAudioRef.current);
                 previewAudioRef.current = null;
             }
             if (mainPlayerWasPausedRef.current) {
@@ -199,7 +216,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 mainPlayerWasPausedRef.current = false;
             }
         };
-    }, [controller]);
+    }, [controller, teardownPreviewAudio]);
 
     return {
         previewTrack,

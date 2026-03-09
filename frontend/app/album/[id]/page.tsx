@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
@@ -13,7 +13,7 @@ import { useDownloadContext } from "@/lib/download-context";
 import { useAlbumData } from "@/features/album/hooks/useAlbumData";
 import { useAlbumActions } from "@/features/album/hooks/useAlbumActions";
 import { useTrackPreview } from "@/hooks/useTrackPreview";
-import type { Track as AlbumTrack } from "@/features/album/types";
+import type { MissingTrack, Track as AlbumTrack } from "@/features/album/types";
 
 // Components
 import { AlbumHero } from "@/features/album/components/AlbumHero";
@@ -47,6 +47,78 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         useAlbumActions();
     const { isPendingByMbid } = useDownloadContext();
     const { previewTrack, previewPlaying, handlePreview } = useTrackPreview();
+
+    const combinedTracks = useMemo<AlbumTrack[]>(() => {
+        const ownedTracks = (album?.tracks || []).map((track) => ({
+            ...track,
+            trackNumber: track.trackNumber ?? track.trackNo,
+            isMissing: false,
+            previewUrl: null,
+        }));
+
+        const missingTracks = (album?.missingTracks || []).map(
+            (track: MissingTrack, index: number) => ({
+                id: `missing-${track.trackNumber ?? "x"}-${index}-${track.title}`,
+                title: track.title,
+                duration: 0,
+                trackNumber: track.trackNumber ?? undefined,
+                isMissing: true,
+                previewUrl: track.previewUrl,
+            })
+        );
+
+        const orderedOwnedTracks = [...ownedTracks].sort((a, b) => {
+            const aNum =
+                typeof a.trackNumber === "number"
+                    ? a.trackNumber
+                    : Number.MAX_SAFE_INTEGER;
+            const bNum =
+                typeof b.trackNumber === "number"
+                    ? b.trackNumber
+                    : Number.MAX_SAFE_INTEGER;
+            return aNum - bNum;
+        });
+
+        const numberedMissing = missingTracks
+            .filter((track) => typeof track.trackNumber === "number")
+            .sort(
+                (a, b) =>
+                    (a.trackNumber as number) - (b.trackNumber as number)
+            );
+
+        const unnumberedMissing = missingTracks.filter(
+            (track) => typeof track.trackNumber !== "number"
+        );
+
+        const merged: AlbumTrack[] = [];
+        let missingIndex = 0;
+
+        for (const ownedTrack of orderedOwnedTracks) {
+            const ownedTrackNumber =
+                typeof ownedTrack.trackNumber === "number"
+                    ? ownedTrack.trackNumber
+                    : Number.MAX_SAFE_INTEGER;
+
+            while (missingIndex < numberedMissing.length) {
+                const missingTrack = numberedMissing[missingIndex];
+                const missingTrackNumber = missingTrack.trackNumber as number;
+
+                if (missingTrackNumber > ownedTrackNumber) break;
+
+                merged.push(missingTrack);
+                missingIndex += 1;
+            }
+
+            merged.push(ownedTrack);
+        }
+
+        while (missingIndex < numberedMissing.length) {
+            merged.push(numberedMissing[missingIndex]);
+            missingIndex += 1;
+        }
+
+        return [...merged, ...unnumberedMissing];
+    }, [album?.tracks, album?.missingTracks]);
 
     // Get cover URL for display and color extraction
     // Proxy through API to handle native: URLs and CORS
@@ -90,8 +162,11 @@ export default function AlbumPage({ params }: AlbumPageProps) {
     }
 
     // Event handlers
-    const handlePlayTrack = (_track: AlbumTrack, index: number) => {
-        playAlbum(album, index);
+    const handlePlayTrack = (track: AlbumTrack, index: number) => {
+        const ownedTrackIndex = (album.tracks || []).findIndex(
+            (ownedTrack: AlbumTrack) => ownedTrack.id === track.id
+        );
+        playAlbum(album, ownedTrackIndex >= 0 ? ownedTrackIndex : index);
     };
 
     const openPlaylistSelector = (trackIds: string[], bulk = false) => {
@@ -180,9 +255,9 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                 />
 
                 <div className="relative px-4 md:px-8 py-6 space-y-8">
-                    {album.tracks && album.tracks.length > 0 && (
+                    {combinedTracks.length > 0 && (
                         <TrackList
-                            tracks={album.tracks}
+                            tracks={combinedTracks}
                             album={album}
                             source={source || "discovery"}
                             currentTrackId={currentTrack?.id}
