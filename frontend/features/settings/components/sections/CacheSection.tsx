@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { SettingsSection, SettingsRow, SettingsToggle } from "../ui";
 import { SystemSettings } from "../../types";
 import { api } from "@/lib/api";
@@ -343,6 +343,36 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             );
         },
     });
+
+    // Debounced slider commits -- only send API call after user stops dragging
+    const workerDebounceRef = useRef<NodeJS.Timeout | null>(null);
+    const debouncedSetWorkers = useCallback((workers: number) => {
+        if (workerDebounceRef.current) clearTimeout(workerDebounceRef.current);
+        // Optimistic UI update immediately
+        queryClient.setQueryData(["analysis-workers"], {
+            workers,
+            cpuCores: workersConfig?.cpuCores || 4,
+            recommended: workersConfig?.recommended || 2,
+            description: `Using ${workers} of ${workersConfig?.cpuCores || 4} available CPU cores`,
+        });
+        workerDebounceRef.current = setTimeout(() => {
+            setAnalysisWorkersMutation.mutate(workers);
+        }, 500);
+    }, [workersConfig, queryClient, setAnalysisWorkersMutation]);
+
+    const clapDebounceRef = useRef<NodeJS.Timeout | null>(null);
+    const debouncedSetClapWorkers = useCallback((workers: number) => {
+        if (clapDebounceRef.current) clearTimeout(clapDebounceRef.current);
+        queryClient.setQueryData(["clap-workers"], {
+            workers,
+            cpuCores: clapWorkersConfig?.cpuCores || 4,
+            recommended: clapWorkersConfig?.recommended || 1,
+            description: `Using ${workers} of ${clapWorkersConfig?.cpuCores || 4} available CPU cores`,
+        });
+        clapDebounceRef.current = setTimeout(() => {
+            setClapWorkersMutation.mutate(workers);
+        }, 500);
+    }, [clapWorkersConfig, queryClient, setClapWorkersMutation]);
 
     const enrichmentSpeed = concurrencyConfig?.concurrency ?? 1;
 
@@ -1038,10 +1068,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 value={workersConfig?.workers ?? 2}
                                 disabled={isWorkersLoading}
                                 onChange={(e) => {
-                                    const newWorkers = parseInt(e.target.value);
-                                    setAnalysisWorkersMutation.mutate(
-                                        newWorkers
-                                    );
+                                    debouncedSetWorkers(parseInt(e.target.value));
                                 }}
                                 className={`${sliderClass} disabled:opacity-50 disabled:cursor-not-allowed`}
                             />
@@ -1083,8 +1110,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 value={clapWorkersConfig?.workers ?? 2}
                                 disabled={isClapWorkersLoading}
                                 onChange={(e) => {
-                                    const newWorkers = parseInt(e.target.value);
-                                    setClapWorkersMutation.mutate(newWorkers);
+                                    debouncedSetClapWorkers(parseInt(e.target.value));
                                 }}
                                 className={`${sliderClass} disabled:opacity-50 disabled:cursor-not-allowed`}
                             />
