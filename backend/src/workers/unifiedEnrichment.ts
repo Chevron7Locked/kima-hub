@@ -933,7 +933,9 @@ async function queueAudioAnalysis(): Promise<number> {
     );
 
     let queued = 0;
+    const pushedIds: string[] = [];
 
+    // Phase 1: Push all tracks to Redis queue
     for (const track of tracks) {
         try {
             await redis.rpush(
@@ -944,23 +946,27 @@ async function queueAudioAnalysis(): Promise<number> {
                     duration: track.duration, // Avoids file read in analyzer
                 }),
             );
-
-            // Mark as queued — Python sets "processing" + analysisStartedAt when it dequeues
-            // Guard: only update if still pending (Python may have already claimed it via BRPOP)
-            const result = await prisma.track.updateMany({
-                where: { id: track.id, analysisStatus: "pending" },
-                data: {
-                    analysisStatus: "queued",
-                },
-            });
-            if (result.count === 0) {
-                queued--;
-                continue;
-            }
-
-            queued++;
+            pushedIds.push(track.id);
         } catch (error) {
             logger.error(`   Failed to queue ${track.title}:`, error);
+        }
+    }
+
+    // Phase 2: Batch-mark as queued (single DB round-trip, no per-row deadlock risk)
+    if (pushedIds.length > 0) {
+        try {
+            const result = await prisma.track.updateMany({
+                where: { id: { in: pushedIds }, analysisStatus: "pending" },
+                data: { analysisStatus: "queued" },
+            });
+            queued = result.count;
+        } catch (error: any) {
+            // Deadlock with Python analyzer is non-fatal -- Python already claimed the tracks
+            if (error?.message?.includes("deadlock")) {
+                logger.debug(`[Audio Analysis] Deadlock on batch mark, Python likely claimed tracks`);
+            } else {
+                logger.error(`[Audio Analysis] Failed to mark tracks as queued:`, error);
+            }
         }
     }
 
