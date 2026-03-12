@@ -61,7 +61,7 @@ export function VibeSongPath({ onStartPath, onClose }: VibeSongPathProps) {
     }, [startTrackId, endTrackId, onStartPath]);
 
     return (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 w-96 bg-black/90 backdrop-blur-lg border border-white/10 rounded-xl p-4">
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 w-[calc(100vw-2rem)] sm:w-96 bg-black/90 backdrop-blur-lg border border-white/10 rounded-xl p-4">
             <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-medium text-white/90 flex items-center gap-2">
                     <Route className="w-4 h-4" /> Song Path

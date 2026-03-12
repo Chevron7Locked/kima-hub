@@ -9,6 +9,7 @@ import { eventBus } from "../services/eventBus";
 import { vibeQueue } from "../workers/enrichmentQueues";
 import { triggerEnrichmentNow } from "../workers/unifiedEnrichment";
 import { audioAnalysisCleanupService } from "../services/audioAnalysisCleanup";
+import { appendTrackToProjection } from "../services/umapProjection";
 import os from "os";
 
 const router = Router();
@@ -675,6 +676,11 @@ router.post("/vibe/success", async (req, res) => {
 
         // Resolve any stale failure records for this track
         await enrichmentFailureService.resolveByEntity("vibe", trackId);
+
+        // Incrementally add to vibe map projection (non-blocking)
+        appendTrackToProjection(trackId).catch(e =>
+            logger.debug(`[VIBE-MAP] Incremental append skipped for ${trackId}:`, (e as Error).message)
+        );
 
         res.json({ message: "Stale failures resolved" });
         eventBus.emit({ type: "enrichment:progress", userId: "*", payload: { phase: "vibe" } });

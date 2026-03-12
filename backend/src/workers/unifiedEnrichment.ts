@@ -42,6 +42,7 @@ import { audioAnalysisCleanupService } from "../services/audioAnalysisCleanup";
 import { featureDetection } from "../services/featureDetection";
 import { musicBrainzService } from "../services/musicbrainz";
 import { trackIdentityService } from "../services/trackIdentity";
+import { precomputeProjection } from "../services/umapProjection";
 
 // Configuration
 const ARTIST_BATCH_SIZE = 10;
@@ -716,6 +717,11 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                 status: "idle",
                 currentPhase: null,
             });
+
+            // Pre-compute vibe map projection so it's cached before first page visit
+            precomputeProjection().catch(e =>
+                logger.error("[Enrichment] Vibe map pre-compute failed:", e)
+            );
 
             // Clear mixes cache again when fully complete (audio analysis done)
             const stateBeforeNotify = await enrichmentStateService.getState();

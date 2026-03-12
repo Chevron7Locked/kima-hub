@@ -60,7 +60,7 @@ export function VibeInfoPanel({
     if (!isVisible) return null;
 
     return (
-        <div className="absolute right-0 top-0 bottom-0 w-80 bg-black/90 backdrop-blur-lg border-l border-white/10 flex flex-col z-20 overflow-hidden">
+        <div className="absolute right-0 top-0 bottom-0 w-full sm:w-80 bg-black/90 backdrop-blur-lg border-l border-white/10 flex flex-col z-20 overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
                 <h3 className="text-sm font-medium text-white/90">
                     {mode === "similar" && "Similar Tracks"}

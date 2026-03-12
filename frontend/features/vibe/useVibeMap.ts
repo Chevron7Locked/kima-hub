@@ -28,11 +28,12 @@ export function useVibeMap() {
     const [pathResult, setPathResult] = useState<PathResult | null>(persisted?.path ?? null);
     const [pathStartId, setPathStartId] = useState<string | null>(null);
 
-    const { data: mapData, isLoading, error } = useQuery({
+    const { data: mapData, isLoading, error, refetch } = useQuery({
         queryKey: ["vibe-map"],
         queryFn: () => api.getVibeMap(),
         staleTime: 1000 * 60 * 60,
         gcTime: 1000 * 60 * 60 * 24,
+        retry: 1,
     });
 
     const tracks = mapData?.tracks;
@@ -119,6 +120,7 @@ export function useVibeMap() {
         mapData,
         isLoading,
         error,
+        refetch,
         trackMap,
         mode,
         selectedTrackId,

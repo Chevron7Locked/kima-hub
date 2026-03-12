@@ -162,9 +162,10 @@ export function computeInitialViewState(tracks: MapTrack[]): {
     const dataHeight = maxY - minY || 1;
     const span = Math.max(dataWidth, dataHeight);
 
-    // Zoom in so ~90% of dots visible -- user should see density, not empty space
-    const viewportEstimate = 900;
-    const zoom = Math.log2(viewportEstimate / (span * 0.85));
+    const viewportSize = typeof window !== "undefined"
+        ? Math.min(window.innerWidth, window.innerHeight)
+        : 900;
+    const zoom = Math.log2(viewportSize / (span * 0.85));
 
     return {
         target: [cx, cy, 0],

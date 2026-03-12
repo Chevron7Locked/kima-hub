@@ -34,7 +34,7 @@ export function VibeToolbar({ mode, onSearch, onPathMode, onAlchemyMode, onReset
     }, [onReset]);
 
     return (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2">
+        <div className="absolute top-[max(1rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-10 flex items-center gap-2">
             <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
                 <input

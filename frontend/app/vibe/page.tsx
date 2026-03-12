@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { useVibeMap } from "@/features/vibe/useVibeMap";
 import { VibeMap } from "@/features/vibe/VibeMap";
 import { VibeToolbar } from "@/features/vibe/VibeToolbar";
@@ -10,11 +10,46 @@ import { VibeAlchemy } from "@/features/vibe/VibeAlchemy";
 import { Loader2 } from "lucide-react";
 import type { TrackResult } from "@/features/vibe/types";
 
+class VibeMapErrorBoundary extends React.Component<
+    { children: React.ReactNode },
+    { hasError: boolean; error: string | null }
+> {
+    constructor(props: { children: React.ReactNode }) {
+        super(props);
+        this.state = { hasError: false, error: null };
+    }
+
+    static getDerivedStateFromError(error: Error) {
+        return { hasError: true, error: error.message };
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="w-full h-full vibe-map-bg flex items-center justify-center">
+                    <div className="text-center">
+                        <p className="text-white/40 text-sm">Map rendering failed</p>
+                        <p className="text-white/20 text-xs mt-1">{this.state.error}</p>
+                        <button
+                            onClick={() => this.setState({ hasError: false, error: null })}
+                            className="mt-3 px-4 py-1.5 bg-white/10 hover:bg-white/15 rounded text-xs text-white/60 hover:text-white"
+                        >
+                            Retry
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
+
 export default function VibePage() {
     const {
         mapData,
         isLoading,
         error,
+        refetch,
         trackMap,
         mode,
         selectedTrackId,
@@ -115,6 +150,12 @@ export default function VibePage() {
                 <div className="text-center">
                     <p className="text-white/40 text-sm">Failed to load music map</p>
                     <p className="text-white/20 text-xs mt-1">{error instanceof Error ? error.message : "Unknown error"}</p>
+                    <button
+                        onClick={() => refetch()}
+                        className="mt-3 px-4 py-1.5 bg-white/10 hover:bg-white/15 rounded text-xs text-white/60 hover:text-white"
+                    >
+                        Retry
+                    </button>
                 </div>
             </div>
         );
@@ -133,16 +174,18 @@ export default function VibePage() {
 
     return (
         <div className="w-full h-full relative overflow-hidden">
-            <VibeMap
-                tracks={mapData.tracks}
-                highlightedIds={highlightedIds}
-                selectedTrackId={selectedTrackId}
-                pathResult={pathResult}
-                mode={mode}
-                trackMap={trackMap}
-                onTrackClick={handleTrackClick}
-                onBackgroundClick={handleBackgroundClick}
-            />
+            <VibeMapErrorBoundary>
+                <VibeMap
+                    tracks={mapData.tracks}
+                    highlightedIds={highlightedIds}
+                    selectedTrackId={selectedTrackId}
+                    pathResult={pathResult}
+                    mode={mode}
+                    trackMap={trackMap}
+                    onTrackClick={handleTrackClick}
+                    onBackgroundClick={handleBackgroundClick}
+                />
+            </VibeMapErrorBoundary>
 
             <VibeToolbar
                 mode={mode}
@@ -177,7 +220,7 @@ export default function VibePage() {
                 onTrackSelect={selectTrack}
             />
 
-            <div className="absolute bottom-3 left-3 z-10 text-white/15 text-[10px] tracking-widest uppercase font-medium">
+            <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-[max(0.75rem,env(safe-area-inset-left))] z-10 text-white/15 text-[10px] tracking-widest uppercase font-medium">
                 {mapData.trackCount} tracks
             </div>
         </div>
