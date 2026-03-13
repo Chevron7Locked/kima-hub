@@ -9,7 +9,6 @@ import {
     PointerLockControls,
     Instances,
     Instance,
-    Environment,
 } from "@react-three/drei";
 import * as THREE from "three";
 import type { MapTrack } from "../types";
@@ -392,8 +391,6 @@ function SceneContent({
                 color="#3b82f6"
                 intensity={0.3}
             />
-
-            <Environment preset="night" />
 
             <FloorGrid worldCenter={worldCenter} />
 
