@@ -50,18 +50,53 @@ export function getTrackThreeColor(track: MapTrack): THREE.Color {
 }
 
 /**
- * Returns an HDR color for bloom. Values > 1.0 will glow when
- * bloom luminanceThreshold < the value. Intensity scales with energy.
+ * Returns a subdued color for the Tron aesthetic. Base brightness 0.15-0.35,
+ * with energy adding a subtle lift. No HDR -- bloom is handled separately.
  */
-export function getTrackBloomColor(track: MapTrack): THREE.Color {
+export function getTrackColor(track: MapTrack): THREE.Color {
     const [r, g, b] = blendMoodColor(track);
     const energy = track.energy ?? 0.5;
-    const intensity = 1.2 + energy * 1.3;
+    const brightness = 0.15 + energy * 0.2;
     return new THREE.Color(
-        (r / 255) * intensity,
-        (g / 255) * intensity,
-        (b / 255) * intensity
+        (r / 255) * brightness,
+        (g / 255) * brightness,
+        (b / 255) * brightness
     );
+}
+
+/** Returns a brighter variant for selected/highlighted tracks. */
+export function getTrackHighlightColor(track: MapTrack): THREE.Color {
+    const [r, g, b] = blendMoodColor(track);
+    return new THREE.Color(r / 255 * 0.7, g / 255 * 0.7, b / 255 * 0.7);
+}
+
+/** Compute edges connecting each track to its K spatially nearest neighbors. */
+export function computeEdges(
+    tracks: MapTrack[],
+    k = 3
+): Array<[number, number]> {
+    const edges = new Set<string>();
+    const result: Array<[number, number]> = [];
+
+    for (let i = 0; i < tracks.length; i++) {
+        const dists: Array<{ j: number; d: number }> = [];
+        for (let j = 0; j < tracks.length; j++) {
+            if (i === j) continue;
+            const dx = tracks[i].x - tracks[j].x;
+            const dy = tracks[i].y - tracks[j].y;
+            dists.push({ j, d: dx * dx + dy * dy });
+        }
+        dists.sort((a, b) => a.d - b.d);
+        for (let n = 0; n < Math.min(k, dists.length); n++) {
+            const j = dists[n].j;
+            const key = i < j ? `${i}-${j}` : `${j}-${i}`;
+            if (!edges.has(key)) {
+                edges.add(key);
+                result.push([i, j]);
+            }
+        }
+    }
+    return result;
 }
 
 /**

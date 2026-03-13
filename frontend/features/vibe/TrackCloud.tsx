@@ -4,7 +4,7 @@ import { useRef, useEffect, useMemo, useCallback } from "react";
 import * as THREE from "three";
 import { ThreeEvent } from "@react-three/fiber";
 import type { MapTrack } from "./types";
-import { getTrackBloomColor } from "./universeUtils";
+import { getTrackColor, getTrackHighlightColor, computeEdges } from "./universeUtils";
 
 function hashToFloat(str: string): number {
     let h = 0;
@@ -23,7 +23,6 @@ interface TrackCloudProps {
 }
 
 const WORLD_SCALE = 200;
-const DIM_OPACITY = 0.12;
 
 const vertexShader = `
     attribute float size;
@@ -35,7 +34,8 @@ const vertexShader = `
         vColor = customColor;
         vOpacity = opacity;
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = size * (300.0 / -mvPosition.z);
+        gl_PointSize = size * (200.0 / -mvPosition.z);
+        gl_PointSize = clamp(gl_PointSize, 1.0, 20.0);
         gl_Position = projectionMatrix * mvPosition;
     }
 `;
@@ -46,10 +46,11 @@ const fragmentShader = `
     void main() {
         float d = length(gl_PointCoord - vec2(0.5));
         if (d > 0.5) discard;
-        float intensity = 1.0 - smoothstep(0.0, 0.5, d);
-        float glow = exp(-d * 6.0) * 0.6;
-        float alpha = (intensity + glow) * vOpacity;
-        gl_FragColor = vec4(vColor * (1.0 + glow * 2.0), alpha);
+        float core = 1.0 - smoothstep(0.0, 0.2, d);
+        float halo = 1.0 - smoothstep(0.1, 0.5, d);
+        float alpha = (core * 0.9 + halo * 0.3) * vOpacity;
+        vec3 color = vColor * (1.0 + core * 0.5);
+        gl_FragColor = vec4(color, alpha);
     }
 `;
 
@@ -61,30 +62,38 @@ export function TrackCloud({
     onTrackHover,
 }: TrackCloudProps) {
     const pointsRef = useRef<THREE.Points>(null!);
+    const linesRef = useRef<THREE.LineSegments>(null!);
 
     const hasHighlights = highlightedIds.size > 0;
 
-    const { geometry, material } = useMemo(() => {
+    // Compute positions once (shared between points and lines)
+    const positions = useMemo(() => {
+        const pos = new Float32Array(tracks.length * 3);
+        for (let i = 0; i < tracks.length; i++) {
+            pos[i * 3] = tracks[i].x * WORLD_SCALE;
+            pos[i * 3 + 1] = tracks[i].y * WORLD_SCALE;
+            pos[i * 3 + 2] = hashToFloat(tracks[i].id) * WORLD_SCALE * 0.1;
+        }
+        return pos;
+    }, [tracks]);
+
+    // Points geometry and material
+    const { pointGeo, pointMat } = useMemo(() => {
         const geo = new THREE.BufferGeometry();
-        const positions = new Float32Array(tracks.length * 3);
         const colors = new Float32Array(tracks.length * 3);
         const sizes = new Float32Array(tracks.length);
         const opacities = new Float32Array(tracks.length);
 
         for (let i = 0; i < tracks.length; i++) {
             const track = tracks[i];
-            positions[i * 3] = track.x * WORLD_SCALE;
-            positions[i * 3 + 1] = track.y * WORLD_SCALE;
-            positions[i * 3 + 2] = hashToFloat(track.id) * WORLD_SCALE * 0.15;
-
-            const bloomColor = getTrackBloomColor(track);
-            colors[i * 3] = bloomColor.r;
-            colors[i * 3 + 1] = bloomColor.g;
-            colors[i * 3 + 2] = bloomColor.b;
+            const color = getTrackColor(track);
+            colors[i * 3] = color.r;
+            colors[i * 3 + 1] = color.g;
+            colors[i * 3 + 2] = color.b;
 
             const energy = track.energy ?? 0.5;
-            sizes[i] = 1.5 + energy * 3.0;
-            opacities[i] = 1.0;
+            sizes[i] = 0.6 + energy * 1.2;
+            opacities[i] = 0.85;
         }
 
         geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -97,48 +106,90 @@ export function TrackCloud({
             fragmentShader,
             transparent: true,
             depthWrite: false,
-            blending: THREE.AdditiveBlending,
+            blending: THREE.NormalBlending,
         });
 
-        return { geometry: geo, material: mat };
-    }, [tracks]);
+        return { pointGeo: geo, pointMat: mat };
+    }, [tracks, positions]);
 
+    // Connection lines geometry
+    const { lineGeo, lineMat } = useMemo(() => {
+        const edges = computeEdges(tracks, 3);
+        const linePositions = new Float32Array(edges.length * 6);
+        const lineColors = new Float32Array(edges.length * 6);
+
+        for (let e = 0; e < edges.length; e++) {
+            const [i, j] = edges[e];
+            linePositions[e * 6] = positions[i * 3];
+            linePositions[e * 6 + 1] = positions[i * 3 + 1];
+            linePositions[e * 6 + 2] = positions[i * 3 + 2];
+            linePositions[e * 6 + 3] = positions[j * 3];
+            linePositions[e * 6 + 4] = positions[j * 3 + 1];
+            linePositions[e * 6 + 5] = positions[j * 3 + 2];
+
+            // Blend colors of both endpoints, very dim
+            const ci = getTrackColor(tracks[i]);
+            const cj = getTrackColor(tracks[j]);
+            const lr = (ci.r + cj.r) * 0.5;
+            const lg = (ci.g + cj.g) * 0.5;
+            const lb = (ci.b + cj.b) * 0.5;
+            lineColors[e * 6] = lr;
+            lineColors[e * 6 + 1] = lg;
+            lineColors[e * 6 + 2] = lb;
+            lineColors[e * 6 + 3] = lr;
+            lineColors[e * 6 + 4] = lg;
+            lineColors[e * 6 + 5] = lb;
+        }
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(linePositions, 3));
+        geo.setAttribute("color", new THREE.BufferAttribute(lineColors, 3));
+
+        const mat = new THREE.LineBasicMaterial({
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.15,
+            blending: THREE.NormalBlending,
+        });
+
+        return { lineGeo: geo, lineMat: mat };
+    }, [tracks, positions]);
+
+    // Update colors/opacity when highlights or selection change
     useEffect(() => {
-        if (!geometry || tracks.length === 0) return;
+        if (!pointGeo || tracks.length === 0) return;
 
-        const colors = geometry.getAttribute("customColor") as THREE.BufferAttribute;
-        const opacities = geometry.getAttribute("opacity") as THREE.BufferAttribute;
-        const sizes = geometry.getAttribute("size") as THREE.BufferAttribute;
+        const colors = pointGeo.getAttribute("customColor") as THREE.BufferAttribute;
+        const opacities = pointGeo.getAttribute("opacity") as THREE.BufferAttribute;
+        const sizes = pointGeo.getAttribute("size") as THREE.BufferAttribute;
 
         for (let i = 0; i < tracks.length; i++) {
             const track = tracks[i];
             const isHighlighted = !hasHighlights || highlightedIds.has(track.id);
             const isSelected = track.id === selectedTrackId;
-
-            const bloomColor = getTrackBloomColor(track);
+            const energy = track.energy ?? 0.5;
 
             if (isSelected) {
-                colors.setXYZ(i, 2.0, 2.0, 2.0);
+                colors.setXYZ(i, 0.9, 0.9, 0.9);
                 opacities.setX(i, 1.0);
-                const energy = track.energy ?? 0.5;
-                sizes.setX(i, (1.5 + energy * 3.0) * 2.0);
+                sizes.setX(i, (0.6 + energy * 1.2) * 2.5);
             } else if (isHighlighted) {
-                colors.setXYZ(i, bloomColor.r, bloomColor.g, bloomColor.b);
-                opacities.setX(i, 1.0);
-                const energy = track.energy ?? 0.5;
-                sizes.setX(i, 1.5 + energy * 3.0);
+                const c = getTrackHighlightColor(track);
+                colors.setXYZ(i, c.r, c.g, c.b);
+                opacities.setX(i, 0.9);
+                sizes.setX(i, 0.6 + energy * 1.2);
             } else {
-                colors.setXYZ(i, bloomColor.r * 0.3, bloomColor.g * 0.3, bloomColor.b * 0.3);
-                opacities.setX(i, DIM_OPACITY);
-                const energy = track.energy ?? 0.5;
-                sizes.setX(i, (1.5 + energy * 3.0) * 0.5);
+                const c = getTrackColor(track);
+                colors.setXYZ(i, c.r * 0.4, c.g * 0.4, c.b * 0.4);
+                opacities.setX(i, 0.25);
+                sizes.setX(i, (0.6 + energy * 1.2) * 0.6);
             }
         }
 
         colors.needsUpdate = true;
         opacities.needsUpdate = true;
         sizes.needsUpdate = true;
-    }, [tracks, highlightedIds, selectedTrackId, hasHighlights, geometry]);
+    }, [tracks, highlightedIds, selectedTrackId, hasHighlights, pointGeo]);
 
     const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
         e.stopPropagation();
@@ -154,7 +205,7 @@ export function TrackCloud({
             const point = new THREE.Vector3(
                 track.x * WORLD_SCALE,
                 track.y * WORLD_SCALE,
-                0
+                hashToFloat(track.id) * WORLD_SCALE * 0.1
             );
             onTrackHover(track, point);
         }
@@ -167,14 +218,23 @@ export function TrackCloud({
     if (tracks.length === 0) return null;
 
     return (
-        <points
-            ref={pointsRef}
-            geometry={geometry}
-            material={material}
-            onClick={handleClick}
-            onPointerOver={handlePointerOver}
-            onPointerOut={handlePointerOut}
-        />
+        <group>
+            {/* Connection lines (rendered behind points) */}
+            <lineSegments
+                ref={linesRef}
+                geometry={lineGeo}
+                material={lineMat}
+            />
+            {/* Track points */}
+            <points
+                ref={pointsRef}
+                geometry={pointGeo}
+                material={pointMat}
+                onClick={handleClick}
+                onPointerOver={handlePointerOver}
+                onPointerOut={handlePointerOut}
+            />
+        </group>
     );
 }
 

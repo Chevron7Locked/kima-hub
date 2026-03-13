@@ -7,7 +7,6 @@ import {
     PerspectiveCamera,
     OrbitControls,
     PointerLockControls,
-    Stars,
 } from "@react-three/drei";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import * as THREE from "three";
@@ -118,29 +117,34 @@ function SceneContent({
     const handleLock = useCallback(() => onLockChange(true), [onLockChange]);
     const handleUnlock = useCallback(() => onLockChange(false), [onLockChange]);
 
+    // 2D zoom: fit all tracks in view with padding
+    const orthoZoom = useMemo(() => {
+        if (typeof window === "undefined") return 2;
+        const viewportMin = Math.min(window.innerWidth, window.innerHeight);
+        const worldSpan = span * WORLD_SCALE;
+        return viewportMin / (worldSpan * 1.3);
+    }, [span]);
+
     return (
         <>
             {is3D ? (
                 <>
                     <PerspectiveCamera
                         makeDefault
-                        position={[worldCenter[0], worldCenter[1], WORLD_SCALE * 0.15]}
-                        fov={75}
+                        position={[worldCenter[0], worldCenter[1], WORLD_SCALE * span * 0.6]}
+                        fov={60}
                         near={0.1}
                         far={WORLD_SCALE * 5}
                     />
                     <PointerLockControls onLock={handleLock} onUnlock={handleUnlock} />
-                    <FlyMovement speed={WORLD_SCALE * 0.15} />
+                    <FlyMovement speed={WORLD_SCALE * 0.12} />
                 </>
             ) : (
                 <>
                     <OrthographicCamera
                         makeDefault
                         position={[worldCenter[0], worldCenter[1], 100]}
-                        zoom={typeof window !== "undefined"
-                            ? Math.min(window.innerWidth, window.innerHeight) / (span * WORLD_SCALE * 0.85)
-                            : 2
-                        }
+                        zoom={orthoZoom}
                         near={0.1}
                         far={WORLD_SCALE * 5}
                     />
@@ -152,18 +156,6 @@ function SceneContent({
                     />
                 </>
             )}
-
-            <fog attach="fog" args={["#000000", WORLD_SCALE * 0.1, WORLD_SCALE * 1.5]} />
-
-            <Stars
-                radius={WORLD_SCALE * 2}
-                depth={WORLD_SCALE}
-                count={isMobile ? 2000 : 5000}
-                factor={WORLD_SCALE * 0.05}
-                saturation={0.1}
-                fade
-                speed={0.3}
-            />
 
             <TrackCloud
                 tracks={tracks}
@@ -177,13 +169,14 @@ function SceneContent({
                 <TrackTooltip track={hoveredTrack} position={hoverPosition} />
             )}
 
+            {/* Subtle bloom -- only bright nodes glow slightly */}
             {!isMobile && (
                 <EffectComposer>
                     <Bloom
                         mipmapBlur
-                        intensity={0.8}
-                        luminanceThreshold={1.0}
-                        luminanceSmoothing={0.05}
+                        intensity={0.3}
+                        luminanceThreshold={0.4}
+                        luminanceSmoothing={0.9}
                     />
                 </EffectComposer>
             )}
@@ -207,12 +200,12 @@ export function VibeUniverse({
             <Canvas
                 dpr={[1, 1.5]}
                 gl={{
-                    antialias: false,
+                    antialias: true,
                     toneMapping: THREE.NoToneMapping,
                     outputColorSpace: THREE.SRGBColorSpace,
                     powerPreference: "high-performance",
                 }}
-                style={{ background: "black" }}
+                style={{ background: "#050508" }}
                 onPointerMissed={onBackgroundClick}
             >
                 <Suspense fallback={null}>
