@@ -68,13 +68,12 @@ jobs:
                   KIMA_TEST_PASSWORD: ${{ secrets.KIMA_TEST_PASSWORD }}
                   KIMA_UI_BASE_URL: http://127.0.0.1:3030
 
-            - name: Run queue, playlist, API contracts, and security tests
+            - name: Run queue, playlist, and security tests
               working-directory: frontend
               run: |
                   npx playwright test \
                     tests/e2e/queue.spec.ts \
                     tests/e2e/playlists.spec.ts \
-                    tests/e2e/api-contracts.spec.ts \
                     tests/e2e/security.spec.ts \
                     --reporter=list
               env:

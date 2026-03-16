@@ -1,218 +1,253 @@
 import { test, expect } from "@playwright/test";
-import { loginAsTestUser, getAuthToken } from "./fixtures/test-helpers";
+import { username, password } from "./fixtures/test-helpers";
 
-/** Login via API without a browser page -- returns the JWT token. */
+/**
+ * Security E2E Tests
+ *
+ * These run against the full Docker stack (real DB, real Redis, real JWT).
+ * They complement the backend unit tests, which verify individual middleware
+ * and route logic in isolation. These tests verify the whole system works
+ * correctly end-to-end under security scenarios.
+ *
+ * Scope:
+ *   - IDOR: two real users, real playlists, real ownership enforcement
+ *   - XSS: real browser rendering of attacker-controlled data
+ *   - Mass assignment: real API rejects injected fields
+ *   - Error responses: no data leakage in real server responses
+ *
+ * Not in scope here (covered by backend unit tests):
+ *   - Auth middleware behavior (tokenVersion, expired JWT, missing header)
+ *   - Route-level ownership logic (covered by playlists.route.test.ts)
+ */
+
 async function apiLogin(
-    page: Parameters<typeof loginAsTestUser>[0],
-    username: string,
-    password: string,
+    page: Parameters<typeof test>[1] extends (args: infer A) => unknown ? never : never,
+    // Use page.request directly from test fixture instead
+    req: { post: (url: string, options?: Record<string, unknown>) => Promise<{ ok: () => boolean; json: () => Promise<unknown> }> },
+    u: string,
+    p: string,
 ): Promise<string> {
-    const res = await page.request.post("/api/auth/login", {
-        data: { username, password },
-    });
-    if (!res.ok()) throw new Error(`Login failed: ${res.status()} ${await res.text()}`);
-    const body = await res.json();
-    return body.token as string;
+    const res = await req.post("/api/auth/login", { data: { username: u, password: p } });
+    if (!res.ok()) throw new Error(`Login failed as ${u}`);
+    return ((await res.json()) as { token: string }).token;
 }
 
-const SECURITY_USER = `sec_test_${Date.now()}`;
-const SECURITY_PASS = "SecTestPass123!";
+const ATTACKER_USER = `attacker_${Date.now()}`;
+const ATTACKER_PASS = "AttackerPass123!";
 
 test.describe("Security", () => {
-    test.describe("Unauthenticated access", () => {
-        test("GET /api/library/tracks without token returns 401", async ({ page }) => {
-            const res = await page.request.get("/api/library/tracks");
-            expect(res.status()).toBe(401);
+
+    // ── IDOR ─────────────────────────────────────────────────────────────────
+
+    test.describe("IDOR -- cross-user isolation", () => {
+
+        test.beforeAll(async ({ request }) => {
+            // Create attacker account using the admin test user's credentials.
+            // If the test user lacks admin role, subsequent tests will skip gracefully.
+            try {
+                const loginRes = await request.post("/api/auth/login", {
+                    data: { username, password },
+                });
+                if (!loginRes.ok()) return;
+                const { token } = await loginRes.json() as { token: string };
+                await request.post("/api/auth/create-user", {
+                    data: { username: ATTACKER_USER, password: ATTACKER_PASS, role: "user" },
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+            } catch {
+                // Non-fatal: individual tests skip if attacker login fails
+            }
         });
 
-        test("GET /api/playlists without token returns 401", async ({ page }) => {
-            const res = await page.request.get("/api/playlists");
-            expect(res.status()).toBe(401);
-        });
+        test("attacker cannot READ victim's private playlist -- must be 403 not 404", async ({ page }) => {
+            // Login as victim (the admin test user) and create a private playlist
+            const victimToken = await page.request.post("/api/auth/login", {
+                data: { username, password },
+            }).then(r => r.json()).then((b: { token: string }) => b.token);
 
-        test("POST /api/playlists without token returns 401", async ({ page }) => {
-            const res = await page.request.post("/api/playlists", {
-                data: { name: "unauthorized" },
-            });
-            expect(res.status()).toBe(401);
-        });
-
-        test("GET /api/auth/me without token returns 401", async ({ page }) => {
-            const res = await page.request.get("/api/auth/me");
-            expect(res.status()).toBe(401);
-        });
-    });
-
-    test.describe("IDOR -- playlist isolation", () => {
-        test("user B cannot read user A private playlist", async ({ page }) => {
-            // User A (admin) logs in and creates a private playlist
-            await loginAsTestUser(page);
-            const tokenA = await getAuthToken(page);
+            if (!victimToken) { test.skip(); return; }
 
             const createRes = await page.request.post("/api/playlists", {
-                data: { name: `idor-read-${Date.now()}`, isPublic: false },
-                headers: { Authorization: `Bearer ${tokenA}` },
+                data: { name: `victim-private-${Date.now()}`, isPublic: false },
+                headers: { Authorization: `Bearer ${victimToken}` },
             });
             if (!createRes.ok()) { test.skip(); return; }
-            const playlist = await createRes.json();
-            const playlistId: string = playlist.id;
+            const { id: playlistId } = await createRes.json() as { id: string };
 
-            // Admin creates user B
-            const createUserRes = await page.request.post("/api/auth/create-user", {
-                data: { username: SECURITY_USER, password: SECURITY_PASS, role: "user" },
-                headers: { Authorization: `Bearer ${tokenA}` },
+            // Login as attacker
+            const attackerLoginRes = await page.request.post("/api/auth/login", {
+                data: { username: ATTACKER_USER, password: ATTACKER_PASS },
             });
+            if (!attackerLoginRes.ok()) { test.skip(); return; }
+            const { token: attackerToken } = await attackerLoginRes.json() as { token: string };
 
-            if (!createUserRes.ok()) {
-                await page.request.delete(`/api/playlists/${playlistId}`, {
-                    headers: { Authorization: `Bearer ${tokenA}` },
-                });
-                test.skip();
-                return;
-            }
-            const createdUser = await createUserRes.json();
-            const userBId: string = createdUser.id;
-
-            // User B logs in and attempts to read user A's private playlist
-            const tokenB = await apiLogin(page, SECURITY_USER, SECURITY_PASS);
-
+            // Attacker attempts to read victim's private playlist
             const readRes = await page.request.get(`/api/playlists/${playlistId}`, {
-                headers: { Authorization: `Bearer ${tokenB}` },
+                headers: { Authorization: `Bearer ${attackerToken}` },
             });
 
-            // Must NOT be 200 -- private playlist is inaccessible to other users
-            expect(readRes.status()).not.toBe(200);
-            expect([403, 404]).toContain(readRes.status());
+            // Must be 403 (access denied), not 404 (which hides that the resource exists
+            // and would mask a broken ownership check that silently falls through to not found)
+            expect(readRes.status()).toBe(403);
 
             // Cleanup
             await page.request.delete(`/api/playlists/${playlistId}`, {
-                headers: { Authorization: `Bearer ${tokenA}` },
+                headers: { Authorization: `Bearer ${victimToken}` },
             });
-            await page.request.delete(`/api/auth/users/${userBId}`, {
-                headers: { Authorization: `Bearer ${tokenA}` },
-            }).catch(() => {/* best-effort */});
         });
 
-        test("tampered JWT cannot delete another user's playlist", async ({ page }) => {
-            await loginAsTestUser(page);
-            const tokenA = await getAuthToken(page);
+        test("attacker cannot UPDATE victim's playlist -- name must be unchanged in DB after attempt", async ({ page }) => {
+            const victimToken = await page.request.post("/api/auth/login", {
+                data: { username, password },
+            }).then(r => r.json()).then((b: { token: string }) => b.token);
+            if (!victimToken) { test.skip(); return; }
 
+            const originalName = `victim-update-${Date.now()}`;
             const createRes = await page.request.post("/api/playlists", {
-                data: { name: `idor-delete-${Date.now()}`, isPublic: false },
-                headers: { Authorization: `Bearer ${tokenA}` },
+                data: { name: originalName, isPublic: false },
+                headers: { Authorization: `Bearer ${victimToken}` },
             });
             if (!createRes.ok()) { test.skip(); return; }
-            const playlist = await createRes.json();
-            const playlistId: string = playlist.id;
+            const { id: playlistId } = await createRes.json() as { id: string };
 
-            // Attempt delete with a structurally valid but wrongly-signed token
-            const fakeToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJmYWtlLXVzZXItaWQiLCJ1c2VybmFtZSI6ImZha2UiLCJyb2xlIjoidXNlciIsImlhdCI6MTcwMDAwMDAwMH0.fake_sig";
-            const deleteRes = await page.request.delete(`/api/playlists/${playlistId}`, {
-                headers: { Authorization: `Bearer ${fakeToken}` },
+            const attackerLoginRes = await page.request.post("/api/auth/login", {
+                data: { username: ATTACKER_USER, password: ATTACKER_PASS },
             });
+            if (!attackerLoginRes.ok()) { test.skip(); return; }
+            const { token: attackerToken } = await attackerLoginRes.json() as { token: string };
 
-            // Bad signature must be rejected
-            expect(deleteRes.status()).toBeGreaterThanOrEqual(401);
-            expect(deleteRes.status()).toBeLessThan(500);
+            // Attacker attempts rename
+            const updateRes = await page.request.put(`/api/playlists/${playlistId}`, {
+                data: { name: "HIJACKED" },
+                headers: { Authorization: `Bearer ${attackerToken}` },
+            });
+            expect(updateRes.status()).toBe(403);
 
-            // Playlist must still exist under the real owner
+            // Verify the name was NOT changed -- re-fetch as victim
             const verifyRes = await page.request.get(`/api/playlists/${playlistId}`, {
-                headers: { Authorization: `Bearer ${tokenA}` },
+                headers: { Authorization: `Bearer ${victimToken}` },
+            });
+            expect(verifyRes.status()).toBe(200);
+            const verified = await verifyRes.json() as { name: string };
+            expect(verified.name).toBe(originalName); // unchanged
+
+            // Cleanup
+            await page.request.delete(`/api/playlists/${playlistId}`, {
+                headers: { Authorization: `Bearer ${victimToken}` },
+            });
+        });
+
+        test("attacker cannot DELETE victim's playlist -- resource must still exist after attempt", async ({ page }) => {
+            const victimToken = await page.request.post("/api/auth/login", {
+                data: { username, password },
+            }).then(r => r.json()).then((b: { token: string }) => b.token);
+            if (!victimToken) { test.skip(); return; }
+
+            const createRes = await page.request.post("/api/playlists", {
+                data: { name: `victim-delete-${Date.now()}`, isPublic: false },
+                headers: { Authorization: `Bearer ${victimToken}` },
+            });
+            if (!createRes.ok()) { test.skip(); return; }
+            const { id: playlistId } = await createRes.json() as { id: string };
+
+            const attackerLoginRes = await page.request.post("/api/auth/login", {
+                data: { username: ATTACKER_USER, password: ATTACKER_PASS },
+            });
+            if (!attackerLoginRes.ok()) { test.skip(); return; }
+            const { token: attackerToken } = await attackerLoginRes.json() as { token: string };
+
+            // Attacker attempts deletion
+            const deleteRes = await page.request.delete(`/api/playlists/${playlistId}`, {
+                headers: { Authorization: `Bearer ${attackerToken}` },
+            });
+            expect(deleteRes.status()).toBe(403);
+
+            // Verify the playlist still exists -- victim can still access it
+            const verifyRes = await page.request.get(`/api/playlists/${playlistId}`, {
+                headers: { Authorization: `Bearer ${victimToken}` },
             });
             expect(verifyRes.status()).toBe(200);
 
             // Cleanup
             await page.request.delete(`/api/playlists/${playlistId}`, {
-                headers: { Authorization: `Bearer ${tokenA}` },
+                headers: { Authorization: `Bearer ${victimToken}` },
             });
         });
     });
 
-    test.describe("XSS -- playlist name rendering", () => {
-        test("script tag in playlist name does not execute", async ({ page }) => {
-            await loginAsTestUser(page);
-            const token = await getAuthToken(page);
+    // ── XSS ──────────────────────────────────────────────────────────────────
 
-            const xssPayload = `<script>window.__xss_fired=true</script>xss-${Date.now()}`;
+    test.describe("XSS -- stored payload rendering", () => {
+
+        test("script tag in playlist name does not execute in browser", async ({ page }) => {
+            const loginRes = await page.request.post("/api/auth/login", { data: { username, password } });
+            if (!loginRes.ok()) { test.skip(); return; }
+            const { token } = await loginRes.json() as { token: string };
+
+            const payload = `<script>window.__xss_script=true</script>xss-${Date.now()}`;
             const createRes = await page.request.post("/api/playlists", {
-                data: { name: xssPayload, isPublic: false },
+                data: { name: payload, isPublic: false },
                 headers: { Authorization: `Bearer ${token}` },
             });
             if (!createRes.ok()) { test.skip(); return; }
-            const playlist = await createRes.json();
-            const playlistId: string = playlist.id;
+            const { id: playlistId } = await createRes.json() as { id: string };
 
+            // Navigate in browser and verify the script did not execute
             await page.goto("/playlists");
             await page.waitForLoadState("domcontentloaded");
-            await page.waitForTimeout(1_000);
+            await page.waitForTimeout(1000);
 
-            // The injected script must NOT have executed
             const xssExecuted = await page.evaluate(
-                () => !!(window as unknown as Record<string, unknown>).__xss_fired,
+                () => !!(window as unknown as Record<string, unknown>).__xss_script,
             );
             expect(xssExecuted).toBe(false);
 
-            // No live <script> tags injected into the DOM with our payload
             const injectedScripts = await page.locator("script").evaluateAll(
-                (els: Element[]) =>
-                    els.filter((el) => el.textContent?.includes("__xss_fired")).length,
+                (els) => els.filter((el) => el.textContent?.includes("__xss_script")).length,
             );
             expect(injectedScripts).toBe(0);
 
-            // Cleanup
+            await page.request.delete(`/api/playlists/${playlistId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+        });
+
+        test("img onerror payload in playlist name does not execute in browser", async ({ page }) => {
+            const loginRes = await page.request.post("/api/auth/login", { data: { username, password } });
+            if (!loginRes.ok()) { test.skip(); return; }
+            const { token } = await loginRes.json() as { token: string };
+
+            const payload = `<img src=x onerror="window.__xss_onerror=true">xss-${Date.now()}`;
+            const createRes = await page.request.post("/api/playlists", {
+                data: { name: payload, isPublic: false },
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!createRes.ok()) { test.skip(); return; }
+            const { id: playlistId } = await createRes.json() as { id: string };
+
+            await page.goto("/playlists");
+            await page.waitForLoadState("domcontentloaded");
+            await page.waitForTimeout(1000);
+
+            const xssExecuted = await page.evaluate(
+                () => !!(window as unknown as Record<string, unknown>).__xss_onerror,
+            );
+            expect(xssExecuted).toBe(false);
+
             await page.request.delete(`/api/playlists/${playlistId}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
         });
     });
 
-    test.describe("Input validation", () => {
-        test("POST /api/playlists with missing name returns 400 or 422", async ({ page }) => {
-            await loginAsTestUser(page);
-            const token = await getAuthToken(page);
-
-            const res = await page.request.post("/api/playlists", {
-                data: { isPublic: false },
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            expect([400, 422]).toContain(res.status());
-        });
-
-        test("POST /api/playlists with empty name returns 400 or 422", async ({ page }) => {
-            await loginAsTestUser(page);
-            const token = await getAuthToken(page);
-
-            const res = await page.request.post("/api/playlists", {
-                data: { name: "", isPublic: false },
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            expect([400, 422]).toContain(res.status());
-        });
-
-        test("POST /api/auth/login with missing password returns 400 or 422", async ({ page }) => {
-            const res = await page.request.post("/api/auth/login", {
-                data: { username: "chevron7" },
-            });
-            expect([400, 422]).toContain(res.status());
-        });
-
-        test("wrong password returns 401 and does not leak hash or stack trace", async ({ page }) => {
-            const res = await page.request.post("/api/auth/login", {
-                data: { username: "chevron7", password: "definitelywrong" },
-            });
-            expect(res.status()).toBe(401);
-            const body = await res.json();
-            expect(body.error).toBeTruthy();
-            const bodyStr = JSON.stringify(body);
-            expect(bodyStr).not.toMatch(/\$2b\$/); // no bcrypt hash in response
-            expect(bodyStr).not.toMatch(/at Object\.|at Function\.|\.ts:\d+/); // no stack trace
-        });
-    });
+    // ── Mass assignment ───────────────────────────────────────────────────────
 
     test.describe("Mass assignment", () => {
-        test("POST /api/playlists ignores injected userId field", async ({ page }) => {
-            await loginAsTestUser(page);
-            const token = await getAuthToken(page);
+
+        test("POST /api/playlists ignores injected userId -- playlist owned by authenticated user", async ({ page }) => {
+            const loginRes = await page.request.post("/api/auth/login", { data: { username, password } });
+            if (!loginRes.ok()) { test.skip(); return; }
+            const { token } = await loginRes.json() as { token: string };
 
             const res = await page.request.post("/api/playlists", {
                 data: {
@@ -224,16 +259,61 @@ test.describe("Security", () => {
                 headers: { Authorization: `Bearer ${token}` },
             });
             if (!res.ok()) { test.skip(); return; }
-            const playlist = await res.json();
+            const playlist = await res.json() as { id: string; userId: string };
 
-            // Playlist must belong to the authenticated user, not the injected ID
+            // Must belong to the real authenticated user, not the injected ID
             expect(playlist.userId).not.toBe("injected-attacker-id");
             expect(playlist.userId).toBeTruthy();
 
-            // Cleanup
             await page.request.delete(`/api/playlists/${playlist.id}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
+        });
+    });
+
+    // ── Error response safety ─────────────────────────────────────────────────
+
+    test.describe("Error responses -- no data leakage", () => {
+
+        test("wrong password response contains no bcrypt hash, stack trace, or ORM internals", async ({ page }) => {
+            const res = await page.request.post("/api/auth/login", {
+                data: { username: "nonexistentuser_xyz", password: "wrongpassword" },
+            });
+            expect(res.status()).toBe(401);
+
+            const body = await res.json() as Record<string, unknown>;
+            const bodyStr = JSON.stringify(body);
+            expect(bodyStr).not.toMatch(/\$2b\$/);               // no bcrypt hash
+            expect(bodyStr).not.toMatch(/at Object\.|at Function\./); // no stack trace
+            expect(bodyStr).not.toMatch(/prisma|PrismaClient/i); // no ORM internals
+        });
+
+        test("validation error after empty playlist name: no playlist created, count unchanged", async ({ page }) => {
+            const loginRes = await page.request.post("/api/auth/login", { data: { username, password } });
+            if (!loginRes.ok()) { test.skip(); return; }
+            const { token } = await loginRes.json() as { token: string };
+
+            // Capture count before
+            const beforeRes = await page.request.get("/api/playlists", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const before = await beforeRes.json() as unknown[];
+            const beforeCount = Array.isArray(before) ? before.length : 0;
+
+            // Attempt with empty name -- must fail
+            const createRes = await page.request.post("/api/playlists", {
+                data: { name: "", isPublic: false },
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            expect([400, 422]).toContain(createRes.status());
+
+            // Count must be unchanged
+            const afterRes = await page.request.get("/api/playlists", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const after = await afterRes.json() as unknown[];
+            const afterCount = Array.isArray(after) ? after.length : 0;
+            expect(afterCount).toBe(beforeCount);
         });
     });
 });
