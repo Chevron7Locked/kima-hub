@@ -1381,9 +1381,9 @@ router.get("/artists/:id", async (req, res) => {
           );
 
           // Fetch images in parallel (Deezer only - fastest source)
-          const deezerLimit2 = pLimit(3);
+          const lastfmDeezerLimit = pLimit(3);
           const similarWithImages = await Promise.all(
-            lastfmSimilar.map((s: any) => deezerLimit2(async () => {
+            lastfmSimilar.map((s: any) => lastfmDeezerLimit(async () => {
               const libraryArtist =
                 (s.mbid && libraryByMbid.get(s.mbid)) ||
                 libraryByName.get(s.name.toLowerCase());

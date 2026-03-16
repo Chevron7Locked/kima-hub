@@ -1638,7 +1638,7 @@ class ApiClient {
     }
 
     // Vibe (CLAP Similarity) API
-    async getVibeSimilarTracks(trackId: string, limit = 20) {
+    async getVibeSimilarTracks(trackId: string, limit = 20, signal?: AbortSignal) {
         return this.request<{
             sourceTrackId: string;
             tracks: Array<{
@@ -1657,7 +1657,7 @@ class ApiClient {
                     name: string;
                 };
             }>;
-        }>(`/vibe/similar/${trackId}?limit=${limit}`);
+        }>(`/vibe/similar/${trackId}?limit=${limit}`, { signal });
     }
 
     async vibeSearch(query: string, limit = 20) {

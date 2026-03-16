@@ -123,6 +123,7 @@ export default function VibePage() {
     const queueTrackIds = useMemo(() => queue.map(t => t.id), [queue]);
     const vibeRequestRef = useRef<AbortController | null>(null);
     const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => () => { vibeRequestRef.current?.abort(); }, []);
     useEffect(() => () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); }, []);
 
     const handleTrackContextMenu = useCallback(async (trackId: string, op: 'vibe' | 'similar' | 'drift') => {
@@ -137,12 +138,11 @@ export default function VibePage() {
         vibeRequestRef.current = controller;
 
         try {
-            const response = await api.getVibeSimilarTracks(trackId, 50);
+            const response = await api.getVibeSimilarTracks(trackId, 50, controller.signal);
             if (controller.signal.aborted) return;
             if (!response.tracks || response.tracks.length === 0) return;
 
-            const sourceTrack = mapData?.tracks.find(t => t.id === trackId);
-            if (!sourceTrack) return;
+            if (!mapData?.tracks.some(t => t.id === trackId)) return;
 
             const tracks: Track[] = response.tracks.map((t) => ({
                 id: t.id,
