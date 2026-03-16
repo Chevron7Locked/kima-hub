@@ -50,6 +50,7 @@ export function AlbumActionBar({
                 <>
                     <button
                         onClick={handlePlayPauseClick}
+                        aria-label={showPause ? "Pause" : "Play all"}
                         className="h-12 w-12 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105 bg-[#fca200]"
                     >
                         {showPause ? (

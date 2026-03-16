@@ -2,7 +2,7 @@
 # Contains: Backend, Frontend, PostgreSQL, Redis, Audio Analyzer (Essentia AI)
 # Usage: docker run -d -p 3030:3030 -v /path/to/music:/music kima/kima
 
-FROM node:20-slim
+FROM node:22-slim
 
 # Add PostgreSQL 16 repository (Debian Bookworm only has PG15 by default)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -204,8 +204,10 @@ RUN npm ci && npm cache clean --force
 COPY frontend/ ./
 
 # Build Next.js (production)
+# MALLOC_ARENA_MAX=1 reduces mmap arena churn during build.
+# Build needs 2GB for tsc; runtime stays at 512MB (set in supervisor config).
 ENV NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:3006
-RUN npm run build
+RUN MALLOC_ARENA_MAX=1 NODE_OPTIONS="--max-old-space-size=2048" npm run build
 
 # ============================================
 # SECURITY HARDENING
@@ -279,7 +281,7 @@ stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
-environment=NODE_ENV="production",BACKEND_URL="http://localhost:3006",PORT="3030"
+environment=NODE_ENV="production",BACKEND_URL="http://localhost:3006",PORT="3030",MALLOC_ARENA_MAX="1",NODE_OPTIONS="--max-old-space-size=512"
 priority=40
 
 [program:audio-analyzer]

@@ -1,5 +1,29 @@
 import { useRef, useCallback } from "react";
 
+/**
+ * Hook for canvas/3D components where tracks are identified by string ID.
+ * First click fires onClick; second click on the same ID within delayMs fires onDoubleClick.
+ */
+export function useDoubleClickById(
+    onClick: (id: string) => void,
+    onDoubleClick?: (id: string) => void,
+    delayMs = 400,
+) {
+    const lastClickRef = useRef<{ id: string; time: number } | null>(null);
+
+    return useCallback((id: string) => {
+        const now = Date.now();
+        const last = lastClickRef.current;
+        if (last && last.id === id && now - last.time < delayMs) {
+            lastClickRef.current = null;
+            onDoubleClick?.(id);
+        } else {
+            lastClickRef.current = { id, time: now };
+            onClick(id);
+        }
+    }, [onClick, onDoubleClick, delayMs]);
+}
+
 const DOUBLE_TAP_MS = 300;
 
 /**

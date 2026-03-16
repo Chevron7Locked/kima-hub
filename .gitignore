@@ -150,7 +150,11 @@ docs/
 context_portal/
 issues/
 plans/
+planning/
 systems/
+
+# Dev test scripts
+e2e/
 
 # Release/Deployment Artifacts
 RELEASE_NOTES_*.md

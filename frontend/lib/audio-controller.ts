@@ -16,8 +16,7 @@ export type AudioControllerCallback = (data?: unknown) => void;
 
 export class AudioController {
     private audio: HTMLAudioElement;
-    private audioContext: AudioContext | null = null;
-    private sourceNode: MediaElementAudioSourceNode | null = null;
+    private audioSessionSet = false;
     private eventListeners: Map<AudioControllerEvent, Set<AudioControllerCallback>> = new Map();
     private nativeListeners: Array<{ event: string; handler: EventListener }> = [];
     private prefetchLink: HTMLLinkElement | null = null;
@@ -62,13 +61,9 @@ export class AudioController {
         this.initializeVolume();
     }
 
-    private ensureAudioContext(): void {
-        if (this.audioContext) return;
-
-        this.audioContext = new AudioContext();
-        this.sourceNode = this.audioContext.createMediaElementSource(this.audio);
-        this.sourceNode.connect(this.audioContext.destination);
-
+    private setAudioSessionPlayback(): void {
+        if (this.audioSessionSet) return;
+        this.audioSessionSet = true;
         try {
             const nav = navigator as { audioSession?: { type: string } };
             if (nav.audioSession) {
@@ -271,15 +266,7 @@ export class AudioController {
     async play(): Promise<void> {
         if (!this.audio.src) return;
 
-        this.ensureAudioContext();
-
-        if (this.audioContext?.state === "suspended") {
-            try {
-                await this.audioContext.resume();
-            } catch {
-                // Resume failed
-            }
-        }
+        this.setAudioSessionPlayback();
 
         try {
             await this.audio.play();
@@ -296,15 +283,7 @@ export class AudioController {
         if (!this.audio.src) return false;
         if (!this.audio.paused) return true;
 
-        this.ensureAudioContext();
-
-        if (this.audioContext?.state === "suspended") {
-            try {
-                await this.audioContext.resume();
-            } catch {
-                return false;
-            }
-        }
+        this.setAudioSessionPlayback();
 
         try {
             await this.audio.play();
@@ -482,14 +461,6 @@ export class AudioController {
     destroy(): void {
         this.cleanup();
         this.detachNativeListeners();
-
-        if (this.audioContext) {
-            this.audioContext.close().catch(() => {
-                // Already closed or failed
-            });
-            this.audioContext = null;
-            this.sourceNode = null;
-        }
 
         this.eventListeners.clear();
     }

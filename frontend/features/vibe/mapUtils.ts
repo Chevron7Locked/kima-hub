@@ -1,6 +1,6 @@
 import type { MapTrack } from "./types";
 
-const MOOD_COLORS: Record<string, [number, number, number]> = {
+export const MOOD_COLORS: Record<string, [number, number, number]> = {
     moodHappy:      [252, 162, 0],   // brand amber #fca200
     moodSad:        [168, 85, 247],  // AI purple #a855f7
     moodRelaxed:    [34, 197, 94],   // green #22c55e
@@ -22,7 +22,21 @@ const MOOD_LABEL_MAP: Record<string, string> = {
     neutral: "Mixed",
 };
 
-function blendMoodColor(track: MapTrack): [number, number, number] {
+// Cache is keyed by track.id:moodScore:dominantMood so it auto-invalidates after enrichment.
+// Capped at 2000 entries -- evicts oldest when full to prevent unbounded growth on large libraries.
+const _moodColorCache = new Map<string, [number, number, number]>();
+const MOOD_COLOR_CACHE_MAX = 50000;
+
+/**
+ * Blend a track's mood scores into a single RGB color.
+ * saturationBoost controls how aggressively the blended color is pushed away from gray.
+ * Use 1.6 for sRGB contexts (Deck.gl), 2.0 for linear-light contexts (Three.js).
+ */
+export function blendMoodColorRGB(track: MapTrack, saturationBoost = 1.6): [number, number, number] {
+    const cacheKey = `${track.id}:${track.moodScore}:${track.dominantMood}:${saturationBoost}`;
+    const cached = _moodColorCache.get(cacheKey);
+    if (cached) return cached;
+
     const moods = track.moods;
     if (!moods || Object.keys(moods).length === 0) {
         return MOOD_COLORS.neutral;
@@ -39,36 +53,28 @@ function blendMoodColor(track: MapTrack): [number, number, number] {
         totalWeight += w;
     }
 
-    if (totalWeight === 0) return MOOD_COLORS.neutral;
-    r = r / totalWeight;
-    g = g / totalWeight;
-    b = b / totalWeight;
+    let result: [number, number, number];
+    if (totalWeight === 0) {
+        result = MOOD_COLORS.neutral;
+    } else {
+        r = r / totalWeight;
+        g = g / totalWeight;
+        b = b / totalWeight;
+        const gray = (r + g + b) / 3;
+        r = Math.max(0, Math.min(255, gray + (r - gray) * saturationBoost));
+        g = Math.max(0, Math.min(255, gray + (g - gray) * saturationBoost));
+        b = Math.max(0, Math.min(255, gray + (b - gray) * saturationBoost));
+        result = [Math.round(r), Math.round(g), Math.round(b)];
+    }
 
-    const gray = (r + g + b) / 3;
-    const boost = 1.6;
-    r = Math.max(0, Math.min(255, gray + (r - gray) * boost));
-    g = Math.max(0, Math.min(255, gray + (g - gray) * boost));
-    b = Math.max(0, Math.min(255, gray + (b - gray) * boost));
-
-    return [Math.round(r), Math.round(g), Math.round(b)];
+    if (_moodColorCache.size >= MOOD_COLOR_CACHE_MAX) {
+        const firstKey = _moodColorCache.keys().next().value;
+        if (firstKey !== undefined) _moodColorCache.delete(firstKey);
+    }
+    _moodColorCache.set(cacheKey, result);
+    return result;
 }
 
-export function getTrackColor(track: MapTrack, dimmed = false): [number, number, number, number] {
-    const base = blendMoodColor(track);
-    const alpha = dimmed ? 30 : 230;
-    return [base[0], base[1], base[2], alpha];
-}
-
-export function getTrackHighlightColor(track: MapTrack): [number, number, number, number] {
-    const base = blendMoodColor(track);
-    return [base[0], base[1], base[2], 255];
-}
-
-export function getGlowColor(track: MapTrack, dimmed = false): [number, number, number, number] {
-    const base = blendMoodColor(track);
-    const alpha = dimmed ? 8 : Math.round(25 + track.moodScore * 50);
-    return [base[0], base[1], base[2], alpha];
-}
 
 export function computeClusterLabels(
     tracks: MapTrack[],
@@ -122,22 +128,16 @@ export function computeClusterLabels(
 }
 
 function baseRadiusForZoom(zoom: number): number {
-    if (zoom < 6) return 2.5;
-    if (zoom < 8) return 3 + (zoom - 6) * 1;
-    if (zoom < 10) return 5 + (zoom - 8) * 2;
-    return 9 + (zoom - 10) * 2;
+    if (zoom < 6) return 3.5;
+    if (zoom < 8) return 4.5 + (zoom - 6) * 1.5;
+    if (zoom < 10) return 7.5 + (zoom - 8) * 2.5;
+    return 12.5 + (zoom - 10) * 2.5;
 }
 
 export function getTrackRadius(track: MapTrack, zoom: number): number {
     const base = baseRadiusForZoom(zoom);
     const energy = track.energy ?? 0.5;
     return base * (0.7 + energy * 0.6);
-}
-
-export function getGlowRadius(track: MapTrack, zoom: number): number {
-    const dotR = getTrackRadius(track, zoom);
-    const confidence = Math.max(0.3, Math.min(1, track.moodScore));
-    return dotR * (2.5 + confidence * 1.5);
 }
 
 export function computeInitialViewState(tracks: MapTrack[]): {

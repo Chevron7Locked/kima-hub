@@ -664,6 +664,7 @@ export default function PlaylistDetailPage() {
                     {playlist.items && playlist.items.length > 0 && (
                         <button
                             onClick={handlePlayPlaylist}
+                            aria-label={isThisPlaylistPlaying && isPlaying ? "Pause" : "Play all"}
                             className="h-12 w-12 rounded-lg bg-[#fca208] hover:bg-[#f97316] hover:scale-105 flex items-center justify-center shadow-lg shadow-[#fca208]/20 transition-all"
                         >
                             {isThisPlaylistPlaying && isPlaying ? (

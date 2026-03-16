@@ -1,46 +1,11 @@
 import * as THREE from "three";
 import type { MapTrack } from "./types";
+import { blendMoodColorRGB } from "./mapUtils";
 
-const MOOD_COLORS: Record<string, [number, number, number]> = {
-    moodHappy:      [252, 162, 0],
-    moodSad:        [168, 85, 247],
-    moodRelaxed:    [34, 197, 94],
-    moodAggressive: [239, 68, 68],
-    moodParty:      [236, 72, 153],
-    moodAcoustic:   [245, 158, 11],
-    moodElectronic: [59, 130, 246],
-    neutral:        [163, 163, 163],
-};
-
+// Three.js renders in linear light -- use a higher saturation boost (2.0) than
+// the Deck.gl sRGB path (1.6) to compensate for the linearization difference.
 function blendMoodColor(track: MapTrack): [number, number, number] {
-    const moods = track.moods;
-    if (!moods || Object.keys(moods).length === 0) {
-        return MOOD_COLORS.neutral;
-    }
-
-    let r = 0, g = 0, b = 0, totalWeight = 0;
-    for (const [mood, score] of Object.entries(moods)) {
-        const color = MOOD_COLORS[mood];
-        if (!color || score <= 0) continue;
-        const w = score * score * score;
-        r += color[0] * w;
-        g += color[1] * w;
-        b += color[2] * w;
-        totalWeight += w;
-    }
-
-    if (totalWeight === 0) return MOOD_COLORS.neutral;
-    r = r / totalWeight;
-    g = g / totalWeight;
-    b = b / totalWeight;
-
-    const gray = (r + g + b) / 3;
-    const boost = 2.0;
-    r = Math.max(0, Math.min(255, gray + (r - gray) * boost));
-    g = Math.max(0, Math.min(255, gray + (g - gray) * boost));
-    b = Math.max(0, Math.min(255, gray + (b - gray) * boost));
-
-    return [Math.round(r), Math.round(g), Math.round(b)];
+    return blendMoodColorRGB(track, 2.0);
 }
 
 /** Returns a Three.js Color for a track, normalized to 0-1 range. */
