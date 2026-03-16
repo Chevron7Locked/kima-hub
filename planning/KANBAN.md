@@ -12,68 +12,83 @@
 
 ## Backlog (ordered -- top is next)
 
-### Phase 1: Core Library
+### v1 Maintenance
 
-**Auth & Users**
-- [ ] User auth service: JWT (access+refresh with token versioning), Redis session, API key -- `internal/user/auth.go`
-- [ ] 2FA service: TOTP enrollment + verification, 10 hashed recovery codes -- `internal/user/totp.go`
-- [ ] User management: register (first-user admin flow), login, password change, settings CRUD, onboarding status -- `internal/user/service.go`
-- [ ] Auth middleware chain: Session -> API Key -> JWT -> query param token -- `api/middleware/auth.go`
-- [ ] User API handlers: register, login, refresh, 2FA, settings, admin user management -- `api/v1/users*.go`
-
-**Library Scanner**
-- [ ] Metadata extraction service: `dhowden/tag` + ffprobe fallback, all formats (MP3 FLAC M4A OGG WAV WMA APE), embedded artwork, embedded lyrics (plain + LRC) -- `internal/library/metadata.go`
-- [ ] Library scanner: goroutine pool, incremental mtime tracking, per-directory progress via SSE, asynq background job -- `internal/library/scanner.go`
-- [ ] Artist/album matching: MBID-first, Unicode normalization + fuzzy threshold, VA detection heuristics, featured artist parsing ("feat."/"ft."/"&"/"with") -- `internal/library/matcher.go`
-- [ ] Cover art pipeline: Embedded -> local folder (cover.jpg) -- store locally, no external sources in Phase 1 -- `internal/library/artwork.go`
-
-**Library API**
-- [ ] Library browsing API: artists/albums/tracks/genres (paginated, sortable, filterable by genre/decade/mood), recently added, recently played, random shuffle -- `api/v1/library*.go`
-- [ ] Library maintenance API: delete cascade (track/album/artist), orphan detection, corrupt track detection, storage stats -- `api/v1/maintenance.go`
-
-**Playback & Streaming**
-- [ ] Audio streaming: HTTP range requests, MIME detection, per-user concurrent limit (configurable, default 2), stream session tracking + cleanup -- `internal/playback/stream.go`
-- [ ] Transcoding: FFmpeg subprocess via os/exec, quality presets (original/320/192/128kbps), disk cache with configurable max size + LRU eviction -- `internal/playback/transcode.go`
-- [ ] Playback state: Redis-backed per-user state (track, position, queue, shuffle, repeat), delta updates, 5MB limit -- `internal/playback/state.go`
-- [ ] Play tracking: play log (min 30s threshold, skip detection), play history API (paginated, date filtered), aggregate stats (top tracks/artists/albums, listening time) -- `internal/playback/plays.go`
-- [ ] Lyrics service: serve embedded lyrics from DB, LRCLib external fetch fallback, cache in DB -- `internal/playback/lyrics.go`
-
-**Subsonic**
-- [ ] Subsonic core: XML/JSON response encoder, auth middleware (MD5 token, API key, basic), separate rate limit (1500 req/min) -- `internal/subsonic/`
-- [ ] Subsonic library + search endpoints: getIndexes, getArtists, getArtist, getAlbum, getSong, getAlbumList, getMusicDirectory, getGenres, getSimilarSongs, search2, search3, getRandomSongs, getSongsByGenre -- `internal/subsonic/library.go`
-- [ ] Subsonic playback + system endpoints: ping, getLicense, getMusicFolders, scan, stream, download, getCoverArt, getNowPlaying, scrobble, playQueue, bookmarks, getLyrics, getLyricsBySongId -- `internal/subsonic/playback.go`
-- [ ] Subsonic playlists + user endpoints: getPlaylists, getPlaylist, createPlaylist, updatePlaylist, deletePlaylist, getStarred, star, unstar, setRating, getUser, getUsers, createUser, updateUser, deleteUser, changePassword -- `internal/subsonic/social.go`
-
-**Deferred from Phase 1 (Phase 3+):**
-- Radio mode (Section 7.2.6) -- requires artist relationship graph (Phase 3)
-- Play event signals (EWMA taste profile, transition graph) -- Phase 3
-- File watching (fsnotify) -- Phase 3
-- External cover art (Deezer, MB CAA, LastFM) -- Phase 4
-- Shadow artist entities -- Phase 3
-- OurSpace opt-in/out flow -- Phase 6 (hub_user_id column already in schema)
+(empty -- awaiting user direction)
 
 ---
 
 ## Done
 
-### Phase 0: Foundation (completed 2026-03-15)
-- [x] Initialize Go module with directory structure from requirements doc Section 1.2 -- `kima/` at project root, all 14 internal/pkg/api/cmd dirs created
-- [x] Set up pgx v5 connection pool with pgxpool and health check -- `pkg/db/db.go`
-- [x] Set up Redis connection with go-redis/v9 -- `pkg/cache/cache.go`
-- [x] Configure caarlos0/env/v11 for environment-based config -- `pkg/config/config.go`
-- [x] Set up slog structured logging (JSON in prod, text in dev) -- `cmd/kima/main.go` newLogger()
-- [x] Set up golang-migrate migration runner with embedded SQL files -- `pkg/db/db.go` + `migrations/` package
-- [x] Set up HTTP server with graceful shutdown (errgroup + signal handling) -- `cmd/kima/main.go`
-- [x] Set up Prometheus metrics endpoint -- `/metrics` via promhttp
-- [x] Configure rate limiting middleware -- `api/middleware/ratelimit.go`
-- [x] Configure CORS middleware -- `api/middleware/cors.go`
-- [x] Implement health check endpoints (/health, /health/ready) -- `api/v1/health.go`
-- [x] Set up SPA routing fallback -- placeholder in main.go, will embed SvelteKit in Phase 5
-- [x] Set up testcontainers-go with pgvector/pgvector:pg16 + Redis -- `pkg/testutil/containers.go`
-- [x] Write initial schema migration (21 tables, HNSW indexes, FTS config, GENERATED columns) -- `migrations/000001_initial.up.sql`
-- [x] Integration tests for schema correctness (9 sub-tests: tables, extensions, FTS config, indexes, constraints, GENERATED columns, idempotency) -- `pkg/db/migration_test.go`
-- [x] sqlc setup: sqlc.yaml, 000002 migration (api_keys/totp_secrets/track_lyrics/token_version), SQL query files for library/user/playback stores, helpers (TextPtr/Int4Ptr/ErrNotFound), 20 store integration tests -- `internal/{library,user,playback}/store/`
-- [x] Set up golangci-lint with import boundaries (depguard), complexity limits (funlen/gocognit), correctness linters -- `.golangci.yml`
-- [x] CI: lint job (golangci-lint + structure check) + test job (race detector, testcontainers) -- `.github/workflows/ci.yml`
-- [x] Structure enforcement script: file length limits (400/600), api/v1 80-line limit, junk-drawer name detection -- `scripts/check-structure.sh`
-- [x] GitHub repo created (`Chevron7Locked/kima-go`), branch ruleset requiring Lint + Test status checks
+### v1 -- Production Readiness (completed 2026-03-16)
+
+**Tier 1 -- Critical**
+- [x] GET /playlists OOM: replace deep Prisma include with _count + 4-item mosaic select -- `backend/src/routes/playlists.ts`
+- [x] Playlist mosaic coverArt->coverUrl field name fix -- `frontend/app/playlists/page.tsx`
+- [x] recently-listened DoS: cap limit param to max 100 -- `backend/src/routes/library.ts`
+- [x] N+1 Deezer API calls: pLimit(3) on 3 Promise.all loops -- `backend/src/routes/library.ts`
+- [x] SSRF in systemSettings: validateUrlForFetch on test-lidarr, lidarr-profiles, test-audiobookshelf -- `backend/src/routes/systemSettings.ts`
+- [x] requireAdmin double-auth: remove redundant requireAuth before requireAdmin -- `backend/src/routes/systemSettings.ts`
+- [x] webhookEventStore.test.ts: rewrite as mocked unit test (was hitting real PG in CI) -- `backend/src/services/__tests__/`
+
+**Tier 2+3 -- High**
+- [x] UMAP nNeighbors: sqrt scaling (min 5, max 50) replacing hard cap of 15 -- `backend/src/services/umapProjection.ts`
+- [x] Circular layout cache TTL: 1h instead of 24h -- `backend/src/services/umapProjection.ts`
+- [x] Timer cleanup on unmount: saveTimerRef + searchTimerRef -- `frontend/features/vibe/VibeMap.tsx`, `frontend/app/vibe/page.tsx`
+
+---
+
+### Kima 2.0 -- Phase 0: Foundation (completed 2026-03-15)
+- [x] Initialize Go module with directory structure from requirements doc Section 1.2
+- [x] Set up pgx v5 connection pool with pgxpool and health check
+- [x] Set up Redis connection with go-redis/v9
+- [x] Configure caarlos0/env/v11 for environment-based config
+- [x] Set up slog structured logging
+- [x] Set up golang-migrate migration runner with embedded SQL files
+- [x] Set up HTTP server with graceful shutdown
+- [x] Set up Prometheus metrics endpoint
+- [x] Configure rate limiting middleware
+- [x] Configure CORS middleware
+- [x] Implement health check endpoints (/health, /health/ready)
+- [x] Set up testcontainers-go with pgvector/pgvector:pg16 + Redis
+- [x] Write initial schema migration (21 tables, HNSW indexes, FTS config, GENERATED columns)
+- [x] Integration tests for schema correctness (9 sub-tests)
+- [x] sqlc setup: sqlc.yaml, 000002 migration, SQL query files, helpers, 20 store integration tests
+- [x] Set up golangci-lint with import boundaries
+- [x] CI: lint + test jobs (race detector, testcontainers)
+- [x] Structure enforcement script
+- [x] GitHub repo created (Chevron7Locked/kima-go), branch ruleset
+
+---
+
+### Kima 2.0 -- Phase 1 Backlog (NOT in progress -- deferred)
+
+**Auth & Users**
+- [ ] User auth service: JWT (access+refresh with token versioning), Redis session, API key
+- [ ] 2FA service: TOTP enrollment + verification, 10 hashed recovery codes
+- [ ] User management: register (first-user admin flow), login, password change, settings CRUD
+- [ ] Auth middleware chain: Session -> API Key -> JWT -> query param token
+- [ ] User API handlers: register, login, refresh, 2FA, settings, admin user management
+
+**Library Scanner**
+- [ ] Metadata extraction service: dhowden/tag + ffprobe fallback, all formats
+- [ ] Library scanner: goroutine pool, incremental mtime tracking, per-directory progress via SSE
+- [ ] Artist/album matching: MBID-first, Unicode normalization + fuzzy threshold, VA detection
+- [ ] Cover art pipeline: Embedded -> local folder (cover.jpg)
+
+**Library API**
+- [ ] Library browsing API: artists/albums/tracks/genres (paginated, sortable, filterable)
+- [ ] Library maintenance API: delete cascade, orphan detection, storage stats
+
+**Playback & Streaming**
+- [ ] Audio streaming: HTTP range requests, MIME detection, per-user concurrent limit
+- [ ] Transcoding: FFmpeg subprocess, quality presets, disk cache with LRU eviction
+- [ ] Playback state: Redis-backed per-user state, delta updates
+- [ ] Play tracking: play log (min 30s threshold, skip detection), play history API
+- [ ] Lyrics service: serve embedded lyrics, LRCLib external fetch fallback
+
+**Subsonic**
+- [ ] Subsonic core: XML/JSON response encoder, auth middleware
+- [ ] Subsonic library + search endpoints
+- [ ] Subsonic playback + system endpoints
+- [ ] Subsonic playlists + user endpoints

@@ -1,66 +1,60 @@
-# Kima 2.0 -- Current State
+# Kima -- Current State
 
-**Updated:** 2026-03-15
-**Current Phase:** Phase 1 -- Core Library
-**Phase Status:** Active, sqlc setup complete, auth service is next
+**Updated:** 2026-03-16
+**Current Focus:** v1 maintenance (production readiness pass)
+**Branch:** main
 
 ## Active Task
 
-None -- sqlc task done, waiting to begin auth service.
+None -- production readiness pass complete. Waiting for next v1 task.
 
-## Last Session (2026-03-15)
+## Last Session (2026-03-16)
 
-Phase 0 completed and Phase 1 Task 1 (sqlc setup) completed:
+Production readiness pass across v1 codebase. Four commits:
 
-Phase 0 highlights:
-- Full Go module scaffolding, pgxpool + go-redis + caarlos0/env + slog wired
-- golang-migrate with embedded SQL, 21-table initial schema migration
-- testcontainers (pgvector:pg16 + redis:7-alpine), golangci-lint, CI, structure enforcement
-- GitHub repo live at `Chevron7Locked/kima-go`
+**Tier 1 -- Critical (OOM, DoS, SSRF, auth, tests):**
+- `GET /playlists` OOM: replaced deep 5-level Prisma include with `_count` + 4-item mosaic select. Pre-existing `coverArt`/`coverUrl` field mismatch fixed as bonus.
+- `recently-listened` DoS: capped `limit` to max 100
+- N+1 Deezer API calls: wrapped 3 separate `Promise.all` loops with `pLimit(3)` in library.ts
+- SSRF in systemSettings: applied `validateUrlForFetch` to `test-lidarr`, `lidarr-profiles`, `test-audiobookshelf`
+- `requireAdmin` double-auth in systemSettings: removed redundant `router.use(requireAuth)` before `router.use(requireAdmin)` (requireAdmin already calls authenticateRequest internally)
+- `webhookEventStore.test.ts`: was hitting real PostgreSQL in CI, rewrote as mocked unit test -- 10/10 passing
 
-Phase 1 Task 1 -- sqlc setup:
-- `sqlc.yaml`: three sql sections (library/user/playback), pgx/v5, emit_interface, UUID overrides
-- `migrations/000002_phase1.up.sql`: token_version on users, UNIQUE(file_path) on tracks, api_keys, totp_secrets, track_lyrics tables
-- SQL query files for all three store packages (library/user/playback)
-- Hand-written helpers: TextPtr/Int4Ptr/ErrNotFound/IsNotFound in each store package
-- 20 store integration tests across 3 packages -- all passing
-- `pkg/db/migration_test.go`: 5 new sub-tests for migration 000002 (tables, token_version default, api_keys unique/cascade, file_path unique)
-- `pkg/testutil/containers.go`: retryMigrate() with exponential backoff fixes "connection reset by peer" race on pgvector image startup
+**Tier 2+3 -- High (UMAP, cache TTL, timer cleanup):**
+- UMAP `nNeighbors` scaling: replaced hard cap of 15 with `Math.min(50, Math.max(5, Math.round(Math.sqrt(rows.length))))` -- proportional local/global structure balance
+- Circular layout cache TTL: reduced from 24h to 1h so UMAP upgrade happens naturally after enrichment adds more tracks
+- Timer cleanup on unmount: added `useEffect` cleanup for `saveTimerRef` (VibeMap.tsx) and `searchTimerRef` (vibe/page.tsx)
+
+**Tier 4 -- Medium (already done in Tier 1 -- double-auth was part of systemSettings fix):**
+- Separate commit `70cba5b` for systemSettings double-auth removal
 
 ## Next Session Goal
 
-Phase 1 Task 2: User auth service -- JWT (access+refresh with token versioning), Redis session storage, API key authentication -- `internal/user/auth.go`
+TBD -- user to direct next v1 task.
 
 ## Open Questions
 
-- None blocking Phase 1 start.
-- Radio mode (Section 7.2.6) deferred -- requires artist relationship graph from Phase 3. Confirm when Phase 3 is planned.
-- External cover art (Deezer/MusicBrainz CAA/LastFM fallbacks) deferred to Phase 4.
+- None blocking.
+- Mixes system rework (memory: project_mixes_rework.md) -- 35+ auto-generated mixes disconnected from CLAP/vibe system. Candidate for next v1 work.
 
 ## Recent Decisions
 
-- **Go 1.26.1**: installed at `/home/chevron7/go126/`. Use full path + explicit GOROOT/GOPATH in shell commands since PATH doesn't persist between tool calls.
-- **chi router**: chosen over stdlib 1.22+ mux for middleware ecosystem. `go-chi/chi` v5.
-- **Consumer-defined interfaces**: health handler uses `DBPinger`/`CachePinger` interfaces, not concrete types. Same pattern used throughout for testability.
-- **cache.Pinger wrapper**: `pkg/cache` exports `Pinger` struct wrapping `*redis.Client` to satisfy the `CachePinger` interface without the health package importing Redis.
-- **Migrations package**: `migrations/` at project root with `//go:embed *.sql` -- cannot embed from outside package directory, so dedicated package exports `var FS embed.FS`.
-- **Test philosophy**: tests must fail if the behavior they describe is wrong. No smoke tests, no tests that pass against stubs. Error paths tested via mock interfaces.
-- **Structural enforcement**: custom `scripts/check-structure.sh` for file length limits (400/600 lines), api/v1 80-line cap, junk-drawer name detection. Not expressible in golangci-lint.
+- `validateUrlForFetch` from `backend/src/utils/ssrf.ts` is the canonical SSRF defense -- apply to all endpoints that accept user-supplied URLs
+- `requireAdmin` already calls `authenticateRequest` internally -- never combine `requireAuth` + `requireAdmin` on the same router
+- `pLimit(3)` is the standard concurrency cap for external API calls (already installed, CJS compatible)
+- UMAP `nNeighbors` scales with sqrt(library size), capped 5-50
 
 ## Key Files
 
-- Design docs: `docs/plans/2026-03-1[3-4]-*-design.md`
-- Requirements: `docs/plans/2026-03-12-kima-2.0-go-rewrite-requirements.md`
-- KANBAN: `planning/KANBAN.md` -- Phase 1 backlog (21 tasks)
+- v1 backend: `backend/src/`
+- v1 frontend: `frontend/`
+- Planning: `planning/KANBAN.md`, `planning/decisions/`
 - Memory: `/home/chevron7/.claude/projects/-mnt-storage-Projects-lidify/memory/MEMORY.md`
-- Go binary: `/home/chevron7/go126/bin/go` (GOROOT=/home/chevron7/go126, GOPATH=/home/chevron7/gopath)
 
 ## What NOT to Touch
 
-- Frontend SvelteKit migration -- separate concern, local agent handling
-- Vibe page redesign -- actively being revised (frontend)
-- OurSpace -- Phase 6, deferred
-- Live site TypeScript code -- scoring fix doc exists, agents can patch independently
+- Kima 2.0 Go rewrite (`kima/`) -- separate concern, deferred for now
+- OurSpace -- deferred
 
 ---
 
@@ -71,38 +65,27 @@ Phase 1 Task 2: User auth service -- JWT (access+refresh with token versioning),
 ### Session Start
 1. Read this file (`planning/HANDOFF.md`) first. It tells you the current state.
 2. Read `planning/KANBAN.md` for the task board. The top Backlog item is the next task.
-3. Read the relevant design doc for the active phase (see `docs/STATUS.md` for the index).
-4. Do NOT start implementing until the user confirms the approach.
+3. Do NOT start implementing until the user confirms the approach.
 
 ### During Work
-5. Work on one task at a time (WIP limit of 1 in KANBAN).
-6. If implementation diverges from a design doc, update the design doc in the same commit.
-7. If you make a non-obvious architectural decision, write a `planning/decisions/DEC-NNN.md`.
+4. Work on one task at a time (WIP limit of 1 in KANBAN).
+5. If implementation diverges from a design doc, update the design doc in the same commit.
+6. If you make a non-obvious architectural decision, write a `planning/decisions/DEC-NNN.md`.
 
 ### Session End
 When the user says "update planning files," "wrap up," or the session is ending:
-8. **Update this file** -- rewrite the Active Task, Last Session, Next Session Goal, and Open Questions sections to reflect current state.
-9. **Update KANBAN.md** -- move completed tasks to Done, ensure In Progress and Backlog are accurate.
-10. **Write a session journal** at `planning/sessions/YYYY-MM-DD.md` -- summarize what was done, decisions made, surprises, and next steps.
-11. Commit all planning file updates.
+7. **Update this file** -- rewrite the Active Task, Last Session, Next Session Goal, and Open Questions sections to reflect current state.
+8. **Update KANBAN.md** -- move completed tasks to Done, ensure In Progress and Backlog are accurate.
+9. **Write a session journal** at `planning/sessions/YYYY-MM-DD.md` -- summarize what was done, decisions made, surprises, and next steps.
+10. Commit all planning file updates.
 
 ### Periodic Review
 When the user says "review planning files" or "check planning status":
-12. Check git history against KANBAN -- are Done items actually committed? Are In Progress items reflected in recent commits?
-13. Check `docs/STATUS.md` -- are any "Implementing" docs drifting from what was actually built?
-14. Check phase appetite in `planning/PHASES.md` -- is the active phase on track?
-15. Report findings to the user. Update files as needed.
-
-### Phase Transitions
-When a phase completes:
-16. Mark all phase tasks as Done in KANBAN.
-17. Update PHASES.md -- set status to Complete with date.
-18. Update `docs/STATUS.md` -- design doc status to "Implemented."
-19. Populate the next phase's backlog in KANBAN from the design doc.
-20. Update this file with the new phase context.
+11. Check git history against KANBAN -- are Done items actually committed? Are In Progress items reflected in recent commits?
+12. Report findings to the user. Update files as needed.
 
 ### What Only the Human Does
 - Decides what to work on (backlog ordering)
 - Reviews agent output (quality gate)
-- Notices when something feels off ("this phase is taking too long")
+- Notices when something feels off
 - Says "update planning files" at session end
