@@ -33,7 +33,7 @@ interface PlaylistItem {
     id: string;
     track: {
         album?: {
-            coverArt?: string;
+            coverUrl?: string;
         };
     };
 }
@@ -63,13 +63,13 @@ function PlaylistMosaic({
         if (!items || items.length === 0) return [];
 
         const tracksWithCovers = items.filter(
-            (item) => item.track?.album?.coverArt
+            (item) => item.track?.album?.coverUrl
         );
         if (tracksWithCovers.length === 0) return [];
 
         const coverCounts = new Map<string, number>();
         for (const item of tracksWithCovers) {
-            const cover = item.track.album!.coverArt!;
+            const cover = item.track.album!.coverUrl!;
             coverCounts.set(cover, (coverCounts.get(cover) || 0) + 1);
         }
         const uniqueCovers = Array.from(coverCounts.entries())

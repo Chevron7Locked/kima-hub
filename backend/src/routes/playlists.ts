@@ -57,19 +57,17 @@ router.get("/", async (req, res) => {
                         username: true,
                     },
                 },
+                _count: {
+                    select: { items: true },
+                },
                 items: {
-                    include: {
+                    take: 4,
+                    select: {
+                        id: true,
                         track: {
-                            include: {
+                            select: {
                                 album: {
-                                    include: {
-                                        artist: {
-                                            select: {
-                                                id: true,
-                                                name: true,
-                                            },
-                                        },
-                                    },
+                                    select: { coverUrl: true },
                                 },
                             },
                         },
@@ -81,7 +79,7 @@ router.get("/", async (req, res) => {
 
         const playlistsWithCounts = playlists.map((playlist) => ({
             ...playlist,
-            trackCount: playlist.items.length,
+            trackCount: playlist._count.items,
             isOwner: playlist.userId === userId,
             isHidden: hiddenPlaylistIds.has(playlist.id),
         }));

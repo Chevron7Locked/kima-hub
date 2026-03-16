@@ -47,6 +47,7 @@ import {
   getDecadeFromYear,
 } from "../utils/dateFilters";
 import { shuffleArray } from "../utils/shuffle";
+import pLimit from "p-limit";
 import {
   resizeImageBuffer,
   getResizedImagePath,
@@ -196,7 +197,7 @@ router.use((req, res, next) => {
   return apiLimiter(req, res, next);
 });
 
-router.post("/scan", async (req, res) => {
+router.post("/scan", requireAdmin, async (req, res) => {
   try {
     if (!config.music.musicPath) {
       return res.status(500).json({
@@ -258,7 +259,7 @@ router.get("/scan/status/:jobId", async (req, res) => {
 });
 
 // POST /library/organize - Manually trigger organization script
-router.post("/organize", async (req, res) => {
+router.post("/organize", requireAdmin, async (req, res) => {
   try {
     // Run in background
     organizeSingles().catch((err) => {
@@ -277,7 +278,7 @@ router.get("/recently-listened", async (req, res) => {
   try {
     const { limit = "10" } = req.query;
     const userId = req.user!.id;
-    const limitNum = parseInt(limit as string, 10);
+    const limitNum = Math.min(parseInt(limit as string, 10) || 10, 100);
 
     const [recentPlays, inProgressAudiobooks, inProgressPodcasts] =
       await Promise.all([
@@ -1267,8 +1268,9 @@ router.get("/artists/:id", async (req, res) => {
       );
 
       // Fetch images in parallel from Deezer (cached in Redis)
+      const deezerLimit = pLimit(3);
       const similarWithImages = await Promise.all(
-        enrichedSimilar.slice(0, 10).map(async (s) => {
+        enrichedSimilar.slice(0, 10).map((s) => deezerLimit(async () => {
           // Check if this artist is in our library
           const libraryArtist =
             (s.mbid && libraryByMbid.get(s.mbid)) ||
@@ -1305,7 +1307,7 @@ router.get("/artists/:id", async (req, res) => {
             weight: s.match,
             inLibrary: !!libraryArtist,
           };
-        }),
+        })),
       );
 
       similarArtists = similarWithImages;
@@ -1379,8 +1381,9 @@ router.get("/artists/:id", async (req, res) => {
           );
 
           // Fetch images in parallel (Deezer only - fastest source)
+          const deezerLimit2 = pLimit(3);
           const similarWithImages = await Promise.all(
-            lastfmSimilar.map(async (s: any) => {
+            lastfmSimilar.map((s: any) => deezerLimit2(async () => {
               const libraryArtist =
                 (s.mbid && libraryByMbid.get(s.mbid)) ||
                 libraryByName.get(s.name.toLowerCase());
@@ -1405,7 +1408,7 @@ router.get("/artists/:id", async (req, res) => {
                 weight: s.match,
                 inLibrary: !!libraryArtist,
               };
-            }),
+            })),
           );
 
           similarArtists = similarWithImages;
@@ -1585,8 +1588,9 @@ router.get("/albums/:id", async (req, res) => {
       );
 
       if (lidarrMissingTracks.length > 0) {
+        const previewLimit = pLimit(3);
         missingTracks = await Promise.all(
-          lidarrMissingTracks.map(async (track) => {
+          lidarrMissingTracks.map((track) => previewLimit(async () => {
             let previewUrl: string | null = null;
             if (artistData?.name) {
               previewUrl = await deezerService.getTrackPreview(
@@ -1599,7 +1603,7 @@ router.get("/albums/:id", async (req, res) => {
               trackNumber: track.trackNumber,
               previewUrl,
             };
-          })
+          }))
         );
       }
     }
