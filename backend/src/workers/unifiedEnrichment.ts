@@ -728,13 +728,21 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                 },
             });
 
-            // Pre-compute vibe map projection so it's cached before first page visit
-            precomputeProjection().catch(e =>
-                logger.error("[Enrichment] Vibe map pre-compute failed:", e)
-            );
+            // Read state once -- used to gate both pre-compute and notification below.
+            const stateBeforeNotify = await enrichmentStateService.getState();
+
+            // Pre-compute vibe map projection so it's cached before first page visit.
+            // Gated on completionNotificationSent: once that flag is set the library is
+            // stable and the projection is already cached.  Without this guard,
+            // precomputeProjection() fires every 5-second tick, deletes the cache keys
+            // before UMAP finishes, and the cache is never stable.
+            if (!stateBeforeNotify?.completionNotificationSent) {
+                precomputeProjection().catch(e =>
+                    logger.error("[Enrichment] Vibe map pre-compute failed:", e)
+                );
+            }
 
             // Clear mixes cache again when fully complete (audio analysis done)
-            const stateBeforeNotify = await enrichmentStateService.getState();
             if (!stateBeforeNotify?.fullCacheCleared) {
                 try {
                     const redisInstance = getRedis();
@@ -762,8 +770,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                 }
             }
 
-            const state = await enrichmentStateService.getState();
-            if (!state?.completionNotificationSent) {
+            if (!stateBeforeNotify?.completionNotificationSent) {
                 try {
                     const { notificationService } = await import("../services/notificationService");
                     const users = await prisma.user.findMany({ select: { id: true } });
