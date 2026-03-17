@@ -1,6 +1,8 @@
 import { useCallback, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
+import { queryKeys } from "@/hooks/useQueries";
 import { Track } from "../types";
 
 // Helper to convert library Track to audio context Track format
@@ -21,6 +23,7 @@ const formatTrackForAudio = (track: Track) => ({
 
 export function useLibraryActions() {
     const { playTracks, addToQueue } = useAudioControls();
+    const queryClient = useQueryClient();
 
     const playArtist = useCallback(async (artistId: string) => {
         try {
@@ -94,10 +97,12 @@ export function useLibraryActions() {
     const addTrackToPlaylist = useCallback(async (playlistId: string, trackId: string) => {
         try {
             await api.addTrackToPlaylist(playlistId, trackId);
+            queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.playlist(playlistId) });
         } catch (error) {
             console.error("Error adding track to playlist:", error);
         }
-    }, []);
+    }, [queryClient]);
 
     const deleteTrack = useCallback(async (id: string): Promise<void> => {
         try {

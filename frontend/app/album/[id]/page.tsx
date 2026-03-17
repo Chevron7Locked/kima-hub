@@ -2,10 +2,12 @@
 
 import { use, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { useImageColor } from "@/hooks/useImageColor";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/hooks/useQueries";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 import { useDownloadContext } from "@/lib/download-context";
 
@@ -30,6 +32,7 @@ interface AlbumPageProps {
 export default function AlbumPage({ params }: AlbumPageProps) {
     const { id } = use(params);
     const router = useRouter();
+    const queryClient = useQueryClient();
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();
@@ -196,6 +199,8 @@ export default function AlbumPage({ params }: AlbumPageProps) {
             for (const trackId of pendingTrackIds) {
                 await api.addTrackToPlaylist(playlistId, trackId);
             }
+            queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.playlist(playlistId) });
             setPendingTrackIds([]);
             setIsBulkAdd(false);
             setShowPlaylistSelector(false);
