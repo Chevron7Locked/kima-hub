@@ -5,6 +5,20 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-03-17
+
+### Fixed
+
+- **Playlist track count not updating live**: Adding a track to a playlist from the album page or library (collection) no longer requires a page refresh. The React Query cache is now invalidated at all three `addTrackToPlaylist` call sites (`album/[id]/page.tsx`, `useLibraryActions`, `useAddToPlaylistMutation`). Closes #157.
+- **Settings: stale restart-required modal removed**: The "Restart Required" modal was a remnant of an old architecture -- services reinitialize live when settings are saved. The modal and all supporting state (`changedServices`, `originalSettings`) have been removed. Closes #158.
+- **YouTube / YouTube Music playlist import broken**: `/api/browse/playlists/parse` now handles `youtube.com` and `music.youtube.com` URLs in addition to the short `youtu.be` form. Closes #155.
+- **Lidarr MBID mismatch (album MBID sent to artist endpoint)**: `verifyArtistName` was incorrectly receiving the album MBID from Lidarr search results and passing it to the MusicBrainz `/artist/{id}` endpoint, causing 404s on every verification. Closes #156.
+- **Hardcoded port-3030 in API base URL detection**: `getApiBaseUrl` no longer hard-codes port 3030 as the "frontend" port. It now returns a relative URL by default, making Kima work behind any reverse proxy or non-standard port mapping. Closes #154.
+
+### Changed
+
+- Dead code removed: unused `setIsBulkAdd` / `setIsAddingToPlaylist` state on album page; unused `useSearchParams()` call in settings page.
+
 ## [1.7.0] - 2026-03-16
 
 ### Added

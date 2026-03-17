@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useSettingsData } from "@/features/settings/hooks/useSettingsData";
 import { useSystemSettings } from "@/features/settings/hooks/useSystemSettings";
@@ -44,7 +43,6 @@ const sidebarItems: SidebarItem[] = [
 
 export default function SettingsPage() {
     const { isAuthenticated, isLoading: authLoading, user } = useAuth();
-    useSearchParams();
     const [isSaving, setIsSaving] = useState(false);
     const [testingServices, setTestingServices] = useState<Record<string, boolean>>({});
     const saveStatus = useInlineStatus();

@@ -352,7 +352,7 @@ Production-ready releases. Updated when new stable versions are released.
 ```bash
 docker pull chevron7locked/kima:latest
 # or specific version
-docker pull chevron7locked/kima:v1.7.0
+docker pull chevron7locked/kima:v1.7.1
 ```
 
 ### 🔴 Nightly (Development)

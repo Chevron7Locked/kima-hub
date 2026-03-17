@@ -41,8 +41,6 @@ export default function AlbumPage({ params }: AlbumPageProps) {
     // State
     const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
     const [pendingTrackIds, setPendingTrackIds] = useState<string[]>([]);
-    const [, setIsBulkAdd] = useState(false);
-    const [, setIsAddingToPlaylist] = useState(false);
 
     // Custom hooks
     const { album, source, loading, reloadAlbum } = useAlbumData(id);
@@ -172,10 +170,9 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         playAlbum(album, ownedTrackIndex >= 0 ? ownedTrackIndex : index);
     };
 
-    const openPlaylistSelector = (trackIds: string[], bulk = false) => {
+    const openPlaylistSelector = (trackIds: string[]) => {
         if (!trackIds.length) return;
         setPendingTrackIds(trackIds);
-        setIsBulkAdd(bulk);
         setShowPlaylistSelector(true);
     };
 
@@ -184,7 +181,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         const trackIds = album.tracks
             .map((track: AlbumTrack) => track.id)
             .filter(Boolean);
-        openPlaylistSelector(trackIds, true);
+        openPlaylistSelector(trackIds);
     };
 
     const handleAddToPlaylist = (trackId: string) => {
@@ -195,19 +192,15 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         if (!pendingTrackIds.length) return;
 
         try {
-            setIsAddingToPlaylist(true);
             for (const trackId of pendingTrackIds) {
                 await api.addTrackToPlaylist(playlistId, trackId);
             }
             queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
             queryClient.invalidateQueries({ queryKey: queryKeys.playlist(playlistId) });
             setPendingTrackIds([]);
-            setIsBulkAdd(false);
             setShowPlaylistSelector(false);
         } catch (error) {
             console.error("Failed to add track(s) to playlist:", error);
-        } finally {
-            setIsAddingToPlaylist(false);
         }
     };
 
@@ -299,7 +292,6 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                 onClose={() => {
                     setShowPlaylistSelector(false);
                     setPendingTrackIds([]);
-                    setIsBulkAdd(false);
                 }}
                 onSelectPlaylist={handlePlaylistSelected}
             />
