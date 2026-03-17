@@ -171,6 +171,7 @@ export function Sidebar() {
                             alt="Kima Logo"
                             width={48}
                             height={48}
+                            priority
                             className="flex-shrink-0"
                         />
                         <div className="flex-1 min-w-0">

@@ -271,6 +271,7 @@ export function TopBar() {
                                 alt="Kima"
                                 width={32}
                                 height={32}
+                                priority
                                 className="group-hover:scale-105 transition-transform"
                             />
                         </Link>

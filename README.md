@@ -10,18 +10,6 @@ Kima is built for music lovers who want the convenience of streaming services wi
 
 ![Kima Home Screen](assets/screenshots/desktop-home.png)
 
-> **\* Upgrading from Lidify?** Kima v1.5.0+ renamed the internal database from `lidify` to `kima`. If you upgraded from a Lidify install and v1.5.0 ran before this fix was available, the container created an empty `kima` database while your data remained in the old `lidify` database. **Your data is safe.** Update to v1.5.1+ and restart -- the migration is now automatic. If you already started v1.5.0 and see an empty library, run these commands to fix it:
->
-> ```bash
-> docker exec -it kima-hub supervisorctl stop backend frontend audio-analyzer audio-analyzer-clap
-> docker exec -it kima-hub gosu postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'kima' AND pid <> pg_backend_pid();"
-> docker exec -it kima-hub gosu postgres psql -c "DROP DATABASE kima;"
-> docker exec -it kima-hub gosu postgres psql -c "ALTER DATABASE lidify RENAME TO kima;"
-> docker exec -it kima-hub gosu postgres psql -c "ALTER USER lidify RENAME TO kima;"
-> docker exec -it kima-hub gosu postgres psql -c "ALTER USER kima WITH PASSWORD 'kima';"
-> docker restart kima-hub
-> ```
-
 ---
 
 ## A Note on Native Apps
@@ -45,6 +33,7 @@ Thanks for your patience while I work through this.
 -   [Integrations](#integrations)
     -   [Native Apps (Subsonic)](#native-apps-subsonic)
 -   [Using Kima](#using-kima)
+    -   [Using the Vibe System](#using-the-vibe-system)
 -   [Administration](#administration)
 -   [Architecture](#architecture)
 -   [Roadmap](#roadmap)
@@ -112,18 +101,41 @@ Thanks for your patience while I work through this.
 
 ### The Vibe System
 
-Kima's standout feature for music discovery. While playing any track, activate vibe mode to find similar music in your library.
+The centerpiece of music discovery in Kima. Your entire library is analyzed by a CLAP neural network and projected into a 2D/3D space where similar-sounding tracks cluster together. The result is a living map of your music collection you can explore, search, and navigate.
 
--   **Vibe Button** - Tap while playing any track to activate vibe mode
--   **Audio Analysis** - Real-time radar chart showing Energy, Mood, Groove, and Tempo
--   **Keep The Vibe Going** - Automatically queues tracks that match your current vibe
--   **Match Scoring** - See how well each track matches with percentage scores
--   **ML Mood Detection** - Tracks are classified across 7 moods: Happy, Sad, Relaxed, Aggressive, Party, Acoustic, Electronic
--   **Mood Mixer** - Create custom playlists by adjusting mood sliders or using presets like Workout, Chill, or Focus
+**Music Map** -- the default 2D view. Every track in your library is a point on the map, colored by mood cluster. Zoom and pan to explore. Click any track to inspect it; double-click to play it immediately.
 
 <p align="center">
-  <img src="assets/screenshots/vibe-overlay.png" alt="Vibe Overlay" width="800">
+  <img src="assets/screenshots/vibe-map.png" alt="Vibe Music Map" width="800">
 </p>
+
+**Galaxy View** -- the same data rendered as a 3D star field. Orbit, zoom, and fly through your library. Switch between Map and Galaxy with the toggle in the top-left corner.
+
+<p align="center">
+  <img src="assets/screenshots/vibe-galaxy.png" alt="Vibe Galaxy" width="800">
+</p>
+
+**Drift** -- pick any two tracks as start and end points and Kima plots a smooth path through the audio space between them. The resulting queue travels gradually from one sonic neighborhood to the other.
+
+<p align="center">
+  <img src="assets/screenshots/vibe-drift.png" alt="Vibe Drift -- Song Path" width="800">
+</p>
+
+**Blend** -- add multiple tracks and let Kima find the centroid in audio space. The result is a queue of tracks that blend all of the inputs together into something new.
+
+<p align="center">
+  <img src="assets/screenshots/vibe-blend.png" alt="Vibe Blend" width="800">
+</p>
+
+**Additional features:**
+
+-   **Text search** - Type any descriptor ("loud and fast", "rainy day piano") to highlight matching tracks on the map
+-   **Right-click context menu** - Vibe from any track (similar-track queue), find similar (highlight on map), or start a Drift
+-   **Labels** - Toggle track/artist labels on the map
+-   **Keep The Vibe Going** - From the player, activate vibe mode to continuously queue tracks that match what's playing
+
+**Mood Mixer** -- pick a mood preset (Happy, Energetic, Chill, Focus, Party, Acoustic, Melancholy, Sad, Aggressive) to instantly generate a playlist calibrated to that sound. Moods are derived from audio analysis of your actual library, not genre tags.
+
 <p align="center">
   <img src="assets/screenshots/mood-mixer.png" alt="Mood Mixer" width="800">
 </p>
@@ -150,7 +162,7 @@ Import playlists from Spotify, Deezer, and YouTube, or browse and discover new m
 ### Native Apps
 
 -   **OpenSubsonic API** - Use any Subsonic-compatible client (Symfonium, DSub, Ultrasonic, Finamp, etc.) to stream your Kima library
--   **Standard Subsonic auth** - MD5 token auth supported; enter your API token as the password — works with Amperfy, Symfonium, DSub, and any standard Subsonic client
+-   **Standard Subsonic auth** - MD5 token auth supported; enter your API token as the password -- works with Amperfy, Symfonium, DSub, and any standard Subsonic client
 -   **Per-client tokens** - Generate named API tokens in Settings > Native Apps; revoke them individually when a device is lost or replaced
 -   **Enrichment-aware** - Genres and artist biographies exposed to clients come from Last.fm enrichment, not just file tags
 -   **Lyrics, bookmarks, and play queue** - getLyrics, bookmarks, and savePlayQueue/getPlayQueue for cross-device resume
@@ -665,15 +677,15 @@ Kima implements the [OpenSubsonic](https://opensubsonic.netlify.app/) REST API, 
 
 1. Go to Settings > Native Apps in Kima
 2. Enter a client name (e.g. "Amperfy on iPhone") and click **Generate Token**
-3. Copy and save the token — it is only shown once
+3. Copy and save the token -- it is only shown once
 4. In your client app, configure:
-   - **Server URL** — your Kima server address (e.g. `http://192.168.1.10:3030`)
-   - **Username** — your Kima username
-   - **Password** — the token you just generated
+   - **Server URL** -- your Kima server address (e.g. `http://192.168.1.10:3030`)
+   - **Username** -- your Kima username
+   - **Password** -- the token you just generated
 
 **Notes:**
 
-- Standard MD5 token auth is supported — clients that hash their password automatically will work correctly when you enter an API token as the password
+- Standard MD5 token auth is supported -- clients that hash their password automatically will work correctly when you enter an API token as the password
 - Each client should have its own token so you can revoke access per device
 - Genres and biographies surfaced to clients come from Last.fm enrichment, not just file tags
 - DISCOVER-location albums are excluded from all library views
@@ -682,17 +694,17 @@ Kima implements the [OpenSubsonic](https://opensubsonic.netlify.app/) REST API, 
 
 **Subsonic route module layout (backend):**
 
-- `backend/src/routes/subsonic/index.ts` — top-level router composition, auth/rate-limit, system endpoints
-- `library.ts` — artists/albums/tracks browsing and directory traversal
-- `search.ts` — `search`/`search2`/`search3`, genre/top/similar discovery
-- `playback.ts` — stream/download/cover-art/scrobble/now-playing plus `hls`/`getTranscodeStream`
-- `playlists.ts` — playlist list/read/create/update/delete
-- `queue.ts` — play queue get/save (ID-based and index-based)
-- `starred.ts` — star/unstar, starred lists, `setRating`
-- `artistInfo.ts` / `lyrics.ts` — artist metadata and lyric endpoints
-- `userManagement.ts` / `profile.ts` — user admin endpoints and `getUser`
-- `podcasts.ts` — podcast subscription and episode endpoints
-- `compat.ts` — compatibility/stub endpoints for clients that expect optional APIs
+- `backend/src/routes/subsonic/index.ts` -- top-level router composition, auth/rate-limit, system endpoints
+- `library.ts` -- artists/albums/tracks browsing and directory traversal
+- `search.ts` -- `search`/`search2`/`search3`, genre/top/similar discovery
+- `playback.ts` -- stream/download/cover-art/scrobble/now-playing plus `hls`/`getTranscodeStream`
+- `playlists.ts` -- playlist list/read/create/update/delete
+- `queue.ts` -- play queue get/save (ID-based and index-based)
+- `starred.ts` -- star/unstar, starred lists, `setRating`
+- `artistInfo.ts` / `lyrics.ts` -- artist metadata and lyric endpoints
+- `userManagement.ts` / `profile.ts` -- user admin endpoints and `getUser`
+- `podcasts.ts` -- podcast subscription and episode endpoints
+- `compat.ts` -- compatibility/stub endpoints for clients that expect optional APIs
 
 **When adding a Subsonic endpoint:**
 
@@ -764,18 +776,36 @@ Your listening progress is saved automatically, so you can pause on one device a
 
 ### Using the Vibe System
 
-1. Start playing any track from your library
-2. Click the **vibe button** (waveform icon) in the player controls
-3. Kima analyzes the track and finds matching songs based on energy, mood, and tempo
-4. Matching tracks are automatically queued - just keep listening
-5. The vibe overlay shows a radar chart comparing your current track to the source
+**Exploring the map:**
 
-**Using the Mood Mixer:**
+1. Navigate to **Vibe** in the sidebar
+2. Your library loads as a 2D music map -- similar-sounding tracks cluster together
+3. Click any point to inspect the track; double-click to play it
+4. Switch to **Galaxy** view for a 3D star-field perspective
+5. Use the **Search** bar to highlight tracks matching a text description
 
-1. Open the Mood Mixer from the home screen or player
-2. Choose a quick mood preset (Happy, Energetic, Chill, Focus, Workout) or create a custom mix
-3. Adjust sliders for happiness, energy, danceability, and tempo
-4. Kima generates a playlist of matching tracks from your library
+**Drift -- journey between two tracks:**
+
+1. Click **Drift** in the toolbar
+2. Search for and select a start track, then an end track
+3. Click **Generate Path** -- Kima queues a smooth sonic journey between them
+
+**Blend -- find the space between multiple tracks:**
+
+1. Click **Blend** in the toolbar
+2. Add tracks you want to blend together
+3. Kima finds the centroid in audio space and queues tracks from that neighborhood
+
+**Keep The Vibe Going (from the player):**
+
+1. Start playing any track
+2. Right-click it on the vibe map and select **Vibe** to queue similar tracks continuously
+
+**Mood Mixer:**
+
+1. On the home screen, click **Mood Mixer** next to the Made For You section
+2. Select a mood preset -- Kima instantly generates a playlist from your library calibrated to that mood
+3. Each preset count shows how many tracks in your library match that mood
 
 ### Importing Playlists
 

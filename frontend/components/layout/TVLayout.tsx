@@ -213,7 +213,7 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
             {/* Nav */}
             <header className="tv-nav">
                 <Link href="/" className="tv-logo">
-                    <Image src="/assets/images/kima.webp" alt="Kima" width={24} height={24} />
+                    <Image src="/assets/images/kima.webp" alt="Kima" width={24} height={24} priority />
                     <span>Kima</span>
                 </Link>
 

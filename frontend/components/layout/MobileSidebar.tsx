@@ -99,6 +99,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             alt="Kima"
                             width={32}
                             height={32}
+                            priority
                             className="flex-shrink-0"
                         />
                         <span className="text-lg font-bold text-white tracking-tight">

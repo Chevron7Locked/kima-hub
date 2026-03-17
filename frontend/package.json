@@ -43,8 +43,7 @@
     "qrcode.react": "^4.2.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "recharts": "^3.6.0",
-    "tailwind-merge": "^3.5.0",
+"tailwind-merge": "^3.5.0",
     "three": "^0.183.2"
   },
   "devDependencies": {
