@@ -1,11 +1,13 @@
 name: Nightly Build
 
 on:
-    push:
-        branches: [main]
-        tags-ignore:
-            - "v*" # Don't trigger on version tags - docker-publish handles those
+    schedule:
+        - cron: "0 4 * * *" # 4am UTC daily
     workflow_dispatch:
+
+concurrency:
+    group: docker-nightly
+    cancel-in-progress: true
 
 env:
     IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/kima

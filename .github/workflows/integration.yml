@@ -7,6 +7,10 @@ on:
         branches: [main]
         types: [labeled]
 
+concurrency:
+    group: integration-${{ github.ref }}
+    cancel-in-progress: true
+
 jobs:
     e2e:
         name: E2E Tests
