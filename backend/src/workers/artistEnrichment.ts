@@ -372,7 +372,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
         }
 
         // Fetch covers for all albums belonging to this artist that don't have covers yet
-        await enrichAlbumCovers(artist.id, localHeroUrl);
+        await enrichAlbumCovers(artist.id);
 
         // Cache artist image path in Redis for faster access
         if (localHeroUrl) {
@@ -408,7 +408,6 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
  */
 async function enrichAlbumCovers(
     artistId: string,
-    artistHeroUrl: string | null
 ): Promise<void> {
     try {
         // Find albums for this artist that don't have cover art
