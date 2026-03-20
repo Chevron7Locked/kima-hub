@@ -21,6 +21,7 @@ import {
 } from "../utils/systemSettings";
 import { rateLimiter } from "../services/rateLimiter";
 import { redisClient } from "../utils/redis";
+import { repairBrokenCovers } from "../services/imageBackfill";
 
 const router = Router();
 
@@ -182,6 +183,27 @@ router.post("/reset-audio-analysis", requireAdmin, async (req, res) => {
   } catch (error) {
     logger.error("Reset audio analysis error:", error);
     res.status(500).json({ error: "Failed to reset audio analysis" });
+  }
+});
+
+/**
+ * POST /enrichment/repair-covers
+ * Scan for broken native cover paths and clear them for re-fetch.
+ * Affected artists are reset to pending so enrichment will re-fetch images.
+ * Admin only
+ */
+router.post("/repair-covers", requireAdmin, async (req, res) => {
+  try {
+    const result = await repairBrokenCovers();
+
+    res.json({
+      message: "Cover art repair complete",
+      description: `Cleared ${result.artistsRepaired} artist images and ${result.albumsRepaired} album covers for re-fetch. Run enrichment or library scan to re-download.`,
+      ...result,
+    });
+  } catch (error) {
+    logger.error("Repair covers error:", error);
+    res.status(500).json({ error: "Failed to repair covers" });
   }
 });
 
