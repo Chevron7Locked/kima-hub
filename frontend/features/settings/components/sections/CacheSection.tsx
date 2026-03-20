@@ -748,7 +748,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     <h4 className="text-sm font-medium text-white/50">Audio Analysis</h4>
                                     <p className="text-xs font-mono text-white/30 uppercase tracking-wider">Not available (lite mode)</p>
                                     <p className="text-[10px] font-mono text-white/20 mt-1 uppercase tracking-wider">
-                                        Remove docker-compose.override.yml and restart to enable
+                                        Service not detected -- check setup documentation
                                     </p>
                                 </div>
                             ) : null}
@@ -785,7 +785,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     <h4 className="text-sm font-medium text-white/50">Vibe Similarity</h4>
                                     <p className="text-xs font-mono text-white/30 uppercase tracking-wider">Not available (lite mode)</p>
                                     <p className="text-[10px] font-mono text-white/20 mt-1 uppercase tracking-wider">
-                                        Remove docker-compose.override.yml and restart to enable
+                                        Service not detected -- check setup documentation
                                     </p>
                                 </div>
                             ) : null}
