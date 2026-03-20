@@ -42,31 +42,38 @@ RUN mkdir -p /app/backend /app/frontend /app/audio-analyzer /app/models \
 # ============================================
 WORKDIR /app/audio-analyzer
 
-# Install all Python dependencies in a single layer to minimize image size
-# CPU-only torch/torchaudio: install first via the CPU index so downstream
-# packages (laion-clap, transformers) reuse the already-installed CPU wheels.
-# tensorflow-cpu replaces tensorflow to avoid pulling in CUDA runtime libs.
-# essentia-tensorflow declares a dependency on `tensorflow` (not tensorflow-cpu)
-# so we install it with --no-deps after tensorflow-cpu is already present.
+# Core Python dependencies -- must succeed on all architectures (AMD64 + ARM64)
 RUN pip3 install --no-cache-dir --break-system-packages \
-    torch torchaudio torchvision \
-    --index-url https://download.pytorch.org/whl/cpu \
-    && pip3 install --no-cache-dir --break-system-packages \
-    'tensorflow-cpu>=2.13.0,<2.14.0' \
-    && pip3 install --no-cache-dir --break-system-packages --no-deps \
-    essentia-tensorflow \
-    && pip3 install --no-cache-dir --break-system-packages \
     redis \
     psycopg2-binary \
-    'laion-clap>=1.1.4' \
-    'librosa>=0.10.0' \
-    'transformers>=4.30.0' \
     'pgvector>=0.2.0' \
     'python-dotenv>=1.0.0' \
     'requests>=2.31.0' \
     'bullmq==2.19.5' \
-    'yt-dlp>=2024.12.0' \
-    && pip cache purge \
+    'yt-dlp>=2024.12.0'
+
+# ML dependencies -- torch/torchaudio for CLAP, tensorflow/essentia for MusiCNN
+# CPU-only torch: install first via the CPU index so downstream packages
+# (laion-clap, transformers) reuse the already-installed CPU wheels.
+# tensorflow-cpu + essentia-tensorflow: no Linux ARM64 wheels exist upstream,
+# so MusiCNN audio analysis is unavailable on ARM64. CLAP still works.
+RUN pip3 install --no-cache-dir --break-system-packages \
+    torch torchaudio torchvision \
+    --index-url https://download.pytorch.org/whl/cpu \
+    && pip3 install --no-cache-dir --break-system-packages \
+    'laion-clap>=1.1.4' \
+    'librosa>=0.10.0' \
+    'transformers>=4.30.0'
+
+# tensorflow-cpu + essentia-tensorflow (AMD64 only -- no ARM64 wheels upstream)
+RUN pip3 install --no-cache-dir --break-system-packages \
+    'tensorflow-cpu>=2.13.0,<2.14.0' \
+    && pip3 install --no-cache-dir --break-system-packages --no-deps \
+    essentia-tensorflow \
+    || echo "[ARM64] tensorflow-cpu/essentia-tensorflow unavailable -- MusiCNN analysis disabled"
+
+# Cleanup
+RUN pip cache purge \
     && find /usr -name "*.pyc" -delete \
     && find /usr -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
