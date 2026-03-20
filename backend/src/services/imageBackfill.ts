@@ -297,3 +297,73 @@ export async function backfillAllImages(): Promise<void> {
     await backfillArtistImages();
     await backfillAlbumCovers();
 }
+
+/**
+ * Repair broken native cover paths.
+ * Finds all artists/albums with native: paths pointing to missing files,
+ * clears the URL so enrichment/scan can re-fetch.
+ */
+export async function repairBrokenCovers(): Promise<{
+    artistsRepaired: number;
+    albumsRepaired: number;
+}> {
+    const { nativeFileExists } = await import("./imageStorage");
+
+    logger.info("[ImageRepair] Scanning for broken native cover paths...");
+
+    const artistsWithNative = await prisma.artist.findMany({
+        where: {
+            heroUrl: {
+                not: null,
+                startsWith: "native:",
+            },
+        },
+        select: { id: true, name: true, heroUrl: true },
+    });
+
+    let artistsRepaired = 0;
+    for (const artist of artistsWithNative) {
+        if (artist.heroUrl && !nativeFileExists(artist.heroUrl)) {
+            await prisma.artist.update({
+                where: { id: artist.id },
+                data: {
+                    heroUrl: null,
+                    enrichmentStatus: "pending",
+                    lastEnriched: null,
+                },
+            });
+            try { await redisClient.del(`hero:${artist.id}`); } catch {}
+            artistsRepaired++;
+            logger.debug(`[ImageRepair] Cleared broken heroUrl for artist: ${artist.name}`);
+        }
+    }
+
+    const albumsWithNative = await prisma.album.findMany({
+        where: {
+            coverUrl: {
+                not: null,
+                startsWith: "native:",
+            },
+        },
+        select: { id: true, title: true, coverUrl: true },
+    });
+
+    let albumsRepaired = 0;
+    for (const album of albumsWithNative) {
+        if (album.coverUrl && !nativeFileExists(album.coverUrl)) {
+            await prisma.album.update({
+                where: { id: album.id },
+                data: { coverUrl: null },
+            });
+            try { await redisClient.del(`album-cover:${album.id}`); } catch {}
+            albumsRepaired++;
+            logger.debug(`[ImageRepair] Cleared broken coverUrl for album: ${album.title}`);
+        }
+    }
+
+    logger.info(
+        `[ImageRepair] Repair complete: ${artistsRepaired} artists, ${albumsRepaired} albums cleared for re-fetch`
+    );
+
+    return { artistsRepaired, albumsRepaired };
+}
