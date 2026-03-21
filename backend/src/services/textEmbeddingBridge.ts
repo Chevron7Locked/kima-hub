@@ -17,11 +17,11 @@ async function ensureSubscriber(): Promise<void> {
 
     subscriberPromise = (async () => {
         const sub = redisClient.duplicate();
-        await sub.connect();
-        await sub.pSubscribe(`${RESPONSE_PREFIX}*`, (message, channel) => {
+        sub.on("pmessage", (_pattern: string, channel: string, message: string) => {
             const requestId = channel.slice(RESPONSE_PREFIX.length);
             emitter.emit(requestId, message);
         });
+        await sub.psubscribe(`${RESPONSE_PREFIX}*`);
         logger.info("[TEXT-EMBED] Shared subscriber connected");
     })();
 

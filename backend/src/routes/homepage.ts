@@ -105,7 +105,7 @@ router.get("/genres", async (req, res) => {
 
         // Cache for 24 hours
         try {
-            await redisClient.setEx(
+            await redisClient.setex(
                 cacheKey,
                 24 * 60 * 60,
                 JSON.stringify(genresWithAlbums)
@@ -174,7 +174,7 @@ router.get("/top-podcasts", async (req, res) => {
 
         // Cache for 24 hours
         try {
-            await redisClient.setEx(
+            await redisClient.setex(
                 cacheKey,
                 24 * 60 * 60,
                 JSON.stringify(result)

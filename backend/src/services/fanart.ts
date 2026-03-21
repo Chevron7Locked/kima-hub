@@ -76,7 +76,7 @@ class FanartService {
         // Check cache first
         const cacheKey = `fanart:artist:${mbid}`;
         try {
-            if (redisClient.isOpen) {
+            if (redisClient.status === 'ready') {
                 const cached = await redisClient.get(cacheKey);
                 if (cached) {
                     logger.debug(`  Fanart.tv: Using cached image`);
@@ -140,9 +140,9 @@ class FanartService {
             }
 
             // Cache for 7 days
-            if (imageUrl && redisClient.isOpen) {
+            if (imageUrl && redisClient.status === 'ready') {
                 try {
-                    await redisClient.setEx(
+                    await redisClient.setex(
                         cacheKey,
                         7 * 24 * 60 * 60,
                         imageUrl
@@ -173,7 +173,7 @@ class FanartService {
 
         const cacheKey = `fanart:album:${mbid}`;
         try {
-            if (redisClient.isOpen) {
+            if (redisClient.status === 'ready') {
                 const cached = await redisClient.get(cacheKey);
                 if (cached) return cached;
             }
@@ -198,9 +198,9 @@ class FanartService {
                 }
             }
 
-            if (imageUrl && redisClient.isOpen) {
+            if (imageUrl && redisClient.status === 'ready') {
                 try {
-                    await redisClient.setEx(
+                    await redisClient.setex(
                         cacheKey,
                         7 * 24 * 60 * 60,
                         imageUrl

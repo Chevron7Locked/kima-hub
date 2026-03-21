@@ -5,6 +5,25 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - nightly
+
+### Changed
+
+- **TypeScript strict mode enabled (frontend)**: `"strict": true` in `frontend/tsconfig.json`. Fixed 31 implicit-any and strictNullChecks errors across album/artist/podcast pages, MetadataEditor, AlbumHero, ArtistHero, ArtistActionBar, AvailableAlbums, useDiscoverData, LibraryAlbumsGrid, LibraryTracksList, UnifiedSongsList, CacheSection, useQueries, useTVNavigation.
+- **Redis client consolidation**: Removed `redis` (node-redis v4) dependency entirely. All ~30 backend files now use `ioredis` exclusively. Eliminated the dual-client footgun. Pub/sub in `textEmbeddingBridge` rewritten to ioredis event-based API.
+- **routes/library.ts split**: 4364-line god-file split into `routes/library/` sub-routers: `artists`, `albums`, `tracks`, `streaming`, `coverArt`, `scan`, `backfill`. Each file has a single clear responsibility. `library.ts` is now a 10-line re-export barrel.
+- **services/programmaticPlaylists.ts split**: 3842-line god-file split into `services/mixes/` sub-modules: `genreMixes`, `moodMixes`, `timeMixes`, `discoveryMixes`, `helpers`, `index`. `programmaticPlaylists.ts` is now a 7-line re-export barrel.
+- **Startup task consolidation**: Three concurrent IIFE startup tasks (audiobook sync, artist counts backfill, image backfill) consolidated into a sequential `runStartupTasks()` function to avoid overwhelming DB connections at startup.
+- **Dead code removal**: Removed unused `ffmpeg-static` dependency (not imported anywhere); added `prebuild` script to clean `dist/` before each build.
+
+### Fixed
+
+- **enrichmentStateMachine tests**: Updated mock for `enrichmentStateService` to include `publishToChannel` method. Tests for Python analyzer C2 bridge now correctly assert against `publishToChannel` instead of raw Redis `publish` (which was never called after the ioredis consolidation refactored the channel through the service layer).
+
+### Tests
+
+- **Tier 1 backend test coverage added**: New test suites for `services/search.ts` (22 tests -- `queryToTsquery` logic, special char handling, search service), `routes/share.ts` (17 tests -- share token lifecycle, play counting, unauthenticated access), `routes/webhooks.ts` (14 tests -- Lidarr webhook events, secret validation, error handling), `services/musicScanner.ts` (49 tests -- pure parsing helpers, path normalization, metadata extraction), `routes/library/albums.ts` (17 tests -- pagination, filtering, delete). Total test count: 307 (up from 173).
+
 ## [1.7.3] - 2026-03-20
 
 ### Fixed

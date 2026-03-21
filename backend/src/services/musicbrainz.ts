@@ -49,7 +49,7 @@ class MusicBrainzService {
             // Use shorter TTL for null results (1 hour) vs successful results (30 days)
             // This allows retrying failed lookups sooner while still caching successes
             const actualTtl = data === null ? 3600 : ttlSeconds;
-            await redisClient.setEx(cacheKey, actualTtl, JSON.stringify(data));
+            await redisClient.setex(cacheKey, actualTtl, JSON.stringify(data));
         } catch (err) {
             logger.warn("Redis set error:", err);
         }
@@ -738,12 +738,12 @@ class MusicBrainzService {
         try {
             // Collect all recording cache keys using SCAN (non-blocking)
             const keys: string[] = [];
-            let cursor = 0;
+            let cursor = "0";
             do {
-                const result = await redisClient.scan(cursor, { MATCH: "mb:search:recording:*", COUNT: 100 });
-                cursor = result.cursor;
-                keys.push(...result.keys);
-            } while (cursor !== 0);
+                const [nextCursor, found] = await redisClient.scan(cursor, "MATCH", "mb:search:recording:*", "COUNT", "100");
+                cursor = nextCursor;
+                keys.push(...found);
+            } while (cursor !== "0");
 
             let cleared = 0;
 

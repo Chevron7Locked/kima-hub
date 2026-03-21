@@ -183,7 +183,7 @@ class DataCacheService {
         if (missingIds.length > 0) {
             try {
                 const cacheKeys = missingIds.map((id) => `hero:${id}`);
-                const cached = await redisClient.mGet(cacheKeys);
+                const cached = await redisClient.mget(cacheKeys);
 
                 missingIds.forEach((id, index) => {
                     const value = cached[index];
@@ -220,7 +220,7 @@ class DataCacheService {
         if (missingIds.length > 0) {
             try {
                 const cacheKeys = missingIds.map((id) => `album-cover:${id}`);
-                const cached = await redisClient.mGet(cacheKeys);
+                const cached = await redisClient.mget(cacheKeys);
 
                 missingIds.forEach((id, index) => {
                     const value = cached[index];
@@ -350,7 +350,7 @@ class DataCacheService {
      */
     private async setRedisCache(key: string, value: string, ttl: number): Promise<void> {
         try {
-            await redisClient.setEx(key, ttl, value);
+            await redisClient.setex(key, ttl, value);
         } catch (err) {
             // Redis errors are non-critical
         }
@@ -368,7 +368,7 @@ class DataCacheService {
         try {
             const multi = redisClient.multi();
             for (const { key, value, ttl } of entries) {
-                multi.setEx(key, ttl, value);
+                multi.setex(key, ttl, value);
             }
             await multi.exec();
         } catch (err) {

@@ -377,7 +377,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
         // Cache artist image path in Redis for faster access
         if (localHeroUrl) {
             try {
-                await redisClient.setEx(
+                await redisClient.setex(
                     `hero:${artist.id}`,
                     7 * 24 * 60 * 60,
                     localHeroUrl
@@ -461,7 +461,7 @@ async function enrichAlbumCovers(
 
                             // Cache in Redis
                             try {
-                                await redisClient.setEx(
+                                await redisClient.setex(
                                     `album-cover:${album.id}`,
                                     30 * 24 * 60 * 60, // 30 days
                                     coverUrl

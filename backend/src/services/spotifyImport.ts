@@ -191,7 +191,7 @@ async function saveImportJob(job: ImportJob): Promise<void> {
 
   // Save to Redis for cross-process sharing
   try {
-    await redisClient.setEx(
+    await redisClient.setex(
       IMPORT_JOB_KEY(job.id),
       IMPORT_JOB_TTL,
       JSON.stringify(job),
@@ -270,7 +270,7 @@ async function getImportJob(importJobId: string): Promise<ImportJob | null> {
 
   // Populate Redis for next time
   try {
-    await redisClient.setEx(
+    await redisClient.setex(
       IMPORT_JOB_KEY(importJobId),
       IMPORT_JOB_TTL,
       JSON.stringify(job),
@@ -1538,7 +1538,7 @@ class SpotifyImportService {
 
     // Cache preview for the BullMQ worker to retrieve
     try {
-      await redisClient.setEx(
+      await redisClient.setex(
         `import:preview:${job.id}`,
         IMPORT_JOB_TTL,
         JSON.stringify(preview),
@@ -3308,7 +3308,7 @@ class SpotifyImportService {
           preview = await this.generatePreview(url, emitFetchProgress, emitMatchingStart);
         }
 
-        await redisClient.setEx(
+        await redisClient.setex(
           PREVIEW_JOB_KEY(jobId),
           PREVIEW_JOB_TTL,
           JSON.stringify({ status: "completed", preview, userId }),
@@ -3325,7 +3325,7 @@ class SpotifyImportService {
         const userMessage = isNetworkError
             ? "Service temporarily unavailable. Please try again in a moment."
             : (error.message || "Import failed");
-        await redisClient.setEx(
+        await redisClient.setex(
           PREVIEW_JOB_KEY(jobId),
           PREVIEW_JOB_TTL,
           JSON.stringify({ status: "failed", error: userMessage, userId }),
@@ -3722,7 +3722,7 @@ class SpotifyImportService {
 
       // Cache preview for processImport
       try {
-        await redisClient.setEx(
+        await redisClient.setex(
           `import:preview:${job.id}`,
           IMPORT_JOB_TTL,
           JSON.stringify(preview),

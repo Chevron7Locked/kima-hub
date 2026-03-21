@@ -62,13 +62,13 @@ class SongLinkService {
             }
 
             try {
-                await redisClient.setEx(cacheKey, 604800, JSON.stringify(result));
+                await redisClient.setex(cacheKey, 604800, JSON.stringify(result));
             } catch {}
 
             return result;
         } catch (err: any) {
             if (err.response?.status === 404) {
-                try { await redisClient.setEx(cacheKey, 3600, "null"); } catch {}
+                try { await redisClient.setex(cacheKey, 3600, "null"); } catch {}
                 return null;
             }
             logger.warn(`song.link resolve failed for ${url}:`, err.message);

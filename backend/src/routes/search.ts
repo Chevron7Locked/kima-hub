@@ -226,7 +226,7 @@ router.get("/discover", async (req, res) => {
         const payload = { results, aliasInfo };
 
         try {
-            await redisClient.setEx(cacheKey, 900, JSON.stringify(payload));
+            await redisClient.setex(cacheKey, 900, JSON.stringify(payload));
         } catch (err) {
             logger.warn("[SEARCH DISCOVER] Redis write error:", err);
         }
@@ -274,7 +274,7 @@ router.get("/discover/similar", async (req, res) => {
 
         try {
             // Cache TTL: 1 hour (3600s) -- similar artists rarely change
-            await redisClient.setEx(cacheKey, 3600, JSON.stringify(payload));
+            await redisClient.setex(cacheKey, 3600, JSON.stringify(payload));
         } catch (err) {
             logger.warn("[SEARCH SIMILAR] Redis write error:", err);
         }

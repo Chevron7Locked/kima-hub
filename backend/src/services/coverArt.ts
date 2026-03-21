@@ -34,7 +34,7 @@ class CoverArtService {
                     frontImage.thumbnails?.large || frontImage.image;
 
                 try {
-                    await redisClient.setEx(cacheKey, 2592000, coverUrl); // 30 days
+                    await redisClient.setex(cacheKey, 2592000, coverUrl); // 30 days
                 } catch (err) {
                     logger.warn("Redis set error:", err);
                 }
@@ -44,7 +44,7 @@ class CoverArtService {
             
             // No front image found - cache negative result
             try {
-                await redisClient.setEx(cacheKey, 604800, "NOT_FOUND"); // 7 days
+                await redisClient.setex(cacheKey, 604800, "NOT_FOUND"); // 7 days
             } catch (err) {
                 // Ignore
             }
@@ -52,7 +52,7 @@ class CoverArtService {
             if (error.response?.status === 404) {
                 // No cover art available - cache the negative result
                 try {
-                    await redisClient.setEx(cacheKey, 604800, "NOT_FOUND"); // 7 days
+                    await redisClient.setex(cacheKey, 604800, "NOT_FOUND"); // 7 days
                 } catch (err) {
                     // Ignore
                 }

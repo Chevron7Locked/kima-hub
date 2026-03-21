@@ -55,7 +55,7 @@ class WikidataService {
 
             // Cache for 30 days
             try {
-                await redisClient.setEx(
+                await redisClient.setex(
                     cacheKey,
                     2592000,
                     JSON.stringify(result)

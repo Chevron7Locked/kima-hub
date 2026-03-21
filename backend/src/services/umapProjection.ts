@@ -143,10 +143,10 @@ export async function computeMapProjection(): Promise<MapResponse> {
 async function cacheResult(result: MapResponse, trackIds: string[], ttl = CACHE_TTL): Promise<void> {
     try {
         const pipeline = redisClient.multi();
-        pipeline.setEx(CACHE_KEY, ttl, JSON.stringify(result));
+        pipeline.setex(CACHE_KEY, ttl, JSON.stringify(result));
         pipeline.del(TRACK_IDS_KEY);
         if (trackIds.length > 0) {
-            pipeline.sAdd(TRACK_IDS_KEY, trackIds);
+            pipeline.sadd(TRACK_IDS_KEY, trackIds);
             pipeline.expire(TRACK_IDS_KEY, ttl);
         }
         await pipeline.exec();
@@ -304,7 +304,7 @@ export async function appendTrackToProjection(trackId: string): Promise<boolean>
         const cached = await redisClient.get(CACHE_KEY);
         if (!cached) return false;
 
-        const alreadyIncluded = await redisClient.sIsMember(TRACK_IDS_KEY, trackId);
+        const alreadyIncluded = await redisClient.sismember(TRACK_IDS_KEY, trackId);
         if (alreadyIncluded) return false;
 
         // Find K nearest neighbors via pgvector cosine distance
@@ -402,8 +402,8 @@ export async function appendTrackToProjection(trackId: string): Promise<boolean>
         projection.trackCount = projection.tracks.length;
 
         const pipeline = redisClient.multi();
-        pipeline.setEx(CACHE_KEY, CACHE_TTL, JSON.stringify(projection));
-        pipeline.sAdd(TRACK_IDS_KEY, trackId);
+        pipeline.setex(CACHE_KEY, CACHE_TTL, JSON.stringify(projection));
+        pipeline.sadd(TRACK_IDS_KEY, trackId);
         await pipeline.exec();
 
         logger.debug(`[VIBE-MAP] Appended track ${trackId} via KNN interpolation (${validNeighbors.length} neighbors)`);

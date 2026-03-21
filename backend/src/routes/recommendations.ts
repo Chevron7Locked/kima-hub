@@ -128,7 +128,7 @@ router.get("/for-you", async (req, res) => {
         let cachedImages: (string | null)[] = [];
         if (cacheKeys.length > 0) {
             try {
-                cachedImages = await redisClient.mGet(cacheKeys);
+                cachedImages = await redisClient.mget(cacheKeys);
             } catch (err) {
                 // Redis errors are non-critical
             }

@@ -32,7 +32,7 @@ export class CacheWrapper {
             const serialized = JSON.stringify(value);
 
             if (ttlSeconds) {
-                await redisClient.setEx(key, ttlSeconds, serialized);
+                await redisClient.setex(key, ttlSeconds, serialized);
             } else {
                 await redisClient.set(key, serialized);
             }

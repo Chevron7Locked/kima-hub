@@ -11,10 +11,7 @@ export class DistributedLock {
   async acquire(key: string, ttlMs: number): Promise<boolean> {
     const lockKey = `lock:${key}`;
     try {
-      const result = await this.redis.set(lockKey, this.lockValue, {
-        PX: ttlMs,
-        NX: true,
-      });
+      const result = await this.redis.set(lockKey, this.lockValue, "PX", ttlMs, "NX");
       return result === 'OK';
     } catch (error) {
       // Return false on Redis errors (lock acquisition failed)
@@ -33,10 +30,7 @@ export class DistributedLock {
           return 0
         end
       `;
-      const result = await this.redis.eval(script, {
-        keys: [lockKey],
-        arguments: [this.lockValue],
-      });
+      const result = await this.redis.eval(script, 1, lockKey, this.lockValue);
       return result === 1;
     } catch (error) {
       // Return false on Redis errors (lock release failed)

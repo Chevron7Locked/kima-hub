@@ -2063,7 +2063,7 @@ private async downloadWithRetry(
     async saveSearchSession(sessionId: string, data: unknown, ttlSeconds: number = 300): Promise<void> {
         try {
             const key = `soulseek:search:${sessionId}`;
-            await redisClient.setEx(key, ttlSeconds, JSON.stringify(data));
+            await redisClient.setex(key, ttlSeconds, JSON.stringify(data));
         } catch (err: any) {
             sessionLog("SOULSEEK", `Failed to save search session: ${err.message}`, "ERROR");
         }
@@ -2117,7 +2117,7 @@ private async downloadWithRetry(
             record.failures++;
             record.lastFailure = new Date().toISOString();
 
-            await redisClient.setEx(key, this.FAILED_USER_TTL, JSON.stringify(record));
+            await redisClient.setex(key, this.FAILED_USER_TTL, JSON.stringify(record));
 
             if (record.failures >= this.FAILURE_THRESHOLD) {
                 sessionLog(

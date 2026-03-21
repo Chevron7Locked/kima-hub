@@ -137,7 +137,7 @@ async function backfillArtistImages(): Promise<void> {
 
                             // Update Redis cache
                             try {
-                                await redisClient.setEx(
+                                await redisClient.setex(
                                     `hero:${artist.id}`,
                                     7 * 24 * 60 * 60,
                                     localPath
@@ -248,7 +248,7 @@ async function backfillAlbumCovers(): Promise<void> {
 
                             // Update Redis cache
                             try {
-                                await redisClient.setEx(
+                                await redisClient.setex(
                                     `album-cover:${album.id}`,
                                     30 * 24 * 60 * 60,
                                     localPath

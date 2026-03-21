@@ -39,7 +39,7 @@ router.get("/", async (req, res) => {
         );
 
         // Cache for 1 hour
-        await redisClient.setEx(cacheKey, 3600, JSON.stringify(mixes));
+        await redisClient.setex(cacheKey, 3600, JSON.stringify(mixes));
 
         res.json(mixes);
     } catch (error) {
@@ -478,7 +478,7 @@ router.post("/refresh", async (req, res) => {
         );
 
         // Cache for 1 hour
-        await redisClient.setEx(cacheKey, 3600, JSON.stringify(mixes));
+        await redisClient.setex(cacheKey, 3600, JSON.stringify(mixes));
 
         res.json({ message: "Mixes refreshed", mixes });
     } catch (error) {
@@ -505,7 +505,7 @@ router.post("/:id/save", async (req, res) => {
             mixes = JSON.parse(cached);
         } else {
             mixes = await programmaticPlaylistService.generateAllMixes(userId);
-            await redisClient.setEx(cacheKey, 3600, JSON.stringify(mixes));
+            await redisClient.setex(cacheKey, 3600, JSON.stringify(mixes));
         }
 
         const mix = mixes.find((m: any) => m.id === mixId);
@@ -588,7 +588,7 @@ router.get("/:id", async (req, res) => {
             mixes = JSON.parse(cached);
         } else {
             mixes = await programmaticPlaylistService.generateAllMixes(userId);
-            await redisClient.setEx(cacheKey, 3600, JSON.stringify(mixes));
+            await redisClient.setex(cacheKey, 3600, JSON.stringify(mixes));
         }
 
         // Find the specific mix

@@ -59,7 +59,7 @@ class ItunesService {
         const data = await requestFn();
 
         try {
-            await redisClient.setEx(cacheKey, ttlSeconds, JSON.stringify(data));
+            await redisClient.setex(cacheKey, ttlSeconds, JSON.stringify(data));
         } catch (err) {
             logger.warn("Redis set error:", err);
         }

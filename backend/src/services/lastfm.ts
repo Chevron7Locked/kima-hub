@@ -193,7 +193,7 @@ class LastFmService {
 
             // Cache for 7 days
             try {
-                await redisClient.setEx(
+                await redisClient.setex(
                     cacheKey,
                     604800,
                     JSON.stringify(results)
@@ -237,7 +237,7 @@ class LastFmService {
                 } : album.tracks
             };
             try {
-                await redisClient.setEx(key, 2592000, JSON.stringify(normalized));
+                await redisClient.setex(key, 2592000, JSON.stringify(normalized));
             } catch (err) {
                 logger.warn("Redis set error:", err);
             }
@@ -319,7 +319,7 @@ class LastFmService {
 
             // Cache for 7 days
             try {
-                await redisClient.setEx(
+                await redisClient.setex(
                     cacheKey,
                     604800,
                     JSON.stringify(albums)
@@ -361,7 +361,7 @@ class LastFmService {
 
             // Cache for 7 days
             try {
-                await redisClient.setEx(
+                await redisClient.setex(
                     cacheKey,
                     604800,
                     JSON.stringify(tracks)
@@ -416,7 +416,7 @@ class LastFmService {
 
             // Cache for 7 days
             try {
-                await redisClient.setEx(
+                await redisClient.setex(
                     cacheKey,
                     604800,
                     JSON.stringify(tracks)
@@ -468,7 +468,7 @@ class LastFmService {
 
             // Cache for 7 days
             try {
-                await redisClient.setEx(
+                await redisClient.setex(
                     cacheKey,
                     604800,
                     JSON.stringify(albums)
@@ -975,7 +975,7 @@ class LastFmService {
 
             if (!correction || !correction.name) {
                 // Cache null result
-                await redisClient.setEx(cacheKey, 2592000, "null");
+                await redisClient.setex(cacheKey, 2592000, "null");
                 return null;
             }
 
@@ -987,13 +987,13 @@ class LastFmService {
             };
 
             // Cache for 30 days
-            await redisClient.setEx(cacheKey, 2592000, JSON.stringify(result));
+            await redisClient.setex(cacheKey, 2592000, JSON.stringify(result));
 
             return result;
         } catch (error: any) {
             // Error 6 = "Artist not found" - cache negative result
             if (error.response?.data?.error === 6) {
-                await redisClient.setEx(cacheKey, 2592000, "null");
+                await redisClient.setex(cacheKey, 2592000, "null");
                 return null;
             }
             logger.error(`Last.fm correction error for ${artistName}:`, error);
@@ -1092,7 +1092,7 @@ class LastFmService {
 
             // Cache for 6 hours (charts update frequently)
             try {
-                await redisClient.setEx(
+                await redisClient.setex(
                     cacheKey,
                     21600,
                     JSON.stringify(detailedArtists)

@@ -17,6 +17,7 @@ const mockGetState = jest.fn().mockResolvedValue(null);
 const mockInitializeState = jest.fn().mockResolvedValue({});
 const mockClear = jest.fn().mockResolvedValue(undefined);
 const mockDetectHang = jest.fn().mockResolvedValue(false);
+const mockPublishToChannel = jest.fn().mockResolvedValue(undefined);
 
 jest.mock("../../services/enrichmentState", () => ({
     enrichmentStateService: {
@@ -26,6 +27,7 @@ jest.mock("../../services/enrichmentState", () => ({
         clear: mockClear,
         detectHang: mockDetectHang,
         clearGate: jest.fn().mockResolvedValue(undefined),
+        publishToChannel: mockPublishToChannel,
     },
 }));
 
@@ -314,11 +316,11 @@ describe("Enrichment State Machine", () => {
     describe("Python analyzer bridge (C2)", () => {
         it("should publish resume to audio:analysis:control when triggerEnrichmentNow is called", async () => {
             await startUnifiedEnrichmentWorker();
-            mockRedisPublish.mockClear();
+            mockPublishToChannel.mockClear();
 
             await triggerEnrichmentNow();
 
-            expect(mockRedisPublish).toHaveBeenCalledWith(
+            expect(mockPublishToChannel).toHaveBeenCalledWith(
                 "audio:analysis:control",
                 "resume",
             );
@@ -326,11 +328,11 @@ describe("Enrichment State Machine", () => {
 
         it("should publish resume to audio:analysis:control when reRunArtistsOnly is called", async () => {
             await startUnifiedEnrichmentWorker();
-            mockRedisPublish.mockClear();
+            mockPublishToChannel.mockClear();
 
             await reRunArtistsOnly();
 
-            expect(mockRedisPublish).toHaveBeenCalledWith(
+            expect(mockPublishToChannel).toHaveBeenCalledWith(
                 "audio:analysis:control",
                 "resume",
             );
@@ -338,11 +340,11 @@ describe("Enrichment State Machine", () => {
 
         it("should publish resume to audio:analysis:control when runFullEnrichment is called", async () => {
             await startUnifiedEnrichmentWorker();
-            mockRedisPublish.mockClear();
+            mockPublishToChannel.mockClear();
 
             await runFullEnrichment();
 
-            expect(mockRedisPublish).toHaveBeenCalledWith(
+            expect(mockPublishToChannel).toHaveBeenCalledWith(
                 "audio:analysis:control",
                 "resume",
             );
@@ -350,11 +352,11 @@ describe("Enrichment State Machine", () => {
 
         it("should publish resume to audio:analysis:control when reRunMoodTagsOnly is called", async () => {
             await startUnifiedEnrichmentWorker();
-            mockRedisPublish.mockClear();
+            mockPublishToChannel.mockClear();
 
             await reRunMoodTagsOnly();
 
-            expect(mockRedisPublish).toHaveBeenCalledWith(
+            expect(mockPublishToChannel).toHaveBeenCalledWith(
                 "audio:analysis:control",
                 "resume",
             );
@@ -362,11 +364,11 @@ describe("Enrichment State Machine", () => {
 
         it("should publish resume to audio:analysis:control when reRunAudioAnalysisOnly is called", async () => {
             await startUnifiedEnrichmentWorker();
-            mockRedisPublish.mockClear();
+            mockPublishToChannel.mockClear();
 
             await reRunAudioAnalysisOnly();
 
-            expect(mockRedisPublish).toHaveBeenCalledWith(
+            expect(mockPublishToChannel).toHaveBeenCalledWith(
                 "audio:analysis:control",
                 "resume",
             );

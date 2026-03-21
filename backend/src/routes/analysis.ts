@@ -41,7 +41,7 @@ router.get("/status", requireAuth, async (req, res) => {
         const total = rawTotal - permanentlyFailed - corruptCount;
 
         // Get queue length from Redis
-        const queueLength = await redisClient.lLen(ANALYSIS_QUEUE);
+        const queueLength = await redisClient.llen(ANALYSIS_QUEUE);
 
         // Get CLAP embedding count
         const embeddingCount = await prisma.$queryRaw<{ count: bigint }[]>`
@@ -106,7 +106,7 @@ router.post("/start", requireAuth, requireAdmin, async (req, res) => {
         // Queue tracks for analysis
         const pipeline = redisClient.multi();
         for (const track of tracks) {
-            pipeline.rPush(ANALYSIS_QUEUE, JSON.stringify({
+            pipeline.rpush(ANALYSIS_QUEUE, JSON.stringify({
                 trackId: track.id,
                 filePath: track.filePath,
                 duration: track.duration,
@@ -202,7 +202,7 @@ router.post("/analyze/:trackId", requireAuth, async (req, res) => {
         }
 
         // Queue for analysis
-        await redisClient.rPush(ANALYSIS_QUEUE, JSON.stringify({
+        await redisClient.rpush(ANALYSIS_QUEUE, JSON.stringify({
             trackId: track.id,
             filePath: track.filePath,
             duration: track.duration,

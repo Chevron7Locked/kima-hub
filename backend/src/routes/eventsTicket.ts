@@ -14,7 +14,7 @@ router.post("/", async (req, res) => {
   }
 
   const ticket = randomUUID();
-  await redisClient.setEx(`sse:ticket:${ticket}`, 30, userId);
+  await redisClient.setex(`sse:ticket:${ticket}`, 30, userId);
 
   res.json({ ticket });
 });

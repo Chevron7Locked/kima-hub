@@ -19,7 +19,7 @@ router.get("/", async (req: Request, res: Response) => {
     return;
   }
 
-  const userId = await redisClient.getDel(`sse:ticket:${ticket}`);
+  const userId = await redisClient.getdel(`sse:ticket:${ticket}`);
   if (!userId) {
     res.status(401).json({ error: "Invalid or expired ticket" });
     return;

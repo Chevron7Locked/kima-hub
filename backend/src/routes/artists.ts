@@ -361,7 +361,7 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
 
         // Cache discovery response for 24 hours
         try {
-            await redisClient.setEx(
+            await redisClient.setex(
                 cacheKey,
                 DISCOVERY_CACHE_TTL,
                 JSON.stringify(response)
@@ -556,7 +556,7 @@ router.get("/album/:mbid", async (req, res) => {
 
         // Cache discovery response for 24 hours
         try {
-            await redisClient.setEx(
+            await redisClient.setex(
                 cacheKey,
                 DISCOVERY_CACHE_TTL,
                 JSON.stringify(response)
