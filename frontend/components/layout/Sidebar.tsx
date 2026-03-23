@@ -12,18 +12,19 @@ import { queryKeys } from "@/hooks/useQueries";
 import { useAudioState } from "@/lib/audio-state-context";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { useToast } from "@/lib/toast-context";
+import { useFeatures } from "@/lib/features-context";
 import Image from "next/image";
 import { MobileSidebar } from "./MobileSidebar";
 
-const navigation = [
-    { name: "Collection", href: "/collection" },
-    { name: "Radio", href: "/radio" },
-    { name: "Discovery", href: "/discover" },
-    { name: "Vibe", href: "/vibe" },
-    { name: "Audiobooks", href: "/audiobooks" },
-    { name: "Podcasts", href: "/podcasts" },
-    { name: "Browse", href: "/browse/playlists" },
-] as const;
+const allNavigation = [
+    { name: "Collection", href: "/collection", feature: null },
+    { name: "Radio", href: "/radio", feature: null },
+    { name: "Discovery", href: "/discover", feature: null },
+    { name: "Vibe", href: "/vibe", feature: null },
+    { name: "Audiobooks", href: "/audiobooks", feature: "audiobookshelfEnabled" as const },
+    { name: "Podcasts", href: "/podcasts", feature: null },
+    { name: "Browse", href: "/browse/playlists", feature: null },
+];
 
 interface Playlist {
     id: string;
@@ -42,6 +43,7 @@ export function Sidebar() {
     const { toast } = useToast();
     const { currentTrack, currentAudiobook, currentPodcast, playbackType } =
         useAudioState();
+    const { audiobookshelfEnabled } = useFeatures();
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;
@@ -267,7 +269,9 @@ export function Sidebar() {
                     </span>
                 </div>
                 <div className="space-y-0.5">
-                    {navigation.map((item, index) => {
+                    {allNavigation.filter((item) =>
+                        item.feature === null || (item.feature === "audiobookshelfEnabled" && audiobookshelfEnabled)
+                    ).map((item, index) => {
                         const isActive = pathname === item.href;
 
                         return (

@@ -18,16 +18,22 @@ const registerSchema = z.object({
 });
 
 const lidarrConfigSchema = z.object({
-    url: z.string().url().optional().or(z.literal("")),
+    url: z.string().optional().or(z.literal("")),
     apiKey: z.string().optional().or(z.literal("")),
     enabled: z.boolean(),
-});
+}).refine(
+    (data) => !data.enabled || !data.url || data.url === "" || z.string().url().safeParse(data.url).success,
+    { message: "Invalid url", path: ["url"] },
+);
 
 const audiobookshelfConfigSchema = z.object({
-    url: z.string().url().optional().or(z.literal("")),
+    url: z.string().optional().or(z.literal("")),
     apiKey: z.string().optional().or(z.literal("")),
     enabled: z.boolean(),
-});
+}).refine(
+    (data) => !data.enabled || !data.url || data.url === "" || z.string().url().safeParse(data.url).success,
+    { message: "Invalid url", path: ["url"] },
+);
 
 const soulseekConfigSchema = z.object({
     username: z.string().optional().or(z.literal("")),

@@ -247,7 +247,7 @@ export default function AudiobooksPage() {
             if (result?.failed) parts.push(`${result.failed} failed`);
             if (result?.skipped) parts.push(`${result.skipped} skipped`);
             toast.success(parts.join(", "));
-            queryClient.invalidateQueries({ queryKey: queryKeys.audiobooks() });
+            await queryClient.refetchQueries({ queryKey: queryKeys.audiobooks() });
         } catch {
             toast.error("Audiobook sync failed");
         } finally {

@@ -159,10 +159,11 @@ export default function OnboardingPage() {
         try {
             if (step === 2) {
                 // Save all integration configs and complete onboarding
+                // Only send field values for enabled integrations; disabled ones get clean payloads
                 await Promise.all([
-                    api.post("/onboarding/lidarr", lidarr),
-                    api.post("/onboarding/audiobookshelf", audiobookshelf),
-                    api.post("/onboarding/soulseek", soulseek),
+                    api.post("/onboarding/lidarr", lidarr.enabled ? lidarr : { url: "", apiKey: "", enabled: false }),
+                    api.post("/onboarding/audiobookshelf", audiobookshelf.enabled ? audiobookshelf : { url: "", apiKey: "", enabled: false }),
+                    api.post("/onboarding/soulseek", soulseek.enabled ? soulseek : { username: "", password: "", enabled: false }),
                 ]);
                 await api.post("/onboarding/complete");
                 router.push("/sync");

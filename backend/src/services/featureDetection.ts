@@ -10,6 +10,7 @@ const CLAP_ANALYZER_PATH = "/app/audio-analyzer-clap/analyzer.py";
 export interface AvailableFeatures {
     musicCNN: boolean;
     vibeEmbeddings: boolean;
+    audiobookshelfEnabled: boolean;
 }
 
 const HEARTBEAT_TTL = 300000; // 5 minutes
@@ -25,16 +26,17 @@ class FeatureDetectionService {
             return this.cache;
         }
 
-        const [musicCNN, vibeEmbeddings] = await Promise.all([
+        const [musicCNN, vibeEmbeddings, audiobookshelfEnabled] = await Promise.all([
             this.checkMusicCNN(),
             this.checkCLAP(),
+            this.checkAudiobookshelf(),
         ]);
 
-        this.cache = { musicCNN, vibeEmbeddings };
+        this.cache = { musicCNN, vibeEmbeddings, audiobookshelfEnabled };
         this.lastCheck = now;
 
         logger.debug(
-            `[FEATURE-DETECTION] Features: musicCNN=${musicCNN}, vibeEmbeddings=${vibeEmbeddings}`
+            `[FEATURE-DETECTION] Features: musicCNN=${musicCNN}, vibeEmbeddings=${vibeEmbeddings}, audiobookshelf=${audiobookshelfEnabled}`
         );
 
         return this.cache;
@@ -90,6 +92,19 @@ class FeatureDetectionService {
             return embeddingCount > 0;
         } catch (error) {
             logger.error("[FEATURE-DETECTION] Error checking CLAP:", error);
+            return false;
+        }
+    }
+
+    private async checkAudiobookshelf(): Promise<boolean> {
+        try {
+            const settings = await prisma.systemSettings.findUnique({
+                where: { id: "default" },
+                select: { audiobookshelfEnabled: true },
+            });
+            return settings?.audiobookshelfEnabled ?? false;
+        } catch (error) {
+            logger.error("[FEATURE-DETECTION] Error checking Audiobookshelf:", error);
             return false;
         }
     }

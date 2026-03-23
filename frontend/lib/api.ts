@@ -742,8 +742,8 @@ class ApiClient {
     }
 
     // System Features
-    async getFeatures(): Promise<{ musicCNN: boolean; vibeEmbeddings: boolean }> {
-        return this.request<{ musicCNN: boolean; vibeEmbeddings: boolean }>(
+    async getFeatures(): Promise<{ musicCNN: boolean; vibeEmbeddings: boolean; audiobookshelfEnabled: boolean }> {
+        return this.request<{ musicCNN: boolean; vibeEmbeddings: boolean; audiobookshelfEnabled: boolean }>(
             "/system/features"
         );
     }
