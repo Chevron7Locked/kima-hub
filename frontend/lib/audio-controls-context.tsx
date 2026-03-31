@@ -1224,8 +1224,18 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 const hasMedia = currentTrackRef.current || currentAudiobookRef.current || currentPodcastRef.current;
                 if (hasMedia) {
                     playback.setAudioError(null);
+
                     if (ctrl.isPlaying()) {
                         ctrl.tryResume().catch(() => {});
+                    } else if (ctrl.wasInterrupted()) {
+                        // iOS interrupted playback (notification, phone call, etc.)
+                        // The auto-resume timer in the controller may have already
+                        // tried, but if the app was suspended it couldn't run.
+                        // Try again now that we're back in foreground.
+                        ctrl.clearInterruptFlag();
+                        ctrl.play().catch(() => {
+                            ctrl.reloadAndPlay();
+                        });
                     }
                 }
             }

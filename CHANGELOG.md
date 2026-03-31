@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.7.7] - 2026-03-31
+
+### Fixed
+
+- **iOS audio not resuming after notification or Control Center pause**: On iPhone, audio would stop when a notification came in or when paused from Control Center, and tapping play showed "playing" but produced no sound. Root cause: the foreground recovery handler checked `isPlaying()` (always false after iOS interrupts audio) instead of tracking whether playback was interrupted by the system. Added three-layer recovery: (1) 1-second auto-resume timer for brief notification interruptions, (2) robust Media Session play handler that reloads the audio source on failure, (3) foreground recovery that detects system-interrupted state and resumes when app returns to focus. Also handles `AbortError` (iOS audio session invalidated) by reloading the source, and `NotAllowedError` by prompting the user to tap play.
+
+## [1.7.6] - 2026-03-30
+
+### Fixed
+
+- SSRF blocking admin-configured integration URLs, CLAP numpy version floor (#165, #166)
+
+## [1.7.5] - 2026-03-29
+
+### Fixed
+
+- Onboarding validation rejects disabled integrations, hide audiobooks when disabled (#162)
+
 ## [1.7.4] - 2026-03-21
 
 ### Fixed

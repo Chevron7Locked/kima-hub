@@ -58,7 +58,7 @@ export function useMediaSession() {
         if (!("mediaSession" in navigator)) return;
         if (!controller) return;
 
-        navigator.mediaSession.setActionHandler("play", () => {
+        navigator.mediaSession.setActionHandler("play", async () => {
             // Eagerly push position state before iOS defers JS execution
             if ("setPositionState" in navigator.mediaSession) {
                 const duration = controller.getDuration();
@@ -75,7 +75,18 @@ export function useMediaSession() {
                     }
                 }
             }
-            controller.play();
+
+            // Clear interrupt flag — user is explicitly requesting play
+            controller.clearInterruptFlag();
+
+            try {
+                await controller.play();
+            } catch {
+                // play() failed (iOS audio session may be invalidated).
+                // Reload source and try again — this re-establishes the
+                // audio hardware connection that iOS drops on interruption.
+                controller.reloadAndPlay();
+            }
         });
 
         navigator.mediaSession.setActionHandler("pause", () => {

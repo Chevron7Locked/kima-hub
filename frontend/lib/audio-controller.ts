@@ -46,6 +46,15 @@ export class AudioController {
     private readonly MAX_STALL_RECOVERIES = 3;
     private autoResumeAfterRecovery = false;
 
+    // iOS interrupt tracking
+    private userInitiatedPause = false;
+    private interruptedWhilePlaying = false;
+    private interruptResumeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    // reloadAndPlay failsafe state (tracked for cleanup in destroy())
+    private reloadFailsafeTimeout: ReturnType<typeof setTimeout> | null = null;
+    private reloadFailsafeListener: (() => void) | null = null;
+
     constructor(audio: HTMLAudioElement) {
         this.audio = audio;
         this.audio.preload = "auto";
@@ -83,6 +92,8 @@ export class AudioController {
         add("playing", () => {
             this.networkRetryCount = 0;
             this.stallRecoveryCount = 0;
+            this.interruptedWhilePlaying = false;
+            this.cancelInterruptResume();
             this.startWatchdog();
             this.cancelStallGrace();
             this.emit("play");
@@ -90,6 +101,25 @@ export class AudioController {
 
         add("pause", () => {
             this.stopWatchdog();
+
+            if (!this.userInitiatedPause && this.currentSrc && !this.audio.ended) {
+                // System-initiated pause (iOS notification, phone call, control center)
+                this.interruptedWhilePlaying = true;
+
+                // Try auto-resume after a short delay (notification sounds are brief)
+                this.cancelInterruptResume();
+                this.interruptResumeTimeout = setTimeout(() => {
+                    this.interruptResumeTimeout = null;
+                    if (this.interruptedWhilePlaying && this.currentSrc) {
+                        this.interruptedWhilePlaying = false;
+                        this.play().catch(() => {
+                            this.emit("needs-resume");
+                        });
+                    }
+                }, 1000);
+            }
+            this.userInitiatedPause = false;
+
             this.emit("pause");
         });
 
@@ -272,6 +302,16 @@ export class AudioController {
             await this.audio.play();
         } catch (err) {
             if (err instanceof DOMException && err.name === "AbortError") {
+                // On iOS, AbortError after interruption means the audio element
+                // is in a bad state. Try reloading the source as a recovery.
+                if (this.currentSrc) {
+                    this.reloadAndPlay();
+                }
+                return;
+            }
+            if (err instanceof DOMException && err.name === "NotAllowedError") {
+                // User gesture required — emit needs-resume so UI can prompt
+                this.emit("needs-resume");
                 return;
             }
             console.error("[AudioController] Play failed:", err);
@@ -294,6 +334,9 @@ export class AudioController {
     }
 
     pause(): void {
+        this.userInitiatedPause = true;
+        this.interruptedWhilePlaying = false;
+        this.cancelInterruptResume();
         this.autoResumeAfterRecovery = false;
         this.audio.pause();
     }
@@ -305,7 +348,76 @@ export class AudioController {
         this.cancelStallGrace();
     }
 
+    wasInterrupted(): boolean {
+        return this.interruptedWhilePlaying;
+    }
+
+    clearInterruptFlag(): void {
+        this.interruptedWhilePlaying = false;
+        this.cancelInterruptResume();
+    }
+
+    private cancelInterruptResume(): void {
+        if (this.interruptResumeTimeout) {
+            clearTimeout(this.interruptResumeTimeout);
+            this.interruptResumeTimeout = null;
+        }
+    }
+
+    private clearReloadFailsafe(): void {
+        if (this.reloadFailsafeTimeout) {
+            clearTimeout(this.reloadFailsafeTimeout);
+            this.reloadFailsafeTimeout = null;
+        }
+        if (this.reloadFailsafeListener) {
+            this.audio.removeEventListener("canplay", this.reloadFailsafeListener);
+            this.reloadFailsafeListener = null;
+        }
+    }
+
+    /**
+     * Reload the current source and resume playback.
+     * Used as a fallback when play() fails after iOS audio interruption
+     * (the audio element can be left in a state where it reports playing
+     * but the hardware audio session is disconnected).
+     *
+     * Recovery flow: set src → load() → canplay fires → seek to saved position
+     * → autoResumeAfterRecovery triggers play(). If the element doesn't reach
+     * canplay within 10 s, emits needs-resume so the UI can prompt the user.
+     */
+    reloadAndPlay(): void {
+        if (!this.currentSrc) return;
+        const currentTime = this.audio.currentTime;
+        this.retrySeekTime = Number.isFinite(currentTime) && currentTime > 0 ? currentTime : null;
+        this.autoResumeAfterRecovery = true;
+
+        // Clean up any previous reload's failsafe
+        this.clearReloadFailsafe();
+
+        const onCanPlayOnce = () => {
+            this.clearReloadFailsafe();
+        };
+
+        this.reloadFailsafeListener = onCanPlayOnce;
+        this.audio.addEventListener("canplay", onCanPlayOnce);
+
+        this.audio.src = this.currentSrc;
+        this.audio.load();
+
+        // Safety net: if canplay never fires, notify the UI
+        this.reloadFailsafeTimeout = setTimeout(() => {
+            this.clearReloadFailsafe();
+            if (this.autoResumeAfterRecovery) {
+                this.autoResumeAfterRecovery = false;
+                this.emit("needs-resume");
+            }
+        }, 10_000);
+    }
+
     stop(): void {
+        this.userInitiatedPause = true;
+        this.interruptedWhilePlaying = false;
+        this.cancelInterruptResume();
         this.audio.pause();
         this.audio.currentTime = 0;
     }
@@ -447,6 +559,10 @@ export class AudioController {
         this.cancelNetworkRetry();
         this.stopWatchdog();
         this.cancelStallGrace();
+        this.cancelInterruptResume();
+        this.clearReloadFailsafe();
+        this.interruptedWhilePlaying = false;
+        this.userInitiatedPause = true; // prevent cleanup pause from triggering interrupt logic
         this.audio.pause();
         this.audio.removeAttribute("src");
         this.audio.load();
