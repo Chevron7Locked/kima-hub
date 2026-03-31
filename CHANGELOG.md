@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.7.8] - 2026-03-31
+
+### Fixed
+
+- **iOS PWA background audio: Control Center pause/resume produces no sound (WebKit #261858)**: Standalone PWAs on iOS use WKWebView, which suspends the audio session when backgrounded and cannot reactivate it from Control Center — `play()` resolves but produces no sound. Confirmed via on-device debugging with ios-webkit-debug-proxy. Fix: iOS "Add to Home Screen" now creates a Safari bookmark (display: browser) instead of a standalone WKWebView app, giving full audio session support. Desktop and Android retain the standalone PWA experience. Dynamic manifest route serves platform-appropriate display mode based on User-Agent.
+
 ## [1.7.7] - 2026-03-31
 
 ### Fixed
