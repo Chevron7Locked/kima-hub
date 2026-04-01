@@ -31,6 +31,7 @@ function transformSearchResults(serviceResults: SearchResults) {
             duration: track.duration,
             trackNo: 0,
             discNumber: null,
+            discSubtitle: null,
             album: {
                 id: track.albumId,
                 title: track.albumTitle,

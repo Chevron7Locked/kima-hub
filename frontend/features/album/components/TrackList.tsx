@@ -283,12 +283,13 @@ export const TrackList = memo(function TrackList({
                         const showDiscHeader =
                             shouldGroupByDisc &&
                             (index === 0 || discNumber !== previousDiscNumber);
+                        const discLabel = track.discSubtitle?.trim();
 
                         return (
                             <React.Fragment key={track.id}>
                                 {showDiscHeader && (
                                     <div className="px-3 md:px-4 py-2 text-xs font-semibold tracking-wide text-gray-400 uppercase bg-[#121212]">
-                                        Disc {discNumber}
+                                        Disc {discNumber}{discLabel ? ` — ${discLabel}` : ""}
                                     </div>
                                 )}
                                 <TrackRow

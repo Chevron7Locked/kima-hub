@@ -21,6 +21,7 @@ interface ShareTrack {
     duration: number;
     trackNo?: number;
     discNumber?: number | null;
+    discSubtitle?: string | null;
     album?: {
         title: string;
         coverUrl?: string;

@@ -216,6 +216,7 @@ router.get("/:token", shareResolveLimiter, async (req: Request, res: Response) =
                             title: true,
                             trackNo: true,
                             discNumber: true,
+                            discSubtitle: true,
                             duration: true,
                         },
                     },

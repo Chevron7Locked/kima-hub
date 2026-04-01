@@ -54,6 +54,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
             ...track,
             trackNumber: track.trackNumber ?? track.trackNo,
             discNumber: track.discNumber ?? null,
+            discSubtitle: track.discSubtitle ?? null,
             isMissing: false,
             previewUrl: null,
         }));
@@ -65,6 +66,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                 duration: 0,
                 trackNumber: track.trackNumber ?? undefined,
                 discNumber: null,
+                discSubtitle: null,
                 isMissing: true,
                 previewUrl: track.previewUrl,
             })
