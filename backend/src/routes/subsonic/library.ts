@@ -134,7 +134,10 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
             artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
             tracks: {
                 where: { corrupt: false },
-                orderBy: { trackNo: "asc" },
+                orderBy: [
+                    { discNumber: "asc" },
+                    { trackNo: "asc" },
+                ],
             },
         },
     });
@@ -278,7 +281,12 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
         where: { id: albumId },
         include: {
             artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
-            tracks: { orderBy: { trackNo: "asc" } },
+            tracks: {
+                orderBy: [
+                    { discNumber: "asc" },
+                    { trackNo: "asc" },
+                ],
+            },
         },
     });
 
@@ -315,7 +323,12 @@ libraryRouter.all("/getAlbum.view", wrap(async (req, res) => {
         where: { id },
         include: {
             artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
-            tracks: { orderBy: { trackNo: "asc" } },
+            tracks: {
+                orderBy: [
+                    { discNumber: "asc" },
+                    { trackNo: "asc" },
+                ],
+            },
         },
     });
     if (!album || album.location !== "LIBRARY") {
