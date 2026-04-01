@@ -91,6 +91,7 @@ router.post("/albums/:id/download", async (req, res) => {
                 trackId: track.id,
                 title: track.title,
                 trackNo: track.trackNo,
+                discNumber: track.discNumber,
                 duration: track.duration,
                 streamUrl: `/library/tracks/${track.id}/stream?quality=${selectedQuality}`,
             })),

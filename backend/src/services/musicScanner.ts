@@ -577,6 +577,7 @@ export class MusicScannerService {
             sanitizeTagString(metadata.common.title) ||
             path.basename(relativePath, path.extname(relativePath));
         const trackNo = metadata.common.track.no || 0;
+        const discNumber = metadata.common.disk.no || null;
         const duration = Math.floor(metadata.format.duration || 0);
         const mime = metadata.format.codec || "audio/mpeg";
         const rawIsrc = metadata.common.isrc?.[0] || null;
@@ -994,6 +995,7 @@ export class MusicScannerService {
                 albumId: album.id,
                 title,
                 trackNo,
+                discNumber,
                 duration,
                 mime,
                 filePath: relativePath,
@@ -1006,6 +1008,7 @@ export class MusicScannerService {
                 albumId: album.id,
                 title,
                 trackNo,
+                discNumber,
                 duration,
                 mime,
                 fileModified: stats.mtime,

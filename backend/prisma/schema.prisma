@@ -585,6 +585,7 @@ model Track {
   albumId                     String
   title                       String
   trackNo                     Int
+  discNumber                  Int?
   duration                    Int
   mime                        String?
   searchVector                Unsupported("tsvector")?

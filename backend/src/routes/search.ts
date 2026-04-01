@@ -30,6 +30,7 @@ function transformSearchResults(serviceResults: SearchResults) {
             albumId: track.albumId,
             duration: track.duration,
             trackNo: 0,
+            discNumber: null,
             album: {
                 id: track.albumId,
                 title: track.albumTitle,
