@@ -53,6 +53,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         const ownedTracks = (album?.tracks || []).map((track: AlbumTrack) => ({
             ...track,
             trackNumber: track.trackNumber ?? track.trackNo,
+            discNumber: track.discNumber ?? null,
             isMissing: false,
             previewUrl: null,
         }));
@@ -63,29 +64,27 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                 title: track.title,
                 duration: 0,
                 trackNumber: track.trackNumber ?? undefined,
+                discNumber: null,
                 isMissing: true,
                 previewUrl: track.previewUrl,
             })
         );
 
-        const orderedOwnedTracks = [...ownedTracks].sort((a, b) => {
-            const aNum =
-                typeof a.trackNumber === "number"
-                    ? a.trackNumber
-                    : Number.MAX_SAFE_INTEGER;
-            const bNum =
-                typeof b.trackNumber === "number"
-                    ? b.trackNumber
-                    : Number.MAX_SAFE_INTEGER;
-            return aNum - bNum;
-        });
+        const compareTrackOrder = (a: AlbumTrack, b: AlbumTrack) => {
+            const aDisc = a.discNumber ?? Number.MAX_SAFE_INTEGER;
+            const bDisc = b.discNumber ?? Number.MAX_SAFE_INTEGER;
+            if (aDisc !== bDisc) return aDisc - bDisc;
+
+            const aTrack = a.trackNumber ?? Number.MAX_SAFE_INTEGER;
+            const bTrack = b.trackNumber ?? Number.MAX_SAFE_INTEGER;
+            return aTrack - bTrack;
+        };
+
+        const orderedOwnedTracks = [...ownedTracks].sort(compareTrackOrder);
 
         const numberedMissing = missingTracks
             .filter((track: AlbumTrack) => typeof track.trackNumber === "number")
-            .sort(
-                (a: AlbumTrack, b: AlbumTrack) =>
-                    (a.trackNumber as number) - (b.trackNumber as number)
-            );
+            .sort(compareTrackOrder);
 
         const unnumberedMissing = missingTracks.filter(
             (track: AlbumTrack) => typeof track.trackNumber !== "number"
@@ -95,16 +94,10 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         let missingIndex = 0;
 
         for (const ownedTrack of orderedOwnedTracks) {
-            const ownedTrackNumber =
-                typeof ownedTrack.trackNumber === "number"
-                    ? ownedTrack.trackNumber
-                    : Number.MAX_SAFE_INTEGER;
-
             while (missingIndex < numberedMissing.length) {
                 const missingTrack = numberedMissing[missingIndex];
-                const missingTrackNumber = missingTrack.trackNumber as number;
 
-                if (missingTrackNumber > ownedTrackNumber) break;
+                if (compareTrackOrder(missingTrack, ownedTrack) > 0) break;
 
                 merged.push(missingTrack);
                 missingIndex += 1;

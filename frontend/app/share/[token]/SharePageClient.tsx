@@ -19,6 +19,8 @@ interface ShareTrack {
     id: string;
     title: string;
     duration: number;
+    trackNo?: number;
+    discNumber?: number | null;
     album?: {
         title: string;
         coverUrl?: string;
@@ -438,6 +440,12 @@ export default function SharePageClient() {
                                     ? buildCoverArtUrl(trackCoverId)
                                     : null;
 
+                                const trackNumber = track.trackNo ?? index + 1;
+                                const trackLabel =
+                                    track.discNumber != null && track.discNumber > 1
+                                        ? `${track.discNumber}-${String(trackNumber).padStart(2, "0")}`
+                                        : String(trackNumber);
+
                                 return (
                                     <button
                                         key={track.id}
@@ -448,7 +456,7 @@ export default function SharePageClient() {
                                                 : "hover:bg-white/[0.02]"
                                         }`}
                                     >
-                                        <div className="w-6 text-center flex-shrink-0">
+                                        <div className="w-8 text-center flex-shrink-0">
                                             {isActive && isPlaying ? (
                                                 <div className="flex items-center justify-center gap-[2px] h-3.5">
                                                     <span className="w-[2px] h-2.5 bg-[#fca200] rounded-full animate-pulse" />
@@ -459,7 +467,7 @@ export default function SharePageClient() {
                                                 <span className={`text-[11px] font-mono ${
                                                     isActive ? "text-[#fca200]" : "text-white/15"
                                                 }`}>
-                                                    {index + 1}
+                                                    {trackLabel}
                                                 </span>
                                             )}
                                         </div>

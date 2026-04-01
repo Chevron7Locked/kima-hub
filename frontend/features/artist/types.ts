@@ -60,6 +60,7 @@ export interface Track {
         coverArt?: string;
     };
     trackNo?: number;
+    discNumber?: number | null;
     // User overrides (non-destructive edits)
     displayTitle?: string | null;
     displayTrackNo?: number | null;

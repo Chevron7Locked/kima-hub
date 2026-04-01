@@ -36,7 +36,7 @@ export interface Track {
     duration: number;
     trackNo?: number;
     trackNumber?: number;
-    discNumber?: number;
+    discNumber?: number | null;
     isMissing?: boolean;
     previewUrl?: string | null;
     playCount?: number;
