@@ -73,9 +73,12 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         );
 
         const compareTrackOrder = (a: AlbumTrack, b: AlbumTrack) => {
-            const aDisc = a.discNumber ?? Number.MAX_SAFE_INTEGER;
-            const bDisc = b.discNumber ?? Number.MAX_SAFE_INTEGER;
-            if (aDisc !== bDisc) return aDisc - bDisc;
+            const aDisc = typeof a.discNumber === "number" ? a.discNumber : 1;
+            const bDisc = typeof b.discNumber === "number" ? b.discNumber : 1;
+
+            if (aDisc !== bDisc) {
+                return aDisc - bDisc;
+            }
 
             const aTrack = a.trackNumber ?? Number.MAX_SAFE_INTEGER;
             const bTrack = b.trackNumber ?? Number.MAX_SAFE_INTEGER;
