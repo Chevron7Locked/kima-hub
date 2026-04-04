@@ -22,6 +22,14 @@ import { ArtistsGrid } from "@/features/library/components/ArtistsGrid";
 import { AlbumsGrid } from "@/features/library/components/AlbumsGrid";
 import { TracksList } from "@/features/library/components/TracksList";
 
+function getArtistSortKey(name: string): string {
+    const trimmed = name.trim();
+    const withoutArticle = trimmed.replace(/^the\s+/i, "");
+    const key = withoutArticle.length > 0 ? withoutArticle : trimmed;
+
+    return key.toLocaleLowerCase();
+}
+
 export default function LibraryPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -79,10 +87,35 @@ export default function LibraryPage() {
     });
 
     // Get data based on active tab
-    const artists = useMemo(
-        () => (activeTab === "artists" ? (artistsQuery.data?.artists ?? []) : []),
-        [activeTab, artistsQuery.data?.artists],
-    );
+    const artists = useMemo(() => {
+        if (activeTab !== "artists") {
+            return [];
+        }
+
+        const artistList = artistsQuery.data?.artists ?? [];
+
+        if (sortBy !== "name" && sortBy !== "name-desc") {
+            return artistList;
+        }
+
+        const sorted = [...artistList].sort((a, b) => {
+            const aKey = getArtistSortKey(a.name || "");
+            const bKey = getArtistSortKey(b.name || "");
+            const byKey = aKey.localeCompare(bKey, undefined, { sensitivity: "base" });
+
+            if (byKey !== 0) {
+                return sortBy === "name-desc" ? -byKey : byKey;
+            }
+
+            const byName = (a.name || "").localeCompare(b.name || "", undefined, {
+                sensitivity: "base",
+            });
+
+            return sortBy === "name-desc" ? -byName : byName;
+        });
+
+        return sorted;
+    }, [activeTab, artistsQuery.data?.artists, sortBy]);
 
 
 

@@ -29,6 +29,34 @@ const MAX_LIMIT = 10000;
 
 const router = Router();
 
+function buildArtistListWhereSql(filter: string, query: string): Prisma.Sql {
+  const clauses: Prisma.Sql[] = [];
+
+  if (filter === "owned") {
+    clauses.push(
+      Prisma.sql`(a."libraryAlbumCount" > 0 OR EXISTS (SELECT 1 FROM "OwnedAlbum" oa WHERE oa."artistId" = a.id))`,
+    );
+  } else if (filter === "discovery") {
+    clauses.push(
+      Prisma.sql`(a."discoveryAlbumCount" > 0 AND a."libraryAlbumCount" = 0)`,
+    );
+  } else {
+    clauses.push(
+      Prisma.sql`(a."libraryAlbumCount" > 0 OR a."discoveryAlbumCount" > 0)`,
+    );
+  }
+
+  if (query) {
+    clauses.push(Prisma.sql`a."name" ILIKE ${`%${query}%`}`);
+  }
+
+  if (clauses.length === 0) {
+    return Prisma.empty;
+  }
+
+  return Prisma.sql`WHERE ${Prisma.join(clauses, " AND ")}`;
+}
+
 router.get("/artists", async (req, res) => {
   try {
     const {
@@ -70,6 +98,52 @@ router.get("/artists", async (req, res) => {
 
     const [artists, total] = await prisma.$transaction(
       async (tx) => {
+        if (sortBy === "name" || sortBy === "name-desc") {
+          const whereSql = buildArtistListWhereSql(filter as string, query as string);
+          const direction = sortBy === "name-desc"
+            ? Prisma.sql`DESC`
+            : Prisma.sql`ASC`;
+
+          const artistsByName = await tx.$queryRaw<
+            {
+              id: string;
+              mbid: string | null;
+              name: string;
+              heroUrl: string | null;
+              userHeroUrl: string | null;
+              libraryAlbumCount: number;
+              discoveryAlbumCount: number;
+              totalTrackCount: number;
+            }[]
+          >`
+            SELECT
+              a.id,
+              a.mbid,
+              a.name,
+              a."heroUrl",
+              a."userHeroUrl",
+              a."libraryAlbumCount",
+              a."discoveryAlbumCount",
+              a."totalTrackCount"
+            FROM "Artist" a
+            ${whereSql}
+            ORDER BY
+              LOWER(REGEXP_REPLACE(TRIM(a.name), '^the\\s+', '', 'i')) ${direction},
+              LOWER(TRIM(a.name)) ${direction},
+              a.id ASC
+            LIMIT ${limit}
+            OFFSET ${offset}
+          `;
+
+          const countRows = await tx.$queryRaw<{ total: bigint }[]>`
+            SELECT COUNT(*)::bigint AS total
+            FROM "Artist" a
+            ${whereSql}
+          `;
+
+          return [artistsByName, Number(countRows[0]?.total ?? 0)] as const;
+        }
+
         const findManyArgs: Parameters<typeof tx.artist.findMany>[0] = {
           where,
           take: limit,
