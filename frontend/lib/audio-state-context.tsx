@@ -66,6 +66,12 @@ export interface Track {
     } | null;
 }
 
+export interface AudiobookTrack {
+    index: number;
+    startOffset: number;
+    duration: number;
+}
+
 export interface Audiobook {
     id: string;
     title: string;
@@ -73,6 +79,9 @@ export interface Audiobook {
     narrator?: string;
     coverUrl: string | null;
     duration: number;
+    tracks?: AudiobookTrack[];
+    trackIndex?: number;
+    trackOffset?: number;
     progress?: {
         currentTime: number;
         progress: number;

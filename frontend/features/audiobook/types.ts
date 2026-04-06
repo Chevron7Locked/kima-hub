@@ -24,6 +24,12 @@ export interface AudiobookMetaTags {
     tagAlbum?: string;
 }
 
+export interface AudiobookTrack {
+    index: number;
+    startOffset: number;
+    duration: number;
+}
+
 export interface AudiobookAudioFile {
     metaTags?: AudiobookMetaTags;
 }
@@ -45,6 +51,7 @@ export interface Audiobook {
     asin?: string;
     language?: string;
     progress?: AudiobookProgress | null;
+    tracks?: AudiobookTrack[];
     chapters?: AudiobookChapter[];
     audioFiles?: AudiobookAudioFile[];
 }

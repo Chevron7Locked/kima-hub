@@ -548,6 +548,11 @@ router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
             duration: audiobook.duration || 0,
             chapters: absBook.media?.chapters || [],
             audioFiles: absBook.media?.audioFiles || [],
+            tracks: (absBook.media?.tracks ?? []).map((t: any) => ({
+                index: t.index,
+                startOffset: t.startOffset ?? 0,
+                duration: t.duration ?? 0,
+            })),
             libraryId: audiobook.libraryId,
             progress: progress
                 ? {
@@ -589,16 +594,17 @@ router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
         }
 
         const { id } = req.params;
+        const trackIndex = Math.max(0, parseInt(req.query.trackIndex as string) || 0);
         const rangeHeader = req.headers.range as string | undefined;
 
         logger.debug(
-            `[Audiobook Stream] Fetching stream for ${id}, range: ${
+            `[Audiobook Stream] Fetching stream for ${id}, track: ${trackIndex}, range: ${
                 rangeHeader || "none"
             }`
         );
 
         const { stream, headers, status } =
-            await audiobookshelfService.streamAudiobook(id, rangeHeader);
+            await audiobookshelfService.streamAudiobook(id, rangeHeader, trackIndex);
 
         logger.debug(
             `[Audiobook Stream] Got stream, status: ${status}, content-type: ${headers["content-type"]}`

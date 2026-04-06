@@ -291,7 +291,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const playAudiobook = useCallback(
         (audiobook: Audiobook) => {
             state.setPlaybackType("audiobook");
-            state.setCurrentAudiobook(audiobook);
             state.setCurrentTrack(null);
             state.setCurrentPodcast(null);
             state.setPodcastEpisodeQueue(null);
@@ -299,12 +298,26 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setCurrentIndex(0);
             state.setShuffleIndices([]);
 
-            const startTime = audiobook.progress?.currentTime || 0;
-            pendingStartTimeRef.current = startTime;
-            setCurrentTimeRef.current(startTime);
+            const totalBookStartTime = audiobook.progress?.currentTime ?? 0;
+            const tracks = audiobook.tracks ?? [];
 
-            const streamUrl = api.getAudiobookStreamUrl(audiobook.id);
-            controllerRef.current?.load(streamUrl, true);
+            let startTrackIndex = 0;
+            let trackStartOffset = 0;
+            if (tracks.length > 1) {
+                for (const t of tracks) {
+                    if (t.startOffset <= totalBookStartTime) {
+                        startTrackIndex = t.index;
+                        trackStartOffset = t.startOffset;
+                    }
+                }
+            }
+            const withinTrackStartTime = totalBookStartTime - trackStartOffset;
+
+            state.setCurrentAudiobook({ ...audiobook, trackIndex: startTrackIndex, trackOffset: trackStartOffset });
+            pendingStartTimeRef.current = withinTrackStartTime;
+            setCurrentTimeRef.current(totalBookStartTime);
+
+            controllerRef.current?.load(api.getAudiobookStreamUrl(audiobook.id, startTrackIndex), true);
         },
         [state]
     );
@@ -376,10 +389,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             return true;
         }
         if (state.playbackType === "audiobook" && state.currentAudiobook) {
-            const startTime = state.currentAudiobook.progress?.currentTime || 0;
-            pendingStartTimeRef.current = startTime;
-            playback.setCurrentTime(startTime);
-            ctrl.load(api.getAudiobookStreamUrl(state.currentAudiobook.id));
+            const totalBookStartTime = state.currentAudiobook.progress?.currentTime ?? 0;
+            const trackIndex = state.currentAudiobook.trackIndex ?? 0;
+            const trackOffset = state.currentAudiobook.trackOffset ?? 0;
+            pendingStartTimeRef.current = totalBookStartTime - trackOffset;
+            playback.setCurrentTime(totalBookStartTime);
+            ctrl.load(api.getAudiobookStreamUrl(state.currentAudiobook.id, trackIndex));
             return true;
         }
         if (state.playbackType === "podcast" && state.currentPodcast) {
@@ -411,8 +426,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     : state.playbackType === "audiobook"
                     ? state.currentAudiobook?.duration || 0
                     : state.currentTrack?.duration || 0;
-            const maxDuration =
-                mediaDuration > 0 && playback.duration > 0
+            const isMultiTrack = state.playbackType === "audiobook" && (state.currentAudiobook?.tracks?.length ?? 0) > 1;
+            const maxDuration = isMultiTrack
+                ? mediaDuration
+                : mediaDuration > 0 && playback.duration > 0
                     ? Math.min(mediaDuration, playback.duration)
                     : mediaDuration || playback.duration || 0;
             const clampedTime =
@@ -423,21 +440,52 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             setCurrentTimeRef.current(clampedTime);
 
             if (state.playbackType === "audiobook" && state.currentAudiobook) {
-                state.setCurrentAudiobook((prev) => {
-                    if (!prev) return prev;
-                    const duration = prev.duration || 0;
-                    const progressPercent =
-                        duration > 0 ? (clampedTime / duration) * 100 : 0;
-                    return {
+                const tracks = state.currentAudiobook.tracks;
+                if (tracks && tracks.length > 1) {
+                    let targetTrack = tracks[0];
+                    for (const t of tracks) {
+                        if (t.startOffset <= clampedTime) targetTrack = t;
+                    }
+                    const withinTrackTime = clampedTime - targetTrack.startOffset;
+                    const currentTrackIdx = state.currentAudiobook.trackIndex ?? 0;
+
+                    state.setCurrentAudiobook((prev) => prev ? {
                         ...prev,
+                        trackIndex: targetTrack.index,
+                        trackOffset: targetTrack.startOffset,
                         progress: {
                             currentTime: clampedTime,
-                            progress: progressPercent,
+                            progress: prev.duration > 0 ? (clampedTime / prev.duration) * 100 : 0,
                             isFinished: false,
                             lastPlayedAt: new Date(),
                         },
-                    };
-                });
+                    } : prev);
+
+                    if (targetTrack.index !== currentTrackIdx) {
+                        const wasPlaying = controllerRef.current?.isPlaying() ?? false;
+                        pendingStartTimeRef.current = withinTrackTime;
+                        controllerRef.current?.load(api.getAudiobookStreamUrl(state.currentAudiobook.id, targetTrack.index), wasPlaying);
+                    } else {
+                        controllerRef.current?.seek(withinTrackTime);
+                    }
+                } else {
+                    state.setCurrentAudiobook((prev) => {
+                        if (!prev) return prev;
+                        const duration = prev.duration || 0;
+                        const progressPercent =
+                            duration > 0 ? (clampedTime / duration) * 100 : 0;
+                        return {
+                            ...prev,
+                            progress: {
+                                currentTime: clampedTime,
+                                progress: progressPercent,
+                                isFinished: false,
+                                lastPlayedAt: new Date(),
+                            },
+                        };
+                    });
+                    controllerRef.current?.seek(clampedTime);
+                }
             } else if (
                 state.playbackType === "podcast" &&
                 state.currentPodcast
@@ -457,9 +505,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                         },
                     };
                 });
+                controllerRef.current?.seek(clampedTime);
+            } else {
+                controllerRef.current?.seek(clampedTime);
             }
-
-            controllerRef.current?.seek(clampedTime);
         },
         [state, playback.duration]
     );
@@ -952,23 +1001,25 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             const audiobook = currentAudiobookRef.current;
             if (!audiobook) return;
 
-            const currentTime = controllerRef.current?.getCurrentTime() || 0;
-            const duration = controllerRef.current?.getDuration() || audiobook.duration;
+            const trackOffset = audiobook.trackOffset ?? 0;
+            const withinTrackTime = controllerRef.current?.getCurrentTime() || 0;
+            const totalBookTime = trackOffset + withinTrackTime;
+            const bookDuration = audiobook.duration || 0;
 
-            if (currentTime === lastSaveTimeRef.current && !isFinished) return;
-            lastSaveTimeRef.current = currentTime;
+            if (totalBookTime === lastSaveTimeRef.current && !isFinished) return;
+            lastSaveTimeRef.current = totalBookTime;
 
             try {
                 await api.updateAudiobookProgress(
                     audiobook.id,
-                    isFinished ? duration : currentTime,
-                    duration,
+                    isFinished ? bookDuration : totalBookTime,
+                    bookDuration,
                     isFinished
                 );
                 state.setCurrentAudiobook((prev) => {
                     if (!prev || prev.id !== audiobook.id) return prev;
                     const dur = prev.duration || 0;
-                    const pos = isFinished ? dur : currentTime;
+                    const pos = isFinished ? dur : totalBookTime;
                     return {
                         ...prev,
                         progress: {
@@ -1041,6 +1092,24 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
         const handleEnded = () => {
             if (playbackTypeRef.current === "audiobook") {
+                const audiobook = currentAudiobookRef.current;
+                const tracks = audiobook?.tracks ?? [];
+                const currentTrackIdx = audiobook?.trackIndex ?? 0;
+
+                if (tracks.length > 1) {
+                    const pos = tracks.findIndex(t => t.index === currentTrackIdx);
+                    const nextTrack = pos >= 0 && pos < tracks.length - 1 ? tracks[pos + 1] : null;
+
+                    if (nextTrack && audiobook) {
+                        state.setCurrentAudiobook(prev =>
+                            prev ? { ...prev, trackIndex: nextTrack.index, trackOffset: nextTrack.startOffset } : prev
+                        );
+                        pendingStartTimeRef.current = 0;
+                        ctrl.load(api.getAudiobookStreamUrl(audiobook.id, nextTrack.index), true);
+                        return;
+                    }
+                }
+
                 justFinishedRef.current = true;
                 saveAudiobookProgressRef.current(true);
                 ctrl.pause();
@@ -1109,14 +1178,18 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 const startPos = pendingStartTimeRef.current;
                 pendingStartTimeRef.current = 0;
                 ctrl.seek(startPos);
-                playback.setCurrentTime(startPos);
+                const trackOffset = playbackTypeRef.current === "audiobook"
+                    ? (currentAudiobookRef.current?.trackOffset ?? 0) : 0;
+                playback.setCurrentTime(startPos + trackOffset);
             }
 
+            const audiobookDuration = playbackTypeRef.current === "audiobook"
+                ? (currentAudiobookRef.current?.duration ?? 0) : 0;
             const fallback =
                 currentTrackRef.current?.duration ||
                 currentAudiobookRef.current?.duration ||
                 currentPodcastRef.current?.duration || 0;
-            playback.setDuration(dur || fallback);
+            playback.setDuration(audiobookDuration || dur || fallback);
         };
 
         ctrl.on("canplay", handleCanPlay);

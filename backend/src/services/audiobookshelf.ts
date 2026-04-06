@@ -265,26 +265,22 @@ class AudiobookshelfService {
      * Stream an audiobook with authentication
      * Returns a readable stream that can be piped to the response
      */
-    async streamAudiobook(audiobookId: string, rangeHeader?: string) {
+    async streamAudiobook(audiobookId: string, rangeHeader?: string, trackIndex = 0) {
         await this.ensureInitialized();
 
-        // First, get the audiobook to find the track file
         const audiobook = await this.getAudiobook(audiobookId);
-
-        // Get the first track's content URL
-        const firstTrack = audiobook.media?.tracks?.[0];
-        if (!firstTrack || !firstTrack.contentUrl) {
+        const tracks = audiobook.media?.tracks ?? [];
+        const track = tracks[trackIndex] ?? tracks[0];
+        if (!track?.contentUrl) {
             throw new Error("No audio track found for this audiobook");
         }
 
-        // Build request headers
         const headers: Record<string, string> = {};
         if (rangeHeader) {
             headers["Range"] = rangeHeader;
         }
 
-        // The contentUrl format is: /api/items/{id}/file/{ino}
-        const response = await this.client!.get(firstTrack.contentUrl, {
+        const response = await this.client!.get(track.contentUrl, {
             responseType: "stream",
             timeout: 0, // No timeout for streaming
             headers,

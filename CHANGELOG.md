@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.7.9] - 2026-04-06
+
+### Fixed
+
+- **Multi-track audiobooks auto-complete after first file**: Audiobooks stored as multiple audio files (e.g., one MP3 per CD/chapter) were being marked `isFinished=true` and stopping playback as soon as the first file ended -- typically within a few minutes -- with no way to resume. Root cause: `streamAudiobook()` hardcoded `tracks[0]`, and the frontend's `handleEnded` handler treated any file end as the entire book finishing. Fix: backend now accepts a `trackIndex` query parameter and exposes the full `tracks[]` array (with `startOffset` and `duration`) in the audiobook detail response; frontend player tracks the active file, advances to the next track on `ended`, handles cross-track seeks, and applies a `trackOffset` so all displayed/saved positions reflect total-book time. Single-file audiobooks are unaffected.
+
 ## [1.7.8] - 2026-03-31
 
 ### Fixed

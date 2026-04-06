@@ -1023,15 +1023,14 @@ class ApiClient {
         );
     }
 
-    getAudiobookStreamUrl(id: string): string {
+    getAudiobookStreamUrl(id: string, trackIndex = 0): string {
         const baseUrl = `${this.getBaseUrl()}/api/audiobooks/${id}/stream`;
-        // For audio element requests, cookies may not be sent cross-origin in development
-        // Add token as query param for authentication (supported by requireAuthOrToken)
         const token = this.getCurrentToken();
-        if (token) {
-            return `${baseUrl}?token=${encodeURIComponent(token)}`;
-        }
-        return baseUrl;
+        const params = new URLSearchParams();
+        if (token) params.set("token", token);
+        if (trackIndex > 0) params.set("trackIndex", String(trackIndex));
+        const qs = params.toString();
+        return qs ? `${baseUrl}?${qs}` : baseUrl;
     }
 
     async updateAudiobookProgress(

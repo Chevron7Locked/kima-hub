@@ -60,8 +60,16 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         setCurrentTime(time);
     }, []);
 
-    // Sync currentTime from audiobook/podcast progress when not playing
     const state = useAudioState();
+
+    // Ref for trackOffset so the timeupdate handler always uses the latest value
+    const trackOffsetRef = useRef(0);
+    useEffect(() => {
+        trackOffsetRef.current = state.playbackType === "audiobook"
+            ? (state.currentAudiobook?.trackOffset ?? 0) : 0;
+    }, [state.playbackType, state.currentAudiobook?.trackOffset]);
+
+    // Sync currentTime from audiobook/podcast progress when not playing
     const progressKey = isHydrated && !isPlaying
         ? `${state.playbackType}-${state.currentAudiobook?.progress?.currentTime}-${state.currentPodcast?.progress?.currentTime}`
         : null;
@@ -95,7 +103,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
 
         const onTimeUpdate = (data: unknown) => {
             const { time } = data as { time: number };
-            setCurrentTimeFromEngine(time);
+            setCurrentTimeFromEngine(time + trackOffsetRef.current);
         };
 
         const onCanPlay = (data: unknown) => {

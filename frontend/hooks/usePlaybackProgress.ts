@@ -23,11 +23,14 @@ export function usePlaybackProgress() {
         duration: playbackDuration,
     } = useAudioPlayback();
 
-    const duration = playbackDuration > 0
-        ? playbackDuration
-        : (currentTrack?.duration || currentAudiobook?.duration || currentPodcast?.duration || 0);
+    const isMultiTrack = playbackType === "audiobook" && (currentAudiobook?.tracks?.length ?? 0) > 1;
 
-    // Show saved progress for audiobooks/podcasts before playback starts
+    const duration = isMultiTrack
+        ? (currentAudiobook?.duration || playbackDuration || 0)
+        : playbackDuration > 0
+            ? playbackDuration
+            : (currentTrack?.duration || currentAudiobook?.duration || currentPodcast?.duration || 0);
+
     let time = currentTime;
     if (time <= 0) {
         if (playbackType === "audiobook" && currentAudiobook?.progress?.currentTime) {
