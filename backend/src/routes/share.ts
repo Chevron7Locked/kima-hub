@@ -207,11 +207,16 @@ router.get("/:token", shareResolveLimiter, async (req: Request, res: Response) =
                 include: {
                     artist: { select: { id: true, name: true } },
                     tracks: {
-                        orderBy: { trackNo: "asc" },
+                        orderBy: [
+                            { discNumber: "asc" },
+                            { trackNo: "asc" },
+                        ],
                         select: {
                             id: true,
                             title: true,
                             trackNo: true,
+                            discNumber: true,
+                            discSubtitle: true,
                             duration: true,
                         },
                     },

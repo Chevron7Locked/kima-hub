@@ -602,6 +602,8 @@ router.get("/album/:mbid", async (req, res) => {
                 id: `mb-${releaseGroupId}-${track.id || index}`,
                 title: track.title,
                 trackNo: track.position || index + 1,
+                discNumber: null,
+                discSubtitle: null,
                 duration: track.length ? Math.floor(track.length / 1000) : 0,
                 artist: { name: artistName },
             })),

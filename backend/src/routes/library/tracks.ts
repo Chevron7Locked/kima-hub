@@ -1754,6 +1754,8 @@ router.get("/radio", async (req, res) => {
       title: track.title,
       duration: track.duration,
       trackNo: track.trackNo,
+      discNumber: track.discNumber,
+      discSubtitle: track.discSubtitle,
       filePath: track.filePath,
       artist: {
         id: track.album.artist.id,

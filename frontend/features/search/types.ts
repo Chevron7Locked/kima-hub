@@ -52,6 +52,8 @@ export interface LibraryTrack {
     id: string;
     title: string;
     duration: number;
+    discNumber?: number | null;
+    discSubtitle?: string | null;
     album: {
         id: string;
         title: string;

@@ -118,7 +118,10 @@ router.get("/albums/:id", async (req, res) => {
           },
         },
         tracks: {
-          orderBy: { trackNo: Prisma.SortOrder.asc },
+          orderBy: [
+            { discNumber: Prisma.SortOrder.asc },
+            { trackNo: Prisma.SortOrder.asc },
+          ],
         },
       },
     });

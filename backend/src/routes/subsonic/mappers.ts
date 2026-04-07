@@ -31,6 +31,7 @@ export type TrackRow = {
     id: string;
     title: string;
     trackNo: number | null;
+    discNumber: number | null;
     duration: number | null;
     filePath: string | null;
     mime: string | null;
@@ -79,6 +80,7 @@ export function mapSong(
         "@_duration": track.duration ? Math.round(track.duration) : 0,
         "@_bitRate": estimateBitrateFromMime(track.mime),
         "@_track": track.trackNo || undefined,
+        "@_discNumber": track.discNumber ?? undefined,
         "@_year": album.year || undefined,
         "@_size": track.fileSize ?? undefined,
         "@_contentType": normalizeMime(track.mime) || "audio/mpeg",

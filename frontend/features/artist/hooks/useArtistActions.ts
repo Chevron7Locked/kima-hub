@@ -8,6 +8,7 @@ interface FormattedTrack {
   id: string;
   title: string;
   trackNumber: number;
+  discNumber: number;
   artist: { name: string; id: string };
   album: { title: string; coverArt?: string; id: string; year?: number };
   duration: number;
@@ -45,7 +46,8 @@ export function useArtistActions() {
       const formattedTracks = albumData.tracks.map((track: Record<string, unknown>) => ({
         id: track.id,
         title: track.title,
-        trackNumber: track.trackNumber || 0,
+        trackNumber: Number(track.trackNumber ?? 0),
+        discNumber: Number(track.discNumber ?? 1),
         artist: { name: artist.name, id: artist.id },
         album: {
           title: album.title,
@@ -56,8 +58,10 @@ export function useArtistActions() {
         duration: track.duration,
       }));
 
-      // Sort tracks within album by track number
-      formattedTracks.sort((a: FormattedTrack, b: FormattedTrack) => a.trackNumber - b.trackNumber);
+      // Sort tracks within album by disc number then track number
+      formattedTracks.sort((a: FormattedTrack, b: FormattedTrack) =>
+        a.discNumber - b.discNumber || a.trackNumber - b.trackNumber
+      );
       allTracks.push(...formattedTracks);
     });
 

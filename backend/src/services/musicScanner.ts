@@ -577,6 +577,16 @@ export class MusicScannerService {
             sanitizeTagString(metadata.common.title) ||
             path.basename(relativePath, path.extname(relativePath));
         const trackNo = metadata.common.track.no || 0;
+        const discNumber = metadata.common.disk.no || null;
+        // music-metadata runtime treats `discsubtitle` as single-value (not multiple)
+        // even though type definitions may suggest array shape.
+        const discSubtitle =
+            sanitizeTagString(
+                metadata.common.discsubtitle as unknown as
+                    | string
+                    | null
+                    | undefined
+            ) || null;
         const duration = Math.floor(metadata.format.duration || 0);
         const mime = metadata.format.codec || "audio/mpeg";
         const rawIsrc = metadata.common.isrc?.[0] || null;
@@ -994,6 +1004,8 @@ export class MusicScannerService {
                 albumId: album.id,
                 title,
                 trackNo,
+                discNumber,
+                discSubtitle,
                 duration,
                 mime,
                 filePath: relativePath,
@@ -1006,6 +1018,8 @@ export class MusicScannerService {
                 albumId: album.id,
                 title,
                 trackNo,
+                discNumber,
+                discSubtitle,
                 duration,
                 mime,
                 fileModified: stats.mtime,

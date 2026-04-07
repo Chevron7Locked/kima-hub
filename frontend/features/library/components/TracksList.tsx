@@ -44,6 +44,16 @@ const TrackRow = memo(
         onDelete,
     }: TrackRowProps) {
         const doubleTapProps = useDoubleTap(onPlayTrack);
+        const displayTrackNumber =
+            typeof track.trackNumber === "number"
+                ? track.trackNumber
+                : index + 1;
+        const displayDiscNumber =
+            typeof track.discNumber === "number" ? track.discNumber : null;
+        const displayTrackLabel =
+            displayDiscNumber && displayDiscNumber > 1
+                ? `${displayDiscNumber}-${String(displayTrackNumber).padStart(2, "0")}`
+                : String(displayTrackNumber);
         return (
             <div
                 key={track.id}
@@ -76,7 +86,7 @@ const TrackRow = memo(
                         >
                             {isCurrentlyPlaying ?
                                 <AudioLines className="w-4 h-4 text-[#a855f7]" />
-                            :   index + 1}
+                            :   displayTrackLabel}
                         </span>
                         <Play className="w-4 h-4 text-[#a855f7] hidden group-hover:block fill-current" />
                     </button>

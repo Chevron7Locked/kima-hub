@@ -33,7 +33,10 @@ router.post("/albums/:id/download", async (req, res) => {
             where: { id: albumId },
             include: {
                 tracks: {
-                    orderBy: { trackNo: "asc" },
+                    orderBy: [
+                        { discNumber: "asc" },
+                        { trackNo: "asc" },
+                    ],
                 },
                 artist: {
                     select: {
@@ -91,6 +94,8 @@ router.post("/albums/:id/download", async (req, res) => {
                 trackId: track.id,
                 title: track.title,
                 trackNo: track.trackNo,
+                discNumber: track.discNumber,
+                discSubtitle: track.discSubtitle,
                 duration: track.duration,
                 streamUrl: `/library/tracks/${track.id}/stream?quality=${selectedQuality}`,
             })),

@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from "react";
+import React, { memo, useCallback, useMemo } from "react";
 import { Card } from "@/components/ui/Card";
 import { Play, Pause, Volume2, ListPlus, Plus } from "lucide-react";
 import { cn } from "@/utils/cn";
@@ -260,6 +260,11 @@ export const TrackList = memo(function TrackList({
     onPreview,
 }: TrackListProps) {
     const isOwned = source === "library";
+    const discNumbers = useMemo(
+        () => Array.from(new Set(tracks.map((track) => track.discNumber).filter((disc) => disc != null))),
+        [tracks]
+    );
+    const shouldGroupByDisc = discNumbers.length > 1;
 
     return (
         <section>
@@ -272,22 +277,35 @@ export const TrackList = memo(function TrackList({
                         const isPlaying = currentTrackId === track.id;
                         const isPreviewPlaying =
                             previewTrack === track.id && previewPlaying;
+                        const discNumber = track.discNumber ?? 1;
+                        const previousDiscNumber =
+                            index > 0 ? tracks[index - 1]?.discNumber ?? 1 : null;
+                        const showDiscHeader =
+                            shouldGroupByDisc &&
+                            (index === 0 || discNumber !== previousDiscNumber);
+                        const discLabel = track.discSubtitle?.trim();
 
                         return (
-                            <TrackRow
-                                key={track.id}
-                                track={track}
-                                index={index}
-                                album={album}
-                                isOwned={isOwned}
-                                isPlaying={isPlaying}
-                                isPreviewPlaying={isPreviewPlaying}
-                                colors={colors}
-                                onPlayTrack={onPlayTrack}
-                                onAddToQueue={onAddToQueue}
-                                onAddToPlaylist={onAddToPlaylist}
-                                onPreview={onPreview}
-                            />
+                            <React.Fragment key={track.id}>
+                                {showDiscHeader && (
+                                    <div className="px-3 md:px-4 py-2 text-xs font-semibold tracking-wide text-gray-400 uppercase bg-[#121212]">
+                                        Disc {discNumber}{discLabel ? ` -- ${discLabel}` : ""}
+                                    </div>
+                                )}
+                                <TrackRow
+                                    track={track}
+                                    index={index}
+                                    album={album}
+                                    isOwned={isOwned}
+                                    isPlaying={isPlaying}
+                                    isPreviewPlaying={isPreviewPlaying}
+                                    colors={colors}
+                                    onPlayTrack={onPlayTrack}
+                                    onAddToQueue={onAddToQueue}
+                                    onAddToPlaylist={onAddToPlaylist}
+                                    onPreview={onPreview}
+                                />
+                            </React.Fragment>
                         );
                     })}
                 </div>
