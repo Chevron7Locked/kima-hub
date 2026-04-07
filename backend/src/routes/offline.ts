@@ -34,7 +34,7 @@ router.post("/albums/:id/download", async (req, res) => {
             include: {
                 tracks: {
                     orderBy: [
-                        { discNumber: "asc" },
+                        { discNumber: { sort: "asc", nulls: "first" } },
                         { trackNo: "asc" },
                     ],
                 },

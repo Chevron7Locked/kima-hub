@@ -135,7 +135,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
             tracks: {
                 where: { corrupt: false },
                 orderBy: [
-                    { discNumber: "asc" },
+                    { discNumber: { sort: "asc", nulls: "first" } },
                     { trackNo: "asc" },
                 ],
             },
@@ -283,7 +283,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
             artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
             tracks: {
                 orderBy: [
-                    { discNumber: "asc" },
+                    { discNumber: { sort: "asc", nulls: "first" } },
                     { trackNo: "asc" },
                 ],
             },
@@ -325,7 +325,7 @@ libraryRouter.all("/getAlbum.view", wrap(async (req, res) => {
             artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
             tracks: {
                 orderBy: [
-                    { discNumber: "asc" },
+                    { discNumber: { sort: "asc", nulls: "first" } },
                     { trackNo: "asc" },
                 ],
             },

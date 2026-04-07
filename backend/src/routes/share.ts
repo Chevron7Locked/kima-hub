@@ -208,7 +208,7 @@ router.get("/:token", shareResolveLimiter, async (req: Request, res: Response) =
                     artist: { select: { id: true, name: true } },
                     tracks: {
                         orderBy: [
-                            { discNumber: "asc" },
+                            { discNumber: { sort: "asc", nulls: "first" } },
                             { trackNo: "asc" },
                         ],
                         select: {
