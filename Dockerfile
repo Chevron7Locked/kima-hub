@@ -58,8 +58,10 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 # tensorflow-cpu + essentia-tensorflow: no Linux ARM64 wheels exist upstream,
 # so MusiCNN audio analysis is unavailable on ARM64. CLAP still works.
 RUN pip3 install --no-cache-dir --break-system-packages \
-    torch torchaudio torchvision \
     --index-url https://download.pytorch.org/whl/cpu \
+    'torch==2.5.1+cpu' \
+    'torchaudio==2.5.1+cpu' \
+    'torchvision==0.20.1+cpu' \
     && pip3 install --no-cache-dir --break-system-packages \
     'laion-clap>=1.1.4' \
     'librosa>=0.10.0' \
@@ -71,6 +73,17 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     && pip3 install --no-cache-dir --break-system-packages --no-deps \
     essentia-tensorflow \
     || echo "[ARM64] tensorflow-cpu/essentia-tensorflow unavailable -- MusiCNN analysis disabled"
+
+# Keep scipy/pandas aligned with tensorflow's numpy constraint in the shared Python env.
+# Force exact wheel versions to avoid resolver drift leaving incompatible pandas/scipy.
+RUN pip3 uninstall -y pandas scipy numpy || true \
+    && pip3 install --no-cache-dir --break-system-packages --force-reinstall \
+    'numpy==1.24.4' \
+    'scipy==1.10.1' \
+    'pandas==2.0.3'
+
+# Fail fast during build if CLAP/Transformers dependency resolution regresses.
+RUN python3 -c "import numpy, scipy, pandas, torch, torchaudio, laion_clap; from transformers import BertModel; print(f'CLAP deps OK: torch={torch.__version__} torchaudio={torchaudio.__version__} numpy={numpy.__version__} scipy={scipy.__version__} pandas={pandas.__version__}')"
 
 # Cleanup
 RUN pip cache purge \
