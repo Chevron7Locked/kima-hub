@@ -149,10 +149,9 @@ export default function PlaylistDetailPage() {
         setPlayingPreviewId(pendingId);
 
         try {
-            const result = await api.getFreshPreviewUrl(playlistId, pendingId);
-            const previewUrl = result.previewUrl;
-
-            const audio = new Audio(previewUrl);
+            const audio = new Audio(
+                api.getPendingTrackPreviewStreamUrl(playlistId, pendingId)
+            );
             const { volume, isMuted } = controller?.getState() ?? { volume: 1, isMuted: false };
             audio.volume = isMuted ? 0 : volume;
             audio.onended = () => setPlayingPreviewId(null);

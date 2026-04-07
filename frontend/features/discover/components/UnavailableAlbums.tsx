@@ -8,7 +8,7 @@ import { tierColors, tierLabels } from "../constants";
 interface UnavailableAlbumsProps {
     unavailable: UnavailableAlbum[];
     currentPreview: string | null;
-    onTogglePreview: (albumId: string, previewUrl: string) => void;
+    onTogglePreview: (albumId: string, artistName: string, trackTitle: string) => void;
     onRetryAll?: () => void;
     isRetrying?: boolean;
 }
@@ -85,7 +85,8 @@ export function UnavailableAlbums({
                                         onClick={() =>
                                             onTogglePreview(
                                                 album.id,
-                                                album.previewUrl!
+                                                album.artist,
+                                                album.title
                                             )
                                         }
                                         className="w-8 h-8 flex items-center justify-center"

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import axios from "axios";
 import { logger } from "../utils/logger";
 import { z } from "zod";
 import { requireAuthOrToken } from "../middleware/auth";
@@ -9,6 +10,38 @@ import { safeError } from "../utils/errors";
 const router = Router();
 
 router.use(requireAuthOrToken);
+
+async function getOwnedPendingTrack(
+    userId: string,
+    playlistId: string,
+    pendingTrackId: string
+) {
+    const pendingTrack = await prisma.playlistPendingTrack.findUnique({
+        where: { id: pendingTrackId },
+        include: {
+            playlist: {
+                select: {
+                    id: true,
+                    userId: true,
+                },
+            },
+        },
+    });
+
+    if (!pendingTrack) {
+        return { error: "pending_not_found" as const };
+    }
+
+    if (pendingTrack.playlist.id !== playlistId) {
+        return { error: "playlist_mismatch" as const };
+    }
+
+    if (pendingTrack.playlist.userId !== userId) {
+        return { error: "forbidden" as const };
+    }
+
+    return { pendingTrack };
+}
 
 const createPlaylistSchema = z.object({
     name: z.string().min(1).max(200),
@@ -629,25 +662,35 @@ router.delete("/:id/pending/:trackId", async (req, res) => {
 });
 
 /**
- * GET /playlists/:id/pending/:trackId/preview
- * Get a fresh Deezer preview URL for a pending track (since they expire)
+ * GET /playlists/:id/pending/:trackId/preview/stream
+ * Stream pending track preview via backend proxy for strict ORB browsers
  */
-router.get("/:id/pending/:trackId/preview", async (req, res) => {
+router.get("/:id/pending/:trackId/preview/stream", async (req, res) => {
     try {
-        const { trackId: pendingTrackId } = req.params;
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+        const userId = req.user.id;
+        const { id: playlistId, trackId: pendingTrackId } = req.params;
 
-        // Get the pending track
-        const pendingTrack = await prisma.playlistPendingTrack.findUnique({
-            where: { id: pendingTrackId },
-        });
-
-        if (!pendingTrack) {
+        const pendingResult = await getOwnedPendingTrack(
+            userId,
+            playlistId,
+            pendingTrackId
+        );
+        if (pendingResult.error === "pending_not_found") {
             return res.status(404).json({ error: "Pending track not found" });
         }
+        if (pendingResult.error === "playlist_mismatch") {
+            return res.status(404).json({ error: "Pending track not found in playlist" });
+        }
+        if (pendingResult.error === "forbidden") {
+            return res.status(403).json({ error: "Access denied" });
+        }
+        const { pendingTrack } = pendingResult;
 
-        // Fetch fresh Deezer preview URL
         const { deezerService } = await import("../services/deezer");
-        const previewUrl = await deezerService.getTrackPreview(
+        const previewUrl = await deezerService.getFreshTrackPreview(
             pendingTrack.spotifyArtist,
             pendingTrack.spotifyTitle
         );
@@ -658,16 +701,38 @@ router.get("/:id/pending/:trackId/preview", async (req, res) => {
                 .json({ error: "No preview available on Deezer" });
         }
 
-        // Update the stored preview URL for future use
-        await prisma.playlistPendingTrack.update({
-            where: { id: pendingTrackId },
-            data: { deezerPreviewUrl: previewUrl },
+        const upstream = await axios.get(previewUrl, {
+            responseType: "stream",
+            timeout: 10000,
         });
 
-        res.json({ previewUrl });
-    } catch (error: any) {
-        logger.error("Get preview URL error:", error);
-        res.status(500).json({ error: "Failed to get preview URL" });
+        res.setHeader(
+            "Content-Type",
+            upstream.headers["content-type"] || "audio/mpeg"
+        );
+        if (upstream.headers["content-length"]) {
+            res.setHeader("Content-Length", upstream.headers["content-length"]);
+        }
+        if (upstream.headers["accept-ranges"]) {
+            res.setHeader("Accept-Ranges", upstream.headers["accept-ranges"]);
+        }
+        res.setHeader("Cache-Control", "no-store");
+
+        upstream.data.on("error", (streamErr: unknown) => {
+            logger.error("Pending preview stream pipe error:", streamErr);
+            if (!res.headersSent) {
+                res.status(502).end();
+            } else {
+                res.end();
+            }
+        });
+
+        upstream.data.pipe(res);
+    } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
+            return res.status(404).json({ error: "No preview available on Deezer" });
+        }
+        safeError(res, "Pending track preview stream", error);
     }
 });
 
