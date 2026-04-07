@@ -161,7 +161,7 @@ Import playlists from Spotify, Deezer, and YouTube, or browse and discover new m
 
 ### Native Apps
 
--   **OpenSubsonic API** - Use any Subsonic-compatible client (Symfonium, DSub, Ultrasonic, Finamp, etc.) to stream your Kima library
+-   **OpenSubsonic API** - Use any Subsonic-compatible client (Symfonium, DSub, Ultrasonic, etc.) to stream your Kima library
 -   **Standard Subsonic auth** - MD5 token auth supported; enter your API token as the password -- works with Amperfy, Symfonium, DSub, and any standard Subsonic client
 -   **Per-client tokens** - Generate named API tokens in Settings > Native Apps; revoke them individually when a device is lost or replaced
 -   **Enrichment-aware** - Genres and artist biographies exposed to clients come from Last.fm enrichment, not just file tags
@@ -671,7 +671,7 @@ You can also configure Soulseek as a download source for playlist imports. In Se
 
 Kima implements the [OpenSubsonic](https://opensubsonic.netlify.app/) REST API, making it compatible with any Subsonic client.
 
-**Tested clients:** Amperfy (iOS), Symfonium, DSub, Ultrasonic, Finamp
+**Tested clients:** Amperfy (iOS), Symfonium, DSub, Ultrasonic
 
 **Setup:**
 
