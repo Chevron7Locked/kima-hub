@@ -678,11 +678,13 @@ router.get("/:id/pending/:trackId/preview/stream", async (req, res) => {
             playlistId,
             pendingTrackId
         );
-        if (pendingResult.error === "pending_not_found") {
+        // Return an identical 404 for both "missing" and "wrong playlist" to avoid
+        // leaking existence of other users' pending track IDs via distinguishable messages.
+        if (
+            pendingResult.error === "pending_not_found" ||
+            pendingResult.error === "playlist_mismatch"
+        ) {
             return res.status(404).json({ error: "Pending track not found" });
-        }
-        if (pendingResult.error === "playlist_mismatch") {
-            return res.status(404).json({ error: "Pending track not found in playlist" });
         }
         if (pendingResult.error === "forbidden") {
             return res.status(403).json({ error: "Access denied" });
@@ -724,6 +726,13 @@ router.get("/:id/pending/:trackId/preview/stream", async (req, res) => {
                 res.status(502).end();
             } else {
                 res.end();
+            }
+        });
+
+        // Clean up upstream stream when client disconnects (preview cancelled, tab closed, etc)
+        res.on("close", () => {
+            if (!upstream.data.destroyed) {
+                upstream.data.destroy();
             }
         });
 

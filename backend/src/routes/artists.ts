@@ -88,6 +88,13 @@ router.get("/preview/:artistName/:trackTitle/stream", async (req, res) => {
             }
         });
 
+        // Clean up upstream stream when client disconnects (preview cancelled, tab closed, etc)
+        res.on("close", () => {
+            if (!upstream.data.destroyed) {
+                upstream.data.destroy();
+            }
+        });
+
         upstream.data.pipe(res);
     } catch (error) {
         if (axios.isAxiosError(error) && error.response?.status === 404) {

@@ -18,7 +18,6 @@ export function useTrackPreview<T extends PreviewableTrack>() {
     const [previewPlaying, setPreviewPlaying] = useState(false);
     const previewAudioRef = useRef<HTMLAudioElement | null>(null);
     const mainPlayerWasPausedRef = useRef(false);
-    const previewRequestIdRef = useRef(0);
     const noPreviewTrackIdsRef = useRef<Set<string>>(new Set());
     const toastShownForNoPreviewRef = useRef<Set<string>>(new Set());
     const inFlightTrackIdRef = useRef<string | null>(null);
@@ -95,10 +94,8 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 return;
             }
 
-            const requestId = ++previewRequestIdRef.current;
             inFlightTrackIdRef.current = track.id;
 
-            if (requestId !== previewRequestIdRef.current) return;
             const streamUrl = api.getTrackPreviewStreamUrl(artistName, track.title);
 
             if (controller?.isPlaying()) {
