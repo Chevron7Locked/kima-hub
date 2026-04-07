@@ -90,10 +90,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
 
         try {
             if (inFlightTrackIdRef.current === track.id) return;
-            if (
-                noPreviewTrackIdsRef.current.has(track.id) &&
-                !track.previewUrl
-            ) {
+            if (noPreviewTrackIdsRef.current.has(track.id)) {
                 showNoPreviewToast(track.id);
                 return;
             }
@@ -101,26 +98,15 @@ export function useTrackPreview<T extends PreviewableTrack>() {
             const requestId = ++previewRequestIdRef.current;
             inFlightTrackIdRef.current = track.id;
 
-            let resolvedPreviewUrl = track.previewUrl || null;
-
-            if (!resolvedPreviewUrl) {
-                const response = await api.getTrackPreview(artistName, track.title);
-                if (requestId !== previewRequestIdRef.current) return;
-                resolvedPreviewUrl = response.previewUrl || null;
-
-                if (!resolvedPreviewUrl) {
-                    noPreviewTrackIdsRef.current.add(track.id);
-                    showNoPreviewToast(track.id);
-                    return;
-                }
-            }
+            if (requestId !== previewRequestIdRef.current) return;
+            const streamUrl = api.getTrackPreviewStreamUrl(artistName, track.title);
 
             if (controller?.isPlaying()) {
                 controller.pause();
                 mainPlayerWasPausedRef.current = true;
             }
 
-            const audio = new Audio(resolvedPreviewUrl);
+            const audio = new Audio(streamUrl);
             applyCurrentPlayerVolume(audio);
             previewAudioRef.current = audio;
 
@@ -137,7 +123,8 @@ export function useTrackPreview<T extends PreviewableTrack>() {
 
             audio.onerror = () => {
                 if (previewAudioRef.current !== audio) return;
-                toast.error("Failed to play preview");
+                noPreviewTrackIdsRef.current.add(track.id);
+                showNoPreviewToast(track.id);
                 setPreviewPlaying(false);
                 setPreviewTrack(null);
                 previewAudioRef.current = null;
@@ -158,19 +145,6 @@ export function useTrackPreview<T extends PreviewableTrack>() {
             setPreviewPlaying(true);
         } catch (error: unknown) {
             if (isAbortError(error)) return;
-            if (
-                typeof error === "object" &&
-                error !== null &&
-                (((error as Record<string, unknown>).error as unknown) ===
-                    "Preview not found" ||
-                    /preview not found/i.test(
-                        String((error as Record<string, unknown>).message || "")
-                    ))
-            ) {
-                noPreviewTrackIdsRef.current.add(track.id);
-                showNoPreviewToast(track.id);
-                return;
-            }
             console.error("Failed to play preview:", error);
             toast.error("Failed to play preview");
             setPreviewPlaying(false);

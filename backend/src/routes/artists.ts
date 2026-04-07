@@ -1,4 +1,5 @@
 import { Router } from "express";
+import axios from "axios";
 import { logger } from "../utils/logger";
 import { lastFmService } from "../services/lastfm";
 import { musicBrainzService } from "../services/musicbrainz";
@@ -38,6 +39,61 @@ router.get("/preview/:artistName/:trackTitle", async (req, res) => {
         }
     } catch (error) {
         safeError(res, "Track preview fetch", error);
+    }
+});
+
+// GET /artists/preview/:artistName/:trackTitle/stream - Proxy Deezer preview audio as same-origin media
+router.get("/preview/:artistName/:trackTitle/stream", async (req, res) => {
+    try {
+        const { artistName, trackTitle } = req.params;
+        const decodedArtist = decodeURIComponent(artistName);
+        const decodedTrack = decodeURIComponent(trackTitle);
+
+        logger.debug(
+            `Streaming preview for "${decodedTrack}" by ${decodedArtist}`
+        );
+
+        const previewUrl = await deezerService.getFreshTrackPreview(
+            decodedArtist,
+            decodedTrack
+        );
+
+        if (!previewUrl) {
+            return res.status(404).json({ error: "Preview not found" });
+        }
+
+        const upstream = await axios.get(previewUrl, {
+            responseType: "stream",
+            timeout: 10000,
+        });
+
+        res.setHeader(
+            "Content-Type",
+            upstream.headers["content-type"] || "audio/mpeg"
+        );
+        if (upstream.headers["content-length"]) {
+            res.setHeader("Content-Length", upstream.headers["content-length"]);
+        }
+        if (upstream.headers["accept-ranges"]) {
+            res.setHeader("Accept-Ranges", upstream.headers["accept-ranges"]);
+        }
+        res.setHeader("Cache-Control", "no-store");
+
+        upstream.data.on("error", (streamErr: unknown) => {
+            logger.error("Preview stream pipe error:", streamErr);
+            if (!res.headersSent) {
+                res.status(502).end();
+            } else {
+                res.end();
+            }
+        });
+
+        upstream.data.pipe(res);
+    } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
+            return res.status(404).json({ error: "Preview not found" });
+        }
+        safeError(res, "Track preview stream", error);
     }
 });
 

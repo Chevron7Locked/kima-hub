@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useToast } from "@/lib/toast-context";
 import { useAudioController } from "@/lib/audio-controller-context";
 import { useAudioState } from "@/lib/audio-state-context";
+import { api } from "@/lib/api";
 
 export function usePreviewPlayer() {
     const controller = useAudioController();
@@ -44,11 +45,7 @@ export function usePreviewPlayer() {
     }, [controller]);
 
     const handleTogglePreview = useCallback(
-        (albumId: string, previewUrl: string) => {
-            if (!previewUrl) {
-                toast.error("No preview available for this album");
-                return;
-            }
+        (albumId: string, artistName: string, trackTitle: string) => {
 
             // Stop currently playing preview and destroy it
             if (currentPreview && currentPreview !== albumId) {
@@ -90,7 +87,9 @@ export function usePreviewPlayer() {
 
                 let audio = previewAudios.get(albumId);
                 if (!audio) {
-                    audio = new Audio(previewUrl);
+                    audio = new Audio(
+                        api.getTrackPreviewStreamUrl(artistName, trackTitle)
+                    );
                     applyCurrentPlayerVolume(audio);
                     audio.onended = () => {
                         setCurrentPreview(null);

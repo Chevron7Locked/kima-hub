@@ -163,6 +163,19 @@ class DeezerService {
     }
 
     /**
+     * Search Deezer and return the first preview URL for a track.
+     */
+    private async searchTrackPreview(artistName: string, trackName: string): Promise<string | null> {
+        const response = await axios.get(`${DEEZER_API}/search/track`, {
+            params: { q: `artist:"${artistName}" track:"${trackName}"`, limit: 1 },
+            timeout: 5000,
+        });
+
+        const track = response.data?.data?.[0];
+        return track?.preview || null;
+    }
+
+    /**
      * Get a preview URL for a track
      */
     async getTrackPreview(artistName: string, trackName: string): Promise<string | null> {
@@ -171,18 +184,25 @@ class DeezerService {
         if (cached) return cached === "null" ? null : cached;
 
         try {
-            const response = await axios.get(`${DEEZER_API}/search/track`, {
-                params: { q: `artist:"${artistName}" track:"${trackName}"`, limit: 1 },
-                timeout: 5000,
-            });
-
-            const track = response.data?.data?.[0];
-            const previewUrl = track?.preview || null;
+            const previewUrl = await this.searchTrackPreview(artistName, trackName);
 
             await this.setCache(cacheKey, previewUrl || "null");
             return previewUrl;
         } catch (error: any) {
             logger.error(`Deezer track preview error for ${artistName} - ${trackName}:`, error.message);
+            return null;
+        }
+    }
+
+    /**
+     * Get a fresh (uncached) preview URL for a track.
+     * Deezer preview URLs are short-lived and should not be persisted for streaming.
+     */
+    async getFreshTrackPreview(artistName: string, trackName: string): Promise<string | null> {
+        try {
+            return await this.searchTrackPreview(artistName, trackName);
+        } catch (error: any) {
+            logger.error(`Deezer fresh track preview error for ${artistName} - ${trackName}:`, error.message);
             return null;
         }
     }

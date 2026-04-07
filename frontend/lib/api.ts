@@ -723,10 +723,18 @@ class ApiClient {
         );
     }
 
-    async getFreshPreviewUrl(playlistId: string, pendingTrackId: string) {
-        return this.request<{ previewUrl: string }>(
-            `/playlists/${playlistId}/pending/${pendingTrackId}/preview`
-        );
+    getPendingTrackPreviewStreamUrl(
+        playlistId: string,
+        pendingTrackId: string
+    ): string {
+        const baseUrl = `${this.getBaseUrl()}/api/playlists/${encodeURIComponent(
+            playlistId
+        )}/pending/${encodeURIComponent(pendingTrackId)}/preview/stream`;
+        const token = this.getCurrentToken();
+        if (token) {
+            return `${baseUrl}?token=${encodeURIComponent(token)}`;
+        }
+        return baseUrl;
     }
 
     // Settings
@@ -1006,6 +1014,17 @@ class ApiClient {
                 artistName
             )}/${encodeURIComponent(trackTitle)}`
         );
+    }
+
+    getTrackPreviewStreamUrl(artistName: string, trackTitle: string): string {
+        const baseUrl = `${this.getBaseUrl()}/api/artists/preview/${encodeURIComponent(
+            artistName
+        )}/${encodeURIComponent(trackTitle)}/stream`;
+        const token = this.getCurrentToken();
+        if (token) {
+            return `${baseUrl}?token=${encodeURIComponent(token)}`;
+        }
+        return baseUrl;
     }
 
     // Audiobooks

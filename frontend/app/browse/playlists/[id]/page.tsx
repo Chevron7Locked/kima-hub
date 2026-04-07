@@ -139,7 +139,9 @@ export default function DeezerPlaylistDetailPage() {
             teardownPreviewAudio(audioRef.current);
         }
 
-        const audio = new Audio(track.previewUrl);
+        const audio = new Audio(
+            api.getTrackPreviewStreamUrl(track.artist, track.title)
+        );
         applyCurrentPlayerVolume(audio);
         audioRef.current = audio;
 
