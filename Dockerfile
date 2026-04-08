@@ -57,11 +57,19 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 # (laion-clap, transformers) reuse the already-installed CPU wheels.
 # tensorflow-cpu + essentia-tensorflow: no Linux ARM64 wheels exist upstream,
 # so MusiCNN audio analysis is unavailable on ARM64. CLAP still works.
+#
+# Pins omit the +cpu local version suffix so the same spec resolves on both
+# architectures. On amd64 the CPU index serves torch==2.5.1+cpu and PEP 440
+# matches without the local tag; on arm64 the same index serves torch==2.5.1
+# without any local tag -- the +cpu suffix only appears from torch 2.6.0+.
+# All three packages must be pinned together so pip resolves a compatible
+# set; unpinning torchaudio causes it to drift to newer versions with
+# mismatched torch ABI (the cause of #165 in v1.7.9).
 RUN pip3 install --no-cache-dir --break-system-packages \
     --index-url https://download.pytorch.org/whl/cpu \
-    'torch==2.5.1+cpu' \
-    'torchaudio==2.5.1+cpu' \
-    'torchvision==0.20.1+cpu' \
+    'torch==2.5.1' \
+    'torchaudio==2.5.1' \
+    'torchvision==0.20.1' \
     && pip3 install --no-cache-dir --break-system-packages \
     'laion-clap>=1.1.4' \
     'librosa>=0.10.0' \
