@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.7.11] - 2026-04-08
+
+### Fixed
+
+- **Docker build failure on linux/arm64 (v1.7.10 hotfix)**: The torch/torchaudio/torchvision pins added in v1.7.10 (PR #178) used the `+cpu` local version suffix, which exists on the pytorch CPU index for amd64 but not for arm64 at torch < 2.6.0. The arm64 build step 7/41 failed with `ERROR: Could not find a version that satisfies the requirement torch==2.5.1+cpu`. Dropped the `+cpu` suffix -- PEP 440 matches versions without a local tag against any local variant, so the same pin resolves to `2.5.1+cpu` on amd64 and `2.5.1` on arm64.
+- **CLAP model not loading (#165, properly this time)**: The v1.7.6 fix closed this issue but was actually dead code -- it edited `services/audio-analyzer-clap/requirements.txt`, but the main Dockerfile only copies `analyzer.py` from that directory and never installs from requirements.txt. CLAP was broken in every release from when the feature shipped until v1.7.10's pins landed (which would have fixed it if the arm64 build had not failed). Root cause: unpinned `torch torchaudio torchvision` let pip's resolver install mismatched versions (torch 2.5.1+cpu paired with torchaudio 2.11.0+cpu -- ABI-incompatible), and unpinned scipy/pandas were installed at latest versions needing numpy>=1.26, which tensorflow-cpu 2.13 then downgraded to 1.24.3, breaking scipy's `from numpy.exceptions import AxisError`. Fixed by the torch+cpu suffix correction above plus PR #178's (now-effective) numpy/scipy/pandas pins. Verified by reproducing the full CLAP + transformers + laion_clap + tensorflow + essentia import chain in the published v1.7.9 image and confirming the fix resolves all errors.
+
 ## [1.7.10] - 2026-04-07
 
 ### Added
