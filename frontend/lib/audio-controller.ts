@@ -46,11 +46,6 @@ export class AudioController {
     private readonly MAX_STALL_RECOVERIES = 3;
     private autoResumeAfterRecovery = false;
 
-    // iOS interrupt tracking
-    private userInitiatedPause = false;
-    private interruptedWhilePlaying = false;
-    private interruptResumeTimeout: ReturnType<typeof setTimeout> | null = null;
-
     // reloadAndPlay failsafe state (tracked for cleanup in destroy())
     private reloadFailsafeTimeout: ReturnType<typeof setTimeout> | null = null;
     private reloadFailsafeListener: (() => void) | null = null;
@@ -92,8 +87,6 @@ export class AudioController {
         add("playing", () => {
             this.networkRetryCount = 0;
             this.stallRecoveryCount = 0;
-            this.interruptedWhilePlaying = false;
-            this.cancelInterruptResume();
             this.startWatchdog();
             this.cancelStallGrace();
             this.emit("play");
@@ -101,25 +94,6 @@ export class AudioController {
 
         add("pause", () => {
             this.stopWatchdog();
-
-            if (!this.userInitiatedPause && this.currentSrc && !this.audio.ended) {
-                // System-initiated pause (iOS notification, phone call, control center)
-                this.interruptedWhilePlaying = true;
-
-                // Try auto-resume after a short delay (notification sounds are brief)
-                this.cancelInterruptResume();
-                this.interruptResumeTimeout = setTimeout(() => {
-                    this.interruptResumeTimeout = null;
-                    if (this.interruptedWhilePlaying && this.currentSrc) {
-                        this.interruptedWhilePlaying = false;
-                        this.play().catch(() => {
-                            this.emit("needs-resume");
-                        });
-                    }
-                }, 1000);
-            }
-            this.userInitiatedPause = false;
-
             this.emit("pause");
         });
 
@@ -334,9 +308,6 @@ export class AudioController {
     }
 
     pause(): void {
-        this.userInitiatedPause = true;
-        this.interruptedWhilePlaying = false;
-        this.cancelInterruptResume();
         this.autoResumeAfterRecovery = false;
         this.audio.pause();
     }
@@ -346,22 +317,6 @@ export class AudioController {
             this.resetWatchdog();
         }
         this.cancelStallGrace();
-    }
-
-    wasInterrupted(): boolean {
-        return this.interruptedWhilePlaying;
-    }
-
-    clearInterruptFlag(): void {
-        this.interruptedWhilePlaying = false;
-        this.cancelInterruptResume();
-    }
-
-    private cancelInterruptResume(): void {
-        if (this.interruptResumeTimeout) {
-            clearTimeout(this.interruptResumeTimeout);
-            this.interruptResumeTimeout = null;
-        }
     }
 
     private clearReloadFailsafe(): void {
@@ -415,9 +370,6 @@ export class AudioController {
     }
 
     stop(): void {
-        this.userInitiatedPause = true;
-        this.interruptedWhilePlaying = false;
-        this.cancelInterruptResume();
         this.audio.pause();
         this.audio.currentTime = 0;
     }
@@ -559,10 +511,7 @@ export class AudioController {
         this.cancelNetworkRetry();
         this.stopWatchdog();
         this.cancelStallGrace();
-        this.cancelInterruptResume();
         this.clearReloadFailsafe();
-        this.interruptedWhilePlaying = false;
-        this.userInitiatedPause = true; // prevent cleanup pause from triggering interrupt logic
         this.audio.pause();
         this.audio.removeAttribute("src");
         this.audio.load();

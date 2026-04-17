@@ -76,9 +76,6 @@ export function useMediaSession() {
                 }
             }
 
-            // Clear interrupt flag — user is explicitly requesting play
-            controller.clearInterruptFlag();
-
             try {
                 await controller.play();
             } catch {
