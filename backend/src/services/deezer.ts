@@ -1,6 +1,5 @@
 import axios from "axios";
 import { logger } from "../utils/logger";
-import { redisClient } from "../utils/redis";
 import { CacheWrapper } from "../utils/cacheWrapper";
 
 /**
@@ -728,6 +727,8 @@ class DeezerService {
         }
     }
 
+    // Not cached: user queries are high-cardinality and Deezer's search is fast (<300ms).
+    // Only the popular-podcasts feed is cached since it's a shared response.
     async searchPodcasts(query: string, limit: number = 20): Promise<DeezerPodcast[]> {
         try {
             const response = await axios.get(`${DEEZER_API}/search/podcast`, {
@@ -779,3 +780,23 @@ class DeezerService {
 }
 
 export const deezerService = new DeezerService();
+
+/**
+ * Dedupe podcast results by normalized title. iTunes results are preferred
+ * (they carry feedUrl); Deezer results fill gaps only when title is unseen.
+ */
+export function mergeAndDedupePodcasts<T extends { title?: string; name?: string }>(
+    primary: T[],
+    fallback: T[]
+): T[] {
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const seen = new Set<string>();
+    const out: T[] = [];
+    for (const item of [...primary, ...fallback]) {
+        const key = normalize(item.title ?? item.name ?? "");
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(item);
+    }
+    return out;
+}

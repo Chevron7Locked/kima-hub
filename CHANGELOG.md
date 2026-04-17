@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.7.12] - 2026-04-16
+
+### Added
+
+- **Persist UMAP map positions to the database**: The vibe galaxy map previously cached its UMAP projection in Redis with a 24h TTL; on every expiry (or container restart) the worker recomputed the full projection, taking ~30s on an 8k-track library. Positions are deterministic once the embedding set is fixed, so they now live in `track_embeddings.map_x` / `map_y`. The map loader tries Redis first, then hydrates from the DB when at least 98% of embeddings have persisted positions (uncovered tracks get patched by `appendTrackToProjection` as they analyze), and only falls back to full UMAP recompute when coverage drops below that threshold. Cold-Redis hydrate is a single indexed join (~100ms) instead of a 30s worker run. The migration is a metadata-only `ADD COLUMN` on PG 11+, zero downtime, safe for `docker compose pull` on existing deployments.
+- **Deezer as fallback source for podcast search**: iTunes Search API had an outage that broke all podcast discovery. The `/podcasts/discover/*` and `/search?type=podcasts` endpoints now fan out to both iTunes and Deezer in parallel via `Promise.allSettled` with title-based dedupe. Deezer results fill gaps when iTunes is down; iTunes results are preferred when available (they carry the `feedUrl` needed for subscription). The preview endpoint can resolve Deezer-only podcasts by looking up the feed URL via iTunes name match.
+
+### Fixed
+
+- **iOS earbud disconnect routing audio to the phone speaker**: The 1-second auto-resume in the audio-controller pause handler (added in v1.7.7) could not distinguish a system pause worth resuming (notification) from one that is not (audio route change when earbuds unplug or Bluetooth disconnects) -- iOS fires an identical pause event for both. When the timer fired `play()` after a route change, iOS routed audio to the loudspeaker, startling the user mid-listen. The original Control Center pause-then-play bug that the auto-resume targeted remained reproducible, so the timer was providing no benefit while causing this regression. Removed the timer and all interruption-flag state; the Media Session play action handler in `useMediaSession` already covers the Control Center path with a `reloadAndPlay` fallback gated on a user gesture, which is the only safe way to resume on iOS. Network retry, stall watchdog, `AbortError` -> reload, `NotAllowedError` -> needs-resume prompt, and visibility/pageshow foreground resume are all preserved.
+- **Vibe galaxy showing a black screen on load**: A single `kima_galaxy_camera` `sessionStorage` key was shared across the 2D (orthographic) and 3D (perspective) viewing modes. Restoring a 3D flight position + `zoom = 1` (the `PerspectiveCamera` default) into the `OrthographicCamera` on the next mount placed the ortho view far from the points with no zoom, producing a black screen. Each mode now has its own storage key and only restores state captured in that same mode. The legacy single-key entry is removed on mount so any user stuck in the bad state unsticks automatically without needing a cache clear.
+- **Podcast previews when iTunes resolves via Deezer**: The preview handler now accepts Deezer-only results and resolves their feed URL through an iTunes name lookup, so subscriptions still work when the primary source was Deezer.
+
+### Changed
+
+- **Removed the PodcastIndex scaffold**: The PodcastIndex service was referencing `SystemSettings` columns that do not exist in the current Prisma schema -- it would have thrown on first call. No production caller invoked it except the now-removed reset hook in `systemSettings`. Dropped the service, its only cache-reset call site, and the `podcast-index-api` dependency (last published 2021).
+
 ## [1.7.11] - 2026-04-08
 
 ### Fixed

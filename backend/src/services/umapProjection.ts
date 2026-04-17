@@ -1,5 +1,6 @@
 import path from "path";
 import { Worker } from "worker_threads";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
@@ -12,6 +13,26 @@ const TRACK_IDS_KEY = "vibe:map:v3:track_ids";
 const CACHE_TTL = 86400;
 const CIRCULAR_CACHE_TTL = 3600; // 1 hour -- refreshes as enrichment adds tracks
 const KNN_NEIGHBORS = 5;
+const HYDRATE_COVERAGE_THRESHOLD = 0.98;
+
+// SQL fragment: the shared column list for track metadata joins.
+// Update in one place when adding/removing projection fields.
+const TRACK_METADATA_COLUMNS = Prisma.sql`
+    t.title,
+    ar.name as "artistName",
+    ar.id as "artistId",
+    a.id as "albumId",
+    a."coverUrl",
+    t.energy,
+    t.valence,
+    t."moodHappy",
+    t."moodSad",
+    t."moodRelaxed",
+    t."moodAggressive",
+    t."moodParty",
+    t."moodAcoustic",
+    t."moodElectronic"
+`;
 
 interface MapTrack {
     id: string;
@@ -182,36 +203,34 @@ async function hydrateFromDb(): Promise<MapResponse | null> {
         `;
         const total = Number(coverage[0]?.total ?? 0n);
         const covered = Number(coverage[0]?.covered ?? 0n);
-        if (total === 0 || covered < total) return null;
+        if (total === 0) return null;
+        if (covered / total < HYDRATE_COVERAGE_THRESHOLD) {
+            logger.info(`[VIBE-MAP] DB hydrate skipped: ${covered}/${total} below threshold`);
+            return null;
+        }
+        if (covered < total) {
+            logger.info(`[VIBE-MAP] DB hydrate with partial coverage: ${covered}/${total}`);
+        }
 
         const rows = await prisma.$queryRaw<Array<TrackRow & { map_x: number; map_y: number }>>`
             SELECT
                 te.track_id,
                 te.map_x,
                 te.map_y,
-                t.title,
-                ar.name as "artistName",
-                ar.id as "artistId",
-                a.id as "albumId",
-                a."coverUrl",
-                t.energy,
-                t.valence,
-                t."moodHappy",
-                t."moodSad",
-                t."moodRelaxed",
-                t."moodAggressive",
-                t."moodParty",
-                t."moodAcoustic",
-                t."moodElectronic"
+                ${TRACK_METADATA_COLUMNS}
             FROM track_embeddings te
             JOIN "Track" t ON te.track_id = t.id
             JOIN "Album" a ON t."albumId" = a.id
             JOIN "Artist" ar ON a."artistId" = ar.id
             WHERE te.map_x IS NOT NULL AND te.map_y IS NOT NULL
+            ORDER BY te.track_id ASC
             LIMIT ${MAX_EMBEDDINGS}
         `;
 
-        if (rows.length === 0) return null;
+        if (rows.length === 0) {
+            logger.warn("[VIBE-MAP] Hydrate SELECT returned 0 rows despite coverage check - race condition");
+            return null;
+        }
 
         const sampled = rows.length === MAX_EMBEDDINGS;
         const tracks: MapTrack[] = rows.map(row => {
@@ -313,20 +332,7 @@ async function doCompute(): Promise<MapResponse> {
     const rows = await prisma.$queryRaw<Array<TrackRow & { embedding: string }>>`
         SELECT
             te.track_id,
-            t.title,
-            ar.name as "artistName",
-            ar.id as "artistId",
-            a.id as "albumId",
-            a."coverUrl",
-            t.energy,
-            t.valence,
-            t."moodHappy",
-            t."moodSad",
-            t."moodRelaxed",
-            t."moodAggressive",
-            t."moodParty",
-            t."moodAcoustic",
-            t."moodElectronic",
+            ${TRACK_METADATA_COLUMNS},
             te.embedding::text as embedding
         FROM track_embeddings te
         JOIN "Track" t ON te.track_id = t.id
@@ -399,7 +405,9 @@ async function doCompute(): Promise<MapResponse> {
         computedAt: new Date().toISOString(),
     };
 
-    await persistPositions(trackIds, xs, ys);
+    void persistPositions(trackIds, xs, ys).catch(e =>
+        logger.warn("[VIBE-MAP] persist failed (background):", (e as Error).message)
+    );
     await cacheResult(result, trackIds);
 
     const elapsed = Date.now() - startTime;
@@ -468,20 +476,7 @@ export async function appendTrackToProjection(trackId: string): Promise<boolean>
         const trackData = await prisma.$queryRaw<TrackRow[]>`
             SELECT
                 te.track_id,
-                t.title,
-                ar.name as "artistName",
-                ar.id as "artistId",
-                a.id as "albumId",
-                a."coverUrl",
-                t.energy,
-                t.valence,
-                t."moodHappy",
-                t."moodSad",
-                t."moodRelaxed",
-                t."moodAggressive",
-                t."moodParty",
-                t."moodAcoustic",
-                t."moodElectronic"
+                ${TRACK_METADATA_COLUMNS}
             FROM track_embeddings te
             JOIN "Track" t ON te.track_id = t.id
             JOIN "Album" a ON t."albumId" = a.id

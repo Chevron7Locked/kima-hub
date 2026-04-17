@@ -6,7 +6,7 @@ import { lastFmService } from "../services/lastfm";
 import { searchService, normalizeCacheQuery, type SearchResults } from "../services/search";
 import axios from "axios";
 import { redisClient } from "../utils/redis";
-import { deezerService } from "../services/deezer";
+import { deezerService, mergeAndDedupePodcasts } from "../services/deezer";
 
 const router = Router();
 
@@ -99,7 +99,7 @@ router.get("/", async (req, res) => {
 });
 
 // GET /search/genres
-router.get("/genres", async (req, res) => {
+router.get("/genres", async (_req, res) => {
     try {
         const genres = await prisma.genre.findMany({
             orderBy: { name: "asc" },
@@ -200,7 +200,7 @@ router.get("/discover", async (req, res) => {
                     logger.warn("[SEARCH DISCOVER] iTunes podcast search failed:", itunesResult.reason?.message || itunesResult.reason);
                 }
 
-                const results = itunesPodcasts.map((podcast: any) => ({
+                const itunesMapped = itunesPodcasts.map((podcast: any) => ({
                     type: "podcast",
                     id: podcast.collectionId,
                     name: podcast.collectionName,
@@ -212,27 +212,19 @@ router.get("/discover", async (req, res) => {
                     trackCount: podcast.trackCount,
                 }));
 
-                const seen = new Set(results.map((r: any) =>
-                    (r.name || "").toLowerCase().replace(/[^a-z0-9]/g, "")
-                ));
+                const deezerMapped = deezerPodcasts.map((dp) => ({
+                    type: "podcast",
+                    id: `deezer:${dp.id}`,
+                    name: dp.title,
+                    artist: "",
+                    description: dp.description,
+                    coverUrl: dp.pictureUrl,
+                    feedUrl: null,
+                    genres: [] as string[],
+                    trackCount: 0,
+                }));
 
-                for (const dp of deezerPodcasts) {
-                    const norm = dp.title.toLowerCase().replace(/[^a-z0-9]/g, "");
-                    if (norm && !seen.has(norm)) {
-                        seen.add(norm);
-                        results.push({
-                            type: "podcast",
-                            id: `deezer:${dp.id}`,
-                            name: dp.title,
-                            artist: "",
-                            description: dp.description,
-                            coverUrl: dp.pictureUrl,
-                            feedUrl: null,
-                            genres: [],
-                            trackCount: 0,
-                        });
-                    }
-                }
+                const results = mergeAndDedupePodcasts(itunesMapped, deezerMapped);
 
                 return results.slice(0, searchLimit);
             })();

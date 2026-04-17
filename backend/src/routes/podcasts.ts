@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
@@ -7,7 +7,7 @@ import { podcastCacheService } from "../services/podcastCache";
 import { parseRangeHeader } from "../utils/rangeParser";
 import { safeError } from "../utils/errors";
 import { validateUrlForFetch } from "../utils/ssrf";
-import { deezerService } from "../services/deezer";
+import { deezerService, mergeAndDedupePodcasts } from "../services/deezer";
 import axios from "axios";
 import fs from "fs";
 
@@ -145,7 +145,7 @@ router.get("/discover/top", requireAuthOrToken, async (req, res) => {
             logger.warn("[TOP PODCASTS] iTunes failed:", (itunesResult.reason as any)?.message || itunesResult.reason);
         }
 
-        const podcasts = itunesPodcasts.map((podcast: any) => ({
+        const itunesMapped = itunesPodcasts.map((podcast: any) => ({
             id: podcast.collectionId.toString(),
             title: podcast.collectionName,
             author: podcast.artistName,
@@ -157,27 +157,19 @@ router.get("/discover/top", requireAuthOrToken, async (req, res) => {
             isExternal: true,
         }));
 
-        const seen = new Set(podcasts.map((p: any) =>
-            (p.title || "").toLowerCase().replace(/[^a-z0-9]/g, "")
-        ));
+        const deezerMapped = deezerPodcasts.map((dp) => ({
+            id: `deezer:${dp.id}`,
+            title: dp.title,
+            author: "",
+            coverUrl: dp.pictureUrl,
+            feedUrl: null,
+            genres: [] as string[],
+            episodeCount: 0,
+            itunesId: null,
+            isExternal: true,
+        }));
 
-        for (const dp of deezerPodcasts) {
-            const norm = dp.title.toLowerCase().replace(/[^a-z0-9]/g, "");
-            if (norm && !seen.has(norm)) {
-                seen.add(norm);
-                podcasts.push({
-                    id: `deezer:${dp.id}`,
-                    title: dp.title,
-                    author: "",
-                    coverUrl: dp.pictureUrl,
-                    feedUrl: null,
-                    genres: [],
-                    episodeCount: 0,
-                    itunesId: null,
-                    isExternal: true,
-                });
-            }
-        }
+        const podcasts = mergeAndDedupePodcasts(itunesMapped, deezerMapped);
 
         logger.debug(`   Found ${podcasts.length} podcasts (iTunes: ${itunesPodcasts.length}, Deezer: ${deezerPodcasts.length})`);
         res.json(podcasts.slice(0, podcastLimit));
@@ -231,7 +223,7 @@ router.get("/discover/genres", async (req, res) => {
                 const itunesPodcasts = itunesResult.status === "fulfilled" ? itunesResult.value : [];
                 const deezerPodcasts = deezerResult.status === "fulfilled" ? deezerResult.value : [];
 
-                const podcasts = itunesPodcasts.map((podcast: any) => ({
+                const itunesMapped = itunesPodcasts.map((podcast: any) => ({
                     id: podcast.collectionId.toString(),
                     title: podcast.collectionName,
                     author: podcast.artistName,
@@ -243,27 +235,19 @@ router.get("/discover/genres", async (req, res) => {
                     isExternal: true,
                 }));
 
-                const seen = new Set(podcasts.map((p: any) =>
-                    (p.title || "").toLowerCase().replace(/[^a-z0-9]/g, "")
-                ));
+                const deezerMapped = deezerPodcasts.map((dp) => ({
+                    id: `deezer:${dp.id}`,
+                    title: dp.title,
+                    author: "",
+                    coverUrl: dp.pictureUrl,
+                    feedUrl: null,
+                    genres: [] as string[],
+                    episodeCount: 0,
+                    itunesId: null,
+                    isExternal: true,
+                }));
 
-                for (const dp of deezerPodcasts) {
-                    const norm = dp.title.toLowerCase().replace(/[^a-z0-9]/g, "");
-                    if (norm && !seen.has(norm)) {
-                        seen.add(norm);
-                        podcasts.push({
-                            id: `deezer:${dp.id}`,
-                            title: dp.title,
-                            author: "",
-                            coverUrl: dp.pictureUrl,
-                            feedUrl: null,
-                            genres: [],
-                            episodeCount: 0,
-                            itunesId: null,
-                            isExternal: true,
-                        });
-                    }
-                }
+                const podcasts = mergeAndDedupePodcasts(itunesMapped, deezerMapped);
 
                 logger.debug(`      Found ${podcasts.length} podcasts for genre ${genreId}`);
                 return { genreId, podcasts: podcasts.slice(0, 10) };
@@ -336,7 +320,7 @@ router.get("/discover/genre/:genreId", async (req, res) => {
         const itunesPodcasts = itunesResult.status === "fulfilled" ? itunesResult.value : [];
         const deezerPodcasts = deezerResult.status === "fulfilled" ? deezerResult.value : [];
 
-        const allPodcasts = itunesPodcasts.map((podcast: any) => ({
+        const itunesMapped = itunesPodcasts.map((podcast: any) => ({
             id: podcast.collectionId.toString(),
             title: podcast.collectionName,
             author: podcast.artistName,
@@ -348,27 +332,19 @@ router.get("/discover/genre/:genreId", async (req, res) => {
             isExternal: true,
         }));
 
-        const seen = new Set(allPodcasts.map((p: any) =>
-            (p.title || "").toLowerCase().replace(/[^a-z0-9]/g, "")
-        ));
+        const deezerMapped = deezerPodcasts.map((dp) => ({
+            id: `deezer:${dp.id}`,
+            title: dp.title,
+            author: "",
+            coverUrl: dp.pictureUrl,
+            feedUrl: null,
+            genres: [] as string[],
+            episodeCount: 0,
+            itunesId: null,
+            isExternal: true,
+        }));
 
-        for (const dp of deezerPodcasts) {
-            const norm = dp.title.toLowerCase().replace(/[^a-z0-9]/g, "");
-            if (norm && !seen.has(norm)) {
-                seen.add(norm);
-                allPodcasts.push({
-                    id: `deezer:${dp.id}`,
-                    title: dp.title,
-                    author: "",
-                    coverUrl: dp.pictureUrl,
-                    feedUrl: null,
-                    genres: [],
-                    episodeCount: 0,
-                    itunesId: null,
-                    isExternal: true,
-                });
-            }
-        }
+        const allPodcasts = mergeAndDedupePodcasts(itunesMapped, deezerMapped);
 
         const podcasts = allPodcasts.slice(podcastOffset, podcastOffset + podcastLimit);
 
@@ -476,7 +452,7 @@ router.get("/preview/:itunesId", requireAuth, async (req, res) => {
     }
 });
 
-async function previewDeezerPodcast(req: any, res: any, deezerId: string) {
+async function previewDeezerPodcast(req: Request, res: Response, deezerId: string) {
     logger.debug(`\n [PODCAST PREVIEW] Deezer ID: ${deezerId}`);
 
     let deezerData: any;
@@ -1382,7 +1358,7 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
  */
 router.post("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req, res) => {
     try {
-        const { podcastId, episodeId } = req.params;
+        const { episodeId } = req.params;
         const { currentTime, duration, isFinished } = req.body;
 
         logger.debug(`\n [PODCAST PROGRESS] Update:`);
