@@ -237,9 +237,15 @@ playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
 
     let coverUrl: string | null = null;
 
+    // Some clients pass native cover references directly as the id value
+    // (e.g. id=native:artists/<file>.jpg).
+    if (rawId.startsWith("native:")) {
+        coverUrl = rawId;
+    }
+
     // Try album first (most common); ar- prefix skips album lookup since that ID is an artist ID.
     // Falls through to artist/track as a cascade — clients may use any prefix for any entity.
-    if (!rawId.startsWith("ar-")) {
+    if (!coverUrl && !rawId.startsWith("ar-")) {
         const album = await prisma.album.findUnique({
             where: { id },
             select: { coverUrl: true, userCoverUrl: true },
