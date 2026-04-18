@@ -743,22 +743,34 @@ router.get("/radio", async (req, res) => {
 
     switch (type) {
       case "discovery":
-        const unplayedTracks = await getRandomTrackIds({
-          where: {
-            plays: { none: {} },
-          },
-          take: limitNum * 2,
-        });
+        const unplayedTracks = await prisma.$queryRaw<{ id: string }[]>`
+                    SELECT t.id
+                    FROM "Track" t
+                    LEFT JOIN "Play" p ON p."trackId" = t.id
+                    GROUP BY t.id
+                    HAVING COUNT(p.id) = 0
+                    ORDER BY RANDOM()
+                    LIMIT ${limitNum * 2}
+                `;
 
         if (unplayedTracks.length >= limitNum) {
-          trackIds = unplayedTracks;
+          trackIds = unplayedTracks.map((t) => t.id);
         } else {
           const leastPlayedTracks = await prisma.$queryRaw<{ id: string }[]>`
-                        SELECT t.id
-                        FROM "Track" t
-                        LEFT JOIN "Play" p ON p."trackId" = t.id
-                        GROUP BY t.id
-                        ORDER BY COUNT(p.id) ASC
+                        WITH play_counts AS (
+                            SELECT t.id, COUNT(p.id)::int AS play_count
+                            FROM "Track" t
+                            LEFT JOIN "Play" p ON p."trackId" = t.id
+                            GROUP BY t.id
+                        ),
+                        ranked AS (
+                            SELECT id, play_count, DENSE_RANK() OVER (ORDER BY play_count ASC) AS play_rank
+                            FROM play_counts
+                        )
+                        SELECT id
+                        FROM ranked
+                        WHERE play_rank <= 10
+                        ORDER BY RANDOM()
                         LIMIT ${limitNum * 2}
                     `;
           trackIds = leastPlayedTracks.map((t) => t.id);
@@ -906,23 +918,18 @@ router.get("/radio", async (req, res) => {
       case "workout":
         let workoutTrackIds: string[] = [];
 
-        const energyTracks = await getRandomTrackIds({
-          where: {
-            analysisStatus: "completed",
-            OR: [
-              {
-                AND: [{ energy: { gte: 0.65 } }, { bpm: { gte: 115 } }],
-              },
-              {
-                moodTags: {
-                  hasSome: ["workout", "energetic", "upbeat"],
-                },
-              },
-            ],
-          },
-          take: limitNum * 2,
-        });
-        workoutTrackIds = energyTracks;
+        const energyTracks = await prisma.$queryRaw<{ id: string }[]>`
+                    SELECT t.id
+                    FROM "Track" t
+                    WHERE t."analysisStatus" = 'completed'
+                      AND (
+                        (t.energy >= 0.65 AND t.bpm >= 115)
+                        OR t."moodTags" && ARRAY['workout', 'energetic', 'upbeat']::text[]
+                      )
+                    ORDER BY RANDOM()
+                    LIMIT ${limitNum * 2}
+                `;
+        workoutTrackIds = energyTracks.map((t) => t.id);
         logger.debug(
           `[Radio:workout] Found ${workoutTrackIds.length} tracks via audio analysis`,
         );
@@ -951,24 +958,21 @@ router.get("/radio", async (req, res) => {
             "pop punk",
           ];
 
-          const workoutGenres = await prisma.genre.findMany({
-            where: {
-              name: {
-                in: workoutGenreNames,
-                mode: "insensitive",
-              },
-            },
-            include: {
-              trackGenres: {
-                select: { trackId: true },
-                take: 50,
-              },
-            },
-          });
+          const genreTrackRows = await prisma.$queryRaw<{ id: string }[]>`
+                        SELECT x.id
+                        FROM (
+                            SELECT DISTINCT tg."trackId" AS id
+                            FROM "Genre" g
+                            JOIN "TrackGenre" tg ON tg."genreId" = g.id
+                            WHERE LOWER(g.name) IN (${Prisma.join(
+                              workoutGenreNames.map((g) => g.toLowerCase()),
+                            )})
+                        ) x
+                        ORDER BY RANDOM()
+                        LIMIT ${limitNum * 2}
+                    `;
 
-          const genreTrackIds = workoutGenres.flatMap((g) =>
-            g.trackGenres.map((tg) => tg.trackId),
-          );
+          const genreTrackIds = genreTrackRows.map((r) => r.id);
           workoutTrackIds = [
             ...new Set([...workoutTrackIds, ...genreTrackIds]),
           ];
@@ -977,17 +981,21 @@ router.get("/radio", async (req, res) => {
           );
 
           if (workoutTrackIds.length < limitNum) {
-            const albumGenreTracks = await prisma.track.findMany({
-              where: {
-                album: {
-                  OR: workoutGenreNames.map((g) => ({
-                    genres: { string_contains: g },
-                  })),
-                },
-              },
-              select: { id: true },
-              take: limitNum,
-            });
+            const albumGenreTracks = await prisma.$queryRaw<{ id: string }[]>`
+                          SELECT t.id
+                          FROM "Track" t
+                          JOIN "Album" a ON a.id = t."albumId"
+                          WHERE a.genres IS NOT NULL
+                            AND LOWER(a.genres::text) LIKE ANY (
+                              ARRAY[${Prisma.join(
+                                workoutGenreNames.map((g) =>
+                                  `%${g.toLowerCase()}%`,
+                                ),
+                              )}]::text[]
+                            )
+                          ORDER BY RANDOM()
+                          LIMIT ${limitNum}
+                      `;
             workoutTrackIds = [
               ...new Set([
                 ...workoutTrackIds,

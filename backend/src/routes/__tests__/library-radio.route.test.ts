@@ -184,6 +184,41 @@ describe('GET /radio -- type=all', () => {
     });
 });
 
+describe('GET /radio -- type=discovery', () => {
+    let app: express.Application;
+
+    beforeAll(() => {
+        app = makeApp();
+    });
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
+    it('uses randomized SQL selection for discovery candidates from full library', async () => {
+        const discoveryIds = [{ id: 'discovery-1' }, { id: 'discovery-2' }, { id: 'discovery-3' }, { id: 'discovery-4' }];
+
+        // First discovery query returns enough unplayed tracks, so fallback query is not used.
+        (prisma.$queryRaw as jest.Mock).mockResolvedValueOnce(discoveryIds);
+        (prisma.track.findMany as jest.Mock).mockResolvedValue(discoveryIds.map((t) => makeTrack(t.id)));
+
+        const res = await request(app).get('/radio?type=discovery&limit=2');
+
+        expect(res.status).toBe(200);
+        expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.track.findMany).toHaveBeenCalledTimes(1);
+
+        const queryCallArgs = (prisma.$queryRaw as jest.Mock).mock.calls[0];
+        const queryTemplate = String(queryCallArgs[0]);
+        expect(queryTemplate).toContain('HAVING COUNT(p.id) = 0');
+        expect(queryTemplate).toContain('ORDER BY RANDOM()');
+
+        const hydrateCallArgs = (prisma.track.findMany as jest.Mock).mock.calls[0][0];
+        expect(hydrateCallArgs.where.id.in).toHaveLength(2);
+        expect(hydrateCallArgs.where.id.in.every((id: string) => discoveryIds.some((t) => t.id === id))).toBe(true);
+    });
+});
+
 describe('GET /radio -- type=genre', () => {
     let app: express.Application;
 
@@ -252,5 +287,40 @@ describe('GET /radio -- type=decade', () => {
 
         const returnedIds = res.body.tracks.map((t: { id: string }) => t.id);
         expect(returnedIds).toEqual(expect.arrayContaining(decadeIds.map((t) => t.id)));
+    });
+});
+
+describe('GET /radio -- type=workout', () => {
+    let app: express.Application;
+
+    beforeAll(() => {
+        app = makeApp();
+    });
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
+    it('uses randomized SQL selection for workout candidates from full library', async () => {
+        const workoutIds = [{ id: 'workout-1' }, { id: 'workout-2' }, { id: 'workout-3' }, { id: 'workout-4' }];
+
+        (prisma.$queryRaw as jest.Mock).mockResolvedValue(workoutIds);
+        (prisma.track.findMany as jest.Mock).mockResolvedValue(workoutIds.map((t) => makeTrack(t.id)));
+
+        const res = await request(app).get('/radio?type=workout&limit=2');
+
+        expect(res.status).toBe(200);
+        expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.track.findMany).toHaveBeenCalledTimes(1);
+
+        const queryCallArgs = (prisma.$queryRaw as jest.Mock).mock.calls[0];
+        const queryTemplate = String(queryCallArgs[0]);
+        expect(queryTemplate).toContain('ORDER BY RANDOM()');
+        expect(queryTemplate).toContain('analysisStatus');
+        expect(queryTemplate).toContain('moodTags');
+
+        const hydrateCallArgs = (prisma.track.findMany as jest.Mock).mock.calls[0][0];
+        expect(hydrateCallArgs.where.id.in).toHaveLength(2);
+        expect(hydrateCallArgs.where.id.in.every((id: string) => workoutIds.some((t) => t.id === id))).toBe(true);
     });
 });
