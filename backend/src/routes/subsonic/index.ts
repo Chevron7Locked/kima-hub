@@ -148,10 +148,10 @@ subsonicRouter.all("/getMusicFolders.view", (req: Request, res: Response) => {
 subsonicRouter.all("/getOpenSubsonicExtensions.view", (req: Request, res: Response) => {
     subsonicOk(req, res, {
         openSubsonicExtensions: [
-            { name: "apiKeyAuthentication", versions: [1] },
-            { name: "songLyrics", versions: [1] },
-            { name: "indexBasedQueue", versions: [1] },
-            { name: "getPodcastEpisode", versions: [1] },
+            { "@_name": "apiKeyAuthentication", versions: [1] },
+            { "@_name": "songLyrics", versions: [1, 2] },
+            { "@_name": "indexBasedQueue", versions: [1] },
+            { "@_name": "getPodcastEpisode", versions: [1] },
         ],
     });
 });

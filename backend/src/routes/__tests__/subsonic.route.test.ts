@@ -267,4 +267,70 @@ describe('Subsonic lyrics routes', () => {
         );
         expect(prisma.trackLyrics.upsert).toHaveBeenCalled();
     });
+
+    it('getLyricsBySongId returns songLyrics v2 fields when enhanced=true', async () => {
+        (prisma.track.findUnique as jest.Mock).mockResolvedValue({
+            id: 'track-v2',
+            title: 'Karaoke Song',
+            duration: 120,
+            album: {
+                title: 'Karaoke Album',
+                artistId: 'artist-v2',
+                artist: { name: 'Karaoke Artist', displayName: null },
+            },
+        });
+
+        (prisma.trackLyrics.findUnique as jest.Mock).mockResolvedValue({
+            track_id: 'track-v2',
+            plain_lyrics: null,
+            synced_lyrics: '[00:01.00]Hello\n[00:03.50]World',
+            source: 'lrclib',
+        });
+
+        const res = await request(app)
+            .get('/getLyricsBySongId.view')
+            .query({ id: 'track-v2', enhanced: 'true', f: 'json' });
+
+        expect(res.status).toBe(200);
+        expect(res.body['subsonic-response'].status).toBe('ok');
+
+        const entry = res.body['subsonic-response'].lyricsList.structuredLyrics[0];
+        expect(entry.kind).toBe('main');
+        expect(entry.synced).toBe(true);
+        expect(Array.isArray(entry.cueLine)).toBe(true);
+        expect(entry.cueLine).toHaveLength(2);
+        expect(entry.cueLine[0].index).toBe(0);
+        expect(entry.cueLine[0].cue[0].byteStart).toBe(0);
+        expect(typeof entry.cueLine[0].cue[0].byteEnd).toBe('number');
+    });
+
+    it('getLyricsBySongId returns XML with structuredLyrics and line attributes for parser compatibility', async () => {
+        (prisma.track.findUnique as jest.Mock).mockResolvedValue({
+            id: 'track-xml',
+            title: 'Candy Everybody Wants',
+            duration: 200,
+            album: {
+                title: 'Our Time in Eden',
+                artistId: 'artist-xml',
+                artist: { name: '10,000 Maniacs', displayName: null },
+            },
+        });
+
+        (prisma.trackLyrics.findUnique as jest.Mock).mockResolvedValue({
+            track_id: 'track-xml',
+            plain_lyrics: null,
+            synced_lyrics: '[00:01.00]Candy\n[00:03.00]Everybody wants',
+            source: 'lrclib',
+        });
+
+        const res = await request(app)
+            .get('/getLyricsBySongId.view')
+            .query({ id: 'track-xml' });
+
+        expect(res.status).toBe(200);
+        expect(res.headers['content-type']).toContain('text/xml');
+        expect(res.text).toContain('<lyricsList>');
+        expect(res.text).toContain('structuredLyrics displayArtist="10,000 Maniacs" displayTitle="Candy Everybody Wants"');
+        expect(res.text).toContain('<line start="1000">Candy</line>');
+    });
 });

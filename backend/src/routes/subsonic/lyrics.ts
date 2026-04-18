@@ -8,6 +8,10 @@ import { rateLimiter } from "../../services/rateLimiter";
 
 export const lyricsRouter = Router();
 
+function utf8ByteLength(value: string): number {
+    return Buffer.byteLength(value, "utf8");
+}
+
 function hasLyrics(lyrics: { plain_lyrics: string | null; synced_lyrics: string | null } | null | undefined) {
     return Boolean(lyrics && ((lyrics.plain_lyrics && lyrics.plain_lyrics.trim()) || (lyrics.synced_lyrics && lyrics.synced_lyrics.trim())));
 }
@@ -109,6 +113,7 @@ async function findFallbackLyricsByTrackMetadata(trackId: string, title: string,
 
 lyricsRouter.all("/getLyricsBySongId.view", wrap(async (req, res) => {
     const id = req.query.id as string | undefined;
+    const enhanced = String(req.query.enhanced || "false").toLowerCase() === "true";
     const requestId = res.locals.subsonicRequestId as string | undefined;
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
@@ -164,6 +169,12 @@ lyricsRouter.all("/getLyricsBySongId.view", wrap(async (req, res) => {
     const displayTitle = track.title;
 
     const structuredLyrics: Array<Record<string, unknown>> = [];
+    const pushStructured = (entry: Record<string, unknown>) => {
+        if (enhanced) {
+            entry.kind = "main";
+        }
+        structuredLyrics.push(entry);
+    };
 
     if (resolvedLyrics.synced_lyrics && resolvedLyrics.synced_lyrics.trim()) {
         const lines = resolvedLyrics.synced_lyrics
@@ -182,18 +193,46 @@ lyricsRouter.all("/getLyricsBySongId.view", wrap(async (req, res) => {
                     ? parseInt(fracRaw, 10) * 10
                     : parseInt(fracRaw.slice(0, 3), 10);
                 const start = min * 60000 + sec * 1000 + fracMs;
-                return { start, value: match[4] || "" };
+                return {
+                    "@_start": start,
+                    "#text": match[4] || "",
+                };
             })
-            .filter((line): line is { start: number; value: string } => Boolean(line));
+            .filter((line): line is { "@_start": number; "#text": string } => Boolean(line));
 
         if (lines.length > 0) {
-            structuredLyrics.push({
-                displayArtist,
-                displayTitle,
-                lang: "und",
-                synced: true,
+            const entry: Record<string, unknown> = {
+                "@_displayArtist": displayArtist,
+                "@_displayTitle": displayTitle,
+                "@_lang": "und",
+                "@_synced": true,
                 line: lines,
-            });
+            };
+
+            if (enhanced) {
+                const cueLine = lines.map((line, index) => {
+                    const nextStart = index < lines.length - 1 ? lines[index + 1]["@_start"] : undefined;
+                    const cue = {
+                        start: line["@_start"],
+                        ...(nextStart !== undefined ? { end: nextStart } : {}),
+                        value: line["#text"],
+                        byteStart: 0,
+                        byteEnd: Math.max(0, utf8ByteLength(line["#text"]) - 1),
+                    };
+
+                    return {
+                        index,
+                        start: line["@_start"],
+                        ...(nextStart !== undefined ? { end: nextStart } : {}),
+                        value: line["#text"],
+                        cue: [cue],
+                    };
+                });
+
+                entry.cueLine = cueLine;
+            }
+
+            pushStructured(entry);
         }
     }
 
@@ -202,14 +241,14 @@ lyricsRouter.all("/getLyricsBySongId.view", wrap(async (req, res) => {
             .split("\n")
             .map((line) => line.trim())
             .filter(Boolean)
-            .map((value) => ({ value }));
+            .map((value) => ({ "#text": value }));
 
         if (lines.length > 0) {
-            structuredLyrics.push({
-                displayArtist,
-                displayTitle,
-                lang: "und",
-                synced: false,
+            pushStructured({
+                "@_displayArtist": displayArtist,
+                "@_displayTitle": displayTitle,
+                "@_lang": "und",
+                "@_synced": false,
                 line: lines,
             });
         }
