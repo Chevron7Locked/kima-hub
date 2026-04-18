@@ -1,10 +1,12 @@
 import { Router, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
+import { randomUUID } from "crypto";
 import { subsonicAuth } from "../../middleware/subsonicAuth";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { prisma } from "../../utils/db";
 import { scanQueue } from "../../workers/queues";
 import { config } from "../../config";
+import { logger } from "../../utils/logger";
 
 import { compatRouter } from "./compat";
 import { libraryRouter } from "./library";
@@ -20,6 +22,50 @@ import { profileRouter } from "./profile";
 import { podcastRouter } from "./podcasts";
 
 export const subsonicRouter = Router();
+
+const SENSITIVE_SUBSONIC_QUERY_KEYS = new Set(["p", "t", "s", "apiKey"]);
+
+function redactSubsonicQuery(query: Request["query"]) {
+    return Object.fromEntries(
+        Object.entries(query).map(([key, value]) => {
+            if (SENSITIVE_SUBSONIC_QUERY_KEYS.has(key)) {
+                return [key, "[REDACTED]"];
+            }
+            return [key, value];
+        })
+    );
+}
+
+// Debug trace for Subsonic API requests and responses.
+subsonicRouter.use((req: Request, res: Response, next) => {
+    const startedAt = Date.now();
+    const query = redactSubsonicQuery(req.query);
+    const requestId = req.get("x-request-id") || randomUUID();
+
+    res.locals.subsonicRequestId = requestId;
+    res.setHeader("x-request-id", requestId);
+
+    logger.debug(`[Subsonic] --> ${req.method} ${req.originalUrl}`, {
+        requestId,
+        path: req.path,
+        query,
+        userAgent: req.get("user-agent") || "unknown",
+        clientIp: req.ip,
+    });
+
+    res.on("finish", () => {
+        logger.debug(`[Subsonic] <-- ${req.method} ${req.path}`, {
+            requestId,
+            statusCode: res.statusCode,
+            durationMs: Date.now() - startedAt,
+            contentType: res.getHeader("content-type"),
+            userId: req.user?.id,
+            username: req.user?.username,
+        });
+    });
+
+    next();
+});
 
 // Rate limit the Subsonic API separately: auth does a DB query on every request
 const subsonicLimiter = rateLimit({
@@ -102,10 +148,10 @@ subsonicRouter.all("/getMusicFolders.view", (req: Request, res: Response) => {
 subsonicRouter.all("/getOpenSubsonicExtensions.view", (req: Request, res: Response) => {
     subsonicOk(req, res, {
         openSubsonicExtensions: [
-            { name: "apiKeyAuthentication", versions: [1] },
-            { name: "songLyrics", versions: [1] },
-            { name: "indexBasedQueue", versions: [1] },
-            { name: "getPodcastEpisode", versions: [1] },
+            { "@_name": "apiKeyAuthentication", versions: [1] },
+            { "@_name": "songLyrics", versions: [1, 2] },
+            { "@_name": "indexBasedQueue", versions: [1] },
+            { "@_name": "getPodcastEpisode", versions: [1] },
         ],
     });
 });

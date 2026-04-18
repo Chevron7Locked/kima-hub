@@ -7,7 +7,6 @@ import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicRe
 import { getAudioStreamingService } from "../../services/audioStreaming";
 import { config } from "../../config";
 import { bitrateToQuality, firstArtistGenre, mapSong, wrap } from "./mappers";
-import { normalizeArtistName } from "../../utils/artistNormalization";
 
 export const playbackRouter = Router();
 
@@ -471,42 +470,3 @@ playbackRouter.all("/deleteBookmark.view", wrap(async (req, res) => {
     return subsonicOk(req, res);
 }));
 
-// ===================== LYRICS =====================
-
-playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
-    const artist = (req.query.artist as string | undefined)?.trim();
-    const title = (req.query.title as string | undefined)?.trim();
-
-    if (!artist && !title) {
-        return subsonicOk(req, res, { lyrics: {} });
-    }
-
-    const normalizedArtist = artist ? normalizeArtistName(artist) : undefined;
-
-    const track = await prisma.track.findFirst({
-        where: {
-            ...(title ? { title: { contains: title, mode: "insensitive" as const } } : {}),
-            ...(normalizedArtist ? {
-                album: {
-                    artist: { normalizedName: normalizedArtist },
-                },
-            } : {}),
-        },
-        include: { trackLyrics: true, album: { include: { artist: true } } },
-    });
-
-    if (!track?.trackLyrics) {
-        return subsonicOk(req, res, { lyrics: {} });
-    }
-
-    const lyricsText = track.trackLyrics.plain_lyrics || track.trackLyrics.synced_lyrics || undefined;
-    const result: Record<string, unknown> = {
-        "@_artist": track.album.artist.name,
-        "@_title": track.title,
-    };
-    if (lyricsText) {
-        result["#text"] = lyricsText;
-    }
-
-    return subsonicOk(req, res, { lyrics: result });
-}));
