@@ -23,6 +23,54 @@ const MAX_LIMIT = 10000;
 
 const router = Router();
 
+async function getRandomTrackIds(
+  params: {
+    where?: Prisma.TrackWhereInput;
+    excludeIds?: string[];
+    take: number;
+  },
+): Promise<string[]> {
+  const { where, excludeIds = [], take } = params;
+
+  if (take <= 0) {
+    return [];
+  }
+
+  const effectiveWhere: Prisma.TrackWhereInput = excludeIds.length
+    ? {
+        ...(where || {}),
+        id: {
+          notIn: excludeIds,
+        },
+      }
+    : (where || {});
+
+  const total = await prisma.track.count({ where: effectiveWhere });
+  if (total === 0) {
+    return [];
+  }
+
+  if (total <= take) {
+    const all = await prisma.track.findMany({
+      where: effectiveWhere,
+      select: { id: true },
+    });
+    return shuffleArray(all.map((t) => t.id));
+  }
+
+  const maxSkip = Math.max(0, total - take);
+  const skip = Math.floor(Math.random() * (maxSkip + 1));
+
+  const sampled = await prisma.track.findMany({
+    where: effectiveWhere,
+    select: { id: true },
+    skip,
+    take,
+  });
+
+  return shuffleArray(sampled.map((t) => t.id));
+}
+
 router.get("/recently-listened", async (req, res) => {
   try {
     const { limit = "10" } = req.query;
@@ -695,16 +743,15 @@ router.get("/radio", async (req, res) => {
 
     switch (type) {
       case "discovery":
-        const unplayedTracks = await prisma.track.findMany({
+        const unplayedTracks = await getRandomTrackIds({
           where: {
             plays: { none: {} },
           },
-          select: { id: true },
           take: limitNum * 2,
         });
 
         if (unplayedTracks.length >= limitNum) {
-          trackIds = unplayedTracks.map((t) => t.id);
+          trackIds = unplayedTracks;
         } else {
           const leastPlayedTracks = await prisma.$queryRaw<{ id: string }[]>`
                         SELECT t.id
@@ -737,24 +784,28 @@ router.get("/radio", async (req, res) => {
           logger.debug(
             "[Radio:favorites] No play data found, returning random tracks",
           );
-          const randomTracks = await prisma.track.findMany({
-            select: { id: true },
+          const randomTracks = await getRandomTrackIds({
             take: limitNum * 2,
           });
-          trackIds = randomTracks.map((t) => t.id);
+          trackIds = randomTracks;
         }
         break;
 
       case "decade":
         const decadeStart = parseInt(value as string) || 2000;
 
-        const decadeTracks = await prisma.track.findMany({
-          where: {
-            album: getDecadeWhereClause(decadeStart),
-          },
-          select: { id: true },
-          take: limitNum * 3,
-        });
+        const decadeTracks = await prisma.$queryRaw<{ id: string }[]>`
+                    SELECT t.id
+                    FROM "Track" t
+                    JOIN "Album" a ON a.id = t."albumId"
+                    WHERE (
+                        (a."originalYear" >= ${decadeStart} AND a."originalYear" < ${decadeStart + 10})
+                        OR
+                        (a."originalYear" IS NULL AND a.year >= ${decadeStart} AND a.year < ${decadeStart + 10})
+                    )
+                    ORDER BY RANDOM()
+                    LIMIT ${limitNum * 3}
+                `;
         trackIds = decadeTracks.map((t) => t.id);
         break;
 
@@ -762,23 +813,27 @@ router.get("/radio", async (req, res) => {
         const genreValue = ((value as string) || "").toLowerCase();
 
         const genreTracks = await prisma.$queryRaw<{ id: string }[]>`
-                    SELECT DISTINCT t.id
-                    FROM "Artist" ar
-                    JOIN "Album" a ON a."artistId" = ar.id
-                    JOIN "Track" t ON t."albumId" = a.id
-                    WHERE (
-                        (ar.genres IS NOT NULL AND EXISTS (
-                            SELECT 1 FROM jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
-                            WHERE LOWER(g.genre) LIKE ${"%" + genreValue + "%"}
-                        ))
-                        OR
-                        (ar."userGenres" IS NOT NULL AND EXISTS (
-                            SELECT 1 FROM jsonb_array_elements_text(ar."userGenres"::jsonb) AS ug(genre)
-                            WHERE LOWER(ug.genre) LIKE ${"%" + genreValue + "%"}
-                        ))
-                    )
-                    LIMIT ${limitNum * 2}
-                `;
+              SELECT x.id
+              FROM (
+                SELECT DISTINCT t.id
+                FROM "Artist" ar
+                JOIN "Album" a ON a."artistId" = ar.id
+                JOIN "Track" t ON t."albumId" = a.id
+                WHERE (
+                  (ar.genres IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
+                    WHERE LOWER(g.genre) LIKE ${"%" + genreValue + "%"}
+                  ))
+                  OR
+                  (ar."userGenres" IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM jsonb_array_elements_text(ar."userGenres"::jsonb) AS ug(genre)
+                    WHERE LOWER(ug.genre) LIKE ${"%" + genreValue + "%"}
+                  ))
+                )
+              ) x
+              ORDER BY RANDOM()
+              LIMIT ${limitNum * 2}
+            `;
         trackIds = genreTracks.map((t) => t.id);
 
         logger.debug(
@@ -841,18 +896,17 @@ router.get("/radio", async (req, res) => {
             };
         }
 
-        const moodTracks = await prisma.track.findMany({
+        const moodTracks = await getRandomTrackIds({
           where: moodWhere,
-          select: { id: true },
           take: limitNum * 3,
         });
-        trackIds = moodTracks.map((t) => t.id);
+        trackIds = moodTracks;
         break;
 
       case "workout":
         let workoutTrackIds: string[] = [];
 
-        const energyTracks = await prisma.track.findMany({
+        const energyTracks = await getRandomTrackIds({
           where: {
             analysisStatus: "completed",
             OR: [
@@ -866,10 +920,9 @@ router.get("/radio", async (req, res) => {
               },
             ],
           },
-          select: { id: true },
           take: limitNum * 2,
         });
-        workoutTrackIds = energyTracks.map((t) => t.id);
+        workoutTrackIds = energyTracks;
         logger.debug(
           `[Radio:workout] Found ${workoutTrackIds.length} tracks via audio analysis`,
         );
@@ -1554,14 +1607,11 @@ router.get("/radio", async (req, res) => {
         }
 
         if (vibeMatchedIds.length < limitNum) {
-          const randomTracks = await prisma.track.findMany({
-            where: {
-              id: { notIn: [sourceTrackId, ...vibeMatchedIds] },
-            },
-            select: { id: true },
+          const randomTracks = await getRandomTrackIds({
+            excludeIds: [sourceTrackId, ...vibeMatchedIds],
             take: limitNum - vibeMatchedIds.length,
           });
-          const newIds = randomTracks.map((t) => t.id);
+          const newIds = randomTracks;
           vibeMatchedIds = [...vibeMatchedIds, ...newIds];
           logger.debug(
             `[Radio:vibe] Fallback D (random): added ${newIds.length} tracks, total: ${vibeMatchedIds.length}`,
@@ -1576,10 +1626,12 @@ router.get("/radio", async (req, res) => {
 
       case "all":
       default:
-        const allTracks = await prisma.track.findMany({
-          select: { id: true },
-          take: 300,
-        });
+        const allTracks = await prisma.$queryRaw<{ id: string }[]>`
+          SELECT id
+          FROM "Track"
+          ORDER BY RANDOM()
+          LIMIT ${Math.max(300, limitNum * 3)}
+        `;
         trackIds = allTracks.map((t) => t.id);
     }
 
@@ -1754,8 +1806,8 @@ router.get("/radio", async (req, res) => {
       title: track.title,
       duration: track.duration,
       trackNo: track.trackNo,
-      discNumber: track.discNumber,
-      discSubtitle: track.discSubtitle,
+      discNumber: (track as any).discNumber,
+      discSubtitle: (track as any).discSubtitle,
       filePath: track.filePath,
       artist: {
         id: track.album.artist.id,
