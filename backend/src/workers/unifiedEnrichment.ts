@@ -1406,13 +1406,26 @@ async function executePodcastRefreshPhase(): Promise<number> {
 
     if (stalePodcasts.length === 0) return 0;
 
+    // BullMQ's jobId dedup keeps the marker hash in Redis after a job
+    // completes, indefinitely. `removeOnComplete: { age: 3600 }` removes the
+    // completed-list entry but not the dedup marker, so subsequent adds with
+    // the same jobId silently no-op forever. This was the root cause of issue
+    // #81 (podcasts never refresh past initial subscription). Clear completed
+    // jobs before the add loop so jobIds are reusable. Matches the pattern
+    // already in place on the vibe queue.
+    try {
+        await podcastQueue.clean(0, 0, "completed");
+    } catch (err) {
+        logger.warn(`[Enrichment] podcastQueue clean failed: ${(err as Error).message}`);
+    }
+
     let queued = 0;
     for (const podcast of stalePodcasts) {
         try {
             await podcastQueue.add(
                 "refresh",
                 { podcastId: podcast.id, podcastTitle: podcast.title },
-                { jobId: `podcast-${podcast.id}` }, // dedup — no-op if already queued
+                { jobId: `podcast-${podcast.id}` }, // dedup -- safe now that completed jobs are cleaned above
             );
             queued++;
         } catch (err) {
