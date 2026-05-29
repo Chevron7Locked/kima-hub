@@ -321,6 +321,7 @@ export default function PodcastsPage() {
                                                     </button>
                                                     <button
                                                         onClick={() => { setShowRssInput(false); setRssUrl(""); setRssError(null); }}
+                                                        aria-label="Cancel RSS input"
                                                         className="p-2.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 transition-all"
                                                     >
                                                         <X className="w-4 h-4" />
@@ -363,6 +364,11 @@ export default function PodcastsPage() {
                                         value={searchQuery}
                                         onChange={(e) => setSearchQuery(e.target.value)}
                                         placeholder="Quick add..."
+                                        role="combobox"
+                                        aria-expanded={showDropdown}
+                                        aria-controls="podcast-search-listbox"
+                                        aria-label="Search podcasts to subscribe"
+                                        aria-autocomplete="list"
                                         className="w-full pl-10 pr-4 py-2.5 bg-[#0a0a0a] border-2 border-white/10 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#3b82f6]/50 transition-all text-sm font-mono"
                                     />
                                     {isSearching && (
@@ -373,12 +379,19 @@ export default function PodcastsPage() {
 
                                     {/* Search Dropdown */}
                                     {showDropdown && searchResults.length > 0 && (
-                                        <div className="absolute top-full left-0 mt-2 w-full bg-[#0f0f0f] border-2 border-white/10 rounded-lg shadow-2xl overflow-hidden z-50 max-h-96 overflow-y-auto">
+                                        <div
+                                            id="podcast-search-listbox"
+                                            role="listbox"
+                                            aria-label="Podcast search results"
+                                            className="absolute top-full left-0 mt-2 w-full bg-[#0f0f0f] border-2 border-white/10 rounded-lg shadow-2xl overflow-hidden z-50 max-h-96 overflow-y-auto"
+                                        >
                                             {searchResults.map((result) => {
                                                 const imageUrl = getProxiedImageUrl(result.coverUrl);
                                                 return (
                                                     <div
                                                         key={result.id}
+                                                        role="option"
+                                                        aria-selected={false}
                                                         className="flex items-center gap-3 p-3 hover:bg-white/5 transition-colors cursor-pointer border-b border-white/5 last:border-b-0"
                                                         onClick={() => {
                                                             router.push(`/podcasts/${result.id}`);
@@ -410,9 +423,17 @@ export default function PodcastsPage() {
                                                             </p>
                                                         </div>
                                                         <div className="flex-shrink-0">
-                                                            <div className="w-7 h-7 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] flex items-center justify-center transition-colors">
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    router.push(`/podcasts/${result.id}`);
+                                                                    setShowDropdown(false);
+                                                                }}
+                                                                aria-label={`Subscribe to ${result.name}`}
+                                                                className="min-h-[44px] min-w-[44px] rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] flex items-center justify-center transition-colors"
+                                                            >
                                                                 <Plus className="w-3.5 h-3.5 text-white" />
-                                                            </div>
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 );
@@ -459,6 +480,7 @@ export default function PodcastsPage() {
                                             <select
                                                 value={sortBy}
                                                 onChange={(e) => setSortBy(e.target.value as SortOption)}
+                                                aria-label="Sort podcasts"
                                                 className="px-3 py-1.5 bg-[#0a0a0a] border-2 border-white/10 rounded-lg text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-[#3b82f6]/50 [&>option]:bg-[#0a0a0a] [&>option]:text-white cursor-pointer"
                                             >
                                                 <option value="title">Title</option>
@@ -471,6 +493,7 @@ export default function PodcastsPage() {
                                                     setItemsPerPage(Number(e.target.value));
                                                     setCurrentPage(1);
                                                 }}
+                                                aria-label="Podcasts per page"
                                                 className="px-3 py-1.5 bg-[#0a0a0a] border-2 border-white/10 rounded-lg text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-[#3b82f6]/50 [&>option]:bg-[#0a0a0a] [&>option]:text-white cursor-pointer"
                                             >
                                                 <option value={25}>25</option>

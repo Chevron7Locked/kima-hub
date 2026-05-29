@@ -204,10 +204,10 @@ export default function BrowsePlaylistsPage() {
         index: number,
         context?: string,
     ) => (
-        <div
+        <button
             key={`${item.source}-${item.type}-${item.id}-${context || "main"}-${index}`}
             onClick={() => handleItemClick(item)}
-            className="group cursor-pointer"
+            className="group cursor-pointer text-left w-full"
         >
             <div className="relative aspect-square mb-2.5 rounded-lg overflow-hidden bg-[#0a0a0a] border border-white/10 group-hover:border-[#a855f7]/40 group-hover:shadow-xl group-hover:shadow-[#a855f7]/10 transition-all duration-300">
                 {item.imageUrl ?
@@ -233,11 +233,11 @@ export default function BrowsePlaylistsPage() {
             <p className="text-[11px] font-mono text-white/40 truncate uppercase tracking-wider mt-0.5">
                 {item.trackCount} songs -- {item.creator}
             </p>
-        </div>
+        </button>
     );
 
     const renderGenreCard = (genre: Genre) => (
-        <div
+        <button
             key={genre.id}
             onClick={() => handleGenreClick(genre)}
             className="group cursor-pointer relative aspect-square rounded-lg overflow-hidden border border-white/10 hover:border-[#a855f7]/40 hover:shadow-xl hover:shadow-[#a855f7]/10 transition-all duration-300"
@@ -262,7 +262,7 @@ export default function BrowsePlaylistsPage() {
 
             {/* Hover accent line */}
             <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#a855f7] to-[#c026d3] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150 origin-center" />
-        </div>
+        </button>
     );
 
     if (isLoading && !selectedGenre && !hasSearched) {
@@ -338,12 +338,14 @@ export default function BrowsePlaylistsPage() {
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 placeholder="Search playlists..."
+                                aria-label="Search playlists"
                                 className="w-full bg-white/5 border border-white/10 rounded-lg pl-11 pr-10 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#a855f7]/40 transition-all font-mono"
                             />
                             {searchQuery && (
                                 <button
                                     type="button"
                                     onClick={clearSearch}
+                                    aria-label="Clear search"
                                     className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 hover:text-white transition-colors"
                                 >
                                     <X className="w-4 h-4" />
@@ -561,6 +563,7 @@ export default function BrowsePlaylistsPage() {
                         <div className="relative px-6 pt-6 pb-4 border-b border-white/10">
                             <button
                                 onClick={() => setShowUrlModal(false)}
+                                aria-label="Close import modal"
                                 className="absolute top-4 right-4 p-2 hover:bg-white/5 rounded-lg transition-colors"
                             >
                                 <X className="w-4 h-4 text-white/40 hover:text-white transition-colors" />

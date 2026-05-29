@@ -448,6 +448,7 @@ function ImportPlaylistPageContent() {
                     <button
                         onClick={() => router.back()}
                         className="p-2 hover:bg-white/5 rounded-full transition-colors"
+                        aria-label="Back"
                     >
                         <ArrowLeft className="w-5 h-5 text-gray-400" />
                     </button>
@@ -480,10 +481,11 @@ function ImportPlaylistPageContent() {
                 {step === "input" && (
                     <div className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">
+                            <label htmlFor="playlist-url" className="block text-sm font-medium text-gray-300 mb-2">
                                 Playlist URL
                             </label>
                             <input
+                                id="playlist-url"
                                 type="text"
                                 value={url}
                                 onChange={handleUrlChange}
@@ -890,10 +892,11 @@ function ImportPlaylistPageContent() {
 
                         {/* Playlist name input */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">
+                            <label htmlFor="playlist-name" className="block text-sm font-medium text-gray-300 mb-2">
                                 Playlist Name
                             </label>
                             <input
+                                id="playlist-name"
                                 type="text"
                                 value={playlistName}
                                 onChange={(e) =>

@@ -4,17 +4,18 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
+import { useToast } from "@/lib/toast-context";
 import { QRCodeSVG } from "qrcode.react";
 import { Card } from "@/components/ui/Card";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
-import { 
-    Smartphone, 
-    RefreshCw, 
-    Check, 
-    Clock, 
-    Copy, 
+import {
+    Smartphone,
+    RefreshCw,
+    Check,
+    Clock,
+    Copy,
     Trash2,
-    AlertCircle 
+    AlertCircle
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 
@@ -34,6 +35,7 @@ interface LinkedDevice {
 export default function DeviceLinkPage() {
     const router = useRouter();
     const { isAuthenticated, isLoading: authLoading } = useAuth();
+    const { toast } = useToast();
     const [linkCode, setLinkCode] = useState<DeviceLinkCode | null>(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const [timeRemaining, setTimeRemaining] = useState(0);
@@ -57,10 +59,11 @@ export default function DeviceLinkPage() {
             setDevices(response);
         } catch (err) {
             console.error("Failed to load devices:", err);
+            toast.error("Failed to load linked devices");
         } finally {
             setIsLoadingDevices(false);
         }
-    }, []);
+    }, [toast]);
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -274,7 +277,7 @@ export default function DeviceLinkPage() {
                                         </div>
 
                                         {/* Code Display */}
-                                        <div className="mb-4">
+                                        <div className="mb-4" aria-live="polite">
                                             <p className="text-gray-400 text-sm mb-2">
                                                 Or enter this code manually:
                                             </p>
@@ -285,12 +288,12 @@ export default function DeviceLinkPage() {
                                                 <button
                                                     onClick={copyCode}
                                                     className={cn(
-                                                        "p-2 rounded-lg transition-all",
+                                                        "p-2 min-h-[44px] min-w-[44px] rounded-lg transition-all flex items-center justify-center",
                                                         copied
                                                             ? "bg-green-500/20 text-green-400"
                                                             : "bg-white/10 hover:bg-white/20 text-gray-400"
                                                     )}
-                                                    title="Copy code"
+                                                    aria-label={copied ? "Code copied" : "Copy code"}
                                                 >
                                                     {copied ? (
                                                         <Check className="w-5 h-5" />
@@ -352,8 +355,8 @@ export default function DeviceLinkPage() {
                                         </div>
                                         <button
                                             onClick={() => revokeDevice(device.id)}
-                                            className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
-                                            title="Revoke device"
+                                            className="p-2 min-h-[44px] min-w-[44px] text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all flex items-center justify-center"
+                                            aria-label={`Revoke ${device.name}`}
                                         >
                                             <Trash2 className="w-4 h-4" />
                                         </button>

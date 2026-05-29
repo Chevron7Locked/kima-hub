@@ -249,8 +249,8 @@ export default function QueuePage() {
                                                         queueIndex <=
                                                         currentIndex + 1
                                                     }
-                                                    className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                                    title="Move up"
+                                                    className="p-2.5 min-h-[44px] min-w-[44px] hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
+                                                    aria-label={`Move ${track.displayTitle ?? track.title} up`}
                                                 >
                                                     <ChevronUp className="w-4 h-4" />
                                                 </button>
@@ -264,8 +264,8 @@ export default function QueuePage() {
                                                         queueIndex >=
                                                         queue.length - 1
                                                     }
-                                                    className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                                    title="Move down"
+                                                    className="p-2.5 min-h-[44px] min-w-[44px] hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
+                                                    aria-label={`Move ${track.displayTitle ?? track.title} down`}
                                                 >
                                                     <ChevronDown className="w-4 h-4" />
                                                 </button>
@@ -275,8 +275,8 @@ export default function QueuePage() {
                                                             queueIndex
                                                         )
                                                     }
-                                                    className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors"
-                                                    title="Play now"
+                                                    className="p-2.5 min-h-[44px] min-w-[44px] hover:bg-[#0a0a0a] rounded-md transition-colors flex items-center justify-center"
+                                                    aria-label={`Play ${track.displayTitle ?? track.title}`}
                                                 >
                                                     <Play className="w-4 h-4" />
                                                 </button>
@@ -286,8 +286,8 @@ export default function QueuePage() {
                                                             queueIndex
                                                         )
                                                     }
-                                                    className="p-2 hover:bg-red-500/10 rounded-md transition-colors text-red-400"
-                                                    title="Remove"
+                                                    className="p-2.5 min-h-[44px] min-w-[44px] hover:bg-red-500/10 rounded-md transition-colors text-red-400 flex items-center justify-center"
+                                                    aria-label={`Remove ${track.displayTitle ?? track.title} from queue`}
                                                 >
                                                     <X className="w-4 h-4" />
                                                 </button>
