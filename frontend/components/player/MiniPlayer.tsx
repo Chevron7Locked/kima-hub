@@ -245,7 +245,7 @@ export function MiniPlayer() {
                             >
                                 {/* Album Art - expand button for keyboard/AT users */}
                                 <button
-                                    className="relative w-12 h-12 flex-shrink-0 rounded-lg overflow-hidden bg-black/30 shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                    className="relative w-12 h-12 flex-shrink-0 rounded-lg overflow-hidden bg-black/30 shadow-md"
                                     aria-label="Expand player"
                                     onClick={(e) => {
                                         e.stopPropagation();
