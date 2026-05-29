@@ -57,7 +57,7 @@ export function LibraryTracksList({ tracks }: LibraryTracksListProps) {
 
     return (
         <div className="space-y-1">
-            {tracks.slice(0, 10).map((track, index) => {
+            {tracks.map((track, index) => {
                 const isCurrentTrack = currentTrack?.id === track.id;
                 const isPlayingThis = isCurrentTrack && isPlaying;
                 const coverUrl = track.album.coverUrl
