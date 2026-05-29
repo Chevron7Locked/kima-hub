@@ -23,35 +23,7 @@
     --border-focus: #333333; /* Focus, selected states */
 
     /* Text Colors */
-    --text-primary: #ffffff; /* Primary headers */
-    --text-body: #e5e5e5; /* Body text */
-    --text-secondary: #a3a3a3; /* Secondary info */
-    --text-muted: #7d7d7d; /* Timestamps, meta */
-    --text-disabled: #525252; /* Disabled */
-
-    /* Actions */
-    --color-primary: #eab308; /* PRIMARY CTA ONLY - Yellow */
-    --color-ai: #a855f7; /* AI features - Purple */
-    --color-ai-dark: #9333ea; /* AI selected */
-
-    /* Content Type Colors (for section headers) */
-    --color-featured: #eab308;
-    --color-tracks: #a855f7;
-    --color-tracks-dark: #c026d3;
-    --color-albums: #22c55e;
-    --color-albums-dark: #16a34a;
-    --color-podcasts: #3b82f6;
-    --color-podcasts-dark: #2563eb;
-    --color-audiobooks: #f59e0b;
-    --color-artists: #ec4899;
-    --color-p2p: #ec4899;
-    --color-discover: #a855f7;
-
-    /* Status */
-    --color-success: #22c55e;
-    --color-warning: #f59e0b;
-    --color-error: #ef4444;
-    --color-info: #3b82f6;
+    --text-muted: #7d7d7d; /* Timestamps, meta -- WCAG-offset, keep as custom */
 }
 
 * {
@@ -60,7 +32,7 @@
 
 body {
     background: var(--bg-primary);
-    color: var(--text-body);
+    color: #e5e5e5;
     font-family: var(--font-montserrat), -apple-system, BlinkMacSystemFont,
         "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     min-height: 100vh;

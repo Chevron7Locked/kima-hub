@@ -238,11 +238,10 @@ export function MiniPlayer() {
                         aria-live="polite"
                     >
                         <div
-                            className="animate-hint-in flex items-center gap-2 rounded-full px-3 py-1.5 text-xs pointer-events-none"
+                            className="animate-hint-in flex items-center gap-2 rounded-full px-3 py-1.5 text-xs pointer-events-none text-gray-400"
                             style={{
                                 background: "rgba(15, 15, 15, 0.92)",
                                 border: "1px solid rgba(252, 162, 0, 0.25)",
-                                color: "var(--text-secondary)",
                                 backdropFilter: "blur(8px)",
                                 WebkitBackdropFilter: "blur(8px)",
                                 boxShadow: "0 2px 12px rgba(0,0,0,0.5)",

@@ -207,7 +207,7 @@ export default function RadioPage() {
                                     <SectionSkeleton />
                                 ) : genresError ? (
                                     <div className="flex items-center gap-3 py-4">
-                                        <p className="text-sm font-mono text-[var(--text-secondary)]">
+                                        <p className="text-sm font-mono text-gray-400">
                                             Could not load genre stations.
                                         </p>
                                         <button
@@ -250,7 +250,7 @@ export default function RadioPage() {
                                     <SectionSkeleton />
                                 ) : decadesError ? (
                                     <div className="flex items-center gap-3 py-4">
-                                        <p className="text-sm font-mono text-[var(--text-secondary)]">
+                                        <p className="text-sm font-mono text-gray-400">
                                             Could not load decade stations.
                                         </p>
                                         <button

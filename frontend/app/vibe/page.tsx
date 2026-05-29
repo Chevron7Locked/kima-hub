@@ -285,7 +285,7 @@ export default function VibePage() {
         return (
             <div className="w-full h-full vibe-map-bg flex items-center justify-center">
                 <div className="text-center">
-                    <Loader2 className="w-6 h-6 text-[var(--color-ai)] animate-spin mx-auto mb-3 opacity-60" />
+                    <Loader2 className="w-6 h-6 text-purple-500 animate-spin mx-auto mb-3 opacity-60" />
                     <p className="text-white/40 text-sm tracking-wide">Computing music map</p>
                 </div>
             </div>

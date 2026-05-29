@@ -270,15 +270,15 @@ export default function DiscoverWeeklyPage() {
                                     {/* What this does -- disk disclosure, visible before generating */}
                                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
-                                            <div className="text-xs font-mono text-[var(--color-discover)] uppercase mb-1">Finds</div>
+                                            <div className="text-xs font-mono text-purple-500 uppercase mb-1">Finds</div>
                                             <div className="text-xs text-gray-400 leading-snug">Similar artists via Last.fm, grouped by similarity tier</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
-                                            <div className="text-xs font-mono text-[var(--color-discover)] uppercase mb-1">Downloads</div>
+                                            <div className="text-xs font-mono text-purple-500 uppercase mb-1">Downloads</div>
                                             <div className="text-xs text-gray-400 leading-snug">Full albums to <span className="font-mono text-white/40">/music/discovery</span> on your server</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
-                                            <div className="text-xs font-mono text-[var(--color-discover)] uppercase mb-1">Cleans up</div>
+                                            <div className="text-xs font-mono text-purple-500 uppercase mb-1">Cleans up</div>
                                             <div className="text-xs text-gray-400 leading-snug">Unliked albums are removed at week&apos;s end -- liked ones stay forever</div>
                                         </div>
                                     </div>
@@ -286,15 +286,15 @@ export default function DiscoverWeeklyPage() {
                                     {/* Placeholder stats */}
                                     <div className="grid grid-cols-3 gap-4 mb-8">
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                                            <div className="text-2xl font-black text-[var(--color-discover)] mb-1">--</div>
+                                            <div className="text-2xl font-black text-purple-500 mb-1">--</div>
                                             <div className="text-xs font-mono text-gray-500 uppercase">Tracks</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                                            <div className="text-2xl font-black text-[var(--color-discover)] mb-1">--</div>
+                                            <div className="text-2xl font-black text-purple-500 mb-1">--</div>
                                             <div className="text-xs font-mono text-gray-500 uppercase">Duration</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                                            <div className="text-2xl font-black text-[var(--color-discover)] mb-1">--</div>
+                                            <div className="text-2xl font-black text-purple-500 mb-1">--</div>
                                             <div className="text-xs font-mono text-gray-500 uppercase">Artists</div>
                                         </div>
                                     </div>

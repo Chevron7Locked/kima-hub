@@ -30,7 +30,7 @@ export function DiscoverHero({ playlist, config, onOpenSettings }: DiscoverHeroP
                     onClick={onOpenSettings}
                     aria-label="Open discovery settings"
                     title="Discovery settings"
-                    className="absolute top-6 right-8 flex items-center gap-1.5 px-3 py-2 border border-white/10 rounded-lg hover:border-[var(--color-discover)] hover:bg-white/5 transition-all duration-300 min-h-[44px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2"
+                    className="absolute top-6 right-8 flex items-center gap-1.5 px-3 py-2 border border-white/10 rounded-lg hover:border-purple-500 hover:bg-white/5 transition-all duration-300 min-h-[44px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2"
                 >
                     <Settings className="w-4 h-4 text-white/60" />
                     <span className="text-xs font-mono text-white/50 uppercase tracking-wider">Settings</span>
