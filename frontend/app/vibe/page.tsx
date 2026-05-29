@@ -16,7 +16,7 @@ import { useAudioControls } from "@/lib/audio-controls-context";
 import { api } from "@/lib/api";
 import type { Track, VibeOperation } from "@/lib/audio-state-context";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
-import { Loader2 } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 type VibeView = "map" | "galaxy";
 
 const GalacticMap = dynamic(
@@ -119,6 +119,14 @@ export default function VibePage() {
     }, []);
     const [showPathPicker, setShowPathPicker] = useState(false);
     const [showAlchemy, setShowAlchemy] = useState(false);
+    const [onboardingDismissed, setOnboardingDismissed] = useState<boolean>(() => {
+        if (typeof window === "undefined") return false;
+        try { return localStorage.getItem("kima_vibe_onboarding_seen") === "true"; } catch { return false; }
+    });
+    const dismissOnboarding = useCallback(() => {
+        setOnboardingDismissed(true);
+        try { localStorage.setItem("kima_vibe_onboarding_seen", "true"); } catch { /* noop */ }
+    }, []);
     const { currentTrack, queue, activeOperation } = useAudioState();
     const { playTrack, replaceOperation } = useAudioControls();
     const isMobile = useIsMobile();
@@ -349,7 +357,7 @@ export default function VibePage() {
                             {driftSourceId && (
                                 <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 bg-black/80 text-white/70 px-4 py-2 rounded-lg text-sm backdrop-blur-sm border border-[var(--color-brand)]/20 flex items-center gap-3">
                                     <span className="w-2 h-2 rounded-full bg-[var(--color-brand)]/60 animate-pulse" />
-                                    Click destination to begin drift
+                                    Click destination to begin song path
                                     <button
                                         onClick={() => setDriftSourceId(null)}
                                         className="text-white/30 hover:text-white ml-1 text-xs"
@@ -426,6 +434,32 @@ export default function VibePage() {
                 <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-[max(0.75rem,env(safe-area-inset-left))] z-10 text-white/15 text-[10px] tracking-widest uppercase font-medium">
                     {mapData.trackCount} tracks
                 </div>
+
+                {mode === "idle" && !onboardingDismissed && (
+                    <div className="absolute bottom-[max(2.5rem,calc(env(safe-area-inset-bottom)+2.5rem))] left-1/2 -translate-x-1/2 z-10 w-[calc(100vw-2rem)] max-w-sm animate-hint-in">
+                        <div className="rounded-xl border border-white/10 bg-black/75 backdrop-blur-md px-4 py-3 flex items-start gap-3 shadow-lg">
+                            <div className="flex-1 min-w-0">
+                                {!(isMobile || isTablet) && (
+                                    <p className="text-white/90 text-xs font-semibold mb-0.5 tracking-wide">
+                                        This is your music, mapped by sound.
+                                    </p>
+                                )}
+                                <p className="text-white/55 text-xs leading-relaxed">
+                                    {isMobile || isTablet
+                                        ? "Each dot is a track -- nearby dots sound alike. Tap a dot to play it."
+                                        : "Each dot is a track -- nearby dots sound alike. Click a dot to play it, or use Song Path and Blend above to discover new mixes."}
+                                </p>
+                            </div>
+                            <button
+                                onClick={dismissOnboarding}
+                                aria-label="Dismiss"
+                                className="shrink-0 text-white/30 hover:text-white/70 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
+                )}
 
             {/* Mobile/tablet: bottom sheet for vibe details */}
             {(isMobile || isTablet) && <VibePanelSheet />}

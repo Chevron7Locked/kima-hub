@@ -1200,18 +1200,21 @@ export function GravityGridScene({
                         className="fixed z-40 bg-black/90 border border-white/10 rounded-xl shadow-2xl backdrop-blur-md overflow-hidden text-sm min-w-[120px]"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
                     >
-                        {(["vibe", "similar", "drift"] as const).map((op) => (
-                            <button
-                                key={op}
-                                className="w-full px-4 py-2.5 text-left text-white/70 hover:text-white hover:bg-white/8 capitalize transition-colors first:pt-3 last:pb-3"
-                                onClick={() => {
-                                    onTrackContextMenu?.(contextMenu.trackId, op);
-                                    setContextMenu(null);
-                                }}
-                            >
-                                {op.charAt(0).toUpperCase() + op.slice(1)}
-                            </button>
-                        ))}
+                        {(["vibe", "similar", "drift"] as const).map((op) => {
+                            const label = op === "drift" ? "Song Path" : op.charAt(0).toUpperCase() + op.slice(1);
+                            return (
+                                <button
+                                    key={op}
+                                    className="w-full px-4 py-2.5 text-left text-white/70 hover:text-white hover:bg-white/8 capitalize transition-colors first:pt-3 last:pb-3"
+                                    onClick={() => {
+                                        onTrackContextMenu?.(contextMenu.trackId, op);
+                                        setContextMenu(null);
+                                    }}
+                                >
+                                    {label}
+                                </button>
+                            );
+                        })}
                     </div>
                 </>
             )}

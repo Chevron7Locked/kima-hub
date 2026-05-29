@@ -60,10 +60,11 @@ export function VibeToolbar({ mode, onSearch, onPathMode, onAlchemyMode, onReset
                         ? "bg-white/20 border-white/30 text-white"
                         : "bg-white/10 border-white/10 text-white/60 hover:text-white hover:bg-white/15"
                 }`}
-                title="Drift -- journey between two tracks"
+                title="Song Path -- build a queue that glides from one track to another"
+                aria-label="Song Path -- build a queue that glides from one track to another"
             >
                 <Waypoints className="w-4 h-4" />
-                <span className="hidden md:inline">Drift</span>
+                <span className="hidden md:inline">Song Path</span>
             </button>
 
             <button
@@ -73,7 +74,8 @@ export function VibeToolbar({ mode, onSearch, onPathMode, onAlchemyMode, onReset
                         ? "bg-white/20 border-white/30 text-white"
                         : "bg-white/10 border-white/10 text-white/60 hover:text-white hover:bg-white/15"
                 }`}
-                title="Blend -- mix tracks to find new vibes"
+                title="Blend -- combine tracks into a new playlist of similar vibes"
+                aria-label="Blend -- combine tracks into a new playlist of similar vibes"
             >
                 <Blend className="w-4 h-4" />
                 <span className="hidden md:inline">Blend</span>
