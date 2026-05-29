@@ -181,48 +181,52 @@ export default function SyncPage() {
 
     return (
         <div className="min-h-screen w-full relative overflow-hidden">
-            {/* Black background with subtle amber accent */}
+            {/* Dark background (matches onboarding) */}
             <div className="absolute inset-0 bg-[#000]">
-                <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 via-transparent to-transparent" />
-                <div className="absolute bottom-0 right-0 w-1/2 h-1/2 bg-gradient-to-tl from-amber-500/3 via-transparent to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-br from-[#fca200]/5 via-transparent to-transparent" />
             </div>
 
             {/* Main content */}
             <div className="relative z-10 min-h-screen flex items-center justify-center p-6">
                 <div className="w-full max-w-lg">
-                    {/* Sync card */}
-                    <div className="bg-white/[0.02] backdrop-blur-sm rounded-2xl border border-white/[0.06] p-8">
-                        <div className="space-y-6">
-                            {/* Logo and Title */}
-                            <div className="text-center space-y-3">
-                                <div className="flex justify-center">
-                                    <div className="relative">
-                                        <div className="absolute inset-0 bg-white/10 blur-xl rounded-full" />
-                                        <Image
-                                            src="/assets/images/kima.webp"
-                                            alt="Kima"
-                                            width={80}
-                                            height={80}
-                                            className="relative z-10"
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <h2 className="text-xl font-semibold text-white">
-                                        {syncing ? "Setting Things Up" : "Ready to Go!"}
-                                    </h2>
-                                    <p className="text-white/50 text-sm mt-1">
-                                        {error || message}
-                                    </p>
-                                </div>
+                    {/* Logo/Brand -- matches onboarding header */}
+                    <div className="text-center mb-8">
+                        <div className="inline-flex items-center gap-4 mb-4">
+                            <div className="relative">
+                                <div className="absolute inset-0 bg-white/10 blur-xl rounded-full" />
+                                <Image
+                                    src="/assets/images/kima.webp"
+                                    alt="Kima"
+                                    width={48}
+                                    height={48}
+                                    className="relative z-10 drop-shadow-2xl"
+                                />
+                            </div>
+                            <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-white to-gray-200 bg-clip-text text-transparent drop-shadow-2xl">
+                                Kima Hub
+                            </h1>
+                        </div>
+                    </div>
+
+                    {/* Sync card -- same aesthetic as onboarding card */}
+                    <div className="bg-[#111]/90 rounded-lg border border-white/10 shadow-xl overflow-hidden">
+                        <div className="p-6 md:p-8 space-y-6">
+                            {/* Title + status message */}
+                            <div>
+                                <h2 className="text-2xl font-bold text-white mb-1">
+                                    {syncing ? "Setting Things Up" : "Ready to Go!"}
+                                </h2>
+                                <p className="text-white/60">
+                                    {error || message}
+                                </p>
                             </div>
 
                             {/* Progress bar */}
                             {syncing && !error && (
                                 <div className="space-y-2">
-                                    <div className="w-full bg-white/[0.06] rounded-full h-1.5 overflow-hidden">
+                                    <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
                                         <div
-                                            className="h-full bg-amber-500 transition-all duration-500 ease-out rounded-full"
+                                            className="h-full bg-[#fca200] transition-all duration-500 ease-out rounded-full"
                                             style={{ width: `${progress}%` }}
                                         />
                                     </div>
@@ -234,15 +238,15 @@ export default function SyncPage() {
 
                             {/* Error state */}
                             {error && (
-                                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-                                    <p className="text-red-400 text-sm text-center">
+                                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+                                    <p className="text-red-400 text-sm">
                                         {error}
                                     </p>
                                 </div>
                             )}
 
                             {/* Steps list */}
-                            <div className="grid grid-cols-2 gap-3 pt-4 border-t border-white/[0.06]">
+                            <div className="grid grid-cols-2 gap-3 pt-4 border-t border-white/10">
                                 {steps.map((step) => {
                                     const isComplete = completedSteps.includes(step.id);
                                     return (
@@ -253,13 +257,13 @@ export default function SyncPage() {
                                             <div
                                                 className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 transition-colors ${
                                                     isComplete
-                                                        ? "bg-amber-500/20"
-                                                        : "bg-white/[0.06]"
+                                                        ? "bg-[#fca200]/20"
+                                                        : "bg-white/10"
                                                 }`}
                                             >
                                                 {isComplete && (
                                                     <svg
-                                                        className="w-2.5 h-2.5 text-amber-500"
+                                                        className="w-2.5 h-2.5 text-[#fca200]"
                                                         fill="none"
                                                         stroke="currentColor"
                                                         viewBox="0 0 24 24"
@@ -276,7 +280,7 @@ export default function SyncPage() {
                                             <span
                                                 className={
                                                     isComplete
-                                                        ? "text-white/70"
+                                                        ? "text-white/70 font-medium"
                                                         : "text-white/40"
                                                 }
                                             >
@@ -293,15 +297,15 @@ export default function SyncPage() {
                     <div className="flex justify-end mt-4">
                         <button
                             onClick={handleSkip}
-                            className="px-4 py-2 text-sm text-white/50 hover:text-white/70 transition-colors"
+                            className="px-4 py-2 text-sm text-white/50 hover:text-white/70 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/30 rounded"
                         >
-                            Skip for Now →
+                            Skip for now
                         </button>
                     </div>
 
                     {/* Footer note */}
-                    <p className="text-center text-white/30 text-xs mt-6">
-                        This may take a few minutes for large libraries
+                    <p className="text-center text-white/40 text-xs mt-6">
+                        Enrichment and metadata analysis will continue in the background once you&apos;re in.
                     </p>
                 </div>
             </div>

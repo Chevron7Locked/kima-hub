@@ -7,14 +7,24 @@ import Image from "next/image";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { useAuth } from "@/lib/auth-context";
 
+type IntegrationKey = "lidarr" | "audiobookshelf" | "soulseek";
+type IntegrationResult = { ok: boolean; message: string };
+
 export default function OnboardingPage() {
     const router = useRouter();
     const { user, isLoading: authLoading } = useAuth();
     const [step, setStep] = useState(1);
-    const [loading, setLoading] = useState(false);
+    // Separate submitting state: account creation + complete/skip
+    const [submitting, setSubmitting] = useState(false);
+    // Per-integration test loading: which integration is mid-test (null = none)
+    const [testingIntegration, setTestingIntegration] =
+        useState<IntegrationKey | null>(null);
+    // Per-integration results: each key holds its own ok/message, not clobbered
+    const [integrationResults, setIntegrationResults] = useState<
+        Partial<Record<IntegrationKey, IntegrationResult>>
+    >({});
     const [initialLoading, setInitialLoading] = useState(true);
     const [error, setError] = useState("");
-    const [success, setSuccess] = useState("");
     const hasCheckedSession = useRef(false);
     const showPasswordMismatch = error === "Passwords don't match";
     const showPasswordTooShort =
@@ -61,7 +71,6 @@ export default function OnboardingPage() {
     const handleRegister = async (e: React.FormEvent) => {
         e.preventDefault();
         setError("");
-        setSuccess("");
 
         if (password !== confirmPassword) {
             setError("Passwords don't match");
@@ -73,7 +82,7 @@ export default function OnboardingPage() {
             return;
         }
 
-        setLoading(true);
+        setSubmitting(true);
         try {
             try {
                 const healthRes = await fetch("/api/health", { method: "GET" });
@@ -102,16 +111,18 @@ export default function OnboardingPage() {
                 setError(message || "Failed to create account");
             }
         } finally {
-            setLoading(false);
+            setSubmitting(false);
         }
     };
 
-    const testConnection = async (
-        type: "lidarr" | "audiobookshelf" | "soulseek",
-    ) => {
-        setError("");
-        setSuccess("");
-        setLoading(true);
+    const testConnection = async (type: IntegrationKey) => {
+        setTestingIntegration(type);
+        // Clear only this integration's result before retesting
+        setIntegrationResults((prev) => {
+            const next = { ...prev };
+            delete next[type];
+            return next;
+        });
 
         try {
             if (type === "lidarr") {
@@ -139,22 +150,27 @@ export default function OnboardingPage() {
                     password: soulseek.password,
                 });
             }
-            setSuccess(`${type} connected successfully!`);
+            setIntegrationResults((prev) => ({
+                ...prev,
+                [type]: { ok: true, message: `${type} connected successfully!` },
+            }));
         } catch (err: unknown) {
             const errorMessage =
                 err instanceof Error ?
                     err.message
                 :   `Failed to connect to ${type}`;
-            setError(errorMessage);
+            setIntegrationResults((prev) => ({
+                ...prev,
+                [type]: { ok: false, message: errorMessage },
+            }));
         } finally {
-            setLoading(false);
+            setTestingIntegration(null);
         }
     };
 
     const handleNextStep = async () => {
         setError("");
-        setSuccess("");
-        setLoading(true);
+        setSubmitting(true);
 
         try {
             if (step === 2) {
@@ -175,7 +191,7 @@ export default function OnboardingPage() {
                 :   "Failed to save configuration",
             );
         } finally {
-            setLoading(false);
+            setSubmitting(false);
         }
     };
 
@@ -262,17 +278,16 @@ export default function OnboardingPage() {
                         </div>
 
                         {/* Main Content Card */}
-                        <div className="bg-[#111]/90 rounded-lg border border-white/10 shadow-xl  overflow-hidden">
+                        <div className="bg-[#111]/90 rounded-lg border border-white/10 shadow-xl overflow-hidden">
                             <div className="p-6 md:p-8">
                                 {step === 1 && (
                                     <div className="space-y-6">
                                         <div>
                                             <h2 className="text-2xl font-bold text-white mb-1">
-                                                Create Your Account
+                                                Create Your Admin Account
                                             </h2>
                                             <p className="text-white/60">
-                                                Let&apos;s get you set up with
-                                                your personal music library
+                                                This is the owner account for your Kima server. You&apos;ll manage users, integrations, and settings from here.
                                             </p>
                                         </div>
 
@@ -281,10 +296,14 @@ export default function OnboardingPage() {
                                             className="space-y-4 mt-8"
                                         >
                                             <div>
-                                                <label className="block text-sm font-medium text-white/90 mb-1.5">
+                                                <label
+                                                    htmlFor="username"
+                                                    className="block text-sm font-medium text-white/90 mb-1.5"
+                                                >
                                                     Username
                                                 </label>
                                                 <input
+                                                    id="username"
                                                     type="text"
                                                     value={username}
                                                     onChange={(e) =>
@@ -292,7 +311,7 @@ export default function OnboardingPage() {
                                                             e.target.value,
                                                         )
                                                     }
-                                                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all "
+                                                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                                                     placeholder="Choose a username"
                                                     required
                                                     minLength={3}
@@ -300,10 +319,14 @@ export default function OnboardingPage() {
                                             </div>
 
                                             <div>
-                                                <label className="block text-sm font-medium text-white/90 mb-1.5">
+                                                <label
+                                                    htmlFor="password"
+                                                    className="block text-sm font-medium text-white/90 mb-1.5"
+                                                >
                                                     Password
                                                 </label>
                                                 <input
+                                                    id="password"
                                                     type="password"
                                                     value={password}
                                                     onChange={(e) =>
@@ -311,7 +334,7 @@ export default function OnboardingPage() {
                                                             e.target.value,
                                                         )
                                                     }
-                                                    className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all  ${
+                                                    className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
                                                         showPasswordTooShort ?
                                                             "border-red-500/50"
                                                         :   "border-white/10"
@@ -323,10 +346,14 @@ export default function OnboardingPage() {
                                             </div>
 
                                             <div>
-                                                <label className="block text-sm font-medium text-white/90 mb-1.5">
+                                                <label
+                                                    htmlFor="confirmPassword"
+                                                    className="block text-sm font-medium text-white/90 mb-1.5"
+                                                >
                                                     Confirm Password
                                                 </label>
                                                 <input
+                                                    id="confirmPassword"
                                                     type="password"
                                                     value={confirmPassword}
                                                     onChange={(e) =>
@@ -334,7 +361,7 @@ export default function OnboardingPage() {
                                                             e.target.value,
                                                         )
                                                     }
-                                                    className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all  ${
+                                                    className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
                                                         showPasswordMismatch ?
                                                             "border-red-500/50"
                                                         :   "border-white/10"
@@ -345,18 +372,18 @@ export default function OnboardingPage() {
                                             </div>
 
                                             {error && (
-                                                <div className="bg-red-500/10  border border-red-500/30 rounded-lg p-4 text-sm text-red-400">
+                                                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 text-sm text-red-400">
                                                     {error}
                                                 </div>
                                             )}
 
                                             <button
                                                 type="submit"
-                                                disabled={loading}
+                                                disabled={submitting}
                                                 className="w-full py-3.5 bg-[#fca200] text-black font-bold rounded-lg hover:bg-[#e69200] transition-all disabled:opacity-50 disabled:cursor-not-allowed relative group overflow-hidden mt-8 focus:outline-none focus:ring-2 focus:ring-brand/30"
                                             >
                                                 <span className="relative z-10 flex items-center justify-center gap-2">
-                                                    {loading ?
+                                                    {submitting ?
                                                         <>
                                                             <GradientSpinner size="sm" />
                                                             Creating Account...
@@ -375,8 +402,7 @@ export default function OnboardingPage() {
                                                 Connect Your Services
                                             </h2>
                                             <p className="text-white/60">
-                                                Optional integrations to enhance
-                                                your music library
+                                                All integrations are optional -- you can enable or change them later in Settings.
                                             </p>
                                         </div>
 
@@ -384,7 +410,7 @@ export default function OnboardingPage() {
                                             {/* Lidarr */}
                                             <IntegrationCard
                                                 title="Lidarr"
-                                                description="Automatic music library management"
+                                                description="Automatically find and download albums missing from your library."
                                                 localPort="localhost:8686"
                                                 icon={
                                                     <svg
@@ -426,13 +452,14 @@ export default function OnboardingPage() {
                                                 onTest={() =>
                                                     testConnection("lidarr")
                                                 }
-                                                loading={loading}
+                                                testing={testingIntegration === "lidarr"}
+                                                result={integrationResults["lidarr"]}
                                             />
 
                                             {/* Audiobookshelf */}
                                             <IntegrationCard
                                                 title="Audiobookshelf"
-                                                description="Audiobook library management"
+                                                description="Browse and stream your audiobook collection alongside your music."
                                                 localPort="localhost:13378"
                                                 icon={
                                                     <svg
@@ -476,7 +503,8 @@ export default function OnboardingPage() {
                                                         "audiobookshelf",
                                                     )
                                                 }
-                                                loading={loading}
+                                                testing={testingIntegration === "audiobookshelf"}
+                                                result={integrationResults["audiobookshelf"]}
                                             />
 
                                             {/* Soulseek */}
@@ -491,32 +519,25 @@ export default function OnboardingPage() {
                                                 }
                                                 username={soulseek.username}
                                                 password={soulseek.password}
-                                                onUsernameChange={(username) =>
+                                                onUsernameChange={(u) =>
                                                     setSoulseek({
                                                         ...soulseek,
-                                                        username,
+                                                        username: u,
                                                     })
                                                 }
-                                                onPasswordChange={(password) =>
+                                                onPasswordChange={(p) =>
                                                     setSoulseek({
                                                         ...soulseek,
-                                                        password,
+                                                        password: p,
                                                     })
                                                 }
                                                 onTest={() =>
                                                     testConnection("soulseek")
                                                 }
-                                                loading={loading}
+                                                testing={testingIntegration === "soulseek"}
+                                                result={integrationResults["soulseek"]}
                                             />
                                         </div>
-
-                                        {success && (
-                                            <div className="flex items-center gap-2 p-4 rounded-lg bg-green-500/10 border border-green-500/20">
-                                                <p className="text-sm text-green-500">
-                                                    {success}
-                                                </p>
-                                            </div>
-                                        )}
 
                                         {error && (
                                             <div className="flex items-center gap-2 p-4 rounded-lg bg-red-500/10 border border-red-500/20">
@@ -526,16 +547,21 @@ export default function OnboardingPage() {
                                             </div>
                                         )}
 
-                                        <div className="flex gap-3 mt-8">
+                                        {/* What happens next */}
+                                        <p className="text-sm text-white/40 border-t border-white/10 pt-4">
+                                            After finishing, Kima will scan your music library and start enrichment in the background. This may take a few minutes for large collections.
+                                        </p>
+
+                                        <div className="flex gap-3">
                                             <button
                                                 onClick={async () => {
-                                                    setLoading(true);
+                                                    setSubmitting(true);
                                                     try {
                                                         await api.post("/onboarding/complete");
                                                         router.push("/sync");
                                                     } catch {
                                                         setError("Failed to complete setup");
-                                                        setLoading(false);
+                                                        setSubmitting(false);
                                                     }
                                                 }}
                                                 onKeyDown={(e) => {
@@ -543,31 +569,31 @@ export default function OnboardingPage() {
                                                         e.currentTarget.click();
                                                     }
                                                 }}
-                                                disabled={loading}
+                                                disabled={submitting}
                                                 tabIndex={0}
                                                 className="flex-1 bg-white/5 border border-white/10 text-white/70 font-medium py-3.5 rounded-lg hover:bg-white/10 transition-all disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand/30"
                                             >
-                                                Skip for Now
+                                                Finish without integrations
                                             </button>
                                             <button
                                                 onClick={handleNextStep}
                                                 onKeyDown={(e) =>
                                                     e.key === "Enter" &&
-                                                    !loading &&
+                                                    !submitting &&
                                                     handleNextStep()
                                                 }
-                                                disabled={loading}
+                                                disabled={submitting}
                                                 tabIndex={0}
                                                 className="flex-1 py-3.5 bg-[#fca200] text-black font-bold rounded-lg hover:bg-[#e69200] transition-all disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand/30"
                                             >
-                                                {loading ?
+                                                {submitting ?
                                                     <>
                                                         <span className="flex items-center justify-center gap-2">
                                                             <GradientSpinner size="sm" />
-                                                            Finishing Setup...
+                                                            Saving...
                                                         </span>
                                                     </>
-                                                :   "Complete Setup"}
+                                                :   "Save & Finish"}
                                             </button>
                                         </div>
                                     </div>
@@ -577,7 +603,7 @@ export default function OnboardingPage() {
 
                         {/* Footer */}
                         <p className="text-center text-white/40 text-sm mt-6">
-                            © 2025 Kima. Your music, your way.
+                            &copy; 2025 Kima. Your music, your way.
                         </p>
                     </div>
                 </div>
@@ -602,7 +628,8 @@ interface IntegrationCardProps {
     onUsernameChange?: (username: string) => void;
     onPasswordChange?: (password: string) => void;
     onTest: () => void;
-    loading: boolean;
+    testing: boolean;
+    result?: IntegrationResult;
     useSoulseekCreds?: boolean;
 }
 
@@ -622,7 +649,8 @@ function IntegrationCard({
     onUsernameChange,
     onPasswordChange,
     onTest,
-    loading,
+    testing,
+    result,
     useSoulseekCreds = false,
 }: IntegrationCardProps) {
     return (
@@ -656,6 +684,8 @@ function IntegrationCard({
                         onClick={onToggle}
                         onKeyDown={(e) => e.key === "Enter" && onToggle()}
                         tabIndex={0}
+                        aria-label={`${enabled ? "Disable" : "Enable"} ${title}`}
+                        aria-pressed={enabled}
                         className={`relative w-11 h-6 rounded-lg transition-all ${
                             enabled ? "bg-[#fca200]" : "bg-white/20"
                         } focus:outline-none focus:ring-2 focus:ring-brand/30`}
@@ -677,7 +707,7 @@ function IntegrationCard({
                             placeholder={`Server URL (e.g., http://${
                                 localPort || "localhost:PORT"
                             })`}
-                            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all "
+                            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                         />
                         {useSoulseekCreds ?
                             <>
@@ -688,7 +718,7 @@ function IntegrationCard({
                                         onUsernameChange?.(e.target.value)
                                     }
                                     placeholder="Soulseek Username"
-                                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all "
+                                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                                 />
                                 <input
                                     type="password"
@@ -697,7 +727,7 @@ function IntegrationCard({
                                         onPasswordChange?.(e.target.value)
                                     }
                                     placeholder="Soulseek Password"
-                                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all "
+                                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                                 />
                                 <p className="text-xs text-white/50 mt-2">
                                     These are your Soulseek network credentials,
@@ -711,19 +741,30 @@ function IntegrationCard({
                                     onApiKeyChange?.(e.target.value)
                                 }
                                 placeholder="API Key"
-                                className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all "
+                                className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                             />
                         }
+                        {result && (
+                            <p
+                                className={`text-xs ${
+                                    result.ok ?
+                                        "text-green-400"
+                                    :   "text-red-400"
+                                }`}
+                            >
+                                {result.message}
+                            </p>
+                        )}
                         <button
                             onClick={onTest}
                             onKeyDown={(e) =>
                                 e.key === "Enter" &&
-                                !loading &&
+                                !testing &&
                                 !e.defaultPrevented &&
                                 onTest()
                             }
                             disabled={
-                                loading ||
+                                testing ||
                                 !url ||
                                 (!useSoulseekCreds ? !apiKey : (
                                     !username || !password
@@ -732,7 +773,12 @@ function IntegrationCard({
                             tabIndex={0}
                             className="w-full bg-white/10 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-white/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand/30"
                         >
-                            Test Connection
+                            {testing ?
+                                <span className="flex items-center justify-center gap-2">
+                                    <GradientSpinner size="sm" />
+                                    Testing...
+                                </span>
+                            :   "Test Connection"}
                         </button>
                     </div>
                 )}
@@ -749,7 +795,8 @@ interface SoulseekCardProps {
     onUsernameChange: (username: string) => void;
     onPasswordChange: (password: string) => void;
     onTest: () => void;
-    loading: boolean;
+    testing: boolean;
+    result?: IntegrationResult;
 }
 
 function SoulseekCard({
@@ -760,7 +807,8 @@ function SoulseekCard({
     onUsernameChange,
     onPasswordChange,
     onTest,
-    loading,
+    testing,
+    result,
 }: SoulseekCardProps) {
     return (
         <div
@@ -797,7 +845,7 @@ function SoulseekCard({
                         <div>
                             <h3 className="text-white font-bold">Soulseek</h3>
                             <p className="text-sm text-white/50">
-                                Peer-to-peer music discovery
+                                Peer-to-peer search to fill in tracks you don&apos;t own.
                             </p>
                         </div>
                     </div>
@@ -805,6 +853,8 @@ function SoulseekCard({
                         onClick={onToggle}
                         onKeyDown={(e) => e.key === "Enter" && onToggle()}
                         tabIndex={0}
+                        aria-label={`${enabled ? "Disable" : "Enable"} Soulseek`}
+                        aria-pressed={enabled}
                         className={`relative w-11 h-6 rounded-lg transition-all ${
                             enabled ? "bg-[#fca200]" : "bg-white/20"
                         } focus:outline-none focus:ring-2 focus:ring-brand/30`}
@@ -824,14 +874,14 @@ function SoulseekCard({
                             value={username}
                             onChange={(e) => onUsernameChange(e.target.value)}
                             placeholder="Soulseek Username"
-                            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all "
+                            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                         />
                         <input
                             type="password"
                             value={password}
                             onChange={(e) => onPasswordChange(e.target.value)}
                             placeholder="Soulseek Password"
-                            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all "
+                            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                         />
                         <p className="text-xs text-white/50">
                             Create an account at{" "}
@@ -844,20 +894,36 @@ function SoulseekCard({
                                 slsknet.org
                             </a>
                         </p>
+                        {result && (
+                            <p
+                                className={`text-xs ${
+                                    result.ok ?
+                                        "text-green-400"
+                                    :   "text-red-400"
+                                }`}
+                            >
+                                {result.message}
+                            </p>
+                        )}
                         <button
                             onClick={onTest}
                             onKeyDown={(e) =>
                                 e.key === "Enter" &&
-                                !loading &&
+                                !testing &&
                                 username &&
                                 password &&
                                 onTest()
                             }
-                            disabled={loading || !username || !password}
+                            disabled={testing || !username || !password}
                             tabIndex={0}
                             className="w-full bg-white/10 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-white/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand/30"
                         >
-                            Test Connection
+                            {testing ?
+                                <span className="flex items-center justify-center gap-2">
+                                    <GradientSpinner size="sm" />
+                                    Testing...
+                                </span>
+                            :   "Test Connection"}
                         </button>
                     </div>
                 )}
