@@ -468,7 +468,7 @@ function ImportPlaylistPageContent() {
                             Looking for playlists to import?{" "}
                             <Link
                                 href="/browse/playlists"
-                                className="text-[#ecb200] hover:underline font-medium"
+                                className="text-brand hover:underline font-medium"
                             >
                                 Browse Deezer playlists & radio stations →
                             </Link>
@@ -488,7 +488,7 @@ function ImportPlaylistPageContent() {
                                 value={url}
                                 onChange={handleUrlChange}
                                 placeholder="https://www.deezer.com/playlist/... or https://open.spotify.com/playlist/..."
-                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#ecb200]/50 focus:border-[#ecb200] transition-colors"
+                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]/50 focus:border-[var(--color-brand)] transition-colors"
                                 onKeyDown={(e) =>
                                     e.key === "Enter" && handleFetchPreview()
                                 }
@@ -519,7 +519,7 @@ function ImportPlaylistPageContent() {
                             <button
                                 onClick={handleQuickImport}
                                 disabled={isLoading || !url.trim()}
-                                className="flex-1 py-3 rounded-full font-medium bg-[#ecb200] text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                                className="flex-1 py-3 rounded-full font-medium bg-brand text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
                             >
                                 {isLoading ? (
                                     <>
@@ -1166,7 +1166,7 @@ export default function ImportPlaylistPage() {
         <Suspense
             fallback={
                 <div className="min-h-screen flex items-center justify-center">
-                    <Loader2 className="w-8 h-8 text-[#ecb200] animate-spin" />
+                    <Loader2 className="w-8 h-8 text-brand animate-spin" />
                 </div>
             }
         >

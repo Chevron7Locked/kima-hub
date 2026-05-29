@@ -146,7 +146,7 @@ export function NotificationsTab() {
                 return <AlertCircle className="w-4 h-4 text-red-400" />;
             case "playlist_ready":
             case "import_complete":
-                return <ListMusic className="w-4 h-4 text-[#ecb200]" />;
+                return <ListMusic className="w-4 h-4 text-brand" />;
             case "system":
             default:
                 return <Bell className="w-4 h-4 text-white/60" />;

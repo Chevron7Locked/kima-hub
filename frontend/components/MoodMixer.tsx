@@ -218,7 +218,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                 {/* Header */}
                 <div className="p-6 border-b border-white/10 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#ecb200] to-amber-600 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--color-brand)] to-amber-600 flex items-center justify-center">
                             <AudioWaveform className="w-5 h-5 text-black" />
                         </div>
                         <div>
@@ -242,7 +242,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                 <div className="p-6 overflow-y-auto max-h-[calc(85vh-100px)]">
                     {loading ? (
                         <div className="flex items-center justify-center py-12">
-                            <Loader2 className="w-8 h-8 animate-spin text-[#ecb200]" />
+                            <Loader2 className="w-8 h-8 animate-spin text-brand" />
                         </div>
                     ) : (
                         /* 3x3 Mood Grid */

@@ -102,9 +102,9 @@ export function UnifiedSongsList({
                             className="w-8 h-8 flex items-center justify-center flex-shrink-0"
                         >
                             {isPlayingThis ? (
-                                <Pause className="w-4 h-4 text-[#ecb200]" />
+                                <Pause className="w-4 h-4 text-brand" />
                             ) : isCurrentTrack ? (
-                                <Play className="w-4 h-4 text-[#ecb200] ml-0.5" />
+                                <Play className="w-4 h-4 text-brand ml-0.5" />
                             ) : (
                                 <>
                                     <span className="text-sm text-gray-400 group-hover:hidden">
@@ -136,7 +136,7 @@ export function UnifiedSongsList({
                             <p
                                 className={cn(
                                     "text-sm font-medium truncate",
-                                    isCurrentTrack ? "text-[#ecb200]" : "text-white",
+                                    isCurrentTrack ? "text-brand" : "text-white",
                                 )}
                             >
                                 {track.title}

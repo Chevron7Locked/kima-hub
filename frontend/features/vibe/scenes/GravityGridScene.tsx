@@ -1088,7 +1088,7 @@ function SceneContent({
                     tracks={tracks}
                     worldPositions={worldPositions}
                     trackId={playingTrackId}
-                    color="#ecb200"
+                    color="#fca200"
                     animated={animated}
                 />
             )}

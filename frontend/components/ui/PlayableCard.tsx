@@ -8,8 +8,8 @@ import { cn } from "@/utils/cn";
 import type { ColorPalette } from "@/hooks/useImageColor";
 import { CachedImage } from "./CachedImage";
 
-// Kima brand yellow for all on-page play buttons
-const KIMA_YELLOW = "#ecb200";
+// Kima brand amber for all on-page play buttons
+const KIMA_YELLOW = "var(--color-brand)";
 
 export interface PlayableCardProps extends Omit<CardProps, "onPlay"> {
     href?: string;

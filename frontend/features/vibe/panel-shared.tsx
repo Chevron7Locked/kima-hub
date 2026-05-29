@@ -73,7 +73,7 @@ export function TabBar({
                     className={cn(
                         "flex-1 px-3 py-2.5 text-xs font-medium transition-colors",
                         activeTab === tab.key
-                            ? "text-white border-b-2 border-[#ecb200]"
+                            ? "text-white border-b-2 border-[var(--color-brand)]"
                             : "text-white/50 hover:text-white/70",
                     )}
                 >

@@ -319,7 +319,7 @@ export function ActivityPanelToggle() {
         >
             <Bell className="w-5 h-5" />
             {hasActivity && (
-                <span className="absolute top-1.5 right-2 w-1 h-1 rounded-full bg-[#ecb200]" />
+                <span className="absolute top-1.5 right-2 w-1 h-1 rounded-full bg-brand" />
             )}
         </button>
     );

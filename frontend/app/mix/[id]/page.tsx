@@ -255,7 +255,7 @@ export default function MixPage() {
                     {mix.tracks && mix.tracks.length > 0 && (
                         <button
                             onClick={handlePlayMix}
-                            className="h-12 w-12 rounded-full bg-[#ecb200] hover:bg-[#d4a000] hover:scale-105 flex items-center justify-center shadow-lg transition-all"
+                            className="h-12 w-12 rounded-full bg-brand hover:bg-[#d4a000] hover:scale-105 flex items-center justify-center shadow-lg transition-all"
                         >
                             {isThisMixPlaying && isPlaying ? (
                                 <Pause className="w-5 h-5 fill-current text-black" />
@@ -330,11 +330,11 @@ export default function MixPage() {
                                                 <span
                                                     className={cn(
                                                         "text-sm group-hover:hidden",
-                                                        isCurrentlyPlaying ? "text-[#ecb200]" : "text-gray-400"
+                                                        isCurrentlyPlaying ? "text-brand" : "text-gray-400"
                                                     )}
                                                 >
                                                     {isCurrentlyPlaying && isPlaying ? (
-                                                        <Music className="w-4 h-4 text-[#ecb200] animate-pulse" />
+                                                        <Music className="w-4 h-4 text-brand animate-pulse" />
                                                     ) : (
                                                         index + 1
                                                     )}
@@ -365,7 +365,7 @@ export default function MixPage() {
                                                 <p
                                                     className={cn(
                                                         "text-sm font-medium truncate",
-                                                        isCurrentlyPlaying ? "text-[#ecb200]" : "text-white"
+                                                        isCurrentlyPlaying ? "text-brand" : "text-white"
                                                     )}
                                                 >
                                                     {track.title}

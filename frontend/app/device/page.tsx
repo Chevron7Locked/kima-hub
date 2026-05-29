@@ -209,7 +209,7 @@ export default function DeviceLinkPage() {
                                 </p>
                                 <button
                                     onClick={generateCode}
-                                    className="px-6 py-3 bg-[#ecb200] hover:bg-[#d4a000] text-black font-medium rounded-full transition-all hover:scale-105"
+                                    className="px-6 py-3 bg-brand hover:bg-[#d4a000] text-black font-medium rounded-full transition-all hover:scale-105"
                                 >
                                     Generate Code
                                 </button>
@@ -255,7 +255,7 @@ export default function DeviceLinkPage() {
                                         </p>
                                         <button
                                             onClick={generateCode}
-                                            className="px-4 py-2 bg-[#ecb200] hover:bg-[#d4a000] text-black font-medium rounded-full transition-all"
+                                            className="px-4 py-2 bg-brand hover:bg-[#d4a000] text-black font-medium rounded-full transition-all"
                                         >
                                             <RefreshCw className="w-4 h-4 inline mr-2" />
                                             Generate New Code
@@ -371,25 +371,25 @@ export default function DeviceLinkPage() {
                     </h2>
                     <ol className="space-y-3 text-gray-400">
                         <li className="flex gap-3">
-                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#ecb200]/20 text-[#ecb200] text-sm font-bold flex items-center justify-center">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[var(--color-brand)]/20 text-brand text-sm font-bold flex items-center justify-center">
                                 1
                             </span>
                             <span>Open the Kima app on your mobile device</span>
                         </li>
                         <li className="flex gap-3">
-                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#ecb200]/20 text-[#ecb200] text-sm font-bold flex items-center justify-center">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[var(--color-brand)]/20 text-brand text-sm font-bold flex items-center justify-center">
                                 2
                             </span>
                             <span>Tap &quot;Scan QR Code&quot; or &quot;Enter Code&quot; on the login screen</span>
                         </li>
                         <li className="flex gap-3">
-                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#ecb200]/20 text-[#ecb200] text-sm font-bold flex items-center justify-center">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[var(--color-brand)]/20 text-brand text-sm font-bold flex items-center justify-center">
                                 3
                             </span>
                             <span>Scan the QR code above, or manually enter the 6-digit code</span>
                         </li>
                         <li className="flex gap-3">
-                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#ecb200]/20 text-[#ecb200] text-sm font-bold flex items-center justify-center">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[var(--color-brand)]/20 text-brand text-sm font-bold flex items-center justify-center">
                                 4
                             </span>
                             <span>Your device will be automatically logged in and linked to your account</span>

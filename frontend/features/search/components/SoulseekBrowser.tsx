@@ -234,7 +234,7 @@ export function SoulseekBrowser({
                             className={cn(
                                 "px-3 py-1.5 text-xs font-semibold rounded-full transition-colors",
                                 formatFilters.has(pill.value)
-                                    ? "bg-[#ecb200]/20 text-[#ecb200]"
+                                    ? "bg-[var(--color-brand)]/20 text-brand"
                                     : "bg-[#282828] text-gray-400 hover:text-white hover:bg-[#333]",
                             )}
                         >
@@ -247,7 +247,7 @@ export function SoulseekBrowser({
                 <select
                     value={sortField}
                     onChange={(e) => setSortField(e.target.value as SoulseekSortField)}
-                    className="bg-[#282828] text-sm text-gray-300 rounded-md px-3 py-1.5 border border-white/10 focus:outline-none focus:border-[#ecb200]/50"
+                    className="bg-[#282828] text-sm text-gray-300 rounded-md px-3 py-1.5 border border-white/10 focus:outline-none focus:border-[var(--color-brand)]/50"
                 >
                     {SORT_OPTIONS.map((opt) => (
                         <option key={opt.value} value={opt.value}>
@@ -284,7 +284,7 @@ export function SoulseekBrowser({
                 {selectedKeys.size > 0 && (
                     <button
                         onClick={handleBulkDownloadClick}
-                        className="ml-auto px-4 py-1.5 text-sm font-bold rounded-full bg-[#ecb200] text-black hover:bg-[#d4a000] transition-colors flex items-center gap-2"
+                        className="ml-auto px-4 py-1.5 text-sm font-bold rounded-full bg-brand text-black hover:bg-[#d4a000] transition-colors flex items-center gap-2"
                     >
                         <Download className="w-4 h-4" />
                         Download {selectedKeys.size} selected
@@ -356,7 +356,7 @@ function FlatView({
                         type="checkbox"
                         checked={allSelected}
                         onChange={onToggleSelectAll}
-                        className="w-3.5 h-3.5 accent-[#ecb200] cursor-pointer"
+                        className="w-3.5 h-3.5 accent-[var(--color-brand)] cursor-pointer"
                     />
                 </div>
                 <div>Title</div>
@@ -423,7 +423,7 @@ function ResultRow({
                     type="checkbox"
                     checked={isSelected}
                     onChange={() => onToggleSelect(key)}
-                    className="w-3.5 h-3.5 accent-[#ecb200] cursor-pointer"
+                    className="w-3.5 h-3.5 accent-[var(--color-brand)] cursor-pointer"
                 />
             </div>
 
