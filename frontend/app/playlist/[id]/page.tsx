@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import { useState, useMemo, useRef, useEffect, useLayoutEffect } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -110,6 +110,8 @@ export default function PlaylistDetailPage() {
     const [showSharePopover, setShowSharePopover] = useState(false);
     const previewAudioRef = useRef<HTMLAudioElement | null>(null);
     const listRef = useRef<HTMLDivElement>(null);
+    const scrollContainerRef = useRef<HTMLElement | null>(null);
+    const [scrollMargin, setScrollMargin] = useState(0);
 
     useEffect(() => {
         return () => {
@@ -118,6 +120,13 @@ export default function PlaylistDetailPage() {
                 previewAudioRef.current = null;
             }
         };
+    }, []);
+
+    // Capture the actual scroll container (#main-content) and measure the
+    // list's offset within it so the element virtualizer positions rows correctly.
+    useLayoutEffect(() => {
+        const el = document.getElementById("main-content") as HTMLElement | null;
+        scrollContainerRef.current = el;
     }, []);
 
     useEffect(() => {
@@ -480,11 +489,22 @@ export default function PlaylistDetailPage() {
         [playlist?.mergedItems, playlist?.items]
     );
 
-    const virtualizer = useWindowVirtualizer({
+    // Measure the list container's offset within the scroll container (#main-content)
+    // after the playlist data loads so the virtualizer positions rows correctly.
+    useLayoutEffect(() => {
+        if (!listRef.current || !scrollContainerRef.current) return;
+        const containerTop = scrollContainerRef.current.getBoundingClientRect().top;
+        const listTop = listRef.current.getBoundingClientRect().top;
+        const offset = listTop - containerTop + scrollContainerRef.current.scrollTop;
+        setScrollMargin(offset);
+    }, [rows.length]);
+
+    const virtualizer = useVirtualizer({
         count: rows.length,
         estimateSize: () => 56,
         overscan: 12,
-        scrollMargin: listRef.current?.offsetTop ?? 0,
+        getScrollElement: () => scrollContainerRef.current,
+        scrollMargin,
     });
 
     const renderRow = (item: PlaylistItem | PendingTrack, index: number) => {
