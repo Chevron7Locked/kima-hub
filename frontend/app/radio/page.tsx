@@ -174,7 +174,7 @@ export default function RadioPage() {
                         {/* Quick Start */}
                         <section>
                             <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
-                                <span className="w-1 h-8 bg-gradient-to-b from-[#fca208] to-[#f97316] rounded-full" />
+                                <span className="w-1 h-8 bg-gradient-to-b from-brand to-[#f97316] rounded-full" />
                                 <span className="uppercase tracking-tighter">Quick Start</span>
                                 <span className="flex-1 border-t border-white/10" />
                             </h2>
@@ -279,7 +279,7 @@ export default function RadioPage() {
                         {/* Info panel */}
                         <section>
                             <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-8">
-                                <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-[#fca208] to-[#f97316]" />
+                                <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-brand to-[#f97316]" />
                                 <div className="flex items-center gap-3 mb-4 pb-3 border-b border-white/10">
                                     <div className="w-2 h-2 bg-brand" />
                                     <span className="text-xs font-mono text-white/60 uppercase tracking-wider">

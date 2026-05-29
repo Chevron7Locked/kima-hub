@@ -183,7 +183,7 @@ export default function SyncPage() {
         <div className="min-h-screen w-full relative overflow-hidden">
             {/* Dark background (matches onboarding) */}
             <div className="absolute inset-0 bg-[#000]">
-                <div className="absolute inset-0 bg-gradient-to-br from-[#fca200]/5 via-transparent to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-br from-brand/5 via-transparent to-transparent" />
             </div>
 
             {/* Main content */}

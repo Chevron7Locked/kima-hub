@@ -223,7 +223,7 @@ function PlaylistCard({
                         <Play className="w-4 h-4 fill-current ml-0.5 text-black" />
                     </button>
 
-                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#fca208] to-[#f97316] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150 origin-left" />
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-brand to-[#f97316] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150 origin-left" />
                 </div>
 
                 <h3
@@ -575,7 +575,7 @@ function EmptyState({
     if (showHiddenTab) {
         return (
             <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-12 shadow-2xl shadow-black/40">
-                <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-[#fca208] to-[#f97316]" />
+                <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-brand to-[#f97316]" />
                 <div className="flex items-center gap-3 mb-8 pb-4 border-b border-white/10">
                     <div className="w-2 h-2 bg-brand" />
                     <span className="text-xs font-mono text-white/60 uppercase tracking-wider">
@@ -599,7 +599,7 @@ function EmptyState({
 
     return (
         <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-8 md:p-12 shadow-2xl shadow-black/40">
-            <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-[#fca208] to-[#f97316]" />
+            <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-brand to-[#f97316]" />
 
             <div className="flex items-center gap-3 mb-8 pb-4 border-b border-white/10">
                 <div className="w-2 h-2 bg-brand" />
@@ -904,7 +904,7 @@ export default function PlaylistsPage() {
                         <div>
                             {/* Section header */}
                             <div className="flex items-center gap-3 mb-6">
-                                <span className="w-1 h-8 bg-gradient-to-b from-[#fca208] to-[#f97316] rounded-full shrink-0" />
+                                <span className="w-1 h-8 bg-gradient-to-b from-brand to-[#f97316] rounded-full shrink-0" />
                                 <h2 className="text-2xl font-black tracking-tighter uppercase">
                                     {showHiddenTab ? "Hidden" : "All Playlists"}
                                 </h2>

@@ -6,7 +6,7 @@ import { memo } from "react";
 type ContentColor = "featured" | "tracks" | "albums" | "podcasts" | "audiobooks" | "artists" | "discover";
 
 const GRADIENT_MAP: Record<ContentColor, string> = {
-    featured: "from-[#fca208] to-[#f97316]",
+    featured: "from-brand to-[#f97316]",
     tracks: "from-[#a855f7] to-[#c026d3]",
     albums: "from-[#22c55e] to-[#16a34a]",
     podcasts: "from-[#3b82f6] to-[#2563eb]",

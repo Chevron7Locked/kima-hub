@@ -155,7 +155,7 @@ function EnrichmentStage({
 const sliderClass = `w-32 h-1.5 bg-white/5 rounded-lg appearance-none cursor-pointer
     [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5
     [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gradient-to-r
-    [&::-webkit-slider-thumb]:from-[#fca208] [&::-webkit-slider-thumb]:to-[#f97316]
+    [&::-webkit-slider-thumb]:from-brand [&::-webkit-slider-thumb]:to-[#f97316]
     [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-[#fca208]/20
     hover:[&::-webkit-slider-thumb]:scale-110 [&::-webkit-slider-thumb]:transition-transform`;
 
