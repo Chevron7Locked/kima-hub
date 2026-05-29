@@ -28,7 +28,7 @@ interface AuthContextType {
         password: string,
         token?: string
     ) => Promise<void>;
-    logout: () => void;
+    logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
