@@ -11,12 +11,29 @@ import {
     TabContent,
 } from "./panel-shared";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { Waypoints, Sparkles, AudioWaveform } from "lucide-react";
 
 type SnapPoint = "peek" | "half" | "full";
 
 const PEEK_HEIGHT = 80;
 
-export function VibePanelSheet() {
+export interface VibePanelSheetProps {
+    selectedTrackId?: string | null;
+    selectedTrackTitle?: string | null;
+    selectedTrackArtist?: string | null;
+    onTrackOperation?: (op: "vibe" | "similar") => void;
+    onStartSongPath?: () => void;
+    songPathActive?: boolean;
+}
+
+export function VibePanelSheet({
+    selectedTrackId,
+    selectedTrackTitle,
+    selectedTrackArtist,
+    onTrackOperation,
+    onStartSongPath,
+    songPathActive = false,
+}: VibePanelSheetProps) {
     const [snap, setSnap] = useState<SnapPoint>("peek");
     const [activeTab, setActiveTab] = useState<VibeTab>("now-playing");
     const [expandedActivity, setExpandedActivity] = useState<ActivityType | null>(null);
@@ -86,6 +103,51 @@ export function VibePanelSheet() {
             >
                 <div className="w-10 h-1 bg-white/20 rounded-full" />
             </div>
+
+            {/* Vibe track actions -- shown when a map dot is selected */}
+            {selectedTrackId && onTrackOperation && onStartSongPath && (
+                <div className="shrink-0 px-3 pb-2 border-b border-white/5">
+                    {(selectedTrackTitle || selectedTrackArtist) && (
+                        <p className="text-xs text-white/40 truncate mb-2 mt-0.5">
+                            <span className="text-white/70">{selectedTrackTitle}</span>
+                            {selectedTrackArtist && (
+                                <> &middot; {selectedTrackArtist}</>
+                            )}
+                        </p>
+                    )}
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => onTrackOperation("vibe")}
+                            aria-label="Match Vibe -- build a queue of similar-sounding tracks"
+                            className="flex-1 flex flex-col items-center gap-1 min-h-[52px] py-2 px-1 rounded-lg bg-[var(--color-ai)]/10 hover:bg-[var(--color-ai)]/20 border border-[var(--color-ai)]/20 hover:border-[var(--color-ai)]/40 text-[var(--color-ai)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ai)]/60"
+                        >
+                            <Sparkles className="w-4 h-4 shrink-0" />
+                            <span className="text-[10px] font-medium leading-tight text-center">Match Vibe</span>
+                        </button>
+                        <button
+                            onClick={() => onTrackOperation("similar")}
+                            aria-label="Similar -- highlight similar tracks on the map"
+                            className="flex-1 flex flex-col items-center gap-1 min-h-[52px] py-2 px-1 rounded-lg bg-[var(--color-ai)]/10 hover:bg-[var(--color-ai)]/20 border border-[var(--color-ai)]/20 hover:border-[var(--color-ai)]/40 text-[var(--color-ai)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ai)]/60"
+                        >
+                            <AudioWaveform className="w-4 h-4 shrink-0" />
+                            <span className="text-[10px] font-medium leading-tight text-center">Similar</span>
+                        </button>
+                        <button
+                            onClick={onStartSongPath}
+                            aria-label="Song Path -- set this track as the start of a song path, then tap the destination"
+                            className="flex-1 flex flex-col items-center gap-1 min-h-[52px] py-2 px-1 rounded-lg bg-[var(--color-ai)]/10 hover:bg-[var(--color-ai)]/20 border border-[var(--color-ai)]/20 hover:border-[var(--color-ai)]/40 text-[var(--color-ai)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ai)]/60"
+                        >
+                            <Waypoints className="w-4 h-4 shrink-0" />
+                            <span className="text-[10px] font-medium leading-tight text-center">Song Path</span>
+                        </button>
+                    </div>
+                    {songPathActive && (
+                        <p className="text-[10px] text-[var(--color-ai)]/70 text-center mt-2 animate-pulse">
+                            Tap another track to complete the song path
+                        </p>
+                    )}
+                </div>
+            )}
 
             {/* Activity icon bar */}
             <div className="shrink-0">

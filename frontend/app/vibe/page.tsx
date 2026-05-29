@@ -354,7 +354,8 @@ export default function VibePage() {
                                 onTrackContextMenu={handleTrackContextMenu}
                                 onBackgroundClick={handleBackgroundClick}
                             />
-                            {driftSourceId && (
+                            {/* Desktop/Galaxy song-path banner -- desktop only; mobile gets the sheet hint */}
+                            {driftSourceId && !isMobile && !isTablet && (
                                 <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 bg-black/80 text-white/70 px-4 py-2 rounded-lg text-sm backdrop-blur-sm border border-[var(--color-brand)]/20 flex items-center gap-3">
                                     <span className="w-2 h-2 rounded-full bg-[var(--color-brand)]/60 animate-pulse" />
                                     Click destination to begin song path
@@ -369,6 +370,20 @@ export default function VibePage() {
                         </>
                     )}
                 </VibeMapErrorBoundary>
+
+                {/* Desktop map-view song-path banner (galaxy view has its own inline) */}
+                {driftSourceId && effectiveView === "map" && !isMobile && !isTablet && (
+                    <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 bg-black/80 text-white/70 px-4 py-2 rounded-lg text-sm backdrop-blur-sm border border-[var(--color-brand)]/20 flex items-center gap-3">
+                        <span className="w-2 h-2 rounded-full bg-[var(--color-brand)]/60 animate-pulse" />
+                        Click destination to begin song path
+                        <button
+                            onClick={() => setDriftSourceId(null)}
+                            className="text-white/30 hover:text-white ml-1 text-xs"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                )}
 
                 <VibeToolbar
                     mode={mode}
@@ -462,7 +477,22 @@ export default function VibePage() {
                 )}
 
             {/* Mobile/tablet: bottom sheet for vibe details */}
-            {(isMobile || isTablet) && <VibePanelSheet />}
+            {(isMobile || isTablet) && (
+                <VibePanelSheet
+                    selectedTrackId={selectedTrackId}
+                    selectedTrackTitle={selectedTrackId ? (trackMap.get(selectedTrackId)?.title ?? null) : null}
+                    selectedTrackArtist={selectedTrackId ? (trackMap.get(selectedTrackId)?.artist ?? null) : null}
+                    onTrackOperation={selectedTrackId
+                        ? (op: 'vibe' | 'similar') => handleTrackContextMenu(selectedTrackId, op)
+                        : undefined
+                    }
+                    onStartSongPath={selectedTrackId
+                        ? () => setDriftSourceId(selectedTrackId)
+                        : undefined
+                    }
+                    songPathActive={!!driftSourceId}
+                />
+            )}
         </div>
     );
 }
