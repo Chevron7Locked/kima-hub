@@ -25,7 +25,7 @@ import {
     RefreshCw,
 } from "lucide-react";
 import { cn } from "@/utils/cn";
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useVibeToggle } from "@/hooks/useVibeToggle";
 import { KeyboardShortcutsTooltip } from "./KeyboardShortcutsTooltip";
 import { SeekSlider } from "./SeekSlider";
@@ -74,6 +74,15 @@ export function MiniPlayer() {
     const [swipeOffset, setSwipeOffset] = useState(0);
     const touchStartX = useRef<number | null>(null);
     const [lastMediaId, setLastMediaId] = useState<string | null>(null);
+    const [hintSeen, setHintSeen] = useState<boolean>(
+        () => typeof window !== "undefined" && localStorage.getItem("kima_miniplayer_hint_seen") === "1"
+    );
+
+    const markHintSeen = useCallback(() => {
+        if (hintSeen) return;
+        setHintSeen(true);
+        localStorage.setItem("kima_miniplayer_hint_seen", "1");
+    }, [hintSeen]);
 
     const currentMediaId =
         currentTrack?.id || currentAudiobook?.id || currentPodcast?.id;
@@ -119,6 +128,7 @@ export function MiniPlayer() {
             // Swipe RIGHT (positive) → minimize to tab
             if (swipeOffset > 80) {
                 setIsMinimized(true);
+                markHintSeen();
             }
             // Swipe LEFT (negative) → open overlay OR dismiss
             else if (swipeOffset < -80) {
@@ -129,6 +139,7 @@ export function MiniPlayer() {
                     // If not playing, dismiss completely
                     setIsDismissed(true);
                 }
+                markHintSeen();
             }
 
             // Reset
@@ -201,6 +212,8 @@ export function MiniPlayer() {
         // Calculate opacity for swipe feedback
         const swipeOpacity = 1 - Math.abs(swipeOffset) / 200;
 
+        const showHint = !hintSeen && hasMedia;
+
         return (
             <div
                 className="fixed left-2 right-2 z-[45] shadow-2xl"
@@ -217,6 +230,40 @@ export function MiniPlayer() {
                 onTouchMove={handleTouchMove}
                 onTouchEnd={handleTouchEnd}
             >
+                {/* One-time gesture hint -- pointer-events:none so touches pass through to the swipeable bar */}
+                {showHint && (
+                    <div
+                        className="absolute left-0 right-0 flex justify-center pointer-events-none"
+                        style={{ bottom: "calc(100% + 8px)" }}
+                        aria-live="polite"
+                    >
+                        <div
+                            className="animate-hint-in flex items-center gap-2 rounded-full px-3 py-1.5 text-xs pointer-events-none"
+                            style={{
+                                background: "rgba(15, 15, 15, 0.92)",
+                                border: "1px solid rgba(252, 162, 0, 0.25)",
+                                color: "var(--text-secondary)",
+                                backdropFilter: "blur(8px)",
+                                WebkitBackdropFilter: "blur(8px)",
+                                boxShadow: "0 2px 12px rgba(0,0,0,0.5)",
+                            }}
+                        >
+                            <span>Swipe ← full screen · → tuck away</span>
+                            <button
+                                className="pointer-events-auto ml-1 flex items-center justify-center rounded-full w-4 h-4 transition-colors focus-ring-none"
+                                style={{ color: "var(--text-muted)" }}
+                                aria-label="Dismiss gesture hint"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    markHintSeen();
+                                }}
+                            >
+                                ×
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {/* Gradient border container - uses padding technique for gradient border */}
                 <div
                     className="rounded-[14px] p-[2px]"
