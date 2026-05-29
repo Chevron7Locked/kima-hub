@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect } from "react";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -108,6 +109,7 @@ export default function PlaylistDetailPage() {
     const [shareCopied, setShareCopied] = useState(false);
     const [showSharePopover, setShowSharePopover] = useState(false);
     const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+    const listRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         return () => {
@@ -471,6 +473,245 @@ export default function PlaylistDetailPage() {
             duration: track.duration,
         };
         addToQueue(formattedTrack);
+    };
+
+    const rows: (PlaylistItem | PendingTrack)[] = useMemo(
+        () => (playlist?.mergedItems || playlist?.items || []) as (PlaylistItem | PendingTrack)[],
+        [playlist?.mergedItems, playlist?.items]
+    );
+
+    const virtualizer = useWindowVirtualizer({
+        count: rows.length,
+        estimateSize: () => 56,
+        overscan: 12,
+        scrollMargin: listRef.current?.offsetTop ?? 0,
+    });
+
+    const renderRow = (item: PlaylistItem | PendingTrack, index: number) => {
+            if (item.type === "pending") {
+                const pending = (item as PendingTrack).pending;
+                const isPreviewPlaying = playingPreviewId === pending.id;
+                const isRetrying = retryingTrackId === pending.id;
+                const isRemoving = removingTrackId === pending.id;
+                const isMissing = pending.missingFromDisk === true;
+
+                return (
+                    <div
+                        key={`pending-${pending.id}`}
+                        className="grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_120px] gap-4 px-4 py-2 rounded-lg opacity-60 hover:opacity-80 group transition-opacity"
+                    >
+                        <div className="flex items-center justify-center">
+                            {isMissing ? (
+                                <FileX className="w-4 h-4 text-amber-400" />
+                            ) : (
+                                <AlertCircle className="w-4 h-4 text-red-400" />
+                            )}
+                        </div>
+
+                        <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-10 h-10 bg-[#0a0a0a] border border-white/10 rounded-lg shrink-0 overflow-hidden flex items-center justify-center">
+                                <button
+                                    onClick={() => handlePlayPreview(pending.id)}
+                                    className="w-full h-full flex items-center justify-center hover:bg-white/5 transition-colors"
+                                    title="Play 30s Deezer preview"
+                                >
+                                    {isPreviewPlaying ? (
+                                        <Volume2 className="w-5 h-5 text-[#fca208] animate-pulse" />
+                                    ) : (
+                                        <Play className="w-5 h-5 text-white/30 hover:text-white/60" />
+                                    )}
+                                </button>
+                            </div>
+                            <div className="min-w-0">
+                                <p className="text-sm font-medium truncate text-white/40">
+                                    {pending.title}
+                                </p>
+                                <p className="text-[10px] font-mono text-white/20 truncate uppercase tracking-wider">
+                                    {pending.artist}
+                                </p>
+                            </div>
+                        </div>
+
+                        <p className="hidden md:flex items-center text-xs font-mono text-white/20 truncate uppercase tracking-wider">
+                            {pending.album}
+                        </p>
+
+                        <div className="flex items-center justify-end gap-1">
+                            <span className={cn(
+                                "text-[10px] font-mono mr-2 hidden sm:inline uppercase tracking-wider",
+                                isMissing ? "text-amber-400" : "text-red-400"
+                            )}>
+                                {isMissing ? "Missing from disk" : "Failed"}
+                            </span>
+                            {!isMissing && (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRetryPendingTrack(pending.id);
+                                    }}
+                                    disabled={isRetrying}
+                                    className={cn(
+                                        "p-1.5 rounded-lg hover:bg-white/10 transition-all",
+                                        isRetrying
+                                            ? "text-[#fca208]"
+                                            : "text-white/30 hover:text-white/60"
+                                    )}
+                                    title="Retry download"
+                                >
+                                    {isRetrying ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                        <RefreshCw className="w-4 h-4" />
+                                    )}
+                                </button>
+                            )}
+                            {playlist?.isOwner && (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRemovePendingTrack(pending.id);
+                                    }}
+                                    disabled={isRemoving}
+                                    className="p-1.5 rounded-lg hover:bg-white/10 text-white/30 hover:text-red-400 transition-all"
+                                    title="Remove from playlist"
+                                >
+                                    {isRemoving ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                        <X className="w-4 h-4" />
+                                    )}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
+            const playlistItem = item as PlaylistItem;
+            const isCurrentlyPlaying = currentTrack?.id === playlistItem.track.id;
+            const trackIndex = playlist?.items?.findIndex(
+                (i: PlaylistItem) => i.id === playlistItem.id
+            ) ?? index;
+
+            return (
+                <div
+                    key={playlistItem.id}
+                    data-track-index={trackIndex}
+                    onDoubleClick={() => handlePlayTrack(trackIndex)}
+                    onTouchEnd={handleRowTouchEnd}
+                    className={cn(
+                        "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 rounded-lg hover:bg-white/[0.03] transition-all group cursor-pointer border border-transparent hover:border-white/5 touch-manipulation",
+                        isCurrentlyPlaying && "bg-white/5 border-[#fca208]/30"
+                    )}
+                >
+                    {/* Track Number / Play Button */}
+                    <div className="flex items-center justify-center">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handlePlayTrack(trackIndex);
+                            }}
+                            className="w-8 h-8 flex items-center justify-center"
+                            aria-label={isCurrentlyPlaying && isPlaying ? "Pause" : "Play"}
+                        >
+                            <span
+                                className={cn(
+                                    "text-xs font-mono group-hover:hidden",
+                                    isCurrentlyPlaying
+                                        ? "text-[#fca208] font-black"
+                                        : "text-white/30"
+                                )}
+                            >
+                                {isCurrentlyPlaying && isPlaying ? (
+                                    <Music className="w-4 h-4 text-[#fca208] animate-pulse" />
+                                ) : (
+                                    trackIndex + 1
+                                )}
+                            </span>
+                            <Play className="w-4 h-4 text-white hidden group-hover:block" />
+                        </button>
+                    </div>
+
+                    {/* Title + Artist */}
+                    <div className="flex items-center gap-3 min-w-0">
+                        <div className="relative w-10 h-10 bg-[#0a0a0a] rounded-lg shrink-0 overflow-hidden border border-white/10">
+                            {playlistItem.track.album?.coverArt ? (
+                                <Image
+                                    src={api.getCoverArtUrl(
+                                        playlistItem.track.album.coverArt,
+                                        100
+                                    )}
+                                    alt={playlistItem.track.title}
+                                    fill
+                                    sizes="40px"
+                                    className="object-cover"
+                                    unoptimized
+                                />
+                            ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                    <Music className="w-5 h-5 text-white/10" />
+                                </div>
+                            )}
+                        </div>
+                        <div className="min-w-0">
+                            <p
+                                className={cn(
+                                    "text-sm font-black truncate tracking-tight",
+                                    isCurrentlyPlaying
+                                        ? "text-[#fca208]"
+                                        : "text-white"
+                                )}
+                            >
+                                {formatTrackDisplay(
+                                    {
+                                        title: playlistItem.track.title,
+                                        artist: playlistItem.track.album.artist.name,
+                                        album: playlistItem.track.album.title,
+                                    },
+                                    trackFormat,
+                                )}
+                            </p>
+                            <p className="text-[10px] font-mono text-white/40 truncate uppercase tracking-wider">
+                                {playlistItem.track.album.artist.name}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Album */}
+                    <p className="hidden md:flex items-center text-xs font-mono text-white/30 truncate">
+                        {playlistItem.track.album.title}
+                    </p>
+
+                    {/* Duration + Actions */}
+                    <div className="flex items-center justify-end gap-2">
+                        <button
+                            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-white/30 hover:text-white transition-all"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleAddToQueue(playlistItem.track);
+                            }}
+                            title="Add to Queue"
+                        >
+                            <ListPlus className="w-4 h-4" />
+                        </button>
+                        <span className="text-[10px] font-mono text-white/30 w-12 text-right uppercase tracking-wider">
+                            {formatTime(playlistItem.track.duration)}
+                        </span>
+                        {playlist?.isOwner && (
+                            <button
+                                className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-white/30 hover:text-red-400 transition-all"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRemoveTrack(playlistItem.track.id);
+                                }}
+                                title="Remove from Playlist"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                            </button>
+                        )}
+                    </div>
+                </div>
+            );
     };
 
     if (isLoading) {
@@ -886,236 +1127,30 @@ export default function PlaylistDetailPage() {
                                 <span className="text-right">Duration</span>
                             </div>
 
-                            {/* Track Rows */}
-                            <div>
-                                {(playlist.mergedItems || playlist.items || []).map(
-                                    (item: PlaylistItem | PendingTrack, index: number) => {
-                                        if (item.type === "pending") {
-                                            const pending = (item as PendingTrack).pending;
-                                            const isPreviewPlaying = playingPreviewId === pending.id;
-                                            const isRetrying = retryingTrackId === pending.id;
-                                            const isRemoving = removingTrackId === pending.id;
-                                            const isMissing = pending.missingFromDisk === true;
-
-                                            return (
-                                                <div
-                                                    key={`pending-${pending.id}`}
-                                                    className="grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_120px] gap-4 px-4 py-2 rounded-lg opacity-60 hover:opacity-80 group transition-opacity"
-                                                >
-                                                    <div className="flex items-center justify-center">
-                                                        {isMissing ? (
-                                                            <FileX className="w-4 h-4 text-amber-400" />
-                                                        ) : (
-                                                            <AlertCircle className="w-4 h-4 text-red-400" />
-                                                        )}
-                                                    </div>
-
-                                                    <div className="flex items-center gap-3 min-w-0">
-                                                        <div className="w-10 h-10 bg-[#0a0a0a] border border-white/10 rounded-lg shrink-0 overflow-hidden flex items-center justify-center">
-                                                            <button
-                                                                onClick={() => handlePlayPreview(pending.id)}
-                                                                className="w-full h-full flex items-center justify-center hover:bg-white/5 transition-colors"
-                                                                title="Play 30s Deezer preview"
-                                                            >
-                                                                {isPreviewPlaying ? (
-                                                                    <Volume2 className="w-5 h-5 text-[#fca208] animate-pulse" />
-                                                                ) : (
-                                                                    <Play className="w-5 h-5 text-white/30 hover:text-white/60" />
-                                                                )}
-                                                            </button>
-                                                        </div>
-                                                        <div className="min-w-0">
-                                                            <p className="text-sm font-medium truncate text-white/40">
-                                                                {pending.title}
-                                                            </p>
-                                                            <p className="text-[10px] font-mono text-white/20 truncate uppercase tracking-wider">
-                                                                {pending.artist}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-
-                                                    <p className="hidden md:flex items-center text-xs font-mono text-white/20 truncate uppercase tracking-wider">
-                                                        {pending.album}
-                                                    </p>
-
-                                                    <div className="flex items-center justify-end gap-1">
-                                                        <span className={cn(
-                                                            "text-[10px] font-mono mr-2 hidden sm:inline uppercase tracking-wider",
-                                                            isMissing ? "text-amber-400" : "text-red-400"
-                                                        )}>
-                                                            {isMissing ? "Missing from disk" : "Failed"}
-                                                        </span>
-                                                        {!isMissing && (
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    handleRetryPendingTrack(pending.id);
-                                                                }}
-                                                                disabled={isRetrying}
-                                                                className={cn(
-                                                                    "p-1.5 rounded-lg hover:bg-white/10 transition-all",
-                                                                    isRetrying
-                                                                        ? "text-[#fca208]"
-                                                                        : "text-white/30 hover:text-white/60"
-                                                                )}
-                                                                title="Retry download"
-                                                            >
-                                                                {isRetrying ? (
-                                                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                                                ) : (
-                                                                    <RefreshCw className="w-4 h-4" />
-                                                                )}
-                                                            </button>
-                                                        )}
-                                                        {playlist.isOwner && (
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    handleRemovePendingTrack(pending.id);
-                                                                }}
-                                                                disabled={isRemoving}
-                                                                className="p-1.5 rounded-lg hover:bg-white/10 text-white/30 hover:text-red-400 transition-all"
-                                                                title="Remove from playlist"
-                                                            >
-                                                                {isRemoving ? (
-                                                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                                                ) : (
-                                                                    <X className="w-4 h-4" />
-                                                                )}
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            );
-                                        }
-
-                                        const playlistItem = item as PlaylistItem;
-                                        const isCurrentlyPlaying = currentTrack?.id === playlistItem.track.id;
-                                        const trackIndex = playlist.items?.findIndex(
-                                            (i: PlaylistItem) => i.id === playlistItem.id
-                                        ) ?? index;
-
-                                        return (
-                                            <div
-                                                key={playlistItem.id}
-                                                data-track-index={trackIndex}
-                                                onDoubleClick={() => handlePlayTrack(trackIndex)}
-                                                onTouchEnd={handleRowTouchEnd}
-                                                className={cn(
-                                                    "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 rounded-lg hover:bg-white/[0.03] transition-all group cursor-pointer border border-transparent hover:border-white/5 touch-manipulation",
-                                                    isCurrentlyPlaying && "bg-white/5 border-[#fca208]/30"
-                                                )}
-                                            >
-                                                {/* Track Number / Play Button */}
-                                                <div className="flex items-center justify-center">
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handlePlayTrack(trackIndex);
-                                                        }}
-                                                        className="w-8 h-8 flex items-center justify-center"
-                                                        aria-label={isCurrentlyPlaying && isPlaying ? "Pause" : "Play"}
-                                                    >
-                                                        <span
-                                                            className={cn(
-                                                                "text-xs font-mono group-hover:hidden",
-                                                                isCurrentlyPlaying
-                                                                    ? "text-[#fca208] font-black"
-                                                                    : "text-white/30"
-                                                            )}
-                                                        >
-                                                            {isCurrentlyPlaying && isPlaying ? (
-                                                                <Music className="w-4 h-4 text-[#fca208] animate-pulse" />
-                                                            ) : (
-                                                                trackIndex + 1
-                                                            )}
-                                                        </span>
-                                                        <Play className="w-4 h-4 text-white hidden group-hover:block" />
-                                                    </button>
-                                                </div>
-
-                                                {/* Title + Artist */}
-                                                <div className="flex items-center gap-3 min-w-0">
-                                                    <div className="relative w-10 h-10 bg-[#0a0a0a] rounded-lg shrink-0 overflow-hidden border border-white/10">
-                                                        {playlistItem.track.album?.coverArt ? (
-                                                            <Image
-                                                                src={api.getCoverArtUrl(
-                                                                    playlistItem.track.album.coverArt,
-                                                                    100
-                                                                )}
-                                                                alt={playlistItem.track.title}
-                                                                fill
-                                                                sizes="40px"
-                                                                className="object-cover"
-                                                                unoptimized
-                                                            />
-                                                        ) : (
-                                                            <div className="w-full h-full flex items-center justify-center">
-                                                                <Music className="w-5 h-5 text-white/10" />
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                    <div className="min-w-0">
-                                                        <p
-                                                            className={cn(
-                                                                "text-sm font-black truncate tracking-tight",
-                                                                isCurrentlyPlaying
-                                                                    ? "text-[#fca208]"
-                                                                    : "text-white"
-                                                            )}
-                                                        >
-                                                            {formatTrackDisplay(
-                                                                {
-                                                                    title: playlistItem.track.title,
-                                                                    artist: playlistItem.track.album.artist.name,
-                                                                    album: playlistItem.track.album.title,
-                                                                },
-                                                                trackFormat,
-                                                            )}
-                                                        </p>
-                                                        <p className="text-[10px] font-mono text-white/40 truncate uppercase tracking-wider">
-                                                            {playlistItem.track.album.artist.name}
-                                                        </p>
-                                                    </div>
-                                                </div>
-
-                                                {/* Album */}
-                                                <p className="hidden md:flex items-center text-xs font-mono text-white/30 truncate">
-                                                    {playlistItem.track.album.title}
-                                                </p>
-
-                                                {/* Duration + Actions */}
-                                                <div className="flex items-center justify-end gap-2">
-                                                    <button
-                                                        className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-white/30 hover:text-white transition-all"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleAddToQueue(playlistItem.track);
-                                                        }}
-                                                        title="Add to Queue"
-                                                    >
-                                                        <ListPlus className="w-4 h-4" />
-                                                    </button>
-                                                    <span className="text-[10px] font-mono text-white/30 w-12 text-right uppercase tracking-wider">
-                                                        {formatTime(playlistItem.track.duration)}
-                                                    </span>
-                                                    {playlist.isOwner && (
-                                                        <button
-                                                            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-white/30 hover:text-red-400 transition-all"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleRemoveTrack(playlistItem.track.id);
-                                                            }}
-                                                            title="Remove from Playlist"
-                                                        >
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        );
-                                    }
-                                )}
+                            {/* Track Rows -- window-virtualized */}
+                            <div
+                                ref={listRef}
+                                style={{
+                                    height: virtualizer.getTotalSize(),
+                                    position: "relative",
+                                }}
+                            >
+                                {virtualizer.getVirtualItems().map((vi) => (
+                                    <div
+                                        key={vi.key}
+                                        data-index={vi.index}
+                                        ref={virtualizer.measureElement}
+                                        style={{
+                                            position: "absolute",
+                                            top: 0,
+                                            left: 0,
+                                            width: "100%",
+                                            transform: `translateY(${vi.start - virtualizer.options.scrollMargin}px)`,
+                                        }}
+                                    >
+                                        {renderRow(rows[vi.index], vi.index)}
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     ) : (
