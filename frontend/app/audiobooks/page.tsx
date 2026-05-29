@@ -327,7 +327,7 @@ export default function AudiobooksPage() {
                     {/* Action Buttons */}
                     <div className="flex flex-col sm:flex-row gap-3 max-w-xl">
                         <button
-                            onClick={() => router.push("/settings?tab=system#audiobookshelf")}
+                            onClick={() => router.push("/settings#audiobookshelf")}
                             className="flex-1 h-12 px-6 rounded-lg bg-[#f59e0b] hover:bg-[#d97706] transition-all font-black text-sm text-black uppercase tracking-wider hover:scale-[1.02] active:scale-[0.98]"
                         >
                             Configure Audiobookshelf

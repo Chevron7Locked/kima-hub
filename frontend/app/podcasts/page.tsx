@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/lib/toast-context";
 import { Mic2, Search, Plus, ChevronLeft, ChevronRight, RefreshCw, Rss, X, Loader2 } from "lucide-react";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { usePodcastsQuery, useTopPodcastsQuery, queryKeys } from "@/hooks/useQueries";
@@ -113,6 +114,7 @@ export default function PodcastsPage() {
     const { isAuthenticated } = useAuth();
     const router = useRouter();
     const queryClient = useQueryClient();
+    const { toast } = useToast();
 
     const [showRssInput, setShowRssInput] = useState(false);
     const [rssUrl, setRssUrl] = useState("");
@@ -149,6 +151,7 @@ export default function PodcastsPage() {
             queryClient.invalidateQueries({ queryKey: queryKeys.podcasts() });
         } catch (error) {
             console.error("Failed to refresh podcasts:", error);
+            toast.error(`Failed to refresh podcasts: ${error instanceof Error ? error.message : "Unknown error"}`);
         } finally {
             setIsRefreshingAll(false);
         }

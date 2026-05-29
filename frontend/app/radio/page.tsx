@@ -100,14 +100,14 @@ function SectionSkeleton() {
 export default function RadioPage() {
     const { loadingStation, startRadio } = useRadioPlayer();
 
-    const { data: genresData, isLoading: genresLoading } = useQuery({
+    const { data: genresData, isLoading: genresLoading, isError: genresError, refetch: refetchGenres } = useQuery({
         queryKey: ["library", "genres"],
         queryFn: () => api.get<{ genres: GenreCount[] }>("/library/genres"),
         staleTime: 5 * 60 * 1000,
         select: (data) => (data.genres || []).filter((g) => g.count >= 15),
     });
 
-    const { data: decadesData, isLoading: decadesLoading } = useQuery({
+    const { data: decadesData, isLoading: decadesLoading, isError: decadesError, refetch: refetchDecades } = useQuery({
         queryKey: ["library", "decades"],
         queryFn: () => api.get<{ decades: DecadeCount[] }>("/library/decades"),
         staleTime: 5 * 60 * 1000,
@@ -191,13 +191,13 @@ export default function RadioPage() {
                         </section>
 
                         {/* Genres */}
-                        {(isLoading || genreStations.length > 0) && (
+                        {(isLoading || genresError || genreStations.length > 0) && (
                             <section>
                                 <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
                                     <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full" />
                                     <span className="uppercase tracking-tighter">By Genre</span>
                                     <span className="flex-1 border-t border-white/10" />
-                                    {!isLoading && (
+                                    {!isLoading && !genresError && (
                                         <span className="text-xs font-mono text-[#a855f7]">
                                             {genreStations.length} genres
                                         </span>
@@ -205,6 +205,19 @@ export default function RadioPage() {
                                 </h2>
                                 {isLoading ? (
                                     <SectionSkeleton />
+                                ) : genresError ? (
+                                    <div className="flex items-center gap-3 py-4">
+                                        <p className="text-sm font-mono text-[var(--text-secondary)]">
+                                            Could not load genre stations.
+                                        </p>
+                                        <button
+                                            onClick={() => refetchGenres()}
+                                            aria-label="Retry loading genre stations"
+                                            className="min-h-[44px] px-4 py-2 text-sm font-mono border border-[var(--color-brand)] text-[var(--color-brand)] rounded hover:bg-[var(--color-brand)]/10 transition-colors focus-visible:outline-2 focus-visible:outline-[var(--color-brand)]"
+                                        >
+                                            Retry
+                                        </button>
+                                    </div>
                                 ) : (
                                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                                         {genreStations.map((station) => (
@@ -221,13 +234,13 @@ export default function RadioPage() {
                         )}
 
                         {/* Decades */}
-                        {(isLoading || decadeStations.length > 0) && (
+                        {(isLoading || decadesError || decadeStations.length > 0) && (
                             <section>
                                 <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
                                     <span className="w-1 h-8 bg-gradient-to-b from-[#22c55e] to-[#16a34a] rounded-full" />
                                     <span className="uppercase tracking-tighter">By Decade</span>
                                     <span className="flex-1 border-t border-white/10" />
-                                    {!isLoading && (
+                                    {!isLoading && !decadesError && (
                                         <span className="text-xs font-mono text-[#22c55e]">
                                             {decadeStations.length} decades
                                         </span>
@@ -235,6 +248,19 @@ export default function RadioPage() {
                                 </h2>
                                 {isLoading ? (
                                     <SectionSkeleton />
+                                ) : decadesError ? (
+                                    <div className="flex items-center gap-3 py-4">
+                                        <p className="text-sm font-mono text-[var(--text-secondary)]">
+                                            Could not load decade stations.
+                                        </p>
+                                        <button
+                                            onClick={() => refetchDecades()}
+                                            aria-label="Retry loading decade stations"
+                                            className="min-h-[44px] px-4 py-2 text-sm font-mono border border-[var(--color-brand)] text-[var(--color-brand)] rounded hover:bg-[var(--color-brand)]/10 transition-colors focus-visible:outline-2 focus-visible:outline-[var(--color-brand)]"
+                                        >
+                                            Retry
+                                        </button>
+                                    </div>
                                 ) : (
                                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                                         {decadeStations.map((station) => (

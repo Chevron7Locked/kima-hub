@@ -1129,7 +1129,7 @@ function ImportPlaylistPageContent() {
                                             }
                                         }}
                                         disabled={isLoading}
-                                        className="px-5 py-2.5 rounded-full text-sm font-medium bg-#0a0a0a text-white hover:bg-white/20 disabled:opacity-50 transition-colors"
+                                        className="px-5 py-2.5 rounded-full text-sm font-medium bg-[#0a0a0a] text-white hover:bg-white/20 disabled:opacity-50 transition-colors"
                                     >
                                         {isLoading
                                             ? "Refreshing..."

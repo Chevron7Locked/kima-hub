@@ -15,7 +15,6 @@ import {
     Music,
     Play,
     X,
-    GripVertical,
     Trash2,
     ListMusic,
     ChevronUp,
@@ -196,14 +195,6 @@ export default function QueuePage() {
                                             key={`${track.id}-${queueIndex}`}
                                             className="flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group"
                                         >
-                                            {/* Drag Handle */}
-                                            <button
-                                                className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-white cursor-grab active:cursor-grabbing"
-                                                title="Drag to reorder"
-                                            >
-                                                <GripVertical className="w-5 h-5" />
-                                            </button>
-
                                             {/* Album Art */}
                                             <div className="relative flex-shrink-0 w-12 h-12">
                                                 {track.album?.coverArt ? (
