@@ -19,15 +19,31 @@ export function useActivityPanel() {
     }, [isOpen]);
 
     const toggle = useCallback(() => {
-        setIsOpen((prev) => !prev);
+        setIsOpen((prev) => {
+            const next = !prev;
+            window.dispatchEvent(
+                new CustomEvent(next ? "open-activity-panel" : "close-activity-panel")
+            );
+            return next;
+        });
     }, []);
 
     const open = useCallback(() => {
-        setIsOpen(true);
+        setIsOpen((prev) => {
+            if (!prev) {
+                window.dispatchEvent(new CustomEvent("open-activity-panel"));
+            }
+            return true;
+        });
     }, []);
 
     const close = useCallback(() => {
-        setIsOpen(false);
+        setIsOpen((prev) => {
+            if (prev) {
+                window.dispatchEvent(new CustomEvent("close-activity-panel"));
+            }
+            return false;
+        });
     }, []);
 
     return useMemo(() => ({
