@@ -34,6 +34,10 @@ export function TopBar() {
     const [searchQuery, setSearchQuery] = useState("");
     const [scanJobId, setScanJobId] = useState<string | null>(null);
     const [lastScanTime, setLastScanTime] = useState<number>(0);
+    const [isActivityPanelOpen, setIsActivityPanelOpen] = useState(() => {
+        if (typeof window === "undefined") return false;
+        return localStorage.getItem("kima_activity_panel_open") === "true";
+    });
     const { toast } = useToast();
     const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -162,6 +166,21 @@ export function TopBar() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pathname]); // Only re-run when pathname changes
 
+    // Mirror activity panel open state for aria-expanded
+    useEffect(() => {
+        const handleToggle = () => setIsActivityPanelOpen((prev) => !prev);
+        const handleOpen = () => setIsActivityPanelOpen(true);
+        const handleClose = () => setIsActivityPanelOpen(false);
+        window.addEventListener("toggle-activity-panel", handleToggle);
+        window.addEventListener("open-activity-panel", handleOpen);
+        window.addEventListener("close-activity-panel", handleClose);
+        return () => {
+            window.removeEventListener("toggle-activity-panel", handleToggle);
+            window.removeEventListener("open-activity-panel", handleOpen);
+            window.removeEventListener("close-activity-panel", handleClose);
+        };
+    }, []);
+
     // Global "/" keyboard shortcut to focus search
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -250,6 +269,8 @@ export function TopBar() {
                                 new CustomEvent("toggle-activity-panel")
                             );
                         }}
+                        aria-expanded={isActivityPanelOpen}
+                        aria-controls="activity-panel-mobile"
                         className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-white transition-colors ml-2 flex-shrink-0 relative"
                         aria-label="Notifications"
                         title="Notifications"

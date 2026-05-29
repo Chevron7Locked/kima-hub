@@ -241,7 +241,18 @@ export function MiniPlayer() {
                             {/* Player content - more spacious padding */}
                             <div
                                 className="relative flex items-center gap-3 px-3 py-3 cursor-pointer"
+                                role="button"
+                                tabIndex={0}
+                                aria-label="Expand player"
                                 onClick={() => setPlayerMode("overlay")}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                        setPlayerMode("overlay");
+                                    } else if (e.key === " ") {
+                                        e.preventDefault();
+                                        setPlayerMode("overlay");
+                                    }
+                                }}
                             >
                                 {/* Album Art - slightly larger */}
                                 <div className="relative w-12 h-12 flex-shrink-0 rounded-lg overflow-hidden bg-black/30 shadow-md">

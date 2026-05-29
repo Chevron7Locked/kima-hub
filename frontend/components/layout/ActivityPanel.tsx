@@ -88,6 +88,7 @@ export function ActivityPanel({
 
                 {/* Panel - slides in from right */}
                 <div
+                    id="activity-panel-mobile"
                     className="fixed inset-y-0 right-0 w-full max-w-md bg-[#0a0a0a] z-[101] flex flex-col"
                     style={{ paddingTop: "var(--standalone-safe-area-top, 0px)" }}
                 >
@@ -171,6 +172,7 @@ export function ActivityPanel({
         >
             {/* Panel container - slides via transform (GPU-accelerated, no layout recalc) */}
             <div
+                id="activity-panel"
                 className="absolute inset-y-0 right-0 w-[450px] bg-[#0a0a0a] flex flex-col overflow-hidden transition-transform duration-200 ease-out"
                 style={{
                     transform: isOpen ? 'translateX(0)' : 'translateX(402px)',
@@ -268,12 +270,32 @@ export function ActivityPanel({
     );
 }
 
+const ACTIVITY_PANEL_KEY = "kima_activity_panel_open";
+
 // Toggle button for TopBar
 export function ActivityPanelToggle() {
     const { unreadCount } = useNotifications();
     const { downloads: activeDownloads } = useActiveDownloads();
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
+    const [isPanelOpen, setIsPanelOpen] = useState(() => {
+        if (typeof window === "undefined") return false;
+        return localStorage.getItem(ACTIVITY_PANEL_KEY) === "true";
+    });
+
+    useEffect(() => {
+        const handleToggle = () => setIsPanelOpen((prev) => !prev);
+        const handleOpen = () => setIsPanelOpen(true);
+        const handleClose = () => setIsPanelOpen(false);
+        window.addEventListener("toggle-activity-panel", handleToggle);
+        window.addEventListener("open-activity-panel", handleOpen);
+        window.addEventListener("close-activity-panel", handleClose);
+        return () => {
+            window.removeEventListener("toggle-activity-panel", handleToggle);
+            window.removeEventListener("open-activity-panel", handleOpen);
+            window.removeEventListener("close-activity-panel", handleClose);
+        };
+    }, []);
 
     if (isMobile || isTablet) {
         return null;
@@ -286,11 +308,14 @@ export function ActivityPanelToggle() {
             onClick={() =>
                 window.dispatchEvent(new CustomEvent("toggle-activity-panel"))
             }
+            aria-expanded={isPanelOpen}
+            aria-controls="activity-panel"
             className={cn(
                 "relative p-2 rounded-full transition-all",
                 "text-white/60 hover:text-white"
             )}
             title="Toggle activity panel"
+            aria-label="Toggle activity panel"
         >
             <Bell className="w-5 h-5" />
             {hasActivity && (

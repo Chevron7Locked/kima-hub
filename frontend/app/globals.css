@@ -66,6 +66,20 @@ body {
     min-height: 100vh;
 }
 
+/* Keyboard focus ring -- restores visibility removed by Tailwind outline-none.
+   :focus-visible triggers only for keyboard nav, not mouse clicks.
+   This rule lives outside @layer, so it wins over Tailwind's @layer utilities
+   regardless of source order (unlayered CSS beats layered CSS in the cascade). */
+:focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+/* Elements that manage their own focus ring can opt out */
+.focus-ring-none:focus-visible {
+    outline: none;
+}
+
 /* Make all buttons have pointer cursor */
 button {
     cursor: pointer;
