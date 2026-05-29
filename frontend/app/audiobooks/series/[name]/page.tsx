@@ -83,7 +83,7 @@ export default function SeriesDetailPage() {
 
     if (isLoading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <GradientSpinner size="md" />
             </div>
         );
@@ -91,7 +91,7 @@ export default function SeriesDetailPage() {
 
     if (books.length === 0) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">
                     No books found in this series
                 </p>
@@ -148,7 +148,7 @@ export default function SeriesDetailPage() {
 
                         <div className="flex items-end gap-6">
                             {/* Cover Art */}
-                            <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#0a0a0a] rounded-lg shadow-2xl shrink-0 overflow-hidden relative border-2 border-white/10">
+                            <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[var(--bg-primary)] rounded-lg shadow-2xl shrink-0 overflow-hidden relative border-2 border-white/10">
                                 {heroImage ? (
                                     <Image
                                         src={heroImage}
@@ -281,7 +281,7 @@ export default function SeriesDetailPage() {
 
                                             {/* Cover thumbnail */}
                                             <Link href={`/audiobooks/${book.id}`}>
-                                                <div className="relative w-10 h-10 rounded overflow-hidden bg-[#0a0a0a] border border-white/10 shrink-0 cursor-pointer">
+                                                <div className="relative w-10 h-10 rounded overflow-hidden bg-[var(--bg-primary)] border border-white/10 shrink-0 cursor-pointer">
                                                     {bookCover ? (
                                                         <Image
                                                             src={bookCover}

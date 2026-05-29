@@ -143,7 +143,7 @@ export function OverlayPlayer() {
             <div className="flex-1 flex flex-col landscape:flex-row items-center justify-center px-6 pb-6 landscape:px-8 landscape:gap-8 overflow-hidden">
                 {/* Artwork / Lyrics swap */}
                 {isLyricsActive && isMobileOrTablet ? (
-                    <div className="w-full max-w-[280px] landscape:max-w-[220px] landscape:w-[220px] aspect-square flex-shrink-0 relative mb-6 landscape:mb-0 rounded-2xl bg-[#0a0a0a]/90 border border-white/[0.06]">
+                    <div className="w-full max-w-[280px] landscape:max-w-[220px] landscape:w-[220px] aspect-square flex-shrink-0 relative mb-6 landscape:mb-0 rounded-2xl bg-[var(--bg-primary)]/90 border border-white/[0.06]">
                         <MobileLyricsView />
                     </div>
                 ) : (
@@ -311,8 +311,8 @@ export function OverlayPlayer() {
                                 audioError
                                     ? "bg-red-500 text-black hover:bg-red-400"
                                     : isBuffering
-                                    ? "bg-[#fca200]/80 text-black"
-                                    : "bg-[#fca200] text-black"
+                                    ? "bg-brand/80 text-black"
+                                    : "bg-brand text-black"
                             )}
                             disabled={isBuffering}
                             title={

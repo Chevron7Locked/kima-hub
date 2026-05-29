@@ -39,7 +39,7 @@ export function AudiobookCard({
         >
             <div className="cursor-pointer group relative h-full flex flex-col">
                 <div className="relative flex-shrink-0">
-                    <div className="aspect-[2/3] rounded-lg overflow-hidden bg-[#0a0a0a] border border-white/10 group-hover:border-[#f59e0b]/40 group-hover:shadow-xl group-hover:shadow-[#f59e0b]/10 transition-all duration-300 relative">
+                    <div className="aspect-[2/3] rounded-lg overflow-hidden bg-[var(--bg-primary)] border border-white/10 group-hover:border-[#f59e0b]/40 group-hover:shadow-xl group-hover:shadow-[#f59e0b]/10 transition-all duration-300 relative">
                         {resolvedCoverUrl ? (
                             <CachedImage
                                 src={resolvedCoverUrl}

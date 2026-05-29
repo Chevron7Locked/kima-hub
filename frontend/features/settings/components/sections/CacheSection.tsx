@@ -35,7 +35,7 @@ interface CacheSectionProps {
 
 function ProgressBar({
     progress,
-    color = "bg-[#fca208]",
+    color = "bg-brand",
     showPercentage = true,
 }: {
     progress: number;
@@ -97,7 +97,7 @@ function EnrichmentStage({
                 {isComplete ? (
                     <CheckCircle className="w-4 h-4 text-green-400" />
                 ) : hasActivity ? (
-                    <Loader2 className="w-4 h-4 text-[#fca208] animate-spin" />
+                    <Loader2 className="w-4 h-4 text-brand animate-spin" />
                 ) : (
                     <Icon className="w-4 h-4 text-white/40" />
                 )}
@@ -122,7 +122,7 @@ function EnrichmentStage({
                                 ? "bg-green-500"
                                 : isBackground
                                 ? "bg-purple-500"
-                                : "bg-[#fca208]"
+                                : "bg-brand"
                         }
                     />
                 </div>
@@ -136,7 +136,7 @@ function EnrichmentStage({
                         </span>
                     )}
                     {processing > 0 && (
-                        <span className="text-[#fca208]">
+                        <span className="text-brand">
                             {processing} processing
                         </span>
                     )}
@@ -847,7 +847,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 disabled={
                                     syncing || reEnriching || isEnrichmentActive
                                 }
-                                className="px-3 py-2.5 min-h-[44px] text-xs font-black bg-[#fca208] text-black rounded-lg uppercase tracking-wider
+                                className="px-3 py-2.5 min-h-[44px] text-xs font-black bg-brand text-black rounded-lg uppercase tracking-wider
                                 hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 {syncing ? "Syncing..." : "Sync New"}
@@ -918,7 +918,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                         <div className="flex items-center gap-2">
                                             {enrichmentState.status ===
                                                 "running" && (
-                                                <Loader2 className="w-3 h-3 animate-spin text-[#fca208]" />
+                                                <Loader2 className="w-3 h-3 animate-spin text-brand" />
                                             )}
                                             {enrichmentState.status ===
                                                 "paused" && (

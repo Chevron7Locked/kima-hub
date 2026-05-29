@@ -26,7 +26,7 @@ export function SettingsSelect({ id, value, onChange, options, disabled }: Setti
                     appearance-none bg-white/5 text-white text-sm font-mono
                     pl-3 pr-8 py-1.5 rounded-lg
                     border border-white/10 outline-none
-                    focus:ring-2 focus:ring-[#fca208]/30 focus:border-[#fca208]/40
+                    focus:ring-2 focus:ring-brand/30 focus:border-brand/40
                     cursor-pointer transition-all
                     hover:bg-white/[0.08] hover:border-white/20
                     ${disabled ? 'opacity-50 cursor-not-allowed' : ''}

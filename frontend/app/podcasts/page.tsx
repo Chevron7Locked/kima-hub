@@ -46,9 +46,9 @@ function PodcastCard({
             data-tv-card
             data-tv-card-index={index}
             tabIndex={0}
-            className="group text-left bg-[#0a0a0a] border border-white/10 rounded-lg overflow-hidden hover:border-[#3b82f6]/40 hover:shadow-lg hover:shadow-[#3b82f6]/10 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
+            className="group text-left bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#3b82f6]/40 hover:shadow-lg hover:shadow-[#3b82f6]/10 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
         >
-            <div className="relative w-full aspect-square bg-[#0f0f0f] overflow-hidden">
+            <div className="relative w-full aspect-square bg-[var(--bg-secondary)] overflow-hidden">
                 {imageUrl ? (
                     <Image
                         src={imageUrl}
@@ -263,7 +263,7 @@ export default function PodcastsPage() {
 
     if (isLoading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <GradientSpinner size="md" />
             </div>
         );
@@ -346,7 +346,7 @@ export default function PodcastsPage() {
                             {/* Search + Stats */}
                             <div className="flex items-center gap-4">
                                 {podcasts.length > 0 && (
-                                    <div className="border-2 border-white/10 bg-[#0a0a0a] px-4 py-3 rounded hidden sm:block">
+                                    <div className="border-2 border-white/10 bg-[var(--bg-primary)] px-4 py-3 rounded hidden sm:block">
                                         <span className="text-3xl font-black font-mono text-[#3b82f6]">
                                             {podcasts.length}
                                         </span>
@@ -369,7 +369,7 @@ export default function PodcastsPage() {
                                         aria-controls="podcast-search-listbox"
                                         aria-label="Search podcasts to subscribe"
                                         aria-autocomplete="list"
-                                        className="w-full pl-10 pr-4 py-2.5 bg-[#0a0a0a] border-2 border-white/10 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#3b82f6]/50 transition-all text-sm font-mono"
+                                        className="w-full pl-10 pr-4 py-2.5 bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#3b82f6]/50 transition-all text-sm font-mono"
                                     />
                                     {isSearching && (
                                         <div className="absolute right-3 top-1/2 -translate-y-1/2 z-10">
@@ -383,7 +383,7 @@ export default function PodcastsPage() {
                                             id="podcast-search-listbox"
                                             role="listbox"
                                             aria-label="Podcast search results"
-                                            className="absolute top-full left-0 mt-2 w-full bg-[#0f0f0f] border-2 border-white/10 rounded-lg shadow-2xl overflow-hidden z-50 max-h-96 overflow-y-auto"
+                                            className="absolute top-full left-0 mt-2 w-full bg-[var(--bg-secondary)] border-2 border-white/10 rounded-lg shadow-2xl overflow-hidden z-50 max-h-96 overflow-y-auto"
                                         >
                                             {searchResults.map((result) => {
                                                 const imageUrl = getProxiedImageUrl(result.coverUrl);
@@ -398,7 +398,7 @@ export default function PodcastsPage() {
                                                             setShowDropdown(false);
                                                         }}
                                                     >
-                                                        <div className="w-10 h-10 rounded-lg bg-[#0a0a0a] flex-shrink-0 overflow-hidden relative border border-white/10">
+                                                        <div className="w-10 h-10 rounded-lg bg-[var(--bg-primary)] flex-shrink-0 overflow-hidden relative border border-white/10">
                                                             {imageUrl ? (
                                                                 <Image
                                                                     src={imageUrl}
@@ -445,7 +445,7 @@ export default function PodcastsPage() {
                                         searchResults.length === 0 &&
                                         !isSearching &&
                                         searchQuery.length >= 2 && (
-                                            <div className="absolute top-full left-0 mt-2 w-full bg-[#0f0f0f] border-2 border-white/10 rounded-lg shadow-2xl p-4 z-50">
+                                            <div className="absolute top-full left-0 mt-2 w-full bg-[var(--bg-secondary)] border-2 border-white/10 rounded-lg shadow-2xl p-4 z-50">
                                                 <p className="text-xs font-mono text-gray-500 text-center uppercase tracking-wider">
                                                     No podcasts found
                                                 </p>
@@ -481,7 +481,7 @@ export default function PodcastsPage() {
                                                 value={sortBy}
                                                 onChange={(e) => setSortBy(e.target.value as SortOption)}
                                                 aria-label="Sort podcasts"
-                                                className="px-3 py-1.5 bg-[#0a0a0a] border-2 border-white/10 rounded-lg text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-[#3b82f6]/50 [&>option]:bg-[#0a0a0a] [&>option]:text-white cursor-pointer"
+                                                className="px-3 py-1.5 bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-[#3b82f6]/50 [&>option]:bg-[var(--bg-primary)] [&>option]:text-white cursor-pointer"
                                             >
                                                 <option value="title">Title</option>
                                                 <option value="author">Author</option>
@@ -494,7 +494,7 @@ export default function PodcastsPage() {
                                                     setCurrentPage(1);
                                                 }}
                                                 aria-label="Podcasts per page"
-                                                className="px-3 py-1.5 bg-[#0a0a0a] border-2 border-white/10 rounded-lg text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-[#3b82f6]/50 [&>option]:bg-[#0a0a0a] [&>option]:text-white cursor-pointer"
+                                                className="px-3 py-1.5 bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-[#3b82f6]/50 [&>option]:bg-[var(--bg-primary)] [&>option]:text-white cursor-pointer"
                                             >
                                                 <option value={25}>25</option>
                                                 <option value={50}>50</option>

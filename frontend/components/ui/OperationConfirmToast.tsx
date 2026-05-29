@@ -54,7 +54,7 @@ export function OperationConfirmToast({
         <div
             className={cn(
                 "fixed bottom-24 left-1/2 -translate-x-1/2 z-[60]",
-                "bg-[#1a1a1a] border border-white/10 rounded-lg shadow-lg",
+                "bg-[var(--bg-hover)] border border-white/10 rounded-lg shadow-lg",
                 "px-4 py-3 flex items-center gap-3",
                 "transition-all duration-300 ease-out",
                 visible

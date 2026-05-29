@@ -243,7 +243,7 @@ export function PlaylistSelector({
                     </div>
                 )}
 
-                <div className="p-6 border-t border-white/10 bg-[#0a0a0a]/50">
+                <div className="p-6 border-t border-white/10 bg-[var(--bg-primary)]/50">
                     <p className="text-sm text-gray-400 mb-3 font-medium">
                         Create New Playlist
                     </p>

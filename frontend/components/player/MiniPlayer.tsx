@@ -398,8 +398,8 @@ export function MiniPlayer() {
                                             audioError
                                                 ? "bg-red-500 text-white hover:bg-red-400"
                                                 : isBuffering
-                                                ? "bg-[#fca200]/80 text-black"
-                                                : "bg-[#fca200] text-black hover:scale-105"
+                                                ? "bg-brand/80 text-black"
+                                                : "bg-brand text-black hover:scale-105"
                                         )}
                                         aria-label={
                                             audioError
@@ -615,9 +615,9 @@ export function MiniPlayer() {
                             className={cn(
                                 "w-8 h-8 rounded-full flex items-center justify-center transition",
                                 hasMedia && !isBuffering
-                                    ? "bg-[#fca200] text-black hover:scale-105"
+                                    ? "bg-brand text-black hover:scale-105"
                                     : isBuffering
-                                    ? "bg-[#fca200]/80 text-black"
+                                    ? "bg-brand/80 text-black"
                                     : "bg-gray-700 text-gray-500 cursor-not-allowed"
                             )}
                             aria-label={isPlaying ? "Pause" : "Play"}

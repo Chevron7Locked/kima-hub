@@ -210,7 +210,7 @@ function ImportJobCard({
     return (
         <div
             className={cn(
-                "px-3 py-3 border-b border-white/5 border-l-2 bg-[#0f0f0f] hover:bg-white/5 transition-colors group",
+                "px-3 py-3 border-b border-white/5 border-l-2 bg-[var(--bg-secondary)] hover:bg-white/5 transition-colors group",
                 borderColor,
             )}
         >

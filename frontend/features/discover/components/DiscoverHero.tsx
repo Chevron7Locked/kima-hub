@@ -41,7 +41,7 @@ export function DiscoverHero({ playlist, config, onOpenSettings }: DiscoverHeroP
                     <div className="flex-1 min-w-0 pb-2">
                         <h1 className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tighter text-white leading-none mb-6">
                             DISCOVER<br/>
-                            <span className="text-[#fca200]">WEEKLY</span>
+                            <span className="text-brand">WEEKLY</span>
                         </h1>
                         <p className="text-sm md:text-base text-gray-500 mb-4 max-w-2xl font-mono">
                             Algorithm-generated playlist / Updated weekly / Personalized to your taste

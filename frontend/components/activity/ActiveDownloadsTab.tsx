@@ -99,7 +99,7 @@ export function ActiveDownloadsTab() {
                 {downloads.map((download, index) => (
                     <div
                         key={download.id}
-                        className="px-3 py-3 border-b border-white/5 border-l-2 border-[#22c55e] bg-[#0f0f0f] hover:bg-white/5 transition-colors group"
+                        className="px-3 py-3 border-b border-white/5 border-l-2 border-[#22c55e] bg-[var(--bg-secondary)] hover:bg-white/5 transition-colors group"
                     >
                         <div className="flex items-start gap-3">
                             {/* Index number */}

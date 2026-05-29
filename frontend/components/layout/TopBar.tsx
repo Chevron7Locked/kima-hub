@@ -220,7 +220,7 @@ export function TopBar() {
                                 new CustomEvent("toggle-mobile-menu")
                             );
                         }}
-                        className="w-10 h-10 flex items-center justify-center bg-[#0f0f0f] border border-[#262626] rounded-md text-white hover:bg-[#141414] transition-colors mr-2 flex-shrink-0"
+                        className="w-10 h-10 flex items-center justify-center bg-[var(--bg-secondary)] border border-[var(--border-interactive)] rounded-md text-white hover:bg-[var(--bg-tertiary)] transition-colors mr-2 flex-shrink-0"
                         aria-label="Open menu"
                     >
                         <Menu className="w-5 h-5" />
@@ -233,7 +233,7 @@ export function TopBar() {
                             "w-10 h-10 rounded-full flex items-center justify-center transition-all flex-shrink-0 mr-2",
                             pathname === "/"
                                 ? "bg-white text-black"
-                                : "bg-[#0a0a0a] text-gray-400 hover:bg-[#1a1a1a] hover:text-white"
+                                : "bg-[var(--bg-primary)] text-gray-400 hover:bg-[var(--bg-hover)] hover:text-white"
                         )}
                         aria-label="Home"
                         title="Home"
@@ -257,7 +257,7 @@ export function TopBar() {
                                 autoCapitalize="none"
                                 autoCorrect="off"
                                 tabIndex={0}
-                                className="w-full h-10 pl-10 pr-3 bg-[#1a1a1a] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
+                                className="w-full h-10 pl-10 pr-3 bg-[var(--bg-hover)] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
                             />
                         </div>
                     </form>
@@ -309,7 +309,7 @@ export function TopBar() {
                                 "w-12 h-12 rounded-full flex items-center justify-center transition-all flex-shrink-0",
                                 pathname === "/"
                                     ? "bg-white text-black"
-                                    : "bg-[#0a0a0a] text-gray-400 hover:bg-[#1a1a1a] hover:text-white hover:scale-105"
+                                    : "bg-[var(--bg-primary)] text-gray-400 hover:bg-[var(--bg-hover)] hover:text-white hover:scale-105"
                             )}
                             aria-label="Home"
                             title="Home"
@@ -338,7 +338,7 @@ export function TopBar() {
                                     autoCapitalize="none"
                                     autoCorrect="off"
                                     tabIndex={0}
-                                    className="w-full h-12 pl-12 pr-4 bg-[#1a1a1a] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
+                                    className="w-full h-12 pl-12 pr-4 bg-[var(--bg-hover)] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
                                 />
                             </div>
                         </form>
@@ -368,7 +368,7 @@ export function TopBar() {
                                     ? " text-green-400 "
                                     : hasFailedDownloads
                                     ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
-                                    : "bg-[#0a0a0a] text-white hover:bg-white/20"
+                                    : "bg-[var(--bg-primary)] text-white hover:bg-white/20"
                             )}
                             title={
                                 isPolling

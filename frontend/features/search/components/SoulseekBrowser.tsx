@@ -452,7 +452,7 @@ function ResultRow({
                         "p-1.5 rounded-full transition-colors",
                         isDownloading
                             ? "text-green-400 cursor-not-allowed"
-                            : "text-[#fca200] hover:bg-[#fca200]/10",
+                            : "text-brand hover:bg-brand/10",
                     )}
                 >
                     {isDownloading ? (

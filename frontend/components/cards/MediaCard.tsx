@@ -39,7 +39,7 @@ export function MediaCard({
         >
             <div
                 className={cn(
-                    "relative bg-[#0a0a0a] border-2 border-white/10 rounded-lg overflow-hidden transition-all duration-300 hover:shadow-lg",
+                    "relative bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg overflow-hidden transition-all duration-300 hover:shadow-lg",
                     accentColor.border,
                     accentColor.shadow,
                 )}

@@ -226,7 +226,7 @@ export default function SyncPage() {
                                 <div className="space-y-2">
                                     <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
                                         <div
-                                            className="h-full bg-[#fca200] transition-all duration-500 ease-out rounded-full"
+                                            className="h-full bg-brand transition-all duration-500 ease-out rounded-full"
                                             style={{ width: `${progress}%` }}
                                         />
                                     </div>
@@ -257,13 +257,13 @@ export default function SyncPage() {
                                             <div
                                                 className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 transition-colors ${
                                                     isComplete
-                                                        ? "bg-[#fca200]/20"
+                                                        ? "bg-brand/20"
                                                         : "bg-white/10"
                                                 }`}
                                             >
                                                 {isComplete && (
                                                     <svg
-                                                        className="w-2.5 h-2.5 text-[#fca200]"
+                                                        className="w-2.5 h-2.5 text-brand"
                                                         fill="none"
                                                         stroke="currentColor"
                                                         viewBox="0 0 24 24"

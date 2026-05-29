@@ -86,12 +86,12 @@ export function SettingsLayout({ children, sidebarItems, isAdmin }: SettingsLayo
     }, [sidebarItems, isAdmin]);
 
     return (
-        <div className="min-h-screen bg-[#0a0a0a] relative">
+        <div className="min-h-screen bg-[var(--bg-primary)] relative">
             <div className="relative max-w-[1800px] mx-auto px-4 md:px-8 pt-8 pb-8">
                 {/* Editorial Header */}
                 <div className="mb-10">
                     <div className="flex items-center gap-2 mb-4">
-                        <div className="w-1.5 h-1.5 bg-[#fca208] rounded-full" />
+                        <div className="w-1.5 h-1.5 bg-brand rounded-full" />
                         <span className="text-xs font-mono text-white/50 uppercase tracking-wider">
                             System Configuration
                         </span>
@@ -99,7 +99,7 @@ export function SettingsLayout({ children, sidebarItems, isAdmin }: SettingsLayo
 
                     <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center">
-                            <Settings className="w-6 h-6 text-[#fca208]" />
+                            <Settings className="w-6 h-6 text-brand" />
                         </div>
                         <div>
                             <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-white leading-none">

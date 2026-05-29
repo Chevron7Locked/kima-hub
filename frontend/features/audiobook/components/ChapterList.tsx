@@ -28,7 +28,7 @@ export function ChapterList({
                 <span className="flex-1 border-t border-white/10" />
             </div>
 
-            <div className="rounded-lg border border-white/10 bg-[#0a0a0a] overflow-hidden">
+            <div className="rounded-lg border border-white/10 bg-[var(--bg-primary)] overflow-hidden">
                 <div className="divide-y divide-white/5">
                     {chapters.map((chapter, index) => (
                         <button

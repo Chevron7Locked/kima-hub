@@ -89,7 +89,7 @@ export function ActivityPanel({
                 {/* Panel - slides in from right */}
                 <div
                     id="activity-panel-mobile"
-                    className="fixed inset-y-0 right-0 w-full max-w-md bg-[#0a0a0a] z-[101] flex flex-col"
+                    className="fixed inset-y-0 right-0 w-full max-w-md bg-[var(--bg-primary)] z-[101] flex flex-col"
                     style={{ paddingTop: "var(--standalone-safe-area-top, 0px)" }}
                 >
                     {/* Header */}
@@ -173,7 +173,7 @@ export function ActivityPanel({
             {/* Panel container - slides via transform (GPU-accelerated, no layout recalc) */}
             <div
                 id="activity-panel"
-                className="absolute inset-y-0 right-0 w-[450px] bg-[#0a0a0a] flex flex-col overflow-hidden transition-transform duration-200 ease-out"
+                className="absolute inset-y-0 right-0 w-[450px] bg-[var(--bg-primary)] flex flex-col overflow-hidden transition-transform duration-200 ease-out"
                 style={{
                     transform: isOpen ? 'translateX(0)' : 'translateX(402px)',
                     willChange: 'transform',
@@ -183,7 +183,7 @@ export function ActivityPanel({
                 <div
                     onClick={onToggle}
                     className={cn(
-                        "absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center cursor-pointer hover:bg-[#141414] transition-colors z-10",
+                        "absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center cursor-pointer hover:bg-[var(--bg-tertiary)] transition-colors z-10",
                         isOpen && "pointer-events-none opacity-0"
                     )}
                     title="Open activity panel"
@@ -238,7 +238,7 @@ export function ActivityPanel({
                                 className={cn(
                                     "flex-1 flex items-center justify-center gap-2 py-2.5 px-2 text-xs font-mono font-bold uppercase tracking-wider transition-all relative whitespace-nowrap border-l-2",
                                     resolvedActiveTab === tab.id
-                                        ? "bg-[#0f0f0f] border-[#eab308] text-white"
+                                        ? "bg-[var(--bg-secondary)] border-[#eab308] text-white"
                                         : "border-transparent text-gray-600 hover:text-white hover:bg-white/5"
                                 )}
                             >

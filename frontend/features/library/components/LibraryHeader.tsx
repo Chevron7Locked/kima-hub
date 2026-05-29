@@ -26,7 +26,7 @@ export function LibraryHeader({ totalItems, activeTab }: LibraryHeaderProps) {
         </div>
 
         {/* Live counter */}
-        <div className="flex items-baseline gap-2 border-2 border-white/10 bg-[#0a0a0a] px-4 py-3 rounded">
+        <div className="flex items-baseline gap-2 border-2 border-white/10 bg-[var(--bg-primary)] px-4 py-3 rounded">
           <span className="text-4xl font-black font-mono text-[#eab308]">
             {totalItems.toLocaleString()}
           </span>

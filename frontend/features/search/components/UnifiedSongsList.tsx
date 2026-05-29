@@ -197,7 +197,7 @@ export function UnifiedSongsList({
                             {isDownloading ? (
                                 <CheckCircle className="w-4 h-4 text-green-400" />
                             ) : (
-                                <Download className="w-4 h-4 text-[#fca200]" />
+                                <Download className="w-4 h-4 text-brand" />
                             )}
                         </button>
 

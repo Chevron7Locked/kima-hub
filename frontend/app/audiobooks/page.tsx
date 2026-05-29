@@ -268,7 +268,7 @@ export default function AudiobooksPage() {
 
     if (isLoading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <GradientSpinner size="md" />
             </div>
         );
@@ -309,7 +309,7 @@ export default function AudiobooksPage() {
                         ].map((step) => (
                             <div
                                 key={step.num}
-                                className="rounded-lg border border-white/10 bg-[#0a0a0a] p-6 hover:border-[#f59e0b]/30 transition-all"
+                                className="rounded-lg border border-white/10 bg-[var(--bg-primary)] p-6 hover:border-[#f59e0b]/30 transition-all"
                             >
                                 <div className="text-3xl font-black text-[#f59e0b]/20 mb-3 tracking-tighter">
                                     {step.num}
@@ -431,7 +431,7 @@ export default function AudiobooksPage() {
                                 <select
                                     value={sortBy}
                                     onChange={(e) => setSortBy(e.target.value as SortType)}
-                                    className="bg-transparent text-xs font-mono text-white/70 uppercase tracking-wider focus:outline-none cursor-pointer [&>option]:bg-[#0a0a0a] [&>option]:text-white"
+                                    className="bg-transparent text-xs font-mono text-white/70 uppercase tracking-wider focus:outline-none cursor-pointer [&>option]:bg-[var(--bg-primary)] [&>option]:text-white"
                                 >
                                     <option value="title">Title</option>
                                     <option value="author">Author</option>
@@ -458,7 +458,7 @@ export default function AudiobooksPage() {
                                     <select
                                         value={selectedGenre || ""}
                                         onChange={(e) => setSelectedGenre(e.target.value || null)}
-                                        className="bg-transparent text-xs font-mono text-white/70 uppercase tracking-wider focus:outline-none cursor-pointer min-w-0 max-w-[140px] truncate [&>option]:bg-[#0a0a0a] [&>option]:text-white"
+                                        className="bg-transparent text-xs font-mono text-white/70 uppercase tracking-wider focus:outline-none cursor-pointer min-w-0 max-w-[140px] truncate [&>option]:bg-[var(--bg-primary)] [&>option]:text-white"
                                     >
                                         <option value="">All Genres</option>
                                         {allGenres.map((genre) => (
@@ -477,7 +477,7 @@ export default function AudiobooksPage() {
                                         setItemsPerPage(Number(e.target.value));
                                         setCurrentPage(1);
                                     }}
-                                    className="bg-transparent text-xs font-mono text-white/70 uppercase tracking-wider focus:outline-none cursor-pointer [&>option]:bg-[#0a0a0a] [&>option]:text-white"
+                                    className="bg-transparent text-xs font-mono text-white/70 uppercase tracking-wider focus:outline-none cursor-pointer [&>option]:bg-[var(--bg-primary)] [&>option]:text-white"
                                 >
                                     <option value={25}>25 per page</option>
                                     <option value={50}>50 per page</option>

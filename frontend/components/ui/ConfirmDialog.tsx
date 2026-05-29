@@ -135,7 +135,7 @@ export function ConfirmDialog({
                 </div>
 
                 {/* Actions */}
-                <div className="flex gap-3 p-6 bg-[#0a0a0a]/50">
+                <div className="flex gap-3 p-6 bg-[var(--bg-primary)]/50">
                     <button
                         ref={cancelRef}
                         onClick={onClose}

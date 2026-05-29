@@ -209,7 +209,7 @@ export default function BrowsePlaylistsPage() {
             onClick={() => handleItemClick(item)}
             className="group cursor-pointer text-left w-full"
         >
-            <div className="relative aspect-square mb-2.5 rounded-lg overflow-hidden bg-[#0a0a0a] border border-white/10 group-hover:border-[#a855f7]/40 group-hover:shadow-xl group-hover:shadow-[#a855f7]/10 transition-all duration-300">
+            <div className="relative aspect-square mb-2.5 rounded-lg overflow-hidden bg-[var(--bg-primary)] border border-white/10 group-hover:border-[#a855f7]/40 group-hover:shadow-xl group-hover:shadow-[#a855f7]/10 transition-all duration-300">
                 {item.imageUrl ?
                     <Image
                         src={item.imageUrl}
@@ -267,7 +267,7 @@ export default function BrowsePlaylistsPage() {
 
     if (isLoading && !selectedGenre && !hasSearched) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <GradientSpinner size="md" />
             </div>
         );
@@ -556,7 +556,7 @@ export default function BrowsePlaylistsPage() {
                     onClick={() => setShowUrlModal(false)}
                 >
                     <div
-                        className="bg-[#0f0f0f] rounded-lg max-w-lg w-full shadow-2xl border border-white/10 animate-in zoom-in-95 duration-200"
+                        className="bg-[var(--bg-secondary)] rounded-lg max-w-lg w-full shadow-2xl border border-white/10 animate-in zoom-in-95 duration-200"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Header */}

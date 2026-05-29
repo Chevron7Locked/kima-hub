@@ -98,7 +98,7 @@ export function AudiobookHero({
 
                     <div className="flex items-end gap-6">
                         {/* Cover Art - Square for audiobooks */}
-                        <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#0a0a0a] rounded-lg shadow-2xl shrink-0 overflow-hidden relative border-2 border-white/10">
+                        <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[var(--bg-primary)] rounded-lg shadow-2xl shrink-0 overflow-hidden relative border-2 border-white/10">
                             {heroImage ? (
                                 <Image
                                     src={heroImage}

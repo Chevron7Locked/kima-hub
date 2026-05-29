@@ -82,7 +82,7 @@ export default function QueuePage() {
     const nextTracks = queue.slice(currentIndex + 1);
 
     return (
-        <div className="min-h-screen bg-[#0a0a0a]">
+        <div className="min-h-screen bg-[var(--bg-primary)]">
             <div className="max-w-4xl mx-auto p-4 md:p-8 space-y-6">
                 {/* Header */}
                 <div className="mb-8">
@@ -131,7 +131,7 @@ export default function QueuePage() {
                             Now Playing
                         </h2>
                         <Card>
-                            <div className="flex items-center gap-4 p-4 bg-[#1a1a1a] border-l-2 border-purple-500">
+                            <div className="flex items-center gap-4 p-4 bg-[var(--bg-hover)] border-l-2 border-purple-500">
                                 <div className="relative flex-shrink-0 w-16 h-16">
                                     {currentTrack.album?.coverArt ? (
                                         <Image
@@ -146,7 +146,7 @@ export default function QueuePage() {
                                             unoptimized
                                         />
                                     ) : (
-                                        <div className="w-16 h-16 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
+                                        <div className="w-16 h-16 bg-[var(--bg-primary)] rounded-sm flex items-center justify-center">
                                             <Music className="w-6 h-6 text-gray-600" />
                                         </div>
                                     )}
@@ -193,7 +193,7 @@ export default function QueuePage() {
                                     return (
                                         <div
                                             key={`${track.id}-${queueIndex}`}
-                                            className="flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group"
+                                            className="flex items-center gap-4 p-4 hover:bg-[var(--bg-hover)] transition-colors group"
                                         >
                                             {/* Album Art */}
                                             <div className="relative flex-shrink-0 w-12 h-12">
@@ -211,7 +211,7 @@ export default function QueuePage() {
                                                         unoptimized
                                                     />
                                                 ) : (
-                                                    <div className="w-12 h-12 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
+                                                    <div className="w-12 h-12 bg-[var(--bg-primary)] rounded-sm flex items-center justify-center">
                                                         <Music className="w-5 h-5 text-gray-600" />
                                                     </div>
                                                 )}
@@ -249,7 +249,7 @@ export default function QueuePage() {
                                                         queueIndex <=
                                                         currentIndex + 1
                                                     }
-                                                    className="p-2.5 min-h-[44px] min-w-[44px] hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
+                                                    className="p-2.5 min-h-[44px] min-w-[44px] hover:bg-[var(--bg-primary)] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
                                                     aria-label={`Move ${track.displayTitle ?? track.title} up`}
                                                 >
                                                     <ChevronUp className="w-4 h-4" />
@@ -264,7 +264,7 @@ export default function QueuePage() {
                                                         queueIndex >=
                                                         queue.length - 1
                                                     }
-                                                    className="p-2.5 min-h-[44px] min-w-[44px] hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
+                                                    className="p-2.5 min-h-[44px] min-w-[44px] hover:bg-[var(--bg-primary)] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
                                                     aria-label={`Move ${track.displayTitle ?? track.title} down`}
                                                 >
                                                     <ChevronDown className="w-4 h-4" />
@@ -275,7 +275,7 @@ export default function QueuePage() {
                                                             queueIndex
                                                         )
                                                     }
-                                                    className="p-2.5 min-h-[44px] min-w-[44px] hover:bg-[#0a0a0a] rounded-md transition-colors flex items-center justify-center"
+                                                    className="p-2.5 min-h-[44px] min-w-[44px] hover:bg-[var(--bg-primary)] rounded-md transition-colors flex items-center justify-center"
                                                     aria-label={`Play ${track.displayTitle ?? track.title}`}
                                                 >
                                                     <Play className="w-4 h-4" />
@@ -311,7 +311,7 @@ export default function QueuePage() {
                                 {previousTracks.map((track, idx) => (
                                     <div
                                         key={`${track.id}-${idx}`}
-                                        className="flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group opacity-50"
+                                        className="flex items-center gap-4 p-4 hover:bg-[var(--bg-hover)] transition-colors group opacity-50"
                                     >
                                         {/* Album Art */}
                                         <div className="relative flex-shrink-0 w-12 h-12">
@@ -328,7 +328,7 @@ export default function QueuePage() {
                                                     unoptimized
                                                 />
                                             ) : (
-                                                <div className="w-12 h-12 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
+                                                <div className="w-12 h-12 bg-[var(--bg-primary)] rounded-sm flex items-center justify-center">
                                                     <Music className="w-5 h-5 text-gray-600" />
                                                 </div>
                                             )}

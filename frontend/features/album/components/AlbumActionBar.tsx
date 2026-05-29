@@ -51,7 +51,7 @@ export function AlbumActionBar({
                     <button
                         onClick={handlePlayPauseClick}
                         aria-label={showPause ? "Pause" : "Play all"}
-                        className="h-12 w-12 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105 bg-[#fca200]"
+                        className="h-12 w-12 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105 bg-brand"
                     >
                         {showPause ? (
                             <Pause className="w-5 h-5 fill-current text-black" />
@@ -89,7 +89,7 @@ export function AlbumActionBar({
                         "flex items-center gap-2 px-5 py-2.5 rounded-full font-medium transition-all",
                         isPendingDownload
                             ? "bg-white/5 text-white/50 cursor-not-allowed"
-                            : "bg-[#fca200] hover:bg-[#e69200] text-black hover:scale-105"
+                            : "bg-brand hover:bg-[#e69200] text-black hover:scale-105"
                     )}
                 >
                     <Download className="w-4 h-4" />

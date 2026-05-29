@@ -31,7 +31,7 @@ function RadioStationCard({
             className={cn(
                 "relative group w-full overflow-hidden",
                 "aspect-[4/3] rounded-lg",
-                "bg-[#0a0a0a] border-2 border-white/10",
+                "bg-[var(--bg-primary)] border-2 border-white/10",
                 station.hoverBorder,
                 "transition-all duration-300",
                 "hover:shadow-lg",
@@ -91,7 +91,7 @@ function SectionSkeleton() {
     return (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="aspect-[4/3] rounded-lg bg-[#0a0a0a] border-2 border-white/10 animate-pulse" />
+                <div key={i} className="aspect-[4/3] rounded-lg bg-[var(--bg-primary)] border-2 border-white/10 animate-pulse" />
             ))}
         </div>
     );
@@ -132,7 +132,7 @@ export default function RadioPage() {
                     <div className="max-w-[1800px] mx-auto">
                         {/* System status */}
                         <div className="flex items-center gap-2 mb-6">
-                            <div className="w-1.5 h-1.5 bg-[#fca208] rounded-full" />
+                            <div className="w-1.5 h-1.5 bg-brand rounded-full" />
                             <span className="text-xs font-mono text-gray-500 uppercase tracking-wider">
                                 Radio Active
                             </span>
@@ -142,7 +142,7 @@ export default function RadioPage() {
                             <div>
                                 <h1 className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tighter text-white leading-none mb-3">
                                     LIBRARY<br />
-                                    <span className="text-[#fca208]">RADIO</span>
+                                    <span className="text-brand">RADIO</span>
                                 </h1>
                                 <p className="text-sm font-mono text-gray-500">
                                     Continuous shuffle from your personal archive
@@ -153,8 +153,8 @@ export default function RadioPage() {
                             <div className="flex items-center gap-4">
                                 {!isLoading && (
                                     <>
-                                        <div className="border-2 border-white/10 bg-[#0a0a0a] px-4 py-3 rounded">
-                                            <span className="text-3xl font-black font-mono text-[#fca208]">
+                                        <div className="border-2 border-white/10 bg-[var(--bg-primary)] px-4 py-3 rounded">
+                                            <span className="text-3xl font-black font-mono text-brand">
                                                 {STATIC_STATIONS.length + genreStations.length + decadeStations.length}
                                             </span>
                                             <span className="text-xs font-mono text-gray-500 uppercase ml-2">
@@ -281,7 +281,7 @@ export default function RadioPage() {
                             <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-8">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-[#fca208] to-[#f97316]" />
                                 <div className="flex items-center gap-3 mb-4 pb-3 border-b border-white/10">
-                                    <div className="w-2 h-2 bg-[#fca208]" />
+                                    <div className="w-2 h-2 bg-brand" />
                                     <span className="text-xs font-mono text-white/60 uppercase tracking-wider">
                                         How It Works
                                     </span>

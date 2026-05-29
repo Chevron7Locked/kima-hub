@@ -35,7 +35,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
             style={{ width: isOpen ? 380 : 48 }}
         >
             <div
-                className="absolute inset-y-0 right-0 w-[380px] bg-[#0a0a0a] flex flex-col overflow-hidden transition-transform duration-200 ease-out rounded-lg"
+                className="absolute inset-y-0 right-0 w-[380px] bg-[var(--bg-primary)] flex flex-col overflow-hidden transition-transform duration-200 ease-out rounded-lg"
                 style={{
                     transform: isOpen ? "translateX(0)" : "translateX(332px)",
                     willChange: "transform",
@@ -45,7 +45,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                 <div
                     onClick={onToggle}
                     className={cn(
-                        "absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center cursor-pointer hover:bg-[#141414] transition-colors z-10",
+                        "absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center cursor-pointer hover:bg-[var(--bg-tertiary)] transition-colors z-10",
                         isOpen && "pointer-events-none opacity-0",
                     )}
                     title="Open panel"
