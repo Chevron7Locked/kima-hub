@@ -322,7 +322,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             });
             return { previousConcurrency };
         },
-        onError: (err, newConcurrency, context) => {
+        onError: (_err, _newConcurrency, context) => {
             queryClient.setQueryData(
                 ["enrichment-concurrency"],
                 context?.previousConcurrency
@@ -350,7 +350,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             });
             return { previousWorkers };
         },
-        onError: (err, newWorkers, context) => {
+        onError: (_err, _newWorkers, context) => {
             queryClient.setQueryData(
                 ["analysis-workers"],
                 context?.previousWorkers
@@ -384,7 +384,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             });
             return { previousWorkers };
         },
-        onError: (err, newWorkers, context) => {
+        onError: (_err, _newWorkers, context) => {
             queryClient.setQueryData(
                 ["clap-workers"],
                 context?.previousWorkers
