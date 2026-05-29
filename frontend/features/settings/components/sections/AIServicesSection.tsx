@@ -45,9 +45,9 @@ export function AIServicesSection({ settings, onUpdate, onTest, isTesting }: AIS
     };
 
     return (
-        <SettingsSection 
-            id="ai-services" 
-            title="Artwork Services"
+        <SettingsSection
+            id="ai-services"
+            title="AI & Artwork"
             description="Enhance your library with high-quality artwork"
         >
             {/* Fanart.tv */}

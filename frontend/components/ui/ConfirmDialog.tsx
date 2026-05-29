@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { AlertTriangle, X } from "lucide-react";
 
 interface ConfirmDialogProps {
@@ -23,6 +24,53 @@ export function ConfirmDialog({
     cancelText = "Cancel",
     variant = "danger",
 }: ConfirmDialogProps) {
+    const cancelRef = useRef<HTMLButtonElement>(null);
+    const dialogRef = useRef<HTMLDivElement>(null);
+
+    // Focus the cancel button when opened
+    useEffect(() => {
+        if (isOpen) {
+            cancelRef.current?.focus();
+        }
+    }, [isOpen]);
+
+    // Close on Escape; trap focus within the dialog
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                e.preventDefault();
+                onClose();
+                return;
+            }
+            if (e.key === "Tab" && dialogRef.current) {
+                const focusable = Array.from(
+                    dialogRef.current.querySelectorAll<HTMLElement>(
+                        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+                    )
+                ).filter((el) => !el.hasAttribute("disabled"));
+                if (focusable.length === 0) return;
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                if (e.shiftKey) {
+                    if (document.activeElement === first) {
+                        e.preventDefault();
+                        last.focus();
+                    }
+                } else {
+                    if (document.activeElement === last) {
+                        e.preventDefault();
+                        first.focus();
+                    }
+                }
+            }
+        };
+
+        document.addEventListener("keydown", handleKeyDown);
+        return () => document.removeEventListener("keydown", handleKeyDown);
+    }, [isOpen, onClose]);
+
     if (!isOpen) return null;
 
     const variantStyles = {
@@ -56,6 +104,11 @@ export function ConfirmDialog({
             onClick={onClose}
         >
             <div
+                ref={dialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="confirm-dialog-title"
+                aria-describedby="confirm-dialog-message"
                 className="bg-[#121212] rounded-xl max-w-md w-full overflow-hidden border border-white/10 shadow-2xl animate-slideUp"
                 onClick={(e) => e.stopPropagation()}
             >
@@ -67,13 +120,14 @@ export function ConfirmDialog({
                         <AlertTriangle className={`w-6 h-6 ${styles.icon}`} />
                     </div>
                     <div className="flex-1 min-w-0">
-                        <h2 className="text-xl font-bold text-white mb-2">
+                        <h2 id="confirm-dialog-title" className="text-xl font-bold text-white mb-2">
                             {title}
                         </h2>
-                        <p className="text-sm text-gray-400">{message}</p>
+                        <p id="confirm-dialog-message" className="text-sm text-gray-400">{message}</p>
                     </div>
                     <button
                         onClick={onClose}
+                        aria-label="Close dialog"
                         className="p-1 hover:bg-white/10 rounded-full transition-colors text-gray-400 hover:text-white flex-shrink-0"
                     >
                         <X className="w-5 h-5" />
@@ -83,6 +137,7 @@ export function ConfirmDialog({
                 {/* Actions */}
                 <div className="flex gap-3 p-6 bg-[#0a0a0a]/50">
                     <button
+                        ref={cancelRef}
                         onClick={onClose}
                         className="flex-1 px-4 py-3 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-lg transition-all border border-white/10"
                     >

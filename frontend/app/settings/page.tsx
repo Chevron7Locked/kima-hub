@@ -34,9 +34,9 @@ const sidebarItems: SidebarItem[] = [
     { id: "lidarr", label: "Download Services", adminOnly: true },
     { id: "audiobookshelf", label: "Media Servers", adminOnly: true },
     { id: "soulseek", label: "P2P Networks", adminOnly: true },
-    { id: "ai-services", label: "Artwork", adminOnly: true },
+    { id: "ai-services", label: "AI & Artwork", adminOnly: true },
     { id: "storage", label: "Storage", adminOnly: true },
-    { id: "cache", label: "Cache & Automation", adminOnly: true },
+    { id: "cache", label: "Library Enrichment", adminOnly: true },
     { id: "corrupt-tracks", label: "Corrupt Tracks", adminOnly: true },
     { id: "users", label: "Users", adminOnly: true },
 ];
