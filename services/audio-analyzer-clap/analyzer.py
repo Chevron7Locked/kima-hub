@@ -20,17 +20,16 @@ Architecture:
 """
 
 import os
-import sys
 import signal
 import json
 import time
 import logging
+import warnings
 import gc
 import asyncio
 import threading
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Optional, Tuple
-import traceback
 import numpy as np
 import librosa
 import requests
@@ -58,6 +57,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger('clap-analyzer')
+
 
 # Configuration from environment
 REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379')
@@ -98,31 +98,34 @@ class CLAPAnalyzer:
         self.last_work_time: float = time.time()
         self._model_loaded = False
 
+    def _load_model_locked(self):
+        """Load model internals. Caller must hold self._lock."""
+        if self.model is not None:
+            return
+
+        logger.info("Loading LAION CLAP model...")
+        import laion_clap
+
+        self.model = laion_clap.CLAP_Module(
+            enable_fusion=False,
+            amodel='HTSAT-base'
+        )
+        self.model.load_ckpt('/app/models/music_audioset_epoch_15_esc_90.14.pt')
+
+        # Move to detected device (GPU if available, else CPU)
+        self.model = self.model.to(DEVICE).eval()
+        self._model_loaded = True
+        self.last_work_time = time.time()
+
+        logger.info("CLAP model loaded successfully on CPU")
+
     def load_model(self):
         """Load the CLAP model (thread-safe, idempotent)"""
         with self._lock:
-            if self.model is not None:
-                return
-
-            logger.info("Loading LAION CLAP model...")
             try:
-                import laion_clap
-
-                self.model = laion_clap.CLAP_Module(
-                    enable_fusion=False,
-                    amodel='HTSAT-base'
-                )
-                self.model.load_ckpt('/app/models/music_audioset_epoch_15_esc_90.14.pt')
-
-                # Move to detected device (GPU if available, else CPU)
-                self.model = self.model.to(DEVICE).eval()
-                self._model_loaded = True
-                self.last_work_time = time.time()
-
-                logger.info("CLAP model loaded successfully on CPU")
-            except Exception as e:
-                logger.error(f"Failed to load CLAP model: {e}")
-                traceback.print_exc()
+                self._load_model_locked()
+            except Exception:
+                logger.exception("Failed to load CLAP model")
                 raise
 
     def unload_model(self):
@@ -141,12 +144,6 @@ class CLAPAnalyzer:
             except Exception:
                 pass
             logger.info("CLAP model unloaded")
-
-    def ensure_model(self):
-        """Ensure model is loaded, reloading if it was unloaded for idle"""
-        if self.model is None:
-            logger.info("Reloading CLAP model (new work arrived)...")
-            self.load_model()
 
     def _load_audio_chunk(self, audio_path: str, duration_hint: Optional[float] = None) -> Tuple[Optional[np.ndarray], int]:
         """
@@ -182,9 +179,8 @@ class CLAPAnalyzer:
 
             return audio, sr
 
-        except Exception as e:
-            logger.error(f"Failed to load audio from {audio_path}: {e}")
-            traceback.print_exc()
+        except Exception:
+            logger.exception(f"Failed to load audio from {audio_path}")
             return None, 0
 
     def get_audio_embedding(self, audio_path: str, duration: Optional[float] = None) -> Optional[np.ndarray]:
@@ -201,9 +197,6 @@ class CLAPAnalyzer:
         Returns:
             numpy array of shape (512,) or None on error
         """
-        self.ensure_model()
-        self.last_work_time = time.time()
-
         if not os.path.exists(audio_path):
             logger.error(f"Audio file not found: {audio_path}")
             return None
@@ -218,6 +211,11 @@ class CLAPAnalyzer:
             logger.debug(f"Loaded audio: {len(audio)/sr:.1f}s at {sr}Hz")
 
             with self._lock:
+                if self.model is None:
+                    logger.info("Reloading CLAP model for audio inference...")
+                    self._load_model_locked()
+                self.last_work_time = time.time()
+
                 # Use get_audio_embedding_from_data for pre-loaded audio
                 # This gives us control over memory usage
                 embeddings = self.model.get_audio_embedding_from_data(
@@ -233,9 +231,8 @@ class CLAPAnalyzer:
 
                 return embedding.astype(np.float32)
 
-        except Exception as e:
-            logger.error(f"Failed to generate audio embedding for {audio_path}: {e}")
-            traceback.print_exc()
+        except Exception:
+            logger.exception(f"Failed to generate audio embedding for {audio_path}")
             return None
 
     def get_text_embedding(self, text: str) -> Optional[np.ndarray]:
@@ -248,15 +245,17 @@ class CLAPAnalyzer:
         Returns:
             numpy array of shape (512,) or None on error
         """
-        self.ensure_model()
-        self.last_work_time = time.time()
-
         if not text or not text.strip():
             logger.error("Empty text provided for embedding")
             return None
 
         try:
             with self._lock:
+                if self.model is None:
+                    logger.info("Reloading CLAP model for text inference...")
+                    self._load_model_locked()
+                self.last_work_time = time.time()
+
                 # CLAP expects a list of text prompts
                 embeddings = self.model.get_text_embedding(
                     [text],
@@ -270,9 +269,8 @@ class CLAPAnalyzer:
 
                 return embedding.astype(np.float32)
 
-        except Exception as e:
-            logger.error(f"Failed to generate text embedding: {e}")
-            traceback.print_exc()
+        except Exception:
+            logger.exception("Failed to generate text embedding")
             return None
 
     def detect_vocals(self, audio_embedding: np.ndarray) -> float:
@@ -541,13 +539,32 @@ class BullMQVibeWorker:
     def start(self):
         """Start the BullMQ worker in a dedicated asyncio event loop."""
         logger.info("BullMQVibeWorker starting...")
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        while not self.stop_event.is_set():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self._run())
+            except Exception as e:
+                logger.exception(f"BullMQVibeWorker crashed: {e}")
+                if not self.stop_event.is_set():
+                    time.sleep(2)
+            finally:
+                loop.close()
+        logger.info("BullMQVibeWorker stopped")
+
+    def _track_exists(self, track_id: str) -> Optional[bool]:
+        """Check if the track exists in the database (runs in executor thread)."""
+        conn = self._db_pool.getconn()
         try:
-            loop.run_until_complete(self._run())
+            with conn.cursor() as cursor:
+                cursor.execute('SELECT 1 FROM "Track" WHERE id = %s', (track_id,))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Failed to check track existence for {track_id}: {e}")
+            conn.rollback()
+            return None
         finally:
-            loop.close()
-            logger.info("BullMQVibeWorker stopped")
+            self._db_pool.putconn(conn)
 
     async def _run(self):
         from bullmq import Worker as BullWorker
@@ -565,6 +582,7 @@ class BullMQVibeWorker:
         )
         logger.info(f"Connected to PostgreSQL (pool size: {pool_size})")
 
+        bullmq_worker = None
         bullmq_worker = BullWorker(
             VIBE_QUEUE_NAME,
             self._process_job,
@@ -593,11 +611,18 @@ class BullMQVibeWorker:
                     pass
                 await asyncio.sleep(30)
         finally:
-            await bullmq_worker.close()
+            if bullmq_worker is not None:
+                await bullmq_worker.close()
             if self._db_pool:
                 self._db_pool.closeall()
+            if self._redis_client:
+                try:
+                    self._redis_client.close()
+                except Exception:
+                    pass
+                self._redis_client = None
 
-    async def _process_job(self, job, job_token: str) -> dict:
+    async def _process_job(self, job, _job_token: str) -> dict:
         """BullMQ job processor — called for each enrichment-vibe job."""
         track_id = job.data.get("trackId")
         file_path = job.data.get("filePath", "")
@@ -609,10 +634,31 @@ class BullMQVibeWorker:
         logger.info(f"[BullMQ] Processing vibe for track: {track_id}")
 
         loop = asyncio.get_running_loop()
+
+        track_exists = await loop.run_in_executor(None, self._track_exists, track_id)
+        if track_exists is None:
+            await loop.run_in_executor(
+                None, self._mark_failed, track_id, "Failed to verify track existence"
+            )
+            raise RuntimeError("Database check failed")
+        if not track_exists:
+            logger.warning(f"Track {track_id} not found in database; skipping vibe job")
+            await job.updateProgress(100)
+            return {"trackId": track_id, "status": "skipped", "reason": "not_found"}
+
         await loop.run_in_executor(None, self._update_track_status, track_id, "processing")
 
-        normalized_path = file_path.replace("\\", "/")
-        full_path = os.path.join(MUSIC_PATH, normalized_path)
+        normalized_path = str(file_path).replace("\\", "/")
+        music_root = os.path.realpath(MUSIC_PATH)
+        full_path = os.path.realpath(os.path.join(music_root, normalized_path))
+        if not full_path.startswith(music_root + os.sep):
+            await loop.run_in_executor(
+                None,
+                self._mark_failed,
+                track_id,
+                f"Invalid file path outside music directory: {normalized_path[:300]}",
+            )
+            raise ValueError("Invalid file path")
 
         try:
             file_size = os.path.getsize(full_path)
@@ -775,7 +821,7 @@ class BullMQVibeWorker:
                 "Content-Type": "application/json",
                 "X-Internal-Secret": os.getenv("INTERNAL_API_SECRET", "")
             }
-            requests.post(
+            response = requests.post(
                 f"{BACKEND_URL}/api/analysis/vibe/failure",
                 json={
                     "trackId": track_id,
@@ -786,6 +832,7 @@ class BullMQVibeWorker:
                 headers=headers,
                 timeout=5
             )
+            response.raise_for_status()
         except Exception as report_err:
             logger.warning(f"Failed to report failure to backend: {report_err}")
 
@@ -823,13 +870,17 @@ class BullMQVibeWorker:
                         model_version = EXCLUDED.model_version,
                         analyzed_at = EXCLUDED.analyzed_at
                     """,
-                    (track_id, embedding_list, MODEL_VERSION, datetime.utcnow()),
+                    (track_id, embedding_list, MODEL_VERSION, datetime.now(UTC)),
                 )
             conn.commit()
             return True
+        except psycopg2.errors.ForeignKeyViolation:
+            # Track might have been deleted while we were processing it.
+            logger.warning(f"Track {track_id} not found in database; skipping embedding store")
+            conn.rollback()
+            return True
         except Exception as e:
-            logger.error(f"Failed to store embedding for {track_id}: {e}")
-            traceback.print_exc()
+            logger.exception(f"Failed to store embedding for {track_id}: {e}")
             conn.rollback()
             return False
         finally:
@@ -854,32 +905,45 @@ class TextEmbedHandler:
         """Start the text embed handler"""
         logger.info("TextEmbedHandler starting...")
 
-        try:
-            self.redis_client = redis.from_url(REDIS_URL)
-            self.pubsub = self.redis_client.pubsub()
-            self.pubsub.subscribe(TEXT_EMBED_CHANNEL)
+        while not self.stop_event.is_set():
+            try:
+                self.redis_client = redis.from_url(REDIS_URL)
+                self.pubsub = self.redis_client.pubsub()
+                self.pubsub.subscribe(TEXT_EMBED_CHANNEL)
 
-            logger.info(f"Subscribed to channel: {TEXT_EMBED_CHANNEL}")
+                logger.info(f"Subscribed to channel: {TEXT_EMBED_CHANNEL}")
 
-            while not self.stop_event.is_set():
-                try:
-                    message = self.pubsub.get_message(
-                        ignore_subscribe_messages=True,
-                        timeout=1.0
-                    )
+                while not self.stop_event.is_set():
+                    try:
+                        message = self.pubsub.get_message(
+                            ignore_subscribe_messages=True,
+                            timeout=1.0
+                        )
 
-                    if message and message['type'] == 'message':
-                        self._handle_message(message)
+                        if message and message['type'] == 'message':
+                            self._handle_message(message)
 
-                except Exception as e:
-                    logger.error(f"TextEmbedHandler error: {e}")
-                    traceback.print_exc()
-                    time.sleep(1)
-
-        finally:
-            if self.pubsub:
-                self.pubsub.close()
-            logger.info("TextEmbedHandler stopped")
+                    except Exception as e:
+                        logger.exception(f"TextEmbedHandler loop error: {e}")
+                        time.sleep(1)
+            except Exception as e:
+                logger.exception(f"TextEmbedHandler crashed: {e}")
+                if not self.stop_event.is_set():
+                    time.sleep(2)
+            finally:
+                if self.pubsub:
+                    try:
+                        self.pubsub.close()
+                    except Exception:
+                        pass
+                    self.pubsub = None
+                if self.redis_client:
+                    try:
+                        self.redis_client.close()
+                    except Exception:
+                        pass
+                    self.redis_client = None
+        logger.info("TextEmbedHandler stopped")
 
     def _handle_message(self, message):
         """Handle a text embedding request"""
@@ -915,9 +979,8 @@ class TextEmbedHandler:
 
             logger.info(f"Text embed response sent: {request_id}")
 
-        except Exception as e:
-            logger.error(f"Failed to handle text embed request: {e}")
-            traceback.print_exc()
+        except Exception:
+            logger.exception("Failed to handle text embed request")
 
 
 class ControlHandler:
@@ -937,31 +1000,44 @@ class ControlHandler:
         """Start listening for control messages"""
         logger.info("ControlHandler starting...")
 
-        try:
-            self.redis_client = redis.from_url(REDIS_URL)
-            self.pubsub = self.redis_client.pubsub()
-            self.pubsub.subscribe(CONTROL_CHANNEL)
-            logger.info(f"Subscribed to control channel: {CONTROL_CHANNEL}")
+        while not self.stop_event.is_set():
+            try:
+                self.redis_client = redis.from_url(REDIS_URL)
+                self.pubsub = self.redis_client.pubsub()
+                self.pubsub.subscribe(CONTROL_CHANNEL)
+                logger.info(f"Subscribed to control channel: {CONTROL_CHANNEL}")
 
-            while not self.stop_event.is_set():
-                try:
-                    message = self.pubsub.get_message(
-                        ignore_subscribe_messages=True,
-                        timeout=1.0
-                    )
+                while not self.stop_event.is_set():
+                    try:
+                        message = self.pubsub.get_message(
+                            ignore_subscribe_messages=True,
+                            timeout=1.0
+                        )
 
-                    if message and message['type'] == 'message':
-                        self._handle_message(message)
+                        if message and message['type'] == 'message':
+                            self._handle_message(message)
 
-                except Exception as e:
-                    logger.error(f"ControlHandler error: {e}")
-                    traceback.print_exc()
-                    time.sleep(1)
-
-        finally:
-            if self.pubsub:
-                self.pubsub.close()
-            logger.info("ControlHandler stopped")
+                    except Exception as e:
+                        logger.exception(f"ControlHandler loop error: {e}")
+                        time.sleep(1)
+            except Exception as e:
+                logger.exception(f"ControlHandler crashed: {e}")
+                if not self.stop_event.is_set():
+                    time.sleep(2)
+            finally:
+                if self.pubsub:
+                    try:
+                        self.pubsub.close()
+                    except Exception:
+                        pass
+                    self.pubsub = None
+                if self.redis_client:
+                    try:
+                        self.redis_client.close()
+                    except Exception:
+                        pass
+                    self.redis_client = None
+        logger.info("ControlHandler stopped")
 
     def _handle_message(self, message):
         """Handle a control message"""
@@ -983,9 +1059,8 @@ class ControlHandler:
             else:
                 logger.warning(f"Unknown control command: {command}")
 
-        except Exception as e:
-            logger.error(f"Failed to handle control message: {e}")
-            traceback.print_exc()
+        except Exception:
+            logger.exception("Failed to handle control message")
 
 
 def main():
@@ -1045,7 +1120,13 @@ def main():
 
     # Main loop: monitor idle state and unload model when not needed
     idle_db = DatabaseConnection(DATABASE_URL)
-    idle_db.connect()
+    while not stop_event.is_set():
+        try:
+            idle_db.connect()
+            break
+        except Exception as e:
+            logger.exception(f"Failed to connect idle DB monitor: {e}")
+            time.sleep(2)
     try:
         while not stop_event.is_set():
             time.sleep(5)
@@ -1071,6 +1152,9 @@ def main():
                     except Exception as e:
                         logger.debug(f"Idle check failed: {e}")
                         idle_db.reconnect()
+    except Exception as e:
+        logger.exception(f"Main loop error: {e}")
+        stop_event.set()
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received")
         stop_event.set()
@@ -1087,4 +1171,10 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    while True:
+        try:
+            main()
+            break
+        except Exception as e:
+            logger.exception(f"Fatal top-level error: {e}")
+            time.sleep(2)
