@@ -112,6 +112,9 @@ keystore.b64
 *.conf
 lidify.keystore
 
+# Docker
+!/docker/*
+
 # Backend
 backend/cache/
 **/cache/covers/

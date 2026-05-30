@@ -276,16 +276,18 @@ docker run -d \
   -p 3030:3030 \
   -v /path/to/your/music:/music \
   -v kima_data:/data \
-  -e SESSION_SECRET=your-secret-key \
   -e TZ=America/New_York \
   --add-host=host.docker.internal:host-gateway \
   chevron7locked/kima:latest
 ```
 
-| Variable         | Description            | Default        |
-| ---------------- | ---------------------- | -------------- |
-| `SESSION_SECRET` | Session encryption key | Auto-generated |
-| `TZ`             | Timezone               | UTC            |
+| Variable                          | Description                         | Default |
+| --------------------------------- | ----------------------------------- | ------- |
+| `TZ`                              | Timezone                            | `UTC`   |
+| `KIMA_AUDIO_ANALYZER_NUM_WORKERS` | Main audio analyzer worker count    | `2`     |
+| `KIMA_CLAP_ENABLED`               | Enable CLAP vibe embedding analysis | `true`  |
+
+Session and encryption secrets are generated automatically and stored under `/data/secrets`, so keep `/data` persistent.
 
 ### Using Docker Compose
 
@@ -373,24 +375,27 @@ docker pull chevron7locked/kima:nightly
 
 ### Environment Variables
 
-The unified Kima container handles most configuration automatically. Here are the available options:
+The unified Kima container handles most configuration automatically. Here are the Docker-specific options:
 
-| Variable                            | Default                            | Description                                                                 |
-| ----------------------------------- | ---------------------------------- | --------------------------------------------------------------------------- |
-| `SESSION_SECRET`                    | Auto-generated                     | Session encryption key (recommended to set for persistence across restarts) |
-| `SETTINGS_ENCRYPTION_KEY`           | Required                           | Encryption key for stored credentials (generate with `openssl rand -base64 32`) |
-| `TZ`                                | `UTC`                              | Timezone for the container                                                  |
-| `PORT`                              | `3030`                             | Port to access Kima                                                       |
-| `KIMA_CALLBACK_URL`               | `http://host.docker.internal:3030` | URL for Lidarr webhook callbacks (see [Lidarr integration](#lidarr))        |
-| `AUDIO_ANALYSIS_WORKERS`            | `2`                                | Number of parallel workers for audio analysis (1-8)                         |
-| `AUDIO_ANALYSIS_THREADS_PER_WORKER` | `1`                                | Threads per worker for TensorFlow/FFT operations (1-4)                      |
-| `AUDIO_ANALYSIS_BATCH_SIZE`         | `10`                               | Tracks per analysis batch                                                   |
-| `AUDIO_BRPOP_TIMEOUT`              | `30`                               | Redis blocking wait timeout in seconds (also controls DB reconciliation)     |
-| `AUDIO_MODEL_IDLE_TIMEOUT`         | `300`                              | Seconds before unloading idle ML models to free memory (0 = never unload)    |
-| `LOG_LEVEL`                         | `warn` (prod) / `debug` (dev)      | Logging verbosity: debug, info, warn, error, silent                         |
-| `DOCS_PUBLIC`                       | `false`                            | Set to `true` to allow public access to API docs in production              |
+| Variable                                  | Default                            | Description                                                              |
+| ----------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------ |
+| `TZ`                                      | `UTC`                              | Timezone for the container                                               |
+| `KIMA_MUSIC_PATH`                         | `/music`                           | Internal music library path used by the analyzer workers                 |
+| `KIMA_AUDIO_ANALYZER_BATCH_SIZE`          | `10`                               | Tracks per main audio analysis batch                                     |
+| `KIMA_AUDIO_ANALYZER_SLEEP_INTERVAL`      | `5`                                | Main audio analyzer queue poll interval in seconds                       |
+| `KIMA_AUDIO_ANALYZER_MAX_ANALYZE_SECONDS` | `90`                               | Maximum duration analyzed per track by the main analyzer                 |
+| `KIMA_AUDIO_ANALYZER_BRPOP_TIMEOUT`       | `30`                               | Redis blocking wait timeout in seconds                                   |
+| `KIMA_AUDIO_ANALYZER_MODEL_IDLE_TIMEOUT`  | `300`                              | Seconds before unloading idle main analyzer ML models                    |
+| `KIMA_AUDIO_ANALYZER_NUM_WORKERS`         | `2`                                | Number of parallel main audio analyzer workers                           |
+| `KIMA_AUDIO_ANALYZER_THREADS_PER_WORKER`  | `1`                                | CPU threads per main analyzer worker                                     |
+| `KIMA_CLAP_ENABLED`                       | `true`                             | Enable the CLAP analyzer worker for vibe embeddings                      |
+| `KIMA_CLAP_SLEEP_INTERVAL`                | `5`                                | CLAP analyzer queue poll interval in seconds                             |
+| `KIMA_CLAP_NUM_WORKERS`                   | `1`                                | Number of parallel CLAP analyzer workers                                 |
+| `KIMA_CLAP_MODEL_IDLE_TIMEOUT`            | `300`                              | Seconds before unloading idle CLAP model                                 |
+| `KIMA_CALLBACK_URL`                       | `http://host.docker.internal:3030` | URL for Lidarr webhook callbacks (see [Lidarr integration](#lidarr))     |
 
 The music library path is configured via Docker volume mount (`-v /path/to/music:/music`).
+Runtime secrets are generated automatically on first start and persisted in `/data/secrets`.
 
 #### External Access
 
@@ -475,7 +480,7 @@ The CLAP (Contrastive Language-Audio Pretraining) service generates embeddings f
 
 ### Requirements
 
--   PostgreSQL with pgvector extension (included in `pgvector/pgvector:pg16` image)
+-   PostgreSQL with pgvector extension (included in the all-in-one container)
 -   2-4GB RAM per worker
 -   CLAP model downloads automatically on first build (~700MB)
 
@@ -483,11 +488,12 @@ The CLAP (Contrastive Language-Audio Pretraining) service generates embeddings f
 
 Environment variables in docker-compose.yml:
 
-| Variable                  | Default | Description                                |
-| ------------------------- | ------- | ------------------------------------------ |
-| `CLAP_WORKERS`            | `2`     | Number of analysis workers (1-8)           |
-| `CLAP_THREADS_PER_WORKER` | `1`     | CPU threads per worker (1-4)               |
-| `CLAP_SLEEP_INTERVAL`     | `5`     | Queue poll interval in seconds             |
+| Variable                       | Default | Description                                  |
+| ------------------------------ | ------- | -------------------------------------------- |
+| `KIMA_CLAP_ENABLED`            | `true`  | Enable or disable CLAP analysis              |
+| `KIMA_CLAP_NUM_WORKERS`        | `1`     | Number of CLAP analysis workers              |
+| `KIMA_CLAP_SLEEP_INTERVAL`     | `5`     | Queue poll interval in seconds               |
+| `KIMA_CLAP_MODEL_IDLE_TIMEOUT` | `300`   | Seconds before unloading the idle CLAP model |
 
 ### Usage
 
@@ -546,15 +552,16 @@ docker run -d --gpus all -p 3030:3030 -v /path/to/music:/music -v kima_data:/dat
 
 **Docker Compose:**
 
-Uncomment the `devices` block under `audio-analyzer` (and optionally `audio-analyzer-clap`) in `docker-compose.yml`:
+Add GPU reservations under the `kima` service:
 
 ```yaml
-reservations:
-    memory: 2G
-    devices:
-        - driver: nvidia
-          count: 1
-          capabilities: [gpu]
+deploy:
+    resources:
+        reservations:
+            devices:
+                - driver: nvidia
+                  count: 1
+                  capabilities: [gpu]
 ```
 
 Then restart: `docker compose up -d`
@@ -562,11 +569,7 @@ Then restart: `docker compose up -d`
 ### Verify GPU Detection
 
 ```bash
-# MusiCNN analyzer
-docker logs kima_audio_analyzer 2>&1 | grep -i gpu
-
-# CLAP analyzer
-docker logs kima_audio_analyzer_clap 2>&1 | grep -i gpu
+docker logs kima 2>&1 | grep -i gpu
 ```
 
 Expected: `TensorFlow GPU detected: ...` or `CUDA available: True`
