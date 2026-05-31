@@ -1,3 +1,11 @@
+// Pin the timezone for the whole worker process BEFORE any Date/Intl is
+// initialized. Setting process.env.TZ from inside a test file is a no-op --
+// V8 caches the local zone at startup -- so date-fns' startOfWeek would resolve
+// in the host zone (America/Chicago on the dev box) and emit non-midnight,
+// occasionally day-shifted weekStarts. This runs in the parent before workers
+// spawn; workers inherit the env, making the suite host-independent.
+process.env.TZ = 'UTC';
+
 /** @type {import('jest').Config} */
 module.exports = {
     preset: 'ts-jest',
