@@ -1049,37 +1049,30 @@ router.post("/retry-unavailable", async (req, res) => {
                 }).catch(() => {});
             }
 
-            // Mark batch as scanning, then trigger library scan
+            // Hand off to the shared completion flow. checkBatchCompletion owns
+            // the Lidarr import wait, queues the "discover-weekly-completion"
+            // scan, runs buildFinalPlaylist + reconcile, and performs the final
+            // status transition. Do NOT force-complete here -- doing so skipped
+            // playlist creation and raced async Lidarr imports.
+            // Known residual (same as the generation path): if acquireAlbum left a
+            // job pending, checkBatchCompletion returns at its pending-jobs guard
+            // and the batch waits for the webhook/scan path or the 30-min stuck
+            // sweep. The IIFE .catch does not cover that quiet wait -- it is the
+            // proven generation behavior, not a regression.
+            const { discoverWeeklyService } = await import("../services/discoverWeekly");
             await prisma.discoveryBatch.update({
                 where: { id: batch.id },
-                data: {
-                    status: "scanning",
-                    completedAlbums: completed,
-                    failedAlbums: failed,
-                },
+                data: { completedAlbums: completed, failedAlbums: failed },
             });
-
-            try {
-                await scanQueue.add("scan", {
-                    userId,
-                    type: "full",
-                    source: "discover-retry-unavailable",
-                    discoveryBatchId: batch.id,
-                });
-            } catch (scanError) {
-                logger.error("[Discover Retry] Failed to queue scan:", scanError);
-            }
-
+            await discoverWeeklyService.checkBatchCompletion(batch.id);
+            logger.info(`[Discover Retry] Batch ${batch.id} handed to completion flow: ${completed} ok, ${failed} failed`);
+        })().catch(async (bgError) => {
+            logger.error(`[Discover Retry] Background processing crashed for batch ${batch.id}:`, bgError);
             await prisma.discoveryBatch.update({
                 where: { id: batch.id },
-                data: {
-                    status: "completed",
-                    completedAt: new Date(),
-                },
-            });
-
-            logger.info(`[Discover Retry] Batch ${batch.id} complete: ${completed} succeeded, ${failed} failed`);
-        })();
+                data: { status: "failed", errorMessage: "Retry processing crashed", completedAt: new Date() },
+            }).catch(() => {});
+        });
     } catch (error) {
         logger.error("Retry unavailable albums error:", error);
         res.status(500).json({ error: "Failed to retry unavailable albums" });
