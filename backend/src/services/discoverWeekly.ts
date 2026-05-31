@@ -1444,6 +1444,11 @@ export class DiscoverWeeklyService {
                 batchId,
                 `Transaction failed: ${txError.message}`
             );
+            await updateBatchStatus(batchId, {
+                status: "failed",
+                errorMessage: `Playlist build failed: ${txError.message}`,
+                completedAt: new Date(),
+            });
         }
 
         if (result) {
