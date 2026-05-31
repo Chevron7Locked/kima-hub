@@ -10,6 +10,7 @@ import cron, { ScheduledTask } from "node-cron";
 import { prisma } from "../utils/db";
 import { discoverQueue } from "./queues";
 import { resolveGenerationWeekStart, weekStartKey } from "../lib/discoveryWeek";
+import { distributedLock } from "../utils/distributedLock";
 
 let cronTask: ScheduledTask | null = null;
 
@@ -47,11 +48,27 @@ export function startDiscoverWeeklyCron() {
                 logger.debug(`   Queueing job for user ${config.userId}...`);
 
                 const weekKey = weekStartKey(resolveGenerationWeekStart(new Date(), 1));
-                await discoverQueue.add("discover-weekly", {
-                    userId: config.userId,
-                }, {
-                    jobId: `discover-weekly-${config.userId}-${weekKey}`,
-                });
+                const jobId = `discover-weekly-${config.userId}-${weekKey}`;
+                await distributedLock.withLock(
+                    `discover:generate:${config.userId}`,
+                    30000,
+                    async () => {
+                        const existing = await discoverQueue.getJob(jobId);
+                        if (existing) {
+                            const state = await existing.getState();
+                            if (state === "completed" || state === "failed") {
+                                await existing.remove();
+                            }
+                        }
+                        await discoverQueue.add("discover-weekly", {
+                            userId: config.userId,
+                        }, { jobId });
+                    },
+                ).catch((e: any) =>
+                    logger.warn(
+                        `[DiscoverCron] enqueue skipped for ${config.userId}: ${e.message}`,
+                    ),
+                );
             }
 
             logger.debug(`   Queued ${configs.length} Discover Weekly jobs`);
