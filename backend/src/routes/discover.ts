@@ -4,6 +4,7 @@ import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { lastFmService } from "../services/lastfm";
 import { startOfWeek, endOfWeek } from "date-fns";
+import { resolveViewWeek, resolveGenerationWeekStart, weekStartKey } from "../lib/discoveryWeek";
 import axios from "axios";
 import fs from "fs";
 import path from "path";
@@ -48,10 +49,20 @@ router.get("/batch-status", async (req, res) => {
 
         if (!activeBatch) {
             logger.debug(`[Batch Status] User ${userId}: No active batch`);
+            const latestTerminal = await prisma.discoveryBatch.findFirst({
+                where: { userId, status: { in: ["completed", "failed"] } },
+                // completedAt has no DB-level NOT NULL; a terminal batch missing
+                // it would sort NULLS LAST under Postgres desc and be skipped.
+                // Fall back to createdAt so it still ranks by creation time.
+                orderBy: [{ completedAt: "desc" }, { createdAt: "desc" }],
+                select: { id: true, status: true },
+            });
             return res.json({
                 active: false,
                 status: null,
                 progress: null,
+                lastBatchId: latestTerminal?.id ?? null,
+                lastBatchStatus: latestTerminal?.status ?? null,
             });
         }
 
@@ -222,7 +233,7 @@ router.post("/generate", async (req, res) => {
                 logger.debug(`\n Queuing Discover Weekly generation for user ${userId}`);
 
                 // Add generation job to queue
-                const weekKey = startOfWeek(new Date(), { weekStartsOn: 1 }).toISOString().split('T')[0];
+                const weekKey = weekStartKey(resolveGenerationWeekStart(new Date(), 1));
                 const job = await discoverQueue.add("discover-weekly", { userId }, {
                     jobId: `discover-weekly-${userId}-${weekKey}`,
                 });
@@ -319,8 +330,15 @@ router.get("/current", async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 }); // Monday
-        const weekEnd = endOfWeek(new Date(), { weekStartsOn: 1 }); // Sunday
+        const calendarWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+        const latestBatch = await prisma.discoveryBatch.findFirst({
+            where: { userId, status: "completed" },
+            orderBy: { createdAt: "desc" },
+            select: { weekStart: true },
+        });
+        const view = resolveViewWeek(calendarWeekStart, latestBatch?.weekStart ?? null);
+        const weekStart = view.weekStart;
+        const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
 
         // Get all discovery albums for this week with their tracks
         const discoveryAlbums = await prisma.discoveryAlbum.findMany({
@@ -549,6 +567,7 @@ router.get("/current", async (req, res) => {
         res.json({
             weekStart,
             weekEnd,
+            stale: view.stale,
             tracks,
             unavailable,
             totalCount: tracks.length,
@@ -802,7 +821,13 @@ router.post("/retry-unavailable", async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+        const calendarWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+        const latestBatch = await prisma.discoveryBatch.findFirst({
+            where: { userId, status: "completed" },
+            orderBy: { createdAt: "desc" },
+            select: { weekStart: true },
+        });
+        const weekStart = resolveViewWeek(calendarWeekStart, latestBatch?.weekStart ?? null).weekStart;
 
         // Check for an active batch already in progress
         const activeBatch = await prisma.discoveryBatch.findFirst({
