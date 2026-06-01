@@ -34,9 +34,9 @@ const sidebarItems: SidebarItem[] = [
     { id: "lidarr", label: "Download Services", adminOnly: true },
     { id: "audiobookshelf", label: "Media Servers", adminOnly: true },
     { id: "soulseek", label: "P2P Networks", adminOnly: true },
-    { id: "ai-services", label: "Artwork", adminOnly: true },
+    { id: "ai-services", label: "AI & Artwork", adminOnly: true },
     { id: "storage", label: "Storage", adminOnly: true },
-    { id: "cache", label: "Cache & Automation", adminOnly: true },
+    { id: "cache", label: "Library Enrichment", adminOnly: true },
     { id: "corrupt-tracks", label: "Corrupt Tracks", adminOnly: true },
     { id: "users", label: "Users", adminOnly: true },
 ];
@@ -122,7 +122,7 @@ export default function SettingsPage() {
 
     if (authLoading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <GradientSpinner size="md" />
             </div>
         );
@@ -215,7 +215,7 @@ export default function SettingsPage() {
                         <button
                             onClick={handleSaveAll}
                             disabled={isSaving}
-                            className="w-full bg-[#fca208] text-black font-black py-3 px-4 rounded-lg uppercase tracking-wider
+                            className="w-full bg-brand text-black font-black py-3 px-4 rounded-lg uppercase tracking-wider
                                 hover:bg-[#f97316] active:scale-[0.98] transition-all
                                 disabled:opacity-50 disabled:cursor-not-allowed"
                         >

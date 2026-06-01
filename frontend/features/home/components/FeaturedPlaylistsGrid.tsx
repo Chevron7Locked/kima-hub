@@ -37,7 +37,7 @@ const PlaylistCard = memo(function PlaylistCard({
                 tabIndex={0}
                 className="group block cursor-pointer"
             >
-                <div className="relative bg-[#0a0a0a] border border-white/10 rounded-lg overflow-hidden hover:border-[#a855f7]/40 transition-all duration-300 hover:shadow-lg hover:shadow-[#a855f7]/10 mx-1">
+                <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#a855f7]/40 transition-all duration-300 hover:shadow-lg hover:shadow-[#a855f7]/10 mx-1">
                     <div className="relative aspect-square">
                         <div className="w-full h-full bg-[#181818] flex items-center justify-center overflow-hidden">
                             {playlist.imageUrl ? (
@@ -81,7 +81,7 @@ export function FeaturedPlaylistsSkeleton() {
         <div className="flex gap-3 overflow-hidden">
             {[...Array(8)].map((_, i) => (
                 <div key={i} className="flex-shrink-0 w-[140px] sm:w-[160px] md:w-[170px] lg:w-[180px]">
-                    <div className="bg-[#0a0a0a] border border-white/10 rounded-lg overflow-hidden mx-1">
+                    <div className="bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden mx-1">
                         <div className="aspect-square bg-[#181818] animate-pulse" />
                         <div className="p-3">
                             <div className="h-4 bg-white/5 rounded animate-pulse w-3/4 mb-2" />

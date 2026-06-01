@@ -130,7 +130,7 @@ export function AccountSection() {
                     {!showPasswordForm ? (
                         <button
                             onClick={() => setShowPasswordForm(true)}
-                            className="text-xs font-mono text-[#fca208] hover:text-[#f97316] uppercase tracking-wider transition-colors"
+                            className="text-xs font-mono text-brand hover:text-[#f97316] uppercase tracking-wider transition-colors"
                         >
                             Change
                         </button>
@@ -168,7 +168,7 @@ export function AccountSection() {
                             <button
                                 onClick={handleChangePassword}
                                 disabled={changingPassword || !currentPassword || !newPassword || newPassword !== confirmPassword}
-                                className="px-4 py-2 bg-[#fca208] text-black text-xs font-black rounded-lg uppercase tracking-wider
+                                className="px-4 py-2 bg-brand text-black text-xs font-black rounded-lg uppercase tracking-wider
                                     hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 {changingPassword ? "Changing..." : "Change Password"}
@@ -198,7 +198,7 @@ export function AccountSection() {
                         ) : (
                             <button
                                 onClick={setup2FA}
-                                className="text-xs font-mono text-[#fca208] hover:text-[#f97316] uppercase tracking-wider transition-colors"
+                                className="text-xs font-mono text-brand hover:text-[#f97316] uppercase tracking-wider transition-colors"
                             >
                                 Enable
                             </button>
@@ -241,7 +241,7 @@ export function AccountSection() {
                             <button
                                 onClick={handleVerify2FA}
                                 disabled={twoFactorToken.length !== 6}
-                                className="px-4 py-2 bg-[#fca208] text-black text-xs font-black rounded-lg uppercase tracking-wider
+                                className="px-4 py-2 bg-brand text-black text-xs font-black rounded-lg uppercase tracking-wider
                                     hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 Verify
@@ -328,7 +328,7 @@ export function AccountSection() {
                         </button>
                         <button
                             onClick={closeRecoveryCodes}
-                            className="px-4 py-2 bg-[#fca208] text-black text-xs font-black rounded-lg hover:bg-[#f97316] transition-colors uppercase tracking-wider"
+                            className="px-4 py-2 bg-brand text-black text-xs font-black rounded-lg hover:bg-[#f97316] transition-colors uppercase tracking-wider"
                         >
                             Done
                         </button>

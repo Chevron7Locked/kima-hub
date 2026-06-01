@@ -18,6 +18,7 @@ export function useDiscoverData() {
   const [playlist, setPlaylist] = useState<DiscoverPlaylist | null>(null);
   const [config, setConfig] = useState<DiscoverConfig | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [pendingGeneration, setPendingGeneration] = useState(false);
   const wasActiveRef = useRef(false);
   const generationStartTimeRef = useRef<number | null>(null);
@@ -34,9 +35,10 @@ export function useDiscoverData() {
   const batchStatus = sseBatchStatus || null;
 
   const loadData = useCallback(async () => {
+    setLoadError(false);
     try {
       const [playlistData, configData] = await Promise.all([
-        api.getCurrentDiscoverWeekly().catch(() => null),
+        api.getCurrentDiscoverWeekly(),
         api.getDiscoverConfig().catch(() => null),
       ]);
 
@@ -44,6 +46,7 @@ export function useDiscoverData() {
       setConfig(configData as DiscoverConfig | null);
     } catch (error) {
       console.error('Failed to load discover data:', error);
+      setLoadError(true);
     }
   }, []);
 
@@ -151,6 +154,7 @@ export function useDiscoverData() {
     config,
     setConfig,
     loading,
+    loadError,
     reloadData: loadData,
     batchStatus,
     refreshBatchStatus: checkBatchStatus,

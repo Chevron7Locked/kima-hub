@@ -27,11 +27,11 @@ const Button = memo(forwardRef<HTMLButtonElement, ButtonProps>(
             primary:
                 "bg-brand hover:bg-brand-hover text-black px-4 py-2 shadow-lg shadow-brand/10",
             secondary:
-                "bg-[#1a1a1a] hover:bg-[#222] text-white px-4 py-2 border border-[#262626]",
-            ghost: "text-gray-400 hover:text-white hover:bg-[#1a1a1a] px-4 py-2",
+                "bg-[var(--bg-hover)] hover:bg-[#222] text-white px-4 py-2 border border-[var(--border-interactive)]",
+            ghost: "text-gray-400 hover:text-white hover:bg-[var(--bg-hover)] px-4 py-2",
             danger: "text-red-500 hover:bg-red-500/10 border border-red-500/20 hover:border-red-500/40 px-4 py-2",
-            ai: "bg-[#1a1a1a] hover:bg-brand/10 text-brand border border-[#1c1c1c] hover:border-brand/30 px-4 py-2",
-            icon: "w-8 h-8 text-gray-400 hover:text-white hover:bg-[#1a1a1a]",
+            ai: "bg-[var(--bg-hover)] hover:bg-brand/10 text-brand border border-[var(--border-subtle)] hover:border-brand/30 px-4 py-2",
+            icon: "w-8 h-8 text-gray-400 hover:text-white hover:bg-[var(--bg-hover)]",
         };
 
         return (

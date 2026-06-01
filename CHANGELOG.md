@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.7.15] - 2026-06-01
+
+A frontend quality and UX overhaul (accessibility, theming, and UX refinements) plus two playback fixes.
+
+### Added
+
+- **Collection "Refine" panel**: filtering, sorting, and items-per-page are consolidated into one popover, with clearer "In your library" vs "Recommended" labels.
+- **Mobile vibe track operations**: match-vibe, find-similar, and Song Path are now reachable on touch via a panel sheet; the vibe map gained a first-run hint, and "Drift" was renamed "Song Path" with outcome-focused tooltips.
+- **Discover Weekly clarity**: a clearer generate CTA, disk-usage disclosure before generation, and two-phase progress.
+- **Safer destructive settings**: cache/enrichment resets now require a confirmation dialog; maintenance actions are grouped and section labels corrected.
+- **Onboarding**: per-integration test/result state and clearer admin-account vs integration copy.
+- **Playlist virtualization**: large playlists render a windowed subset of rows (load-tested ~33,700 -> ~1,260 DOM nodes for a 1,000-track playlist) for smooth scrolling.
+- **Mini-player gesture hint**: a one-time hint explains the swipe gestures (behavior unchanged).
+
+### Fixed
+
+- **iOS playback stopping after almost every song when backgrounded**: the silent-playback watchdog (added in v1.7.13) was armed on every automatic track transition and judged "silent" purely from whether a `timeupdate` event arrived within 2.5s. iOS throttles that event when the installed PWA is backgrounded, so after most songs the watchdog wrongly paused healthy playback and surfaced a "Tap play to resume" error. It now judges liveness by `audio.currentTime` advancement, never tears down while the document is hidden, and only the genuine deep-suspension case (suspended/interrupted AudioContext) still prompts -- restored via an explicit foreground check. Installed iOS PWA only.
+- **Desktop Discover settings / lyrics not opening in the rebuilt sidebar**: the desktop `UnifiedPanel` never read the externally-registered settings content, so the Discover settings gear (and lyrics) opened the panel to the activity feed instead of the settings. The panel now renders the registered content and returns to the feed on collapse. Pre-existing since the sidebar rewrite.
+- **Keyboard focus squaring off rounded controls**: the global `:focus-visible` rule set `border-radius` on the focused element (not the outline), distorting circular and rounded buttons/modals on keyboard focus; removed (browsers already round the outline via `outline-offset`).
+- **Library search silently capped at 10 results**; now renders all matches.
+- **Real-bug batch**: an invisible refresh button (invalid color class), a dead `?tab=` link parameter, a non-functional queue drag handle, and several silently-swallowed errors (radio, podcasts) now surface.
+- **Playlist scroll correctness**: the virtualizer offset is measured against the real scroll container and re-measured on reflow.
+- `logout` return type corrected to `Promise<void>`; `aria-expanded` now stays in sync across every panel close path; removed a nested-interactive ARIA role on the mini-player.
+
+### Changed
+
+- **Accessibility (WCAG AA)**: muted text raised to 4.81:1 contrast, a global brand focus ring restored on keyboard navigation app-wide, ARIA labels/landmarks across remaining routes, and 44px minimum touch targets.
+- **Brand color consolidated** to the official amber (`#fca200`); the legacy green accent was removed.
+- **Internal theming**: hard-coded hex colors migrated to design tokens, and redundant tokens that merely aliased Tailwind values were dropped in favor of Tailwind utilities (no visual change).
+
+## [1.7.14] - 2026-05-27
+
+### Fixed
+
+- **Podcast refresh silently stuck (#81)**: BullMQ retains completed-job hashes, so re-adding a refresh job with the same id was silently deduplicated and dropped. Completed jobs are now cleaned before re-queue, so podcast refresh works repeatedly.
+
+## [1.7.13] - 2026-05-14
+
+iOS audio reliability overhaul plus audiobook, Soulseek, and podcast fixes.
+
+### Fixed
+
+- **iOS audio survival and resume**: the audio element is bridged through an AudioContext to survive backgrounding; the next track's source is swapped synchronously on track-end to preserve the iOS autoplay grant; foreground resume uses a `wasPlaying` flag; AudioContext resume is awaited with silent-playback detection; and audio route-change pauses are now observable. Restored the standalone PWA on iOS so Safari chrome stops covering the UI.
+- **Audiobook chapter ordering (#184)**: chapters/tracks are resolved by logical chapter number and sorted defensively by offset; sync failures now show the backend's actual error message.
+- **Soulseek download errors (#192)**: errors propagate to the awaiting promise instead of crashing the backend; service-layer error listeners carry file context.
+- **Podcasts (#168)**: an error UI is rendered instead of an infinite spinner, and state resets on navigation so errors don't stick across podcasts.
+
+### Added
+
+- **iOS audio forensics** (opt-in via `?ios_debug=1`): an audio-event ring buffer, MediaSession and lifecycle instrumentation, and a `/debug/ios-log` viewer with a backend archival endpoint.
+
+### Changed
+
+- Pinned Next.js to `^16.2.2` to match the container's resolved version.
+
 ## [1.7.12] - 2026-04-16
 
 ### Added

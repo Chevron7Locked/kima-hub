@@ -29,7 +29,7 @@ export function SettingsSidebar({ items, activeSection, onSectionClick, isAdmin 
                         className={`
                             w-full text-left px-3 py-2 rounded-lg text-sm font-mono transition-all
                             ${activeSection === item.id
-                                ? 'text-[#fca208] bg-[#fca208]/10 border border-[#fca208]/20'
+                                ? 'text-brand bg-brand/10 border border-brand/20'
                                 : 'text-white/40 hover:text-white/70 border border-transparent'
                             }
                         `}
@@ -52,7 +52,7 @@ export function SettingsSidebar({ items, activeSection, onSectionClick, isAdmin 
                                 className={`
                                     w-full text-left px-3 py-2 rounded-lg text-sm font-mono transition-all
                                     ${activeSection === item.id
-                                        ? 'text-[#fca208] bg-[#fca208]/10 border border-[#fca208]/20'
+                                        ? 'text-brand bg-brand/10 border border-brand/20'
                                         : 'text-white/40 hover:text-white/70 border border-transparent'
                                     }
                                 `}

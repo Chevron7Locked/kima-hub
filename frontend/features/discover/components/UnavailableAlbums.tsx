@@ -31,7 +31,7 @@ export function UnavailableAlbums({
             <div className="p-4 flex items-center justify-between">
                 <button
                     onClick={() => setIsExpanded(!isExpanded)}
-                    className="flex items-center gap-2 hover:bg-[#1a1a1a] transition-colors rounded-lg flex-1"
+                    className="flex items-center gap-2 hover:bg-[var(--bg-hover)] transition-colors rounded-lg flex-1"
                 >
                     <Music className="w-5 h-5 text-orange-400" />
                     <span className="text-sm font-medium text-gray-400">
@@ -74,9 +74,9 @@ export function UnavailableAlbums({
                         <div
                             key={album.id}
                             className={cn(
-                                "flex items-center gap-4 px-4 py-3 hover:bg-[#1a1a1a] transition-colors group",
+                                "flex items-center gap-4 px-4 py-3 hover:bg-[var(--bg-hover)] transition-colors group",
                                 (album.attemptNumber ?? 0) > 0 &&
-                                    "pl-12 bg-[#1a1a1a]/30"
+                                    "pl-12 bg-[var(--bg-hover)]/30"
                             )}
                         >
                             <div className="w-8 flex items-center justify-center">

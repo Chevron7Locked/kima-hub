@@ -30,7 +30,7 @@ export default function AudiobookDetailPage() {
 
     if (isLoading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <GradientSpinner size="md" />
             </div>
         );
@@ -38,7 +38,7 @@ export default function AudiobookDetailPage() {
 
     if (!audiobook) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">
                     Audiobook not found
                 </p>
@@ -106,7 +106,7 @@ export default function AudiobookDetailPage() {
                                     <h2 className="text-xl font-black tracking-tighter uppercase">About</h2>
                                     <span className="flex-1 border-t border-white/10" />
                                 </div>
-                                <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[#0a0a0a] p-5">
+                                <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[var(--bg-primary)] p-5">
                                     <div
                                         className="prose prose-invert prose-sm max-w-none text-white/50 [&_a]:text-[#f59e0b] [&_a]:no-underline [&_a:hover]:underline text-sm leading-relaxed"
                                         dangerouslySetInnerHTML={{

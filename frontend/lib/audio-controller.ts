@@ -72,6 +72,7 @@ export class AudioController {
     // needs-resume so the UI renders a Tap-to-resume prompt; the user tap is
     // a fresh user gesture that can actually resume the AudioContext.
     private silentPlaybackTimeout: ReturnType<typeof setTimeout> | null = null;
+    private silentWatchdogBaselineTime = -1;
     private readonly SILENT_PLAYBACK_TIMEOUT_MS = 2500;
 
     constructor(audio: HTMLAudioElement) {
@@ -190,6 +191,11 @@ export class AudioController {
             this.stallRecoveryCount = 0;
             this.startWatchdog();
             this.cancelStallGrace();
+            // 'playing' is a stronger "audio actually started" signal than
+            // 'timeupdate' and is not throttled the same way in background, so
+            // disarm the silent watchdog here too -- the stall watchdog
+            // (currentTime-based) covers any real no-progress case from now on.
+            this.cancelSilentPlaybackWatchdog();
             this.emit("play");
         });
 
@@ -198,6 +204,9 @@ export class AudioController {
                 msSincePlay: Date.now() - this.lastPlayAt,
             });
             this.stopWatchdog();
+            // External pauses (Control Center, route loss) route through the
+            // native 'pause' event, not the pause() method, so disarm here too.
+            this.cancelSilentPlaybackWatchdog();
             this.emit("pause");
         });
 
@@ -386,20 +395,50 @@ export class AudioController {
     private startSilentPlaybackWatchdog(): void {
         this.cancelSilentPlaybackWatchdog();
         if (!this.isIosStandalone()) return;
+        // Snapshot the clock so we can verify real decode progress at fire time.
+        this.silentWatchdogBaselineTime = this.audio.currentTime;
         this.silentPlaybackTimeout = setTimeout(() => {
             this.silentPlaybackTimeout = null;
-            // If we're "playing" but timeupdate hasn't fired (cancelled this),
-            // iOS is silently swallowing the audio. Pause and prompt the user.
-            if (!this.audio.paused && !this.audio.ended) {
-                iosAudioLog(
-                    "silent-playback:detected",
-                    "audio-controller:silent-watchdog",
-                    this.audio,
-                    { ctxState: this.audioContext?.state ?? null },
-                );
-                this.audio.pause();
-                this.emit("needs-resume");
+            if (this.audio.paused || this.audio.ended) return;
+
+            // (1) Authoritative liveness: did the decode clock advance?
+            // currentTime keeps moving whenever audio is genuinely routing,
+            // even when iOS throttles the 'timeupdate' EVENT in background
+            // (the stall watchdog trusts this exact signal, see checkWatchdog).
+            // AudioContext.state is only a proxy for the graph node and can
+            // read 'running' while silent or non-'running' while audible after
+            // a backgrounded src swap (swapAndPlay never resumes the context),
+            // so it is NOT used as the primary discriminator.
+            if (this.audio.currentTime > this.silentWatchdogBaselineTime + 0.05) {
+                return; // playing fine; timeupdate was just throttled
             }
+
+            // (2) Never tear down playback while hidden. The Tap-to-resume UI
+            // is not actionable in the user's pocket, and a transient route /
+            // throttle stall must not pause healthy background playback. The
+            // foreground path (handleForeground -> notifyForeground +
+            // tryResume) re-evaluates: tryResume re-checks the AudioContext and
+            // emits needs-resume if still suspended -- so genuine nap-mode
+            // silence is surfaced when the user is actually looking at the
+            // screen and can tap.
+            if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+                return;
+            }
+
+            // (3) Visible + no decode progress + not paused/ended -> genuinely
+            // silent. Corroborate with ctx state for the log only.
+            iosAudioLog(
+                "silent-playback:detected",
+                "audio-controller:silent-watchdog",
+                this.audio,
+                {
+                    ctxState: this.audioContext?.state ?? null,
+                    baseline: this.silentWatchdogBaselineTime,
+                    now: this.audio.currentTime,
+                },
+            );
+            this.audio.pause();
+            this.emit("needs-resume");
         }, this.SILENT_PLAYBACK_TIMEOUT_MS);
     }
 
@@ -408,6 +447,7 @@ export class AudioController {
             clearTimeout(this.silentPlaybackTimeout);
             this.silentPlaybackTimeout = null;
         }
+        this.silentWatchdogBaselineTime = -1;
     }
 
     async play(): Promise<void> {
@@ -493,6 +533,10 @@ export class AudioController {
             this.resetWatchdog();
         }
         this.cancelStallGrace();
+        // A watchdog armed while hidden must not fire stale after return;
+        // handleForeground -> tryResume re-evaluates liveness with a real
+        // AudioContext check and re-arms the watchdog if it plays.
+        this.cancelSilentPlaybackWatchdog();
     }
 
     private clearReloadFailsafe(): void {
@@ -644,6 +688,22 @@ export class AudioController {
 
     isPlaying(): boolean {
         return !this.audio.paused && !this.audio.ended;
+    }
+
+    /**
+     * iOS deep-suspension check: the element reports "playing" (paused=false)
+     * but the AudioContext is suspended/interrupted, so no audio is routing --
+     * the genuine "playing but silent" nap-mode state. tryResume() short-circuits
+     * on !paused and cannot detect this, so handleForeground uses this to surface
+     * the Tap-to-resume prompt when the user is foregrounded and can act.
+     */
+    isPlayingButContextSuspended(): boolean {
+        if (!this.isIosStandalone()) return false;
+        if (this.audio.paused || this.audio.ended) return false;
+        // WebKit's "interrupted" state is outside the standard AudioContextState
+        // union, so widen to string before comparing.
+        const s = this.audioContext?.state as string | undefined;
+        return s === "suspended" || s === "interrupted";
     }
 
     hasAudio(): boolean {

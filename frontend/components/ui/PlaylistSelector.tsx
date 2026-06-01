@@ -181,7 +181,7 @@ export function PlaylistSelector({
                                     onClick={() => handleSelectPlaylist(playlist.id)}
                                     className={`w-full text-left px-4 py-4 rounded-lg transition-all border group ${
                                         isMulti && isSelected
-                                            ? "bg-[#ecb200]/10 border-[#ecb200]/30"
+                                            ? "bg-[var(--color-brand)]/10 border-[var(--color-brand)]/30"
                                             : "bg-white/5 hover:bg-white/10 border-white/5 hover:border-white/10"
                                     }`}
                                     disabled={isSaving || isConfirming}
@@ -191,7 +191,7 @@ export function PlaylistSelector({
                                             <div
                                                 className={`w-5 h-5 rounded border-2 flex items-center justify-center mr-3 shrink-0 transition-all ${
                                                     isSelected
-                                                        ? "bg-[#ecb200] border-[#ecb200]"
+                                                        ? "bg-brand border-[var(--color-brand)]"
                                                         : "border-gray-500 group-hover:border-gray-300"
                                                 }`}
                                             >
@@ -203,8 +203,8 @@ export function PlaylistSelector({
                                         <div className="flex-1 min-w-0">
                                             <p className={`font-semibold truncate transition-colors ${
                                                 isMulti && isSelected
-                                                    ? "text-[#ecb200]"
-                                                    : "text-white group-hover:text-[#ecb200]"
+                                                    ? "text-brand"
+                                                    : "text-white group-hover:text-brand"
                                             }`}>
                                                 {playlist.name}
                                             </p>
@@ -216,7 +216,7 @@ export function PlaylistSelector({
                                             </p>
                                         </div>
                                         {!isMulti && (
-                                            <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#ecb200] transition-colors ml-2 shrink-0" />
+                                            <Plus className="w-5 h-5 text-gray-400 group-hover:text-brand transition-colors ml-2 shrink-0" />
                                         )}
                                     </div>
                                 </button>
@@ -230,7 +230,7 @@ export function PlaylistSelector({
                         <button
                             onClick={handleConfirm}
                             disabled={selected.size === 0 || isConfirming}
-                            className="w-full py-3 rounded-lg font-bold transition-all flex items-center justify-center gap-2 disabled:cursor-not-allowed bg-[#ecb200] hover:bg-[#d4a000] text-black disabled:bg-gray-700 disabled:text-gray-500"
+                            className="w-full py-3 rounded-lg font-bold transition-all flex items-center justify-center gap-2 disabled:cursor-not-allowed bg-brand hover:bg-[#d4a000] text-black disabled:bg-gray-700 disabled:text-gray-500"
                         >
                             {isConfirming ? (
                                 <GradientSpinner size="sm" />
@@ -243,7 +243,7 @@ export function PlaylistSelector({
                     </div>
                 )}
 
-                <div className="p-6 border-t border-white/10 bg-[#0a0a0a]/50">
+                <div className="p-6 border-t border-white/10 bg-[var(--bg-primary)]/50">
                     <p className="text-sm text-gray-400 mb-3 font-medium">
                         Create New Playlist
                     </p>
@@ -256,7 +256,7 @@ export function PlaylistSelector({
                             onKeyDown={(e) =>
                                 e.key === "Enter" && handleCreatePlaylist()
                             }
-                            className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[#ecb200] focus:bg-white/10 transition-all"
+                            className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[var(--color-brand)] focus:bg-white/10 transition-all"
                         />
                         <button
                             onClick={handleCreatePlaylist}
@@ -265,7 +265,7 @@ export function PlaylistSelector({
                                 isCreating ||
                                 isSaving
                             }
-                            className="px-5 py-3 bg-[#ecb200] hover:bg-[#d4a000] disabled:bg-gray-700 disabled:cursor-not-allowed text-black font-bold rounded-lg transition-all flex items-center gap-2 disabled:text-gray-500"
+                            className="px-5 py-3 bg-brand hover:bg-[#d4a000] disabled:bg-gray-700 disabled:cursor-not-allowed text-black font-bold rounded-lg transition-all flex items-center gap-2 disabled:text-gray-500"
                         >
                             <Plus className="w-5 h-5" />
                             <span className="hidden sm:inline">Create</span>
@@ -279,7 +279,7 @@ export function PlaylistSelector({
                                 onChange={(e) => setIsPublic(e.target.checked)}
                                 className="sr-only peer"
                             />
-                            <div className="w-10 h-5 bg-white/10 rounded-full peer-checked:bg-[#ecb200] transition-colors" />
+                            <div className="w-10 h-5 bg-white/10 rounded-full peer-checked:bg-brand transition-colors" />
                             <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5" />
                         </div>
                         <span className="text-sm text-gray-400 group-hover:text-gray-300 transition-colors">

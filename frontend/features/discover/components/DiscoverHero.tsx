@@ -28,10 +28,12 @@ export function DiscoverHero({ playlist, config, onOpenSettings }: DiscoverHeroP
                 {/* Settings button - top right */}
                 <button
                     onClick={onOpenSettings}
-                    className="absolute top-6 right-8 p-2 border border-white/10 rounded-lg hover:border-[#a855f7] hover:bg-white/5 transition-all duration-300"
-                    title="Settings"
+                    aria-label="Open discovery settings"
+                    title="Discovery settings"
+                    className="absolute top-6 right-8 flex items-center gap-1.5 px-3 py-2 border border-white/10 rounded-lg hover:border-purple-500 hover:bg-white/5 transition-all duration-300 min-h-[44px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2"
                 >
-                    <Settings className="w-5 h-5 text-white/60" />
+                    <Settings className="w-4 h-4 text-white/60" />
+                    <span className="text-xs font-mono text-white/50 uppercase tracking-wider">Settings</span>
                 </button>
 
                 <div className="flex items-end gap-8">
@@ -39,7 +41,7 @@ export function DiscoverHero({ playlist, config, onOpenSettings }: DiscoverHeroP
                     <div className="flex-1 min-w-0 pb-2">
                         <h1 className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tighter text-white leading-none mb-6">
                             DISCOVER<br/>
-                            <span className="text-[#fca200]">WEEKLY</span>
+                            <span className="text-brand">WEEKLY</span>
                         </h1>
                         <p className="text-sm md:text-base text-gray-500 mb-4 max-w-2xl font-mono">
                             Algorithm-generated playlist / Updated weekly / Personalized to your taste

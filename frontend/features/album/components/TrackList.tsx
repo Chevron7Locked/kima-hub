@@ -105,8 +105,8 @@ const TrackRow = memo(
                 data-tv-card-index={index}
                 tabIndex={0}
                 className={cn(
-                    "group relative flex items-center gap-3 md:gap-4 px-3 md:px-4 py-3 hover:bg-[#141414] transition-colors cursor-pointer touch-manipulation",
-                    isPlaying && "bg-[#1a1a1a] border-l-2",
+                    "group relative flex items-center gap-3 md:gap-4 px-3 md:px-4 py-3 hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer touch-manipulation",
+                    isPlaying && "bg-[var(--bg-hover)] border-l-2",
                     isPreviewOnly && "opacity-70 hover:opacity-90"
                 )}
                 style={
@@ -184,7 +184,7 @@ const TrackRow = memo(
                 {isOwned &&
                     track.playCount !== undefined &&
                     track.playCount > 0 && (
-                        <div className="hidden lg:flex items-center gap-1.5 text-xs text-gray-400 bg-[#1a1a1a] px-2 py-1 rounded-full">
+                        <div className="hidden lg:flex items-center gap-1.5 text-xs text-gray-400 bg-[var(--bg-hover)] px-2 py-1 rounded-full">
                             <Play className="w-3 h-3" />
                             <span>{formatNumber(track.playCount)}</span>
                         </div>
@@ -214,7 +214,7 @@ const TrackRow = memo(
                 {isPreviewOnly ? (
                     <button
                         onClick={handlePreview}
-                        className="p-2 rounded-full bg-[#1a1a1a] hover:bg-[#2a2a2a] transition-colors text-white"
+                        className="p-2 rounded-full bg-[var(--bg-hover)] hover:bg-[#2a2a2a] transition-colors text-white"
                         aria-label={
                             isPreviewPlaying ? "Pause preview" : "Play preview"
                         }

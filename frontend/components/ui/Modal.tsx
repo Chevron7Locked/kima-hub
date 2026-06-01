@@ -44,12 +44,12 @@ export function Modal({
         <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60 ">
             <div
                 className={cn(
-                    "bg-gradient-to-br from-[#141414] to-[#0f0f0f] border border-[#262626] rounded-sm shadow-2xl max-w-md w-full p-6",
+                    "bg-gradient-to-br from-[#141414] to-[#0f0f0f] border border-[var(--border-interactive)] rounded-sm shadow-2xl max-w-md w-full p-6",
                     className
                 )}
             >
                 {/* Header */}
-                <div className="flex items-center justify-between mb-4 pb-4 border-b border-[#1c1c1c]">
+                <div className="flex items-center justify-between mb-4 pb-4 border-b border-[var(--border-subtle)]">
                     <h2 className="text-lg font-medium text-white">{title}</h2>
                     <Button
                         variant="icon"

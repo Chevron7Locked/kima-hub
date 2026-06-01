@@ -92,7 +92,7 @@ export function LibraryRadioStations() {
             disabled={loadingStation !== null}
             className={cn(
                 "relative group overflow-hidden",
-                "bg-[#0a0a0a] border border-white/10 rounded-lg",
+                "bg-[var(--bg-primary)] border border-white/10 rounded-lg",
                 station.hoverBorder,
                 "transition-all duration-300",
                 "hover:shadow-lg",
@@ -170,7 +170,7 @@ export function LibraryRadioStations() {
                     {allStations.map((station) => renderCard(station, true))}
                     {isLoading &&
                         Array.from({ length: 6 }).map((_, i) => (
-                            <div key={i} className="flex-shrink-0 w-[180px] h-[80px] rounded-lg bg-[#0a0a0a] border border-white/10 animate-pulse" />
+                            <div key={i} className="flex-shrink-0 w-[180px] h-[80px] rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse" />
                         ))}
                 </div>
 
@@ -209,7 +209,7 @@ export function LibraryRadioStations() {
                 {isLoading && (
                     <div className="flex-shrink-0 snap-start w-full grid grid-cols-3 grid-rows-2 gap-2">
                         {Array.from({ length: 6 }).map((_, i) => (
-                            <div key={i} className="aspect-[5/3] rounded-lg bg-[#0a0a0a] border border-white/10 animate-pulse" />
+                            <div key={i} className="aspect-[5/3] rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse" />
                         ))}
                     </div>
                 )}

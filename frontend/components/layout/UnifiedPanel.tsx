@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { useNotifications, useActiveDownloads } from "@/hooks/useNotifications";
+import { useActivityPanelSettings } from "@/lib/activity-panel-settings-context";
 import { ActivityIconBar, type ActivityType } from "@/features/vibe/ActivityIconBar";
 import {
     type VibeTab,
@@ -21,13 +22,44 @@ interface UnifiedPanelProps {
 export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
     const [activeTab, setActiveTab] = useState<VibeTab>("now-playing");
     const [expandedActivity, setExpandedActivity] = useState<ActivityType | null>(null);
+    // Externally-registered settings content (discover settings gear, lyrics).
+    // Pages register it via useActivityPanelSettings and open it by dispatching
+    // "set-activity-panel-tab" { tab: "settings" }; this panel renders it.
+    const [showSettings, setShowSettings] = useState(false);
+    const { settingsContent } = useActivityPanelSettings();
     const { unreadCount } = useNotifications();
     const { downloads: activeDownloads } = useActiveDownloads();
     const hasActivity = unreadCount > 0 || activeDownloads.length > 0;
 
     const handleToggleActivity = (type: ActivityType) => {
+        setShowSettings(false);
         setExpandedActivity((prev) => (prev === type ? null : type));
     };
+
+    // Reset settings view on collapse so reopening shows the feed.
+    const handleCollapse = () => {
+        setShowSettings(false);
+        onToggle();
+    };
+
+    // Respond to the cross-component tab event (discover gear, lyrics back button).
+    useEffect(() => {
+        const handleSetTab = (e: Event) => {
+            const tab = (e as CustomEvent<{ tab?: string }>).detail?.tab;
+            if (tab === "settings") {
+                setExpandedActivity(null);
+                setShowSettings(true);
+            } else {
+                setShowSettings(false);
+            }
+        };
+        window.addEventListener("set-activity-panel-tab", handleSetTab);
+        return () => window.removeEventListener("set-activity-panel-tab", handleSetTab);
+    }, []);
+
+    // settingsContent null (owner page unmounted) falls through to the feed via
+    // the `settingsContent &&` render guard -- no reset effect needed.
+    const settingsActive = showSettings && !!settingsContent;
 
     return (
         <div
@@ -35,7 +67,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
             style={{ width: isOpen ? 380 : 48 }}
         >
             <div
-                className="absolute inset-y-0 right-0 w-[380px] bg-[#0a0a0a] flex flex-col overflow-hidden transition-transform duration-200 ease-out rounded-lg"
+                className="absolute inset-y-0 right-0 w-[380px] bg-[var(--bg-primary)] flex flex-col overflow-hidden transition-transform duration-200 ease-out rounded-lg"
                 style={{
                     transform: isOpen ? "translateX(0)" : "translateX(332px)",
                     willChange: "transform",
@@ -43,9 +75,9 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
             >
                 {/* Collapsed strip */}
                 <div
-                    onClick={onToggle}
+                    onClick={handleCollapse}
                     className={cn(
-                        "absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center cursor-pointer hover:bg-[#141414] transition-colors z-10",
+                        "absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center cursor-pointer hover:bg-[var(--bg-tertiary)] transition-colors z-10",
                         isOpen && "pointer-events-none opacity-0",
                     )}
                     title="Open panel"
@@ -63,6 +95,15 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                         isOpen ? "opacity-100" : "opacity-0 pointer-events-none",
                     )}
                 >
+                    {settingsActive ? (
+                        // Externally-registered settings (discover gear / lyrics).
+                        // The content provides its own header and back button,
+                        // which dispatches set-activity-panel-tab to exit.
+                        <div className="flex-1 min-h-0 overflow-hidden">
+                            {settingsContent}
+                        </div>
+                    ) : (
+                    <>
                     {/* Header */}
                     <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
                         <div className="flex items-center gap-2">
@@ -72,7 +113,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                             </span>
                         </div>
                         <button
-                            onClick={onToggle}
+                            onClick={handleCollapse}
                             className="p-1 hover:bg-white/10 transition-colors"
                             title="Collapse panel"
                         >
@@ -101,6 +142,8 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                             <TabBar activeTab={activeTab} onTabClick={setActiveTab} />
                             <TabContent activeTab={activeTab} />
                         </>
+                    )}
+                    </>
                     )}
                 </div>
             </div>

@@ -272,9 +272,9 @@ export function FullPlayer() {
                                     audioError
                                         ? "bg-red-500 text-white hover:scale-110 hover:bg-red-400"
                                         : hasMedia && !isBuffering
-                                        ? "bg-[#fca200] text-black hover:scale-110 shadow-lg shadow-[#fca200]/20 hover:shadow-[#fca200]/30"
+                                        ? "bg-brand text-black hover:scale-110 shadow-lg shadow-[#fca200]/20 hover:shadow-[#fca200]/30"
                                         : isBuffering
-                                        ? "bg-[#fca200]/80 text-black"
+                                        ? "bg-brand/80 text-black"
                                         : "bg-gray-700 text-gray-500 cursor-not-allowed"
                                 )}
                                 disabled={!hasMedia || isBuffering}
@@ -298,7 +298,7 @@ export function FullPlayer() {
                                 }
                             >
                                 {hasMedia && !isBuffering && !audioError && (
-                                    <div className="absolute inset-0 rounded-full bg-[#fca200] blur-md opacity-0 group-hover:opacity-50 transition-opacity duration-200" />
+                                    <div className="absolute inset-0 rounded-full bg-brand blur-md opacity-0 group-hover:opacity-50 transition-opacity duration-200" />
                                 )}
                                 {audioError ? (
                                     <RefreshCw className="w-5 h-5 relative z-10" />
@@ -435,7 +435,7 @@ export function FullPlayer() {
                                 onClick={() => router.push("/queue")}
                                 className={`p-1.5 rounded-md transition-colors ${
                                     pathname === "/queue"
-                                        ? "text-[#fca200]"
+                                        ? "text-brand"
                                         : "text-white/40 hover:text-white/70"
                                 }`}
                                 aria-label="View play queue"

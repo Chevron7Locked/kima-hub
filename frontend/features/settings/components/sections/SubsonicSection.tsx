@@ -108,7 +108,7 @@ export function SubsonicSection() {
                     </span>
                     <button
                         onClick={() => copyToClipboard(serverUrl)}
-                        className="text-xs font-mono text-[#fca208] hover:text-[#f97316] uppercase tracking-wider transition-colors shrink-0"
+                        className="text-xs font-mono text-brand hover:text-[#f97316] uppercase tracking-wider transition-colors shrink-0"
                     >
                         Copy
                     </button>
@@ -142,7 +142,7 @@ export function SubsonicSection() {
                         <button
                             onClick={handleGenerate}
                             disabled={generating}
-                            className="px-4 py-2 bg-[#fca208] text-black text-xs font-black rounded-lg uppercase tracking-wider
+                            className="px-4 py-2 bg-brand text-black text-xs font-black rounded-lg uppercase tracking-wider
                                 hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                             {generating ? "Generating..." : "Generate Token"}
@@ -168,7 +168,7 @@ export function SubsonicSection() {
                         </code>
                         <button
                             onClick={() => copyToClipboard(newToken)}
-                            className="text-xs font-mono text-[#fca208] hover:text-[#f97316] uppercase tracking-wider transition-colors shrink-0 pt-2"
+                            className="text-xs font-mono text-brand hover:text-[#f97316] uppercase tracking-wider transition-colors shrink-0 pt-2"
                         >
                             Copy
                         </button>

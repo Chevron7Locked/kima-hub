@@ -131,7 +131,7 @@ export function UserManagementSection() {
                             <button
                                 onClick={handleCreate}
                                 disabled={creating || !newUsername.trim() || newPassword.length < 6}
-                                className="px-4 py-1.5 text-xs font-black bg-[#fca208] text-black rounded-lg uppercase tracking-wider
+                                className="px-4 py-1.5 text-xs font-black bg-brand text-black rounded-lg uppercase tracking-wider
                                     hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 {creating ? "Creating..." : "Create"}
@@ -158,7 +158,7 @@ export function UserManagementSection() {
                                 className="flex items-center justify-between py-3 px-3 rounded-lg hover:bg-white/[0.03] border border-transparent hover:border-white/5 transition-all"
                             >
                                 <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-xs font-black text-[#fca208]">
+                                    <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-xs font-black text-brand">
                                         {user.username[0].toUpperCase()}
                                     </div>
                                     <div>

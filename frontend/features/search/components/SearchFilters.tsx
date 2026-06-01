@@ -58,7 +58,7 @@ export function SearchFilters({
     return (
         <div className="relative">
             {/* Background blur effect */}
-            <div className="absolute -inset-x-4 -inset-y-2 bg-[#0a0a0a]/60 backdrop-blur-xl rounded-2xl border border-white/5" />
+            <div className="absolute -inset-x-4 -inset-y-2 bg-[var(--bg-primary)]/60 backdrop-blur-xl rounded-2xl border border-white/5" />
 
             {/* Filters */}
             <div

@@ -48,7 +48,7 @@ export function ServiceWorkerRegistration() {
     if (!updateAvailable) return null;
 
     return (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[200] bg-[#1a1a1a] border border-white/10 rounded-lg px-4 py-3 flex items-center gap-3 shadow-xl text-sm whitespace-nowrap">
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[200] bg-[var(--bg-hover)] border border-white/10 rounded-lg px-4 py-3 flex items-center gap-3 shadow-xl text-sm whitespace-nowrap">
             <span className="text-white/60">New version available</span>
             <button
                 onClick={handleReload}

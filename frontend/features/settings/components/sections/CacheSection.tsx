@@ -6,6 +6,7 @@ import { SystemSettings } from "../../types";
 import { api } from "@/lib/api";
 import { enrichmentApi, type EnrichmentFailure } from "@/lib/enrichmentApi";
 import { useFeatures } from "@/lib/features-context";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
     useQueryClient,
     useQuery,
@@ -34,7 +35,7 @@ interface CacheSectionProps {
 
 function ProgressBar({
     progress,
-    color = "bg-[#fca208]",
+    color = "bg-brand",
     showPercentage = true,
 }: {
     progress: number;
@@ -96,7 +97,7 @@ function EnrichmentStage({
                 {isComplete ? (
                     <CheckCircle className="w-4 h-4 text-green-400" />
                 ) : hasActivity ? (
-                    <Loader2 className="w-4 h-4 text-[#fca208] animate-spin" />
+                    <Loader2 className="w-4 h-4 text-brand animate-spin" />
                 ) : (
                     <Icon className="w-4 h-4 text-white/40" />
                 )}
@@ -121,7 +122,7 @@ function EnrichmentStage({
                                 ? "bg-green-500"
                                 : isBackground
                                 ? "bg-purple-500"
-                                : "bg-[#fca208]"
+                                : "bg-brand"
                         }
                     />
                 </div>
@@ -135,7 +136,7 @@ function EnrichmentStage({
                         </span>
                     )}
                     {processing > 0 && (
-                        <span className="text-[#fca208]">
+                        <span className="text-brand">
                             {processing} processing
                         </span>
                     )}
@@ -154,7 +155,7 @@ function EnrichmentStage({
 const sliderClass = `w-32 h-1.5 bg-white/5 rounded-lg appearance-none cursor-pointer
     [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5
     [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gradient-to-r
-    [&::-webkit-slider-thumb]:from-[#fca208] [&::-webkit-slider-thumb]:to-[#f97316]
+    [&::-webkit-slider-thumb]:from-brand [&::-webkit-slider-thumb]:to-[#f97316]
     [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-[#fca208]/20
     hover:[&::-webkit-slider-thumb]:scale-110 [&::-webkit-slider-thumb]:transition-transform`;
 
@@ -186,6 +187,50 @@ function EnrichmentFailuresList() {
     );
 }
 
+type ConfirmTarget =
+    | "artists"
+    | "moodTags"
+    | "audioAnalysis"
+    | "vibeEmbeddings"
+    | "allEnrichment"
+    | null;
+
+const confirmMeta: Record<
+    NonNullable<ConfirmTarget>,
+    { title: string; message: string; confirmText: string }
+> = {
+    artists: {
+        title: "Reset Artist Metadata?",
+        message:
+            "This clears all artist bios, images, and similar-artist data and re-fetches everything from Last.fm. On large libraries this can take a while.",
+        confirmText: "Reset Artists",
+    },
+    moodTags: {
+        title: "Reset Mood Tags?",
+        message:
+            "This deletes all mood and vibe tags for every track. Re-running Last.fm tagging on a large library takes time.",
+        confirmText: "Reset Mood Tags",
+    },
+    audioAnalysis: {
+        title: "Reset Audio Analysis?",
+        message:
+            "This deletes BPM, key, energy, and danceability results for every track. Re-analysis is CPU-intensive and can take a long time on large libraries.",
+        confirmText: "Reset Audio Analysis",
+    },
+    vibeEmbeddings: {
+        title: "Reset Vibe Embeddings?",
+        message:
+            "This deletes all CLAP audio embeddings used for vibe similarity. Re-embedding is CPU-intensive and can take a long time on large libraries.",
+        confirmText: "Reset Vibe Embeddings",
+    },
+    allEnrichment: {
+        title: "Reset All Enrichment Data?",
+        message:
+            "This wipes everything: artist metadata, audio analysis, vibe embeddings, mood tags, and all failure records. Your entire library will be re-enriched from scratch. This is slow to rebuild on large libraries.",
+        confirmText: "Reset Everything",
+    },
+};
+
 export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     const { musicCNN, vibeEmbeddings, loading: featuresLoading } = useFeatures();
     const [syncing, setSyncing] = useState(false);
@@ -199,6 +244,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     const [resettingEnrichment, setResettingEnrichment] = useState(false);
     const [retryingFailed, setRetryingFailed] = useState(false);
     const [retryResult, setRetryResult] = useState<{ reset: number } | null>(null);
+    const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget>(null);
+    const [maintenanceOpen, setMaintenanceOpen] = useState(false);
     const [cleanupResult, setCleanupResult] = useState<{
         totalCleaned: number;
         cleaned: {
@@ -275,7 +322,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             });
             return { previousConcurrency };
         },
-        onError: (err, newConcurrency, context) => {
+        onError: (_err, _newConcurrency, context) => {
             queryClient.setQueryData(
                 ["enrichment-concurrency"],
                 context?.previousConcurrency
@@ -303,7 +350,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             });
             return { previousWorkers };
         },
-        onError: (err, newWorkers, context) => {
+        onError: (_err, _newWorkers, context) => {
             queryClient.setQueryData(
                 ["analysis-workers"],
                 context?.previousWorkers
@@ -337,7 +384,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             });
             return { previousWorkers };
         },
-        onError: (err, newWorkers, context) => {
+        onError: (_err, _newWorkers, context) => {
             queryClient.setQueryData(
                 ["clap-workers"],
                 context?.previousWorkers
@@ -450,7 +497,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         }
     };
 
-    const handleResetArtists = async () => {
+    const execResetArtists = async () => {
         setResettingArtists(true);
         setError(null);
         try {
@@ -465,7 +512,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         }
     };
 
-    const handleResetMoodTags = async () => {
+    const execResetMoodTags = async () => {
         setResettingMoodTags(true);
         setError(null);
         try {
@@ -480,7 +527,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         }
     };
 
-    const handleResetAudioAnalysis = async () => {
+    const execResetAudioAnalysis = async () => {
         setResettingAudio(true);
         setError(null);
         try {
@@ -495,7 +542,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         }
     };
 
-    const handleResetVibeEmbeddings = async () => {
+    const execResetVibeEmbeddings = async () => {
         setResettingVibe(true);
         setError(null);
         try {
@@ -555,19 +602,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         }
     };
 
-    const handleResetEnrichment = async () => {
-        if (!window.confirm(
-            "This will wipe ALL enrichment data:\n\n" +
-            "- Artist metadata (bios, images, similar artists)\n" +
-            "- Audio analysis results (BPM, key, energy, etc.)\n" +
-            "- Track embeddings (vibe map, similarity)\n" +
-            "- Mood tags and genre tags\n" +
-            "- All failure records\n" +
-            "- Scan validation status\n\n" +
-            "Everything will be re-enriched from scratch.\n\n" +
-            "Are you sure?"
-        )) return;
-
+    const execResetEnrichment = async () => {
         setResettingEnrichment(true);
         setError(null);
         try {
@@ -580,6 +615,16 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         } finally {
             setResettingEnrichment(false);
         }
+    };
+
+    const handleConfirmAction = async () => {
+        const target = confirmTarget;
+        setConfirmTarget(null);
+        if (target === "artists") await execResetArtists();
+        else if (target === "moodTags") await execResetMoodTags();
+        else if (target === "audioAnalysis") await execResetAudioAnalysis();
+        else if (target === "vibeEmbeddings") await execResetVibeEmbeddings();
+        else if (target === "allEnrichment") await execResetEnrichment();
     };
 
     const handlePause = async () => {
@@ -622,7 +667,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
 
     return (
         <>
-            <SettingsSection id="cache" title="Cache & Automation">
+            <SettingsSection id="cache" title="Library Enrichment">
                 {/* Enrichment Progress */}
                 {isProgressPending ? (
                     <div className="mb-6 p-4 bg-white/5 rounded-lg border border-white/10 flex items-center gap-2">
@@ -634,7 +679,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                         <span className="text-xs font-mono text-red-400 uppercase tracking-wider">Failed to load enrichment status</span>
                         <button
                             onClick={() => refetchProgress()}
-                            className="px-3 py-1 text-[10px] font-mono bg-white/5 border border-white/10 text-white/50 rounded-lg hover:bg-white/10 transition-colors uppercase tracking-wider"
+                            className="px-3 py-2.5 min-h-[44px] text-[10px] font-mono bg-white/5 border border-white/10 text-white/50 rounded-lg hover:bg-white/10 transition-colors uppercase tracking-wider"
                         >
                             Retry
                         </button>
@@ -643,7 +688,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                     <div className="mb-6 p-4 bg-white/5 rounded-lg border border-white/10">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-sm font-medium text-white">
-                                Library Enrichment
+                                Enrichment Status
                             </h3>
                             {enrichmentProgress.coreComplete &&
                                 !enrichmentProgress.isFullyComplete && (
@@ -677,9 +722,10 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     />
                                 </div>
                                 <button
-                                    onClick={handleResetArtists}
+                                    onClick={() => setConfirmTarget("artists")}
                                     disabled={resettingArtists || syncing || reEnriching || isEnrichmentActive}
-                                    className="mt-1 px-2 py-1 text-[10px] font-mono bg-white/5 border border-white/10 text-white/40 rounded-lg
+                                    aria-label="Reset and re-run artist metadata enrichment"
+                                    className="mt-1 px-3 py-2.5 min-h-[44px] text-[10px] font-mono bg-white/5 border border-white/10 text-white/40 rounded-lg
                                         hover:bg-white/10 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap uppercase tracking-wider"
                                 >
                                     {resettingArtists ? "Resetting..." : "Re-run"}
@@ -701,9 +747,10 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     />
                                 </div>
                                 <button
-                                    onClick={handleResetMoodTags}
+                                    onClick={() => setConfirmTarget("moodTags")}
                                     disabled={resettingMoodTags || syncing || reEnriching || isEnrichmentActive}
-                                    className="mt-1 px-2 py-1 text-[10px] font-mono bg-white/5 border border-white/10 text-white/40 rounded-lg
+                                    aria-label="Reset and re-run mood tag enrichment"
+                                    className="mt-1 px-3 py-2.5 min-h-[44px] text-[10px] font-mono bg-white/5 border border-white/10 text-white/40 rounded-lg
                                         hover:bg-white/10 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap uppercase tracking-wider"
                                 >
                                     {resettingMoodTags ? "Resetting..." : "Re-run"}
@@ -735,9 +782,10 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                         />
                                     </div>
                                     <button
-                                        onClick={handleResetAudioAnalysis}
+                                        onClick={() => setConfirmTarget("audioAnalysis")}
                                         disabled={resettingAudio || syncing || reEnriching || isEnrichmentActive}
-                                        className="mt-1 px-2 py-1 text-[10px] font-mono bg-white/5 border border-white/10 text-white/40 rounded-lg
+                                        aria-label="Reset and re-run audio analysis"
+                                        className="mt-1 px-3 py-2.5 min-h-[44px] text-[10px] font-mono bg-white/5 border border-white/10 text-white/40 rounded-lg
                                             hover:bg-white/10 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap uppercase tracking-wider"
                                     >
                                         {resettingAudio ? "Resetting..." : "Re-run"}
@@ -771,9 +819,10 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                             />
                                         </div>
                                         <button
-                                            onClick={handleResetVibeEmbeddings}
+                                            onClick={() => setConfirmTarget("vibeEmbeddings")}
                                             disabled={resettingVibe || syncing || reEnriching || isEnrichmentActive}
-                                            className="mt-1 px-2 py-1 text-[10px] font-mono bg-white/5 border border-white/10 text-white/40 rounded-lg
+                                            aria-label="Reset and re-run vibe embedding generation"
+                                            className="mt-1 px-3 py-2.5 min-h-[44px] text-[10px] font-mono bg-white/5 border border-white/10 text-white/40 rounded-lg
                                                 hover:bg-white/10 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap uppercase tracking-wider"
                                         >
                                             {resettingVibe ? "Resetting..." : "Re-run"}
@@ -798,7 +847,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 disabled={
                                     syncing || reEnriching || isEnrichmentActive
                                 }
-                                className="px-3 py-1.5 text-xs font-black bg-[#fca208] text-black rounded-lg uppercase tracking-wider
+                                className="px-3 py-2.5 min-h-[44px] text-xs font-black bg-brand text-black rounded-lg uppercase tracking-wider
                                 hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 {syncing ? "Syncing..." : "Sync New"}
@@ -808,7 +857,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 disabled={
                                     syncing || reEnriching || isEnrichmentActive
                                 }
-                                className="px-3 py-1.5 text-xs font-mono bg-white/5 border border-white/10 text-white/70 rounded-lg uppercase tracking-wider
+                                className="px-3 py-2.5 min-h-[44px] text-xs font-mono bg-white/5 border border-white/10 text-white/70 rounded-lg uppercase tracking-wider
                                 hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                             >
                                 {reEnriching ? "Starting..." : "Re-enrich All"}
@@ -819,7 +868,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     {enrichmentState?.status === "running" ? (
                                         <button
                                             onClick={handlePause}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono bg-yellow-600/20 border border-yellow-600/30 text-yellow-400 rounded-lg uppercase tracking-wider
+                                            className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-mono bg-yellow-600/20 border border-yellow-600/30 text-yellow-400 rounded-lg uppercase tracking-wider
                                             hover:bg-yellow-600/30 transition-colors"
                                         >
                                             <Pause className="w-3 h-3" />
@@ -828,7 +877,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     ) : (
                                         <button
                                             onClick={handleResume}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono bg-green-600/20 border border-green-600/30 text-green-400 rounded-lg uppercase tracking-wider
+                                            className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-mono bg-green-600/20 border border-green-600/30 text-green-400 rounded-lg uppercase tracking-wider
                                             hover:bg-green-600/30 transition-colors"
                                         >
                                             <Play className="w-3 h-3" />
@@ -837,7 +886,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     )}
                                     <button
                                         onClick={handleStop}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono bg-red-600/20 border border-red-600/30 text-red-400 rounded-lg uppercase tracking-wider
+                                        className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-mono bg-red-600/20 border border-red-600/30 text-red-400 rounded-lg uppercase tracking-wider
                                         hover:bg-red-600/30 transition-colors"
                                     >
                                         <StopCircle className="w-3 h-3" />
@@ -845,7 +894,6 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     </button>
                                 </>
                             )}
-
                         </div>
 
                         {totalFailures > 0 && (
@@ -862,76 +910,65 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             </div>
                         )}
 
-                        {/* Status Message */}
-                        {enrichmentState &&
-                            enrichmentState.status !== "idle" && (
-                                <div className="mt-3 p-2 bg-white/[0.02] rounded-lg border border-white/5 text-xs">
-                                    <div className="flex items-center gap-2">
-                                        {enrichmentState.status ===
-                                            "running" && (
-                                            <Loader2 className="w-3 h-3 animate-spin text-[#fca208]" />
-                                        )}
-                                        {enrichmentState.status ===
-                                            "paused" && (
-                                            <Pause className="w-3 h-3 text-yellow-400" />
-                                        )}
-                                        {enrichmentState.status ===
-                                            "stopping" && (
-                                            <StopCircle className="w-3 h-3 text-red-400 animate-pulse" />
-                                        )}
-                                        <span className="text-white/50 font-mono">
+                        {/* Status Message -- aria-live so screen readers announce changes */}
+                        <div aria-live="polite" aria-atomic="true">
+                            {enrichmentState &&
+                                enrichmentState.status !== "idle" && (
+                                    <div className="mt-3 p-2 bg-white/[0.02] rounded-lg border border-white/5 text-xs">
+                                        <div className="flex items-center gap-2">
                                             {enrichmentState.status ===
-                                                "running" &&
-                                                `Processing ${enrichmentState.currentPhase}...`}
+                                                "running" && (
+                                                <Loader2 className="w-3 h-3 animate-spin text-brand" />
+                                            )}
                                             {enrichmentState.status ===
-                                                "paused" && "Enrichment paused"}
+                                                "paused" && (
+                                                <Pause className="w-3 h-3 text-yellow-400" />
+                                            )}
                                             {enrichmentState.status ===
-                                                "stopping" &&
-                                                `Stopping... finishing ${
-                                                    enrichmentState.stoppingInfo
-                                                        ?.currentItem ||
-                                                    "current item"
-                                                }`}
-                                        </span>
+                                                "stopping" && (
+                                                <StopCircle className="w-3 h-3 text-red-400 animate-pulse" />
+                                            )}
+                                            <span className="text-white/50 font-mono">
+                                                {enrichmentState.status ===
+                                                    "running" &&
+                                                    `Processing ${enrichmentState.currentPhase}...`}
+                                                {enrichmentState.status ===
+                                                    "paused" && "Enrichment paused"}
+                                                {enrichmentState.status ===
+                                                    "stopping" &&
+                                                    `Stopping... finishing ${
+                                                        enrichmentState.stoppingInfo
+                                                            ?.currentItem ||
+                                                        "current item"
+                                                    }`}
+                                            </span>
+                                        </div>
+                                        {enrichmentState.status === "running" &&
+                                            enrichmentState.currentPhase ===
+                                                "artists" &&
+                                            enrichmentState.artists?.current && (
+                                                <div className="mt-1 text-white/30 font-mono truncate">
+                                                    Current:{" "}
+                                                    {
+                                                        enrichmentState.artists
+                                                            .current
+                                                    }
+                                                </div>
+                                            )}
+                                        {enrichmentState.status === "running" &&
+                                            enrichmentState.currentPhase ===
+                                                "tracks" &&
+                                            enrichmentState.tracks?.current && (
+                                                <div className="mt-1 text-white/30 font-mono truncate">
+                                                    Current:{" "}
+                                                    {enrichmentState.tracks.current}
+                                                </div>
+                                            )}
                                     </div>
-                                    {enrichmentState.status === "running" &&
-                                        enrichmentState.currentPhase ===
-                                            "artists" &&
-                                        enrichmentState.artists?.current && (
-                                            <div className="mt-1 text-white/30 font-mono truncate">
-                                                Current:{" "}
-                                                {
-                                                    enrichmentState.artists
-                                                        .current
-                                                }
-                                            </div>
-                                        )}
-                                    {enrichmentState.status === "running" &&
-                                        enrichmentState.currentPhase ===
-                                            "tracks" &&
-                                        enrichmentState.tracks?.current && (
-                                            <div className="mt-1 text-white/30 font-mono truncate">
-                                                Current:{" "}
-                                                {enrichmentState.tracks.current}
-                                            </div>
-                                        )}
-                                </div>
-                            )}
+                                )}
+                        </div>
                     </div>
                 ) : null}
-
-                {enrichmentProgress && (
-                    <div className="flex items-center gap-3 -mt-3 mb-4 px-1">
-                        <button
-                            onClick={handleResetEnrichment}
-                            disabled={resettingEnrichment || isEnrichmentActive}
-                            className="px-3 py-1.5 text-xs font-black bg-red-600/80 text-white rounded-lg uppercase tracking-wider
-                                hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        >
-                            {resettingEnrichment ? "Resetting..." : "Reset Enrichment Data"}
-                        </button>
-                    </div>
-                )}
 
                 {/* Cache Sizes */}
                 <SettingsRow
@@ -1147,61 +1184,115 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                     </SettingsRow>
                 )}
 
-                {/* Cache Actions */}
-                <div className="flex flex-col gap-3 pt-4">
+                {/* Maintenance Operations -- grouped destructive actions */}
+                <div className="mt-6 rounded-lg border border-white/10 overflow-hidden">
                     <button
-                        onClick={handleClearCaches}
-                        disabled={clearingCaches}
-                        className={secondaryBtnClass}
+                        onClick={() => setMaintenanceOpen((o) => !o)}
+                        aria-expanded={maintenanceOpen}
+                        className="w-full flex items-center justify-between px-4 py-3 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-left"
                     >
-                        {clearingCaches ? "Clearing..." : "Clear All Caches"}
+                        <div>
+                            <span className="text-xs font-mono text-white/60 uppercase tracking-wider">
+                                Maintenance Operations
+                            </span>
+                            <p className="text-[10px] font-mono text-white/25 uppercase tracking-wider mt-0.5">
+                                Destructive actions -- cache clearing, job cleanup, full resets
+                            </p>
+                        </div>
+                        <ChevronDown
+                            className={`w-4 h-4 text-white/30 transition-transform shrink-0 ${maintenanceOpen ? "rotate-180" : ""}`}
+                        />
                     </button>
-                    <button
-                        onClick={handleCleanupStaleJobs}
-                        disabled={cleaningStaleJobs}
-                        className={secondaryBtnClass}
-                    >
-                        {cleaningStaleJobs
-                            ? "Cleaning..."
-                            : "Cleanup Stale Jobs"}
-                    </button>
-                    {((enrichmentProgress?.audioAnalysis?.failed ?? 0) > 0 || (enrichmentProgress?.audioAnalysis?.permanentlyFailed ?? 0) > 0) && (
-                        <button
-                            onClick={handleRetryFailedAnalysis}
-                            disabled={retryingFailed || isEnrichmentActive}
-                            className={secondaryBtnClass}
-                        >
-                            {retryingFailed
-                                ? "Retrying..."
-                                : `Retry Failed Analysis (${(enrichmentProgress?.audioAnalysis?.failed || 0) + (enrichmentProgress?.audioAnalysis?.permanentlyFailed || 0)})`}
-                        </button>
+
+                    {maintenanceOpen && (
+                        <div className="px-4 pt-3 pb-4 space-y-3 border-t border-white/10">
+                            {/* Non-destructive maintenance */}
+                            <button
+                                onClick={handleClearCaches}
+                                disabled={clearingCaches}
+                                className={secondaryBtnClass}
+                            >
+                                {clearingCaches ? "Clearing..." : "Clear All Caches"}
+                            </button>
+                            <button
+                                onClick={handleCleanupStaleJobs}
+                                disabled={cleaningStaleJobs}
+                                className={secondaryBtnClass}
+                            >
+                                {cleaningStaleJobs
+                                    ? "Cleaning..."
+                                    : "Cleanup Stale Jobs"}
+                            </button>
+                            {((enrichmentProgress?.audioAnalysis?.failed ?? 0) > 0 || (enrichmentProgress?.audioAnalysis?.permanentlyFailed ?? 0) > 0) && (
+                                <button
+                                    onClick={handleRetryFailedAnalysis}
+                                    disabled={retryingFailed || isEnrichmentActive}
+                                    className={secondaryBtnClass}
+                                >
+                                    {retryingFailed
+                                        ? "Retrying..."
+                                        : `Retry Failed Analysis (${(enrichmentProgress?.audioAnalysis?.failed || 0) + (enrichmentProgress?.audioAnalysis?.permanentlyFailed || 0)})`}
+                                </button>
+                            )}
+
+                            {/* Full enrichment reset -- most destructive, visually distinct */}
+                            {enrichmentProgress && (
+                                <div className="pt-2 border-t border-white/5">
+                                    <button
+                                        onClick={() => setConfirmTarget("allEnrichment")}
+                                        disabled={resettingEnrichment || isEnrichmentActive}
+                                        className="px-3 py-2.5 min-h-[44px] text-xs font-black bg-red-600/80 text-white rounded-lg uppercase tracking-wider
+                                            hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        {resettingEnrichment ? "Resetting..." : "Reset All Enrichment Data"}
+                                    </button>
+                                    <p className="mt-1.5 text-[10px] font-mono text-white/25 uppercase tracking-wider">
+                                        Wipes artists, audio analysis, vibe embeddings, and mood tags
+                                    </p>
+                                </div>
+                            )}
+
+                            {retryResult && (
+                                <p className="text-xs font-mono text-green-400 uppercase tracking-wider">
+                                    Reset {retryResult.reset} failed tracks to pending
+                                </p>
+                            )}
+                            {cleanupResult && cleanupResult.totalCleaned > 0 && (
+                                <p className="text-xs font-mono text-green-400 uppercase tracking-wider">
+                                    Cleaned:{" "}
+                                    {cleanupResult.cleaned.discoveryBatches.cleaned}{" "}
+                                    batches,{" "}
+                                    {cleanupResult.cleaned.downloadJobs.cleaned}{" "}
+                                    downloads,{" "}
+                                    {cleanupResult.cleaned.spotifyImportJobs.cleaned}{" "}
+                                    imports, {cleanupResult.cleaned.bullQueues.cleaned}{" "}
+                                    queue jobs
+                                </p>
+                            )}
+                            {cleanupResult && cleanupResult.totalCleaned === 0 && (
+                                <p className="text-xs font-mono text-white/30 uppercase tracking-wider">
+                                    No stale jobs found
+                                </p>
+                            )}
+                            {error && <p className="text-xs font-mono text-red-400 uppercase tracking-wider">{error}</p>}
+                        </div>
                     )}
-                    {retryResult && (
-                        <p className="text-xs font-mono text-green-400 uppercase tracking-wider">
-                            Reset {retryResult.reset} failed tracks to pending
-                        </p>
-                    )}
-                    {cleanupResult && cleanupResult.totalCleaned > 0 && (
-                        <p className="text-xs font-mono text-green-400 uppercase tracking-wider">
-                            Cleaned:{" "}
-                            {cleanupResult.cleaned.discoveryBatches.cleaned}{" "}
-                            batches,{" "}
-                            {cleanupResult.cleaned.downloadJobs.cleaned}{" "}
-                            downloads,{" "}
-                            {cleanupResult.cleaned.spotifyImportJobs.cleaned}{" "}
-                            imports, {cleanupResult.cleaned.bullQueues.cleaned}{" "}
-                            queue jobs
-                        </p>
-                    )}
-                    {cleanupResult && cleanupResult.totalCleaned === 0 && (
-                        <p className="text-xs font-mono text-white/30 uppercase tracking-wider">
-                            No stale jobs found
-                        </p>
-                    )}
-                    {error && <p className="text-xs font-mono text-red-400 uppercase tracking-wider">{error}</p>}
                 </div>
             </SettingsSection>
 
+            {/* Confirm dialog for destructive resets */}
+            {confirmTarget && (
+                <ConfirmDialog
+                    isOpen={true}
+                    onClose={() => setConfirmTarget(null)}
+                    onConfirm={handleConfirmAction}
+                    title={confirmMeta[confirmTarget].title}
+                    message={confirmMeta[confirmTarget].message}
+                    confirmText={confirmMeta[confirmTarget].confirmText}
+                    cancelText="Cancel"
+                    variant="danger"
+                />
+            )}
         </>
     );
 }

@@ -116,7 +116,7 @@ export function PreviewEpisodes({
                         <h2 className="text-xl font-black tracking-tighter uppercase">About</h2>
                         <span className="flex-1 border-t border-white/10" />
                     </div>
-                    <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[#0a0a0a] p-4">
+                    <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[var(--bg-primary)] p-4">
                         <div
                             className="prose prose-invert prose-sm max-w-none text-white/60 [&_a]:text-[#3b82f6] [&_a]:no-underline [&_a:hover]:underline font-mono text-xs leading-relaxed"
                             dangerouslySetInnerHTML={{

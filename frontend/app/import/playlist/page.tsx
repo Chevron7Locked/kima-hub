@@ -448,6 +448,7 @@ function ImportPlaylistPageContent() {
                     <button
                         onClick={() => router.back()}
                         className="p-2 hover:bg-white/5 rounded-full transition-colors"
+                        aria-label="Back"
                     >
                         <ArrowLeft className="w-5 h-5 text-gray-400" />
                     </button>
@@ -468,7 +469,7 @@ function ImportPlaylistPageContent() {
                             Looking for playlists to import?{" "}
                             <Link
                                 href="/browse/playlists"
-                                className="text-[#ecb200] hover:underline font-medium"
+                                className="text-brand hover:underline font-medium"
                             >
                                 Browse Deezer playlists & radio stations →
                             </Link>
@@ -480,15 +481,16 @@ function ImportPlaylistPageContent() {
                 {step === "input" && (
                     <div className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">
+                            <label htmlFor="playlist-url" className="block text-sm font-medium text-gray-300 mb-2">
                                 Playlist URL
                             </label>
                             <input
+                                id="playlist-url"
                                 type="text"
                                 value={url}
                                 onChange={handleUrlChange}
                                 placeholder="https://www.deezer.com/playlist/... or https://open.spotify.com/playlist/..."
-                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#ecb200]/50 focus:border-[#ecb200] transition-colors"
+                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]/50 focus:border-[var(--color-brand)] transition-colors"
                                 onKeyDown={(e) =>
                                     e.key === "Enter" && handleFetchPreview()
                                 }
@@ -519,7 +521,7 @@ function ImportPlaylistPageContent() {
                             <button
                                 onClick={handleQuickImport}
                                 disabled={isLoading || !url.trim()}
-                                className="flex-1 py-3 rounded-full font-medium bg-[#ecb200] text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                                className="flex-1 py-3 rounded-full font-medium bg-brand text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
                             >
                                 {isLoading ? (
                                     <>
@@ -890,10 +892,11 @@ function ImportPlaylistPageContent() {
 
                         {/* Playlist name input */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">
+                            <label htmlFor="playlist-name" className="block text-sm font-medium text-gray-300 mb-2">
                                 Playlist Name
                             </label>
                             <input
+                                id="playlist-name"
                                 type="text"
                                 value={playlistName}
                                 onChange={(e) =>
@@ -1129,7 +1132,7 @@ function ImportPlaylistPageContent() {
                                             }
                                         }}
                                         disabled={isLoading}
-                                        className="px-5 py-2.5 rounded-full text-sm font-medium bg-#0a0a0a text-white hover:bg-white/20 disabled:opacity-50 transition-colors"
+                                        className="px-5 py-2.5 rounded-full text-sm font-medium bg-[var(--bg-primary)] text-white hover:bg-white/20 disabled:opacity-50 transition-colors"
                                     >
                                         {isLoading
                                             ? "Refreshing..."
@@ -1166,7 +1169,7 @@ export default function ImportPlaylistPage() {
         <Suspense
             fallback={
                 <div className="min-h-screen flex items-center justify-center">
-                    <Loader2 className="w-8 h-8 text-[#ecb200] animate-spin" />
+                    <Loader2 className="w-8 h-8 text-brand animate-spin" />
                 </div>
             }
         >

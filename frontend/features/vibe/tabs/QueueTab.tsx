@@ -10,7 +10,7 @@ import { api } from "@/lib/api";
 import { formatTime } from "@/utils/formatTime";
 
 const OPERATION_STYLES: Record<string, { label: string; borderColor: string }> = {
-    drift: { label: "Drift", borderColor: "#ecb200" },
+    drift: { label: "Song Path", borderColor: "var(--color-brand)" },
     vibe: { label: "Vibe", borderColor: "#1db954" },
     blend: { label: "Blend", borderColor: "#a056e0" },
     similar: { label: "Similar", borderColor: "#5c8dd6" },

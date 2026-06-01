@@ -54,7 +54,7 @@ export function ArtistActionBar({
             {/* Play Button */}
             <button
                 onClick={handlePlayPauseClick}
-                className="h-12 w-12 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105 bg-[#fca200]"
+                className="h-12 w-12 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105 bg-brand"
             >
                 {showPause ? (
                     <Pause className="w-5 h-5 fill-current text-black" />

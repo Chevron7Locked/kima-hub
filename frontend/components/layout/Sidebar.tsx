@@ -283,7 +283,7 @@ export function Sidebar() {
                                 className={cn(
                                     "flex items-center gap-3 py-2.5 px-2 border-l-2 transition-all duration-200 group relative",
                                     isActive ?
-                                        "bg-[#0a0a0a] border-[#eab308] text-white"
+                                        "bg-[var(--bg-primary)] border-[#eab308] text-white"
                                     :   "border-transparent text-gray-500 hover:text-white hover:bg-white/5 hover:border-white/20",
                                 )}
                             >
@@ -355,14 +355,14 @@ export function Sidebar() {
                                 setShowCreatePlaylist((v) => !v);
                                 setNewPlaylistName("");
                             }}
-                            className="w-6 h-6 flex items-center justify-center bg-[#0a0a0a] border-2 border-white/10 text-gray-500 hover:text-[#a855f7] hover:border-[#a855f7]/50 hover:bg-[#a855f7]/5 transition-all"
+                            className="w-6 h-6 flex items-center justify-center bg-[var(--bg-primary)] border-2 border-white/10 text-gray-500 hover:text-[#a855f7] hover:border-[#a855f7]/50 hover:bg-[#a855f7]/5 transition-all"
                             aria-label="Create playlist"
                             title="Create Playlist"
                         >
                             <Plus className="w-3.5 h-3.5" />
                         </button>
                         {showCreatePlaylist && (
-                            <div className="absolute right-0 top-8 z-50 w-56 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-2xl p-3">
+                            <div className="absolute right-0 top-8 z-50 w-56 bg-[var(--bg-hover)] border border-white/10 rounded-lg shadow-2xl p-3">
                                 <input
                                     type="text"
                                     value={newPlaylistName}
@@ -379,7 +379,7 @@ export function Sidebar() {
                                     }}
                                     placeholder="Playlist name"
                                     autoFocus
-                                    className="w-full bg-[#0a0a0a] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white placeholder-gray-600 outline-none focus:border-[#a855f7]/50 transition-colors"
+                                    className="w-full bg-[var(--bg-primary)] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white placeholder-gray-600 outline-none focus:border-[#a855f7]/50 transition-colors"
                                 />
                                 <button
                                     onClick={handleCreatePlaylist}
@@ -405,7 +405,7 @@ export function Sidebar() {
                             {[1, 2, 3, 4, 5].map((i) => (
                                 <div
                                     key={i}
-                                    className="px-2 py-2 bg-[#0a0a0a] border-l-2 border-transparent"
+                                    className="px-2 py-2 bg-[var(--bg-primary)] border-l-2 border-transparent"
                                 >
                                     <div className="h-3.5 bg-white/5 rounded w-3/4 mb-1.5"></div>
                                     <div className="h-2.5 bg-white/5 rounded w-1/2"></div>
@@ -427,7 +427,7 @@ export function Sidebar() {
                                         className={cn(
                                             "flex items-center gap-3 py-2 px-2 border-l-2 transition-all group",
                                             isActive ?
-                                                "bg-[#0a0a0a] border-[#a855f7] text-white"
+                                                "bg-[var(--bg-primary)] border-[#a855f7] text-white"
                                             :   "border-transparent text-gray-600 hover:text-white hover:bg-white/5 hover:border-white/20",
                                         )}
                                     >
@@ -507,7 +507,7 @@ export function Sidebar() {
 
             {/* Desktop Sidebar */}
             {!isMobileOrTablet && (
-                <aside className="w-72 bg-[#0a0a0a] flex flex-col overflow-hidden relative z-10 rounded-lg">
+                <aside className="w-72 bg-[var(--bg-primary)] flex flex-col overflow-hidden relative z-10 rounded-lg">
                     {sidebarContent}
                 </aside>
             )}

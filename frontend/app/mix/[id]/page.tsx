@@ -177,8 +177,14 @@ export default function MixPage() {
 
     if (!mix) {
         return (
-            <div className="flex items-center justify-center min-h-screen">
+            <div className="flex flex-col items-center justify-center min-h-screen gap-4">
                 <p className="text-gray-500">Mix not found</p>
+                <button
+                    onClick={() => router.push("/")}
+                    className="px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-all"
+                >
+                    Back to Mixes
+                </button>
             </div>
         );
     }
@@ -255,7 +261,8 @@ export default function MixPage() {
                     {mix.tracks && mix.tracks.length > 0 && (
                         <button
                             onClick={handlePlayMix}
-                            className="h-12 w-12 rounded-full bg-[#ecb200] hover:bg-[#d4a000] hover:scale-105 flex items-center justify-center shadow-lg transition-all"
+                            aria-label={isThisMixPlaying && isPlaying ? `Pause ${mix.name}` : `Play ${mix.name}`}
+                            className="h-12 w-12 rounded-full bg-brand hover:bg-[#d4a000] hover:scale-105 flex items-center justify-center shadow-lg transition-all"
                         >
                             {isThisMixPlaying && isPlaying ? (
                                 <Pause className="w-5 h-5 fill-current text-black" />
@@ -269,8 +276,8 @@ export default function MixPage() {
                     {mix.tracks && mix.tracks.length > 1 && (
                         <button
                             onClick={handleShuffle}
+                            aria-label={`Shuffle play ${mix.name}`}
                             className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
-                            title="Shuffle play"
                         >
                             <Shuffle className="w-5 h-5" />
                         </button>
@@ -324,17 +331,17 @@ export default function MixPage() {
                                                     e.stopPropagation();
                                                     handlePlayTrack(index);
                                                 }}
-                                                className="w-8 h-8 flex items-center justify-center"
-                                                aria-label={isCurrentlyPlaying && isPlaying ? "Pause" : "Play"}
+                                                className="min-h-[44px] min-w-[44px] flex items-center justify-center"
+                                                aria-label={isCurrentlyPlaying && isPlaying ? `Pause ${track.title}` : `Play ${track.title}`}
                                             >
                                                 <span
                                                     className={cn(
                                                         "text-sm group-hover:hidden",
-                                                        isCurrentlyPlaying ? "text-[#ecb200]" : "text-gray-400"
+                                                        isCurrentlyPlaying ? "text-brand" : "text-gray-400"
                                                     )}
                                                 >
                                                     {isCurrentlyPlaying && isPlaying ? (
-                                                        <Music className="w-4 h-4 text-[#ecb200] animate-pulse" />
+                                                        <Music className="w-4 h-4 text-brand animate-pulse" />
                                                     ) : (
                                                         index + 1
                                                     )}
@@ -365,7 +372,7 @@ export default function MixPage() {
                                                 <p
                                                     className={cn(
                                                         "text-sm font-medium truncate",
-                                                        isCurrentlyPlaying ? "text-[#ecb200]" : "text-white"
+                                                        isCurrentlyPlaying ? "text-brand" : "text-white"
                                                     )}
                                                 >
                                                     {track.title}
@@ -384,12 +391,12 @@ export default function MixPage() {
                                         {/* Duration + Actions */}
                                         <div className="flex items-center justify-end gap-2">
                                             <button
-                                                className="p-1.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-white/10 text-gray-400 hover:text-white transition-all"
+                                                className="min-h-[44px] min-w-[44px] rounded-full opacity-0 group-hover:opacity-100 hover:bg-white/10 text-gray-400 hover:text-white transition-all flex items-center justify-center"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     handleAddToQueue(track);
                                                 }}
-                                                title="Add to Queue"
+                                                aria-label={`Add ${track.title} to queue`}
                                             >
                                                 <ListPlus className="w-4 h-4" />
                                             </button>
@@ -408,7 +415,13 @@ export default function MixPage() {
                             <Music className="w-10 h-10 text-gray-500" />
                         </div>
                         <h3 className="text-lg font-medium text-white mb-1">No tracks</h3>
-                        <p className="text-sm text-gray-500">This mix is empty</p>
+                        <p className="text-sm text-gray-500 mb-4">This mix is empty</p>
+                        <button
+                            onClick={() => router.push("/")}
+                            className="px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-all"
+                        >
+                            Back to Mixes
+                        </button>
                     </div>
                 )}
             </div>

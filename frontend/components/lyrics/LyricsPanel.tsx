@@ -32,7 +32,7 @@ export function LyricsPanel({ onBack }: LyricsPanelProps) {
     }, [activeIndex]);
 
     return (
-        <div className="h-full flex flex-col bg-[#0a0a0a]">
+        <div className="h-full flex flex-col bg-[var(--bg-primary)]">
             {/* Header with back button */}
             <div className="flex items-center gap-3 px-5 py-4 border-b-2 border-white/20">
                 <button

@@ -67,7 +67,7 @@ export function TVSearchInput({ initialQuery = "", onSearch }: TVSearchInputProp
                         tabIndex={0}
                         className={`
                             w-full h-16 pl-14 pr-6
-                            bg-[#1a1a1a]
+                            bg-[var(--bg-hover)]
                             rounded-lg
                             text-xl text-white
                             placeholder-gray-500
@@ -75,7 +75,7 @@ export function TVSearchInput({ initialQuery = "", onSearch }: TVSearchInputProp
                             outline-none
                             border-2
                             ${isFocused
-                                ? "border-[#ecb200] bg-[#242424]"
+                                ? "border-[var(--color-brand)] bg-[#242424]"
                                 : "border-transparent hover:bg-[#242424]"
                             }
                         `}

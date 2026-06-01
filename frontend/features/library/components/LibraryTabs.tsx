@@ -17,7 +17,7 @@ export function LibraryTabs({ activeTab, onTabChange }: LibraryTabsProps) {
   return (
     <div data-tv-section="library-tabs" className="relative">
       {/* Glassmorphism background */}
-      <div className="absolute -inset-x-4 -inset-y-2 bg-[#0a0a0a]/60 backdrop-blur-xl rounded-2xl border border-white/5" />
+      <div className="absolute -inset-x-4 -inset-y-2 bg-[var(--bg-primary)]/60 backdrop-blur-xl rounded-2xl border border-white/5" />
 
       {/* Tab buttons */}
       <div className="relative flex justify-center gap-2 p-2">

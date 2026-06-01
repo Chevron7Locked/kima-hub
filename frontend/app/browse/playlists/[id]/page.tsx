@@ -200,7 +200,7 @@ export default function DeezerPlaylistDetailPage() {
 
     if (isLoading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <GradientSpinner size="md" />
             </div>
         );
@@ -281,7 +281,7 @@ export default function DeezerPlaylistDetailPage() {
 
                         <div className="flex items-end gap-6">
                             {/* Cover Art */}
-                            <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#0a0a0a] rounded-lg shadow-2xl shrink-0 overflow-hidden relative border-2 border-white/10">
+                            <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[var(--bg-primary)] rounded-lg shadow-2xl shrink-0 overflow-hidden relative border-2 border-white/10">
                                 {playlist.imageUrl ? (
                                     <Image
                                         src={playlist.imageUrl}
@@ -447,7 +447,7 @@ export default function DeezerPlaylistDetailPage() {
 
                                             {/* Title + Artist */}
                                             <div className="flex items-center gap-3 min-w-0">
-                                                <div className="relative w-10 h-10 bg-[#0a0a0a] rounded border border-white/10 shrink-0 overflow-hidden">
+                                                <div className="relative w-10 h-10 bg-[var(--bg-primary)] rounded border border-white/10 shrink-0 overflow-hidden">
                                                     {track.coverUrl ? (
                                                         <Image
                                                             src={track.coverUrl}

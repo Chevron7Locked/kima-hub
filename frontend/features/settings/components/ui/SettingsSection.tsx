@@ -19,7 +19,7 @@ export function SettingsSection({
         <section id={id} className="scroll-mt-24">
             <div className="mb-4">
                 <div className="flex items-center gap-3 mb-1">
-                    <span className="w-1 h-6 bg-gradient-to-b from-[#fca208] to-[#f97316] rounded-full shrink-0" />
+                    <span className="w-1 h-6 bg-gradient-to-b from-brand to-[#f97316] rounded-full shrink-0" />
                     <h2 className="text-lg font-black tracking-tighter uppercase text-white">{title}</h2>
                     <span className="flex-1 border-t border-white/10" />
                 </div>

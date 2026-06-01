@@ -27,7 +27,7 @@ export default function DiscoverWeeklyPage() {
     const queryClient = useQueryClient();
 
     // Custom hooks - single source of truth for batch status from useDiscoverData
-    const { playlist, config, setConfig, loading, reloadData, batchStatus, refreshBatchStatus, setPendingGeneration, markGenerationStart, updateTrackLiked, isGenerating } = useDiscoverData();
+    const { playlist, config, setConfig, loading, loadError, reloadData, batchStatus, refreshBatchStatus, setPendingGeneration, markGenerationStart, updateTrackLiked, isGenerating } = useDiscoverData();
     const {
         handleGenerate,
         handleLike,
@@ -143,10 +143,41 @@ export default function DiscoverWeeklyPage() {
         }
     };
 
+    // Map real backend status values to human-readable phase labels
+    const getProgressLabel = () => {
+        if (!batchStatus?.active) return null;
+        if (batchStatus.status === "scanning") {
+            return "Finding artists…";
+        }
+        if (batchStatus.status === "downloading") {
+            const completed = batchStatus.completed ?? 0;
+            const total = batchStatus.total ?? 0;
+            return total > 0
+                ? `Downloading albums (${completed} / ${total})…`
+                : "Downloading albums…";
+        }
+        return "Working…";
+    };
+
     if (loading) {
         return (
             <div className="flex items-center justify-center min-h-screen">
                 <GradientSpinner size="md" />
+            </div>
+        );
+    }
+
+    if (loadError) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-screen gap-4">
+                <p className="text-sm font-mono text-gray-500">Could not load discovery data.</p>
+                <button
+                    onClick={reloadData}
+                    className="flex items-center gap-2 px-4 py-2 border border-white/10 rounded-lg text-sm font-black uppercase tracking-wider text-white/60 hover:border-[var(--color-brand)] hover:text-white transition-all duration-300 min-h-[44px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2"
+                >
+                    <RefreshCw className="w-4 h-4" />
+                    Retry
+                </button>
             </div>
         );
     }
@@ -214,41 +245,56 @@ export default function DiscoverWeeklyPage() {
                             </div>
                         ) : (
                             <div className="max-w-3xl mx-auto py-16">
-                                {/* Data-driven empty state */}
                                 <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-12 shadow-2xl shadow-black/40">
                                     {/* Accent line */}
-                                    <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-[#eab308] to-[#f59e0b]" />
+                                    <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-[var(--color-brand)] to-[var(--color-brand-hover)]" />
 
-                                    {/* System status */}
+                                    {/* Status badge */}
                                     <div className="flex items-center gap-3 mb-8 pb-4 border-b border-white/10">
-                                        <div className="w-2 h-2 bg-[#eab308]" />
+                                        <div className="w-2 h-2 bg-[var(--color-brand)]" />
                                         <span className="text-xs font-mono text-white/60 uppercase tracking-wider">
-                                            System Ready
+                                            {isGenerating ? "Generating" : "Ready"}
                                         </span>
                                     </div>
 
                                     <h3 className="text-4xl md:text-5xl font-black tracking-tighter text-white mb-4 leading-none">
-                                        PLAYLIST<br/>
-                                        GENERATION
+                                        THIS WEEK&apos;S<br/>
+                                        <span className="text-[var(--color-brand)]">PLAYLIST</span>
                                     </h3>
 
-                                    <p className="text-sm font-mono text-gray-500 mb-8 leading-relaxed">
-                                        No active playlist detected. Initialize generation process to analyze listening history
-                                        and create personalized recommendations.
+                                    <p className="text-sm font-mono text-gray-500 mb-6 leading-relaxed">
+                                        Kima finds artists similar to ones you already love, picks a representative track
+                                        from each, then builds your weekly playlist.
                                     </p>
 
-                                    {/* Stats grid */}
+                                    {/* What this does -- disk disclosure, visible before generating */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+                                        <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
+                                            <div className="text-xs font-mono text-purple-500 uppercase mb-1">Finds</div>
+                                            <div className="text-xs text-gray-400 leading-snug">Similar artists via Last.fm, grouped by similarity tier</div>
+                                        </div>
+                                        <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
+                                            <div className="text-xs font-mono text-purple-500 uppercase mb-1">Downloads</div>
+                                            <div className="text-xs text-gray-400 leading-snug">Full albums to <span className="font-mono text-white/40">/music/discovery</span> on your server</div>
+                                        </div>
+                                        <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
+                                            <div className="text-xs font-mono text-purple-500 uppercase mb-1">Cleans up</div>
+                                            <div className="text-xs text-gray-400 leading-snug">Unliked albums are removed at week&apos;s end -- liked ones stay forever</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Placeholder stats */}
                                     <div className="grid grid-cols-3 gap-4 mb-8">
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                                            <div className="text-2xl font-black text-[#a855f7] mb-1">--</div>
+                                            <div className="text-2xl font-black text-purple-500 mb-1">--</div>
                                             <div className="text-xs font-mono text-gray-500 uppercase">Tracks</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                                            <div className="text-2xl font-black text-[#a855f7] mb-1">--</div>
+                                            <div className="text-2xl font-black text-purple-500 mb-1">--</div>
                                             <div className="text-xs font-mono text-gray-500 uppercase">Duration</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                                            <div className="text-2xl font-black text-[#a855f7] mb-1">--</div>
+                                            <div className="text-2xl font-black text-purple-500 mb-1">--</div>
                                             <div className="text-xs font-mono text-gray-500 uppercase">Artists</div>
                                         </div>
                                     </div>
@@ -256,25 +302,23 @@ export default function DiscoverWeeklyPage() {
                                     <button
                                         onClick={handleGenerate}
                                         disabled={isGenerating}
+                                        aria-label={isGenerating ? "Playlist generation in progress" : "Build this week's playlist"}
                                         className={cn(
-                                            "w-full py-4 px-6 border-2 rounded-lg font-black text-sm tracking-wider uppercase transition-all duration-300",
+                                            "w-full py-4 px-6 border-2 rounded-lg font-black text-sm tracking-wider uppercase transition-all duration-300 min-h-[52px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2",
                                             isGenerating
                                                 ? "border-white/20 bg-white/5 text-white/30 cursor-not-allowed"
-                                                : "border-[#eab308] bg-[#eab308] text-black hover:bg-[#f59e0b] hover:border-[#f59e0b] hover:scale-[1.02] hover:shadow-lg hover:shadow-[#eab308]/20"
+                                                : "border-[var(--color-brand)] bg-[var(--color-brand)] text-black hover:bg-[var(--color-brand-hover)] hover:border-[var(--color-brand-hover)] hover:scale-[1.02] hover:shadow-lg hover:shadow-[var(--color-brand)]/20"
                                         )}
                                     >
                                         {isGenerating ? (
                                             <span className="flex items-center justify-center gap-3">
                                                 <GradientSpinner size="sm" />
-                                                {batchStatus?.status === "scanning"
-                                                    ? "Processing..."
-                                                    : `Downloading ${batchStatus?.completed || 0}/${batchStatus?.total || 0}`
-                                                }
+                                                {getProgressLabel()}
                                             </span>
                                         ) : (
                                             <span className="flex items-center justify-center gap-3">
                                                 <RefreshCw className="w-4 h-4" />
-                                                Initialize Generation
+                                                Build This Week&apos;s Playlist
                                             </span>
                                         )}
                                     </button>

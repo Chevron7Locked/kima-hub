@@ -54,7 +54,7 @@ export function OperationConfirmToast({
         <div
             className={cn(
                 "fixed bottom-24 left-1/2 -translate-x-1/2 z-[60]",
-                "bg-[#1a1a1a] border border-white/10 rounded-lg shadow-lg",
+                "bg-[var(--bg-hover)] border border-white/10 rounded-lg shadow-lg",
                 "px-4 py-3 flex items-center gap-3",
                 "transition-all duration-300 ease-out",
                 visible
@@ -68,7 +68,7 @@ export function OperationConfirmToast({
             </span>
             <button
                 onClick={onConfirm}
-                className="px-3 py-1 bg-[#ecb200] text-black text-sm font-medium rounded hover:bg-[#ecb200]/90 transition-colors"
+                className="px-3 py-1 bg-brand text-black text-sm font-medium rounded hover:bg-[var(--color-brand)]/90 transition-colors"
             >
                 Replace
             </button>

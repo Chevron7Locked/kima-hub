@@ -23,35 +23,7 @@
     --border-focus: #333333; /* Focus, selected states */
 
     /* Text Colors */
-    --text-primary: #ffffff; /* Primary headers */
-    --text-body: #e5e5e5; /* Body text */
-    --text-secondary: #a3a3a3; /* Secondary info */
-    --text-muted: #737373; /* Timestamps, meta */
-    --text-disabled: #525252; /* Disabled */
-
-    /* Actions */
-    --color-primary: #eab308; /* PRIMARY CTA ONLY - Yellow */
-    --color-ai: #a855f7; /* AI features - Purple */
-    --color-ai-dark: #9333ea; /* AI selected */
-
-    /* Content Type Colors (for section headers) */
-    --color-featured: #eab308;
-    --color-tracks: #a855f7;
-    --color-tracks-dark: #c026d3;
-    --color-albums: #22c55e;
-    --color-albums-dark: #16a34a;
-    --color-podcasts: #3b82f6;
-    --color-podcasts-dark: #2563eb;
-    --color-audiobooks: #f59e0b;
-    --color-artists: #ec4899;
-    --color-p2p: #ec4899;
-    --color-discover: #a855f7;
-
-    /* Status */
-    --color-success: #22c55e;
-    --color-warning: #f59e0b;
-    --color-error: #ef4444;
-    --color-info: #3b82f6;
+    --text-muted: #7d7d7d; /* Timestamps, meta -- WCAG-offset, keep as custom */
 }
 
 * {
@@ -60,10 +32,23 @@
 
 body {
     background: var(--bg-primary);
-    color: var(--text-body);
+    color: #e5e5e5;
     font-family: var(--font-montserrat), -apple-system, BlinkMacSystemFont,
         "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     min-height: 100vh;
+}
+
+/* Keyboard focus ring -- restores visibility removed by Tailwind outline-none.
+   :focus-visible triggers only for keyboard nav, not mouse clicks.
+   This rule lives outside @layer, so it wins over Tailwind's @layer utilities
+   regardless of source order (unlayered CSS beats layered CSS in the cascade). */
+:focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+}
+/* Elements that manage their own focus ring can opt out */
+.focus-ring-none:focus-visible {
+    outline: none;
 }
 
 /* Make all buttons have pointer cursor */
@@ -414,7 +399,7 @@ body.tv-mode * {
 }
 
 .tv-nav-link.focused {
-    color: #ecb200;
+    color: var(--color-brand);
     background: rgba(236, 178, 0, 0.1);
 }
 
@@ -435,7 +420,7 @@ body.tv-mode * {
 .tv-sync-btn:hover,
 .tv-sync-btn:focus {
     background: rgba(255, 255, 255, 0.2);
-    outline: 2px solid #ecb200;
+    outline: 2px solid var(--color-brand);
 }
 
 .tv-sync-btn:disabled {
@@ -491,7 +476,7 @@ body.tv-mode * {
     width: 40px;
     height: 40px;
     border-radius: 50%;
-    background: #ecb200;
+    background: var(--color-brand);
     color: #000;
     border: none;
     display: flex;
@@ -534,7 +519,7 @@ body.tv-mode * {
 }
 
 .tv-np-ctrl.active {
-    color: #ecb200;
+    color: var(--color-brand);
 }
 
 .tv-np-ctrl.active:hover {
@@ -548,14 +533,14 @@ body.tv-mode * {
     right: 2px;
     font-size: 8px;
     font-weight: bold;
-    color: #ecb200;
+    color: var(--color-brand);
 }
 
 /* ===== TV FOCUS STATES ===== */
 /* Card focus styling - visible ring around focused cards */
 body.tv-mode [data-tv-card]:focus {
     outline: none;
-    box-shadow: 0 0 0 3px #ecb200, 0 0 20px rgba(236, 178, 0, 0.4);
+    box-shadow: 0 0 0 3px var(--color-brand), 0 0 20px rgba(252, 162, 0, 0.4);
     transform: scale(1.02);
     transition: box-shadow 0.15s ease, transform 0.15s ease;
     z-index: 10;
@@ -569,7 +554,7 @@ body.tv-mode [data-tv-card]:focus-visible {
 /* Buttons in TV mode */
 body.tv-mode button:focus,
 body.tv-mode a:focus {
-    outline: 2px solid #ecb200;
+    outline: 2px solid var(--color-brand);
     outline-offset: 2px;
 }
 
@@ -582,22 +567,22 @@ body.tv-mode [data-tv-card] {
 /* Filter buttons / tabs focus */
 body.tv-mode [data-tv-filter]:focus {
     outline: none;
-    background: rgba(236, 178, 0, 0.2);
-    color: #ecb200;
-    box-shadow: 0 0 0 2px #ecb200;
+    background: rgba(252, 162, 0, 0.2);
+    color: var(--color-brand);
+    box-shadow: 0 0 0 2px var(--color-brand);
 }
 
 /* Track list items focus */
 body.tv-mode [data-tv-track]:focus {
     outline: none;
-    background: rgba(236, 178, 0, 0.15);
-    box-shadow: inset 0 0 0 2px #ecb200;
+    background: rgba(252, 162, 0, 0.15);
+    box-shadow: inset 0 0 0 2px var(--color-brand);
 }
 
 /* Action buttons in action bars */
 body.tv-mode [data-tv-action]:focus {
     outline: none;
-    box-shadow: 0 0 0 2px #ecb200;
+    box-shadow: 0 0 0 2px var(--color-brand);
     transform: scale(1.05);
 }
 
@@ -682,6 +667,11 @@ body.scanner-active .scanner-overlay {
         app-region: no-drag;
     }
 }
+
+/* =====================================================
+   Vibe Map - First-run hint entrance
+   ===================================================== */
+
 
 /* =====================================================
    Vibe Map Background

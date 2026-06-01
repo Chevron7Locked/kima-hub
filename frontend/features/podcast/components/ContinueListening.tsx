@@ -75,7 +75,7 @@ export function ContinueListening({
 
                 {/* Current Episode */}
                 <div
-                    className="flex items-center gap-4 p-4 rounded-lg bg-[#0a0a0a] border-2 border-[#3b82f6]/30 hover:border-[#3b82f6]/50 transition-all cursor-pointer"
+                    className="flex items-center gap-4 p-4 rounded-lg bg-[var(--bg-primary)] border-2 border-[#3b82f6]/30 hover:border-[#3b82f6]/50 transition-all cursor-pointer"
                     onClick={() => onPlayPause(recentEpisode)}
                 >
                     <button

@@ -83,7 +83,7 @@ export default function HomePage() {
                                         <div className="flex items-center gap-2">
                                             <button
                                                 onClick={() => setShowMoodMixer(true)}
-                                                className="flex items-center gap-2 px-4 py-2 text-xs font-black uppercase tracking-wider text-black bg-[#fca208] hover:bg-[#f97316] rounded-lg transition-colors"
+                                                className="flex items-center gap-2 px-4 py-2 text-xs font-black uppercase tracking-wider text-black bg-brand hover:bg-[#f97316] rounded-lg transition-colors"
                                             >
                                                 <AudioWaveform className="w-3.5 h-3.5" />
                                                 <span className="hidden sm:inline">Mood Mixer</span>
@@ -91,6 +91,7 @@ export default function HomePage() {
                                             <button
                                                 onClick={handleRefreshMixes}
                                                 disabled={isRefreshingMixes}
+                                                aria-label="Refresh mixes"
                                                 className="flex items-center gap-2 px-4 py-2 text-xs font-mono uppercase tracking-wider text-gray-400 hover:text-white transition-colors bg-white/5 hover:bg-white/10 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed border border-white/10 hover:border-white/20"
                                             >
                                                 {isRefreshingMixes ? (

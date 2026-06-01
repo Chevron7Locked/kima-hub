@@ -146,7 +146,7 @@ export function NotificationsTab() {
                 return <AlertCircle className="w-4 h-4 text-red-400" />;
             case "playlist_ready":
             case "import_complete":
-                return <ListMusic className="w-4 h-4 text-[#ecb200]" />;
+                return <ListMusic className="w-4 h-4 text-brand" />;
             case "system":
             default:
                 return <Bell className="w-4 h-4 text-white/60" />;
@@ -225,7 +225,7 @@ export function NotificationsTab() {
                             key={notification.id}
                             className={cn(
                                 "px-3 py-3 border-b border-white/5 transition-colors group relative",
-                                !notification.read && "bg-[#0f0f0f] border-l-2 border-[#eab308]",
+                                !notification.read && "bg-[var(--bg-secondary)] border-l-2 border-[#eab308]",
                                 notification.read && "border-l-2 border-transparent hover:border-white/20 hover:bg-white/5"
                             )}
                         >

@@ -217,6 +217,7 @@ export function MiniPlayer() {
                 onTouchMove={handleTouchMove}
                 onTouchEnd={handleTouchEnd}
             >
+
                 {/* Gradient border container - uses padding technique for gradient border */}
                 <div
                     className="rounded-[14px] p-[2px]"
@@ -243,8 +244,15 @@ export function MiniPlayer() {
                                 className="relative flex items-center gap-3 px-3 py-3 cursor-pointer"
                                 onClick={() => setPlayerMode("overlay")}
                             >
-                                {/* Album Art - slightly larger */}
-                                <div className="relative w-12 h-12 flex-shrink-0 rounded-lg overflow-hidden bg-black/30 shadow-md">
+                                {/* Album Art - expand button for keyboard/AT users */}
+                                <button
+                                    className="relative w-12 h-12 flex-shrink-0 rounded-lg overflow-hidden bg-black/30 shadow-md"
+                                    aria-label="Expand player"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setPlayerMode("overlay");
+                                    }}
+                                >
                                     {coverUrl ? (
                                         <Image
                                             src={coverUrl}
@@ -259,7 +267,7 @@ export function MiniPlayer() {
                                             <MusicIcon className="w-5 h-5 text-gray-400" />
                                         </div>
                                     )}
-                                </div>
+                                </button>
 
                                 {/* Track Info */}
                                 <div className="flex-1 min-w-0">
@@ -344,8 +352,8 @@ export function MiniPlayer() {
                                             audioError
                                                 ? "bg-red-500 text-white hover:bg-red-400"
                                                 : isBuffering
-                                                ? "bg-[#fca200]/80 text-black"
-                                                : "bg-[#fca200] text-black hover:scale-105"
+                                                ? "bg-brand/80 text-black"
+                                                : "bg-brand text-black hover:scale-105"
                                         )}
                                         aria-label={
                                             audioError
@@ -561,9 +569,9 @@ export function MiniPlayer() {
                             className={cn(
                                 "w-8 h-8 rounded-full flex items-center justify-center transition",
                                 hasMedia && !isBuffering
-                                    ? "bg-[#fca200] text-black hover:scale-105"
+                                    ? "bg-brand text-black hover:scale-105"
                                     : isBuffering
-                                    ? "bg-[#fca200]/80 text-black"
+                                    ? "bg-brand/80 text-black"
                                     : "bg-gray-700 text-gray-500 cursor-not-allowed"
                             )}
                             aria-label={isPlaying ? "Pause" : "Play"}

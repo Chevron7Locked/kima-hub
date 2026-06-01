@@ -90,12 +90,12 @@ export function TrackList({
                                         className={cn(
                                             "group-hover:hidden text-sm",
                                             isTrackPlaying
-                                                ? "text-[#ecb200]"
+                                                ? "text-brand"
                                                 : "text-gray-400"
                                         )}
                                     >
                                         {isTrackPlaying && isPlaying ? (
-                                            <Music className="w-4 h-4 text-[#ecb200] animate-pulse" />
+                                            <Music className="w-4 h-4 text-brand animate-pulse" />
                                         ) : (
                                             index + 1
                                         )}
@@ -130,7 +130,7 @@ export function TrackList({
                                         className={cn(
                                             "text-sm font-medium truncate",
                                             isTrackPlaying
-                                                ? "text-[#ecb200]"
+                                                ? "text-brand"
                                                 : "text-white"
                                         )}
                                     >

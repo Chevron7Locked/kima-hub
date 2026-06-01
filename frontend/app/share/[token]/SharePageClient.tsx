@@ -251,9 +251,9 @@ export default function SharePageClient() {
     // Loading
     if (loading) {
         return (
-            <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+            <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3">
-                    <div className="w-8 h-8 border-2 border-[#fca200]/30 border-t-[#fca200] rounded-full animate-spin" />
+                    <div className="w-8 h-8 border-2 border-brand/30 border-t-[#fca200] rounded-full animate-spin" />
                     <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest">
                         Loading
                     </p>
@@ -265,7 +265,7 @@ export default function SharePageClient() {
     // Error
     if (error || !data) {
         return (
-            <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center px-4">
+            <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center px-4">
                 <div className="text-center max-w-sm">
                     <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-white/[0.03] border border-white/[0.06] flex items-center justify-center">
                         <Music className="w-5 h-5 text-white/15" />
@@ -286,7 +286,7 @@ export default function SharePageClient() {
     }
 
     return (
-        <div className="min-h-screen bg-[#0a0a0a] flex flex-col">
+        <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col">
             <audio
                 ref={audioRef}
                 onTimeUpdate={() => {
@@ -350,7 +350,7 @@ export default function SharePageClient() {
                                 onClick={handleProgressClick}
                             >
                                 <div
-                                    className="h-full bg-[#fca200] rounded-full transition-[width] duration-100"
+                                    className="h-full bg-brand rounded-full transition-[width] duration-100"
                                     style={{
                                         width: `${duration > 0 ? (progress / duration) * 100 : 0}%`,
                                     }}
@@ -460,13 +460,13 @@ export default function SharePageClient() {
                                         <div className="w-8 text-center flex-shrink-0">
                                             {isActive && isPlaying ? (
                                                 <div className="flex items-center justify-center gap-[2px] h-3.5">
-                                                    <span className="w-[2px] h-2.5 bg-[#fca200] rounded-full animate-pulse" />
-                                                    <span className="w-[2px] h-3.5 bg-[#fca200] rounded-full animate-pulse [animation-delay:150ms]" />
-                                                    <span className="w-[2px] h-2 bg-[#fca200] rounded-full animate-pulse [animation-delay:300ms]" />
+                                                    <span className="w-[2px] h-2.5 bg-brand rounded-full animate-pulse" />
+                                                    <span className="w-[2px] h-3.5 bg-brand rounded-full animate-pulse [animation-delay:150ms]" />
+                                                    <span className="w-[2px] h-2 bg-brand rounded-full animate-pulse [animation-delay:300ms]" />
                                                 </div>
                                             ) : (
                                                 <span className={`text-[11px] font-mono ${
-                                                    isActive ? "text-[#fca200]" : "text-white/15"
+                                                    isActive ? "text-brand" : "text-white/15"
                                                 }`}>
                                                     {trackLabel}
                                                 </span>
@@ -487,7 +487,7 @@ export default function SharePageClient() {
 
                                         <div className="flex-1 min-w-0 text-left">
                                             <p className={`text-sm truncate ${
-                                                isActive ? "text-[#fca200]" : "text-white/70"
+                                                isActive ? "text-brand" : "text-white/70"
                                             }`}>
                                                 {track.title}
                                             </p>

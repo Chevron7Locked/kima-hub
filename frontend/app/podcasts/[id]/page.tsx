@@ -54,7 +54,7 @@ export default function PodcastDetailPage() {
 
     if (previewLoadState === "error") {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <div className="flex flex-col items-center gap-3 text-center">
                     <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">
                         {previewError || "Could not load podcast"}
@@ -72,7 +72,7 @@ export default function PodcastDetailPage() {
 
     if (isLoading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <GradientSpinner size="md" />
             </div>
         );
@@ -80,7 +80,7 @@ export default function PodcastDetailPage() {
 
     if (!podcast && !previewData) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">Podcast not found</p>
             </div>
         );
@@ -88,7 +88,7 @@ export default function PodcastDetailPage() {
 
     if (!displayData) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <GradientSpinner size="md" />
             </div>
         );
@@ -212,7 +212,7 @@ export default function PodcastDetailPage() {
                                     <h2 className="text-xl font-black tracking-tighter uppercase">About</h2>
                                     <span className="flex-1 border-t border-white/10" />
                                 </div>
-                                <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[#0a0a0a] p-5">
+                                <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[var(--bg-primary)] p-5">
                                     <div
                                         className="prose prose-invert prose-sm max-w-none text-white/50 [&_a]:text-[#3b82f6] [&_a]:no-underline [&_a:hover]:underline text-sm leading-relaxed"
                                         dangerouslySetInnerHTML={{

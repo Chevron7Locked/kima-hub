@@ -36,7 +36,7 @@ export const STATIC_STATIONS: RadioStation[] = [
         name: "Shuffle All",
         description: "Your entire library",
         color: "from-[#fca208]/15 to-[#f97316]/10",
-        hoverBorder: "hover:border-[#fca208]/40",
+        hoverBorder: "hover:border-brand/40",
         hoverShadow: "hover:shadow-[#fca208]/10",
         accentGradient: "from-[#fca208] to-[#f97316]",
         filter: { type: "all" },

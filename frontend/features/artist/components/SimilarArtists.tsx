@@ -74,7 +74,7 @@ export function SimilarArtists({
                                 {/* Library indicator badge */}
                                 {artist.inLibrary && (
                                     <div
-                                        className="absolute bottom-1 right-1 bg-[#fca200] rounded-full p-1"
+                                        className="absolute bottom-1 right-1 bg-brand rounded-full p-1"
                                         title="In your library"
                                     >
                                         <Library className="w-3 h-3 text-black" />
