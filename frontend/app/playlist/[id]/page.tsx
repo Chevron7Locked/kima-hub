@@ -490,13 +490,23 @@ export default function PlaylistDetailPage() {
     );
 
     // Measure the list container's offset within the scroll container (#main-content)
-    // after the playlist data loads so the virtualizer positions rows correctly.
+    // so the virtualizer positions rows correctly. Re-measures on reflow above the
+    // list (e.g. the responsive hero crossing the md breakpoint shifts listRef ~52px)
+    // via a ResizeObserver, so scrollMargin can't go stale if overscan is later tuned.
     useLayoutEffect(() => {
-        if (!listRef.current || !scrollContainerRef.current) return;
-        const containerTop = scrollContainerRef.current.getBoundingClientRect().top;
-        const listTop = listRef.current.getBoundingClientRect().top;
-        const offset = listTop - containerTop + scrollContainerRef.current.scrollTop;
-        setScrollMargin(offset);
+        const measure = () => {
+            if (!listRef.current || !scrollContainerRef.current) return;
+            const containerTop = scrollContainerRef.current.getBoundingClientRect().top;
+            const listTop = listRef.current.getBoundingClientRect().top;
+            const offset = listTop - containerTop + scrollContainerRef.current.scrollTop;
+            setScrollMargin(offset);
+        };
+        measure();
+        if (!scrollContainerRef.current || !listRef.current) return;
+        const ro = new ResizeObserver(measure);
+        ro.observe(scrollContainerRef.current);
+        if (listRef.current.parentElement) ro.observe(listRef.current.parentElement);
+        return () => ro.disconnect();
     }, [rows.length]);
 
     const virtualizer = useVirtualizer({
