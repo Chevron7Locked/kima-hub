@@ -213,7 +213,7 @@ export function RefinePanel({
                                     aria-pressed={sortBy === opt.value}
                                     onClick={() => onSortChange(opt.value)}
                                     className={cn(
-                                        "px-3 py-2 text-xs font-black uppercase tracking-wider rounded-lg border transition-all",
+                                        "px-3 py-2 min-h-[44px] text-xs font-black uppercase tracking-wider rounded-lg border transition-all",
                                         sortBy === opt.value
                                             ? "border-[var(--color-brand)]/50 bg-[var(--color-brand)]/10 text-[var(--color-brand)]"
                                             : "border-white/5 bg-white/3 text-gray-400 hover:bg-white/8 hover:border-white/15 hover:text-white",
@@ -238,7 +238,7 @@ export function RefinePanel({
                                     aria-pressed={itemsPerPage === n}
                                     onClick={() => onItemsPerPageChange(n)}
                                     className={cn(
-                                        "py-2 text-xs font-black font-mono rounded-lg border transition-all",
+                                        "py-2 min-h-[44px] text-xs font-black font-mono rounded-lg border transition-all",
                                         itemsPerPage === n
                                             ? "border-[var(--color-brand)]/50 bg-[var(--color-brand)]/10 text-[var(--color-brand)]"
                                             : "border-white/5 bg-white/3 text-gray-400 hover:bg-white/8 hover:border-white/15 hover:text-white",
