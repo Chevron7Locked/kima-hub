@@ -768,7 +768,7 @@ router.post("/:id/pending/retry-all", async (req, res) => {
             return res.status(404).json({ error: "Playlist not found" });
         }
 
-        if (playlist.userId !== userId) {
+        if (playlist.userId !== userId && req.user!.role !== "admin") {
             return res.status(403).json({ error: "Access denied" });
         }
 
@@ -955,7 +955,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
             return res.status(404).json({ error: "Playlist not found" });
         }
 
-        if (playlist.userId !== userId) {
+        if (playlist.userId !== userId && req.user!.role !== "admin") {
             sessionLog(
                 "PENDING-RETRY",
                 `Access denied: playlistId=${playlistId} userId=${userId}`,
