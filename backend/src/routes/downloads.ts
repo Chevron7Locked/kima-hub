@@ -119,9 +119,13 @@ router.post("/", async (req, res) => {
             });
         }
 
-        // Check if Lidarr is enabled — fall back to Soulseek via acquisition service
+        // Auto-falling back to Soulseek when Lidarr is unavailable is opt-in:
+        // by default a failed/retried album download does NOT silently route to
+        // Soulseek. Enable with DOWNLOAD_SOULSEEK_AUTO_FALLBACK=true.
+        const soulseekAutoFallback =
+            (process.env.DOWNLOAD_SOULSEEK_AUTO_FALLBACK || "false").toLowerCase() === "true";
         const lidarrEnabled = await lidarrService.isEnabled();
-        if (!lidarrEnabled && type === "album" && artistName && albumTitle) {
+        if (soulseekAutoFallback && !lidarrEnabled && type === "album" && artistName && albumTitle) {
             logger.info(`[DOWNLOAD] Lidarr unavailable, using Soulseek: ${artistName} - ${albumTitle} (${mbid})`);
             res.json({ id: null, status: "downloading", downloadType, message: `Downloading via Soulseek: ${artistName} - ${albumTitle}` });
             acquisitionService.acquireAlbum({
