@@ -45,7 +45,6 @@ body {
 :focus-visible {
     outline: 2px solid var(--color-brand);
     outline-offset: 2px;
-    border-radius: 2px;
 }
 /* Elements that manage their own focus ring can opt out */
 .focus-ring-none:focus-visible {
