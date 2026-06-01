@@ -153,7 +153,7 @@ echo "[wait-for-db] Waiting for Redis and database schema (timeout: ${TIMEOUT}s)
 echo "[wait-for-db] Checking Redis readiness..."
 REDIS_COUNTER=0
 while [ $REDIS_COUNTER -lt $TIMEOUT ]; do
-    if redis-cli -h localhost ping 2>/dev/null | grep -q PONG; then
+    if redis-cli -u "${REDIS_URL:-redis://localhost:6379}" ping 2>/dev/null | grep -q PONG; then
         echo "[wait-for-db] ✓ Redis is ready!"
         break
     fi
@@ -172,7 +172,7 @@ if [ -f /data/.schema_ready ]; then
 fi
 
 while [ $COUNTER -lt $TIMEOUT ]; do
-    if PGPASSWORD=kima psql -h localhost -U kima -d kima -c "SELECT 1 FROM \"Track\" LIMIT 1" > /dev/null 2>&1; then
+    if psql "${DATABASE_URL:-postgresql://kima:kima@localhost:5432/kima}" -c "SELECT 1 FROM \"Track\" LIMIT 1" > /dev/null 2>&1; then
         echo "[wait-for-db] ✓ Database is ready and schema exists!"
         exit 0
     fi
@@ -187,7 +187,7 @@ done
 
 echo "[wait-for-db] ERROR: Database schema not ready after ${TIMEOUT}s"
 echo "[wait-for-db] Listing available tables:"
-PGPASSWORD=kima psql -h localhost -U kima -d kima -c "\dt" 2>&1 || echo "Could not list tables"
+psql "${DATABASE_URL:-postgresql://kima:kima@localhost:5432/kima}" -c "\dt" 2>&1 || echo "Could not list tables"
 exit 1
 EOF
 
@@ -374,11 +374,27 @@ if [ -z "$PG_BIN" ]; then
 fi
 echo "Using PostgreSQL from: $PG_BIN"
 
+# ---------------------------------------------------------------------------
+# Database configuration
+# Honor an externally-provided DATABASE_URL / REDIS_URL; otherwise fall back to
+# the embedded defaults. Set EMBEDDED_POSTGRES=false to run against an external
+# PostgreSQL server (the embedded postgres program is then disabled).
+# ---------------------------------------------------------------------------
+EMBEDDED_POSTGRES="${EMBEDDED_POSTGRES:-true}"
+export DATABASE_URL="${DATABASE_URL:-postgresql://kima:kima@localhost:5432/kima}"
+export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
+if [ "$EMBEDDED_POSTGRES" = "true" ]; then
+    echo "Postgres mode: embedded (set EMBEDDED_POSTGRES=false to use an external DATABASE_URL)"
+else
+    echo "Postgres mode: external -> $(printf '%s' "$DATABASE_URL" | sed -E 's#://[^@/]*@#://***@#')"
+fi
+
 # Prepare data directories (bind-mount safe)
 echo "Preparing data directories..."
-mkdir -p /data/postgres /data/redis /run/postgresql
+mkdir -p /data/redis /run/postgresql
 
-if id postgres >/dev/null 2>&1; then
+if [ "$EMBEDDED_POSTGRES" = "true" ] && id postgres >/dev/null 2>&1; then
+    mkdir -p /data/postgres
     chown -R postgres:postgres /data/postgres /run/postgresql 2>/dev/null || true
     chmod 700 /data/postgres 2>/dev/null || true
     if ! gosu postgres test -w /data/postgres; then
@@ -402,65 +418,87 @@ if id redis >/dev/null 2>&1; then
     fi
 fi
 
-# Clean up stale PID file if exists
+# Clean up stale PID file if exists (embedded only)
 rm -f /data/postgres/postmaster.pid 2>/dev/null || true
 
-# Initialize PostgreSQL if not already done
-if [ ! -f /data/postgres/PG_VERSION ]; then
-    echo "Initializing PostgreSQL database..."
-    gosu postgres $PG_BIN/initdb -D /data/postgres
+if [ "$EMBEDDED_POSTGRES" = "true" ]; then
+    # ----- Embedded PostgreSQL: initialize and start the local instance -----
+    if [ ! -f /data/postgres/PG_VERSION ]; then
+        echo "Initializing PostgreSQL database..."
+        gosu postgres $PG_BIN/initdb -D /data/postgres
 
-    # Configure PostgreSQL
-    echo "host all all 0.0.0.0/0 md5" >> /data/postgres/pg_hba.conf
-    echo "listen_addresses='*'" >> /data/postgres/postgresql.conf
-fi
-
-# Start PostgreSQL temporarily to create database and user
-gosu postgres $PG_BIN/pg_ctl -D /data/postgres -w start
-
-# Migrate from Lidify -> Kima: rename old database and user if they exist
-if gosu postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'lidify'" | grep -q 1; then
-    echo "Found legacy 'lidify' database, migrating to 'kima'..."
-    # Terminate any connections to the old database
-    gosu postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'lidify' AND pid <> pg_backend_pid();" 2>/dev/null || true
-    # Rename the database
-    gosu postgres psql -c "ALTER DATABASE lidify RENAME TO kima;"
-    echo "✓ Database renamed: lidify -> kima"
-    # Rename the user if it exists
-    if gosu postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname = 'lidify'" | grep -q 1; then
-        gosu postgres psql -c "ALTER USER lidify RENAME TO kima;"
-        gosu postgres psql -c "ALTER USER kima WITH PASSWORD 'kima';"
-        echo "✓ User renamed: lidify -> kima"
+        # Configure PostgreSQL
+        echo "host all all 0.0.0.0/0 md5" >> /data/postgres/pg_hba.conf
+        echo "listen_addresses='*'" >> /data/postgres/postgresql.conf
     fi
+
+    # Start PostgreSQL temporarily to create database and user
+    gosu postgres $PG_BIN/pg_ctl -D /data/postgres -w start
+
+    # Migrate from Lidify -> Kima: rename old database and user if they exist
+    if gosu postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'lidify'" | grep -q 1; then
+        echo "Found legacy 'lidify' database, migrating to 'kima'..."
+        # Terminate any connections to the old database
+        gosu postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'lidify' AND pid <> pg_backend_pid();" 2>/dev/null || true
+        # Rename the database
+        gosu postgres psql -c "ALTER DATABASE lidify RENAME TO kima;"
+        echo "✓ Database renamed: lidify -> kima"
+        # Rename the user if it exists
+        if gosu postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname = 'lidify'" | grep -q 1; then
+            gosu postgres psql -c "ALTER USER lidify RENAME TO kima;"
+            gosu postgres psql -c "ALTER USER kima WITH PASSWORD 'kima';"
+            echo "✓ User renamed: lidify -> kima"
+        fi
+    fi
+
+    # Create user and database if they don't exist (fresh install)
+    gosu postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname = 'kima'" | grep -q 1 || \
+        gosu postgres psql -c "CREATE USER kima WITH PASSWORD 'kima';"
+    gosu postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'kima'" | grep -q 1 || \
+        gosu postgres psql -c "CREATE DATABASE kima OWNER kima;"
+
+    # Run psql against the local instance for the shared steps below
+    db_psql() { gosu postgres psql -d kima "$@"; }
+else
+    # ----- External PostgreSQL: wait until reachable -----
+    echo "Waiting for external PostgreSQL to become reachable..."
+    PG_WAIT=0
+    until psql "$DATABASE_URL" -c "SELECT 1" >/dev/null 2>&1; do
+        PG_WAIT=$((PG_WAIT + 1))
+        if [ "$PG_WAIT" -ge 120 ]; then
+            echo "FATAL: external PostgreSQL not reachable after 120s (check DATABASE_URL)."
+            exit 1
+        fi
+        sleep 1
+    done
+    echo "✓ External PostgreSQL reachable"
+
+    # Run psql against the external database for the shared steps below
+    db_psql() { psql "$DATABASE_URL" "$@"; }
 fi
 
-# Create user and database if they don't exist (fresh install)
-gosu postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname = 'kima'" | grep -q 1 || \
-    gosu postgres psql -c "CREATE USER kima WITH PASSWORD 'kima';"
-gosu postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'kima'" | grep -q 1 || \
-    gosu postgres psql -c "CREATE DATABASE kima OWNER kima;"
+# Create pgvector extension (required before migrations). Best-effort on
+# external DBs where the role may lack privileges or it already exists.
+echo "Ensuring pgvector extension..."
+db_psql -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>/dev/null \
+    || echo "WARN: could not create 'vector' extension (may already exist or insufficient privilege)"
 
-# Create pgvector extension as superuser (required before migrations)
-echo "Creating pgvector extension..."
-gosu postgres psql -d kima -c "CREATE EXTENSION IF NOT EXISTS vector;"
-
-# Run Prisma migrations
+# Run Prisma migrations (DATABASE_URL already exported with the effective value)
 cd /app/backend
-export DATABASE_URL="postgresql://kima:kima@localhost:5432/kima"
 echo "Running Prisma migrations..."
 ls -la prisma/migrations/ || echo "No migrations directory!"
 
 # Check if _prisma_migrations table exists (indicates previous Prisma setup)
-MIGRATIONS_EXIST=$(gosu postgres psql -d kima -tAc "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = '_prisma_migrations')" 2>/dev/null || echo "f")
+MIGRATIONS_EXIST=$(db_psql -tAc "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = '_prisma_migrations')" 2>/dev/null || echo "f")
 
 # Check if User table exists (indicates existing data)
-USER_TABLE_EXIST=$(gosu postgres psql -d kima -tAc "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'User')" 2>/dev/null || echo "f")
+USER_TABLE_EXIST=$(db_psql -tAc "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'User')" 2>/dev/null || echo "f")
 
 # Handle rename migration for existing databases
 echo "Checking if rename migration needs to be marked as applied..."
-if gosu postgres psql -d kima -tAc "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='SystemSettings' AND column_name='soulseekFallback');" 2>/dev/null | grep -q 't'; then
+if db_psql -tAc "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='SystemSettings' AND column_name='soulseekFallback');" 2>/dev/null | grep -q 't'; then
     echo "Old column exists, marking migration as applied..."
-    gosu postgres psql -d kima -c "INSERT INTO \"_prisma_migrations\" (id, checksum, finished_at, migration_name, logs, rolled_back_at, started_at, applied_steps_count) VALUES (gen_random_uuid(), '', NOW(), '20250101000000_rename_soulseek_fallback', '', NULL, NOW(), 1) ON CONFLICT DO NOTHING;" 2>/dev/null || true
+    db_psql -c "INSERT INTO \"_prisma_migrations\" (id, checksum, finished_at, migration_name, logs, rolled_back_at, started_at, applied_steps_count) VALUES (gen_random_uuid(), '', NOW(), '20250101000000_rename_soulseek_fallback', '', NULL, NOW(), 1) ON CONFLICT DO NOTHING;" 2>/dev/null || true
 fi
 
 if [ "$MIGRATIONS_EXIST" = "t" ]; then
@@ -493,7 +531,7 @@ echo "✓ Migrations completed successfully"
 
 # Verify schema exists before starting services
 echo "Verifying database schema..."
-if ! gosu postgres psql -d kima -c "SELECT 1 FROM \"Track\" LIMIT 1" >/dev/null 2>&1; then
+if ! db_psql -c "SELECT 1 FROM \"Track\" LIMIT 1" >/dev/null 2>&1; then
     echo "FATAL: Track table does not exist after migration!"
     echo "Database schema verification failed. Container will exit."
     exit 1
@@ -504,8 +542,10 @@ echo "✓ Schema verification passed"
 touch /data/.schema_ready
 echo "✓ Schema ready flag created"
 
-# Stop PostgreSQL (supervisord will start it)
-gosu postgres $PG_BIN/pg_ctl -D /data/postgres -w stop
+# Stop the temporary embedded PostgreSQL (supervisord will start it)
+if [ "$EMBEDDED_POSTGRES" = "true" ]; then
+    gosu postgres $PG_BIN/pg_ctl -D /data/postgres -w stop
+fi
 
 # Create persistent cache directories in /data volume
 mkdir -p /data/cache/covers /data/cache/transcodes /data/secrets
@@ -534,8 +574,8 @@ fi
 # Write environment file for backend
 cat > /app/backend/.env << ENVEOF
 NODE_ENV=production
-DATABASE_URL=postgresql://kima:kima@localhost:5432/kima
-REDIS_URL=redis://localhost:6379
+DATABASE_URL=$DATABASE_URL
+REDIS_URL=$REDIS_URL
 PORT=3006
 MUSIC_PATH=/music
 TRANSCODE_CACHE_PATH=/data/cache/transcodes
@@ -561,10 +601,26 @@ open('/etc/supervisor/conf.d/kima.conf', 'w').write(conf)
     echo "CLAP audio analyzer disabled (DISABLE_CLAP=${DISABLE_CLAP})"
 fi
 
+# Point the supervisor-managed services at the effective database settings, and
+# disable the embedded postgres program when running against an external server.
+python3 - "$EMBEDDED_POSTGRES" "$DATABASE_URL" "$REDIS_URL" << 'PYEOF'
+import re, sys
+embedded, db_url, redis_url = sys.argv[1], sys.argv[2], sys.argv[3]
+path = '/etc/supervisor/conf.d/kima.conf'
+conf = open(path).read()
+# Use lambda replacements so URL characters are never treated as backrefs.
+conf = re.sub(r'DATABASE_URL="[^"]*"', lambda m: 'DATABASE_URL="%s"' % db_url, conf)
+conf = re.sub(r'REDIS_URL="[^"]*"', lambda m: 'REDIS_URL="%s"' % redis_url, conf)
+if embedded != 'true':
+    conf = re.sub(r'(\[program:postgres\][^\[]*autostart=)true', r'\g<1>false', conf, flags=re.DOTALL)
+open(path, 'w').write(conf)
+PYEOF
+
 echo "Starting Kima..."
 exec env \
     NODE_ENV=production \
-    DATABASE_URL="postgresql://kima:kima@localhost:5432/kima" \
+    DATABASE_URL="$DATABASE_URL" \
+    REDIS_URL="$REDIS_URL" \
     SESSION_SECRET="$SESSION_SECRET" \
     SETTINGS_ENCRYPTION_KEY="$SETTINGS_ENCRYPTION_KEY" \
     /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
