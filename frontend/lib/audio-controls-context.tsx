@@ -1334,7 +1334,16 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 if (hasMedia) {
                     playback.setAudioError(null);
 
-                    if (ctrl.hasAudio() && wasPlaying) {
+                    if (ctrl.isPlayingButContextSuspended()) {
+                        // Genuine nap-mode: element says "playing" but the
+                        // AudioContext is suspended/interrupted (no sound).
+                        // tryResume short-circuits on !paused and would miss
+                        // this, so prompt explicitly now that the user is
+                        // foregrounded and a tap can resume the context.
+                        iosAudioLog("foreground:silent-context", "audio-controls-context", null);
+                        ctrl.pause();
+                        playback.setAudioError("Tap play to resume");
+                    } else if (ctrl.hasAudio() && wasPlaying) {
                         ctrl.tryResume().then((resumed) => {
                             if (!resumed) {
                                 iosAudioLog("foreground:resume-failed", "audio-controls-context", null);
