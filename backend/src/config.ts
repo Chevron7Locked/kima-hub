@@ -91,6 +91,16 @@ export const config = {
         apiKey: process.env.LASTFM_API_KEY || "c1797de6bf0b7e401b623118120cd9e1",
     },
 
+    // Cover-art cache: cap the longest edge of downloaded artwork before it is
+    // written to disk, so we don't keep multi-MB originals around or ship them
+    // to the browser. Album covers are square; artist images double as
+    // backdrops, so they get a larger cap. Quality is the JPEG re-encode level.
+    artwork: {
+        maxAlbumDim: parseInt(process.env.ARTWORK_CACHE_MAX_ALBUM || "1000", 10),
+        maxArtistDim: parseInt(process.env.ARTWORK_CACHE_MAX_ARTIST || "1920", 10),
+        quality: parseInt(process.env.ARTWORK_CACHE_QUALITY || "85", 10),
+    },
+
     allowedOrigins:
         process.env.ALLOWED_ORIGINS?.split(",").map((o) => o.trim()) ||
         (process.env.NODE_ENV === "development" ? true : []),
