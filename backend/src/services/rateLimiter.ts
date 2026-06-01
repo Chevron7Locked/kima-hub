@@ -249,7 +249,10 @@ class GlobalRateLimiter {
         if (retryAfter) {
             const parsed = parseInt(retryAfter, 10);
             if (!isNaN(parsed)) {
-                return parsed * 1000; // Convert to ms
+                // Honor Retry-After, but never back off below baseDelay — some
+                // endpoints/proxies return 0 (or a tiny value), which would
+                // otherwise hot-loop the retries and exhaust them instantly.
+                return Math.max(parsed * 1000, baseDelay);
             }
         }
 

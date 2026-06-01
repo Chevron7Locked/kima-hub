@@ -339,6 +339,7 @@ export class DiscoverWeeklyService {
                             albumTitle: metadata.albumTitle,
                             artistName: metadata.artistName,
                             mbid: metadata.albumMbid,
+                            artistMbid: metadata.artistMbid,
                             lastfmUrl: undefined,
                         },
                         {
