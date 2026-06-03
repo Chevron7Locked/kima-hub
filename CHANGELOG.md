@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.7.16] - 2026-06-02
+
+A playback/reliability patch: an iOS audio-session fix, a Vibe search Redis fix, and the first phase of the Discover Weekly correctness rework.
+
+### Fixed
+
+- **iOS earbud / lock-screen resume produced no audio and lost the audio session to another app**: the MediaSession "play" action called `controller.play()`, which `await`ed the AudioContext bridge **before** `audio.play()`. That await forfeited the iOS user-activation token from the earbud click, so an interrupted/suspended AudioContext never resumed -- and `play()` then *returned* (not threw) on a non-running context, so the handler's `reloadAndPlay()` fallback never ran. The result: earbud-click resume did nothing, no native `playing` event fired, `playbackState` never updated, and after a few clicks iOS reassigned the session to the next app. Added `resumeFromGesture()`, which fires the context resume **without awaiting it**, calls `audio.play()` synchronously in the gesture (mirroring the proven track-advance path), and reloads the source on any failure instead of a silent prompt. Wired only into the explicit "play" action, so it cannot auto-resume on an ambiguous pause/route-change (the v1.7.12 earbud-unplug-through-speaker regression stays fixed). Installed iOS PWA only.
+- **Vibe text search crashed the request with "Stream isn't writeable" (#197)**: the text-embedding Redis subscriber duplicated the shared client, inheriting `enableOfflineQueue:false` + `maxRetriesPerRequest:0`, so `psubscribe` threw when the subscriber socket wasn't connected yet -- and the rejected promise was cached, breaking Vibe search permanently until restart (worse on large libraries). The subscriber now gets its own offline queue + retries, clears the cached promise on rejection, and reconnects on disconnect.
+- **Discover Weekly never showed (and silently auto-deleted) the generated playlist -- Phase 1 of the rework**: the Sunday cron tagged records with the *ending* week, so `GET /current` (which looked for the current week with exact equality) found nothing, and the next run's cleanup then deleted the invisible records. This phase fixes the core correctness path (no schema migration): generation now tags the upcoming week via a centralized week helper; the cron moves to Monday 05:00 with a dedup key aligned to the batch week; `/current` resolves from the latest completed batch (bounded, with a `stale` flag) so drifted records are visible; `buildFinalPlaylist` marks the batch failed on a transaction error instead of hanging in `scanning`; retry-unavailable routes through the shared completion flow so retried albums actually enter the playlist; cancelling a batch marks it `failed` (not a false "successful empty week"); album deletes are wrapped in transactions with an atomic claim guard so a concurrent "like" can't lose its album (and `/like` is symmetric); a same-`rgMbid` `LIBRARY` album is never deleted; and the BullMQ job hash is cleared before re-enqueue so a retry after a failure isn't silently dropped. `TZ=UTC` is pinned for deterministic week math.
+
 ## [1.7.15] - 2026-06-01
 
 A frontend quality and UX overhaul (accessibility, theming, and UX refinements) plus two playback fixes.
