@@ -25,8 +25,14 @@ function detectEnabled(): boolean {
     if (typeof window === "undefined") return false;
     try {
         const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        const standalone =
+            (navigator as { standalone?: boolean }).standalone === true ||
+            window.matchMedia?.("(display-mode: standalone)").matches === true;
         const flagged = window.localStorage.getItem(FLAG_KEY) === "1";
-        enabled = isIos && flagged;
+        // Auto-capture in the installed iOS PWA -- it has no URL bar to set
+        // ?ios_debug=1, so the ring buffer must be available unconditionally for
+        // the auto-upload below. (Temporary diagnostic aid.)
+        enabled = isIos && (standalone || flagged);
         if (enabled) {
             const stored = window.sessionStorage.getItem(STORAGE_KEY);
             if (stored) {
@@ -79,6 +85,28 @@ export function iosAudioLog(
     } catch {
         // sessionStorage full or unavailable -- not fatal
     }
+    scheduleAutoUpload();
+}
+
+// Debounced auto-archive: after a burst of audio events settles, POST the ring
+// buffer to the server so the trace arrives without a manual Upload tap -- the
+// installed iOS PWA can't navigate to /debug/ios-log. Temporary diagnostic aid.
+let uploadTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleAutoUpload(): void {
+    if (uploadTimer || typeof window === "undefined") return;
+    uploadTimer = setTimeout(() => {
+        uploadTimer = null;
+        try {
+            void fetch("/api/debug/ios-log", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ events: buffer }),
+            }).catch(() => {});
+        } catch {
+            // ignore
+        }
+    }, 3000);
 }
 
 export function readIosAudioLog(): IosAudioLogEvent[] {
