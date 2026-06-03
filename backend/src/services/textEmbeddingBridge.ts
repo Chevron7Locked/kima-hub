@@ -16,14 +16,33 @@ async function ensureSubscriber(): Promise<void> {
     if (subscriberPromise) return subscriberPromise;
 
     subscriberPromise = (async () => {
-        const sub = redisClient.duplicate();
+        // The parent redisClient sets enableOfflineQueue:false + maxRetriesPerRequest:0,
+        // and duplicate() inherits them -- so psubscribe threw "Stream isn't writeable"
+        // when the new subscriber socket wasn't connected yet, and the cached rejected
+        // promise then broke vibe text search permanently until restart (#197). Give
+        // the subscriber its own offline queue + retries so the command buffers until
+        // the connection is ready.
+        const sub = redisClient.duplicate({ enableOfflineQueue: true, maxRetriesPerRequest: null });
+        sub.on("error", (err: Error) => {
+            logger.warn(`[TEXT-EMBED] subscriber error: ${err.message}`);
+        });
+        sub.on("end", () => {
+            // Drop the cached subscriber so the next request reconnects rather than
+            // reusing a dead connection.
+            subscriberPromise = null;
+        });
         sub.on("pmessage", (_pattern: string, channel: string, message: string) => {
             const requestId = channel.slice(RESPONSE_PREFIX.length);
             emitter.emit(requestId, message);
         });
         await sub.psubscribe(`${RESPONSE_PREFIX}*`);
         logger.info("[TEXT-EMBED] Shared subscriber connected");
-    })();
+    })().catch((err) => {
+        // Never cache a rejected promise -- one transient failure must not
+        // permanently break vibe text search (#197).
+        subscriberPromise = null;
+        throw err;
+    });
 
     return subscriberPromise;
 }
