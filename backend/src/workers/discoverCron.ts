@@ -9,18 +9,19 @@ import { logger } from "../utils/logger";
 import cron, { ScheduledTask } from "node-cron";
 import { prisma } from "../utils/db";
 import { discoverQueue } from "./queues";
-import { startOfWeek } from "date-fns";
+import { resolveGenerationWeekStart, weekStartKey } from "../lib/discoveryWeek";
+import { distributedLock } from "../utils/distributedLock";
 
 let cronTask: ScheduledTask | null = null;
 
 export function startDiscoverWeeklyCron() {
-    // Run every Sunday at 8 PM (20:00)
+    // Monday 05:00 -- generate at the start of the user's week (was Sunday
+    // 20:00, which tagged records with the ending week and hid them).
     // Cron format: minute hour day-of-month month day-of-week
-    // "0 20 * * 0" = At 20:00 on Sunday
-    const schedule = "0 20 * * 0";
+    const schedule = "0 5 * * 1";
 
     logger.debug(
-        `Scheduling Discover Weekly to run: ${schedule} (Sundays at 8 PM)`
+        `Scheduling Discover Weekly to run: ${schedule} (Mondays at 5 AM)`
     );
 
     cronTask = cron.schedule(schedule, async () => {
@@ -46,12 +47,28 @@ export function startDiscoverWeeklyCron() {
             for (const config of configs) {
                 logger.debug(`   Queueing job for user ${config.userId}...`);
 
-                const weekKey = startOfWeek(new Date(), { weekStartsOn: 1 }).toISOString().split('T')[0];
-                await discoverQueue.add("discover-weekly", {
-                    userId: config.userId,
-                }, {
-                    jobId: `discover-weekly-${config.userId}-${weekKey}`,
-                });
+                const weekKey = weekStartKey(resolveGenerationWeekStart(new Date(), 1));
+                const jobId = `discover-weekly-${config.userId}-${weekKey}`;
+                await distributedLock.withLock(
+                    `discover:generate:${config.userId}`,
+                    30000,
+                    async () => {
+                        const existing = await discoverQueue.getJob(jobId);
+                        if (existing) {
+                            const state = await existing.getState();
+                            if (state === "completed" || state === "failed") {
+                                await existing.remove();
+                            }
+                        }
+                        await discoverQueue.add("discover-weekly", {
+                            userId: config.userId,
+                        }, { jobId });
+                    },
+                ).catch((e: any) =>
+                    logger.warn(
+                        `[DiscoverCron] enqueue skipped for ${config.userId}: ${e.message}`,
+                    ),
+                );
             }
 
             logger.debug(`   Queued ${configs.length} Discover Weekly jobs`);

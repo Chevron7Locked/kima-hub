@@ -80,6 +80,26 @@ export class DiscoveryAlbumLifecycle {
         album: DiscoveryAlbumInfo,
         settings: LidarrSettings
     ): Promise<void> {
+        // Cheap read-only pre-check before any destructive action. If the user
+        // liked this album after the cleanup snapshot was taken, its status is no
+        // longer ACTIVE -- skip the Lidarr file delete and the DB deletes entirely.
+        // This guards the FILES: the in-transaction claim below only guards DB
+        // rows, and the Lidarr HTTP delete must stay outside the transaction (so a
+        // Lidarr timeout cannot roll back the claim). Without this pre-check a
+        // like landing during the Lidarr round-trip would lose its files while the
+        // claim left the row LIKED. The window is now one DB read, not an HTTP
+        // round-trip; the in-tx claim closes the residual race on the row itself.
+        const current = await prisma.discoveryAlbum.findUnique({
+            where: { id: album.id },
+            select: { status: true },
+        });
+        if (!current || current.status !== 'ACTIVE') {
+            logger.debug(
+                `[DiscoveryLifecycle] Skipped delete (pre-check) -- ${album.albumTitle} no longer ACTIVE (liked?)`
+            );
+            return;
+        }
+
         if (
             settings.lidarrEnabled &&
             settings.lidarrUrl &&
@@ -104,24 +124,40 @@ export class DiscoveryAlbumLifecycle {
             }
         }
 
-        const dbAlbum = await prisma.album.findFirst({
-            where: { rgMbid: album.rgMbid },
-        });
-
-        if (dbAlbum) {
-            await prisma.track.deleteMany({
-                where: { albumId: dbAlbum.id },
+        await prisma.$transaction(async (tx) => {
+            // Claim the row atomically: only delete if it is still ACTIVE.
+            // If the user liked it concurrently, count === 0 and we abort.
+            const claimed = await tx.discoveryAlbum.updateMany({
+                where: { id: album.id, status: 'ACTIVE' },
+                data: { status: 'DELETED' },
             });
-            await prisma.album.delete({ where: { id: dbAlbum.id } });
-        }
-
-        await prisma.discoveryTrack.deleteMany({
-            where: { discoveryAlbumId: album.id },
-        });
-
-        await prisma.discoveryAlbum.update({
-            where: { id: album.id },
-            data: { status: 'DELETED' },
+            if (claimed.count === 0) {
+                logger.debug(
+                    `[DiscoveryLifecycle] Skipped delete -- ${album.albumTitle} no longer ACTIVE (liked?)`
+                );
+                return;
+            }
+            // Read the owned Album inside the tx (after the claim) so the read and
+            // the deletes share one snapshot and only DISCOVER albums are touched
+            // -- a same-rgMbid LIBRARY album must never be deleted here.
+            // AlbumLocation is a non-null enum of exactly {LIBRARY, DISCOVER}
+            // (schema.prisma:882, default LIBRARY), so this filter cannot skip a
+            // null-location row -- none exist. The only intentionally-skipped case
+            // is a discovery album mislabeled LIBRARY; protecting genuine LIBRARY
+            // albums from deletion outweighs leaving that benign Album row behind
+            // (its DiscoveryAlbum/DiscoveryTrack rows are still cleaned). rgMbid
+            // alone cannot distinguish the two, so we err toward never destroying
+            // library data.
+            const dbAlbum = await tx.album.findFirst({
+                where: { rgMbid: album.rgMbid, location: 'DISCOVER' },
+            });
+            if (dbAlbum) {
+                await tx.track.deleteMany({ where: { albumId: dbAlbum.id } });
+                await tx.album.delete({ where: { id: dbAlbum.id } });
+            }
+            await tx.discoveryTrack.deleteMany({
+                where: { discoveryAlbumId: album.id },
+            });
         });
 
         logger.debug(

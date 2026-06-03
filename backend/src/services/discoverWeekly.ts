@@ -21,7 +21,8 @@ import { musicBrainzService } from "./musicbrainz";
 import { updateBatchStatus } from "./discovery/optimisticBatchUpdate";
 import { lidarrService } from "./lidarr";
 import { scanQueue } from "../workers/queues";
-import { startOfWeek, subWeeks } from "date-fns";
+import { subWeeks } from "date-fns";
+import { resolveGenerationWeekStart } from "../lib/discoveryWeek";
 import { getSystemSettings } from "../utils/systemSettings";
 import { discoveryLogger } from "./discoveryLogger";
 import { acquisitionService } from "./acquisitionService";
@@ -105,7 +106,7 @@ export class DiscoverWeeklyService {
             discoveryLogger.section("CONFIGURATION CHECK");
             const settings = await getSystemSettings();
 
-            const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+            const weekStart = resolveGenerationWeekStart(new Date(), 1);
 
             // Get user config
             const config = await prisma.userDiscoverConfig.findUnique({
@@ -1443,6 +1444,11 @@ export class DiscoverWeeklyService {
                 batchId,
                 `Transaction failed: ${txError.message}`
             );
+            await updateBatchStatus(batchId, {
+                status: "failed",
+                errorMessage: `Playlist build failed: ${txError.message}`,
+                completedAt: new Date(),
+            });
         }
 
         if (result) {

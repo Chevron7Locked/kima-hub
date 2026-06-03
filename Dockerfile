@@ -290,6 +290,7 @@ priority=20
 
 [program:backend]
 command=/bin/bash -c "/app/wait-for-db.sh 120 && cd /app/backend && node dist/index.js"
+environment=TZ="UTC"
 autostart=true
 autorestart=true
 startretries=3
@@ -309,7 +310,7 @@ stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
-environment=NODE_ENV="production",BACKEND_URL="http://localhost:3006",PORT="3030",MALLOC_ARENA_MAX="1",NODE_OPTIONS="--max-old-space-size=512"
+environment=NODE_ENV="production",BACKEND_URL="http://localhost:3006",PORT="3030",MALLOC_ARENA_MAX="1",NODE_OPTIONS="--max-old-space-size=512",TZ="UTC"
 priority=40
 
 [program:audio-analyzer]

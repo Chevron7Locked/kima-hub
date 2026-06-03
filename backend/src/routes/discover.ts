@@ -4,6 +4,7 @@ import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { lastFmService } from "../services/lastfm";
 import { startOfWeek, endOfWeek } from "date-fns";
+import { resolveViewWeek, resolveGenerationWeekStart, weekStartKey } from "../lib/discoveryWeek";
 import axios from "axios";
 import fs from "fs";
 import path from "path";
@@ -48,10 +49,20 @@ router.get("/batch-status", async (req, res) => {
 
         if (!activeBatch) {
             logger.debug(`[Batch Status] User ${userId}: No active batch`);
+            const latestTerminal = await prisma.discoveryBatch.findFirst({
+                where: { userId, status: { in: ["completed", "failed"] } },
+                // completedAt has no DB-level NOT NULL; a terminal batch missing
+                // it would sort NULLS LAST under Postgres desc and be skipped.
+                // Fall back to createdAt so it still ranks by creation time.
+                orderBy: [{ completedAt: "desc" }, { createdAt: "desc" }],
+                select: { id: true, status: true },
+            });
             return res.json({
                 active: false,
                 status: null,
                 progress: null,
+                lastBatchId: latestTerminal?.id ?? null,
+                lastBatchStatus: latestTerminal?.status ?? null,
             });
         }
 
@@ -136,17 +147,18 @@ router.delete("/batch", async (req, res) => {
             downloadJobsCancelled += downloadJobsUpdated.count;
             logger.info(`[Discover Cancel] Cancelled ${downloadJobsUpdated.count} download jobs for batch ${batch.id}`);
 
-            // Mark batch as completed
+            // A cancelled batch produced no playlist -- it must not read as a
+            // successful empty week to the /current fallback.
             await prisma.discoveryBatch.update({
                 where: { id: batch.id },
                 data: {
-                    status: "completed",
+                    status: "failed",
                     completedAt: new Date(),
                     errorMessage: "Cancelled by user",
                 },
             });
             batchesCancelled++;
-            logger.info(`[Discover Cancel] Marked batch ${batch.id} as completed`);
+            logger.info(`[Discover Cancel] Marked batch ${batch.id} as failed`);
         }
 
         // Find and cancel any active BullMQ jobs for this user
@@ -222,10 +234,16 @@ router.post("/generate", async (req, res) => {
                 logger.debug(`\n Queuing Discover Weekly generation for user ${userId}`);
 
                 // Add generation job to queue
-                const weekKey = startOfWeek(new Date(), { weekStartsOn: 1 }).toISOString().split('T')[0];
-                const job = await discoverQueue.add("discover-weekly", { userId }, {
-                    jobId: `discover-weekly-${userId}-${weekKey}`,
-                });
+                const weekKey = weekStartKey(resolveGenerationWeekStart(new Date(), 1));
+                const jobId = `discover-weekly-${userId}-${weekKey}`;
+                const existing = await discoverQueue.getJob(jobId);
+                if (existing) {
+                    const state = await existing.getState();
+                    if (state === "completed" || state === "failed") {
+                        await existing.remove();
+                    }
+                }
+                const job = await discoverQueue.add("discover-weekly", { userId }, { jobId });
 
                 return { conflict: false as const, jobId: job.id };
             },
@@ -319,8 +337,15 @@ router.get("/current", async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 }); // Monday
-        const weekEnd = endOfWeek(new Date(), { weekStartsOn: 1 }); // Sunday
+        const calendarWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+        const latestBatch = await prisma.discoveryBatch.findFirst({
+            where: { userId, status: "completed" },
+            orderBy: { createdAt: "desc" },
+            select: { weekStart: true },
+        });
+        const view = resolveViewWeek(calendarWeekStart, latestBatch?.weekStart ?? null);
+        const weekStart = view.weekStart;
+        const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
 
         // Get all discovery albums for this week with their tracks
         const discoveryAlbums = await prisma.discoveryAlbum.findMany({
@@ -549,6 +574,7 @@ router.get("/current", async (req, res) => {
         res.json({
             weekStart,
             weekEnd,
+            stale: view.stale,
             tracks,
             unavailable,
             totalCount: tracks.length,
@@ -587,14 +613,26 @@ router.post("/like", async (req, res) => {
                 .json({ error: "Album not in active discovery" });
         }
 
-        // Mark as liked (entire album will be kept)
-        await prisma.discoveryAlbum.update({
-            where: { id: discoveryAlbum.id },
+        // Mark as liked (entire album will be kept). Conditional claim gated on
+        // status="ACTIVE" so a concurrent cleanup that already flipped the row to
+        // DELETED cannot be resurrected to LIKED -- if count===0 the cleanup won
+        // the row and we return 409. This guards the DB row only; the file-level
+        // race (cleanup deleting files for a row the user is liking) is closed on
+        // the cleanup side by deleteRejectedAlbum's status pre-check before its
+        // Lidarr/FS delete, not here.
+        const claimed = await prisma.discoveryAlbum.updateMany({
+            where: { id: discoveryAlbum.id, status: "ACTIVE" },
             data: {
                 status: "LIKED",
                 likedAt: new Date(),
             },
         });
+        if (claimed.count === 0) {
+            return res.status(409).json({
+                error: "This album was just removed and can no longer be kept",
+                code: "ALBUM_GONE",
+            });
+        }
 
         // Remove discovery tag from the artist in Lidarr
         // This prevents the artist from being deleted during cleanup
@@ -802,7 +840,13 @@ router.post("/retry-unavailable", async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+        const calendarWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+        const latestBatch = await prisma.discoveryBatch.findFirst({
+            where: { userId, status: "completed" },
+            orderBy: { createdAt: "desc" },
+            select: { weekStart: true },
+        });
+        const weekStart = resolveViewWeek(calendarWeekStart, latestBatch?.weekStart ?? null).weekStart;
 
         // Check for an active batch already in progress
         const activeBatch = await prisma.discoveryBatch.findFirst({
@@ -1024,37 +1068,30 @@ router.post("/retry-unavailable", async (req, res) => {
                 }).catch(() => {});
             }
 
-            // Mark batch as scanning, then trigger library scan
+            // Hand off to the shared completion flow. checkBatchCompletion owns
+            // the Lidarr import wait, queues the "discover-weekly-completion"
+            // scan, runs buildFinalPlaylist + reconcile, and performs the final
+            // status transition. Do NOT force-complete here -- doing so skipped
+            // playlist creation and raced async Lidarr imports.
+            // Known residual (same as the generation path): if acquireAlbum left a
+            // job pending, checkBatchCompletion returns at its pending-jobs guard
+            // and the batch waits for the webhook/scan path or the 30-min stuck
+            // sweep. The IIFE .catch does not cover that quiet wait -- it is the
+            // proven generation behavior, not a regression.
+            const { discoverWeeklyService } = await import("../services/discoverWeekly");
             await prisma.discoveryBatch.update({
                 where: { id: batch.id },
-                data: {
-                    status: "scanning",
-                    completedAlbums: completed,
-                    failedAlbums: failed,
-                },
+                data: { completedAlbums: completed, failedAlbums: failed },
             });
-
-            try {
-                await scanQueue.add("scan", {
-                    userId,
-                    type: "full",
-                    source: "discover-retry-unavailable",
-                    discoveryBatchId: batch.id,
-                });
-            } catch (scanError) {
-                logger.error("[Discover Retry] Failed to queue scan:", scanError);
-            }
-
+            await discoverWeeklyService.checkBatchCompletion(batch.id);
+            logger.info(`[Discover Retry] Batch ${batch.id} handed to completion flow: ${completed} ok, ${failed} failed`);
+        })().catch(async (bgError) => {
+            logger.error(`[Discover Retry] Background processing crashed for batch ${batch.id}:`, bgError);
             await prisma.discoveryBatch.update({
                 where: { id: batch.id },
-                data: {
-                    status: "completed",
-                    completedAt: new Date(),
-                },
-            });
-
-            logger.info(`[Discover Retry] Batch ${batch.id} complete: ${completed} succeeded, ${failed} failed`);
-        })();
+                data: { status: "failed", errorMessage: "Retry processing crashed", completedAt: new Date() },
+            }).catch(() => {});
+        });
     } catch (error) {
         logger.error("Retry unavailable albums error:", error);
         res.status(500).json({ error: "Failed to retry unavailable albums" });
@@ -1365,6 +1402,24 @@ router.delete("/clear", async (req, res) => {
 
             for (const album of activeAlbums) {
                 try {
+                    // Claim the row before any destructive action. A user can
+                    // /like an album mid-clear (the activeAlbums snapshot was taken
+                    // above); the conditional claim gated on status="ACTIVE" means
+                    // if the like landed first (count===0) we skip the Lidarr/FS
+                    // delete AND the DB delete, so a just-liked album never loses
+                    // its files or gets clobbered back to DELETED. Symmetric with
+                    // deleteRejectedAlbum's claim guard.
+                    const claimed = await prisma.discoveryAlbum.updateMany({
+                        where: { id: album.id, status: "ACTIVE" },
+                        data: { status: "DELETED" },
+                    });
+                    if (claimed.count === 0) {
+                        logger.debug(
+                            `    Skipped clear -- ${album.albumTitle} no longer ACTIVE (liked?)`
+                        );
+                        continue;
+                    }
+
                     // Remove from Lidarr if enabled
                     if (
                         settings.lidarrEnabled &&
@@ -1519,37 +1574,38 @@ router.delete("/clear", async (req, res) => {
                         );
                     }
 
-                    // Delete DiscoveryTrack records first (foreign key to Track)
-                    await prisma.discoveryTrack.deleteMany({
-                        where: { discoveryAlbumId: album.id },
-                    });
-
-                    // Remove from local database
-                    const dbAlbum = await prisma.album.findFirst({
-                        where: {
-                            title: album.albumTitle,
-                            artist: { name: album.artistName },
-                            location: "DISCOVER",
-                        },
-                        include: { tracks: true },
-                    });
-
-                    if (dbAlbum) {
-                        // Delete tracks first
-                        await prisma.track.deleteMany({
-                            where: { albumId: dbAlbum.id },
+                    // Wrap the DB row deletes in a transaction so a crash mid-delete
+                    // cannot leave a torn state (tracks gone but rows orphaned).
+                    // The DiscoveryAlbum status was already flipped to DELETED by
+                    // the conditional claim above. Lidarr HTTP and the filesystem
+                    // delete above are not DB writes -- they stay out.
+                    await prisma.$transaction(async (tx) => {
+                        // Delete DiscoveryTrack records first (foreign key to Track)
+                        await tx.discoveryTrack.deleteMany({
+                            where: { discoveryAlbumId: album.id },
                         });
 
-                        // Delete album
-                        await prisma.album.delete({
-                            where: { id: dbAlbum.id },
+                        // Remove from local database
+                        const dbAlbum = await tx.album.findFirst({
+                            where: {
+                                title: album.albumTitle,
+                                artist: { name: album.artistName },
+                                location: "DISCOVER",
+                            },
+                            include: { tracks: true },
                         });
-                    }
 
-                    // Mark as DELETED in discovery database
-                    await prisma.discoveryAlbum.update({
-                        where: { id: album.id },
-                        data: { status: "DELETED" },
+                        if (dbAlbum) {
+                            // Delete tracks first
+                            await tx.track.deleteMany({
+                                where: { albumId: dbAlbum.id },
+                            });
+
+                            // Delete album
+                            await tx.album.delete({
+                                where: { id: dbAlbum.id },
+                            });
+                        }
                     });
 
                     activeDeleted++;
