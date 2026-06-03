@@ -522,6 +522,54 @@ export class AudioController {
         }
     }
 
+    /**
+     * Explicit user-gesture resume (MediaSession "play" action / visible play
+     * button). Unlike play(), this NEVER awaits the AudioContext before
+     * audio.play() -- awaiting forfeits the iOS user-activation token, which is
+     * what left earbud-click resume silent and let iOS hand the session to
+     * another app (WebKit #261858). Mirrors swapAndPlay's synchronous pattern:
+     * fire the context resume in parallel, call audio.play() synchronously in
+     * the gesture tail, and on ANY failure reload the source to re-grab the
+     * hardware session rather than emitting a needs-resume the lock screen
+     * can't show.
+     *
+     * MUST only be called from an explicit user resume gesture, never from an
+     * ambiguous 'pause'/route-change event (see v1.7.12 / 7b41b91 -- a timer
+     * resuming on the native pause event routed audio through the speaker on
+     * earbud unplug).
+     */
+    resumeFromGesture(): void {
+        iosAudioLog("resumeFromGesture:entry", "audio-controller:resumeFromGesture", this.audio);
+        if (!this.audio.src) return;
+
+        this.setAudioSessionPlayback();
+        // Kick the AudioContext resume but do NOT await it: audio.play() below
+        // must run inside the live gesture. The bridge node resumes in parallel;
+        // currentTime advancing is the liveness signal the silent watchdog
+        // checks, not ctx.state.
+        void this.setupAudioContextBridge();
+
+        this.cancelSilentPlaybackWatchdog();
+        this.audio.play().then(() => {
+            this.startSilentPlaybackWatchdog();
+        }).catch((err) => {
+            if (err instanceof DOMException && err.name === "NotAllowedError") {
+                iosAudioLog("resumeFromGesture:not-allowed", "audio-controller:resumeFromGesture", this.audio);
+                // A fresh explicit gesture still rejected -> the element/session
+                // is stale; reloadAndPlay re-establishes the hardware session.
+                if (this.currentSrc) this.reloadAndPlay();
+                return;
+            }
+            if (err instanceof DOMException && err.name === "AbortError") {
+                iosAudioLog("resumeFromGesture:abort", "audio-controller:resumeFromGesture", this.audio);
+                if (this.currentSrc) this.reloadAndPlay();
+                return;
+            }
+            console.error("[AudioController] resumeFromGesture failed:", err);
+            this.emit("error", { error: err instanceof Error ? err.message : String(err) });
+        });
+    }
+
     pause(): void {
         this.autoResumeAfterRecovery = false;
         this.cancelSilentPlaybackWatchdog();

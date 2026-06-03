@@ -28,7 +28,12 @@ test("core smoke: login → play album → play/pause/next/prev", async ({ page 
     // Start playback
     await page.getByLabel("Play all").click();
 
-    // Mini player should reflect playing state
+    // Wait for playback to actually start before asserting transport state -- a
+    // freshly-booted container can lag the first audio load past the locator's
+    // default wait, which left the player "Not Playing" and flaked this test.
+    await expect.poll(() => getAudioCurrentTime(page), { timeout: 15_000 }).toBeGreaterThan(0);
+
+    // Player should reflect playing state
     const playPause = page.locator('button[title="Pause"], button[title="Play"]').first();
     await expect(playPause).toHaveAttribute("title", "Pause");
 
