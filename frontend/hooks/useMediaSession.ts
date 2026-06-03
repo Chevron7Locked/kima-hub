@@ -78,12 +78,15 @@ export function useMediaSession() {
                 }
             }
 
-            // Explicit user resume -> synchronous gesture-preserving path.
-            // resumeFromGesture starts audio.play() synchronously (so the iOS
-            // user-activation token isn't forfeited by an await) and reloads the
-            // source on failure, so there's no silent needs-resume dead-end and
-            // no reliance on play() throwing for the fallback to run.
-            controller.resumeFromGesture();
+            try {
+                await controller.play();
+            } catch {
+                // play() failed (iOS audio session may be invalidated).
+                // Reload source and try again -- this re-establishes the
+                // audio hardware connection that iOS drops on interruption.
+                iosAudioLog("ms:play:fallback-reload", "useMediaSession");
+                controller.reloadAndPlay();
+            }
         });
 
         navigator.mediaSession.setActionHandler("pause", () => {
