@@ -64,6 +64,7 @@ export class AudioController {
     private audioContext: AudioContext | null = null;
     private mediaSourceNode: MediaElementAudioSourceNode | null = null;
     private audioContextBridgeAttempted = false;
+    private audioContextStateHandler: (() => void) | null = null;
 
     constructor(audio: HTMLAudioElement) {
         this.audio = audio;
@@ -80,8 +81,14 @@ export class AudioController {
         this.initializeVolume();
     }
 
-    private setAudioSessionPlayback(): void {
-        if (this.audioSessionSet) return;
+    // Claim the iOS "playback" audio session category. iOS demotes / reassigns
+    // the category to another app when our session is interrupted (earbud click,
+    // Control Center, a call), so an explicit resume MUST re-assert it (force)
+    // rather than trusting the one-time latch -- otherwise iOS leaves the session
+    // with whatever app grabbed it (e.g. a sleep-sounds app) and our resume is
+    // silent. The latch still short-circuits the non-gesture auto paths.
+    private setAudioSessionPlayback(force = false): void {
+        if (this.audioSessionSet && !force) return;
         this.audioSessionSet = true;
         try {
             const nav = navigator as { audioSession?: { type: string } };
@@ -118,6 +125,25 @@ export class AudioController {
             const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
             if (!AC) return;
             this.audioContext = new AC();
+            this.audioContextStateHandler = () => {
+                const state = this.audioContext?.state;
+                iosAudioLog(
+                    "audio-context:statechange",
+                    "audio-controller:setupAudioContextBridge",
+                    this.audio,
+                    { state },
+                );
+                // OS ended an interruption and the context is live again: re-claim
+                // the playback session category so iOS does not leave it assigned
+                // to whatever app grabbed it during the interruption. Never call
+                // play() here -- auto-resuming on a route/interruption change is the
+                // v1.7.12 earbud-unplug-to-speaker regression. If the element was
+                // never paused it resumes on its own once the context runs.
+                if (state === "running" && !this.audio.paused) {
+                    this.setAudioSessionPlayback(true);
+                }
+            };
+            this.audioContext.addEventListener("statechange", this.audioContextStateHandler);
             this.mediaSourceNode = this.audioContext.createMediaElementSource(this.audio);
             this.mediaSourceNode.connect(this.audioContext.destination);
             this.audioContext.resume().catch(() => {});
@@ -346,7 +372,11 @@ export class AudioController {
         iosAudioLog("play:entry", "audio-controller:play", this.audio);
         if (!this.audio.src) return;
 
-        this.setAudioSessionPlayback();
+        // Explicit play/resume: re-claim the session category every time (force),
+        // not just on first play -- this is the path the MediaSession "play"
+        // action and the on-screen play button reach, and it is what stops iOS
+        // leaving the session with an app that grabbed it during interruption.
+        this.setAudioSessionPlayback(true);
         this.setupAudioContextBridge();
 
         try {
@@ -363,7 +393,7 @@ export class AudioController {
             }
             if (err instanceof DOMException && err.name === "NotAllowedError") {
                 iosAudioLog("play:not-allowed", "audio-controller:play", this.audio);
-                // User gesture required — emit needs-resume so UI can prompt
+                // User gesture required -- emit needs-resume so UI can prompt
                 this.emit("needs-resume");
                 return;
             }
@@ -641,6 +671,16 @@ export class AudioController {
     destroy(): void {
         this.cleanup();
         this.detachNativeListeners();
+
+        if (this.audioContext) {
+            if (this.audioContextStateHandler) {
+                this.audioContext.removeEventListener("statechange", this.audioContextStateHandler);
+                this.audioContextStateHandler = null;
+            }
+            this.audioContext.close().catch(() => {});
+            this.audioContext = null;
+            this.mediaSourceNode = null;
+        }
 
         this.eventListeners.clear();
     }
