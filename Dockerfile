@@ -73,7 +73,10 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     && pip3 install --no-cache-dir --break-system-packages \
     'laion-clap>=1.1.4' \
     'librosa>=0.10.0' \
-    'transformers>=4.30.0'
+    'transformers==5.8.1'
+# transformers pinned exact: newer releases reference torch.float8_e8m0fnu
+# (added in torch 2.7) at import and crash against the pinned torch==2.5.1.
+# 5.8.1 is the version running in prod against this torch. Bump only with torch.
 
 # tensorflow-cpu + essentia-tensorflow (AMD64 only -- no ARM64 wheels upstream)
 RUN pip3 install --no-cache-dir --break-system-packages \
