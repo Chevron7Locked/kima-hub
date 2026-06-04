@@ -883,6 +883,7 @@ class TextEmbedHandler:
 
     def _handle_message(self, message):
         """Handle a text embedding request"""
+        request_id = None
         try:
             data = message['data']
             if isinstance(data, bytes):
@@ -918,6 +919,16 @@ class TextEmbedHandler:
         except Exception as e:
             logger.error(f"Failed to handle text embed request: {e}")
             traceback.print_exc()
+            # Publish a failure response so the caller fails fast instead of
+            # waiting out its full timeout on an internal analyzer error.
+            if request_id:
+                try:
+                    self.redis_client.publish(
+                        f"{TEXT_EMBED_RESPONSE_PREFIX}{request_id}",
+                        json.dumps({'requestId': request_id, 'success': False, 'embedding': None})
+                    )
+                except Exception as pub_err:
+                    logger.error(f"Failed to publish text embed failure response: {pub_err}")
 
 
 class ControlHandler:
