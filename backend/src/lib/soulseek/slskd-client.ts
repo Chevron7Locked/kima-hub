@@ -431,15 +431,25 @@ export class SlskdClient extends EventEmitter {
 
     const stats = await fs.promises.stat(filePath)
     ;(dl as any).totalBytes = BigInt(stats.size)
-    dl.receivedBytes = BigInt(stats.size)
-    ;(dl as any).status = 'complete'
+    dl.receivedBytes = BigInt(0)
 
-    // File already exists in slskd's download dir where beets will process it.
-    // Signal completion without piping — avoids writing an untagged duplicate
-    // to the library. Kima's caller (downloadTrack) will write a 0-byte file
-    // to destPath; we end the stream immediately so it stays empty.
-    dl.stream.end()
-    dl.events.emit('complete', dl.receivedBytes)
+    const readStream = fs.createReadStream(filePath)
+
+    readStream.on('data', (chunk: any) => {
+      dl.receivedBytes += BigInt(chunk.length)
+    })
+
+    readStream.on('error', (err: Error) => {
+      dl.events.emit('error', err)
+    })
+
+    readStream.pipe(dl.stream)
+
+    dl.stream.on('end', () => {
+      ;(dl as any).status = 'complete'
+      dl.receivedBytes = (dl as any).totalBytes
+      dl.events.emit('complete', dl.receivedBytes)
+    })
   }
 
   private async _findFileRecursive(dir: string, basename: string): Promise<string | null> {

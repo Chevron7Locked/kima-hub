@@ -1256,20 +1256,10 @@ if (!this.client) {
 
                         if (fs.existsSync(destPath)) {
                             const stats = fs.statSync(destPath);
-                            if (stats.size === 0) {
-                                // slskd adapter: file lives in slskd's download dir
-                                // for beets to process — clean up the empty placeholder
-                                try { fs.unlinkSync(destPath); } catch { /* ignore */ }
-                                sessionLog(
-                                    "SOULSEEK",
-                                    `Downloaded via slskd (beets will import): ${match.filename}`
-                                );
-                            } else {
-                                sessionLog(
-                                    "SOULSEEK",
-                                    `Downloaded: ${match.filename} (${Math.round(stats.size / 1024)}KB)`
-                                );
-                            }
+                            sessionLog(
+                                "SOULSEEK",
+                                `Downloaded: ${match.filename} (${Math.round(stats.size / 1024)}KB)`
+                            );
                             resolve({ success: true });
                         } else {
                             sessionLog(
