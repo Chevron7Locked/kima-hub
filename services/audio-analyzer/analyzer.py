@@ -1394,12 +1394,40 @@ class AnalysisWorker:
             if recovered_count > 0:
                 logger.info(f"Recovered {recovered_count} stale tracks that already had embeddings")
 
-            # Then: reset truly stale tracks (no embedding) back to pending
+            # Quarantine tracks that crashed/stalled MAX_RETRIES times: a worker
+            # that dies on a native fault (e.g. a SIGSEGV the pre-decode gate did
+            # not catch) leaves the track in 'processing' and never reaches the
+            # normal mark-failed path, so without this it would reset forever.
+            cursor.execute("""
+                UPDATE "Track" t
+                SET
+                    "analysisStatus" = 'failed',
+                    "analysisError" = 'Quarantined after repeated worker crash/stall',
+                    "analysisStartedAt" = NULL
+                WHERE t."analysisStatus" = 'processing'
+                AND (
+                    (t."analysisStartedAt" IS NOT NULL AND t."analysisStartedAt" < NOW() - INTERVAL '%s minutes')
+                    OR
+                    (t."analysisStartedAt" IS NULL AND t."updatedAt" < NOW() - INTERVAL '%s minutes')
+                )
+                AND COALESCE(t."analysisRetryCount", 0) >= %s
+                AND NOT EXISTS (SELECT 1 FROM track_embeddings te WHERE te.track_id = t.id)
+                RETURNING t.id
+            """, (STALE_PROCESSING_MINUTES, STALE_PROCESSING_MINUTES, MAX_RETRIES))
+
+            quarantined_ids = cursor.fetchall()
+            quarantined_count = len(quarantined_ids)
+            if quarantined_count > 0:
+                logger.warning(f"Quarantined {quarantined_count} stale 'processing' tracks past {MAX_RETRIES} retries (likely repeated worker crash)")
+
+            # Then: reset truly stale tracks (no embedding) back to pending, and
+            # count the crash as a retry so a poison file can't loop forever.
             cursor.execute("""
                 UPDATE "Track" t
                 SET
                     "analysisStatus" = 'pending',
-                    "analysisStartedAt" = NULL
+                    "analysisStartedAt" = NULL,
+                    "analysisRetryCount" = COALESCE(t."analysisRetryCount", 0) + 1
                 WHERE t."analysisStatus" = 'processing'
                 AND (
                     (t."analysisStartedAt" IS NOT NULL AND t."analysisStartedAt" < NOW() - INTERVAL '%s minutes')
