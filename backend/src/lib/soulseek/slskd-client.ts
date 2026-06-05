@@ -18,6 +18,7 @@ import path from 'path'
 
 import type { Download, SlskDownloadEventEmitter } from './downloads'
 import type { FileSearchResponse } from './messages/from/peer'
+import type { FileAttribute } from './messages/common'
 
 const SLSKD_URL = process.env.SLSKD_URL || 'http://gluetun-slsk:5030'
 const SLSKD_API_KEY = process.env.SLSKD_API_KEY || ''
@@ -255,15 +256,16 @@ export class SlskdClient extends EventEmitter {
 
   private _mapSearchResponse(resp: SlskdSearchResponse): FileSearchResponse {
     return {
+      kind: 'fileSearchResponse' as const,
       username: resp.username,
       slotsFree: resp.hasFreeUploadSlot,
       avgSpeed: resp.uploadSpeed || 0,
       queueLength: resp.queueLength || 0,
-      token: resp.token || 0,
+      token: String(resp.token || ''),
       files: (resp.files || [])
         .filter((f) => !f.isLocked)
         .map((f) => {
-          const attrs = new Map<number, number>()
+          const attrs = new Map<FileAttribute, number>()
           const dur = f.length || 0
           const sz = f.size || 0
           if (dur > 0 && sz > 0) {
@@ -429,25 +431,15 @@ export class SlskdClient extends EventEmitter {
 
     const stats = await fs.promises.stat(filePath)
     ;(dl as any).totalBytes = BigInt(stats.size)
-    dl.receivedBytes = BigInt(0)
+    dl.receivedBytes = BigInt(stats.size)
+    ;(dl as any).status = 'complete'
 
-    const readStream = fs.createReadStream(filePath)
-
-    readStream.on('data', (chunk: Buffer) => {
-      dl.receivedBytes += BigInt(chunk.length)
-    })
-
-    readStream.on('error', (err: Error) => {
-      dl.events.emit('error', err)
-    })
-
-    readStream.pipe(dl.stream)
-
-    dl.stream.on('end', () => {
-      ;(dl as any).status = 'complete'
-      dl.receivedBytes = (dl as any).totalBytes
-      dl.events.emit('complete', dl.receivedBytes)
-    })
+    // File already exists in slskd's download dir where beets will process it.
+    // Signal completion without piping — avoids writing an untagged duplicate
+    // to the library. Kima's caller (downloadTrack) will write a 0-byte file
+    // to destPath; we end the stream immediately so it stays empty.
+    dl.stream.end()
+    dl.events.emit('complete', dl.receivedBytes)
   }
 
   private async _findFileRecursive(dir: string, basename: string): Promise<string | null> {

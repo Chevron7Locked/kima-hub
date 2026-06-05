@@ -187,7 +187,7 @@ class SlidingWindowRateLimiter {
 }
 
 export class SoulseekService {
-    private client: SlskClient | null = null;
+    private client: InstanceType<typeof SlskClient> | null = null;
     private connecting = false;
     private connectPromise: Promise<void> | null = null;
     private lastConnectAttempt = 0;
@@ -328,7 +328,7 @@ export class SoulseekService {
                 resolve();
             });
 
-            this.client!.server.conn.once("error", (err) => {
+            this.client!.server.conn.once("error", (err: Error) => {
                 clearTimeout(timeout);
                 reject(err);
             });
@@ -1256,10 +1256,20 @@ if (!this.client) {
 
                         if (fs.existsSync(destPath)) {
                             const stats = fs.statSync(destPath);
-                            sessionLog(
-                                "SOULSEEK",
-                                `Downloaded: ${match.filename} (${Math.round(stats.size / 1024)}KB)`
-                            );
+                            if (stats.size === 0) {
+                                // slskd adapter: file lives in slskd's download dir
+                                // for beets to process — clean up the empty placeholder
+                                try { fs.unlinkSync(destPath); } catch { /* ignore */ }
+                                sessionLog(
+                                    "SOULSEEK",
+                                    `Downloaded via slskd (beets will import): ${match.filename}`
+                                );
+                            } else {
+                                sessionLog(
+                                    "SOULSEEK",
+                                    `Downloaded: ${match.filename} (${Math.round(stats.size / 1024)}KB)`
+                                );
+                            }
                             resolve({ success: true });
                         } else {
                             sessionLog(
