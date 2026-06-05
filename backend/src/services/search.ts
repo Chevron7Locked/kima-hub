@@ -811,6 +811,57 @@ export class SearchService {
         }
     }
 
+    /**
+     * Record a query that returned zero results across all types into a Redis
+     * sorted set (key `search:zeroresults`), so we get a ranked "miss list" to
+     * tune search later. Best-effort only: never throws, so logging cannot
+     * break search. Skips empty/whitespace and very short (<2 char) queries.
+     */
+    private async recordZeroResult(query: string): Promise<void> {
+        const member = normalizeCacheQuery(query);
+        if (member.length < 2) return;
+
+        const ZERORESULTS_KEY = "search:zeroresults";
+        const MAX_ENTRIES = 500;
+        const TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
+
+        try {
+            await redisClient.zincrby(ZERORESULTS_KEY, 1, member);
+            // Keep only the top ~500 entries (highest scores), dropping the
+            // lowest-ranked overflow.
+            await redisClient.zremrangebyrank(ZERORESULTS_KEY, 0, -(MAX_ENTRIES + 1));
+            // Refresh TTL so the miss list self-expires when searches go quiet.
+            await redisClient.expire(ZERORESULTS_KEY, TTL_SECONDS);
+        } catch (err) {
+            logger.warn("[SEARCH] Redis zero-result record error:", err);
+        }
+    }
+
+    /**
+     * Return the most frequent zero-result queries, highest count first.
+     * Intended for a future admin "miss list" view.
+     */
+    async getZeroResultQueries(
+        limit = 50
+    ): Promise<Array<{ query: string; count: number }>> {
+        try {
+            const flat = await redisClient.zrevrange(
+                "search:zeroresults",
+                0,
+                limit - 1,
+                "WITHSCORES"
+            );
+            const out: Array<{ query: string; count: number }> = [];
+            for (let i = 0; i < flat.length; i += 2) {
+                out.push({ query: flat[i], count: Number(flat[i + 1]) });
+            }
+            return out;
+        } catch (err) {
+            logger.warn("[SEARCH] Redis zero-result read error:", err);
+            return [];
+        }
+    }
+
     async searchAll({
         query,
         limit = 10,
@@ -879,6 +930,19 @@ export class SearchService {
             await redisClient.setex(cacheKey, 300, JSON.stringify(results));
         } catch (err) {
             logger.warn("[SEARCH] Redis cache write error:", err);
+        }
+
+        // Record genuine DB misses (cache-miss branch only) into the ranked
+        // zero-result list to tune search later.
+        if (
+            results.artists.length === 0 &&
+            results.albums.length === 0 &&
+            results.tracks.length === 0 &&
+            results.podcasts.length === 0 &&
+            results.audiobooks.length === 0 &&
+            results.episodes.length === 0
+        ) {
+            await this.recordZeroResult(query);
         }
 
         return results;
@@ -982,6 +1046,14 @@ export class SearchService {
             await redisClient.setex(cacheKey, 120, JSON.stringify(results));
         } catch (err) {
             logger.warn("[SEARCH] Redis write error:", err);
+        }
+
+        // Record genuine DB misses (cache-miss branch only) when the requested
+        // type returned nothing.
+        if (
+            (results[type as keyof SearchResults] ?? []).length === 0
+        ) {
+            await this.recordZeroResult(query);
         }
 
         return results;
