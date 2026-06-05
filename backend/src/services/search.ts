@@ -112,6 +112,41 @@ export class SearchService {
         return terms.map((term) => `${term}:*`).join(" & ");
     }
 
+    /**
+     * Trigram (pg_trgm) fuzzy artist search. Used only when full-text search
+     * returns nothing, to tolerate typos the prefix tsquery cannot match
+     * (e.g. "metalica" -> "Metallica"). Uses the GIN trigram index on
+     * Artist.name via the `%` operator (pg_trgm.similarity_threshold).
+     */
+    private async searchArtistsTrigram({
+        query,
+        limit = 20,
+        offset = 0,
+    }: SearchOptions): Promise<ArtistSearchResult[]> {
+        const q = query.trim();
+        if (!q) return [];
+        try {
+            return await prisma.$queryRaw<ArtistSearchResult[]>`
+        SELECT
+          a.id,
+          a.name,
+          a.mbid,
+          a."heroUrl",
+          a.summary,
+          similarity(a.name, ${q}) AS rank
+        FROM "Artist" a
+        WHERE a.name % ${q}
+          AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
+        ORDER BY rank DESC, a.name ASC
+        LIMIT ${limit}
+        OFFSET ${offset}
+      `;
+        } catch (error) {
+            logger.error("Artist trigram search error:", error);
+            return [];
+        }
+    }
+
     private async searchArtistsFallback({
         query,
         limit = 20,
@@ -174,10 +209,52 @@ export class SearchService {
         OFFSET ${offset}
       `;
 
-            return results.length > 0 ? results : this.searchArtistsFallback({ query, limit, offset });
+            if (results.length > 0) return results;
+            const fuzzy = await this.searchArtistsTrigram({ query, limit, offset });
+            return fuzzy.length > 0
+                ? fuzzy
+                : this.searchArtistsFallback({ query, limit, offset });
         } catch (error) {
             logger.error("Artist search error:", error);
             return this.searchArtistsFallback({ query, limit, offset });
+        }
+    }
+
+    /**
+     * Trigram (pg_trgm) fuzzy album search (title or artist name). Used only
+     * when full-text search returns nothing. Uses the GIN trigram indexes on
+     * Album.title and Artist.name via the `%` operator.
+     */
+    private async searchAlbumsTrigram({
+        query,
+        limit = 20,
+        offset = 0,
+    }: SearchOptions): Promise<AlbumSearchResult[]> {
+        const q = query.trim();
+        if (!q) return [];
+        try {
+            return await prisma.$queryRaw<AlbumSearchResult[]>`
+        SELECT
+          a.id,
+          a.title,
+          a."artistId",
+          ar.name AS "artistName",
+          a.year,
+          a."coverUrl",
+          GREATEST(
+            similarity(a.title, ${q}),
+            similarity(COALESCE(ar.name, ''), ${q})
+          ) AS rank
+        FROM "Album" a
+        LEFT JOIN "Artist" ar ON a."artistId" = ar.id
+        WHERE a.title % ${q} OR ar.name % ${q}
+        ORDER BY rank DESC, a.title ASC
+        LIMIT ${limit}
+        OFFSET ${offset}
+      `;
+        } catch (error) {
+            logger.error("Album trigram search error:", error);
+            return [];
         }
     }
 
@@ -287,10 +364,50 @@ export class SearchService {
         OFFSET ${offset}
       `;
 
-            return results.length > 0 ? results : this.searchAlbumsFallback({ query, limit, offset });
+            if (results.length > 0) return results;
+            const fuzzy = await this.searchAlbumsTrigram({ query, limit, offset });
+            return fuzzy.length > 0
+                ? fuzzy
+                : this.searchAlbumsFallback({ query, limit, offset });
         } catch (error) {
             logger.error("Album search error:", error);
             return this.searchAlbumsFallback({ query, limit, offset });
+        }
+    }
+
+    /**
+     * Trigram (pg_trgm) fuzzy track search by title. Used only when full-text
+     * search returns nothing. Uses the GIN trigram index on Track.title.
+     */
+    private async searchTracksTrigram({
+        query,
+        limit = 20,
+        offset = 0,
+    }: SearchOptions): Promise<TrackSearchResult[]> {
+        const q = query.trim();
+        if (!q) return [];
+        try {
+            return await prisma.$queryRaw<TrackSearchResult[]>`
+        SELECT
+          t.id,
+          t.title,
+          t."albumId",
+          t.duration,
+          a.title as "albumTitle",
+          a."artistId",
+          ar.name as "artistName",
+          similarity(t.title, ${q}) AS rank
+        FROM "Track" t
+        LEFT JOIN "Album" a ON t."albumId" = a.id
+        LEFT JOIN "Artist" ar ON a."artistId" = ar.id
+        WHERE t.title % ${q}
+        ORDER BY rank DESC, t.title ASC
+        LIMIT ${limit}
+        OFFSET ${offset}
+      `;
+        } catch (error) {
+            logger.error("Track trigram search error:", error);
+            return [];
         }
     }
 
@@ -376,7 +493,11 @@ export class SearchService {
         OFFSET ${offset}
       `;
 
-            return results.length > 0 ? results : this.searchTracksFallback({ query, limit, offset });
+            if (results.length > 0) return results;
+            const fuzzy = await this.searchTracksTrigram({ query, limit, offset });
+            return fuzzy.length > 0
+                ? fuzzy
+                : this.searchTracksFallback({ query, limit, offset });
         } catch (error) {
             logger.error("Track search error:", error);
             return this.searchTracksFallback({ query, limit, offset });
