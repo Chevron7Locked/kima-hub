@@ -20,9 +20,21 @@ import type { Download, SlskDownloadEventEmitter } from './downloads'
 import type { FileSearchResponse } from './messages/from/peer'
 import type { FileAttribute } from './messages/common'
 
-const SLSKD_URL = process.env.SLSKD_URL || 'http://gluetun-slsk:5030'
-const SLSKD_API_KEY = process.env.SLSKD_API_KEY || ''
-const SLSKD_DOWNLOADS = process.env.SLSKD_DOWNLOADS || '/soulseek-downloads'
+// Defaults come from the environment; configureSlskd() lets the app override
+// them at runtime from user settings (so slskd is configurable in the UI, not
+// only via env vars). Kept as module-level `let`s so existing references below
+// pick up the configured values without threading config through every call.
+let SLSKD_URL = process.env.SLSKD_URL || 'http://gluetun-slsk:5030'
+let SLSKD_API_KEY = process.env.SLSKD_API_KEY || ''
+let SLSKD_DOWNLOADS = process.env.SLSKD_DOWNLOADS || '/soulseek-downloads'
+
+/** Override slskd connection settings (e.g. from SystemSettings). Empty/undefined
+ *  values are ignored so an unset field never clobbers a working env default. */
+export function configureSlskd(opts: { url?: string | null; apiKey?: string | null; downloads?: string | null }): void {
+  if (opts.url) SLSKD_URL = opts.url
+  if (opts.apiKey != null) SLSKD_API_KEY = opts.apiKey
+  if (opts.downloads) SLSKD_DOWNLOADS = opts.downloads
+}
 
 // ── HTTP helpers ──────────────────────────────────────────────────────
 

@@ -7,7 +7,8 @@ import path from "path";
 import fs from "fs";
 import { mkdir } from "fs/promises";
 import PQueue from "p-queue";
-import { SlskClient } from "../lib/soulseek/client";
+import { SlskClient, resolveSlskClient } from "../lib/soulseek/client";
+import { configureSlskd } from "../lib/soulseek/slskd-client";
 import type { FileSearchResponse } from "../lib/soulseek/messages/from/peer";
 import { FileAttribute } from "../lib/soulseek/messages/common";
 import { getSystemSettings } from "../utils/systemSettings";
@@ -226,7 +227,8 @@ export class SoulseekService {
     private async connectEagerly(): Promise<void> {
         try {
             const settings = await this.getSettings();
-            if (!settings.enabled || !settings.username || !settings.password) {
+            const hasCreds = settings.mode === 'slskd' || !!(settings.username && settings.password);
+            if (!settings.enabled || !hasCreds) {
                 return;
             }
             sessionLog("SOULSEEK", "Attempting eager connection on startup...", "DEBUG");
@@ -241,8 +243,12 @@ export class SoulseekService {
         const settings = await getSystemSettings();
 
         if (!settings) {
+            const slskdUrl = process.env.SLSKD_URL || null;
             return {
-                enabled: process.env.SOULSEEK_ENABLED === 'true',
+                mode: slskdUrl ? 'slskd' : 'p2p',
+                slskdUrl,
+                slskdApiKey: process.env.SLSKD_API_KEY || null,
+                enabled: process.env.SOULSEEK_ENABLED === 'true' || !!slskdUrl,
                 username: process.env.SOULSEEK_USERNAME,
                 password: process.env.SOULSEEK_PASSWORD,
                 downloadPath: process.env.SOULSEEK_DOWNLOAD_PATH,
@@ -255,9 +261,20 @@ export class SoulseekService {
 
         const username = settings.soulseekUsername || process.env.SOULSEEK_USERNAME;
         const password = settings.soulseekPassword || process.env.SOULSEEK_PASSWORD;
+        const slskdUrl = settings.slskdUrl || process.env.SLSKD_URL || null;
+        const slskdApiKey = settings.slskdApiKey || process.env.SLSKD_API_KEY || null;
+        // Explicit setting wins; otherwise infer slskd from a configured URL,
+        // else fall back to the built-in P2P client.
+        const mode = settings.soulseekMode || (slskdUrl ? 'slskd' : 'p2p');
+        const isSlskd = mode === 'slskd';
 
         return {
-            enabled: settings.soulseekEnabled ?? !!(username && password),
+            mode,
+            slskdUrl,
+            slskdApiKey,
+            // In slskd mode no Kima-side Soulseek credentials are needed (slskd
+            // holds its own account), so enablement doesn't hinge on user/pass.
+            enabled: settings.soulseekEnabled ?? (isSlskd ? true : !!(username && password)),
             username,
             password,
             downloadPath: settings.soulseekDownloadPath || process.env.SOULSEEK_DOWNLOAD_PATH,
@@ -271,13 +288,21 @@ export class SoulseekService {
             throw new Error('Soulseek is not enabled');
         }
 
-        if (!settings.username || !settings.password) {
-            throw new Error("Soulseek credentials not configured");
+        const isSlskd = settings.mode === 'slskd';
+
+        if (isSlskd) {
+            // slskd carries its own Soulseek account — Kima needs no credentials.
+            configureSlskd({ url: settings.slskdUrl, apiKey: settings.slskdApiKey });
+            sessionLog("SOULSEEK", `Using slskd backend at ${settings.slskdUrl}...`);
+        } else {
+            if (!settings.username || !settings.password) {
+                throw new Error("Soulseek credentials not configured");
+            }
+            sessionLog("SOULSEEK", `Connecting as ${settings.username}...`);
         }
 
-        sessionLog("SOULSEEK", `Connecting as ${settings.username}...`);
-
-        this.client = new SlskClient();
+        const ClientImpl = resolveSlskClient(settings.mode);
+        this.client = new ClientImpl();
 
         this.client.on("server-error", (error: Error) => {
             sessionLog(
@@ -574,6 +599,8 @@ export class SoulseekService {
     async isAvailable(): Promise<boolean> {
         try {
             const settings = await this.getSettings();
+            // slskd mode is available without Kima-side credentials.
+            if (settings.mode === 'slskd') return !!settings.slskdUrl;
             return !!(settings.username && settings.password);
         } catch {
             return false;

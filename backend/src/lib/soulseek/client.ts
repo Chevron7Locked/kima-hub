@@ -62,5 +62,14 @@ const _slskd: new () => ISlskClient = SlskdClient
 // concrete class, so consumers depend only on the shared contract.
 export const SlskClient: new () => ISlskClient = process.env.SLSKD_URL ? _slskd : _p2p
 
+// Resolve the backend from an explicit mode (e.g. a user setting) instead of the
+// env default: "slskd" -> REST adapter, "p2p" -> built-in client. When mode is
+// unset, fall back to the env-based selection above.
+export function resolveSlskClient(mode?: string | null): new () => ISlskClient {
+  if (mode === 'slskd') return _slskd
+  if (mode === 'p2p') return _p2p
+  return process.env.SLSKD_URL ? _slskd : _p2p
+}
+
 // Re-export the client events type from the P2P client for type compatibility.
 export type { SlskClientEvents, SlskPeersEvents } from './p2p-client'

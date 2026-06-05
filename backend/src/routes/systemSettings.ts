@@ -76,6 +76,12 @@ const systemSettingsSchema = z.object({
   soulseekEnabled: z.boolean().nullable().optional(),
   soulseekDownloadPath: z.string().nullable().optional(),
 
+  // Soulseek backend: "p2p" = built-in client (needs the credentials above),
+  // "slskd" = route via a slskd REST instance (which holds its own account).
+  soulseekMode: z.enum(["p2p", "slskd"]).nullable().optional(),
+  slskdUrl: z.string().nullable().optional(),
+  slskdApiKey: z.string().nullable().optional(),
+
   // Spotify (for playlist import)
   spotifyClientId: z.string().nullable().optional(),
   spotifyClientSecret: z.string().nullable().optional(),
@@ -147,6 +153,7 @@ router.get("/", async (req, res) => {
       lastfmUserKey: safeDecrypt(settings.lastfmUserKey),
       audiobookshelfApiKey: safeDecrypt(settings.audiobookshelfApiKey),
       soulseekPassword: safeDecrypt(settings.soulseekPassword),
+      slskdApiKey: safeDecrypt(settings.slskdApiKey),
       spotifyClientSecret: safeDecrypt(settings.spotifyClientSecret),
     };
 
@@ -189,6 +196,8 @@ router.post("/", async (req, res) => {
       encryptedData.audiobookshelfApiKey = encrypt(data.audiobookshelfApiKey);
     if (data.soulseekPassword)
       encryptedData.soulseekPassword = encrypt(data.soulseekPassword);
+    if (data.slskdApiKey)
+      encryptedData.slskdApiKey = encrypt(data.slskdApiKey);
     if (data.spotifyClientSecret)
       encryptedData.spotifyClientSecret = encrypt(data.spotifyClientSecret);
 
