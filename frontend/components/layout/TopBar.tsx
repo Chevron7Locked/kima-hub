@@ -15,6 +15,7 @@ import {
 import { ActivityPanelToggle } from "./ActivityPanel";
 import { cn } from "@/utils/cn";
 import { api } from "@/lib/api";
+import { useSearchSuggest } from "@/hooks/useSearchSuggest";
 import { useToast } from "@/lib/toast-context";
 import { useDownloadContext } from "@/lib/download-context";
 import { useQuery } from "@tanstack/react-query";
@@ -42,6 +43,20 @@ export function TopBar() {
     const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
     const queryClient = useQueryClient();
+
+    // Phase H: typeahead suggestions dropdown (additive -- does not alter the
+    // existing Enter/submit + 500ms auto-navigate behaviour above).
+    const [suggestOpen, setSuggestOpen] = useState(false);
+    const { suggestions } = useSearchSuggest(searchQuery);
+    const hasSuggestions =
+        suggestions.artists.length > 0 || suggestions.albums.length > 0;
+    const showSuggest =
+        suggestOpen && searchQuery.trim().length >= 2 && hasSuggestions;
+
+    const goToSuggestion = (href: string) => {
+        setSuggestOpen(false);
+        router.push(href);
+    };
 
     // SSE-populated scan status (populated by useEventSource via queryClient.setQueryData)
     const { data: scanStatus } = useQuery<{
@@ -112,9 +127,87 @@ export function TopBar() {
 
     const handleSearch = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
+        setSuggestOpen(false);
         if (searchQuery.trim()) {
             router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
         }
+    };
+
+    // Shared dropdown of typeahead suggestions, rendered under each search input.
+    const renderSuggestDropdown = () => {
+        if (!showSuggest) return null;
+        return (
+            <div
+                className="absolute left-0 right-0 top-full mt-2 bg-[#0f0f0f] border border-[#262626] rounded-xl shadow-2xl overflow-hidden z-50 max-h-[60vh] overflow-y-auto"
+                // Keep the dropdown open while interacting with it; blur fires
+                // before click, so suppress the mousedown-driven close.
+                onMouseDown={(e) => e.preventDefault()}
+            >
+                {suggestions.artists.length > 0 && (
+                    <div className="py-1">
+                        <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-gray-500">
+                            Artists
+                        </div>
+                        {suggestions.artists.map((artist) => (
+                            <button
+                                key={`artist-${artist.id}`}
+                                type="button"
+                                onClick={() => goToSuggestion(`/artist/${artist.id}`)}
+                                className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-white/5 transition-colors"
+                            >
+                                {artist.heroUrl ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                        src={api.getCoverArtUrl(artist.heroUrl, 64)}
+                                        alt=""
+                                        className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                                    />
+                                ) : (
+                                    <span className="w-8 h-8 rounded-full bg-[#262626] flex-shrink-0" />
+                                )}
+                                <span className="truncate text-sm text-white">
+                                    {artist.name}
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+                )}
+                {suggestions.albums.length > 0 && (
+                    <div className="py-1 border-t border-[#1a1a1a]">
+                        <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-gray-500">
+                            Albums
+                        </div>
+                        {suggestions.albums.map((album) => (
+                            <button
+                                key={`album-${album.id}`}
+                                type="button"
+                                onClick={() => goToSuggestion(`/album/${album.id}`)}
+                                className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-white/5 transition-colors"
+                            >
+                                {album.coverUrl ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                        src={api.getCoverArtUrl(album.coverUrl, 64)}
+                                        alt=""
+                                        className="w-8 h-8 rounded object-cover flex-shrink-0"
+                                    />
+                                ) : (
+                                    <span className="w-8 h-8 rounded bg-[#262626] flex-shrink-0" />
+                                )}
+                                <span className="min-w-0">
+                                    <span className="block truncate text-sm text-white">
+                                        {album.title}
+                                    </span>
+                                    <span className="block truncate text-xs text-gray-400">
+                                        {album.artistName}
+                                    </span>
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
     };
 
     // Auto-search with debounce (500ms after user stops typing)
@@ -251,7 +344,12 @@ export function TopBar() {
                             <input
                                 type="text"
                                 value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onChange={(e) => {
+                                    setSearchQuery(e.target.value);
+                                    setSuggestOpen(true);
+                                }}
+                                onFocus={() => setSuggestOpen(true)}
+                                onBlur={() => setSuggestOpen(false)}
                                 placeholder="Search..."
                                 aria-label="Search"
                                 autoCapitalize="none"
@@ -259,6 +357,7 @@ export function TopBar() {
                                 tabIndex={0}
                                 className="w-full h-10 pl-10 pr-3 bg-[var(--bg-hover)] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
                             />
+                            {renderSuggestDropdown()}
                         </div>
                     </form>
 
@@ -330,9 +429,12 @@ export function TopBar() {
                                     ref={searchInputRef}
                                     type="text"
                                     value={searchQuery}
-                                    onChange={(e) =>
-                                        setSearchQuery(e.target.value)
-                                    }
+                                    onChange={(e) => {
+                                        setSearchQuery(e.target.value);
+                                        setSuggestOpen(true);
+                                    }}
+                                    onFocus={() => setSuggestOpen(true)}
+                                    onBlur={() => setSuggestOpen(false)}
                                     placeholder="What do you want to play?"
                                     aria-label="Search"
                                     autoCapitalize="none"
@@ -340,6 +442,7 @@ export function TopBar() {
                                     tabIndex={0}
                                     className="w-full h-12 pl-12 pr-4 bg-[var(--bg-hover)] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
                                 />
+                                {renderSuggestDropdown()}
                             </div>
                         </form>
                     </div>

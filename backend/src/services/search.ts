@@ -78,6 +78,24 @@ export interface AudiobookSearchResult {
     rank: number;
 }
 
+export interface SuggestArtist {
+    id: string;
+    name: string;
+    heroUrl: string | null;
+}
+
+export interface SuggestAlbum {
+    id: string;
+    title: string;
+    artistName: string;
+    coverUrl: string | null;
+}
+
+export interface SuggestResults {
+    artists: SuggestArtist[];
+    albums: SuggestAlbum[];
+}
+
 export interface SearchByTypeOptions {
     query: string;
     type: string;
@@ -912,6 +930,68 @@ export class SearchService {
             logger.warn("[SEARCH] Redis zero-result read error:", err);
             return [];
         }
+    }
+
+    /**
+     * Phase H: lightweight typeahead/suggest for the search box.
+     *
+     * Returns a small, trimmed set of artist + album suggestions reusing the
+     * existing ranked searchArtists/searchAlbums. Briefly Redis-cached (60s)
+     * under `search:suggest:<normalizedCacheQuery>:<limit>`, mirroring the
+     * other search caches. Queries shorter than 2 chars return empty (the
+     * full search box uses a 2-char threshold too).
+     */
+    async suggest({
+        query,
+        limit = 8,
+    }: SearchOptions): Promise<SuggestResults> {
+        const empty: SuggestResults = { artists: [], albums: [] };
+
+        const q = (query || "").trim();
+        if (q.length < 2) {
+            return empty;
+        }
+
+        // Each type gets a small slice; keep it tight for a fast dropdown.
+        const perType = Math.max(1, Math.min(limit, 5));
+
+        const cacheKey = `search:suggest:${normalizeCacheQuery(q)}:${perType}`;
+        try {
+            const cached = await redisClient.get(cacheKey);
+            if (cached) {
+                logger.debug(`[SEARCH SUGGEST] Cache HIT for query: "${q}"`);
+                return JSON.parse(cached);
+            }
+        } catch (err) {
+            logger.warn("[SEARCH SUGGEST] Redis read error:", err);
+        }
+
+        const [artists, albums] = await Promise.all([
+            this.searchArtists({ query: q, limit: perType }),
+            this.searchAlbums({ query: q, limit: perType }),
+        ]);
+
+        const results: SuggestResults = {
+            artists: artists.map((a) => ({
+                id: a.id,
+                name: a.name,
+                heroUrl: a.heroUrl,
+            })),
+            albums: albums.map((a) => ({
+                id: a.id,
+                title: a.title,
+                artistName: a.artistName,
+                coverUrl: a.coverUrl,
+            })),
+        };
+
+        try {
+            await redisClient.setex(cacheKey, 60, JSON.stringify(results));
+        } catch (err) {
+            logger.warn("[SEARCH SUGGEST] Redis write error:", err);
+        }
+
+        return results;
     }
 
     async searchAll({
