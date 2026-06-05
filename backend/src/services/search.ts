@@ -173,10 +173,18 @@ export class SearchService {
         // 20260606000000): band names like "The The"/"Yes" stay searchable.
         // The trigram arm also matches normalizedName so accent/&-folded
         // queries hit (e.g. "of mice and men" -> stored "Of Mice & Men").
+        // Phase C: both arms add a modest, bounded ownership boost
+        // (LEAST(0.5, ln(1 + libraryAlbumCount) * 0.1)) so that, among
+        // similarly-relevant same-name hits, the more-owned artist wins. It is
+        // log-scaled and capped at 0.5 so a huge library can't dominate
+        // relevance; it survives the MAX(rank) GROUP BY by being baked into both
+        // arms' rank. FTS still generally outranks trigram (the +1.0 boost is
+        // larger than the 0.5 cap).
         const ftsArm = tsquery
             ? Prisma.sql`
               SELECT a.id, a.name, a.mbid, a."heroUrl", a.summary,
-                     ts_rank(a."searchVector", to_tsquery('simple', ${tsquery})) + 1.0 AS rank
+                     ts_rank(a."searchVector", to_tsquery('simple', ${tsquery})) + 1.0
+                       + LEAST(0.5, ln(1 + COALESCE(a."libraryAlbumCount", 0)) * 0.1) AS rank
                 FROM "Artist" a
                WHERE a."searchVector" @@ to_tsquery('simple', ${tsquery})
                  AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
@@ -188,7 +196,8 @@ export class SearchService {
         SELECT id, name, mbid, "heroUrl", summary, MAX(rank) AS rank FROM (
           ${ftsArm}
           SELECT a.id, a.name, a.mbid, a."heroUrl", a.summary,
-                 GREATEST(similarity(a.name, ${q}), similarity(a."normalizedName", ${nq})) AS rank
+                 GREATEST(similarity(a.name, ${q}), similarity(a."normalizedName", ${nq}))
+                   + LEAST(0.5, ln(1 + COALESCE(a."libraryAlbumCount", 0)) * 0.1) AS rank
             FROM "Artist" a
            WHERE (a.name % ${q} OR a."normalizedName" % ${nq})
              AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
@@ -279,6 +288,11 @@ export class SearchService {
         // The trigram arm matches album title OR artist name. MAX(rank) dedupes
         // an album matched by several arms. Both arms always run; FTS arm is
         // skipped when tsquery is empty (punctuation-only query).
+        // Phase C: both arms add a modest, bounded ownership boost from the
+        // parent artist's libraryAlbumCount (no per-album play count exists):
+        // LEAST(0.5, ln(1 + ar.libraryAlbumCount) * 0.1), log-scaled and capped
+        // so a large library can't dominate relevance. Baked into both arms so
+        // it survives MAX(rank); the +1.0 FTS boost still tops the 0.5 cap.
         const ftsArm = tsquery
             ? Prisma.sql`
               SELECT a.id, a.title, a."artistId", ar.name as "artistName",
@@ -288,7 +302,8 @@ export class SearchService {
                             THEN ts_rank(a."searchVector", to_tsquery('simple', ${tsquery})) ELSE 0 END,
                        CASE WHEN ar."searchVector" @@ to_tsquery('simple', ${tsquery})
                             THEN ts_rank(ar."searchVector", to_tsquery('simple', ${tsquery})) ELSE 0 END
-                     ) + 1.0 AS rank
+                     ) + 1.0
+                     + LEAST(0.5, ln(1 + COALESCE(ar."libraryAlbumCount", 0)) * 0.1) AS rank
                 FROM "Album" a
                 LEFT JOIN "Artist" ar ON a."artistId" = ar.id
                WHERE a."searchVector" @@ to_tsquery('simple', ${tsquery})
@@ -305,7 +320,8 @@ export class SearchService {
                  GREATEST(
                    similarity(a.title, ${q}),
                    similarity(COALESCE(ar.name, ''), ${q})
-                 ) AS rank
+                 )
+                 + LEAST(0.5, ln(1 + COALESCE(ar."libraryAlbumCount", 0)) * 0.1) AS rank
             FROM "Album" a
             LEFT JOIN "Artist" ar ON a."artistId" = ar.id
            WHERE a.title % ${q} OR ar.name % ${q}
@@ -388,11 +404,17 @@ export class SearchService {
         // hit outranks a pure trigram hit; trigram arm matches the track title.
         // MAX(rank) dedupes a track matched by both arms. Both arms always run;
         // FTS arm skipped when tsquery is empty (punctuation-only query).
+        // Phase C: both arms add a modest, bounded ownership boost from the
+        // parent artist's libraryAlbumCount (no per-track play count exists):
+        // LEAST(0.5, ln(1 + ar.libraryAlbumCount) * 0.1), log-scaled and capped
+        // so a large library can't dominate relevance. Baked into both arms so
+        // it survives MAX(rank); the +1.0 FTS boost still tops the 0.5 cap.
         const ftsArm = tsquery
             ? Prisma.sql`
               SELECT t.id, t.title, t."albumId", t.duration,
                      a.title as "albumTitle", a."artistId", ar.name as "artistName",
-                     ts_rank(t."searchVector", to_tsquery('simple', ${tsquery})) + 1.0 AS rank
+                     ts_rank(t."searchVector", to_tsquery('simple', ${tsquery})) + 1.0
+                       + LEAST(0.5, ln(1 + COALESCE(ar."libraryAlbumCount", 0)) * 0.1) AS rank
                 FROM "Track" t
                 LEFT JOIN "Album" a ON t."albumId" = a.id
                 LEFT JOIN "Artist" ar ON a."artistId" = ar.id
@@ -406,7 +428,8 @@ export class SearchService {
           ${ftsArm}
           SELECT t.id, t.title, t."albumId", t.duration,
                  a.title as "albumTitle", a."artistId", ar.name as "artistName",
-                 similarity(t.title, ${q}) AS rank
+                 similarity(t.title, ${q})
+                   + LEAST(0.5, ln(1 + COALESCE(ar."libraryAlbumCount", 0)) * 0.1) AS rank
             FROM "Track" t
             LEFT JOIN "Album" a ON t."albumId" = a.id
             LEFT JOIN "Artist" ar ON a."artistId" = ar.id
