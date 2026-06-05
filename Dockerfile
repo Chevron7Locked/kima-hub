@@ -104,29 +104,29 @@ RUN pip cache purge \
 # Download all ML models in a single layer (~800MB total)
 # IMPORTANT: Using MusiCNN models to match analyzer.py expectations
 RUN echo "Downloading ML models..." && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o /app/models/msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/autotagging/msd/msd-musicnn-1.pb" && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_happy-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o /app/models/mood_happy-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_happy/mood_happy-msd-musicnn-1.pb" && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_sad-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o /app/models/mood_sad-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_sad/mood_sad-msd-musicnn-1.pb" && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_relaxed-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o /app/models/mood_relaxed-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_relaxed/mood_relaxed-msd-musicnn-1.pb" && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_aggressive-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o /app/models/mood_aggressive-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_aggressive/mood_aggressive-msd-musicnn-1.pb" && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_party-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o /app/models/mood_party-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_party/mood_party-msd-musicnn-1.pb" && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_acoustic-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o /app/models/mood_acoustic-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_acoustic/mood_acoustic-msd-musicnn-1.pb" && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/mood_electronic-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o /app/models/mood_electronic-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_electronic/mood_electronic-msd-musicnn-1.pb" && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/danceability-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o /app/models/danceability-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/danceability/danceability-msd-musicnn-1.pb" && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/deam-msd-musicnn-2.pb \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o /app/models/deam-msd-musicnn-2.pb \
         "https://essentia.upf.edu/models/classification-heads/deam/deam-msd-musicnn-2.pb" && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 -o /app/models/emomusic-msd-musicnn-2.pb \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o /app/models/emomusic-msd-musicnn-2.pb \
         "https://essentia.upf.edu/models/classification-heads/emomusic/emomusic-msd-musicnn-2.pb" && \
-    curl -L --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 600 -o /tmp/clap_full.pt \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o /tmp/clap_full.pt \
         "https://huggingface.co/lukewys/laion_clap/resolve/main/music_audioset_epoch_15_esc_90.14.pt" && \
     python3 -c "import torch; ckpt = torch.load('/tmp/clap_full.pt', map_location='cpu', weights_only=False); torch.save({'state_dict': ckpt['state_dict']}, '/app/models/music_audioset_epoch_15_esc_90.14.pt')" && \
     rm /tmp/clap_full.pt && \
