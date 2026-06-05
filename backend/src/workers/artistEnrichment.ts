@@ -91,6 +91,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
             ? artist.heroUrl
             : null;
         let genres: string[] = [];
+        let aliases: string[] = [];
 
         if (!artist.mbid.startsWith("temp-")) {
             logger.debug(
@@ -215,11 +216,13 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
             }
         }
 
-        // Genre fallback: MusicBrainz curated genres (if Last.fm didn't return any)
-        if (genres.length === 0 && !artist.mbid.startsWith("temp-")) {
+        // MusicBrainz: curated genres (fallback if Last.fm returned none) + aliases.
+        // Aliases always need MB, so fetch unconditionally for real MBIDs; genres
+        // are only used when Last.fm gave us nothing.
+        if (!artist.mbid.startsWith("temp-")) {
             try {
-                const mbArtist = await musicBrainzService.getArtist(artist.mbid, ["genres"]);
-                if (mbArtist?.genres && Array.isArray(mbArtist.genres)) {
+                const mbArtist = await musicBrainzService.getArtist(artist.mbid, ["genres", "aliases"]);
+                if (genres.length === 0 && mbArtist?.genres && Array.isArray(mbArtist.genres)) {
                     genres = mbArtist.genres
                         .sort((a: any, b: any) => (b.count || 0) - (a.count || 0))
                         .slice(0, 5)
@@ -229,8 +232,29 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                         logger.debug(`${logPrefix} MusicBrainz: ${genres.length} genres: ${genres.join(', ')}`);
                     }
                 }
+                // Alternate names (e.g. "JAY-Z"/"Jay Z", localized/stage names).
+                // These flow into the artist searchVector (weight B) so full-text
+                // search can match an artist by an alias with no query change.
+                if (mbArtist?.aliases && Array.isArray(mbArtist.aliases)) {
+                    const primaryLower = artist.name.toLowerCase();
+                    const seen = new Set<string>();
+                    aliases = mbArtist.aliases
+                        .map((a: any) => (a?.name || "").trim())
+                        .filter((name: string) => {
+                            if (!name) return false;
+                            if (name.toLowerCase() === primaryLower) return false;
+                            const key = name.toLowerCase();
+                            if (seen.has(key)) return false;
+                            seen.add(key);
+                            return true;
+                        })
+                        .slice(0, 25);
+                    if (aliases.length > 0) {
+                        logger.debug(`${logPrefix} MusicBrainz: ${aliases.length} aliases: ${aliases.join(', ')}`);
+                    }
+                }
             } catch (error: any) {
-                logger.debug(`${logPrefix} MusicBrainz genres: FAILED - ${error?.message || error}`);
+                logger.debug(`${logPrefix} MusicBrainz genres/aliases: FAILED - ${error?.message || error}`);
             }
         }
 
@@ -310,6 +334,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                 heroUrl: finalHeroUrl,
                 similarArtistsJson,
                 genres: genres.length > 0 ? genres : undefined,
+                aliases: aliases.length > 0 ? aliases : undefined,
                 lastEnriched: new Date(),
                 enrichmentStatus: "completed",
             },
