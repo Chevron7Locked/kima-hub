@@ -163,6 +163,17 @@ export class SearchService {
         const nq = normalizeArtistName(query);
         const tsquery = this.queryToTsquery(query);
 
+        // Phase F: trigram is noisy on very short inputs (1-2 chars) and the %
+        // operator can return huge low-quality sets. For short queries we run
+        // FTS-only (the FTS arm already does prefix matching via :*) and clamp
+        // the result cap. If there's no usable tsquery for such a short query
+        // there's nothing to FTS, so go straight to the LIKE fallback.
+        const isShort = q.length < 3;
+        if (isShort && !tsquery) {
+            return this.searchArtistsFallback({ query, limit, offset });
+        }
+        const effectiveLimit = isShort ? Math.min(limit, 10) : limit;
+
         // Unified FTS + trigram query. The FTS arm gets a +1.0 boost so any
         // full-text hit (ts_rank up to ~1.6) always outranks a pure trigram
         // hit (similarity 0..1). MAX(rank) dedupes rows matched by both arms.
@@ -187,32 +198,84 @@ export class SearchService {
                        + LEAST(0.5, ln(1 + COALESCE(a."libraryAlbumCount", 0)) * 0.1) AS rank
                 FROM "Artist" a
                WHERE a."searchVector" @@ to_tsquery('simple', ${tsquery})
-                 AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
-              UNION ALL`
+                 AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)`
             : Prisma.empty;
 
-        try {
-            const results = await prisma.$queryRaw<ArtistSearchResult[]>(Prisma.sql`
-        SELECT id, name, mbid, "heroUrl", summary, MAX(rank) AS rank FROM (
-          ${ftsArm}
+        // Phase F: skip the trigram arm entirely for short queries (FTS-only),
+        // mirroring how the FTS arm is conditionally Prisma.empty when tsquery
+        // is "". The two arms are joined by UNION ALL only when both are present.
+        const trigramArm = isShort
+            ? Prisma.empty
+            : Prisma.sql`
           SELECT a.id, a.name, a.mbid, a."heroUrl", a.summary,
                  GREATEST(similarity(a.name, ${q}), similarity(a."normalizedName", ${nq}))
                    + LEAST(0.5, ln(1 + COALESCE(a."libraryAlbumCount", 0)) * 0.1) AS rank
             FROM "Artist" a
            WHERE (a.name % ${q} OR a."normalizedName" % ${nq})
-             AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
+             AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)`;
+
+        const unionGlue =
+            tsquery && !isShort ? Prisma.sql`UNION ALL` : Prisma.empty;
+
+        try {
+            const results = await prisma.$queryRaw<ArtistSearchResult[]>(Prisma.sql`
+        SELECT id, name, mbid, "heroUrl", summary, MAX(rank) AS rank FROM (
+          ${ftsArm}
+          ${unionGlue}
+          ${trigramArm}
         ) u
         GROUP BY id, name, mbid, "heroUrl", summary
         ORDER BY rank DESC, name ASC
-        LIMIT ${limit}
+        LIMIT ${effectiveLimit}
         OFFSET ${offset}
       `);
 
             if (results.length > 0) return results;
+            // Phase G: last-resort phonetic tier (artists only), tried only when
+            // the unified query came back empty, before the LIKE fallback.
+            const phonetic = await this.searchArtistsPhonetic({
+                query,
+                limit: effectiveLimit,
+                offset,
+            });
+            if (phonetic.length > 0) return phonetic;
             return this.searchArtistsFallback({ query, limit, offset });
         } catch (error) {
             logger.error("Artist search error:", error);
             return this.searchArtistsFallback({ query, limit, offset });
+        }
+    }
+
+    /**
+     * Phase G: Double Metaphone phonetic artist match (rare last-resort).
+     *
+     * Only called from searchArtists when the unified FTS + trigram query
+     * returns zero rows, and before the LIKE fallback. Catches phonetic
+     * spellings trigram misses ("ke$ha" -> "Kesha"). Backed by the functional
+     * index Artist_name_dmetaphone_idx (see migration 20260608000000).
+     * dmetaphone of a multiword string returns the code for roughly the first
+     * token only; that's acceptable for a last-resort tier. Never throws.
+     */
+    private async searchArtistsPhonetic({
+        query,
+        limit = 20,
+        offset = 0,
+    }: SearchOptions): Promise<ArtistSearchResult[]> {
+        const q = query.trim();
+        try {
+            return await prisma.$queryRaw<ArtistSearchResult[]>(Prisma.sql`
+        SELECT a.id, a.name, a.mbid, a."heroUrl", a.summary,
+               similarity(a.name, ${q}) AS rank
+          FROM "Artist" a
+         WHERE dmetaphone(a.name) = dmetaphone(${q})
+           AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
+         ORDER BY a.name ASC
+         LIMIT ${limit}
+         OFFSET ${offset}
+      `);
+        } catch (error) {
+            logger.error("Artist phonetic search error:", error);
+            return [];
         }
     }
 
@@ -282,6 +345,17 @@ export class SearchService {
         const q = query.trim();
         const tsquery = this.queryToTsquery(query);
 
+        // Phase F: trigram is noisy on very short inputs (1-2 chars) and the %
+        // operator can return huge low-quality sets. For short queries we run
+        // FTS-only (the FTS arm already does prefix matching via :*) and clamp
+        // the result cap. With no usable tsquery for such a short query there's
+        // nothing to FTS, so go straight to the LIKE fallback.
+        const isShort = q.length < 3;
+        if (isShort && !tsquery) {
+            return this.searchAlbumsFallback({ query, limit, offset });
+        }
+        const effectiveLimit = isShort ? Math.min(limit, 10) : limit;
+
         // Unified FTS + trigram query. The FTS arm matches either the album's
         // own searchVector or the artist's searchVector (folded into the LEFT
         // JOIN via OR), each +1.0 boosted so any FTS hit outranks pure-fuzzy.
@@ -307,14 +381,15 @@ export class SearchService {
                 FROM "Album" a
                 LEFT JOIN "Artist" ar ON a."artistId" = ar.id
                WHERE a."searchVector" @@ to_tsquery('simple', ${tsquery})
-                  OR ar."searchVector" @@ to_tsquery('simple', ${tsquery})
-              UNION ALL`
+                  OR ar."searchVector" @@ to_tsquery('simple', ${tsquery})`
             : Prisma.empty;
 
-        try {
-            const results = await prisma.$queryRaw<AlbumSearchResult[]>(Prisma.sql`
-        SELECT id, title, "artistId", "artistName", year, "coverUrl", MAX(rank) AS rank FROM (
-          ${ftsArm}
+        // Phase F: skip the trigram arm entirely for short queries (FTS-only),
+        // mirroring the conditional FTS arm. UNION ALL joins them only when both
+        // arms are present.
+        const trigramArm = isShort
+            ? Prisma.empty
+            : Prisma.sql`
           SELECT a.id, a.title, a."artistId", ar.name as "artistName",
                  a.year, a."coverUrl",
                  GREATEST(
@@ -324,11 +399,21 @@ export class SearchService {
                  + LEAST(0.5, ln(1 + COALESCE(ar."libraryAlbumCount", 0)) * 0.1) AS rank
             FROM "Album" a
             LEFT JOIN "Artist" ar ON a."artistId" = ar.id
-           WHERE a.title % ${q} OR ar.name % ${q}
+           WHERE a.title % ${q} OR ar.name % ${q}`;
+
+        const unionGlue =
+            tsquery && !isShort ? Prisma.sql`UNION ALL` : Prisma.empty;
+
+        try {
+            const results = await prisma.$queryRaw<AlbumSearchResult[]>(Prisma.sql`
+        SELECT id, title, "artistId", "artistName", year, "coverUrl", MAX(rank) AS rank FROM (
+          ${ftsArm}
+          ${unionGlue}
+          ${trigramArm}
         ) u
         GROUP BY id, title, "artistId", "artistName", year, "coverUrl"
         ORDER BY rank DESC, title ASC
-        LIMIT ${limit}
+        LIMIT ${effectiveLimit}
         OFFSET ${offset}
       `);
 
@@ -400,6 +485,17 @@ export class SearchService {
         const q = query.trim();
         const tsquery = this.queryToTsquery(query);
 
+        // Phase F: trigram is noisy on very short inputs (1-2 chars) and the %
+        // operator can return huge low-quality sets. For short queries we run
+        // FTS-only (the FTS arm already does prefix matching via :*) and clamp
+        // the result cap. With no usable tsquery for such a short query there's
+        // nothing to FTS, so go straight to the LIKE fallback.
+        const isShort = q.length < 3;
+        if (isShort && !tsquery) {
+            return this.searchTracksFallback({ query, limit, offset });
+        }
+        const effectiveLimit = isShort ? Math.min(limit, 10) : limit;
+
         // Unified FTS + trigram query. FTS arm +1.0 boosted so any full-text
         // hit outranks a pure trigram hit; trigram arm matches the track title.
         // MAX(rank) dedupes a track matched by both arms. Both arms always run;
@@ -418,14 +514,15 @@ export class SearchService {
                 FROM "Track" t
                 LEFT JOIN "Album" a ON t."albumId" = a.id
                 LEFT JOIN "Artist" ar ON a."artistId" = ar.id
-               WHERE t."searchVector" @@ to_tsquery('simple', ${tsquery})
-              UNION ALL`
+               WHERE t."searchVector" @@ to_tsquery('simple', ${tsquery})`
             : Prisma.empty;
 
-        try {
-            const results = await prisma.$queryRaw<TrackSearchResult[]>(Prisma.sql`
-        SELECT id, title, "albumId", duration, "albumTitle", "artistId", "artistName", MAX(rank) AS rank FROM (
-          ${ftsArm}
+        // Phase F: skip the trigram arm entirely for short queries (FTS-only),
+        // mirroring the conditional FTS arm. UNION ALL joins them only when both
+        // arms are present.
+        const trigramArm = isShort
+            ? Prisma.empty
+            : Prisma.sql`
           SELECT t.id, t.title, t."albumId", t.duration,
                  a.title as "albumTitle", a."artistId", ar.name as "artistName",
                  similarity(t.title, ${q})
@@ -433,11 +530,21 @@ export class SearchService {
             FROM "Track" t
             LEFT JOIN "Album" a ON t."albumId" = a.id
             LEFT JOIN "Artist" ar ON a."artistId" = ar.id
-           WHERE t.title % ${q}
+           WHERE t.title % ${q}`;
+
+        const unionGlue =
+            tsquery && !isShort ? Prisma.sql`UNION ALL` : Prisma.empty;
+
+        try {
+            const results = await prisma.$queryRaw<TrackSearchResult[]>(Prisma.sql`
+        SELECT id, title, "albumId", duration, "albumTitle", "artistId", "artistName", MAX(rank) AS rank FROM (
+          ${ftsArm}
+          ${unionGlue}
+          ${trigramArm}
         ) u
         GROUP BY id, title, "albumId", duration, "albumTitle", "artistId", "artistName"
         ORDER BY rank DESC, title ASC
-        LIMIT ${limit}
+        LIMIT ${effectiveLimit}
         OFFSET ${offset}
       `);
 
