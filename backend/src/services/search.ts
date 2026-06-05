@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
+import { normalizeArtistName } from "../utils/artistNormalization";
 
 export function normalizeCacheQuery(query: string): string {
     return query.trim().toLowerCase().replace(/\s+/g, " ");
@@ -159,6 +160,7 @@ export class SearchService {
         }
 
         const q = query.trim();
+        const nq = normalizeArtistName(query);
         const tsquery = this.queryToTsquery(query);
 
         // Unified FTS + trigram query. The FTS arm gets a +1.0 boost so any
@@ -167,12 +169,16 @@ export class SearchService {
         // Both arms always run so a typo'd term still gets fuzzy coverage even
         // when other terms produce FTS hits. If queryToTsquery is empty
         // (punctuation-only query) we skip the FTS arm and run trigram-only.
+        // FTS uses the 'simple' config to match the searchVector (see migration
+        // 20260606000000): band names like "The The"/"Yes" stay searchable.
+        // The trigram arm also matches normalizedName so accent/&-folded
+        // queries hit (e.g. "of mice and men" -> stored "Of Mice & Men").
         const ftsArm = tsquery
             ? Prisma.sql`
               SELECT a.id, a.name, a.mbid, a."heroUrl", a.summary,
-                     ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) + 1.0 AS rank
+                     ts_rank(a."searchVector", to_tsquery('simple', ${tsquery})) + 1.0 AS rank
                 FROM "Artist" a
-               WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
+               WHERE a."searchVector" @@ to_tsquery('simple', ${tsquery})
                  AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
               UNION ALL`
             : Prisma.empty;
@@ -182,9 +188,9 @@ export class SearchService {
         SELECT id, name, mbid, "heroUrl", summary, MAX(rank) AS rank FROM (
           ${ftsArm}
           SELECT a.id, a.name, a.mbid, a."heroUrl", a.summary,
-                 similarity(a.name, ${q}) AS rank
+                 GREATEST(similarity(a.name, ${q}), similarity(a."normalizedName", ${nq})) AS rank
             FROM "Artist" a
-           WHERE a.name % ${q}
+           WHERE (a.name % ${q} OR a."normalizedName" % ${nq})
              AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
         ) u
         GROUP BY id, name, mbid, "heroUrl", summary
@@ -278,15 +284,15 @@ export class SearchService {
               SELECT a.id, a.title, a."artistId", ar.name as "artistName",
                      a.year, a."coverUrl",
                      GREATEST(
-                       CASE WHEN a."searchVector" @@ to_tsquery('english', ${tsquery})
-                            THEN ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) ELSE 0 END,
-                       CASE WHEN ar."searchVector" @@ to_tsquery('english', ${tsquery})
-                            THEN ts_rank(ar."searchVector", to_tsquery('english', ${tsquery})) ELSE 0 END
+                       CASE WHEN a."searchVector" @@ to_tsquery('simple', ${tsquery})
+                            THEN ts_rank(a."searchVector", to_tsquery('simple', ${tsquery})) ELSE 0 END,
+                       CASE WHEN ar."searchVector" @@ to_tsquery('simple', ${tsquery})
+                            THEN ts_rank(ar."searchVector", to_tsquery('simple', ${tsquery})) ELSE 0 END
                      ) + 1.0 AS rank
                 FROM "Album" a
                 LEFT JOIN "Artist" ar ON a."artistId" = ar.id
-               WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
-                  OR ar."searchVector" @@ to_tsquery('english', ${tsquery})
+               WHERE a."searchVector" @@ to_tsquery('simple', ${tsquery})
+                  OR ar."searchVector" @@ to_tsquery('simple', ${tsquery})
               UNION ALL`
             : Prisma.empty;
 
@@ -386,11 +392,11 @@ export class SearchService {
             ? Prisma.sql`
               SELECT t.id, t.title, t."albumId", t.duration,
                      a.title as "albumTitle", a."artistId", ar.name as "artistName",
-                     ts_rank(t."searchVector", to_tsquery('english', ${tsquery})) + 1.0 AS rank
+                     ts_rank(t."searchVector", to_tsquery('simple', ${tsquery})) + 1.0 AS rank
                 FROM "Track" t
                 LEFT JOIN "Album" a ON t."albumId" = a.id
                 LEFT JOIN "Artist" ar ON a."artistId" = ar.id
-               WHERE t."searchVector" @@ to_tsquery('english', ${tsquery})
+               WHERE t."searchVector" @@ to_tsquery('simple', ${tsquery})
               UNION ALL`
             : Prisma.empty;
 
