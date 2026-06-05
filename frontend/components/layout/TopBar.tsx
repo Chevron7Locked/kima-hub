@@ -342,7 +342,13 @@ export function TopBar() {
                         >
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                             <input
-                                type="text"
+                                type="search"
+                                name="q"
+                                autoComplete="off"
+                                data-1p-ignore="true"
+                                data-lpignore="true"
+                                data-bwignore="true"
+                                data-form-type="other"
                                 value={searchQuery}
                                 onChange={(e) => {
                                     setSearchQuery(e.target.value);
@@ -427,7 +433,13 @@ export function TopBar() {
                                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                                 <input
                                     ref={searchInputRef}
-                                    type="text"
+                                    type="search"
+                                    name="q"
+                                    autoComplete="off"
+                                    data-1p-ignore="true"
+                                    data-lpignore="true"
+                                    data-bwignore="true"
+                                    data-form-type="other"
                                     value={searchQuery}
                                     onChange={(e) => {
                                         setSearchQuery(e.target.value);
