@@ -33,8 +33,8 @@ export interface SystemSettings {
     soulseekPassword: string;
     // Soulseek backend: "p2p" = built-in client, "slskd" = external slskd REST API
     soulseekMode: "p2p" | "slskd";
-    slskdUrl: string;
-    slskdApiKey: string;
+    slskdUrl: string | null;
+    slskdApiKey: string | null;
     // Spotify (for playlist import)
     spotifyClientId: string;
     spotifyClientSecret: string;

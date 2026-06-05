@@ -13,6 +13,7 @@
 import { EventEmitter } from 'events'
 import { PassThrough } from 'stream'
 import http from 'http'
+import https from 'https'
 import fs from 'fs'
 import path from 'path'
 
@@ -36,14 +37,26 @@ export function configureSlskd(opts: { url?: string | null; apiKey?: string | nu
   if (opts.downloads) SLSKD_DOWNLOADS = opts.downloads
 }
 
+/** Snapshot the current slskd connection settings. Lets callers (e.g. the
+ *  connection-test endpoint) temporarily reconfigure and then restore, so a
+ *  probe against a candidate URL never leaks into the live client. */
+export function peekSlskdConfig(): { url: string; apiKey: string; downloads: string } {
+  return { url: SLSKD_URL, apiKey: SLSKD_API_KEY, downloads: SLSKD_DOWNLOADS }
+}
+
 // ── HTTP helpers ──────────────────────────────────────────────────────
 
 function slskdRequest(method: string, urlPath: string, body?: unknown): Promise<any> {
   return new Promise((resolve, reject) => {
     const base = new URL(SLSKD_URL)
+    // Honour the URL scheme: an https:// slskd must go over TLS (not plaintext
+    // http to port 80, which would leak the API key). Default the port to the
+    // scheme's standard when the URL omits it.
+    const isHttps = base.protocol === 'https:'
+    const transport = isHttps ? https : http
     const opts: http.RequestOptions = {
       hostname: base.hostname,
-      port: base.port || 80,
+      port: base.port || (isHttps ? 443 : 80),
       path: urlPath,
       method,
       headers: { 'Content-Type': 'application/json' } as Record<string, string>,
@@ -51,7 +64,7 @@ function slskdRequest(method: string, urlPath: string, body?: unknown): Promise<
     }
     if (SLSKD_API_KEY) (opts.headers as Record<string, string>)['X-API-Key'] = SLSKD_API_KEY
 
-    const req = http.request(opts, (res) => {
+    const req = transport.request(opts, (res) => {
       let data = ''
       res.on('data', (chunk: string) => (data += chunk))
       res.on('end', () => {
@@ -157,6 +170,7 @@ interface SlskdTransferFile {
   size?: number
   bytesTransferred?: number
   state?: string
+  placeInQueue?: number
 }
 
 interface SlskdTransferDirectory {
@@ -180,6 +194,17 @@ export class SlskdClient extends EventEmitter {
   server: { conn: FakeServerConn }
 
   private _fileSizeCache = new Map<string, number>()
+  // Cap the size cache so a long-running session can't grow it unbounded.
+  // Map keeps insertion order, so deleting the first key is FIFO eviction.
+  private static readonly FILE_SIZE_CACHE_MAX = 10000
+
+  private _cacheFileSize(key: string, size: number): void {
+    if (this._fileSizeCache.size >= SlskdClient.FILE_SIZE_CACHE_MAX) {
+      const oldest = this._fileSizeCache.keys().next().value
+      if (oldest !== undefined) this._fileSizeCache.delete(oldest)
+    }
+    this._fileSizeCache.set(key, size)
+  }
 
   constructor() {
     super()
@@ -287,7 +312,7 @@ export class SlskdClient extends EventEmitter {
           if (f.sampleRate) attrs.set(4, f.sampleRate)
           if (f.bitDepth) attrs.set(5, f.bitDepth)
           const fname = f.filename || ''
-          if (sz > 0) this._fileSizeCache.set(`${resp.username}\0${fname}`, sz)
+          if (sz > 0) this._cacheFileSize(`${resp.username}\0${fname}`, sz)
           return {
             filename: fname,
             size: BigInt(sz),
@@ -311,6 +336,8 @@ export class SlskdClient extends EventEmitter {
       receivedBytes: BigInt(0),
       stream,
       events,
+      // No-op: there's no peer to ask in the REST model. Position is read from
+      // the transfer during download polling (see queuePosition above).
       requestQueuePosition: () => {},
       startedAt: Date.now(),
     }
@@ -360,6 +387,12 @@ export class SlskdClient extends EventEmitter {
 
       ;(dl as any).totalBytes = BigInt(file.size || 0)
       dl.receivedBytes = BigInt(file.bytesTransferred || 0)
+      // slskd reports place in the remote peer's queue on the transfer itself,
+      // so expose it the way the P2P backend does (on the download object)
+      // rather than the no-op requestQueuePosition() the pull model can't use.
+      if (typeof file.placeInQueue === 'number') {
+        ;(dl as any).queuePosition = file.placeInQueue
+      }
 
       const state = (file.state || '').toLowerCase()
 
@@ -378,6 +411,11 @@ export class SlskdClient extends EventEmitter {
       ) {
         dl.events.emit('error', new Error('slskd download ' + file.state))
         return
+      }
+
+      if (state.includes('queued')) {
+        ;(dl as any).status = 'queued'
+        continue
       }
 
       if (state.includes('inprogress')) {
