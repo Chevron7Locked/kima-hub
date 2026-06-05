@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
@@ -91,6 +92,11 @@ export interface SearchResults {
     podcasts: PodcastSearchResult[];
     audiobooks: AudiobookSearchResult[];
     episodes: EpisodeSearchResult[];
+    topResult?: {
+        type: "artist" | "album" | "track";
+        id: string;
+        rank: number;
+    };
 }
 
 export class SearchService {
@@ -110,41 +116,6 @@ export class SearchService {
         if (terms.length === 0) return "";
 
         return terms.map((term) => `${term}:*`).join(" & ");
-    }
-
-    /**
-     * Trigram (pg_trgm) fuzzy artist search. Used only when full-text search
-     * returns nothing, to tolerate typos the prefix tsquery cannot match
-     * (e.g. "metalica" -> "Metallica"). Uses the GIN trigram index on
-     * Artist.name via the `%` operator (pg_trgm.similarity_threshold).
-     */
-    private async searchArtistsTrigram({
-        query,
-        limit = 20,
-        offset = 0,
-    }: SearchOptions): Promise<ArtistSearchResult[]> {
-        const q = query.trim();
-        if (!q) return [];
-        try {
-            return await prisma.$queryRaw<ArtistSearchResult[]>`
-        SELECT
-          a.id,
-          a.name,
-          a.mbid,
-          a."heroUrl",
-          a.summary,
-          similarity(a.name, ${q}) AS rank
-        FROM "Artist" a
-        WHERE a.name % ${q}
-          AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
-        ORDER BY rank DESC, a.name ASC
-        LIMIT ${limit}
-        OFFSET ${offset}
-      `;
-        } catch (error) {
-            logger.error("Artist trigram search error:", error);
-            return [];
-        }
     }
 
     private async searchArtistsFallback({
@@ -187,74 +158,46 @@ export class SearchService {
             return [];
         }
 
+        const q = query.trim();
         const tsquery = this.queryToTsquery(query);
-        if (!tsquery) {
-            return this.searchArtistsFallback({ query, limit, offset });
-        }
+
+        // Unified FTS + trigram query. The FTS arm gets a +1.0 boost so any
+        // full-text hit (ts_rank up to ~1.6) always outranks a pure trigram
+        // hit (similarity 0..1). MAX(rank) dedupes rows matched by both arms.
+        // Both arms always run so a typo'd term still gets fuzzy coverage even
+        // when other terms produce FTS hits. If queryToTsquery is empty
+        // (punctuation-only query) we skip the FTS arm and run trigram-only.
+        const ftsArm = tsquery
+            ? Prisma.sql`
+              SELECT a.id, a.name, a.mbid, a."heroUrl", a.summary,
+                     ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) + 1.0 AS rank
+                FROM "Artist" a
+               WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
+                 AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
+              UNION ALL`
+            : Prisma.empty;
 
         try {
-            const results = await prisma.$queryRaw<ArtistSearchResult[]>`
-        SELECT
-          a.id,
-          a.name,
-          a.mbid,
-          a."heroUrl",
-          a.summary,
-          ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) AS rank
-        FROM "Artist" a
-        WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
-          AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
-        ORDER BY rank DESC, a.name ASC
+            const results = await prisma.$queryRaw<ArtistSearchResult[]>(Prisma.sql`
+        SELECT id, name, mbid, "heroUrl", summary, MAX(rank) AS rank FROM (
+          ${ftsArm}
+          SELECT a.id, a.name, a.mbid, a."heroUrl", a.summary,
+                 similarity(a.name, ${q}) AS rank
+            FROM "Artist" a
+           WHERE a.name % ${q}
+             AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
+        ) u
+        GROUP BY id, name, mbid, "heroUrl", summary
+        ORDER BY rank DESC, name ASC
         LIMIT ${limit}
         OFFSET ${offset}
-      `;
+      `);
 
             if (results.length > 0) return results;
-            const fuzzy = await this.searchArtistsTrigram({ query, limit, offset });
-            return fuzzy.length > 0
-                ? fuzzy
-                : this.searchArtistsFallback({ query, limit, offset });
+            return this.searchArtistsFallback({ query, limit, offset });
         } catch (error) {
             logger.error("Artist search error:", error);
             return this.searchArtistsFallback({ query, limit, offset });
-        }
-    }
-
-    /**
-     * Trigram (pg_trgm) fuzzy album search (title or artist name). Used only
-     * when full-text search returns nothing. Uses the GIN trigram indexes on
-     * Album.title and Artist.name via the `%` operator.
-     */
-    private async searchAlbumsTrigram({
-        query,
-        limit = 20,
-        offset = 0,
-    }: SearchOptions): Promise<AlbumSearchResult[]> {
-        const q = query.trim();
-        if (!q) return [];
-        try {
-            return await prisma.$queryRaw<AlbumSearchResult[]>`
-        SELECT
-          a.id,
-          a.title,
-          a."artistId",
-          ar.name AS "artistName",
-          a.year,
-          a."coverUrl",
-          GREATEST(
-            similarity(a.title, ${q}),
-            similarity(COALESCE(ar.name, ''), ${q})
-          ) AS rank
-        FROM "Album" a
-        LEFT JOIN "Artist" ar ON a."artistId" = ar.id
-        WHERE a.title % ${q} OR ar.name % ${q}
-        ORDER BY rank DESC, a.title ASC
-        LIMIT ${limit}
-        OFFSET ${offset}
-      `;
-        } catch (error) {
-            logger.error("Album trigram search error:", error);
-            return [];
         }
     }
 
@@ -321,93 +264,57 @@ export class SearchService {
             return [];
         }
 
+        const q = query.trim();
         const tsquery = this.queryToTsquery(query);
-        if (!tsquery) {
-            return this.searchAlbumsFallback({ query, limit, offset });
-        }
+
+        // Unified FTS + trigram query. The FTS arm matches either the album's
+        // own searchVector or the artist's searchVector (folded into the LEFT
+        // JOIN via OR), each +1.0 boosted so any FTS hit outranks pure-fuzzy.
+        // The trigram arm matches album title OR artist name. MAX(rank) dedupes
+        // an album matched by several arms. Both arms always run; FTS arm is
+        // skipped when tsquery is empty (punctuation-only query).
+        const ftsArm = tsquery
+            ? Prisma.sql`
+              SELECT a.id, a.title, a."artistId", ar.name as "artistName",
+                     a.year, a."coverUrl",
+                     GREATEST(
+                       CASE WHEN a."searchVector" @@ to_tsquery('english', ${tsquery})
+                            THEN ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) ELSE 0 END,
+                       CASE WHEN ar."searchVector" @@ to_tsquery('english', ${tsquery})
+                            THEN ts_rank(ar."searchVector", to_tsquery('english', ${tsquery})) ELSE 0 END
+                     ) + 1.0 AS rank
+                FROM "Album" a
+                LEFT JOIN "Artist" ar ON a."artistId" = ar.id
+               WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
+                  OR ar."searchVector" @@ to_tsquery('english', ${tsquery})
+              UNION ALL`
+            : Prisma.empty;
 
         try {
-            const results = await prisma.$queryRaw<AlbumSearchResult[]>`
-        SELECT * FROM (
-          SELECT DISTINCT ON (id) id, title, "artistId", "artistName", year, "coverUrl", rank
-          FROM (
-            SELECT
-              a.id,
-              a.title,
-              a."artistId",
-              ar.name as "artistName",
-              a.year,
-              a."coverUrl",
-              ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) AS rank
+            const results = await prisma.$queryRaw<AlbumSearchResult[]>(Prisma.sql`
+        SELECT id, title, "artistId", "artistName", year, "coverUrl", MAX(rank) AS rank FROM (
+          ${ftsArm}
+          SELECT a.id, a.title, a."artistId", ar.name as "artistName",
+                 a.year, a."coverUrl",
+                 GREATEST(
+                   similarity(a.title, ${q}),
+                   similarity(COALESCE(ar.name, ''), ${q})
+                 ) AS rank
             FROM "Album" a
             LEFT JOIN "Artist" ar ON a."artistId" = ar.id
-            WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
-
-            UNION ALL
-
-            SELECT
-              a.id,
-              a.title,
-              a."artistId",
-              ar.name as "artistName",
-              a.year,
-              a."coverUrl",
-              ts_rank(ar."searchVector", to_tsquery('english', ${tsquery})) AS rank
-            FROM "Album" a
-            INNER JOIN "Artist" ar ON a."artistId" = ar.id
-            WHERE ar."searchVector" @@ to_tsquery('english', ${tsquery})
-          ) combined
-          ORDER BY id, rank DESC
-        ) deduped
+           WHERE a.title % ${q} OR ar.name % ${q}
+        ) u
+        GROUP BY id, title, "artistId", "artistName", year, "coverUrl"
         ORDER BY rank DESC, title ASC
         LIMIT ${limit}
         OFFSET ${offset}
-      `;
+      `);
 
             if (results.length > 0) return results;
-            const fuzzy = await this.searchAlbumsTrigram({ query, limit, offset });
-            return fuzzy.length > 0
-                ? fuzzy
-                : this.searchAlbumsFallback({ query, limit, offset });
+            return this.searchAlbumsFallback({ query, limit, offset });
         } catch (error) {
             logger.error("Album search error:", error);
             return this.searchAlbumsFallback({ query, limit, offset });
-        }
-    }
-
-    /**
-     * Trigram (pg_trgm) fuzzy track search by title. Used only when full-text
-     * search returns nothing. Uses the GIN trigram index on Track.title.
-     */
-    private async searchTracksTrigram({
-        query,
-        limit = 20,
-        offset = 0,
-    }: SearchOptions): Promise<TrackSearchResult[]> {
-        const q = query.trim();
-        if (!q) return [];
-        try {
-            return await prisma.$queryRaw<TrackSearchResult[]>`
-        SELECT
-          t.id,
-          t.title,
-          t."albumId",
-          t.duration,
-          a.title as "albumTitle",
-          a."artistId",
-          ar.name as "artistName",
-          similarity(t.title, ${q}) AS rank
-        FROM "Track" t
-        LEFT JOIN "Album" a ON t."albumId" = a.id
-        LEFT JOIN "Artist" ar ON a."artistId" = ar.id
-        WHERE t.title % ${q}
-        ORDER BY rank DESC, t.title ASC
-        LIMIT ${limit}
-        OFFSET ${offset}
-      `;
-        } catch (error) {
-            logger.error("Track trigram search error:", error);
-            return [];
         }
     }
 
@@ -468,36 +375,45 @@ export class SearchService {
             return [];
         }
 
+        const q = query.trim();
         const tsquery = this.queryToTsquery(query);
-        if (!tsquery) {
-            return this.searchTracksFallback({ query, limit, offset });
-        }
+
+        // Unified FTS + trigram query. FTS arm +1.0 boosted so any full-text
+        // hit outranks a pure trigram hit; trigram arm matches the track title.
+        // MAX(rank) dedupes a track matched by both arms. Both arms always run;
+        // FTS arm skipped when tsquery is empty (punctuation-only query).
+        const ftsArm = tsquery
+            ? Prisma.sql`
+              SELECT t.id, t.title, t."albumId", t.duration,
+                     a.title as "albumTitle", a."artistId", ar.name as "artistName",
+                     ts_rank(t."searchVector", to_tsquery('english', ${tsquery})) + 1.0 AS rank
+                FROM "Track" t
+                LEFT JOIN "Album" a ON t."albumId" = a.id
+                LEFT JOIN "Artist" ar ON a."artistId" = ar.id
+               WHERE t."searchVector" @@ to_tsquery('english', ${tsquery})
+              UNION ALL`
+            : Prisma.empty;
 
         try {
-            const results = await prisma.$queryRaw<TrackSearchResult[]>`
-        SELECT
-          t.id,
-          t.title,
-          t."albumId",
-          t.duration,
-          a.title as "albumTitle",
-          a."artistId",
-          ar.name as "artistName",
-          ts_rank(t."searchVector", to_tsquery('english', ${tsquery})) AS rank
-        FROM "Track" t
-        LEFT JOIN "Album" a ON t."albumId" = a.id
-        LEFT JOIN "Artist" ar ON a."artistId" = ar.id
-        WHERE t."searchVector" @@ to_tsquery('english', ${tsquery})
-        ORDER BY rank DESC, t.title ASC
+            const results = await prisma.$queryRaw<TrackSearchResult[]>(Prisma.sql`
+        SELECT id, title, "albumId", duration, "albumTitle", "artistId", "artistName", MAX(rank) AS rank FROM (
+          ${ftsArm}
+          SELECT t.id, t.title, t."albumId", t.duration,
+                 a.title as "albumTitle", a."artistId", ar.name as "artistName",
+                 similarity(t.title, ${q}) AS rank
+            FROM "Track" t
+            LEFT JOIN "Album" a ON t."albumId" = a.id
+            LEFT JOIN "Artist" ar ON a."artistId" = ar.id
+           WHERE t.title % ${q}
+        ) u
+        GROUP BY id, title, "albumId", duration, "albumTitle", "artistId", "artistName"
+        ORDER BY rank DESC, title ASC
         LIMIT ${limit}
         OFFSET ${offset}
-      `;
+      `);
 
             if (results.length > 0) return results;
-            const fuzzy = await this.searchTracksTrigram({ query, limit, offset });
-            return fuzzy.length > 0
-                ? fuzzy
-                : this.searchTracksFallback({ query, limit, offset });
+            return this.searchTracksFallback({ query, limit, offset });
         } catch (error) {
             logger.error("Track search error:", error);
             return this.searchTracksFallback({ query, limit, offset });
@@ -916,13 +832,42 @@ export class SearchService {
                 this.searchEpisodes({ query, limit }),
             ]);
 
-        const results = {
+        const filteredTracks = genre
+            ? await this.filterTracksByGenre(tracks, genre)
+            : tracks;
+
+        // Cross-type top result: highest-rank item across the first (already
+        // rank-sorted desc) entry of each music type. Tie-break artist > album
+        // > track, achieved by considering them in that order with strict `>`.
+        let topResult: SearchResults["topResult"];
+        const candidates: Array<{
+            type: "artist" | "album" | "track";
+            id: string;
+            rank: number;
+        }> = [];
+        if (artists[0]) {
+            candidates.push({ type: "artist", id: artists[0].id, rank: artists[0].rank });
+        }
+        if (albums[0]) {
+            candidates.push({ type: "album", id: albums[0].id, rank: albums[0].rank });
+        }
+        if (filteredTracks[0]) {
+            candidates.push({ type: "track", id: filteredTracks[0].id, rank: filteredTracks[0].rank });
+        }
+        for (const c of candidates) {
+            if (!topResult || c.rank > topResult.rank) {
+                topResult = c;
+            }
+        }
+
+        const results: SearchResults = {
             artists,
             albums,
-            tracks: genre ? await this.filterTracksByGenre(tracks, genre) : tracks,
+            tracks: filteredTracks,
             podcasts,
             audiobooks,
             episodes,
+            ...(topResult ? { topResult } : {}),
         };
 
         // Cache for 5 minutes (balance freshness vs performance)
@@ -1050,9 +995,10 @@ export class SearchService {
 
         // Record genuine DB misses (cache-miss branch only) when the requested
         // type returned nothing.
-        if (
-            (results[type as keyof SearchResults] ?? []).length === 0
-        ) {
+        const typedResults = results[
+            type as Exclude<keyof SearchResults, "topResult">
+        ];
+        if ((typedResults ?? []).length === 0) {
             await this.recordZeroResult(query);
         }
 
