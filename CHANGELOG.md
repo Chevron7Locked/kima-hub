@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.8.1] - 2026-06-05
+
+### Added
+
+- **Optional slskd backend for Soulseek (#205, by gossip31)**: a `soulseekMode` setting routes Soulseek through an external [slskd](https://github.com/slskd/slskd) instance instead of the built-in client. slskd holds its own Soulseek account, so this mode needs no Kima-side username or password. The built-in client stays the default and is unchanged.
+
+### Fixed
+
+- **Audio analyzer crash-loop on corrupt files (#204, by gossip31)**: a handful of malformed files take an uncatchable native crash inside Essentia's decoder, which kills the worker before the failure can be counted, so those files looped forever and each crash left a large core dump behind. An ffmpeg integrity probe now screens files before Essentia decodes them, so a bad one fails cleanly and quarantines after the normal retry limit. As a backstop, the stale-processing recovery counts a worker crash as a retry, so any crash the probe can't predict still quarantines instead of looping.
+
 ## [1.8.0] - 2026-06-04
 
 iOS playback reliability rebuilt from a stable baseline, Vibe search hardened against Redis pressure, the first phase of the Discover Weekly correctness rework, and a dependency pin that unbreaks the build.
