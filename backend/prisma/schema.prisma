@@ -550,6 +550,9 @@ model SystemSettings {
   audiobookshelfApiKey        String?
   soulseekUsername            String?
   soulseekPassword            String?
+  soulseekMode                String?  @default("p2p")
+  slskdUrl                    String?
+  slskdApiKey                 String?
   spotifyClientId             String?
   spotifyClientSecret         String?
   musicPath                   String?  @default("/music")

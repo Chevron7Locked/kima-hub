@@ -76,6 +76,25 @@ const systemSettingsSchema = z.object({
   soulseekEnabled: z.boolean().nullable().optional(),
   soulseekDownloadPath: z.string().nullable().optional(),
 
+  // Soulseek backend: "p2p" = built-in client (needs the credentials above),
+  // "slskd" = route via a slskd REST instance (which holds its own account).
+  soulseekMode: z.enum(["p2p", "slskd"]).nullable().optional(),
+  // Pin to an http(s) URL so a file:// or scheme-less internal address can't be
+  // saved (admin-only, but slskd-client.ts trusts this value for the request).
+  slskdUrl: z
+    .union([
+      z
+        .string()
+        .url()
+        .refine((u) => /^https?:\/\//i.test(u), {
+          message: "slskdUrl must start with http:// or https://",
+        }),
+      z.literal(""),
+    ])
+    .nullable()
+    .optional(),
+  slskdApiKey: z.string().nullable().optional(),
+
   // Spotify (for playlist import)
   spotifyClientId: z.string().nullable().optional(),
   spotifyClientSecret: z.string().nullable().optional(),
@@ -147,6 +166,7 @@ router.get("/", async (req, res) => {
       lastfmUserKey: safeDecrypt(settings.lastfmUserKey),
       audiobookshelfApiKey: safeDecrypt(settings.audiobookshelfApiKey),
       soulseekPassword: safeDecrypt(settings.soulseekPassword),
+      slskdApiKey: safeDecrypt(settings.slskdApiKey),
       spotifyClientSecret: safeDecrypt(settings.spotifyClientSecret),
     };
 
@@ -189,6 +209,8 @@ router.post("/", async (req, res) => {
       encryptedData.audiobookshelfApiKey = encrypt(data.audiobookshelfApiKey);
     if (data.soulseekPassword)
       encryptedData.soulseekPassword = encrypt(data.soulseekPassword);
+    if (data.slskdApiKey)
+      encryptedData.slskdApiKey = encrypt(data.slskdApiKey);
     if (data.spotifyClientSecret)
       encryptedData.spotifyClientSecret = encrypt(data.spotifyClientSecret);
 
@@ -214,10 +236,18 @@ router.post("/", async (req, res) => {
       logger.warn("Failed to refresh Last.fm API key:", err);
     }
 
-    // Disconnect Soulseek only if credentials actually changed (not just present in payload)
+    // Reconnect Soulseek only if connection-relevant settings actually changed
+    // (not just present in payload). This covers P2P credentials AND the slskd
+    // backend selection — switching soulseekMode or editing slskdUrl/slskdApiKey
+    // now reconnects the chosen backend immediately (connect() re-reads settings
+    // and re-runs configureSlskd/resolveSlskClient), instead of the toggle
+    // appearing to do nothing until an unrelated reconnect.
     if (
       data.soulseekUsername !== undefined ||
-      data.soulseekPassword !== undefined
+      data.soulseekPassword !== undefined ||
+      data.soulseekMode !== undefined ||
+      data.slskdUrl !== undefined ||
+      data.slskdApiKey !== undefined
     ) {
       try {
         const oldUsername = existingSettings?.soulseekUsername || "";
@@ -225,12 +255,26 @@ router.post("/", async (req, res) => {
         const newUsername = data.soulseekUsername !== undefined ? data.soulseekUsername : oldUsername;
         const newPassword = data.soulseekPassword !== undefined ? data.soulseekPassword : oldPassword;
 
-        if (newUsername !== oldUsername || newPassword !== oldPassword) {
+        const oldMode = existingSettings?.soulseekMode || "";
+        const newMode = (data.soulseekMode !== undefined ? data.soulseekMode : oldMode) || "";
+        const oldSlskdUrl = existingSettings?.slskdUrl || "";
+        const newSlskdUrl = (data.slskdUrl !== undefined ? data.slskdUrl : oldSlskdUrl) || "";
+        const oldSlskdApiKey = existingSettings?.slskdApiKey ? safeDecrypt(existingSettings.slskdApiKey) : "";
+        const newSlskdApiKey = (data.slskdApiKey !== undefined ? data.slskdApiKey : oldSlskdApiKey) || "";
+
+        const changed =
+          newUsername !== oldUsername ||
+          newPassword !== oldPassword ||
+          newMode !== oldMode ||
+          newSlskdUrl !== oldSlskdUrl ||
+          newSlskdApiKey !== oldSlskdApiKey;
+
+        if (changed) {
           const { soulseekService } = await import("../services/soulseek");
           try {
             await soulseekService.resetAndReconnect();
             logger.debug(
-              "[SYSTEM SETTINGS] Reset Soulseek connection and reconnected with new credentials",
+              "[SYSTEM SETTINGS] Reset Soulseek connection and reconnected after settings change",
             );
           } catch (err: any) {
             logger.warn(
@@ -658,8 +702,46 @@ router.post("/test-audiobookshelf", async (req, res) => {
 // Test Soulseek connection (direct via vendored soulseek-ts)
 router.post("/test-soulseek", async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, password, mode, slskdUrl, slskdApiKey } = req.body;
 
+    // Test the backend the user is actually configuring, not the env default.
+    const { resolveSlskClient } = await import("../lib/soulseek/client");
+    const resolvedMode = mode || (slskdUrl ? "slskd" : "p2p");
+
+    if (resolvedMode === "slskd") {
+      // slskd holds its own Soulseek account, so no Kima username/password is
+      // needed — just verify the slskd instance is reachable and logged in.
+      const { configureSlskd, peekSlskdConfig } = await import(
+        "../lib/soulseek/slskd-client"
+      );
+      const previous = peekSlskdConfig();
+      try {
+        if (slskdUrl) configureSlskd({ url: slskdUrl, apiKey: slskdApiKey });
+        logger.debug(
+          `[SOULSEEK-TEST] Testing slskd reachability at "${slskdUrl || previous.url}"...`,
+        );
+        const ClientImpl = resolveSlskClient("slskd");
+        const testClient = new ClientImpl();
+        // The slskd adapter ignores credentials; login() probes GET
+        // /api/v0/application to confirm reachability + Soulseek login.
+        await testClient.login("", "");
+        testClient.destroy();
+        res.json({
+          success: true,
+          message: `Connected to slskd${slskdUrl ? ` at ${slskdUrl}` : ""}`,
+          isConnected: true,
+        });
+      } catch (connectError) {
+        safeError(res, "slskd connection test", connectError, 401);
+      } finally {
+        // Restore the live config so a candidate URL never leaks into the
+        // running client.
+        configureSlskd({ url: previous.url, apiKey: previous.apiKey });
+      }
+      return;
+    }
+
+    // P2P mode: Kima logs in with the user's own Soulseek credentials.
     if (!username || !password) {
       return res.status(400).json({
         error: "Soulseek username and password are required",
@@ -669,8 +751,8 @@ router.post("/test-soulseek", async (req, res) => {
     logger.debug(`[SOULSEEK-TEST] Testing connection as "${username}"...`);
 
     try {
-      const { SlskClient } = await import("../lib/soulseek/client");
-      const testClient = new SlskClient();
+      const ClientImpl = resolveSlskClient("p2p");
+      const testClient = new ClientImpl();
 
       await testClient.login(username, password);
       logger.debug(`[SOULSEEK-TEST] Connected successfully`);
