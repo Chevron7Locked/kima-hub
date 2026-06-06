@@ -97,9 +97,21 @@ function scheduleAutoUpload(): void {
     uploadTimer = setTimeout(() => {
         uploadTimer = null;
         try {
+            // The /api/debug/ios-log route is requireAuth (Bearer), so the upload
+            // MUST send the token the same way the api client does -- cookies
+            // alone 401, and the .catch below would swallow it silently (which is
+            // exactly why no trace was ever captured before).
+            const headers: Record<string, string> = { "Content-Type": "application/json" };
+            let token: string | null = null;
+            try {
+                token = window.localStorage.getItem("auth_token");
+            } catch {
+                // localStorage unavailable
+            }
+            if (token) headers["Authorization"] = `Bearer ${token}`;
             void fetch("/api/debug/ios-log", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers,
                 credentials: "include",
                 body: JSON.stringify({ events: buffer }),
             }).catch(() => {});
