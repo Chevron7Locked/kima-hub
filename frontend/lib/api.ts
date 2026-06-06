@@ -1072,7 +1072,21 @@ class ApiClient {
     }
 
     async previewPodcast(itunesId: string) {
-        return this.request<ApiData>(`/podcasts/preview/${itunesId}`);
+        // Bound the preview so a slow or dead feed can't spin the UI forever. On
+        // timeout the request aborts and the hook renders its error surface
+        // instead of an endless spinner (#168).
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 20000);
+        try {
+            return await this.request<ApiData>(`/podcasts/preview/${itunesId}`, { signal: controller.signal });
+        } catch (err) {
+            if (err instanceof DOMException && err.name === "AbortError") {
+                throw new Error("Podcast preview timed out. The feed may be slow or unreachable.");
+            }
+            throw err;
+        } finally {
+            clearTimeout(timer);
+        }
     }
 
     getPodcastEpisodeStreamUrl(podcastId: string, episodeId: string): string {

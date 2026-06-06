@@ -13,6 +13,19 @@ import fs from "fs";
 
 const router = Router();
 
+// Bound the preview RSS fetch so a slow or dead feed returns partial data
+// quickly instead of sitting on the 30s parser timeout and hanging the request
+// (#168). The feed is non-critical for a preview; core data comes from
+// iTunes/Deezer, and both call sites already fall through to partial data.
+const PREVIEW_RSS_TIMEOUT_MS = 8000;
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    });
+    return Promise.race([p.finally(() => clearTimeout(timer)), timeout]);
+}
+
 /**
  * POST /podcasts/sync-covers
  * Manually trigger podcast cover caching
@@ -412,8 +425,10 @@ router.get("/preview/:itunesId", requireAuth, async (req, res) => {
         let previewEpisodes: any[] = [];
         if (podcastData.feedUrl) {
             try {
-                const feedResult = await rssParserService.parseFeed(
-                    podcastData.feedUrl
+                const feedResult = await withTimeout(
+                    rssParserService.parseFeed(podcastData.feedUrl),
+                    PREVIEW_RSS_TIMEOUT_MS,
+                    "RSS preview",
                 );
                 if (feedResult.notModified) throw new Error("Unexpected 304 on preview fetch");
                 description = feedResult.podcast.description || "";
@@ -502,7 +517,11 @@ async function previewDeezerPodcast(req: Request, res: Response, deezerId: strin
 
     if (feedUrl) {
         try {
-            const feedResult = await rssParserService.parseFeed(feedUrl);
+            const feedResult = await withTimeout(
+                rssParserService.parseFeed(feedUrl),
+                PREVIEW_RSS_TIMEOUT_MS,
+                "RSS preview",
+            );
             if (!feedResult.notModified) {
                 description = feedResult.podcast.description || description;
                 previewEpisodes = (feedResult.episodes || []).slice(0, 3).map((ep: any) => ({
