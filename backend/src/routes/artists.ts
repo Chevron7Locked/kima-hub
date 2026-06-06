@@ -151,9 +151,19 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
         // artist we own, redirect to the canonical library page rather than
         // building a discovery page. Done before the cache read so a stale
         // cached discovery payload can never shadow an owned artist.
+        // nameOrMbid is already URL-decoded by Express. Decoding it a second
+        // time throws URIError on any literal '%' in the name (e.g. "50%"),
+        // which previously 500'd this route. Decode defensively, falling back
+        // to the raw value.
+        let decodedName = nameOrMbid;
+        try {
+            decodedName = decodeURIComponent(nameOrMbid);
+        } catch {
+            decodedName = nameOrMbid;
+        }
         const ownedByInput = await findOwnedArtist({
             mbid: nameOrMbid,
-            name: decodeURIComponent(nameOrMbid),
+            name: decodedName,
         });
         if (ownedByInput) {
             return res.redirect(307, `/api/library/artists/${ownedByInput.id}`);
@@ -180,7 +190,7 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
             );
 
         let mbid: string | null = isMbid ? nameOrMbid : null;
-        let artistName: string = isMbid ? "" : decodeURIComponent(nameOrMbid);
+        let artistName: string = isMbid ? "" : decodedName;
 
         // If we have a name but no MBID, search for it
         if (!mbid && artistName) {
