@@ -98,6 +98,91 @@ const slskdPost = (p: string, b?: unknown) => slskdRequest('POST', p, b)
 const slskdDelete = (p: string) => slskdRequest('DELETE', p)
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+// ── Outgoing-search flood protection ──────────────────────────────────
+//
+// WHY: Kima expands each track into several near-identical query variants
+// (e.g. "Stairway to Heaven" -> "Led Zeppelin Stairway to Heaven" ->
+// "Led Zeppelin IV (Deluxe Edition) Stairway to Heaven" -> "... (Remaster)")
+// and higher-level batch code (searchAndDownloadBatch) runs multiple tracks
+// concurrently. Firing all of these at once produced bursts of ~25 searches
+// within ~200ms, which trips Soulseek's SERVER-SIDE flood protection: searches
+// come back Completed/Errored with 0 results in ~0s, and the account gets
+// 30-minute bans.
+//
+// To make this impossible regardless of how many callers dispatch in parallel,
+// EVERY outgoing slskd search is funnelled through one process-wide gate:
+// concurrency 1 (serialized) with a small inter-search delay between
+// consecutive searches. This is a hard global limiter — even Promise.all /
+// PQueue callers end up issuing their search HTTP calls one-at-a-time here.
+const SLSKD_SEARCH_CONCURRENCY = Math.max(
+  1,
+  parseInt(process.env.SLSKD_SEARCH_CONCURRENCY || '1', 10) || 1
+)
+const SLSKD_SEARCH_DELAY_MS = Math.max(
+  0,
+  parseInt(process.env.SLSKD_SEARCH_DELAY_MS || '400', 10) || 0
+)
+
+/**
+ * Tiny dependency-free async concurrency limiter that also spaces consecutive
+ * tasks apart by a fixed delay. Used as a module-level singleton so it gates
+ * outgoing searches across ALL SlskdClient instances and all callers.
+ *
+ * The delay is applied BEFORE running a task only when a previous task has
+ * already run (tracked via lastRunAt), so the very first search after an idle
+ * period is not penalised, but back-to-back searches are throttled.
+ */
+class SearchGate {
+  private active = 0
+  private queue: Array<() => void> = []
+  private lastRunAt = 0
+
+  constructor(
+    private readonly concurrency: number,
+    private readonly delayMs: number
+  ) {}
+
+  async run<T>(task: () => Promise<T>): Promise<T> {
+    await this._acquire()
+    try {
+      // Space consecutive searches apart to stay under Soulseek's flood
+      // threshold. Only wait if a previous search ran recently.
+      if (this.delayMs > 0 && this.lastRunAt > 0) {
+        const elapsed = Date.now() - this.lastRunAt
+        if (elapsed < this.delayMs) {
+          await sleep(this.delayMs - elapsed)
+        }
+      }
+      this.lastRunAt = Date.now()
+      return await task()
+    } finally {
+      this.lastRunAt = Date.now()
+      this._release()
+    }
+  }
+
+  private _acquire(): Promise<void> {
+    if (this.active < this.concurrency) {
+      this.active++
+      return Promise.resolve()
+    }
+    return new Promise<void>((resolve) => {
+      this.queue.push(() => {
+        this.active++
+        resolve()
+      })
+    })
+  }
+
+  private _release(): void {
+    this.active--
+    const next = this.queue.shift()
+    if (next) next()
+  }
+}
+
+const searchGate = new SearchGate(SLSKD_SEARCH_CONCURRENCY, SLSKD_SEARCH_DELAY_MS)
+
 // ── FakeServerConn ────────────────────────────────────────────────────
 
 class FakeServerConn extends EventEmitter {
@@ -243,10 +328,17 @@ export class SlskdClient extends EventEmitter {
       maxResponses?: number
     } = {}
   ): Promise<FileSearchResponse[]> {
-    const searchResult = await slskdPost('/api/v0/searches', {
-      searchText: query,
-      responseLimit: maxResponses,
-    })
+    // Issue the search-creation call through the process-wide flood gate so
+    // bursts of variant/batch searches are serialized + spaced apart (see
+    // SearchGate / SLSKD_SEARCH_* above). Only the initial "create search"
+    // POST is gated — subsequent result polling for an already-running search
+    // does not count against Soulseek's outbound-search flood threshold.
+    const searchResult = await searchGate.run(() =>
+      slskdPost('/api/v0/searches', {
+        searchText: query,
+        responseLimit: maxResponses,
+      })
+    )
     const searchId = searchResult.id
 
     const results: FileSearchResponse[] = []

@@ -190,7 +190,7 @@ export async function searchWithStrategies(
     const audioExtensions = [".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav", ".aac"];
 
     // Build queries once and filter strategies that produce valid queries
-    const applicableStrategies = SEARCH_STRATEGIES
+    const builtStrategies = SEARCH_STRATEGIES
         .map(strategy => ({
             strategy,
             query: strategy.buildQuery(artistName, trackTitle, albumName)
@@ -207,6 +207,30 @@ export async function searchWithStrategies(
             }
             return query.length > 0;
         });
+
+    // De-duplicate near-identical query variants before dispatch.
+    // WHY: different strategies frequently collapse to the same string after
+    // normalization (e.g. moderate vs aggressive produce identical text, or the
+    // album-title / artist-album-title variants coincide). Searching the same
+    // text twice wastes an outbound Soulseek search and contributes to the
+    // burst pattern that trips server-side flood protection (0-result returns +
+    // 30-minute bans). We compare on a normalized key (trim + collapsed
+    // whitespace + lowercase) but keep the ORIGINAL casing for the actual
+    // search, and preserve the first occurrence's order/priority.
+    const seenQueryKeys = new Set<string>();
+    const applicableStrategies = builtStrategies.filter(({ query, strategy }) => {
+        const key = query.trim().replace(/\s+/g, " ").toLowerCase();
+        if (seenQueryKeys.has(key)) {
+            sessionLog(
+                "SOULSEEK",
+                `[Search #${searchId}] Skipping strategy "${strategy.name}" - duplicate query "${query}"`,
+                "DEBUG"
+            );
+            return false;
+        }
+        seenQueryKeys.add(key);
+        return true;
+    });
 
     let allResponses: FileSearchResponse[] = [];
     let successfulStrategy: string | null = null;
