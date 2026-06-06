@@ -1210,12 +1210,24 @@ export class SearchService {
         }
 
         // Record genuine DB misses (cache-miss branch only) when the requested
-        // type returned nothing.
-        const typedResults = results[
-            type as Exclude<keyof SearchResults, "topResult">
+        // type returned nothing. Guard on a known type: an unrecognised ?type=
+        // value runs no query above, so without this check it would falsely
+        // record a zero-result for a query that may well have hits.
+        const VALID_TYPES: ReadonlyArray<keyof SearchResults> = [
+            "artists",
+            "albums",
+            "tracks",
+            "podcasts",
+            "audiobooks",
+            "episodes",
         ];
-        if ((typedResults ?? []).length === 0) {
-            await this.recordZeroResult(query);
+        if (VALID_TYPES.includes(type as keyof SearchResults)) {
+            const typedResults = results[
+                type as Exclude<keyof SearchResults, "topResult">
+            ];
+            if ((typedResults ?? []).length === 0) {
+                await this.recordZeroResult(query);
+            }
         }
 
         return results;
