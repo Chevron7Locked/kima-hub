@@ -375,6 +375,155 @@ router.delete("/users/:id", requireAuth, requireAdmin, async (req, res) => {
     }
 });
 
+// POST /auth/users/:id/reset-password (Admin only)
+// Set another user's password without knowing their current one. Increments
+// tokenVersion so the target user's existing sessions are invalidated.
+router.post(
+    "/users/:id/reset-password",
+    requireAuth,
+    requireAdmin,
+    async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { newPassword } = req.body;
+
+            if (!newPassword || typeof newPassword !== "string") {
+                return res.status(400).json({ error: "New password is required" });
+            }
+
+            if (newPassword.length < 6) {
+                return res
+                    .status(400)
+                    .json({ error: "New password must be at least 6 characters" });
+            }
+
+            const target = await prisma.user.findUnique({
+                where: { id },
+                select: { id: true, username: true },
+            });
+
+            if (!target) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            const passwordHash = await bcrypt.hash(newPassword, 10);
+            await prisma.user.update({
+                where: { id },
+                data: {
+                    passwordHash,
+                    tokenVersion: { increment: 1 },
+                },
+            });
+
+            logger.info(
+                `[AUTH] Admin ${req.user!.id} reset password for user ${target.username} (${id})`
+            );
+            res.json({ message: "Password reset successfully" });
+        } catch (error: any) {
+            logger.error("Admin reset password error:", error);
+            if (error.code === "P2025") {
+                return res.status(404).json({ error: "User not found" });
+            }
+            res.status(500).json({ error: "Failed to reset password" });
+        }
+    }
+);
+
+// PATCH /auth/users/:id (Admin only) — edit a user's username and/or role.
+// Role/username are read fresh from the DB on every request, so changes take
+// effect immediately without invalidating sessions. Guards against demoting
+// the last remaining admin (which would lock everyone out of admin functions).
+router.patch("/users/:id", requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { username, role } = req.body as {
+            username?: string;
+            role?: string;
+        };
+
+        if (username === undefined && role === undefined) {
+            return res
+                .status(400)
+                .json({ error: "Provide a username and/or role to update" });
+        }
+
+        const target = await prisma.user.findUnique({
+            where: { id },
+            select: { id: true, username: true, role: true },
+        });
+        if (!target) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const data: { username?: string; role?: string } = {};
+
+        if (username !== undefined) {
+            const trimmed = String(username).trim();
+            if (!trimmed) {
+                return res.status(400).json({ error: "Username cannot be empty" });
+            }
+            if (trimmed !== target.username) {
+                const clash = await prisma.user.findUnique({
+                    where: { username: trimmed },
+                    select: { id: true },
+                });
+                if (clash && clash.id !== id) {
+                    return res.status(400).json({ error: "Username already taken" });
+                }
+                data.username = trimmed;
+            }
+        }
+
+        if (role !== undefined) {
+            if (!["user", "admin"].includes(role)) {
+                return res.status(400).json({ error: "Invalid role" });
+            }
+            // Block demoting the last admin (lockout protection).
+            if (target.role === "admin" && role !== "admin") {
+                const adminCount = await prisma.user.count({
+                    where: { role: "admin" },
+                });
+                if (adminCount <= 1) {
+                    return res
+                        .status(400)
+                        .json({ error: "Cannot demote the last admin" });
+                }
+            }
+            if (role !== target.role) {
+                data.role = role;
+            }
+        }
+
+        if (Object.keys(data).length === 0) {
+            return res.json({
+                id: target.id,
+                username: target.username,
+                role: target.role,
+            });
+        }
+
+        const updated = await prisma.user.update({
+            where: { id },
+            data,
+            select: { id: true, username: true, role: true },
+        });
+
+        logger.info(
+            `[AUTH] Admin ${req.user!.id} updated user ${id}: ${JSON.stringify(data)}`
+        );
+        res.json(updated);
+    } catch (error: any) {
+        logger.error("Admin update user error:", error);
+        if (error.code === "P2002") {
+            return res.status(400).json({ error: "Username already taken" });
+        }
+        if (error.code === "P2025") {
+            return res.status(404).json({ error: "User not found" });
+        }
+        res.status(500).json({ error: "Failed to update user" });
+    }
+});
+
 // POST /auth/2fa/setup - Generate 2FA secret and QR code
 router.post("/2fa/setup", requireAuth, async (req, res) => {
     try {
