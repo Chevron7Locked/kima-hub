@@ -107,7 +107,11 @@ export function usePodcastData() {
 
     loadPreviewData();
     return () => { cancelled = true; };
-  }, [isPodcastLoading, podcast, isAuthenticated, podcastId, router, previewLoadState]);
+    // NB: previewLoadState NON va nelle deps: settando 'loading' dentro l'effect
+    // farebbe ri-eseguire l'effect, la cleanup annulla il load in volo (cancelled=true)
+    // e non si arriva mai a 'done' -> spinner infinito. La guardia interna basta.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPodcastLoading, podcast, isAuthenticated, podcastId, router]);
 
   // Save sort order to localStorage when it changes
   useEffect(() => {
