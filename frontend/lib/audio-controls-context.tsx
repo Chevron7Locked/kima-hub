@@ -1282,24 +1282,47 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         return () => ctrl.off("play", onPlay);
     }, [controller]);
 
-    // -- Periodic save via timeupdate (30s throttle) --
+    // -- Periodic save on a real timer (every 15s while playing) --
+    // iOS throttles/suspends the "timeupdate" event when the PWA is backgrounded
+    // (screen off), so a timeupdate-driven save misses an entire screen-off
+    // listening session -- an update or crash then reverts to the moment the
+    // screen was locked. A wall-clock interval keeps checkpointing as reliably as
+    // iOS lets a background-audio app run. saveAudiobookProgress de-dupes an
+    // unchanged position, so a paused/stalled tick is a no-op.
     useEffect(() => {
         const ctrl = controllerRef.current;
         if (!ctrl) return;
-        const lastPeriodicSave = { time: 0 };
 
-        const onTimeUpdate = () => {
-            if (playbackTypeRef.current !== "audiobook" && playbackTypeRef.current !== "podcast") return;
-            const now = Date.now();
-            if (now - lastPeriodicSave.time < 30000) return;
-            lastPeriodicSave.time = now;
-
-            if (playbackTypeRef.current === "audiobook") saveAudiobookProgressRef.current();
-            else if (playbackTypeRef.current === "podcast") savePodcastProgressRef.current();
+        let interval: ReturnType<typeof setInterval> | null = null;
+        const tick = () => {
+            const type = playbackTypeRef.current;
+            if (type !== "audiobook" && type !== "podcast") return;
+            if (!controllerRef.current?.isPlaying()) return;
+            if (type === "audiobook") saveAudiobookProgressRef.current();
+            else savePodcastProgressRef.current();
+        };
+        const start = () => {
+            if (interval) return;
+            interval = setInterval(tick, 15000);
+        };
+        const stop = () => {
+            if (interval) {
+                clearInterval(interval);
+                interval = null;
+            }
         };
 
-        ctrl.on("timeupdate", onTimeUpdate);
-        return () => ctrl.off("timeupdate", onTimeUpdate);
+        ctrl.on("play", start);
+        ctrl.on("pause", stop);
+        ctrl.on("ended", stop);
+        if (ctrl.isPlaying()) start();
+
+        return () => {
+            stop();
+            ctrl.off("play", start);
+            ctrl.off("pause", stop);
+            ctrl.off("ended", stop);
+        };
     }, [controller]);
 
     // -- Volume/mute sync --
