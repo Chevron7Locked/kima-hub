@@ -71,6 +71,7 @@ export async function getSystemSettings(forceRefresh = false) {
             settings.audiobookshelfApiKey,
             "audiobookshelfApiKey",
         ),
+        slskdApiKey: safeDecrypt(settings.slskdApiKey, "slskdApiKey"),
         soulseekPassword: safeDecrypt(
             settings.soulseekPassword,
             "soulseekPassword",

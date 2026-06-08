@@ -7,6 +7,23 @@ import { config } from "./config";
 import { redisClient } from "./utils/redis";
 import { prisma } from "./utils/db";
 import { logger } from "./utils/logger";
+import http from "http";
+import https from "https";
+import axios from "axios";
+
+// I messaggi Soulseek usano BigInt per size/byte-counter. JSON.stringify non sa
+// serializzare i BigInt e lancia "Do not know how to serialize a BigInt"
+// (es. nello stream SSE di routes/events.ts). Esponiamo i BigInt come Number
+// (i size dei file sono ben sotto Number.MAX_SAFE_INTEGER).
+(BigInt.prototype as unknown as { toJSON: () => number }).toJSON = function () {
+    return Number(this as unknown as bigint);
+};
+
+// Forza IPv4 su tutte le chiamate axios: in pod senza IPv6 in uscita, gli host
+// con record AAAA (itunes.apple.com, feed podcast, deezer...) facevano appendere
+// la connessione su IPv6 fino al timeout (spinner podcast). Default globale axios.
+axios.defaults.httpAgent = new http.Agent({ family: 4, keepAlive: true });
+axios.defaults.httpsAgent = new https.Agent({ family: 4, keepAlive: true });
 
 import authRoutes from "./routes/auth";
 import onboardingRoutes from "./routes/onboarding";
