@@ -75,6 +75,10 @@ export async function getSystemSettings(forceRefresh = false) {
             settings.soulseekPassword,
             "soulseekPassword",
         ),
+        oidcClientSecret: safeDecrypt(
+            settings.oidcClientSecret,
+            "oidcClientSecret",
+        ),
     };
 
     cachedSettings = decrypted;

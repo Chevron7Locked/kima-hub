@@ -45,6 +45,29 @@ export default function LoginPage() {
     const [error, setError] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [isCheckingOnboarding, setIsCheckingOnboarding] = useState(true);
+    const [oidcProvider, setOidcProvider] = useState<{ name: string } | null>(null);
+    const [oidcLoading, setOidcLoading] = useState(false);
+
+    // Discover whether SSO is configured
+    useEffect(() => {
+        api.getAuthProviders()
+            .then((p) => {
+                if (p.oidc?.enabled) setOidcProvider({ name: p.oidc.name });
+            })
+            .catch(() => {});
+    }, []);
+
+    const handleOidcLogin = async () => {
+        setOidcLoading(true);
+        setError("");
+        try {
+            const { authorizationUrl } = await api.oidcStart();
+            window.location.href = authorizationUrl;
+        } catch {
+            setError("Could not start SSO login. Please try again.");
+            setOidcLoading(false);
+        }
+    };
 
     // Defense in depth: Check if onboarding is needed
     // If no users exist, redirect to onboarding instead of showing login
@@ -343,6 +366,36 @@ export default function LoginPage() {
                                 </button>
                             )}
                         </form>
+
+                        {/* SSO */}
+                        {oidcProvider && !requires2FA && (
+                            <div className="mt-6">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className="flex-1 h-px bg-white/10" />
+                                    <span className="text-[10px] font-mono text-white/30 uppercase tracking-wider">
+                                        or
+                                    </span>
+                                    <div className="flex-1 h-px bg-white/10" />
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={handleOidcLogin}
+                                    disabled={oidcLoading}
+                                    className="w-full py-3 bg-white/5 border border-white/10 text-white font-medium rounded-lg hover:bg-white/10 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <span className="flex items-center justify-center gap-2">
+                                        {oidcLoading ? (
+                                            <>
+                                                <Loader2 className="w-5 h-5 animate-spin" />
+                                                Redirecting…
+                                            </>
+                                        ) : (
+                                            `Sign in with ${oidcProvider.name}`
+                                        )}
+                                    </span>
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                     {/* Footer */}

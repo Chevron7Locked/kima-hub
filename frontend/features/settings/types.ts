@@ -17,6 +17,16 @@ export interface SystemSettings {
     lidarrApiKey: string;
     lidarrQualityProfileId: number | null;
     lidarrMetadataProfileId: number | null;
+    // OIDC / SSO
+    oidcEnabled: boolean;
+    oidcProviderName: string;
+    oidcIssuer: string;
+    oidcClientId: string;
+    oidcClientSecret: string;
+    oidcScopes: string;
+    oidcRoleClaim: string;
+    oidcAdminValue: string;
+    oidcAutoLinkByUsername: boolean;
     // AI Services
     openaiEnabled: boolean;
     openaiApiKey: string;

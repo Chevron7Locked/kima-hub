@@ -46,6 +46,7 @@
         "multer": "^2.1.0",
         "music-metadata": "^11.10.0",
         "node-cron": "^4.2.1",
+        "openid-client": "^5.7.1",
         "p-limit": "^7.2.0",
         "p-queue": "^9.0.0",
         "prom-client": "^15.1.3",

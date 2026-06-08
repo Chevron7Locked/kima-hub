@@ -14,8 +14,48 @@ import {
     generateRefreshToken,
 } from "../middleware/auth";
 import { encrypt, decrypt } from "../utils/encryption";
+import { oidcService, OidcClaims } from "../services/oidc";
+import { getSystemSettings } from "../utils/systemSettings";
 
 const router = Router();
+
+/** Resolve the browser-facing OIDC callback URL (publicUrl preferred). */
+function resolveRedirectUri(req: any, publicUrl?: string | null): string {
+    const base = (publicUrl || "").replace(/\/$/, "");
+    if (base) return `${base}/auth/callback`;
+    const proto = (req.get("x-forwarded-proto") || req.protocol || "http")
+        .split(",")[0]
+        .trim();
+    return `${proto}://${req.get("host")}/auth/callback`;
+}
+
+/**
+ * Map OIDC claims to a Kima role. Returns null when role mapping is NOT
+ * configured (SSO should not manage the role — don't downgrade existing admins).
+ */
+function computeOidcRole(
+    roleValue: unknown,
+    roleClaim?: string | null,
+    adminValue?: string | null,
+): "admin" | "user" | null {
+    if (!roleClaim?.trim()) return null;
+    const admin = adminValue?.trim();
+    // Normalize the claim value to a list of role names. Handles:
+    //  - array of strings (Keycloak realm_access.roles, groups)
+    //  - a single string
+    //  - an object keyed by role name (Zitadel's
+    //    urn:zitadel:iam:org:project:roles → { "admin": {...}, ... })
+    let vals: string[] = [];
+    if (Array.isArray(roleValue)) vals = roleValue.map(String);
+    else if (roleValue && typeof roleValue === "object")
+        vals = Object.keys(roleValue as Record<string, unknown>);
+    else if (roleValue != null) vals = [String(roleValue)];
+
+    if (admin) {
+        return vals.includes(admin) ? "admin" : "user";
+    }
+    return vals.includes("admin") ? "admin" : "user";
+}
 
 const loginSchema = z.object({
     username: z.string().min(1),
@@ -127,6 +167,201 @@ router.post("/login", async (req, res) => {
         }
         logger.error("Login error:", err);
         res.status(500).json({ error: "Internal error" });
+    }
+});
+
+// GET /auth/providers - Public: which login methods are available
+router.get("/providers", async (_req, res) => {
+    try {
+        const oidc = await oidcService.getProviderInfo();
+        res.json({
+            local: true, // local username/password stays enabled alongside SSO
+            oidc, // { enabled, name } or null
+        });
+    } catch (err) {
+        logger.error("Get providers error:", err);
+        res.json({ local: true, oidc: null });
+    }
+});
+
+// GET /auth/oidc/start - Public: begin the Authorization Code + PKCE flow
+router.get("/oidc/start", async (req, res) => {
+    try {
+        if (!(await oidcService.isEnabled())) {
+            return res.status(400).json({ error: "OIDC is not enabled" });
+        }
+        const settings = await getSystemSettings();
+        const redirectUri = resolveRedirectUri(req, settings?.publicUrl);
+        const { authorizationUrl } = await oidcService.startLogin(redirectUri);
+        res.json({ authorizationUrl });
+    } catch (err: any) {
+        logger.error("OIDC start error:", err.message);
+        res.status(500).json({ error: "Failed to start SSO login" });
+    }
+});
+
+// POST /auth/oidc/callback - Public: exchange code + verify, then mint a session
+router.post("/oidc/callback", async (req, res) => {
+    try {
+        if (!(await oidcService.isEnabled())) {
+            return res.status(400).json({ error: "OIDC is not enabled" });
+        }
+
+        const { code, state, error, error_description } = req.body || {};
+        let claims: OidcClaims;
+        try {
+            claims = await oidcService.handleCallback({
+                code,
+                state,
+                error,
+                error_description,
+            });
+        } catch (err: any) {
+            return res.status(401).json({ error: err.message || "SSO login failed" });
+        }
+
+        const settings = await getSystemSettings();
+        const mappedRole = computeOidcRole(
+            claims.roleValue,
+            settings?.oidcRoleClaim,
+            settings?.oidcAdminValue,
+        );
+        // Only ever persist an email we can trust, so an unverified address can't
+        // later become a linking key for someone else's account.
+        const verifiedEmail =
+            claims.email && claims.emailVerified === true ? claims.email : null;
+
+        // 1) Existing link by subject
+        let user = await prisma.user.findUnique({ where: { oidcSub: claims.sub } });
+
+        // 2) Auto-link an existing local account by username or VERIFIED email.
+        // Email is only trusted for linking when the IdP asserts email_verified —
+        // otherwise an attacker who can set an arbitrary/unverified email on an
+        // IdP account could hijack an existing Kima account (incl. admin).
+        // Username linking is gated by oidcAutoLinkByUsername (default on): only
+        // safe when the IdP doesn't allow arbitrary self-chosen usernames.
+        if (!user) {
+            const emailUsable = !!claims.email && claims.emailVerified === true;
+            const linkByUsername = settings?.oidcAutoLinkByUsername !== false;
+            const or: any[] = [];
+            if (linkByUsername && claims.preferredUsername) {
+                or.push({ username: claims.preferredUsername });
+            }
+            if (emailUsable) {
+                or.push({ username: claims.email });
+                or.push({ email: claims.email });
+            }
+            if (or.length) {
+                user = await prisma.user.findFirst({ where: { OR: or } });
+            }
+            if (user) {
+                if (user.oidcSub && user.oidcSub !== claims.sub) {
+                    return res.status(409).json({
+                        error: "An account with this identity already exists",
+                    });
+                }
+                user = await prisma.user.update({
+                    where: { id: user.id },
+                    data: {
+                        oidcSub: claims.sub,
+                        email: verifiedEmail ?? user.email,
+                    },
+                });
+            }
+        }
+
+        // 3) Just-in-time provisioning
+        if (!user) {
+            const baseUsername =
+                claims.preferredUsername ||
+                verifiedEmail ||
+                `sso_${claims.sub.slice(0, 8)}`;
+            const randomHash = await bcrypt.hash(
+                crypto.randomBytes(32).toString("hex"),
+                10,
+            );
+            try {
+                user = await prisma.user.create({
+                    data: {
+                        username: baseUsername,
+                        email: verifiedEmail,
+                        oidcSub: claims.sub,
+                        passwordHash: randomHash,
+                        role: mappedRole ?? "user",
+                        onboardingComplete: true,
+                    },
+                });
+            } catch (e: any) {
+                if (e.code === "P2002") {
+                    const target = (e.meta?.target as string[] | string) || "";
+                    const onSub = Array.isArray(target)
+                        ? target.includes("oidcSub")
+                        : String(target).includes("oidcSub");
+                    if (onSub) {
+                        // Concurrent first-login for the same subject already
+                        // created the account — use it (don't suffix/duplicate).
+                        user = await prisma.user.findUnique({
+                            where: { oidcSub: claims.sub },
+                        });
+                        if (!user) throw e;
+                    } else {
+                        // Username clash with an unlinked local account — suffix it.
+                        user = await prisma.user.create({
+                            data: {
+                                username: `${baseUsername}-${claims.sub.slice(0, 6)}`,
+                                email: verifiedEmail,
+                                oidcSub: claims.sub,
+                                passwordHash: randomHash,
+                                role: mappedRole ?? "user",
+                                onboardingComplete: true,
+                            },
+                        });
+                    }
+                } else {
+                    throw e;
+                }
+            }
+            await prisma.userSettings
+                .create({
+                    data: {
+                        userId: user.id,
+                        playbackQuality: "original",
+                        wifiOnly: false,
+                        offlineEnabled: false,
+                        maxCacheSizeMb: 10240,
+                    },
+                })
+                .catch(() => {});
+        }
+
+        // 4) Keep role in sync with the IdP when role mapping is active
+        if (mappedRole && mappedRole !== user.role) {
+            user = await prisma.user.update({
+                where: { id: user.id },
+                data: { role: mappedRole },
+            });
+        }
+
+        const jwtToken = generateToken({
+            id: user.id,
+            username: user.username,
+            role: user.role,
+            tokenVersion: user.tokenVersion,
+        });
+        const refreshToken = generateRefreshToken({
+            id: user.id,
+            tokenVersion: user.tokenVersion,
+        });
+
+        logger.info(`[AUTH] OIDC login: ${user.username} (${user.id})`);
+        res.json({
+            token: jwtToken,
+            refreshToken,
+            user: { id: user.id, username: user.username, role: user.role },
+        });
+    } catch (err: any) {
+        logger.error("OIDC callback error:", err.message);
+        res.status(500).json({ error: "SSO login failed" });
     }
 });
 
