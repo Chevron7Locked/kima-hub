@@ -83,9 +83,15 @@ router.get("/tracks/:id/stream", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const track = await prisma.track.findUnique({
-      where: { id: req.params.id },
-    });
+    // Track lookup and the quality setting are independent: fetch in parallel so
+    // they cost one round-trip, not two, before the first byte. Only read
+    // settings when the request did not pin a quality (it usually does not).
+    const [track, settings] = await Promise.all([
+      prisma.track.findUnique({ where: { id: req.params.id } }),
+      quality
+        ? Promise.resolve(null)
+        : prisma.userSettings.findUnique({ where: { userId } }),
+    ]);
 
     if (!track) {
       logger.debug("[STREAM] Track not found");
@@ -94,36 +100,30 @@ router.get("/tracks/:id/stream", async (req, res) => {
 
     registerStream(userId, req.params.id, res);
 
-    const recentPlay = await prisma.play.findFirst({
-      where: {
-        userId,
-        trackId: track.id,
-        playedAt: {
-          gte: new Date(Date.now() - 30 * 1000),
-        },
-      },
-      orderBy: { playedAt: "desc" },
-    });
+    // Play-history logging must NOT gate the first byte -- it added two
+    // sequential DB round-trips (a recent-play check + an insert) to the start
+    // latency for no playback benefit. Fire it in the background.
+    void (async () => {
+      try {
+        const recentPlay = await prisma.play.findFirst({
+          where: {
+            userId,
+            trackId: track.id,
+            playedAt: { gte: new Date(Date.now() - 30 * 1000) },
+          },
+          orderBy: { playedAt: "desc" },
+        });
+        if (!recentPlay) {
+          await prisma.play.create({ data: { userId, trackId: track.id } });
+        }
+      } catch (err) {
+        logger.warn("[STREAM] Failed to log play (non-fatal):", err);
+      }
+    })();
 
-    if (!recentPlay) {
-      await prisma.play.create({
-        data: {
-          userId,
-          trackId: track.id,
-        },
-      });
-      logger.debug("[STREAM] Logged new play for track:", track.title);
-    }
-
-    let requestedQuality: string = "medium";
-    if (quality) {
-      requestedQuality = quality as string;
-    } else {
-      const settings = await prisma.userSettings.findUnique({
-        where: { userId },
-      });
-      requestedQuality = settings?.playbackQuality || "medium";
-    }
+    const requestedQuality: string = quality
+      ? (quality as string)
+      : settings?.playbackQuality || "medium";
 
     const ext = track.filePath
       ? path.extname(track.filePath).toLowerCase()
