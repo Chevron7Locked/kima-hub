@@ -65,22 +65,6 @@ export class AudioController {
     private mediaSourceNode: MediaElementAudioSourceNode | null = null;
     private audioContextBridgeAttempted = false;
     private audioContextStateHandler: (() => void) | null = null;
-    // Play intent, distinct from audio.paused. True while the user wants playback
-    // on; cleared ONLY by an explicit pause()/stop(). An OS interruption (call,
-    // notification, another app) pauses the element via the native "pause" event
-    // WITHOUT clearing this, so when the interruption ends we can tell a resume
-    // apart from a deliberate pause.
-    private intendsToPlay = false;
-    // Last observed AudioContext state, so the resume below can require an
-    // interrupted -> running transition specifically, not the initial bridge
-    // resume (suspended -> running) or a background suspend.
-    private lastContextState: string | undefined = undefined;
-    // Timestamp of the last audio-route change (earbud/Bluetooth unplug). A resume
-    // within this window of a route change is suppressed so unplugged audio is
-    // never routed to the phone speaker (the v1.7.12 regression).
-    private lastRouteChangeAt = 0;
-    private readonly ROUTE_CHANGE_GUARD_MS = 1500;
-    private routeChangeHandler: (() => void) | null = null;
 
     constructor(audio: HTMLAudioElement) {
         this.audio = audio;
@@ -143,56 +127,23 @@ export class AudioController {
             this.audioContext = new AC();
             this.audioContextStateHandler = () => {
                 const state = this.audioContext?.state;
-                const prev = this.lastContextState;
-                this.lastContextState = state;
-                const sinceRoute = Date.now() - this.lastRouteChangeAt;
                 iosAudioLog(
                     "audio-context:statechange",
                     "audio-controller:setupAudioContextBridge",
                     this.audio,
-                    { state, prev, intendsToPlay: this.intendsToPlay, paused: this.audio.paused, sinceRouteMs: sinceRoute },
+                    { state, paused: this.audio.paused },
                 );
-                if (state !== "running") return;
-                // Session is live again: re-claim the playback category so iOS
-                // does not leave it with whatever app grabbed it.
-                this.setAudioSessionPlayback(true);
-                // Auto-resume ONLY coming out of an OS interruption
-                // (interrupted -> running). Excluding the initial bridge resume
-                // (suspended -> running) and a background suspend avoids a
-                // double-play race with the gesture path and the stall reload.
-                if (prev !== "interrupted") return;
-                // Never resume right after a route change (earbud/BT unplug): that
-                // is the v1.7.12 speaker-routing regression. An interruption end is
-                // not accompanied by a devicechange; an unplug is.
-                if (sinceRoute < this.ROUTE_CHANGE_GUARD_MS) return;
-                // A stall-recovery reload already owns the resume.
-                if (this.autoResumeAfterRecovery) return;
-                if (this.intendsToPlay && this.audio.paused) {
-                    iosAudioLog("audio-context:auto-resume", "audio-controller:setupAudioContextBridge", this.audio);
-                    this.audio.play().catch((err) => {
-                        iosAudioLog(
-                            "audio-context:auto-resume-failed",
-                            "audio-controller:setupAudioContextBridge",
-                            this.audio,
-                            { error: err instanceof Error ? err.message : String(err) },
-                        );
-                    });
+                // OS ended an interruption and the context is live again: re-claim
+                // the playback session category so iOS does not leave it with
+                // whatever app grabbed it. Do NOT call audio.play() here -- iOS
+                // does not emit a route-change signal we can use to tell an earbud
+                // unplug from an interruption end, so auto-resume cannot be made
+                // safe (it routes unplugged audio to the speaker: v1.7.12).
+                if (state === "running" && !this.audio.paused) {
+                    this.setAudioSessionPlayback(true);
                 }
             };
             this.audioContext.addEventListener("statechange", this.audioContextStateHandler);
-            // Mark audio-route changes (earbud/BT unplug) so the resume above can
-            // refuse to fire right after one.
-            try {
-                if (navigator.mediaDevices?.addEventListener) {
-                    this.routeChangeHandler = () => {
-                        this.lastRouteChangeAt = Date.now();
-                        iosAudioLog("route-change", "audio-controller:devicechange", this.audio);
-                    };
-                    navigator.mediaDevices.addEventListener("devicechange", this.routeChangeHandler);
-                }
-            } catch {
-                // mediaDevices unavailable
-            }
             this.mediaSourceNode = this.audioContext.createMediaElementSource(this.audio);
             this.mediaSourceNode.connect(this.audioContext.destination);
             this.audioContext.resume().catch(() => {});
@@ -420,7 +371,6 @@ export class AudioController {
     async play(): Promise<void> {
         iosAudioLog("play:entry", "audio-controller:play", this.audio);
         if (!this.audio.src) return;
-        this.intendsToPlay = true;
 
         // Explicit play/resume: re-claim the session category every time (force),
         // not just on first play -- this is the path the MediaSession "play"
@@ -443,10 +393,6 @@ export class AudioController {
             }
             if (err instanceof DOMException && err.name === "NotAllowedError") {
                 iosAudioLog("play:not-allowed", "audio-controller:play", this.audio);
-                // Intent can't be honoured without a fresh gesture -- clear it so
-                // a later interruption-end doesn't auto-resume content the user
-                // never actually got playing.
-                this.intendsToPlay = false;
                 // User gesture required -- emit needs-resume so UI can prompt
                 this.emit("needs-resume");
                 return;
@@ -459,7 +405,6 @@ export class AudioController {
     async tryResume(): Promise<boolean> {
         if (!this.audio.src) return false;
         if (!this.audio.paused) return true;
-        this.intendsToPlay = true;
 
         this.setAudioSessionPlayback();
         this.setupAudioContextBridge();
@@ -468,7 +413,6 @@ export class AudioController {
             await this.audio.play();
             return true;
         } catch {
-            this.intendsToPlay = false;
             if (this.currentSrc) {
                 this.emit("needs-resume");
             }
@@ -477,7 +421,6 @@ export class AudioController {
     }
 
     pause(): void {
-        this.intendsToPlay = false;
         this.autoResumeAfterRecovery = false;
         this.audio.pause();
     }
@@ -548,7 +491,6 @@ export class AudioController {
      */
     swapAndPlay(src: string): void {
         iosAudioLog("swapAndPlay:entry", "audio-controller:swapAndPlay", this.audio, { src: src.slice(-40) });
-        this.intendsToPlay = true;
         this.cancelNetworkRetry();
         this.stopWatchdog();
         this.cancelStallGrace();
@@ -569,7 +511,6 @@ export class AudioController {
     }
 
     stop(): void {
-        this.intendsToPlay = false;
         this.audio.pause();
         this.audio.currentTime = 0;
     }
@@ -712,7 +653,6 @@ export class AudioController {
     }
 
     cleanup(): void {
-        this.intendsToPlay = false;
         this.cancelNetworkRetry();
         this.stopWatchdog();
         this.cancelStallGrace();
@@ -731,11 +671,6 @@ export class AudioController {
     destroy(): void {
         this.cleanup();
         this.detachNativeListeners();
-
-        if (this.routeChangeHandler && navigator.mediaDevices?.removeEventListener) {
-            navigator.mediaDevices.removeEventListener("devicechange", this.routeChangeHandler);
-            this.routeChangeHandler = null;
-        }
 
         if (this.audioContext) {
             if (this.audioContextStateHandler) {
