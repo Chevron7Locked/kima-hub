@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.8.2] - 2026-06-10
+
+A playback-reliability release: faster track starts, audiobook progress that survives backgrounding and updates, and a round of audiobook and podcast fixes.
+
+### Fixed
+
+- **iOS audiobooks lost their place after an app update or a long screen-off session**: progress was saved off the `timeupdate` event, which iOS throttles when the PWA is backgrounded, so a screen-off listening session was never checkpointed and reverted to where the screen was locked. Progress now saves on a 15-second wall-clock timer while playing, independent of the throttled event.
+- **An iOS interruption (call/notification) could leave audio paused, and audio could restart through the speaker after pulling earbuds**: an auto-resume-after-interruption attempt was removed after a device trace proved its safeguard could not work (iOS never emits the route-change event the guard relied on, so it could not tell an earbud unplug from an interruption ending). The audio session is still re-claimed when an interruption ends, but playback is never auto-restarted, so the earbud-to-speaker case cannot occur.
+- **Slow track starts**: the streaming route did play-history logging and a settings lookup before sending the first byte. Those now run in parallel and in the background, so playback starts sooner. Default quality with no settings row is now `original` (no transcode) to match the schema default.
+- **Audiobook seek past the end of a file returned a 500**: a seek using a stale file size made Audiobookshelf return 416, which surfaced as a server error. It now returns a clean 416 instead of piping an error body to the player.
+- **Mis-cataloged Audiobookshelf libraries imported as a single multi-thousand-hour "audiobook"**: sync now skips items with more than 1000 audio files, which are libraries mistaken for one book (they broke seeking and the player).
+- **Podcast detail page stuck on an infinite loading spinner (#168)**: a slow or unreachable feed hung the preview request with no error. The preview is now time-bounded on both ends, so a slow feed returns partial data and a dead feed surfaces an error instead of spinning forever.
+
 ## [1.8.1] - 2026-06-05
 
 ### Added
