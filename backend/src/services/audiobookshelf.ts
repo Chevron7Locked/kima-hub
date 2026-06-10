@@ -291,8 +291,12 @@ class AudiobookshelfService {
             responseType: "stream",
             timeout: 0, // No timeout for streaming
             headers,
-            // Don't throw on 206 Partial Content
-            validateStatus: (status) => status >= 200 && status < 300,
+            // Accept 206 Partial Content, and let 416 Range Not Satisfiable pass
+            // through as-is instead of throwing (axios would otherwise surface a
+            // valid 416 -- e.g. a seek past a file whose metadata size is wrong --
+            // as a 500).
+            validateStatus: (status) =>
+                (status >= 200 && status < 300) || status === 416,
         });
 
         return {
@@ -366,8 +370,23 @@ class AudiobookshelfService {
 
             // Map and upsert each audiobook to database
             let syncedCount = 0;
+            let skippedCount = 0;
             for (const item of audiobooks) {
                 try {
+                    // Skip records that are clearly a mis-cataloged library rather
+                    // than a single book: no real audiobook has 1000+ audio files.
+                    // These ingest as multi-thousand-hour / tens-of-GB monsters that
+                    // break seeking and the player. (Duration is NOT a safe signal --
+                    // legitimate omnibus editions run 50-65h.)
+                    const trackCount = item.media?.tracks?.length ?? item.media?.numTracks ?? 0;
+                    if (trackCount > 1000) {
+                        logger.warn(
+                            `[AUDIOBOOKSHELF] Skipping "${item.media?.metadata?.title || item.id}": ${trackCount} tracks -- looks like a mis-cataloged library, not a single audiobook`
+                        );
+                        skippedCount++;
+                        continue;
+                    }
+
                     const metadata = item.media?.metadata || {};
                     
                     // Extract series information (check both possible formats)
@@ -453,9 +472,10 @@ class AudiobookshelfService {
             }
 
             logger.debug(
-                `[AUDIOBOOKSHELF] Successfully synced ${syncedCount}/${audiobooks.length} audiobooks to cache`
+                `[AUDIOBOOKSHELF] Successfully synced ${syncedCount}/${audiobooks.length} audiobooks to cache` +
+                (skippedCount > 0 ? ` (${skippedCount} skipped as mis-cataloged)` : "")
             );
-            return { synced: syncedCount, total: audiobooks.length };
+            return { synced: syncedCount, total: audiobooks.length, skipped: skippedCount };
         } catch (error) {
             logger.error("[AUDIOBOOKSHELF] Audiobook sync failed:", error);
             throw error;

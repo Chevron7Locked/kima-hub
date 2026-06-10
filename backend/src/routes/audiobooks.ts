@@ -619,6 +619,22 @@ router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
             `[Audiobook Stream] Got stream, status: ${status}, content-type: ${headers["content-type"]}`
         );
 
+        // Range past the end of the file (e.g. a seek using a stale/wrong size --
+        // see the bad-metadata audiobook records): upstream returns 416. Send a
+        // clean 416 to the player instead of piping the upstream error body
+        // through as if it were audio. Forward Content-Range so the client can
+        // correct its range; never the error body or its content-type.
+        if (status === 416) {
+            stream.destroy();
+            res.status(416);
+            res.setHeader("Accept-Ranges", "bytes");
+            if (headers["content-range"]) {
+                res.setHeader("Content-Range", headers["content-range"]);
+            }
+            res.end();
+            return;
+        }
+
         const responseStatus = status || (rangeHeader ? 206 : 200);
         res.status(responseStatus);
 
