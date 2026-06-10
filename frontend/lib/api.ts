@@ -1076,7 +1076,10 @@ class ApiClient {
         // timeout the request aborts and the hook renders its error surface
         // instead of an endless spinner (#168).
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 20000);
+        // Headroom over the backend's worst-case preview time (~18s on the Deezer
+        // path: Deezer fetch + iTunes resolve + the 8s RSS bound) so a slow but
+        // answerable feed isn't aborted and shown as a false timeout (#168).
+        const timer = setTimeout(() => controller.abort(), 25000);
         try {
             return await this.request<ApiData>(`/podcasts/preview/${itunesId}`, { signal: controller.signal });
         } catch (err) {
