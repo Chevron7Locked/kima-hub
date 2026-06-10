@@ -13,6 +13,28 @@ interface ActiveStream {
 }
 const activeStreams = new Map<string, Set<ActiveStream>>();
 
+// Play-logging dedup window. The DB recent-play check + insert now run
+// off the critical path (fire-and-forget), so two concurrent stream requests
+// for the same track could both see "no recent play" and both insert. A
+// synchronous in-process claim closes that race: it is checked-and-set before
+// any await, so only the first of N concurrent requests proceeds to log.
+const PLAY_LOG_WINDOW_MS = 30 * 1000;
+const recentlyLoggedPlays = new Map<string, number>();
+function claimPlayLog(userId: string, trackId: string): boolean {
+  const key = `${userId}:${trackId}`;
+  const now = Date.now();
+  const last = recentlyLoggedPlays.get(key);
+  if (last && now - last < PLAY_LOG_WINDOW_MS) return false;
+  recentlyLoggedPlays.set(key, now);
+  // Opportunistic cleanup so the map can't grow unbounded.
+  if (recentlyLoggedPlays.size > 1000) {
+    for (const [k, t] of recentlyLoggedPlays) {
+      if (now - t >= PLAY_LOG_WINDOW_MS) recentlyLoggedPlays.delete(k);
+    }
+  }
+  return true;
+}
+
 function registerStream(userId: string, trackId: string, res: Response): void {
   if (!activeStreams.has(userId)) {
     activeStreams.set(userId, new Set());
@@ -102,28 +124,33 @@ router.get("/tracks/:id/stream", async (req, res) => {
 
     // Play-history logging must NOT gate the first byte -- it added two
     // sequential DB round-trips (a recent-play check + an insert) to the start
-    // latency for no playback benefit. Fire it in the background.
-    void (async () => {
-      try {
-        const recentPlay = await prisma.play.findFirst({
-          where: {
-            userId,
-            trackId: track.id,
-            playedAt: { gte: new Date(Date.now() - 30 * 1000) },
-          },
-          orderBy: { playedAt: "desc" },
-        });
-        if (!recentPlay) {
-          await prisma.play.create({ data: { userId, trackId: track.id } });
+    // latency for no playback benefit. Fire it in the background, gated by a
+    // synchronous in-process claim so concurrent requests can't double-insert.
+    if (claimPlayLog(userId, track.id)) {
+      void (async () => {
+        try {
+          const recentPlay = await prisma.play.findFirst({
+            where: {
+              userId,
+              trackId: track.id,
+              playedAt: { gte: new Date(Date.now() - PLAY_LOG_WINDOW_MS) },
+            },
+            orderBy: { playedAt: "desc" },
+          });
+          if (!recentPlay) {
+            await prisma.play.create({ data: { userId, trackId: track.id } });
+          }
+        } catch (err) {
+          logger.warn("[STREAM] Failed to log play (non-fatal):", err);
         }
-      } catch (err) {
-        logger.warn("[STREAM] Failed to log play (non-fatal):", err);
-      }
-    })();
+      })();
+    }
 
+    // Default to original (no transcode) to match the schema default and avoid a
+    // pointless first-play transcode for users with no settings row.
     const requestedQuality: string = quality
       ? (quality as string)
-      : settings?.playbackQuality || "medium";
+      : settings?.playbackQuality || "original";
 
     const ext = track.filePath
       ? path.extname(track.filePath).toLowerCase()
