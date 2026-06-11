@@ -1222,9 +1222,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setCurrentTrack(queueRef.current[nextIndex]);
             playback.setCurrentTime(0);
 
-            // Use swapAndPlay (synchronous src swap inside ended handler) to preserve
-            // the autoplay grant on iOS where load() -> play() loses it.
-            ctrl.swapAndPlay(api.getStreamUrl(nextTrack.id));
+            ctrl.load(api.getStreamUrl(nextTrack.id), { autoplay: true });
         };
 
         ctrl.on("ended", handleEnded);
@@ -1257,14 +1255,17 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         const ctrl = controllerRef.current;
         if (!ctrl) return;
 
-        const handlePlay = () => {
-            consecutiveErrorCountRef.current = 0;
-        };
+        // Reset consecutive error count on any transition INTO "playing".
+         
+        const unsubscribePlayReset = ctrl.subscribe((snap) => {
+            if (snap.status === "playing") {
+                consecutiveErrorCountRef.current = 0;
+            }
+        });
 
-        const handleError = (data: unknown) => {
-            const { code } = data as { error: string; code?: number };
-            if (code === 2) return;
-
+        // "error" event is terminal by construction (ladder exhausted). Every
+        // emission means the engine gave up on this src -- skip or give up uniformly.
+        const handleError = (_data: unknown) => {
             if (playbackTypeRef.current === "track") {
                 consecutiveErrorCountRef.current++;
                 if (consecutiveErrorCountRef.current >= 3 || queueRef.current.length <= 1) {
@@ -1287,31 +1288,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             }
         };
 
-        ctrl.on("play", handlePlay);
         ctrl.on("error", handleError);
         return () => {
-            ctrl.off("play", handlePlay);
+            if (typeof unsubscribePlayReset === "function") unsubscribePlayReset();
             ctrl.off("error", handleError);
         };
     }, [controller, state]);
-
-    // -- Save on pause --
-    useEffect(() => {
-        const ctrl = controllerRef.current;
-        if (!ctrl) return;
-
-        const onPause = () => {
-            if (justFinishedRef.current) {
-                justFinishedRef.current = false;
-                return;
-            }
-            if (playbackTypeRef.current === "audiobook") saveAudiobookProgressRef.current();
-            else if (playbackTypeRef.current === "podcast") savePodcastProgressRef.current();
-        };
-
-        ctrl.on("pause", onPause);
-        return () => ctrl.off("pause", onPause);
-    }, [controller]);
 
     // -- Periodic save on a real timer (every 15s while playing) --
     // iOS throttles/suspends the "timeupdate" event when the PWA is backgrounded
@@ -1344,15 +1326,34 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             }
         };
 
-        ctrl.on("play", start);
-        ctrl.on("pause", stop);
+         
+        const unsubscribe = ctrl.subscribe((snap) => {
+            const { status } = snap;
+            if (status === "playing") {
+                start();
+            } else {
+                // Any non-playing status stops the interval.
+                stop();
+                // For pause-like exits (paused/error/blocked), save progress.
+                // justFinishedRef guards against double-save after natural end.
+                if (status === "paused" || status === "error" || status === "blocked") {
+                    if (!justFinishedRef.current) {
+                        if (playbackTypeRef.current === "audiobook") saveAudiobookProgressRef.current();
+                        else if (playbackTypeRef.current === "podcast") savePodcastProgressRef.current();
+                    } else {
+                        justFinishedRef.current = false;
+                    }
+                }
+            }
+        });
+
+        // Also stop on ended (ended event still exists).
         ctrl.on("ended", stop);
         if (ctrl.isPlaying()) start();
 
         return () => {
             stop();
-            ctrl.off("play", start);
-            ctrl.off("pause", stop);
+            if (typeof unsubscribe === "function") unsubscribe();
             ctrl.off("ended", stop);
         };
     }, [controller]);
@@ -1381,13 +1382,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             if (!ctrl) return;
 
             ctrl.notifyForeground();
-
-            if (playbackTypeRef.current) {
-                const hasMedia = currentTrackRef.current || currentAudiobookRef.current || currentPodcastRef.current;
-                if (hasMedia) {
-                    playback.setAudioError(null);
-                }
-            }
         };
 
         const handleVisibility = () => {
@@ -1427,7 +1421,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             window.removeEventListener("pagehide", handlePageHide);
             deviceChangeAbort?.();
         };
-    }, [playback]);
+    }, []);
 
     // -- Cleanup on unmount --
     useEffect(() => {

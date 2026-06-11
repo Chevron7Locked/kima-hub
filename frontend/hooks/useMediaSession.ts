@@ -5,6 +5,7 @@ import { useAudioControls } from "@/lib/audio-controls-context";
 import { useAudioController } from "@/lib/audio-controller-context";
 import { api } from "@/lib/api";
 import { iosAudioLog } from "@/lib/iosAudioLog";
+import type { EngineSnapshot } from "@/lib/audio-engine-policy";
 
 export function useMediaSession() {
     const controller = useAudioController();
@@ -15,13 +16,14 @@ export function useMediaSession() {
         playbackType,
     } = useAudioState();
     const { currentTime } = useAudioPlayback();
-    const { next, previous, seek } = useAudioControls();
+    const { next, previous, seek, pause } = useAudioControls();
 
     const currentTimeRef = useRef(currentTime);
     const playbackTypeRef = useRef(playbackType);
     const nextRef = useRef(next);
     const previousRef = useRef(previous);
     const seekRef = useRef(seek);
+    const pauseRef = useRef(pause);
     const lastPositionUpdateRef = useRef(0);
 
     useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
@@ -29,28 +31,39 @@ export function useMediaSession() {
     useEffect(() => { nextRef.current = next; }, [next]);
     useEffect(() => { previousRef.current = previous; }, [previous]);
     useEffect(() => { seekRef.current = seek; }, [seek]);
+    useEffect(() => { pauseRef.current = pause; }, [pause]);
 
-    // Sync playbackState from controller events (single source of truth)
+    // Sync playbackState from snapshot (single source of truth).
     useEffect(() => {
         if (!("mediaSession" in navigator)) return;
         if (!controller) return;
 
-        const onPlay = () => {
-            navigator.mediaSession.playbackState = "playing";
-            lastPositionUpdateRef.current = 0;
-        };
-        const onPause = () => { navigator.mediaSession.playbackState = "paused"; };
+         
+        const unsubscribe = controller.subscribe((snap: EngineSnapshot) => {
+            const { status } = snap;
+            if (status === "playing") {
+                navigator.mediaSession.playbackState = "playing";
+                lastPositionUpdateRef.current = 0;
+            } else if (
+                status === "paused" ||
+                status === "blocked" ||
+                status === "error" ||
+                status === "idle"
+            ) {
+                navigator.mediaSession.playbackState = "paused";
+            }
+        });
 
-        controller.on("play", onPlay);
-        controller.on("pause", onPause);
-        controller.on("ended", onPause);
-        controller.on("error", onPause);
+        // ended still emitted as an event; map to paused for MediaSession.
+        const onEnded = () => { navigator.mediaSession.playbackState = "paused"; };
+        const onError = () => { navigator.mediaSession.playbackState = "paused"; };
+        controller.on("ended", onEnded);
+        controller.on("error", onError);
 
         return () => {
-            controller.off("play", onPlay);
-            controller.off("pause", onPause);
-            controller.off("ended", onPause);
-            controller.off("error", onPause);
+            if (typeof unsubscribe === "function") unsubscribe();
+            controller.off("ended", onEnded);
+            controller.off("error", onError);
         };
     }, [controller]);
 
@@ -59,7 +72,7 @@ export function useMediaSession() {
         if (!("mediaSession" in navigator)) return;
         if (!controller) return;
 
-        navigator.mediaSession.setActionHandler("play", async () => {
+        navigator.mediaSession.setActionHandler("play", () => {
             iosAudioLog("ms:play", "useMediaSession", null, { hasController: !!controller });
             // Eagerly push position state before iOS defers JS execution
             if ("setPositionState" in navigator.mediaSession) {
@@ -78,20 +91,15 @@ export function useMediaSession() {
                 }
             }
 
-            try {
-                await controller.play();
-            } catch {
-                // play() failed (iOS audio session may be invalidated).
-                // Reload source and try again -- this re-establishes the
-                // audio hardware connection that iOS drops on interruption.
-                iosAudioLog("ms:play:fallback-reload", "useMediaSession");
-                controller.reloadAndPlay();
-            }
+            // play() handles retry-from-error/blocked internally; no catch needed.
+            controller.play();
         });
 
         navigator.mediaSession.setActionHandler("pause", () => {
             iosAudioLog("ms:pause", "useMediaSession");
-            controller.pause();
+            // Route through context pause so lock-screen pauses are USER pauses,
+            // matching the FE5 intent-correct routing (spec 4.1).
+            pauseRef.current();
         });
 
         navigator.mediaSession.setActionHandler("previoustrack", () => {

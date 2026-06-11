@@ -4,11 +4,8 @@ import { NextResponse } from "next/server";
 // `display: "browser"` workaround for WebKit #261858 (audio session
 // suspended in standalone WKWebView) made "Add to Home Screen" open a
 // Safari tab whose chrome covered the top nav and bottom player rows.
-// The iOS audio recovery paths shipped in v1.7.13 (wasPlaying-driven
-// foreground resume, synchronous src swap on track-end, needs-resume
-// emit from tryResume) handle the suspended-session case via UI prompts
-// and a user-gesture-driven reload, so standalone is the correct
-// long-term default.
+// Standalone is the correct long-term default; audio session continuity
+// is handled by the Phase C engine state machine and the AudioContext bridge.
 
 const MANIFEST = {
     id: "/",

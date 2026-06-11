@@ -1,63 +1,50 @@
 "use client";
 
 import { iosAudioLog } from "./iosAudioLog";
+import type {
+    EngineStatus,
+    PauseClass,
+    TimerId,
+    EngineSnapshot,
+    EngineEvent,
+    Effect,
+} from "./audio-engine-policy";
+import { initialSnapshot, transition } from "./audio-engine-policy";
 
-export type AudioControllerEvent =
-    | "play"
-    | "pause"
-    | "ended"
-    | "timeupdate"
-    | "loading"
-    | "canplay"
-    | "error"
-    | "waiting"
-    | "seeked"
-    | "needs-resume";
+// Re-export types consumers may need
+export type { EngineStatus, PauseClass, EngineSnapshot };
 
-export type AudioControllerCallback = (data?: unknown) => void;
+type ExternalEvent = "ended" | "timeupdate" | "canplay" | "seeked" | "error";
+type ExternalCallback = (data?: unknown) => void;
+
+const TICKER_INTERVAL_MS = 1000;
 
 export class AudioController {
     private audio: HTMLAudioElement;
     private audioSessionSet = false;
-    private eventListeners: Map<AudioControllerEvent, Set<AudioControllerCallback>> = new Map();
-    private nativeListeners: Array<{ event: string; handler: EventListener }> = [];
-    private prefetchLink: HTMLLinkElement | null = null;
 
-    private currentSrc: string | null = null;
+    // State machine
+    private snapshot: EngineSnapshot;
+    private subscribers: Set<(snap: EngineSnapshot) => void> = new Set();
+
+    // External event listeners (ended / timeupdate / canplay / seeked / error)
+    private externalListeners: Map<ExternalEvent, Set<ExternalCallback>> = new Map();
+
+    // Native element listeners for cleanup
+    private nativeListeners: Array<{ event: string; handler: EventListener }> = [];
+
+    // Timers keyed by TimerId
+    private timers: Map<TimerId, ReturnType<typeof setTimeout>> = new Map();
+
+    // 1s ticker
+    private tickerInterval: ReturnType<typeof setInterval> | null = null;
+
+    // Tracks whether the last pause event was caused by our own call-pause effect
+    private expectingPause = false;
+
+    // Volume / mute
     private volume = 1;
     private isMuted = false;
-
-    private networkRetryCount = 0;
-    private readonly MAX_NETWORK_RETRIES = 3;
-    private networkRetryTimeout: ReturnType<typeof setTimeout> | null = null;
-    private retrySeekTime: { gen: number; time: number } | null = null;
-
-    private loadGeneration = 0;
-    private pendingSeek: { gen: number; time: number } | null = null;
-    private transitioning = false;
-
-    // Stall watchdog state
-    private watchdogInterval: ReturnType<typeof setInterval> | null = null;
-    private lastWatchdogTime = -1;
-    private lastTimeChangeAt = 0;
-    private readonly WATCHDOG_CHECK_MS = 1000;
-    private readonly WATCHDOG_STALL_MS = 3000;
-
-    // Stalled event grace timer
-    private stallGraceTimeout: ReturnType<typeof setTimeout> | null = null;
-    private readonly STALL_GRACE_MS = 10000;
-
-    // Stall recovery state
-    private stallRecoveryCount = 0;
-    private readonly MAX_STALL_RECOVERIES = 3;
-    private autoResumeAfterRecovery = false;
-
-    // reloadAndPlay failsafe state (tracked for cleanup in destroy())
-    private reloadFailsafeTimeout: ReturnType<typeof setTimeout> | null = null;
-    private reloadFailsafeListener: (() => void) | null = null;
-
-    // Route-change observability: track time of last play to compute ms-since-play on pause.
-    private lastPlayAt = 0;
 
     // iOS standalone PWA audio session bridge. iOS WKWebView suspends the
     // HTMLAudioElement's audio session when backgrounded; MediaSession reports
@@ -74,16 +61,18 @@ export class AudioController {
         this.audio = audio;
         this.audio.preload = "auto";
 
-        const events: AudioControllerEvent[] = [
-            "play", "pause", "ended", "timeupdate",
-            "loading", "canplay", "error", "waiting",
-            "seeked", "needs-resume",
-        ];
-        events.forEach((e) => this.eventListeners.set(e, new Set()));
+        const events: ExternalEvent[] = ["ended", "timeupdate", "canplay", "seeked", "error"];
+        events.forEach((e) => this.externalListeners.set(e, new Set()));
+
+        this.snapshot = initialSnapshot();
 
         this.attachNativeListeners();
         this.initializeVolume();
     }
+
+    // -------------------------------------------------------------------------
+    // Battle-tested iOS code -- preserved verbatim
+    // -------------------------------------------------------------------------
 
     // Claim the iOS "playback" audio session category. iOS demotes / reassigns
     // the category to another app when our session is interrupted (earbud click,
@@ -167,6 +156,161 @@ export class AudioController {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // State machine dispatch
+    // -------------------------------------------------------------------------
+
+    private dispatch(event: EngineEvent): void {
+        const { snapshot, effects } = transition(this.snapshot, event);
+        const changed = snapshot !== this.snapshot;
+        this.snapshot = snapshot;
+
+        this.runEffects(effects);
+
+        if (changed) {
+            this.updateTicker(snapshot.status);
+            this.notifySubscribers();
+        }
+    }
+
+    private runEffects(effects: Effect[]): void {
+        for (const effect of effects) {
+            switch (effect.kind) {
+                case "set-src-and-load": {
+                    this.audio.src = effect.src;
+                    this.audio.load();
+                    break;
+                }
+                case "seek": {
+                    try {
+                        this.audio.currentTime = effect.time;
+                    } catch {
+                        // Element not ready
+                    }
+                    break;
+                }
+                case "call-play": {
+                    // Capture generation at call time so the reaction is bound to it.
+                    // The whole dispatch including audio.play() runs synchronously to
+                    // preserve the iOS autoplay grant in event tails (e.g. ended -> next track).
+                    const capturedGen = this.snapshot.generation;
+                    this.audio.play().then(() => {
+                        // Play succeeded -- nothing to do; native-playing fires
+                    }).catch((err: unknown) => {
+                        if (!(err instanceof DOMException)) {
+                            iosAudioLog("play:error", "audio-controller:call-play", this.audio, {
+                                error: err instanceof Error ? err.message : String(err),
+                            });
+                            this.dispatch({
+                                type: "play-rejected",
+                                reason: "other",
+                                generation: capturedGen,
+                                now: Date.now(),
+                            });
+                            return;
+                        }
+                        const name = (err as DOMException).name;
+                        if (name === "AbortError") {
+                            iosAudioLog("play:abort-error", "audio-controller:call-play", this.audio);
+                            // Superseded generations are silently ignored by the policy.
+                            this.dispatch({
+                                type: "play-rejected",
+                                reason: "abort",
+                                generation: capturedGen,
+                                now: Date.now(),
+                            });
+                        } else if (name === "NotAllowedError") {
+                            iosAudioLog("play:not-allowed", "audio-controller:call-play", this.audio);
+                            this.dispatch({
+                                type: "play-rejected",
+                                reason: "not-allowed",
+                                generation: capturedGen,
+                                now: Date.now(),
+                            });
+                        } else {
+                            iosAudioLog("play:error", "audio-controller:call-play", this.audio, { error: (err as DOMException).message });
+                            this.dispatch({
+                                type: "play-rejected",
+                                reason: "other",
+                                generation: capturedGen,
+                                now: Date.now(),
+                            });
+                        }
+                    });
+                    break;
+                }
+                case "call-pause": {
+                    this.expectingPause = true;
+                    this.audio.pause();
+                    break;
+                }
+                case "arm-timer": {
+                    const timerId = effect.timer;
+                    const existing = this.timers.get(timerId);
+                    if (existing != null) clearTimeout(existing);
+                    const handle = setTimeout(() => {
+                        this.timers.delete(timerId);
+                        this.dispatch({ type: "timer-fired", timer: timerId, now: Date.now() });
+                    }, effect.ms);
+                    this.timers.set(timerId, handle);
+                    break;
+                }
+                case "cancel-timer": {
+                    const timerId = effect.timer;
+                    const existing = this.timers.get(timerId);
+                    if (existing != null) {
+                        clearTimeout(existing);
+                        this.timers.delete(timerId);
+                    }
+                    break;
+                }
+                case "claim-session": {
+                    this.setAudioSessionPlayback(true);
+                    this.setupAudioContextBridge();
+                    break;
+                }
+                case "emit-ended": {
+                    this.emitExternal("ended");
+                    break;
+                }
+                case "emit-error": {
+                    this.emitExternal("error", {
+                        error: this.snapshot.error?.message ?? "Audio playback error",
+                        code: this.snapshot.error?.code,
+                    });
+                    break;
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Ticker
+    // -------------------------------------------------------------------------
+
+    private updateTicker(status: EngineStatus): void {
+        const active = status === "playing" || status === "buffering" || status === "recovering";
+        if (active && !this.tickerInterval) {
+            this.tickerInterval = setInterval(() => {
+                this.dispatch({
+                    type: "tick",
+                    currentTime: this.audio.currentTime,
+                    readyState: this.audio.readyState,
+                    paused: this.audio.paused,
+                    hidden: document.visibilityState === "hidden",
+                    now: Date.now(),
+                });
+            }, TICKER_INTERVAL_MS);
+        } else if (!active && this.tickerInterval) {
+            clearInterval(this.tickerInterval);
+            this.tickerInterval = null;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Native element listeners
+    // -------------------------------------------------------------------------
+
     private attachNativeListeners(): void {
         const add = (event: string, handler: EventListener) => {
             this.audio.addEventListener(event, handler);
@@ -174,136 +318,75 @@ export class AudioController {
         };
 
         add("playing", () => {
-            this.lastPlayAt = Date.now();
             iosAudioLog("playing", "audio-controller:listeners", this.audio);
-            this.networkRetryCount = 0;
-            this.stallRecoveryCount = 0;
-            this.startWatchdog();
-            this.cancelStallGrace();
-            this.emit("play");
+            this.dispatch({ type: "native-playing", now: Date.now() });
         });
 
         add("pause", () => {
-            iosAudioLog("pause", "audio-controller:listeners", this.audio, {
-                msSincePlay: Date.now() - this.lastPlayAt,
-            });
-            this.stopWatchdog();
-            this.emit("pause");
+            iosAudioLog("pause", "audio-controller:listeners", this.audio);
+            if (this.expectingPause) {
+                // Our own call-pause effect fired this -- do not dispatch native-pause
+                this.expectingPause = false;
+                return;
+            }
+            // Unexpected pause (earbud, interruption, system) -- dispatch to policy
+            this.dispatch({ type: "native-pause", now: Date.now() });
         });
 
         add("ended", () => {
             iosAudioLog("ended", "audio-controller:listeners", this.audio);
-            this.stopWatchdog();
-            this.emit("ended");
+            this.dispatch({
+                type: "native-ended",
+                currentTime: this.audio.currentTime,
+                duration: this.audio.duration,
+                now: Date.now(),
+            });
         });
 
         add("timeupdate", () => {
-            this.cancelStallGrace();
-            this.emit("timeupdate", { time: this.audio.currentTime });
+            // Suppress upstream timeupdate while transitioning (avoids 0-position flash)
+            if (!this.isTransitioning) {
+                this.emitExternal("timeupdate", { time: this.audio.currentTime });
+            }
         });
 
         add("canplay", () => {
-            const gen = this.loadGeneration;
+            const dur = this.audio.duration;
             iosAudioLog("canplay", "audio-controller:listeners", this.audio, {
-                autoResumeAfterRecovery: this.autoResumeAfterRecovery,
-                retrySeekTime: this.retrySeekTime,
-                gen,
+                gen: this.snapshot.generation,
+                pendingSeek: this.snapshot.pendingSeek,
             });
-            if (this.pendingSeek !== null && this.pendingSeek.gen === gen) {
-                const seekTo = this.pendingSeek.time;
-                this.pendingSeek = null;
-                try {
-                    this.audio.currentTime = seekTo;
-                } catch {
-                    // Element not ready
-                }
-            }
-            if (this.retrySeekTime !== null && this.retrySeekTime.gen === gen) {
-                const seekTo = this.retrySeekTime.time;
-                this.retrySeekTime = null;
-                try {
-                    this.audio.currentTime = seekTo;
-                } catch {
-                    // Element not ready
-                }
-            } else if (this.retrySeekTime !== null) {
-                this.retrySeekTime = null;
-            }
-            this.transitioning = false;
-            if (this.autoResumeAfterRecovery) {
-                this.autoResumeAfterRecovery = false;
-                this.play();
-            }
-            this.emit("canplay", { duration: this.audio.duration || 0 });
+            // Dispatch first so policy applies the pending seek (if any)
+            this.dispatch({ type: "native-canplay", duration: isFinite(dur) ? dur : 0, now: Date.now() });
+            // Then emit upstream -- pendingSeek is now applied
+            this.emitExternal("canplay", { duration: isFinite(dur) ? dur : 0 });
         });
 
         add("waiting", () => {
-            this.emit("waiting");
-        });
-
-        add("loadstart", () => {
-            this.emit("loading");
+            this.dispatch({ type: "native-waiting", now: Date.now() });
         });
 
         add("seeked", () => {
-            this.resetWatchdog();
-            this.emit("seeked", { time: this.audio.currentTime });
-        });
-
-        add("stalled", () => {
-            iosAudioLog("stalled", "audio-controller:listeners", this.audio);
-            if (this.audio.paused || this.audio.ended) return;
-            if (this.stallGraceTimeout) return;
-
-            this.stallGraceTimeout = setTimeout(() => {
-                this.stallGraceTimeout = null;
-                if (
-                    this.audio.readyState < 3 &&
-                    !this.audio.paused &&
-                    !this.audio.ended
-                ) {
-                    console.warn("[AudioController] Stall grace expired, attempting recovery");
-                    this.attemptStallRecovery();
-                }
-            }, this.STALL_GRACE_MS);
+            this.emitExternal("seeked", { time: this.audio.currentTime });
         });
 
         add("error", () => {
-            iosAudioLog("error", "audio-controller:listeners", this.audio, {
-                code: this.audio.error?.code,
-                message: this.audio.error?.message,
-            });
-            this.transitioning = false;
             const err = this.audio.error;
-
-            if (
-                err?.code === 2 &&
-                this.networkRetryCount < this.MAX_NETWORK_RETRIES &&
-                this.currentSrc
-            ) {
-                this.networkRetryCount++;
-                const delay = Math.min(1000 * Math.pow(2, this.networkRetryCount - 1), 8000);
-                console.warn(
-                    `[AudioController] Network error, retrying in ${delay}ms (attempt ${this.networkRetryCount}/${this.MAX_NETWORK_RETRIES})`
-                );
-                this.networkRetryTimeout = setTimeout(() => {
-                    if (this.currentSrc) {
-                        const currentTime = this.audio.currentTime;
-                        const gen = this.loadGeneration;
-                        this.retrySeekTime = currentTime > 0 ? { gen, time: currentTime } : null;
-                        this.autoResumeAfterRecovery = true;
-                        this.audio.src = this.currentSrc;
-                        this.audio.load();
-                    }
-                }, delay);
-                return;
-            }
-
-            this.emit("error", {
-                error: err?.message || "Audio playback error",
+            iosAudioLog("error", "audio-controller:listeners", this.audio, {
                 code: err?.code,
+                message: err?.message,
+            });
+            this.dispatch({
+                type: "native-error",
+                code: err?.code ?? 0,
+                message: err?.message ?? "Audio error",
+                now: Date.now(),
             });
         });
+
+        // NOTE: "stalled" is intentionally NOT forwarded to the policy.
+        // Production calibration: 1094 stalled events in the 2.5-day iOS trace,
+        // all during healthy playback with readyState=4. Pure noise on iOS.
     }
 
     private detachNativeListeners(): void {
@@ -313,275 +396,96 @@ export class AudioController {
         this.nativeListeners = [];
     }
 
-    // -- Stall watchdog --
+    // -------------------------------------------------------------------------
+    // Subscriber management
+    // -------------------------------------------------------------------------
 
-    private startWatchdog(): void {
-        if (this.watchdogInterval) return;
-        this.lastWatchdogTime = this.audio.currentTime;
-        this.lastTimeChangeAt = Date.now();
-
-        this.watchdogInterval = setInterval(() => {
-            this.checkWatchdog();
-        }, this.WATCHDOG_CHECK_MS);
-    }
-
-    private stopWatchdog(): void {
-        if (this.watchdogInterval) {
-            clearInterval(this.watchdogInterval);
-            this.watchdogInterval = null;
-        }
-        this.lastWatchdogTime = -1;
-    }
-
-    private resetWatchdog(): void {
-        this.lastWatchdogTime = this.audio.currentTime;
-        this.lastTimeChangeAt = Date.now();
-    }
-
-    private checkWatchdog(): void {
-        if (this.audio.paused || this.audio.ended) return;
-
-        const now = Date.now();
-        if (this.audio.currentTime !== this.lastWatchdogTime) {
-            this.lastWatchdogTime = this.audio.currentTime;
-            this.lastTimeChangeAt = now;
-            return;
-        }
-
-        const stalledFor = now - this.lastTimeChangeAt;
-        if (stalledFor >= this.WATCHDOG_STALL_MS) {
-            console.warn(
-                `[AudioController] Watchdog: no progress for ${stalledFor}ms, attempting recovery`
-            );
-            this.attemptStallRecovery();
-        }
-    }
-
-    private attemptStallRecovery(): void {
-        iosAudioLog("stall-recovery", "audio-controller:attemptStallRecovery", this.audio);
-        if (!this.currentSrc) return;
-
-        this.cancelStallGrace();
-        this.stopWatchdog();
-
-        this.stallRecoveryCount++;
-        if (this.stallRecoveryCount > this.MAX_STALL_RECOVERIES) {
-            console.error("[AudioController] Max stall recoveries exceeded, giving up");
-            this.emit("error", {
-                error: "Playback stalled repeatedly",
-                code: 99,
-            });
-            return;
-        }
-
-        const currentTime = this.audio.currentTime;
-        const gen = this.loadGeneration;
-        this.retrySeekTime = currentTime > 0 ? { gen, time: currentTime } : null;
-        this.autoResumeAfterRecovery = true;
-        this.audio.src = this.currentSrc;
-        this.audio.load();
-    }
-
-    private cancelStallGrace(): void {
-        if (this.stallGraceTimeout) {
-            clearTimeout(this.stallGraceTimeout);
-            this.stallGraceTimeout = null;
-        }
-    }
-
-    async play(): Promise<void> {
-        iosAudioLog("play:entry", "audio-controller:play", this.audio);
-        if (!this.audio.src) return;
-
-        // Explicit play/resume: re-claim the session category every time (force),
-        // not just on first play -- this is the path the MediaSession "play"
-        // action and the on-screen play button reach, and it is what stops iOS
-        // leaving the session with an app that grabbed it during interruption.
-        this.setAudioSessionPlayback(true);
-        this.setupAudioContextBridge();
-
-        try {
-            await this.audio.play();
-        } catch (err) {
-            if (err instanceof DOMException && err.name === "AbortError") {
-                iosAudioLog("play:abort-error", "audio-controller:play", this.audio);
-                // On iOS, AbortError after interruption means the audio element
-                // is in a bad state. Try reloading the source as a recovery.
-                if (this.currentSrc) {
-                    this.reloadAndPlay();
-                }
-                return;
+    private notifySubscribers(): void {
+        this.subscribers.forEach((fn) => {
+            try {
+                fn(this.snapshot);
+            } catch (err) {
+                console.error("[AudioController] Subscriber error:", err);
             }
-            if (err instanceof DOMException && err.name === "NotAllowedError") {
-                iosAudioLog("play:not-allowed", "audio-controller:play", this.audio);
-                // User gesture required -- emit needs-resume so UI can prompt
-                this.emit("needs-resume");
-                return;
-            }
-            console.error("[AudioController] Play failed:", err);
-            this.emit("error", { error: err instanceof Error ? err.message : String(err) });
-        }
-    }
-
-    async tryResume(): Promise<boolean> {
-        if (!this.audio.src) return false;
-        if (!this.audio.paused) return true;
-
-        this.setAudioSessionPlayback();
-        this.setupAudioContextBridge();
-
-        try {
-            await this.audio.play();
-            return true;
-        } catch {
-            if (this.currentSrc) {
-                this.emit("needs-resume");
-            }
-            return false;
-        }
-    }
-
-    pause(): void {
-        this.autoResumeAfterRecovery = false;
-        this.audio.pause();
-    }
-
-    notifyForeground(): void {
-        if (this.watchdogInterval) {
-            this.resetWatchdog();
-        }
-        this.cancelStallGrace();
-    }
-
-    private clearReloadFailsafe(): void {
-        if (this.reloadFailsafeTimeout) {
-            clearTimeout(this.reloadFailsafeTimeout);
-            this.reloadFailsafeTimeout = null;
-        }
-        if (this.reloadFailsafeListener) {
-            this.audio.removeEventListener("canplay", this.reloadFailsafeListener);
-            this.reloadFailsafeListener = null;
-        }
-    }
-
-    /**
-     * Reload the current source and resume playback.
-     * Used as a fallback when play() fails after iOS audio interruption
-     * (the audio element can be left in a state where it reports playing
-     * but the hardware audio session is disconnected).
-     *
-     * Recovery flow: set src → load() → canplay fires → seek to saved position
-     * → autoResumeAfterRecovery triggers play(). If the element doesn't reach
-     * canplay within 10 s, emits needs-resume so the UI can prompt the user.
-     */
-    reloadAndPlay(): void {
-        iosAudioLog("reload:entry", "audio-controller:reloadAndPlay", this.audio);
-        if (!this.currentSrc) return;
-        const currentTime = this.audio.currentTime;
-        const gen = this.loadGeneration;
-        this.retrySeekTime = Number.isFinite(currentTime) && currentTime > 0 ? { gen, time: currentTime } : null;
-        this.autoResumeAfterRecovery = true;
-
-        // Clean up any previous reload's failsafe
-        this.clearReloadFailsafe();
-
-        const onCanPlayOnce = () => {
-            this.clearReloadFailsafe();
-        };
-
-        this.reloadFailsafeListener = onCanPlayOnce;
-        this.audio.addEventListener("canplay", onCanPlayOnce);
-
-        this.audio.src = this.currentSrc;
-        this.audio.load();
-
-        // Safety net: if canplay never fires, notify the UI
-        this.reloadFailsafeTimeout = setTimeout(() => {
-            iosAudioLog("reload:failsafe-fired", "audio-controller:reloadAndPlay", this.audio);
-            this.clearReloadFailsafe();
-            if (this.autoResumeAfterRecovery) {
-                this.autoResumeAfterRecovery = false;
-                this.emit("needs-resume");
-            }
-        }, 10_000);
-    }
-
-    /**
-     * iOS-safe track advance: swap src and call play() synchronously inside the
-     * caller's event tail (e.g., inside an "ended" handler). This may preserve the
-     * autoplay grant on iOS where load() -> play() does not.
-     */
-    swapAndPlay(src: string): void {
-        iosAudioLog("swapAndPlay:entry", "audio-controller:swapAndPlay", this.audio, { src: src.slice(-40) });
-        this.cancelNetworkRetry();
-        this.stopWatchdog();
-        this.cancelStallGrace();
-        this.loadGeneration++;
-        this.pendingSeek = null;
-        this.transitioning = true;
-        this.currentSrc = src;
-        this.audio.src = src;
-        this.audio.play().catch((err) => {
-            if (err instanceof DOMException && err.name === "NotAllowedError") {
-                this.emit("needs-resume");
-                return;
-            }
-            if (err instanceof DOMException && err.name === "AbortError") {
-                this.reloadAndPlay();
-                return;
-            }
-            console.error("[AudioController] swapAndPlay failed:", err);
-            this.emit("error", { error: err instanceof Error ? err.message : String(err) });
         });
     }
 
-    stop(): void {
-        this.audio.pause();
-        this.audio.currentTime = 0;
+    subscribe(fn: (snap: EngineSnapshot) => void): () => void {
+        this.subscribers.add(fn);
+        // Call immediately with current snapshot
+        try {
+            fn(this.snapshot);
+        } catch (err) {
+            console.error("[AudioController] Subscriber error on initial call:", err);
+        }
+        return () => {
+            this.subscribers.delete(fn);
+        };
     }
+
+    getSnapshot(): EngineSnapshot {
+        return this.snapshot;
+    }
+
+    // -------------------------------------------------------------------------
+    // External event bus
+    // -------------------------------------------------------------------------
+
+    on(event: ExternalEvent, cb: ExternalCallback): void {
+        this.externalListeners.get(event)?.add(cb);
+    }
+
+    off(event: ExternalEvent, cb: ExternalCallback): void {
+        this.externalListeners.get(event)?.delete(cb);
+    }
+
+    private emitExternal(event: ExternalEvent, data?: unknown): void {
+        this.externalListeners.get(event)?.forEach((cb) => {
+            try {
+                cb(data);
+            } catch (err) {
+                console.error(`[AudioController] Event listener error (${event}):`, err);
+            }
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Public API
+    // -------------------------------------------------------------------------
 
     load(src: string, opts: { autoplay?: boolean; seekTo?: number } = {}): void {
         const { autoplay = false, seekTo } = opts;
         iosAudioLog("load:entry", "audio-controller:load", this.audio, {
             autoplay,
             seekTo,
-            sameSrc: this.currentSrc === src,
+            sameSrc: this.snapshot.src === src,
         });
 
-        if (this.currentSrc === src && this.audio.readyState >= 2) {
-            if (autoplay && this.audio.paused) {
-                this.play();
+        // Same-src dedup: if already loading this src, only update intent
+        if (src === this.snapshot.src && this.snapshot.status === "loading") {
+            if (autoplay) {
+                this.dispatch({ type: "play-requested", now: Date.now() });
             }
             return;
         }
 
-        // Same src still loading: update autoplay intent only, no restart (FE16).
-        if (this.currentSrc === src && this.transitioning) {
-            if (autoplay && this.audio.paused) {
-                this.play();
-            }
-            return;
-        }
-
-        this.cancelNetworkRetry();
-        this.stopWatchdog();
-        this.cancelStallGrace();
-
-        this.loadGeneration++;
-        const gen = this.loadGeneration;
-        this.pendingSeek = seekTo !== undefined ? { gen, time: seekTo } : null;
-        this.transitioning = true;
-
-        this.currentSrc = src;
-        this.audio.src = src;
-
-        if (autoplay) {
-            this.play();
-        }
+        this.dispatch({
+            type: "load",
+            src,
+            autoplay,
+            seekTo,
+            now: Date.now(),
+        });
     }
 
-    get isTransitioning(): boolean {
-        return this.transitioning;
+    play(): void {
+        iosAudioLog("play:entry", "audio-controller:play", this.audio);
+        this.dispatch({ type: "play-requested", now: Date.now() });
+    }
+
+    pause(cls: "user" | "system" = "user"): void {
+        iosAudioLog("pause", "audio-controller:pause", this.audio, { cls });
+        this.dispatch({ type: "pause-requested", cls, now: Date.now() });
     }
 
     seek(time: number): void {
@@ -598,19 +502,51 @@ export class AudioController {
         }
     }
 
-    preloadHint(src: string): void {
-        if (this.prefetchLink) {
-            this.prefetchLink.remove();
-            this.prefetchLink = null;
+    stop(): void {
+        this.audio.pause();
+        this.audio.currentTime = 0;
+    }
+
+    cleanup(): void {
+        this.dispatch({ type: "cleanup", now: Date.now() });
+
+        // Cancel all pending timers
+        for (const [, handle] of this.timers) {
+            clearTimeout(handle);
+        }
+        this.timers.clear();
+
+        // Element teardown
+        this.audio.pause();
+        this.audio.removeAttribute("src");
+        this.audio.load();
+    }
+
+    destroy(): void {
+        this.cleanup();
+        this.detachNativeListeners();
+
+        if (this.tickerInterval) {
+            clearInterval(this.tickerInterval);
+            this.tickerInterval = null;
         }
 
-        const link = document.createElement("link");
-        link.rel = "prefetch";
-        link.as = "fetch";
-        link.href = src;
-        link.dataset.preloadAudio = "true";
-        document.head.appendChild(link);
-        this.prefetchLink = link;
+        // Bridge teardown
+        if (this.audioContext) {
+            if (this.audioContextStateHandler) {
+                this.audioContext.removeEventListener("statechange", this.audioContextStateHandler);
+                this.audioContextStateHandler = null;
+            }
+            this.audioContext.close().catch(() => {});
+            this.audioContext = null;
+            this.mediaSourceNode = null;
+        }
+
+        this.subscribers.clear();
+    }
+
+    notifyForeground(): void {
+        this.dispatch({ type: "foreground", now: Date.now() });
     }
 
     getCurrentTime(): number {
@@ -630,8 +566,15 @@ export class AudioController {
         return this.audio.readyState >= 2;
     }
 
+    get isTransitioning(): boolean {
+        return (
+            this.snapshot.status === "loading" ||
+            this.snapshot.pendingSeek != null
+        );
+    }
+
     getState(): Readonly<{ currentSrc: string | null; volume: number; isMuted: boolean }> {
-        return { currentSrc: this.currentSrc, volume: this.volume, isMuted: this.isMuted };
+        return { currentSrc: this.snapshot.src, volume: this.volume, isMuted: this.isMuted };
     }
 
     setVolume(volume: number): void {
@@ -643,7 +586,12 @@ export class AudioController {
 
     setMuted(muted: boolean): void {
         this.isMuted = muted;
-        this.audio.volume = muted ? 0 : this.volume;
+        // FE14: must use audio.muted on iOS (audio.volume is read-only there)
+        this.audio.muted = muted;
+        // Also set volume for non-iOS devices
+        if (!muted) {
+            this.audio.volume = this.volume;
+        }
     }
 
     initializeVolume(): void {
@@ -668,68 +616,5 @@ export class AudioController {
             console.error("[AudioController] Failed to initialize from storage:", error);
         }
     }
-
-    on(event: AudioControllerEvent, callback: AudioControllerCallback): void {
-        this.eventListeners.get(event)?.add(callback);
-    }
-
-    off(event: AudioControllerEvent, callback: AudioControllerCallback): void {
-        this.eventListeners.get(event)?.delete(callback);
-    }
-
-    private emit(event: AudioControllerEvent, data?: unknown): void {
-        this.eventListeners.get(event)?.forEach((callback) => {
-            try {
-                callback(data);
-            } catch (err) {
-                console.error(`[AudioController] Event listener error (${event}):`, err);
-            }
-        });
-    }
-
-    private cancelNetworkRetry(): void {
-        if (this.networkRetryTimeout) {
-            clearTimeout(this.networkRetryTimeout);
-            this.networkRetryTimeout = null;
-        }
-        this.networkRetryCount = 0;
-        this.stallRecoveryCount = 0;
-        this.retrySeekTime = null;
-        this.pendingSeek = null;
-        this.autoResumeAfterRecovery = false;
-    }
-
-    cleanup(): void {
-        this.cancelNetworkRetry();
-        this.stopWatchdog();
-        this.cancelStallGrace();
-        this.clearReloadFailsafe();
-        this.transitioning = false;
-        this.audio.pause();
-        this.audio.removeAttribute("src");
-        this.audio.load();
-        this.currentSrc = null;
-
-        if (this.prefetchLink) {
-            this.prefetchLink.remove();
-            this.prefetchLink = null;
-        }
-    }
-
-    destroy(): void {
-        this.cleanup();
-        this.detachNativeListeners();
-
-        if (this.audioContext) {
-            if (this.audioContextStateHandler) {
-                this.audioContext.removeEventListener("statechange", this.audioContextStateHandler);
-                this.audioContextStateHandler = null;
-            }
-            this.audioContext.close().catch(() => {});
-            this.audioContext = null;
-            this.mediaSourceNode = null;
-        }
-
-        this.eventListeners.clear();
-    }
 }
+

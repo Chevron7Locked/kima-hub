@@ -49,7 +49,6 @@ export function OverlayPlayer() {
         canSeek,
         downloadProgress,
         audioError,
-        clearAudioError,
     } = useAudioPlayback();
 
     const { duration, displayTime, progress } = usePlaybackProgress();
@@ -294,18 +293,7 @@ export function OverlayPlayer() {
                         </button>
 
                         <button
-                            onClick={
-                                audioError
-                                    ? () => {
-                                        clearAudioError();
-                                        resumeWithGesture();
-                                    }
-                                    : isBuffering
-                                    ? undefined
-                                    : isPlaying
-                                    ? pause
-                                    : resumeWithGesture
-                            }
+                            onClick={isPlaying ? pause : resumeWithGesture}
                             className={cn(
                                 "w-16 h-16 rounded-full flex items-center justify-center hover:scale-105 transition-all shadow-xl",
                                 audioError
@@ -314,7 +302,6 @@ export function OverlayPlayer() {
                                     ? "bg-brand/80 text-black"
                                     : "bg-brand text-black"
                             )}
-                            disabled={isBuffering}
                             title={
                                 audioError
                                     ? "Retry playback"

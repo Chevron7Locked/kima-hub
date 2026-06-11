@@ -170,9 +170,16 @@ export function useTrackPreview<T extends PreviewableTrack>() {
             }
         };
 
-        controller?.on("play", stopPreview);
+        // Stop the preview whenever the main player starts playing.
+        let prevStatus: string | null = null;
+        const unsubscribe = controller?.subscribe((snap) => {
+            if (snap.status === "playing" && prevStatus !== "playing") {
+                stopPreview();
+            }
+            prevStatus = snap.status;
+        });
         return () => {
-            controller?.off("play", stopPreview);
+            unsubscribe?.();
         };
     }, [controller, teardownPreviewAudio]);
 

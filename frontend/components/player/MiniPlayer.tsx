@@ -49,7 +49,6 @@ export function MiniPlayer() {
         canSeek,
         downloadProgress,
         audioError,
-        clearAudioError,
     } = useAudioPlayback();
     const { duration, progress } = usePlaybackProgress();
     const {
@@ -336,15 +335,10 @@ export function MiniPlayer() {
                                     {/* Play/Pause or Retry */}
                                     <button
                                         onClick={() => {
-                                            if (audioError) {
-                                                clearAudioError();
+                                            if (isPlaying) {
+                                                pause();
+                                            } else {
                                                 resumeWithGesture();
-                                            } else if (!isBuffering) {
-                                                if (isPlaying) {
-                                                    pause();
-                                                } else {
-                                                    resumeWithGesture();
-                                                }
                                             }
                                         }}
                                         className={cn(
@@ -558,20 +552,14 @@ export function MiniPlayer() {
 
                         {/* Play/Pause */}
                         <button
-                            onClick={
-                                isBuffering
-                                    ? undefined
-                                    : isPlaying
-                                    ? pause
-                                    : resumeWithGesture
-                            }
-                            disabled={!hasMedia || isBuffering}
+                            onClick={isPlaying ? pause : resumeWithGesture}
+                            disabled={!hasMedia}
                             className={cn(
                                 "w-8 h-8 rounded-full flex items-center justify-center transition",
-                                hasMedia && !isBuffering
-                                    ? "bg-brand text-black hover:scale-105"
-                                    : isBuffering
-                                    ? "bg-brand/80 text-black"
+                                hasMedia
+                                    ? isBuffering
+                                        ? "bg-brand/80 text-black"
+                                        : "bg-brand text-black hover:scale-105"
                                     : "bg-gray-700 text-gray-500 cursor-not-allowed"
                             )}
                             aria-label={isPlaying ? "Pause" : "Play"}

@@ -12,6 +12,7 @@ import {
 } from "react";
 import { useAudioState } from "./audio-state-context";
 import { useAudioController } from "./audio-controller-context";
+import type { EngineSnapshot } from "./audio-engine-policy";
 
 interface AudioPlaybackContextType {
     isPlaying: boolean;
@@ -21,15 +22,14 @@ interface AudioPlaybackContextType {
     canSeek: boolean;
     downloadProgress: number | null;
     audioError: string | null;
-    setIsPlaying: (playing: boolean) => void;
     setCurrentTime: (time: number) => void;
     setCurrentTimeFromEngine: (time: number) => void;
     setDuration: (duration: number) => void;
-    setIsBuffering: (buffering: boolean) => void;
     setCanSeek: (canSeek: boolean) => void;
     setDownloadProgress: (progress: number | null) => void;
-    setAudioError: (error: string | null) => void;
-    clearAudioError: () => void;
+    // No-op stubs retained for backward compat with audio-hooks.tsx shim.
+    // Engine state is authoritative; callers that used to write these can be
+    // deleted as they are encountered -- the engine clears error on play().
 }
 
 const AudioPlaybackContext = createContext<AudioPlaybackContextType | undefined>(undefined);
@@ -45,10 +45,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const [isHydrated] = useState(() => typeof window !== "undefined");
 
     const lastSeekTimeRef = useRef(0);
-
-    const clearAudioError = useCallback(() => {
-        setAudioError(null);
-    }, []);
 
     const setCurrentTimeFromEngine = useCallback((time: number) => {
         if (Date.now() - lastSeekTimeRef.current < 300) return;
@@ -88,18 +84,38 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
 
     const controller = useAudioController();
 
+    // Snapshot subscriber: derive isPlaying/isBuffering/audioError from engine state machine.
     useEffect(() => {
         if (!controller) return;
 
-        const onPlay = () => {
-            setIsPlaying(true);
-            setIsBuffering(false);
-            setAudioError(null);
-        };
+        // subscribe is the Phase C engine contract; cast until audio-controller.ts lands it.
+         
+        const unsubscribe = controller.subscribe((snap: EngineSnapshot) => {
+            const { status } = snap;
 
-        const onPause = () => {
-            setIsPlaying(false);
+            setIsPlaying(status === "playing");
+            setIsBuffering(
+                status === "loading" || status === "buffering" || status === "recovering"
+            );
+
+            if (status === "error") {
+                setAudioError(snap.error?.message ?? "Audio playback error");
+            } else if (status === "blocked") {
+                setAudioError("Tap play to resume");
+            } else {
+                setAudioError(null);
+            }
+        });
+
+        return () => {
+            if (typeof unsubscribe === "function") unsubscribe();
         };
+    }, [controller]);
+
+    // timeupdate and canplay remain event-driven: they carry data (time, duration)
+    // that the snapshot does not replace for the offset-adjusted currentTime path.
+    useEffect(() => {
+        if (!controller) return;
 
         const onTimeUpdate = (data: unknown) => {
             const { time } = data as { time: number };
@@ -109,74 +125,48 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         const onCanPlay = (data: unknown) => {
             const { duration: dur } = data as { duration: number };
             setDuration(dur || 0);
-            setIsBuffering(false);
-            setAudioError(null);
         };
 
-        const onWaiting = () => {
-            setIsBuffering(true);
-        };
-
-        const onError = (data: unknown) => {
-            const { error, code } = data as { error: string; code?: number };
-            setIsPlaying(false);
-            setIsBuffering(false);
-            const errorMessage =
-                code === 2
-                    ? "Playback interrupted -- stream may have been taken by another session"
-                    : typeof error === "string"
-                      ? error
-                      : "Audio playback error";
-            setAudioError(errorMessage);
-        };
-
-        const onNeedsResume = () => {
-            setAudioError("Tap play to resume");
-        };
-
-        controller.on("play", onPlay);
-        controller.on("pause", onPause);
         controller.on("timeupdate", onTimeUpdate);
         controller.on("canplay", onCanPlay);
-        controller.on("waiting", onWaiting);
-        controller.on("error", onError);
-        controller.on("needs-resume", onNeedsResume);
 
         return () => {
-            controller.off("play", onPlay);
-            controller.off("pause", onPause);
             controller.off("timeupdate", onTimeUpdate);
             controller.off("canplay", onCanPlay);
-            controller.off("waiting", onWaiting);
-            controller.off("error", onError);
-            controller.off("needs-resume", onNeedsResume);
         };
     }, [controller, setCurrentTimeFromEngine]);
 
+    // BroadcastChannel single-tab claim. Pause is "system" (another tab took over).
+    // onPlay postMessage fires when status transitions INTO "playing".
     useEffect(() => {
         if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return;
         if (!controller) return;
 
         const tabId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const channel = new BroadcastChannel("kima-audio-playback");
+        let prevStatusForBc: EngineSnapshot["status"] | null = null;
 
         channel.onmessage = (event: MessageEvent) => {
             const msg = event.data;
             if (msg?.type === "playback-claimed" && msg.tabId !== tabId) {
-                controller.pause();
+                 
+                controller.pause("system");
             }
         };
 
-        const onPlay = () => {
-            try {
-                channel.postMessage({ type: "playback-claimed", tabId });
-            } catch {}
-        };
-
-        controller.on("play", onPlay);
+         
+        const unsubscribe = controller.subscribe((snap: EngineSnapshot) => {
+            const { status } = snap;
+            if (status === "playing" && prevStatusForBc !== "playing") {
+                try {
+                    channel.postMessage({ type: "playback-claimed", tabId });
+                } catch {}
+            }
+            prevStatusForBc = status;
+        });
 
         return () => {
-            controller.off("play", onPlay);
+            if (typeof unsubscribe === "function") unsubscribe();
             channel.close();
         };
     }, [controller]);
@@ -190,15 +180,11 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             canSeek,
             downloadProgress,
             audioError,
-            setIsPlaying,
             setCurrentTime: setCurrentTimeWithSeekMark,
             setCurrentTimeFromEngine,
             setDuration,
-            setIsBuffering,
             setCanSeek,
             setDownloadProgress,
-            setAudioError,
-            clearAudioError,
         }),
         [
             isPlaying,
@@ -210,7 +196,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             audioError,
             setCurrentTimeWithSeekMark,
             setCurrentTimeFromEngine,
-            clearAudioError,
         ]
     );
 

@@ -65,7 +65,6 @@ export function FullPlayer() {
         canSeek,
         downloadProgress,
         audioError,
-        clearAudioError,
     } = useAudioPlayback();
 
     const { duration, displayTime, progress } = usePlaybackProgress();
@@ -255,18 +254,7 @@ export function FullPlayer() {
                             </button>
 
                             <button
-                                onClick={
-                                    audioError
-                                        ? () => {
-                                            clearAudioError();
-                                            resumeWithGesture();
-                                        }
-                                        : isBuffering
-                                        ? undefined
-                                        : isPlaying
-                                        ? pause
-                                        : resumeWithGesture
-                                }
+                                onClick={isPlaying ? pause : resumeWithGesture}
                                 className={cn(
                                     "w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 relative group",
                                     audioError
@@ -277,7 +265,7 @@ export function FullPlayer() {
                                         ? "bg-brand/80 text-black"
                                         : "bg-gray-700 text-gray-500 cursor-not-allowed"
                                 )}
-                                disabled={!hasMedia || isBuffering}
+                                disabled={!hasMedia}
                                 aria-label={
                                     audioError
                                         ? "Retry playback"

@@ -42,9 +42,7 @@ export const metadata: Metadata = {
     appleWebApp: {
         // Standalone PWA on iOS so "Add to Home Screen" opens fullscreen and
         // safe-area-inset values activate, freeing the top nav and bottom
-        // player from Safari chrome overlap. Audio session continuity is
-        // handled by the v1.7.13 iOS recovery paths (wasPlaying flag,
-        // swapAndPlay, needs-resume emit) rather than by avoiding standalone.
+        // player from Safari chrome overlap.
         capable: true,
         statusBarStyle: "black-translucent",
         title: "Kima",
