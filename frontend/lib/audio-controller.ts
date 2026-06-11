@@ -30,7 +30,11 @@ export class AudioController {
     private networkRetryCount = 0;
     private readonly MAX_NETWORK_RETRIES = 3;
     private networkRetryTimeout: ReturnType<typeof setTimeout> | null = null;
-    private retrySeekTime: number | null = null;
+    private retrySeekTime: { gen: number; time: number } | null = null;
+
+    private loadGeneration = 0;
+    private pendingSeek: { gen: number; time: number } | null = null;
+    private transitioning = false;
 
     // Stall watchdog state
     private watchdogInterval: ReturnType<typeof setInterval> | null = null;
@@ -199,19 +203,33 @@ export class AudioController {
         });
 
         add("canplay", () => {
+            const gen = this.loadGeneration;
             iosAudioLog("canplay", "audio-controller:listeners", this.audio, {
                 autoResumeAfterRecovery: this.autoResumeAfterRecovery,
                 retrySeekTime: this.retrySeekTime,
+                gen,
             });
-            if (this.retrySeekTime !== null) {
-                const seekTo = this.retrySeekTime;
-                this.retrySeekTime = null;
+            if (this.pendingSeek !== null && this.pendingSeek.gen === gen) {
+                const seekTo = this.pendingSeek.time;
+                this.pendingSeek = null;
                 try {
                     this.audio.currentTime = seekTo;
                 } catch {
                     // Element not ready
                 }
             }
+            if (this.retrySeekTime !== null && this.retrySeekTime.gen === gen) {
+                const seekTo = this.retrySeekTime.time;
+                this.retrySeekTime = null;
+                try {
+                    this.audio.currentTime = seekTo;
+                } catch {
+                    // Element not ready
+                }
+            } else if (this.retrySeekTime !== null) {
+                this.retrySeekTime = null;
+            }
+            this.transitioning = false;
             if (this.autoResumeAfterRecovery) {
                 this.autoResumeAfterRecovery = false;
                 this.play();
@@ -255,6 +273,7 @@ export class AudioController {
                 code: this.audio.error?.code,
                 message: this.audio.error?.message,
             });
+            this.transitioning = false;
             const err = this.audio.error;
 
             if (
@@ -270,7 +289,8 @@ export class AudioController {
                 this.networkRetryTimeout = setTimeout(() => {
                     if (this.currentSrc) {
                         const currentTime = this.audio.currentTime;
-                        this.retrySeekTime = currentTime > 0 ? currentTime : null;
+                        const gen = this.loadGeneration;
+                        this.retrySeekTime = currentTime > 0 ? { gen, time: currentTime } : null;
                         this.autoResumeAfterRecovery = true;
                         this.audio.src = this.currentSrc;
                         this.audio.load();
@@ -355,7 +375,8 @@ export class AudioController {
         }
 
         const currentTime = this.audio.currentTime;
-        this.retrySeekTime = currentTime > 0 ? currentTime : null;
+        const gen = this.loadGeneration;
+        this.retrySeekTime = currentTime > 0 ? { gen, time: currentTime } : null;
         this.autoResumeAfterRecovery = true;
         this.audio.src = this.currentSrc;
         this.audio.load();
@@ -457,7 +478,8 @@ export class AudioController {
         iosAudioLog("reload:entry", "audio-controller:reloadAndPlay", this.audio);
         if (!this.currentSrc) return;
         const currentTime = this.audio.currentTime;
-        this.retrySeekTime = Number.isFinite(currentTime) && currentTime > 0 ? currentTime : null;
+        const gen = this.loadGeneration;
+        this.retrySeekTime = Number.isFinite(currentTime) && currentTime > 0 ? { gen, time: currentTime } : null;
         this.autoResumeAfterRecovery = true;
 
         // Clean up any previous reload's failsafe
@@ -494,6 +516,9 @@ export class AudioController {
         this.cancelNetworkRetry();
         this.stopWatchdog();
         this.cancelStallGrace();
+        this.loadGeneration++;
+        this.pendingSeek = null;
+        this.transitioning = true;
         this.currentSrc = src;
         this.audio.src = src;
         this.audio.play().catch((err) => {
@@ -515,12 +540,23 @@ export class AudioController {
         this.audio.currentTime = 0;
     }
 
-    load(src: string, autoplay: boolean = false): void {
+    load(src: string, opts: { autoplay?: boolean; seekTo?: number } = {}): void {
+        const { autoplay = false, seekTo } = opts;
         iosAudioLog("load:entry", "audio-controller:load", this.audio, {
             autoplay,
+            seekTo,
             sameSrc: this.currentSrc === src,
         });
+
         if (this.currentSrc === src && this.audio.readyState >= 2) {
+            if (autoplay && this.audio.paused) {
+                this.play();
+            }
+            return;
+        }
+
+        // Same src still loading: update autoplay intent only, no restart (FE16).
+        if (this.currentSrc === src && this.transitioning) {
             if (autoplay && this.audio.paused) {
                 this.play();
             }
@@ -530,12 +566,22 @@ export class AudioController {
         this.cancelNetworkRetry();
         this.stopWatchdog();
         this.cancelStallGrace();
+
+        this.loadGeneration++;
+        const gen = this.loadGeneration;
+        this.pendingSeek = seekTo !== undefined ? { gen, time: seekTo } : null;
+        this.transitioning = true;
+
         this.currentSrc = src;
         this.audio.src = src;
 
         if (autoplay) {
             this.play();
         }
+    }
+
+    get isTransitioning(): boolean {
+        return this.transitioning;
     }
 
     seek(time: number): void {
@@ -649,6 +695,7 @@ export class AudioController {
         this.networkRetryCount = 0;
         this.stallRecoveryCount = 0;
         this.retrySeekTime = null;
+        this.pendingSeek = null;
         this.autoResumeAfterRecovery = false;
     }
 
@@ -657,6 +704,7 @@ export class AudioController {
         this.stopWatchdog();
         this.cancelStallGrace();
         this.clearReloadFailsafe();
+        this.transitioning = false;
         this.audio.pause();
         this.audio.removeAttribute("src");
         this.audio.load();

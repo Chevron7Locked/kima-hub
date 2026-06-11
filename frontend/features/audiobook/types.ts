@@ -52,6 +52,7 @@ export interface Audiobook {
     language?: string;
     progress?: AudiobookProgress | null;
     tracks?: AudiobookTrack[];
+    trackCount?: number;
     chapters?: AudiobookChapter[];
     audioFiles?: AudiobookAudioFile[];
 }

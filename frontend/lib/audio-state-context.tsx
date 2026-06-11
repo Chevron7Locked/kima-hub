@@ -80,6 +80,7 @@ export interface Audiobook {
     coverUrl: string | null;
     duration: number;
     tracks?: AudiobookTrack[];
+    trackCount?: number;
     trackIndex?: number;
     trackOffset?: number;
     progress?: {

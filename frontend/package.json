@@ -18,7 +18,8 @@
     "test:predeploy": "playwright test tests/e2e/predeploy --reporter=list",
     "test:predeploy:ui": "playwright test tests/e2e/predeploy --ui",
     "test:predeploy:headed": "playwright test tests/e2e/predeploy --headed",
-    "analyze": "ANALYZE=true next build --webpack"
+    "analyze": "ANALYZE=true next build --webpack",
+    "test:unit": "vitest run"
   },
   "dependencies": {
     "@deck.gl/core": "^9.2.11",
@@ -58,6 +59,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.0.1",
     "tailwindcss": "^4.2.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.8"
   }
 }

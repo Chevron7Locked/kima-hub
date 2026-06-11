@@ -25,6 +25,8 @@ import { api } from "@/lib/api";
 import { useAudioController } from "./audio-controller-context";
 import { dispatchQueryEvent } from "@/lib/query-events";
 import { iosAudioLog } from "./iosAudioLog";
+import { useToast } from "@/lib/toast-context";
+import { BookSession, BookSessionUnavailableError } from "@/lib/book-session";
 
 interface AudioControlsContextType {
     // Track methods
@@ -33,6 +35,7 @@ interface AudioControlsContextType {
 
     // Audiobook methods
     playAudiobook: (audiobook: Audiobook) => void;
+    playAudiobookAt: (audiobook: Audiobook, bookTime: number) => void;
 
     // Podcast methods
     playPodcast: (podcast: Podcast) => void;
@@ -118,6 +121,7 @@ function getNextTrackInfo(
 export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const state = useAudioState();
     const playback = useAudioPlayback();
+    const { toast } = useToast();
 
     const controller = useAudioController();
     const controllerRef = useRef(controller);
@@ -145,7 +149,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const setCurrentTimeRef = useRef(playback.setCurrentTime);
 
     // Refs for ended/canplay/error handlers
-    const pendingStartTimeRef = useRef<number>(0);
     const playbackTypeRef = useRef(state.playbackType);
     const currentTrackRef = useRef(state.currentTrack);
     const currentAudiobookRef = useRef(state.currentAudiobook);
@@ -157,6 +160,21 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const consecutiveErrorCountRef = useRef(0);
     const justFinishedRef = useRef(false);
     const lastSaveTimeRef = useRef(0);
+
+    // Session ref: always consulted by seek, handleEnded, and progress saves.
+    const bookSessionRef = useRef<BookSession | null>(null);
+
+    // Clear the session when the active book changes or playback leaves audiobook mode.
+    const prevBookIdRef = useRef<string | null>(null);
+    useEffect(() => {
+        const currentId = state.playbackType === "audiobook" ? state.currentAudiobook?.id ?? null : null;
+        if (currentId !== prevBookIdRef.current) {
+            if (currentId === null) {
+                bookSessionRef.current = null;
+            }
+            prevBookIdRef.current = currentId;
+        }
+    }, [state.playbackType, state.currentAudiobook?.id]);
 
     // Keep a stable "Up Next" insertion cursor like Spotify:
     // - When the current track changes, reset to "right after current"
@@ -249,7 +267,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setRepeatOneCount(0);
 
             const streamUrl = api.getStreamUrl(track.id);
-            controllerRef.current?.load(streamUrl, true);
+            controllerRef.current?.load(streamUrl, { autoplay: true });
         },
         [state]
     );
@@ -285,14 +303,27 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             );
 
             const streamUrl = api.getStreamUrl(tracks[startIndex].id);
-            controllerRef.current?.load(streamUrl, true);
+            controllerRef.current?.load(streamUrl, { autoplay: true });
         },
         [state, generateShuffleIndices]
     );
 
-    const playAudiobook = useCallback(
-        (audiobook: Audiobook) => {
+    const startAudiobookSession = useCallback(
+        async (audiobook: Audiobook, bookTime: number) => {
             iosAudioLog("playAudiobook", "audio-controls-context");
+            let session: BookSession;
+            try {
+                session = await BookSession.open(audiobook);
+            } catch (err) {
+                if (err instanceof BookSessionUnavailableError || err instanceof Error) {
+                    toast.error("Couldn't load audiobook -- Audiobookshelf is unreachable");
+                }
+                return;
+            }
+
+            bookSessionRef.current = session;
+            const { file, fileTime } = session.locate(bookTime);
+
             state.setPlaybackType("audiobook");
             state.setCurrentTrack(null);
             state.setCurrentPodcast(null);
@@ -300,34 +331,35 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setQueue([]);
             state.setCurrentIndex(0);
             state.setShuffleIndices([]);
+            state.setCurrentAudiobook({
+                ...audiobook,
+                tracks: [...session.files],
+                trackIndex: file.index,
+                trackOffset: file.startOffset,
+            });
+            setCurrentTimeRef.current(bookTime);
 
-            const totalBookStartTime = audiobook.progress?.currentTime ?? 0;
-            const tracks = (audiobook.tracks ?? [])
-                .slice()
-                .sort((a, b) => (a.startOffset ?? 0) - (b.startOffset ?? 0));
-
-            let startTrackIndex = tracks[0]?.index ?? 0;
-            let trackStartOffset = tracks[0]?.startOffset ?? 0;
-            if (tracks.length > 1) {
-                let found = tracks[0];
-                for (let i = tracks.length - 1; i >= 0; i--) {
-                    if ((tracks[i].startOffset ?? 0) <= totalBookStartTime) {
-                        found = tracks[i];
-                        break;
-                    }
-                }
-                startTrackIndex = found.index;
-                trackStartOffset = found.startOffset ?? 0;
-            }
-            const withinTrackStartTime = totalBookStartTime - trackStartOffset;
-
-            state.setCurrentAudiobook({ ...audiobook, trackIndex: startTrackIndex, trackOffset: trackStartOffset });
-            pendingStartTimeRef.current = withinTrackStartTime;
-            setCurrentTimeRef.current(totalBookStartTime);
-
-            controllerRef.current?.load(api.getAudiobookStreamUrl(audiobook.id, startTrackIndex), true);
+            controllerRef.current?.load(
+                api.getAudiobookStreamUrl(session.bookId, file.index),
+                { autoplay: true, seekTo: fileTime }
+            );
         },
-        [state]
+        [state, toast]
+    );
+
+    const playAudiobook = useCallback(
+        (audiobook: Audiobook) => {
+            const resumeAt = audiobook.progress?.currentTime ?? 0;
+            startAudiobookSession(audiobook, resumeAt).catch(() => {});
+        },
+        [startAudiobookSession]
+    );
+
+    const playAudiobookAt = useCallback(
+        (audiobook: Audiobook, bookTime: number) => {
+            startAudiobookSession(audiobook, bookTime).catch(() => {});
+        },
+        [startAudiobookSession]
     );
 
     const playPodcast = useCallback(
@@ -341,21 +373,16 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setShuffleIndices([]);
 
             const startTime = podcast.progress?.currentTime || 0;
-            pendingStartTimeRef.current = startTime;
             setCurrentTimeRef.current(startTime);
 
             const [podcastId, episodeId] = podcast.id.split(":");
             const streamUrl = api.getPodcastEpisodeStreamUrl(podcastId, episodeId);
-            controllerRef.current?.load(streamUrl, true);
+            controllerRef.current?.load(streamUrl, { autoplay: true, seekTo: startTime });
         },
         [state]
     );
 
     const pause = useCallback(() => {
-        // Mark user-initiated pause so foreground recovery knows not to auto-resume.
-        if (typeof window !== "undefined") {
-            try { window.sessionStorage.setItem("kima_was_playing", "0"); } catch { /* ignore */ }
-        }
         controllerRef.current?.pause();
     }, []);
 
@@ -392,7 +419,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         }
     }, [state, playPodcast, pause]);
 
-    const loadRestoredState = useCallback(() => {
+    const loadRestoredState = useCallback(async (): Promise<boolean> => {
         const ctrl = controllerRef.current;
         if (!ctrl || ctrl.getState().currentSrc) return false;
 
@@ -401,32 +428,55 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             return true;
         }
         if (state.playbackType === "audiobook" && state.currentAudiobook) {
-            const totalBookStartTime = state.currentAudiobook.progress?.currentTime ?? 0;
-            const trackIndex = state.currentAudiobook.trackIndex ?? 0;
-            const trackOffset = state.currentAudiobook.trackOffset ?? 0;
-            pendingStartTimeRef.current = totalBookStartTime - trackOffset;
-            playback.setCurrentTime(totalBookStartTime);
-            ctrl.load(api.getAudiobookStreamUrl(state.currentAudiobook.id, trackIndex));
+            const persisted = state.currentAudiobook;
+            let session: BookSession;
+            try {
+                session = await BookSession.open(persisted);
+            } catch {
+                toast.error("Couldn't load audiobook -- Audiobookshelf is unreachable");
+                return false;
+            }
+            bookSessionRef.current = session;
+            const resumeAt = persisted.progress?.currentTime ?? 0;
+            const { file, fileTime } = session.locate(resumeAt);
+            // Persisted trackIndex/trackOffset may be stale relative to the
+            // saved position (progress synced from elsewhere); re-anchor state
+            // to the located file so saves and ended-advance use real offsets.
+            state.setCurrentAudiobook((prev) =>
+                prev ? {
+                    ...prev,
+                    tracks: [...session.files],
+                    trackIndex: file.index,
+                    trackOffset: file.startOffset,
+                } : prev
+            );
+            playback.setCurrentTime(resumeAt);
+            ctrl.load(
+                api.getAudiobookStreamUrl(session.bookId, file.index),
+                { seekTo: fileTime }
+            );
             return true;
         }
         if (state.playbackType === "podcast" && state.currentPodcast) {
             const startTime = state.currentPodcast.progress?.currentTime || 0;
-            pendingStartTimeRef.current = startTime;
             playback.setCurrentTime(startTime);
             const [podcastId, episodeId] = state.currentPodcast.id.split(":");
-            ctrl.load(api.getPodcastEpisodeStreamUrl(podcastId, episodeId));
+            ctrl.load(
+                api.getPodcastEpisodeStreamUrl(podcastId, episodeId),
+                { seekTo: startTime }
+            );
             return true;
         }
         return false;
-    }, [state.playbackType, state.currentTrack, state.currentAudiobook, state.currentPodcast, playback]);
+    }, [state, playback, toast]);
 
-    const resume = useCallback(() => {
-        loadRestoredState();
+    const resume = useCallback(async () => {
+        await loadRestoredState();
         controllerRef.current?.play();
     }, [loadRestoredState]);
 
-    const resumeWithGesture = useCallback(() => {
-        loadRestoredState();
+    const resumeWithGesture = useCallback(async () => {
+        await loadRestoredState();
         controllerRef.current?.play();
     }, [loadRestoredState]);
 
@@ -452,19 +502,15 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             setCurrentTimeRef.current(clampedTime);
 
             if (state.playbackType === "audiobook" && state.currentAudiobook) {
-                const tracks = state.currentAudiobook.tracks;
-                if (tracks && tracks.length > 1) {
-                    let targetTrack = tracks[0];
-                    for (const t of tracks) {
-                        if (t.startOffset <= clampedTime) targetTrack = t;
-                    }
-                    const withinTrackTime = clampedTime - targetTrack.startOffset;
+                const session = bookSessionRef.current;
+                if (session) {
+                    const { file, fileTime } = session.locate(clampedTime);
                     const currentTrackIdx = state.currentAudiobook.trackIndex ?? 0;
 
                     state.setCurrentAudiobook((prev) => prev ? {
                         ...prev,
-                        trackIndex: targetTrack.index,
-                        trackOffset: targetTrack.startOffset,
+                        trackIndex: file.index,
+                        trackOffset: file.startOffset,
                         progress: {
                             currentTime: clampedTime,
                             progress: prev.duration > 0 ? (clampedTime / prev.duration) * 100 : 0,
@@ -473,30 +519,20 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                         },
                     } : prev);
 
-                    if (targetTrack.index !== currentTrackIdx) {
+                    if (file.index !== currentTrackIdx) {
                         const wasPlaying = controllerRef.current?.isPlaying() ?? false;
-                        pendingStartTimeRef.current = withinTrackTime;
-                        controllerRef.current?.load(api.getAudiobookStreamUrl(state.currentAudiobook.id, targetTrack.index), wasPlaying);
+                        controllerRef.current?.load(
+                            api.getAudiobookStreamUrl(state.currentAudiobook.id, file.index),
+                            { autoplay: wasPlaying, seekTo: fileTime }
+                        );
                     } else {
-                        controllerRef.current?.seek(withinTrackTime);
+                        controllerRef.current?.seek(fileTime);
                     }
                 } else {
-                    state.setCurrentAudiobook((prev) => {
-                        if (!prev) return prev;
-                        const duration = prev.duration || 0;
-                        const progressPercent =
-                            duration > 0 ? (clampedTime / duration) * 100 : 0;
-                        return {
-                            ...prev,
-                            progress: {
-                                currentTime: clampedTime,
-                                progress: progressPercent,
-                                isFinished: false,
-                                lastPlayedAt: new Date(),
-                            },
-                        };
-                    });
-                    controllerRef.current?.seek(clampedTime);
+                    // Degraded: no session (open failed or not yet restored).
+                    // Plain element seek within the current file; never touch trackIndex.
+                    const trackOffset = state.currentAudiobook.trackOffset ?? 0;
+                    controllerRef.current?.seek(clampedTime - trackOffset);
                 }
             } else if (
                 state.playbackType === "podcast" &&
@@ -569,7 +605,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         setCurrentTimeRef.current(0);
 
         const streamUrl = api.getStreamUrl(state.queue[nextIndex].id);
-        controllerRef.current?.load(streamUrl, true);
+        controllerRef.current?.load(streamUrl, { autoplay: true });
     }, [state, seek]);
 
     const previous = useCallback(() => {
@@ -610,7 +646,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         setCurrentTimeRef.current(0);
 
         const streamUrl = api.getStreamUrl(state.queue[prevIndex].id);
-        controllerRef.current?.load(streamUrl, true);
+        controllerRef.current?.load(streamUrl, { autoplay: true });
     }, [state, seek]);
 
     const addToQueue = useCallback(
@@ -626,7 +662,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 state.setShuffleIndices([0]);
 
                 const streamUrl = api.getStreamUrl(track.id);
-                controllerRef.current?.load(streamUrl, true);
+                controllerRef.current?.load(streamUrl, { autoplay: true });
                 return;
             }
 
@@ -740,7 +776,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     }
 
                     const streamUrl = api.getStreamUrl(tracks[0].id);
-                    controllerRef.current?.load(streamUrl, true);
+                    controllerRef.current?.load(streamUrl, { autoplay: true });
                 }
                 return;
             }
@@ -1012,6 +1048,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         async (isFinished: boolean = false) => {
             const audiobook = currentAudiobookRef.current;
             if (!audiobook) return;
+            if (controllerRef.current?.isTransitioning) return;
 
             const trackOffset = audiobook.trackOffset ?? 0;
             const withinTrackTime = controllerRef.current?.getCurrentTime() || 0;
@@ -1054,6 +1091,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         async (isFinished: boolean = false) => {
             const podcast = currentPodcastRef.current;
             if (!podcast) return;
+            if (controllerRef.current?.isTransitioning) return;
 
             const currentTime = controllerRef.current?.getCurrentTime() || 0;
             const duration = controllerRef.current?.getDuration() || podcast.duration;
@@ -1106,25 +1144,37 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             iosAudioLog("ended:queue-advance", "audio-controls-context", null, { currentIndex: currentIndexRef.current, queueLength: queueRef.current.length });
             if (playbackTypeRef.current === "audiobook") {
                 const audiobook = currentAudiobookRef.current;
-                const tracks = audiobook?.tracks ?? [];
-                const currentTrackIdx = audiobook?.trackIndex ?? 0;
+                const session = bookSessionRef.current;
 
-                if (tracks.length > 1) {
-                    const pos = tracks.findIndex(t => t.index === currentTrackIdx);
-                    const nextTrack = pos >= 0 && pos < tracks.length - 1 ? tracks[pos + 1] : null;
+                if (session && audiobook) {
+                    const currentTrackIdx = audiobook.trackIndex ?? 0;
+                    const file = session.fileByIndex(currentTrackIdx);
 
-                    if (nextTrack && audiobook) {
-                        state.setCurrentAudiobook(prev =>
-                            prev ? { ...prev, trackIndex: nextTrack.index, trackOffset: nextTrack.startOffset } : prev
-                        );
-                        pendingStartTimeRef.current = 0;
-                        ctrl.load(api.getAudiobookStreamUrl(audiobook.id, nextTrack.index), true);
+                    if (file && !session.isLastFile(file)) {
+                        const nextFileIdx = session.files.indexOf(file) + 1;
+                        const nextFile = session.files[nextFileIdx];
+                        if (nextFile) {
+                            state.setCurrentAudiobook((prev) =>
+                                prev ? { ...prev, trackIndex: nextFile.index, trackOffset: nextFile.startOffset } : prev
+                            );
+                            ctrl.load(
+                                api.getAudiobookStreamUrl(audiobook.id, nextFile.index),
+                                { autoplay: true, seekTo: 0 }
+                            );
+                            return;
+                        }
+                    }
+
+                    if (file && session.isLastFile(file)) {
+                        justFinishedRef.current = true;
+                        saveAudiobookProgressRef.current(true);
+                        ctrl.pause();
                         return;
                     }
                 }
 
-                justFinishedRef.current = true;
-                saveAudiobookProgressRef.current(true);
+                // Session or file unavailable: save progress but never mark finished.
+                saveAudiobookProgressRef.current(false);
                 ctrl.pause();
                 return;
             } else if (playbackTypeRef.current === "podcast") {
@@ -1181,22 +1231,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         return () => ctrl.off("ended", handleEnded);
     }, [controller, state, playback]);
 
-    // -- Canplay handler for pending seek --
+    // -- Canplay handler: duration update only --
     useEffect(() => {
         const ctrl = controllerRef.current;
         if (!ctrl) return;
 
         const handleCanPlay = (data: unknown) => {
             const { duration: dur } = data as { duration: number };
-
-            if (pendingStartTimeRef.current > 0) {
-                const startPos = pendingStartTimeRef.current;
-                pendingStartTimeRef.current = 0;
-                ctrl.seek(startPos);
-                const trackOffset = playbackTypeRef.current === "audiobook"
-                    ? (currentAudiobookRef.current?.trackOffset ?? 0) : 0;
-                playback.setCurrentTime(startPos + trackOffset);
-            }
 
             const audiobookDuration = playbackTypeRef.current === "audiobook"
                 ? (currentAudiobookRef.current?.duration ?? 0) : 0;
@@ -1233,8 +1274,15 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     nextRef.current();
                 }
             } else {
-                if (playbackTypeRef.current === "audiobook") state.setCurrentAudiobook(null);
-                if (playbackTypeRef.current === "podcast") state.setCurrentPodcast(null);
+                // Save progress before clearing state (isTransitioning guard inside save).
+                if (playbackTypeRef.current === "audiobook") {
+                    saveAudiobookProgressRef.current();
+                    state.setCurrentAudiobook(null);
+                }
+                if (playbackTypeRef.current === "podcast") {
+                    savePodcastProgressRef.current();
+                    state.setCurrentPodcast(null);
+                }
                 state.setPlaybackType(null);
             }
         };
@@ -1265,23 +1313,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         return () => ctrl.off("pause", onPause);
     }, [controller]);
 
-    // -- wasPlaying flag (iOS foreground recovery) --
-    // Set to "1" on play, cleared to "0" only by user-initiated pause().
-    // NOT cleared on native pause events so iOS auto-pause does not suppress resume.
-    useEffect(() => {
-        const ctrl = controllerRef.current;
-        if (!ctrl) return;
-
-        const onPlay = () => {
-            if (typeof window !== "undefined") {
-                try { window.sessionStorage.setItem("kima_was_playing", "1"); } catch { /* ignore */ }
-            }
-        };
-
-        ctrl.on("play", onPlay);
-        return () => ctrl.off("play", onPlay);
-    }, [controller]);
-
     // -- Periodic save on a real timer (every 15s while playing) --
     // iOS throttles/suspends the "timeupdate" event when the PWA is backgrounded
     // (screen off), so a timeupdate-driven save misses an entire screen-off
@@ -1298,6 +1329,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             const type = playbackTypeRef.current;
             if (type !== "audiobook" && type !== "podcast") return;
             if (!controllerRef.current?.isPlaying()) return;
+            if (controllerRef.current?.isTransitioning) return;
             if (type === "audiobook") saveAudiobookProgressRef.current();
             else savePodcastProgressRef.current();
         };
@@ -1345,9 +1377,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
         const handleForeground = () => {
             const ctrl = controllerRef.current;
-            const wasPlaying = typeof window !== "undefined" &&
-                window.sessionStorage.getItem("kima_was_playing") === "1";
-            iosAudioLog("vis:foreground", "audio-controls-context", null, { wasPlaying });
+            iosAudioLog("vis:foreground", "audio-controls-context");
             if (!ctrl) return;
 
             ctrl.notifyForeground();
@@ -1356,14 +1386,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 const hasMedia = currentTrackRef.current || currentAudiobookRef.current || currentPodcastRef.current;
                 if (hasMedia) {
                     playback.setAudioError(null);
-
-                    if (ctrl.hasAudio() && wasPlaying) {
-                        ctrl.tryResume().then((resumed) => {
-                            if (!resumed) {
-                                iosAudioLog("foreground:resume-failed", "audio-controls-context", null);
-                            }
-                        });
-                    }
                 }
             }
         };
@@ -1407,26 +1429,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         };
     }, [playback]);
 
-    // -- Preload hint --
-    useEffect(() => {
-        if (state.playbackType !== "track" || !state.currentTrack) return;
-        const ctrl = controllerRef.current;
-        if (!ctrl) return;
-
-        const nextTrack = getNextTrackInfo(
-            state.queue, state.currentIndex, state.isShuffle,
-            state.shuffleIndices, state.repeatMode
-        );
-        if (!nextTrack) return;
-
-        const timer = setTimeout(() => {
-            ctrl.preloadHint(api.getStreamUrl(nextTrack.id));
-        }, 2000);
-
-        return () => clearTimeout(timer);
-    }, [state.playbackType, state.currentTrack, state.queue, state.currentIndex,
-        state.isShuffle, state.shuffleIndices, state.repeatMode]);
-
     // -- Cleanup on unmount --
     useEffect(() => {
         return () => {
@@ -1444,6 +1446,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playTrack,
             playTracks,
             playAudiobook,
+            playAudiobookAt,
             playPodcast,
             nextPodcastEpisode,
             pause,
@@ -1473,6 +1476,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playTrack,
             playTracks,
             playAudiobook,
+            playAudiobookAt,
             playPodcast,
             nextPodcastEpisode,
             pause,

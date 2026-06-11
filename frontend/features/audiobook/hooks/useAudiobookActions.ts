@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { useAudio } from "@/lib/audio-context";
+import { useAudioControls } from "@/lib/audio-controls-context";
 import { useAudioState } from "@/lib/audio-state-context";
 import { useToast } from "@/lib/toast-context";
 import { api } from "@/lib/api";
@@ -23,6 +24,7 @@ export function useAudiobookActions(
     updateCurrentTime,
     seek,
   } = useAudio();
+  const { playAudiobookAt } = useAudioControls();
   const { setCurrentAudiobook, setPlaybackType } = useAudioState();
   const { toast } = useToast();
 
@@ -133,15 +135,14 @@ export function useAudiobookActions(
     (startTime: number) => {
       if (!audiobook) return;
 
-      // If this book is not currently loaded, start playback first
       if (!isThisBookPlaying) {
-        playAudiobook(audiobook);
+        playAudiobookAt(audiobook, startTime);
+        return;
       }
 
-      // Perform an actual player seek so audio jumps to the chapter
       seek(startTime);
     },
-    [audiobook, isThisBookPlaying, playAudiobook, seek]
+    [audiobook, isThisBookPlaying, playAudiobookAt, seek]
   );
 
   return {
