@@ -74,15 +74,15 @@ export default function RootLayout({
                             <QueryProvider>
                                 <DownloadProgressProvider>
                                     <DownloadProvider>
-                                        <ConditionalAudioProvider>
-                                            <ToastProvider>
+                                        <ToastProvider>
+                                            <ConditionalAudioProvider>
                                                 <ActivityPanelSettingsProvider>
                                                     <AuthenticatedLayout>
                                                         {children}
                                                     </AuthenticatedLayout>
                                                 </ActivityPanelSettingsProvider>
-                                            </ToastProvider>
-                                        </ConditionalAudioProvider>
+                                            </ConditionalAudioProvider>
+                                        </ToastProvider>
                                     </DownloadProvider>
                                 </DownloadProgressProvider>
                             </QueryProvider>
