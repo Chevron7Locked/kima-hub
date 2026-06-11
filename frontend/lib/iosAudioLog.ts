@@ -19,20 +19,22 @@ const FLAG_KEY = "kima_ios_debug";
 
 let buffer: IosAudioLogEvent[] = [];
 let enabled: boolean | null = null;
+// Whether the visibility/pagehide flush listeners have been registered.
+// Registered lazily on first log call so disabled users pay zero listener cost.
+let listenersRegistered = false;
 
 function detectEnabled(): boolean {
     if (enabled !== null) return enabled;
     if (typeof window === "undefined") return false;
     try {
         const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
-        const standalone =
-            (navigator as { standalone?: boolean }).standalone === true ||
-            window.matchMedia?.("(display-mode: standalone)").matches === true;
         const flagged = window.localStorage.getItem(FLAG_KEY) === "1";
-        // Auto-capture in the installed iOS PWA -- it has no URL bar to set
-        // ?ios_debug=1, so the ring buffer must be available unconditionally for
-        // the auto-upload below. (Temporary diagnostic aid.)
-        enabled = isIos && (standalone || flagged);
+        // Auto-capture graduated out: the unconditional standalone enable was itself
+        // perturbing the system under observation. The kima_ios_debug localStorage flag
+        // (set via ?ios_debug=1) is the sole enable path. An in-app Settings toggle
+        // ("Capture playback diagnostics") will be added with the support-bundle feature
+        // (docs/plans/2026-06-04-diagnostics-support-bundle.md).
+        enabled = isIos && flagged;
         if (enabled) {
             const stored = window.sessionStorage.getItem(STORAGE_KEY);
             if (stored) {
@@ -44,6 +46,31 @@ function detectEnabled(): boolean {
         enabled = false;
     }
     return enabled;
+}
+
+// Flush the in-memory ring buffer to sessionStorage. Called on visibility hide,
+// pagehide, and immediately before each debounced upload POST.
+//
+// Trade-off (R16, accepted): if iOS kills the PWA without firing visibilitychange
+// or pagehide, the unflushed tail is lost -- one of the crash classes diagnostics
+// exist for. Accepted because the per-event synchronous write was itself a
+// perturbation of the system under observation, and the 3s debounced upload bounds
+// the loss window in practice.
+function flushToStorage(): void {
+    try {
+        window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(buffer));
+    } catch {
+        // sessionStorage full or unavailable -- not fatal
+    }
+}
+
+function registerFlushListeners(): void {
+    if (listenersRegistered || typeof window === "undefined") return;
+    listenersRegistered = true;
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") flushToStorage();
+    });
+    window.addEventListener("pagehide", flushToStorage);
 }
 
 export function applyIosDebugQueryFlag(): void {
@@ -66,6 +93,7 @@ export function iosAudioLog(
     extra?: Record<string, unknown>,
 ): void {
     if (!detectEnabled()) return;
+    registerFlushListeners();
     const evt: IosAudioLogEvent = {
         t: Date.now(),
         name,
@@ -80,23 +108,21 @@ export function iosAudioLog(
     };
     buffer.push(evt);
     if (buffer.length > MAX_EVENTS) buffer = buffer.slice(-MAX_EVENTS);
-    try {
-        window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(buffer));
-    } catch {
-        // sessionStorage full or unavailable -- not fatal
-    }
     scheduleAutoUpload();
 }
 
 // Debounced auto-archive: after a burst of audio events settles, POST the ring
 // buffer to the server so the trace arrives without a manual Upload tap -- the
-// installed iOS PWA can't navigate to /debug/ios-log. Temporary diagnostic aid.
+// installed iOS PWA can't navigate to /debug/ios-log.
 let uploadTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleAutoUpload(): void {
     if (uploadTimer || typeof window === "undefined") return;
     uploadTimer = setTimeout(() => {
         uploadTimer = null;
         try {
+            // Flush to sessionStorage immediately before each upload so the persisted
+            // copy stays in sync with what we send.
+            flushToStorage();
             // The /api/debug/ios-log route is requireAuth (Bearer), so the upload
             // MUST send the token the same way the api client does -- cookies
             // alone 401, and the .catch below would swallow it silently (which is

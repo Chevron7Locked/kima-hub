@@ -79,10 +79,13 @@ export const getApiBaseUrl = () => {
     return "";
 };
 
+type RefreshResult = "refreshed" | "rejected" | "network-error";
+
 class ApiClient {
     private token: string | null = null;
     private tokenInitialized: boolean = false;
-    private refreshPromise: Promise<boolean> | null = null;
+    private refreshPromise: Promise<RefreshResult> | null = null;
+    private ensurePromise: Promise<"fresh" | RefreshResult> | null = null;
 
     constructor() {
         // Try to load token synchronously
@@ -164,7 +167,56 @@ class ApiClient {
      * Deduplicates concurrent refresh calls -- all concurrent 401s share one refresh attempt.
      */
     private async refreshAccessToken(): Promise<boolean> {
-        if (this.refreshPromise) return this.refreshPromise;
+        if (this.refreshPromise) return (await this.refreshPromise) === "refreshed";
+        this.refreshPromise = this._doRefresh();
+        try {
+            return (await this.refreshPromise) === "refreshed";
+        } finally {
+            this.refreshPromise = null;
+        }
+    }
+
+    /**
+     * Ensure the access token is fresh. Returns:
+     *   "fresh"         -- exp > 60 min away, no network call made
+     *   "refreshed"     -- token was refreshed successfully
+     *   "rejected"      -- server rejected the refresh token; tokens cleared
+     *   "network-error" -- fetch failed; tokens left intact (transient outage)
+     *
+     * Deduplicates concurrent calls the same way refreshAccessToken does.
+     */
+    async ensureFreshToken(): Promise<"fresh" | RefreshResult> {
+        if (this.ensurePromise) return this.ensurePromise;
+        this.ensurePromise = this._doEnsureFreshToken();
+        try {
+            return await this.ensurePromise;
+        } finally {
+            this.ensurePromise = null;
+        }
+    }
+
+    private async _doEnsureFreshToken(): Promise<"fresh" | RefreshResult> {
+        const tok = this.getCurrentToken();
+        if (tok) {
+            try {
+                const parts = tok.split(".");
+                if (parts.length === 3) {
+                    const payload = JSON.parse(
+                        atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))
+                    ) as { exp?: number };
+                    if (
+                        typeof payload.exp === "number" &&
+                        payload.exp - Date.now() / 1000 > 3600
+                    ) {
+                        return "fresh";
+                    }
+                }
+            } catch {
+                // Malformed JWT: fall through to refresh.
+            }
+        }
+
+        if (this.refreshPromise) return (await this.refreshPromise);
         this.refreshPromise = this._doRefresh();
         try {
             return await this.refreshPromise;
@@ -173,14 +225,39 @@ class ApiClient {
         }
     }
 
-    private async _doRefresh(): Promise<boolean> {
-        const refreshToken = this.getRefreshToken();
-        if (!refreshToken) {
+    /** Returns the Authorization header value for the current token, or null. */
+    getAuthHeader(): string | null {
+        const tok = this.getCurrentToken();
+        return tok ? `Bearer ${tok}` : null;
+    }
+
+    private tokenExpiresWithin60Min(): boolean {
+        const tok = this.getCurrentToken();
+        if (!tok) return false;
+        try {
+            const parts = tok.split(".");
+            if (parts.length !== 3) return false;
+            const payload = JSON.parse(
+                atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))
+            ) as { exp?: number };
+            return (
+                typeof payload.exp === "number" &&
+                payload.exp - Date.now() / 1000 < 3600
+            );
+        } catch {
             return false;
         }
+    }
 
+    private async _doRefresh(): Promise<"refreshed" | "rejected" | "network-error"> {
+        const refreshToken = this.getRefreshToken();
+        if (!refreshToken) {
+            return "rejected";
+        }
+
+        let response: Response;
         try {
-            const response = await fetch(
+            response = await fetch(
                 `${this.getBaseUrl()}/api/auth/refresh`,
                 {
                     method: "POST",
@@ -189,26 +266,29 @@ class ApiClient {
                     credentials: "include",
                 }
             );
-
-            if (!response.ok) {
-                this.clearToken();
-                return false;
-            }
-
-            const data = await response.json();
-
-            if (data.token) {
-                this.setToken(data.token, data.refreshToken);
-                return true;
-            }
-
-            this.clearToken();
-            return false;
         } catch (error) {
-            console.error("[API] Token refresh failed:", error);
-            this.clearToken();
-            return false;
+            // Network/fetch failure (TypeError, AbortError): keep tokens intact.
+            // Clearing tokens on a transient network failure would log the user
+            // out during a subway ride.
+            console.error("[API] Token refresh network error:", error);
+            return "network-error";
         }
+
+        if (!response.ok) {
+            // Server explicitly rejected the refresh token -- session is invalid.
+            this.clearToken();
+            return "rejected";
+        }
+
+        const data = await response.json();
+
+        if (data.token) {
+            this.setToken(data.token, data.refreshToken);
+            return "refreshed";
+        }
+
+        this.clearToken();
+        return "rejected";
     }
 
     /**
@@ -536,9 +616,8 @@ class ApiClient {
     // Streaming
     getStreamUrl(trackId: string): string {
         const baseUrl = `${this.getBaseUrl()}/api/library/tracks/${trackId}/stream`;
-        // For audio element requests, cookies may not be sent cross-origin in development
-        // Add token as query param for authentication (supported by requireAuthOrToken)
         const token = this.getCurrentToken();
+        if (this.tokenExpiresWithin60Min()) void this.ensureFreshToken();
         if (token) {
             return `${baseUrl}?token=${encodeURIComponent(token)}`;
         }
@@ -1037,6 +1116,7 @@ class ApiClient {
     getAudiobookStreamUrl(id: string, trackIndex = 0): string {
         const baseUrl = `${this.getBaseUrl()}/api/audiobooks/${id}/stream`;
         const token = this.getCurrentToken();
+        if (this.tokenExpiresWithin60Min()) void this.ensureFreshToken();
         const params = new URLSearchParams();
         if (token) params.set("token", token);
         if (trackIndex > 0) params.set("trackIndex", String(trackIndex));
@@ -1094,9 +1174,8 @@ class ApiClient {
 
     getPodcastEpisodeStreamUrl(podcastId: string, episodeId: string): string {
         const baseUrl = `${this.getBaseUrl()}/api/podcasts/${podcastId}/episodes/${episodeId}/stream`;
-        // For audio element requests, cookies may not be sent cross-origin in development
-        // Add token as query param for authentication (supported by requireAuthOrToken)
         const token = this.getCurrentToken();
+        if (this.tokenExpiresWithin60Min()) void this.ensureFreshToken();
         if (token) {
             return `${baseUrl}?token=${encodeURIComponent(token)}`;
         }

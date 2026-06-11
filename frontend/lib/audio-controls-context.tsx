@@ -21,7 +21,7 @@ import {
 } from "./audio-state-context";
 import { OperationConfirmToast } from "@/components/ui/OperationConfirmToast";
 import { useAudioPlayback } from "./audio-playback-context";
-import { api } from "@/lib/api";
+import { api, getApiBaseUrl } from "@/lib/api";
 import { useAudioController } from "./audio-controller-context";
 import { dispatchQueryEvent } from "@/lib/query-events";
 import { iosAudioLog } from "./iosAudioLog";
@@ -160,6 +160,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const consecutiveErrorCountRef = useRef(0);
     const justFinishedRef = useRef(false);
     const lastSaveTimeRef = useRef(0);
+    const errorClassifyingRef = useRef(false);
 
     // Session ref: always consulted by seek, handleEnded, and progress saves.
     const bookSessionRef = useRef<BookSession | null>(null);
@@ -1265,7 +1266,19 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
         // "error" event is terminal by construction (ladder exhausted). Every
         // emission means the engine gave up on this src -- skip or give up uniformly.
-        const handleError = (_data: unknown) => {
+        //
+        // Before tearing down, we classify code-4 errors (src-not-supported) as a
+        // possible 401: the server may have returned a JSON error body to the audio
+        // element instead of audio bytes. A lightweight probe to GET /api/auth/me
+        // (5s bound) disambiguates. On 401 we refresh and reload at the saved
+        // position -- no teardown, no skip. Any other outcome falls through to the
+        // standard teardown below.
+        //
+        // On a hard refresh failure (rejected token), the engine surfaces
+        // "Session expired -- sign in again" and current playback ends naturally.
+        // No mid-session provider unmount; the normal auth flow takes over at the
+        // next navigation/mount.
+        const doTeardown = () => {
             if (playbackTypeRef.current === "track") {
                 consecutiveErrorCountRef.current++;
                 if (consecutiveErrorCountRef.current >= 3 || queueRef.current.length <= 1) {
@@ -1275,7 +1288,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     nextRef.current();
                 }
             } else {
-                // Save progress before clearing state (isTransitioning guard inside save).
                 if (playbackTypeRef.current === "audiobook") {
                     saveAudiobookProgressRef.current();
                     state.setCurrentAudiobook(null);
@@ -1288,12 +1300,91 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             }
         };
 
+        const handleError = (data: unknown) => {
+            // Guard: if a classification is already in-flight, ignore duplicate events.
+            if (errorClassifyingRef.current) return;
+
+            const errCode = (data as { code?: number } | null)?.code;
+            if (errCode !== 4) {
+                doTeardown();
+                return;
+            }
+
+            errorClassifyingRef.current = true;
+            void (async () => {
+                try {
+                    const authHeader = api.getAuthHeader();
+                    const probeUrl = `${getApiBaseUrl()}/api/auth/me`;
+                    const ac = new AbortController();
+                    const timer = setTimeout(() => ac.abort(), 5000);
+                    let probeStatus = 0;
+                    try {
+                        const res = await fetch(probeUrl, {
+                            headers: authHeader ? { Authorization: authHeader } : {},
+                            signal: ac.signal,
+                        });
+                        probeStatus = res.status;
+                    } catch {
+                        // Probe failed (network/timeout): treat as non-401.
+                    } finally {
+                        clearTimeout(timer);
+                    }
+
+                    if (probeStatus !== 401) {
+                        doTeardown();
+                        return;
+                    }
+
+                    const result = await api.ensureFreshToken();
+
+                    if (result === "refreshed") {
+                        const ctrl2 = controllerRef.current;
+                        if (!ctrl2) { doTeardown(); return; }
+
+                        const position = ctrl2.getSnapshot().currentTime;
+                        const type = playbackTypeRef.current;
+
+                        if (type === "track") {
+                            const track = currentTrackRef.current;
+                            if (!track) { doTeardown(); return; }
+                            ctrl2.load(api.getStreamUrl(track.id), { autoplay: true, seekTo: position });
+                        } else if (type === "audiobook") {
+                            const book = currentAudiobookRef.current;
+                            if (!book) { doTeardown(); return; }
+                            ctrl2.load(
+                                api.getAudiobookStreamUrl(book.id, book.trackIndex ?? 0),
+                                { autoplay: true, seekTo: position }
+                            );
+                        } else if (type === "podcast") {
+                            const pod = currentPodcastRef.current;
+                            if (!pod) { doTeardown(); return; }
+                            const [podcastId, episodeId] = pod.id.split(":");
+                            ctrl2.load(
+                                api.getPodcastEpisodeStreamUrl(podcastId, episodeId),
+                                { autoplay: true, seekTo: position }
+                            );
+                        } else {
+                            doTeardown();
+                        }
+                        return;
+                    }
+
+                    if (result === "rejected") {
+                        toast.error("Session expired -- sign in again");
+                    }
+                    doTeardown();
+                } finally {
+                    errorClassifyingRef.current = false;
+                }
+            })();
+        };
+
         ctrl.on("error", handleError);
         return () => {
             if (typeof unsubscribePlayReset === "function") unsubscribePlayReset();
             ctrl.off("error", handleError);
         };
-    }, [controller, state]);
+    }, [controller, state, toast]);
 
     // -- Periodic save on a real timer (every 15s while playing) --
     // iOS throttles/suspends the "timeupdate" event when the PWA is backgrounded
