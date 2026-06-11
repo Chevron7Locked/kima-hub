@@ -357,10 +357,16 @@ async function main() {
     // Check for admin password reset
     await checkPasswordReset();
 
-    app.listen(config.port, "0.0.0.0", async () => {
+    const server = app.listen(config.port, "0.0.0.0", async () => {
     logger.debug(
         `Kima API running on port ${config.port} (accessible on all network interfaces)`
     );
+    // Reap dead/half-open peers so long-lived audio streams cannot accumulate
+    // forever. 5 minutes of full socket silence is far beyond any live client's
+    // backpressure pause for audio.
+    server.keepAliveTimeout = 65_000;  // > common LB idle of 60s
+    server.headersTimeout = 70_000;    // must exceed keepAliveTimeout
+    server.timeout = config.serverSocketTimeoutMs;
 
     // Enable slow query monitoring in development
     if (config.nodeEnv === "development") {

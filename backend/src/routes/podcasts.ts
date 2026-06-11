@@ -1040,22 +1040,42 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                 if (range) {
                     const parsed = parseRangeHeader(range, fileSize);
 
-                    let start: number;
-                    let end: number;
-
                     if (!parsed.ok) {
-                        // Clamp to 1MB window near EOF instead of 416 (prevents client stalls during seeking)
-                        const clampWindowBytes = 1024 * 1024;
-                        start = Math.max(0, fileSize - clampWindowBytes);
-                        end = fileSize - 1;
-                        logger.debug(
-                            `    Invalid range, clamping to last ${fileSize - start} bytes`
-                        );
-                    } else {
-                        start = parsed.start;
-                        end = parsed.end;
+                        if (parsed.reason === "multi") {
+                            // RFC 9110: ignore multi-range, serve full file as 200
+                            logger.debug(`    Multi-range ignored, serving full file`);
+                            res.writeHead(200, {
+                                "Content-Type": episode.mimeType || "audio/mpeg",
+                                "Content-Length": fileSize,
+                                "Accept-Ranges": "bytes",
+                                "Cache-Control": "public, max-age=3600",
+                                "Access-Control-Allow-Origin":
+                                    req.headers.origin || "*",
+                                "Access-Control-Allow-Credentials": "true",
+                            });
+                            const fullStream = fs.createReadStream(cachedPath);
+                            res.on("close", () => {
+                                if (!fullStream.destroyed) fullStream.destroy();
+                            });
+                            fullStream.pipe(res);
+                            fullStream.on("error", (err) => {
+                                logger.error("    Cache stream error:", err);
+                                if (!res.headersSent) {
+                                    res.status(500).json({ error: "Failed to stream episode" });
+                                } else {
+                                    res.end();
+                                }
+                            });
+                        } else {
+                            res.status(416).set({
+                                "Content-Range": `bytes */${fileSize}`,
+                            });
+                            res.end();
+                        }
+                        return;
                     }
 
+                    const { start, end } = parsed;
                     const chunkSize = end - start + 1;
 
                     logger.debug(
@@ -1174,12 +1194,15 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
         if (range && fileSize) {
             const parsed = parseRangeHeader(range, fileSize);
             if (!parsed.ok) {
-                res.status(416).set({
-                    "Content-Range": `bytes */${fileSize}`,
-                });
-                res.end();
-                return;
-            }
+                if (parsed.reason !== "multi") {
+                    res.status(416).set({
+                        "Content-Range": `bytes */${fileSize}`,
+                    });
+                    res.end();
+                    return;
+                }
+                // multi-range: fall through to full-file stream below
+            } else {
             const { start, end } = parsed;
             const chunkSize = end - start + 1;
 
@@ -1308,7 +1331,9 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                 response.data.pipe(res);
                 return;
             }
-        } else {
+            } // end parsed.ok range branch
+        }
+        {
             // No range request - stream entire file
             logger.debug(`    Streaming full file`);
 

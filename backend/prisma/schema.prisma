@@ -84,6 +84,7 @@ model Audiobook {
   seriesSequence String?
   duration       Float?
   numTracks      Int?
+  tracksJson     Json?
   numChapters    Int?
   size           BigInt?
   isbn           String?
@@ -675,7 +676,8 @@ model TranscodedFile {
   trackId        String
   quality        String
   cachePath      String   @unique
-  cacheSize      Int
+  cacheSize      BigInt
+  sourceSize     BigInt   @default(0)
   sourceModified DateTime
   lastAccessed   DateTime @default(now())
   createdAt      DateTime @default(now())

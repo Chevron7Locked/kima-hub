@@ -269,6 +269,8 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
                       }
                     : null,
                 genres: book.genres || [],
+                ...(book.tracksJson != null && { tracks: book.tracksJson }),
+                ...(book.numTracks != null && { trackCount: book.numTracks }),
                 progress: progress
                     ? {
                           currentTime: progress.currentTime,
@@ -358,6 +360,8 @@ router.get(
                           }
                         : null,
                     genres: book.genres || [],
+                    ...(book.tracksJson != null && { tracks: book.tracksJson }),
+                    ...(book.numTracks != null && { trackCount: book.numTracks }),
                     progress: progress
                         ? {
                               currentTime: progress.currentTime,
@@ -516,17 +520,19 @@ router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
             return res.status(404).json({ error: "Audiobook not found" });
         }
 
-        // Get chapters and audio files from API (these change less frequently)
-        let absBook;
+        // Get chapters and audio files from ABS (these change less frequently).
+        // Track whether the live fetch succeeded so we can distinguish
+        // "ABS unreachable" from "book has no tracks".
+        let absBook: any = null;
+        let absReachable = false;
         try {
             absBook = await audiobookshelfService.getAudiobook(id);
+            absReachable = true;
         } catch (apiError: any) {
             logger.warn(
                 `  Failed to fetch live data from Audiobookshelf for ${id}, using cached data only:`,
                 apiError.message
             );
-            // Continue with cached data only if API call fails
-            absBook = { media: { chapters: [], audioFiles: [] } };
         }
 
         // Get user's progress
@@ -539,7 +545,43 @@ router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
             },
         });
 
-        const response = {
+        // Resolve tracks: prefer live ABS data; fall back to DB cache.
+        const liveTracks: { index: number; startOffset: number; duration: number }[] | null =
+            absReachable && absBook?.media?.tracks?.length > 0
+                ? (absBook.media.tracks as any[])
+                      .slice()
+                      .sort((a: any, b: any) => (a.startOffset ?? 0) - (b.startOffset ?? 0))
+                      .map((t: any) => ({
+                          index: t.index,
+                          startOffset: t.startOffset ?? 0,
+                          duration: t.duration ?? 0,
+                      }))
+                : null;
+
+        const dbTracks = audiobook.tracksJson as
+            | { index: number; startOffset: number; duration: number }[]
+            | null;
+
+        const resolvedTracks = liveTracks ?? dbTracks;
+        const tracksUnavailable = !absReachable && resolvedTracks === null;
+
+        // Lazy fill: if ABS returned tracks and the DB row doesn't have them yet,
+        // upsert in the background so future list/series responses include them.
+        if (liveTracks !== null && dbTracks === null) {
+            prisma.audiobook
+                .update({
+                    where: { id },
+                    data: {
+                        tracksJson: liveTracks,
+                        ...(audiobook.numTracks == null && { numTracks: liveTracks.length }),
+                    },
+                })
+                .catch((err: any) =>
+                    logger.warn(`[AUDIOBOOK] Lazy tracksJson fill failed for ${id}:`, err.message)
+                );
+        }
+
+        const response: Record<string, any> = {
             id: audiobook.id,
             title: audiobook.title,
             author: audiobook.author || "Unknown Author",
@@ -550,19 +592,14 @@ router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
                     ? `/audiobooks/${audiobook.id}/cover`
                     : null,
             duration: audiobook.duration || 0,
-            chapters: (absBook.media?.chapters || [])
-                .slice()
-                .sort((a: any, b: any) => (a.start ?? 0) - (b.start ?? 0)),
-            audioFiles: absBook.media?.audioFiles || [],
-            tracks: (absBook.media?.tracks ?? [])
-                .slice()
-                .sort((a: any, b: any) => (a.startOffset ?? 0) - (b.startOffset ?? 0))
-                .map((t: any) => ({
-                    index: t.index,
-                    startOffset: t.startOffset ?? 0,
-                    duration: t.duration ?? 0,
-                })),
+            chapters: absReachable
+                ? (absBook.media?.chapters || [])
+                      .slice()
+                      .sort((a: any, b: any) => (a.start ?? 0) - (b.start ?? 0))
+                : [],
+            audioFiles: absReachable ? absBook.media?.audioFiles || [] : [],
             libraryId: audiobook.libraryId,
+            ...(audiobook.numTracks != null && { trackCount: audiobook.numTracks }),
             progress: progress
                 ? {
                       currentTime: progress.currentTime,
@@ -575,6 +612,12 @@ router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
                   }
                 : null,
         };
+
+        if (tracksUnavailable) {
+            response["tracksUnavailable"] = true;
+        } else {
+            response["tracks"] = resolvedTracks ?? [];
+        }
 
         res.json(response);
     } catch (error) {
@@ -603,11 +646,15 @@ router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
         }
 
         const { id } = req.params;
-        const trackIndex = Math.max(0, parseInt(req.query.trackIndex as string) || 0);
+        const rawTrackIndex = req.query.trackIndex as string | undefined;
+        const trackIndex =
+            rawTrackIndex !== undefined && rawTrackIndex !== ""
+                ? parseInt(rawTrackIndex, 10) || 1
+                : undefined;
         const rangeHeader = req.headers.range as string | undefined;
 
         logger.debug(
-            `[Audiobook Stream] Fetching stream for ${id}, track: ${trackIndex}, range: ${
+            `[Audiobook Stream] Fetching stream for ${id}, track: ${trackIndex ?? "first"}, range: ${
                 rangeHeader || "none"
             }`
         );

@@ -94,4 +94,12 @@ export const config = {
     allowedOrigins:
         process.env.ALLOWED_ORIGINS?.split(",").map((o) => o.trim()) ||
         (process.env.NODE_ENV === "development" ? true : []),
+
+    // Socket inactivity timeout for active requests. 5 minutes bounds dead
+    // peers without cutting live audio streams -- clients transparently re-range
+    // on resume. Injectable via env so tests can use a small value.
+    serverSocketTimeoutMs: parseInt(
+        process.env.SERVER_SOCKET_TIMEOUT_MS || "300000",
+        10
+    ),
 };

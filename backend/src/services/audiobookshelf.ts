@@ -1,7 +1,22 @@
 import axios, { AxiosInstance } from "axios";
+import pLimit from "p-limit";
 import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
+
+const TRACK_CACHE_TTL_MS = 5 * 60 * 1000;
+
+interface TrackEntry {
+    index: number;
+    startOffset: number;
+    duration: number;
+    contentUrl: string;
+}
+
+interface TrackCacheEntry {
+    tracks: TrackEntry[];
+    fetchedAt: number;
+}
 
 /**
  * Audiobookshelf API Service
@@ -14,6 +29,7 @@ class AudiobookshelfService {
     private initialized = false;
     private podcastCache: { items: any[]; expiresAt: number } | null = null;
     private readonly PODCAST_CACHE_TTL_MS = 5 * 60 * 1000;
+    private trackCache = new Map<string, TrackCacheEntry>();
 
     private async ensureInitialized() {
         if (this.initialized && this.client) return;
@@ -80,6 +96,7 @@ class AudiobookshelfService {
         this.client = null;
         this.baseUrl = null;
         this.apiKey = null;
+        this.trackCache.clear();
     }
 
     /**
@@ -262,35 +279,65 @@ class AudiobookshelfService {
     }
 
     /**
-     * Stream an audiobook with authentication
-     * Returns a readable stream that can be piped to the response
+     * Stream an audiobook with authentication.
+     * Returns a readable stream that can be piped to the response.
+     *
+     * Tracks are resolved from a 5-minute in-process cache to avoid paying an
+     * ABS round-trip on every seek/range request.
      */
-    async streamAudiobook(audiobookId: string, rangeHeader?: string, trackIndex = 0) {
+    async streamAudiobook(
+        audiobookId: string,
+        rangeHeader?: string,
+        trackIndex?: number,
+    ) {
         await this.ensureInitialized();
 
-        const audiobook = await this.getAudiobook(audiobookId);
-        const tracks = (audiobook.media?.tracks ?? []).slice().sort(
-            (a: any, b: any) => (a.startOffset ?? 0) - (b.startOffset ?? 0),
-        );
-        const track =
-            tracks.find((t: any) => t.index === trackIndex) ??
-            tracks[0];
-        if (trackIndex !== 0 && !tracks.find((t: any) => t.index === trackIndex)) {
-            logger.warn(`[ABS] streamAudiobook: trackIndex=${trackIndex} not found, falling back to first track`);
+        const cached = this.trackCache.get(audiobookId);
+        let tracks: TrackEntry[];
+        if (cached && Date.now() - cached.fetchedAt < TRACK_CACHE_TTL_MS) {
+            tracks = cached.tracks;
+        } else {
+            const audiobook = await this.getAudiobook(audiobookId);
+            tracks = ((audiobook.media?.tracks ?? []) as any[])
+                .slice()
+                .sort((a, b) => (a.startOffset ?? 0) - (b.startOffset ?? 0))
+                .map((t) => ({
+                    index: t.index as number,
+                    startOffset: (t.startOffset ?? 0) as number,
+                    duration: (t.duration ?? 0) as number,
+                    contentUrl: t.contentUrl as string,
+                }));
+            this.trackCache.set(audiobookId, { tracks, fetchedAt: Date.now() });
         }
+
+        let track: TrackEntry | undefined;
+        if (trackIndex === undefined || trackIndex === null) {
+            track = tracks[0];
+        } else {
+            track = tracks.find((t) => t.index === trackIndex);
+            if (!track) {
+                logger.warn(
+                    `[ABS] streamAudiobook: trackIndex=${trackIndex} not found, falling back to first track`,
+                );
+                track = tracks[0];
+            }
+        }
+
         if (!track?.contentUrl) {
             throw new Error("No audio track found for this audiobook");
         }
 
-        const headers: Record<string, string> = {};
+        const reqHeaders: Record<string, string> = {};
         if (rangeHeader) {
-            headers["Range"] = rangeHeader;
+            reqHeaders["Range"] = rangeHeader;
         }
 
         const response = await this.client!.get(track.contentUrl, {
             responseType: "stream",
-            timeout: 0, // No timeout for streaming
-            headers,
+            // Bounds time-to-response-headers; body stalls are handled by the
+            // server socket timeout and client recovery.
+            timeout: 15_000,
+            headers: reqHeaders,
             // Accept 206 Partial Content, and let 416 Range Not Satisfiable pass
             // through as-is instead of throwing (axios would otherwise surface a
             // valid 416 -- e.g. a seek past a file whose metadata size is wrong --
@@ -307,42 +354,6 @@ class AudiobookshelfService {
     }
 
     /**
-     * Stream a podcast episode with authentication
-     * For podcasts, we need to get a specific episode ID
-     */
-    async streamPodcastEpisode(podcastId: string, episodeId: string) {
-        await this.ensureInitialized();
-
-        // Get the podcast to find the episode
-        const podcast = await this.getPodcast(podcastId);
-        const episode = podcast.media?.episodes?.find(
-            (ep: any) => ep.id === episodeId
-        );
-
-        if (!episode) {
-            throw new Error("Episode not found");
-        }
-
-        // Podcast episodes use audioTrack.contentUrl, not audioFile.contentUrl
-        const contentUrl =
-            episode.audioTrack?.contentUrl || episode.audioFile?.contentUrl;
-
-        if (!contentUrl) {
-            throw new Error("No audio file found for this episode");
-        }
-
-        const response = await this.client!.get(contentUrl, {
-            responseType: "stream",
-            timeout: 0,
-        });
-
-        return {
-            stream: response.data,
-            headers: response.headers,
-        };
-    }
-
-    /**
      * Search audiobooks
      */
     async searchAudiobooks(query: string) {
@@ -354,45 +365,100 @@ class AudiobookshelfService {
     }
 
     /**
-     * Sync audiobooks from Audiobookshelf to local database cache
-     * This populates the Audiobook table for full-text search
+     * Sync audiobooks from Audiobookshelf to local database cache.
+     * This populates the Audiobook table for full-text search.
+     *
+     * For items whose tracksJson is NULL or whose numTracks changed, fetches
+     * the expanded item (GET /api/items/:id?expanded=1) with bounded concurrency
+     * (limit 4) to persist the track map. Only changed/missing rows pay the
+     * extra fetch.
      */
     async syncAudiobooksToCache() {
         await this.ensureInitialized();
+        // Invalidate the stream track cache so seeks pick up fresh data.
+        this.trackCache.clear();
         logger.debug("[AUDIOBOOKSHELF] Starting audiobook sync to cache...");
 
         try {
-            // Fetch all audiobooks from Audiobookshelf API
             const audiobooks = await this.getAllAudiobooks();
             logger.debug(
                 `[AUDIOBOOKSHELF] Found ${audiobooks.length} audiobooks to sync`
             );
 
-            // Map and upsert each audiobook to database
+            // Load existing rows so we can decide which need an expanded fetch.
+            const existingRows = await prisma.audiobook.findMany({
+                select: { id: true, numTracks: true, tracksJson: true },
+            });
+            const existingMap = new Map(existingRows.map((r) => [r.id, r]));
+
+            // Mis-cataloged-library guard: no real audiobook has 1000+ audio
+            // files. These ingest as multi-thousand-hour / tens-of-GB monsters
+            // that break seeking and the player. (Duration is NOT a safe
+            // signal -- legitimate omnibus editions run 50-65h.)
+            const miscatalogedTrackCount = (item: any): number | null => {
+                const trackCount = item.media?.tracks?.length ?? item.media?.numTracks ?? 0;
+                return trackCount > 1000 ? trackCount : null;
+            };
+
+            // Prefetch expanded track maps with real concurrency (4 in flight)
+            // BEFORE the sequential upsert loop -- awaiting inside the loop
+            // would serialize the fetches one book at a time.
+            const limit = pLimit(4);
+            const expandedTracks = new Map<
+                string,
+                { index: number; startOffset: number; duration: number }[]
+            >();
+            const needsExpanded = audiobooks.filter((item) => {
+                if (miscatalogedTrackCount(item) !== null) return false;
+                const existing = existingMap.get(item.id);
+                return (
+                    !existing ||
+                    existing.tracksJson === null ||
+                    existing.numTracks !== (item.media?.numTracks ?? null)
+                );
+            });
+            await Promise.all(
+                needsExpanded.map((item) =>
+                    limit(async () => {
+                        try {
+                            const expanded = await this.getAudiobook(item.id);
+                            const rawTracks: any[] = expanded.media?.tracks ?? [];
+                            expandedTracks.set(
+                                item.id,
+                                rawTracks.map((t) => ({
+                                    index: t.index as number,
+                                    startOffset: (t.startOffset ?? 0) as number,
+                                    duration: (t.duration ?? 0) as number,
+                                }))
+                            );
+                        } catch (err: any) {
+                            logger.warn(
+                                `[AUDIOBOOKSHELF] Could not fetch expanded tracks for ${item.id}: ${err.message}`
+                            );
+                        }
+                    })
+                )
+            );
+
             let syncedCount = 0;
             let skippedCount = 0;
+
             for (const item of audiobooks) {
                 try {
-                    // Skip records that are clearly a mis-cataloged library rather
-                    // than a single book: no real audiobook has 1000+ audio files.
-                    // These ingest as multi-thousand-hour / tens-of-GB monsters that
-                    // break seeking and the player. (Duration is NOT a safe signal --
-                    // legitimate omnibus editions run 50-65h.)
-                    const trackCount = item.media?.tracks?.length ?? item.media?.numTracks ?? 0;
-                    if (trackCount > 1000) {
+                    const skippedTrackCount = miscatalogedTrackCount(item);
+                    if (skippedTrackCount !== null) {
                         logger.warn(
-                            `[AUDIOBOOKSHELF] Skipping "${item.media?.metadata?.title || item.id}": ${trackCount} tracks -- looks like a mis-cataloged library, not a single audiobook`
+                            `[AUDIOBOOKSHELF] Skipping "${item.media?.metadata?.title || item.id}": ${skippedTrackCount} tracks -- looks like a mis-cataloged library, not a single audiobook`
                         );
                         skippedCount++;
                         continue;
                     }
 
                     const metadata = item.media?.metadata || {};
-                    
-                    // Extract series information (check both possible formats)
+
                     let series: string | null = null;
                     let seriesSequence: string | null = null;
-                    
+
                     if (metadata.series && Array.isArray(metadata.series) && metadata.series.length > 0) {
                         series = metadata.series[0].name || null;
                         seriesSequence = metadata.series[0].sequence || null;
@@ -401,66 +467,42 @@ class AudiobookshelfService {
                         seriesSequence = metadata.seriesSequence || null;
                     }
 
+                    const incomingNumTracks: number | null = item.media?.numTracks ?? null;
+                    const tracksJson = expandedTracks.get(item.id);
+
+                    const sharedData = {
+                        title: metadata.title || "Untitled",
+                        author: metadata.authorName || metadata.author || null,
+                        narrator: metadata.narratorName || metadata.narrator || null,
+                        description: metadata.description || null,
+                        publishedYear: metadata.publishedYear
+                            ? parseInt(metadata.publishedYear, 10)
+                            : null,
+                        publisher: metadata.publisher || null,
+                        series,
+                        seriesSequence,
+                        duration: item.media?.duration || null,
+                        numTracks: incomingNumTracks,
+                        numChapters: item.media?.numChapters || null,
+                        size: item.media?.size ? BigInt(item.media.size) : null,
+                        isbn: metadata.isbn || null,
+                        asin: metadata.asin || null,
+                        language: metadata.language || null,
+                        genres: metadata.genres || [],
+                        tags: item.media?.tags || [],
+                        coverUrl: metadata.coverPath
+                            ? `${this.baseUrl}${metadata.coverPath}`
+                            : null,
+                        audioUrl: `${this.baseUrl}/api/items/${item.id}/play`,
+                        libraryId: item.libraryId || null,
+                        lastSyncedAt: new Date(),
+                        ...(tracksJson !== undefined && { tracksJson }),
+                    };
+
                     await prisma.audiobook.upsert({
                         where: { id: item.id },
-                        update: {
-                            title: metadata.title || "Untitled",
-                            author: metadata.authorName || metadata.author || null,
-                            narrator: metadata.narratorName || metadata.narrator || null,
-                            description: metadata.description || null,
-                            publishedYear: metadata.publishedYear
-                                ? parseInt(metadata.publishedYear, 10)
-                                : null,
-                            publisher: metadata.publisher || null,
-                            series,
-                            seriesSequence,
-                            duration: item.media?.duration || null,
-                            numTracks: item.media?.numTracks || null,
-                            numChapters: item.media?.numChapters || null,
-                            size: item.media?.size
-                                ? BigInt(item.media.size)
-                                : null,
-                            isbn: metadata.isbn || null,
-                            asin: metadata.asin || null,
-                            language: metadata.language || null,
-                            genres: metadata.genres || [],
-                            tags: item.media?.tags || [],
-                            coverUrl: metadata.coverPath
-                                ? `${this.baseUrl}${metadata.coverPath}`
-                                : null,
-                            audioUrl: `${this.baseUrl}/api/items/${item.id}/play`,
-                            libraryId: item.libraryId || null,
-                            lastSyncedAt: new Date(),
-                        },
-                        create: {
-                            id: item.id,
-                            title: metadata.title || "Untitled",
-                            author: metadata.authorName || metadata.author || null,
-                            narrator: metadata.narratorName || metadata.narrator || null,
-                            description: metadata.description || null,
-                            publishedYear: metadata.publishedYear
-                                ? parseInt(metadata.publishedYear, 10)
-                                : null,
-                            publisher: metadata.publisher || null,
-                            series,
-                            seriesSequence,
-                            duration: item.media?.duration || null,
-                            numTracks: item.media?.numTracks || null,
-                            numChapters: item.media?.numChapters || null,
-                            size: item.media?.size
-                                ? BigInt(item.media.size)
-                                : null,
-                            isbn: metadata.isbn || null,
-                            asin: metadata.asin || null,
-                            language: metadata.language || null,
-                            genres: metadata.genres || [],
-                            tags: item.media?.tags || [],
-                            coverUrl: metadata.coverPath
-                                ? `${this.baseUrl}${metadata.coverPath}`
-                                : null,
-                            audioUrl: `${this.baseUrl}/api/items/${item.id}/play`,
-                            libraryId: item.libraryId || null,
-                        },
+                        update: sharedData,
+                        create: { id: item.id, ...sharedData },
                     });
                     syncedCount++;
                 } catch (error) {

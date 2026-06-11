@@ -31,7 +31,6 @@ async function streamTrackById(
     }
 
     const streamingService = getAudioStreamingService(
-        config.music.musicPath,
         config.music.transcodeCachePath,
         config.music.transcodeCacheMaxGb,
     );
@@ -212,7 +211,6 @@ playbackRouter.all("/download.view", wrap(async (req, res) => {
     }
 
     const streamingService = getAudioStreamingService(
-        config.music.musicPath,
         config.music.transcodeCachePath,
         config.music.transcodeCacheMaxGb,
     );

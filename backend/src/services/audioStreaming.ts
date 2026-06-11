@@ -25,6 +25,9 @@ export const QUALITY_SETTINGS = {
 
 export type Quality = keyof typeof QUALITY_SETTINGS;
 
+// 120s hard kill -- must be shorter than the 240s queue-wait cap (1.3)
+const TRANSCODE_TIMEOUT_MS = 120_000;
+
 interface StreamFileInfo {
     filePath: string;
     mimeType: string;
@@ -32,18 +35,15 @@ interface StreamFileInfo {
 
 export class AudioStreamingService {
     private transcodeQueue = new PQueue({ concurrency: 3 });
-    private musicPath: string;
     private transcodeCachePath: string;
     private transcodeCacheMaxGb: number;
     private evictionInterval: NodeJS.Timeout | null = null;
     private inFlightTranscodes = new Map<string, Promise<string>>();
 
     constructor(
-        musicPath: string,
         transcodeCachePath: string,
         transcodeCacheMaxGb: number
     ) {
-        this.musicPath = musicPath;
         this.transcodeCachePath = transcodeCachePath;
         this.transcodeCacheMaxGb = transcodeCacheMaxGb;
 
@@ -70,7 +70,7 @@ export class AudioStreamingService {
         sourceAbsolutePath: string
     ): Promise<StreamFileInfo> {
         logger.debug(`[AudioStreaming] Request: trackId=${trackId}, quality=${quality}, source=${path.basename(sourceAbsolutePath)}`);
-        
+
         // If original quality requested, return source file
         if (quality === "original") {
             const mimeType = this.getMimeType(sourceAbsolutePath);
@@ -85,7 +85,8 @@ export class AudioStreamingService {
         const cachedPath = await this.getCachedTranscode(
             trackId,
             quality,
-            sourceModified
+            sourceModified,
+            sourceAbsolutePath
         );
 
         if (cachedPath) {
@@ -135,7 +136,9 @@ export class AudioStreamingService {
             await this.evictCache(this.transcodeCacheMaxGb * 0.8);
         }
 
-        // Transcode to cache (deduplicated for concurrent requests)
+        // Transcode to cache (deduplicated for concurrent requests).
+        // inFlightTranscodes dedup lives OUTSIDE the queue so waiting callers
+        // share one queue slot instead of each occupying their own.
         const dedupeKey = `${trackId}-${quality}`;
         let transcodedPath: string;
 
@@ -146,7 +149,12 @@ export class AudioStreamingService {
             logger.debug(
                 `[STREAM] Transcoding to ${quality} quality: ${sourceAbsolutePath}`
             );
-            const promise = this.transcodeToCache(trackId, quality, sourceAbsolutePath, sourceModified);
+            // Queue cap (240s) is shorter than socket timeout (300s) so a
+            // request queued behind a burst gets a clean 500 before connection reset.
+            const promise = this.transcodeQueue.add(
+                () => this.transcodeToCache(trackId, quality, sourceAbsolutePath, sourceModified),
+                { timeout: 240_000 }
+            ) as Promise<string>;
             this.inFlightTranscodes.set(dedupeKey, promise);
             try {
                 transcodedPath = await promise;
@@ -162,12 +170,15 @@ export class AudioStreamingService {
     }
 
     /**
-     * Get cached transcode if it exists and is valid
+     * Get cached transcode if it exists and is fresh (mtime equality + size match).
+     * A sourceSize of 0 indicates a legacy row written before size tracking -- treated
+     * as a cache miss so it is revalidated once.
      */
     private async getCachedTranscode(
         trackId: string,
         quality: Quality,
-        sourceModified: Date
+        sourceModified: Date,
+        sourceAbsolutePath: string
     ): Promise<string | null> {
         const cached = await prisma.transcodedFile.findFirst({
             where: {
@@ -178,20 +189,19 @@ export class AudioStreamingService {
 
         if (!cached) return null;
 
-        // Invalidate if source file was modified after transcode was created
-        if (cached.sourceModified < sourceModified) {
+        const sourceStat = await fsPromises.stat(sourceAbsolutePath);
+        const fresh =
+            cached.sourceModified.getTime() === sourceModified.getTime() &&
+            cached.sourceSize === BigInt(sourceStat.size) &&
+            cached.sourceSize !== 0n;
+
+        if (!fresh) {
             logger.debug(
-                `[STREAM] Cache stale for track ${trackId}, removing...`
+                `[STREAM] Cache stale or legacy for track ${trackId}, removing...`
             );
             await prisma.transcodedFile.delete({ where: { id: cached.id } });
-
-            // Delete file from disk
-            const cachePath = path.join(
-                this.transcodeCachePath,
-                cached.cachePath
-            );
-            await fs.promises.unlink(cachePath).catch(() => {});
-
+            const cachePath = path.join(this.transcodeCachePath, cached.cachePath);
+            await fsPromises.unlink(cachePath).catch(() => {});
             return null;
         }
 
@@ -240,55 +250,72 @@ export class AudioStreamingService {
         const cachePath = path.join(this.transcodeCachePath, cacheFileName);
 
         return new Promise((resolve, reject) => {
+            let timedOut = false;
+            let settled = false;
+
+            const settleOnce = (fn: () => void) => {
+                if (settled) return;
+                settled = true;
+                fn();
+            };
+
             try {
-                ffmpeg(sourcePath)
+                const command = ffmpeg(sourcePath)
                     .audioBitrate(settings.bitrate)
                     .audioCodec("libmp3lame")
                     .format(settings.format)
                     .on("error", (err) => {
-                        // Check if error is due to missing FFmpeg
+                        clearTimeout(killer);
+                        // When the watchdog already fired it killed the process,
+                        // which in turn triggers this error handler. Do not
+                        // double-settle -- the timeout rejection wins.
+                        if (timedOut) return;
+                        fsPromises.unlink(cachePath).catch(() => {});
                         const errorMsg = err.message.toLowerCase();
-                        if (
-                            errorMsg.includes("ffmpeg") &&
-                            errorMsg.includes("not found")
-                        ) {
-                            reject(
-                                new AppError(
-                                    ErrorCode.FFMPEG_NOT_FOUND,
-                                    ErrorCategory.FATAL,
-                                    "FFmpeg not installed. Please install FFmpeg to enable transcoding.",
-                                    { trackId, quality }
+                        if (errorMsg.includes("ffmpeg") && errorMsg.includes("not found")) {
+                            settleOnce(() =>
+                                reject(
+                                    new AppError(
+                                        ErrorCode.FFMPEG_NOT_FOUND,
+                                        ErrorCategory.FATAL,
+                                        "FFmpeg not installed. Please install FFmpeg to enable transcoding.",
+                                        { trackId, quality }
+                                    )
                                 )
                             );
                         } else {
-                            reject(
-                                new AppError(
-                                    ErrorCode.TRANSCODE_FAILED,
-                                    ErrorCategory.RECOVERABLE,
-                                    `Transcoding failed: ${err.message}`,
-                                    { trackId, quality, source: sourcePath }
+                            settleOnce(() =>
+                                reject(
+                                    new AppError(
+                                        ErrorCode.TRANSCODE_FAILED,
+                                        ErrorCategory.RECOVERABLE,
+                                        `Transcoding failed: ${err.message}`,
+                                        { trackId, quality, source: sourcePath }
+                                    )
                                 )
                             );
                         }
                     })
                     .on("end", async () => {
+                        clearTimeout(killer);
                         try {
-                            // Get file size
-                            const stats = await fs.promises.stat(cachePath);
+                            const stats = await fsPromises.stat(cachePath);
+                            const sourceStat = await fsPromises.stat(sourcePath);
 
-                            // Save to database
                             await prisma.transcodedFile.upsert({
                                 where: { cachePath: cacheFileName },
                                 create: {
                                     trackId,
                                     quality,
                                     cachePath: cacheFileName,
-                                    cacheSize: stats.size,
+                                    cacheSize: BigInt(stats.size),
+                                    sourceSize: BigInt(sourceStat.size),
                                     sourceModified,
                                     lastAccessed: new Date(),
                                 },
                                 update: {
-                                    cacheSize: stats.size,
+                                    cacheSize: BigInt(stats.size),
+                                    sourceSize: BigInt(sourceStat.size),
                                     sourceModified,
                                     lastAccessed: new Date(),
                                 },
@@ -301,19 +328,43 @@ export class AudioStreamingService {
                                     1024
                                 ).toFixed(2)}MB)`
                             );
-                            resolve(cachePath);
+                            settleOnce(() => resolve(cachePath));
                         } catch (err: any) {
-                            reject(
-                                new AppError(
-                                    ErrorCode.DB_QUERY_ERROR,
-                                    ErrorCategory.RECOVERABLE,
-                                    `Failed to save transcode record: ${err.message}`,
-                                    { trackId, quality }
+                            settleOnce(() =>
+                                reject(
+                                    new AppError(
+                                        ErrorCode.DB_QUERY_ERROR,
+                                        ErrorCategory.RECOVERABLE,
+                                        `Failed to save transcode record: ${err.message}`,
+                                        { trackId, quality }
+                                    )
                                 )
                             );
                         }
                     })
                     .save(cachePath);
+
+                const killer = setTimeout(() => {
+                    timedOut = true;
+                    command.kill("SIGKILL");
+                    // Reject only after the partial file is gone so callers
+                    // (and tests) observe a consistent state on settle.
+                    void fsPromises
+                        .unlink(cachePath)
+                        .catch(() => {})
+                        .finally(() =>
+                            settleOnce(() =>
+                                reject(
+                                    new AppError(
+                                        ErrorCode.TRANSCODE_FAILED,
+                                        ErrorCategory.RECOVERABLE,
+                                        `Transcode timed out after ${TRANSCODE_TIMEOUT_MS}ms`,
+                                        { trackId, quality }
+                                    )
+                                )
+                            )
+                        );
+                }, TRANSCODE_TIMEOUT_MS);
             } catch (err: any) {
                 reject(
                     new AppError(
@@ -334,7 +385,7 @@ export class AudioStreamingService {
         const cached = await prisma.transcodedFile.findMany({
             select: { cacheSize: true },
         });
-        const totalBytes = cached.reduce((sum, f) => sum + f.cacheSize, 0);
+        const totalBytes = cached.reduce((sum, f) => sum + Number(f.cacheSize), 0);
         return totalBytes / (1024 * 1024 * 1024);
     }
 
@@ -364,7 +415,7 @@ export class AudioStreamingService {
             // Delete file from disk
             const fullPath = path.join(this.transcodeCachePath, file.cachePath);
             try {
-                await fs.promises.unlink(fullPath);
+                await fsPromises.unlink(fullPath);
             } catch (err) {
                 logger.warn(`[CACHE] Failed to delete ${fullPath}:`, err);
             }
@@ -372,7 +423,7 @@ export class AudioStreamingService {
             // Delete from database
             await prisma.transcodedFile.delete({ where: { id: file.id } });
 
-            currentSize -= file.cacheSize / (1024 * 1024 * 1024);
+            currentSize -= Number(file.cacheSize) / (1024 * 1024 * 1024);
             evicted++;
         }
 
@@ -419,35 +470,72 @@ export class AudioStreamingService {
             const stats = await fsPromises.stat(filePath);
             const fileSize = stats.size;
 
+            const etag = `"${stats.ino}-${stats.size}-${stats.mtimeMs}"`;
+            const lastModified = stats.mtime.toUTCString();
+
+            // RFC 9110: evaluate conditional request headers before Range.
+            // 304 is correct even when a Range header is present.
+            const ifNoneMatch = req.headers["if-none-match"];
+            const ifModifiedSince = req.headers["if-modified-since"];
+
+            if (ifNoneMatch) {
+                // If-None-Match may be a comma-separated list of entity tags
+                const candidates = ifNoneMatch.split(",").map((t) => t.trim());
+                if (candidates.includes(etag) || candidates.includes("*")) {
+                    res.status(304).set({
+                        "ETag": etag,
+                        "Cache-Control": "private, max-age=3600, must-revalidate",
+                    }).end();
+                    return;
+                }
+            } else if (ifModifiedSince) {
+                const ifModifiedSinceMs = new Date(ifModifiedSince).getTime();
+                if (!Number.isNaN(ifModifiedSinceMs) && stats.mtime.getTime() <= ifModifiedSinceMs) {
+                    res.status(304).set({
+                        "ETag": etag,
+                        "Cache-Control": "private, max-age=3600, must-revalidate",
+                    }).end();
+                    return;
+                }
+            }
+
             // Parse Range header
             const range = req.headers.range;
             let start = 0;
             let end = fileSize - 1;
+            let isRangeRequest = false;
 
             if (range) {
                 const parsed = parseRangeHeader(range, fileSize);
                 if (!parsed.ok) {
-                    res.status(416).set({
-                        "Content-Range": `bytes */${fileSize}`,
-                    });
-                    res.end();
-                    return;
+                    if (parsed.reason === "multi") {
+                        // RFC 9110 permits ignoring multi-range; serve full file as 200
+                        isRangeRequest = false;
+                    } else {
+                        // Unsatisfiable single range
+                        res.status(416).set({
+                            "Content-Range": `bytes */${fileSize}`,
+                        });
+                        res.end();
+                        return;
+                    }
+                } else {
+                    start = parsed.start;
+                    end = parsed.end;
+                    isRangeRequest = true;
                 }
-                start = parsed.start;
-                end = parsed.end;
             }
 
             const contentLength = end - start + 1;
 
             // Set response headers
-            const etag = `"${stats.ino}-${stats.size}-${stats.mtimeMs}"`;
             const headers: Record<string, string> = {
                 "Content-Type": mimeType,
                 "Accept-Ranges": "bytes",
-                "Cache-Control": "public, max-age=31536000",
+                "Cache-Control": "private, max-age=3600, must-revalidate",
                 "Content-Length": contentLength.toString(),
                 "ETag": etag,
-                "Last-Modified": stats.mtime.toUTCString(),
+                "Last-Modified": lastModified,
             };
 
             // Add CORS headers from request origin
@@ -457,7 +545,7 @@ export class AudioStreamingService {
             }
 
             // Set status and range-specific headers
-            if (range) {
+            if (isRangeRequest) {
                 res.status(206);
                 headers["Content-Range"] = `bytes ${start}-${end}/${fileSize}`;
             } else {
@@ -506,12 +594,11 @@ export class AudioStreamingService {
 let singletonInstance: AudioStreamingService | null = null;
 
 export function getAudioStreamingService(
-    musicPath: string,
     transcodeCachePath: string,
     transcodeCacheMaxGb: number
 ): AudioStreamingService {
     if (!singletonInstance) {
-        singletonInstance = new AudioStreamingService(musicPath, transcodeCachePath, transcodeCacheMaxGb);
+        singletonInstance = new AudioStreamingService(transcodeCachePath, transcodeCacheMaxGb);
     }
     return singletonInstance;
 }

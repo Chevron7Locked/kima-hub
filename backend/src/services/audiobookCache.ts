@@ -136,7 +136,14 @@ export class AudiobookCacheService {
         const genres = metadata.genres || [];
         const tags = book.tags || [];
         const duration = book.media?.duration || null;
-        const numTracks = book.media?.numTracks || null;
+        // Expanded ABS items carry a tracks array but may omit numTracks; derive
+        // it from the array length so play-adjacent cache fills don't leave NULL.
+        const numTracks: number | null =
+            book.media?.numTracks != null
+                ? (book.media.numTracks as number)
+                : Array.isArray(book.media?.tracks) && book.media.tracks.length > 0
+                  ? (book.media.tracks.length as number)
+                  : null;
         const numChapters = book.media?.numChapters || null;
         const size = book.media?.size ? BigInt(book.media.size) : null;
         const libraryId = book.libraryId || null;
@@ -198,6 +205,16 @@ export class AudiobookCacheService {
             );
         }
 
+        // If this is an expanded response (has media.tracks), persist the track map.
+        const tracksJson: { index: number; startOffset: number; duration: number }[] | null =
+            Array.isArray(book.media?.tracks) && book.media.tracks.length > 0
+                ? (book.media.tracks as any[]).map((t: any) => ({
+                      index: t.index as number,
+                      startOffset: (t.startOffset ?? 0) as number,
+                      duration: (t.duration ?? 0) as number,
+                  }))
+                : null;
+
         let localCoverPath: string | null = null;
         if (coverUrl) {
             const fullCoverUrl = await this.getFullCoverUrl(coverUrl);
@@ -236,6 +253,7 @@ export class AudiobookCacheService {
                 audioUrl: book.id,
                 libraryId,
                 lastSyncedAt: new Date(),
+                ...(tracksJson !== null && { tracksJson }),
             },
             update: {
                 title,
@@ -260,6 +278,7 @@ export class AudiobookCacheService {
                 audioUrl: book.id,
                 libraryId,
                 lastSyncedAt: new Date(),
+                ...(tracksJson !== null && { tracksJson }),
             },
         });
 

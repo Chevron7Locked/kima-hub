@@ -1,17 +1,9 @@
-import { Router, Response } from "express";
+import { Router } from "express";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { config } from "../../config";
 import { getAudioStreamingService } from "../../services/audioStreaming";
 import path from "path";
-
-const MAX_CONCURRENT_STREAMS = 2;
-interface ActiveStream {
-  res: Response;
-  trackId: string;
-  startedAt: number;
-}
-const activeStreams = new Map<string, Set<ActiveStream>>();
 
 // Play-logging dedup window. The DB recent-play check + insert now run
 // off the critical path (fire-and-forget), so two concurrent stream requests
@@ -34,63 +26,6 @@ function claimPlayLog(userId: string, trackId: string): boolean {
   }
   return true;
 }
-
-function registerStream(userId: string, trackId: string, res: Response): void {
-  if (!activeStreams.has(userId)) {
-    activeStreams.set(userId, new Set());
-  }
-  const streams = activeStreams.get(userId)!;
-
-  if (streams.size >= MAX_CONCURRENT_STREAMS) {
-    let oldest: ActiveStream | null = null;
-    for (const s of streams) {
-      if (!oldest || s.startedAt < oldest.startedAt) {
-        oldest = s;
-      }
-    }
-    if (oldest) {
-      logger.debug(
-        "[STREAM] Evicting oldest stream for user",
-        userId,
-        "track",
-        oldest.trackId,
-      );
-      try {
-        if (!oldest.res.writableEnded) {
-          oldest.res.end();
-        }
-      } catch {
-        // Stream may already be closed
-      }
-      streams.delete(oldest);
-    }
-  }
-
-  const entry: ActiveStream = { res, trackId, startedAt: Date.now() };
-  streams.add(entry);
-
-  res.on("close", () => {
-    streams.delete(entry);
-    if (streams.size === 0) {
-      activeStreams.delete(userId);
-    }
-  });
-}
-
-const STREAM_TTL_MS = 60 * 60 * 1000;
-setInterval(() => {
-  const now = Date.now();
-  for (const [userId, streams] of activeStreams) {
-    for (const stream of streams) {
-      if (now - stream.startedAt > STREAM_TTL_MS) {
-        streams.delete(stream);
-      }
-    }
-    if (streams.size === 0) {
-      activeStreams.delete(userId);
-    }
-  }
-}, STREAM_TTL_MS);
 
 const router = Router();
 
@@ -120,8 +55,6 @@ router.get("/tracks/:id/stream", async (req, res) => {
       return res.status(404).json({ error: "Track not found" });
     }
 
-    registerStream(userId, req.params.id, res);
-
     // Play-history logging must NOT gate the first byte -- it added two
     // sequential DB round-trips (a recent-play check + an insert) to the start
     // latency for no playback benefit. Fire it in the background, gated by a
@@ -141,6 +74,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
             await prisma.play.create({ data: { userId, trackId: track.id } });
           }
         } catch (err) {
+          recentlyLoggedPlays.delete(`${userId}:${track.id}`);
           logger.warn("[STREAM] Failed to log play (non-fatal):", err);
         }
       })();
@@ -164,7 +98,6 @@ router.get("/tracks/:id/stream", async (req, res) => {
     if (track.filePath && track.fileModified) {
       try {
         const streamingService = getAudioStreamingService(
-          config.music.musicPath,
           config.music.transcodeCachePath,
           config.music.transcodeCacheMaxGb,
         );
@@ -216,7 +149,6 @@ router.get("/tracks/:id/stream", async (req, res) => {
           );
 
           const streamingService = getAudioStreamingService(
-            config.music.musicPath,
             config.music.transcodeCachePath,
             config.music.transcodeCacheMaxGb,
           );

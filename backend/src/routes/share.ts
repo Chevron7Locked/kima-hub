@@ -389,7 +389,6 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
 
         const mimeType = getMimeType(track.filePath);
         const streamingService = getAudioStreamingService(
-            config.music.musicPath,
             config.music.transcodeCachePath,
             config.music.transcodeCacheMaxGb,
         );

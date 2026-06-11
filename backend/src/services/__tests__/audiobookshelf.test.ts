@@ -1,46 +1,292 @@
-import { audiobookshelfService } from "../audiobookshelf";
+// p-limit is pure ESM; mock it with a pass-through before any import.
+jest.mock("p-limit", () => {
+    return () => (fn: (...args: any[]) => any) => fn();
+});
 
-describe("audiobookshelf streamAudiobook track resolution", () => {
-    const unsortedAudiobook = {
-        id: "test-abid",
-        media: {
-            tracks: [
-                { index: 2, startOffset: 1200, duration: 1200, contentUrl: "/abs/t2" },
-                { index: 3, startOffset: 2400, duration: 1200, contentUrl: "/abs/t3" },
-                { index: 1, startOffset: 0, duration: 1200, contentUrl: "/abs/t1" },
-            ],
+jest.mock("../../utils/db", () => ({
+    prisma: {
+        audiobook: {
+            findMany: jest.fn().mockResolvedValue([]),
+            upsert: jest.fn().mockResolvedValue({}),
         },
-    };
+    },
+}));
 
+jest.mock("../../utils/logger", () => ({
+    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
+}));
+
+jest.mock("../../utils/systemSettings", () => ({
+    getSystemSettings: jest.fn(),
+}));
+
+import { audiobookshelfService } from "../audiobookshelf";
+import { logger } from "../../utils/logger";
+
+const multiTrackBook = {
+    media: {
+        tracks: [
+            { index: 2, startOffset: 1200, duration: 1200, contentUrl: "/abs/t2" },
+            { index: 3, startOffset: 2400, duration: 1200, contentUrl: "/abs/t3" },
+            { index: 1, startOffset: 0, duration: 1200, contentUrl: "/abs/t1" },
+        ],
+        numTracks: 3,
+    },
+};
+
+function setupClient(response: object = { data: "stream-data", headers: {}, status: 200 }) {
+    (audiobookshelfService as any).client = {
+        get: jest.fn().mockResolvedValue(response),
+    };
+    return (audiobookshelfService as any).client;
+}
+
+beforeEach(() => {
+    jest.spyOn(audiobookshelfService as any, "ensureInitialized").mockResolvedValue(undefined);
+    // Clear the track cache so each test starts cold.
+    (audiobookshelfService as any).trackCache.clear();
+});
+
+afterEach(() => jest.restoreAllMocks());
+
+// ── Track resolution (1-based index) ──────────────────────────────────────────
+
+describe("streamAudiobook track resolution", () => {
     beforeEach(() => {
-        jest.spyOn(audiobookshelfService as any, "ensureInitialized").mockResolvedValue(undefined);
-        jest.spyOn(audiobookshelfService as any, "getAudiobook").mockResolvedValue(unsortedAudiobook);
-        (audiobookshelfService as any).client = {
-            get: jest.fn().mockResolvedValue({
-                data: "stream-data",
-                headers: {},
-                status: 200,
-            }),
-        };
+        jest.spyOn(audiobookshelfService as any, "getAudiobook").mockResolvedValue(multiTrackBook);
+        setupClient();
     });
 
-    afterEach(() => jest.restoreAllMocks());
-
     it("resolves trackIndex=1 to the track with index 1, not array position 1", async () => {
-        await audiobookshelfService.streamAudiobook("test-abid", undefined, 1);
-        const client = (audiobookshelfService as any).client;
+        const client = setupClient();
+        await audiobookshelfService.streamAudiobook("book-1", undefined, 1);
         expect(client.get).toHaveBeenCalledWith("/abs/t1", expect.any(Object));
     });
 
     it("resolves trackIndex=3 to the track with index 3", async () => {
-        await audiobookshelfService.streamAudiobook("test-abid", undefined, 3);
-        const client = (audiobookshelfService as any).client;
+        const client = setupClient();
+        await audiobookshelfService.streamAudiobook("book-1", undefined, 3);
         expect(client.get).toHaveBeenCalledWith("/abs/t3", expect.any(Object));
     });
 
-    it("falls back to track index 1 (first by startOffset) when trackIndex is unknown", async () => {
-        await audiobookshelfService.streamAudiobook("test-abid", undefined, 99);
-        const client = (audiobookshelfService as any).client;
+    it("falls back to first track and warns when supplied trackIndex is not found", async () => {
+        const client = setupClient();
+        const warnSpy = logger.warn as jest.Mock;
+        await audiobookshelfService.streamAudiobook("book-1", undefined, 99);
         expect(client.get).toHaveBeenCalledWith("/abs/t1", expect.any(Object));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("trackIndex=99"));
+    });
+
+    it("resolves first track without warning when trackIndex is not supplied", async () => {
+        const client = setupClient();
+        const warnSpy = logger.warn as jest.Mock;
+        await audiobookshelfService.streamAudiobook("book-1", undefined, undefined);
+        expect(client.get).toHaveBeenCalledWith("/abs/t1", expect.any(Object));
+        expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("trackIndex"));
+    });
+});
+
+// ── Track resolution cache: one getAudiobook call per TTL window ──────────────
+
+describe("streamAudiobook track resolution cache", () => {
+    it("calls getAudiobook once per book per TTL window across multiple seeks", async () => {
+        const getAudiobookSpy = jest
+            .spyOn(audiobookshelfService as any, "getAudiobook")
+            .mockResolvedValue(multiTrackBook);
+        setupClient();
+
+        await audiobookshelfService.streamAudiobook("book-cache", undefined, 1);
+        await audiobookshelfService.streamAudiobook("book-cache", undefined, 2);
+        await audiobookshelfService.streamAudiobook("book-cache", undefined, 3);
+
+        expect(getAudiobookSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("calls getAudiobook again after TTL expires", async () => {
+        const getAudiobookSpy = jest
+            .spyOn(audiobookshelfService as any, "getAudiobook")
+            .mockResolvedValue(multiTrackBook);
+        setupClient();
+
+        await audiobookshelfService.streamAudiobook("book-ttl", undefined, 1);
+        expect(getAudiobookSpy).toHaveBeenCalledTimes(1);
+
+        // Manually age the cache entry past the TTL.
+        const entry = (audiobookshelfService as any).trackCache.get("book-ttl");
+        entry.fetchedAt = Date.now() - 6 * 60 * 1000; // 6 minutes ago
+
+        await audiobookshelfService.streamAudiobook("book-ttl", undefined, 1);
+        expect(getAudiobookSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("maintains separate cache entries for different books", async () => {
+        const getAudiobookSpy = jest
+            .spyOn(audiobookshelfService as any, "getAudiobook")
+            .mockResolvedValue(multiTrackBook);
+        setupClient();
+
+        await audiobookshelfService.streamAudiobook("book-A", undefined, 1);
+        await audiobookshelfService.streamAudiobook("book-B", undefined, 1);
+
+        expect(getAudiobookSpy).toHaveBeenCalledTimes(2);
+
+        // Subsequent calls to both hit the cache.
+        await audiobookshelfService.streamAudiobook("book-A", undefined, 1);
+        await audiobookshelfService.streamAudiobook("book-B", undefined, 1);
+        expect(getAudiobookSpy).toHaveBeenCalledTimes(2);
+    });
+});
+
+// ── Timeout: 15_000 on the stream request ─────────────────────────────────────
+
+describe("streamAudiobook timeout", () => {
+    it("passes timeout: 15_000 to the axios request", async () => {
+        jest.spyOn(audiobookshelfService as any, "getAudiobook").mockResolvedValue(multiTrackBook);
+        const client = setupClient();
+
+        await audiobookshelfService.streamAudiobook("book-to", undefined, 1);
+
+        expect(client.get).toHaveBeenCalledWith(
+            "/abs/t1",
+            expect.objectContaining({ timeout: 15_000 }),
+        );
+    });
+
+    it("rejects when upstream returns a timeout error", async () => {
+        jest.spyOn(audiobookshelfService as any, "getAudiobook").mockResolvedValue(multiTrackBook);
+
+        // Simulate an axios timeout rejection (what axios emits when its own
+        // timeout fires -- we verify the timeout value is 15_000 in the prior test).
+        (audiobookshelfService as any).client = {
+            get: jest.fn().mockRejectedValue(Object.assign(new Error("timeout"), { code: "ECONNABORTED" })),
+        };
+
+        await expect(
+            audiobookshelfService.streamAudiobook("book-hang", undefined, 1),
+        ).rejects.toThrow("timeout");
+    });
+});
+
+// ── syncAudiobooksToCache: expanded fetch for missing/changed tracksJson ───────
+
+describe("syncAudiobooksToCache expanded fetch", () => {
+    const { prisma } = require("../../utils/db");
+
+    const minifiedItem = (id: string, numTracks: number) => ({
+        id,
+        libraryId: "lib1",
+        media: {
+            metadata: { title: `Book ${id}`, authorName: "Author" },
+            numTracks,
+            duration: 3600,
+        },
+    });
+
+    const expandedItem = (numTracks: number) => ({
+        media: {
+            numTracks,
+            tracks: Array.from({ length: numTracks }, (_, i) => ({
+                index: i + 1,
+                startOffset: i * 1200,
+                duration: 1200,
+            })),
+        },
+    });
+
+    beforeEach(() => {
+        jest.spyOn(audiobookshelfService as any, "ensureInitialized").mockResolvedValue(undefined);
+        jest.spyOn(audiobookshelfService as any, "getAllAudiobooks").mockResolvedValue([]);
+        jest.spyOn(audiobookshelfService as any, "getAudiobook").mockResolvedValue(expandedItem(3));
+        prisma.audiobook.findMany.mockResolvedValue([]);
+        prisma.audiobook.upsert.mockResolvedValue({});
+    });
+
+    it("does not fetch expanded item when tracksJson is present and numTracks unchanged", async () => {
+        const getAudiobookSpy = jest.spyOn(audiobookshelfService as any, "getAudiobook");
+        jest.spyOn(audiobookshelfService as any, "getAllAudiobooks").mockResolvedValue([
+            minifiedItem("book-ok", 3),
+        ]);
+        prisma.audiobook.findMany.mockResolvedValue([
+            {
+                id: "book-ok",
+                numTracks: 3,
+                tracksJson: [{ index: 1, startOffset: 0, duration: 1200 }],
+            },
+        ]);
+
+        await audiobookshelfService.syncAudiobooksToCache();
+
+        expect(getAudiobookSpy).not.toHaveBeenCalled();
+    });
+
+    it("fetches expanded item when tracksJson is NULL", async () => {
+        const getAudiobookSpy = jest
+            .spyOn(audiobookshelfService as any, "getAudiobook")
+            .mockResolvedValue(expandedItem(3));
+        jest.spyOn(audiobookshelfService as any, "getAllAudiobooks").mockResolvedValue([
+            minifiedItem("book-null", 3),
+        ]);
+        prisma.audiobook.findMany.mockResolvedValue([
+            { id: "book-null", numTracks: 3, tracksJson: null },
+        ]);
+
+        await audiobookshelfService.syncAudiobooksToCache();
+
+        expect(getAudiobookSpy).toHaveBeenCalledWith("book-null");
+    });
+
+    it("fetches expanded item when numTracks changed", async () => {
+        const getAudiobookSpy = jest
+            .spyOn(audiobookshelfService as any, "getAudiobook")
+            .mockResolvedValue(expandedItem(5));
+        jest.spyOn(audiobookshelfService as any, "getAllAudiobooks").mockResolvedValue([
+            minifiedItem("book-changed", 5),
+        ]);
+        prisma.audiobook.findMany.mockResolvedValue([
+            {
+                id: "book-changed",
+                numTracks: 3,
+                tracksJson: [{ index: 1, startOffset: 0, duration: 1200 }],
+            },
+        ]);
+
+        await audiobookshelfService.syncAudiobooksToCache();
+
+        expect(getAudiobookSpy).toHaveBeenCalledWith("book-changed");
+    });
+
+    it("persists tracksJson with 1-based indexes in {index,startOffset,duration} shape", async () => {
+        jest.spyOn(audiobookshelfService as any, "getAllAudiobooks").mockResolvedValue([
+            minifiedItem("book-shape", 2),
+        ]);
+        prisma.audiobook.findMany.mockResolvedValue([]);
+        jest.spyOn(audiobookshelfService as any, "getAudiobook").mockResolvedValue(
+            expandedItem(2),
+        );
+
+        await audiobookshelfService.syncAudiobooksToCache();
+
+        const upsertCall = prisma.audiobook.upsert.mock.calls[0][0];
+        const tracks = upsertCall.update.tracksJson;
+        expect(tracks).toHaveLength(2);
+        expect(tracks[0]).toMatchObject({ index: 1, startOffset: 0, duration: 1200 });
+        expect(tracks[1]).toMatchObject({ index: 2, startOffset: 1200, duration: 1200 });
+    });
+
+    it("calls getAudiobook for each book that needs an expanded fetch", async () => {
+        const expandSpy = jest
+            .spyOn(audiobookshelfService as any, "getAudiobook")
+            .mockImplementation(async () => expandedItem(1));
+
+        // 8 books, all needing an expanded fetch (no existing rows).
+        const books = Array.from({ length: 8 }, (_, i) => minifiedItem(`book-${i}`, 1));
+        jest.spyOn(audiobookshelfService as any, "getAllAudiobooks").mockResolvedValue(books);
+        prisma.audiobook.findMany.mockResolvedValue([]);
+
+        // p-limit is mocked as a pass-through in tests; verify each book's
+        // getAudiobook was called (concurrency cap enforced in production).
+        await audiobookshelfService.syncAudiobooksToCache();
+
+        expect(expandSpy).toHaveBeenCalledTimes(8);
     });
 });
