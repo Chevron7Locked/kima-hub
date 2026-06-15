@@ -847,35 +847,59 @@ router.post("/queue-cleaner/stop", (req, res) => {
   });
 });
 
-// Clear all Redis caches
+// Cache key prefixes that are safe to drop -- external-API and image-derivation
+// caches that rebuild on demand. Deliberately an allowlist: it must never touch
+// BullMQ queue state ("bull:"), the enrichment/analysis control plane
+// ("enrichment", "audio:", "clap:"), or sessions ("sess:"). The previous
+// "delete everything except sess:" approach would have wiped live job state --
+// and it never ran anyway because it used the node-redis scan signature against
+// our ioredis client (positional args + array return), so it threw every time.
+const CLEARABLE_CACHE_PREFIXES = [
+  "mb:",
+  "album-cover:",
+  "hero:",
+  "cover-art:",
+  "caa:",
+  "lastfm:",
+  "wikidata:",
+  "deezer:",
+  "itunes:",
+];
+
+// Clear external-API / image caches (not queue or control-plane state)
 router.post("/clear-caches", async (req, res) => {
   try {
     const { redisClient } = require("../utils/redis");
     const { notificationService } =
       await import("../services/notificationService");
 
-    // Collect all keys using SCAN (non-blocking) and exclude session keys
-    const allKeys: string[] = [];
-    let cursor = 0;
+    // SCAN with the ioredis signature: positional MATCH/COUNT args, and an
+    // [nextCursor, keys] array result; the cursor is a string, "0" terminates.
+    const keysToDelete: string[] = [];
+    let cursor = "0";
     do {
-      const result = await redisClient.scan(cursor, { MATCH: "*", COUNT: 100 });
-      cursor = result.cursor;
-      allKeys.push(...result.keys);
-    } while (cursor !== 0);
-
-    const keysToDelete = allKeys.filter(
-      (key: string) => !key.startsWith("sess:"),
-    );
+      const [next, keys] = await redisClient.scan(
+        cursor,
+        "MATCH",
+        "*",
+        "COUNT",
+        500,
+      );
+      cursor = next;
+      for (const key of keys) {
+        if (CLEARABLE_CACHE_PREFIXES.some((p) => key.startsWith(p))) {
+          keysToDelete.push(key);
+        }
+      }
+    } while (cursor !== "0");
 
     if (keysToDelete.length > 0) {
+      // Delete in chunks so a large cache doesn't build one oversized command.
+      for (let i = 0; i < keysToDelete.length; i += 500) {
+        await redisClient.del(...keysToDelete.slice(i, i + 500));
+      }
       logger.debug(
-        `[CACHE] Clearing ${keysToDelete.length} cache entries (excluding ${
-          allKeys.length - keysToDelete.length
-        } session keys)...`,
-      );
-      await redisClient.del(keysToDelete);
-      logger.debug(
-        `[CACHE] Successfully cleared ${keysToDelete.length} cache entries`,
+        `[CACHE] Cleared ${keysToDelete.length} cache entries`,
       );
 
       // Send notification to user
