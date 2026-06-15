@@ -1357,8 +1357,12 @@ async function executeVibePhase(): Promise<number> {
     // paused it and the resume timer may have deferred (found audio still active)
     await vibeQueue.resume().catch(() => {});
 
-    // Clean completed jobs to prevent jobId dedup from silently losing re-queued tracks
+    // Clean completed AND failed jobs to prevent jobId dedup from silently
+    // losing re-queued tracks: BullMQ keeps the dedup marker for failed jobs
+    // too, so clearing only "completed" lets one failed job poison a track's
+    // jobId permanently.
     await vibeQueue.clean(0, 0, 'completed');
+    await vibeQueue.clean(0, 0, 'failed');
 
     // Reset stale vibeAnalysisStatus for these tracks before queuing
     const trackIds = tracks.map((t) => t.id);
@@ -1393,7 +1397,7 @@ async function executeVibePhase(): Promise<number> {
     return queued;
 }
 
-async function executePodcastRefreshPhase(): Promise<number> {
+export async function executePodcastRefreshPhase(): Promise<number> {
     const podcastCount = await prisma.podcast.count();
     if (podcastCount === 0) return 0;
 
@@ -1406,18 +1410,30 @@ async function executePodcastRefreshPhase(): Promise<number> {
 
     if (stalePodcasts.length === 0) return 0;
 
-    // BullMQ's jobId dedup keeps the marker hash in Redis after a job
-    // completes, indefinitely. `removeOnComplete: { age: 3600 }` removes the
-    // completed-list entry but not the dedup marker, so subsequent adds with
-    // the same jobId silently no-op forever. This was the root cause of issue
-    // #81 (podcasts never refresh past initial subscription). Clear completed
-    // jobs before the add loop so jobIds are reusable. Matches the pattern
-    // already in place on the vibe queue.
+    // BullMQ keeps the jobId dedup marker in Redis after a job settles -- for
+    // BOTH completed and failed jobs. The original #81 fix cleaned only
+    // "completed", which left failed jobs as permanent poison: one failed
+    // refresh kept its `podcast-<id>` marker forever, so every later add() with
+    // that jobId silently no-op'd and the podcast never refreshed again (a
+    // single corrupt failed job took out all auto-refresh). Clean both states
+    // so a failed refresh is retried rather than wedging the feed.
     try {
         await podcastQueue.clean(0, 0, "completed");
+        await podcastQueue.clean(0, 0, "failed");
     } catch (err) {
         logger.warn(`[Enrichment] podcastQueue clean failed: ${(err as Error).message}`);
     }
+
+    // Claim these podcasts by advancing lastRefreshed before queuing.
+    // refreshPodcastFeed only advances lastRefreshed on success or a 304, so
+    // without this an unreachable feed would keep matching the stale-window
+    // query and be re-queued every cycle (seconds apart). Bumping up front
+    // gives every outcome -- success, 304, or failure -- a full backoff window;
+    // a successful refresh advances it again moments later.
+    await prisma.podcast.updateMany({
+        where: { id: { in: stalePodcasts.map((p) => p.id) } },
+        data: { lastRefreshed: new Date() },
+    });
 
     let queued = 0;
     for (const podcast of stalePodcasts) {

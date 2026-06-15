@@ -13,7 +13,12 @@ export function startPodcastEnrichmentWorker(): Worker {
     const worker = new Worker<PodcastJobData>(
         QUEUE_NAMES.PODCASTS,
         async (job: Job<PodcastJobData>) => {
-            const { podcastId, podcastTitle } = job.data;
+            const { podcastId, podcastTitle } = job.data ?? ({} as PodcastJobData);
+            // Guard against corrupt job data (a Redis-stripped job hash once left
+            // data-less jobs that threw a confusing `findUnique({ id: undefined })`).
+            if (!podcastId) {
+                throw new Error("[PodcastWorker] Job has no podcastId -- corrupt job data");
+            }
             logger.debug(`[PodcastWorker] Processing ${podcastId} (${podcastTitle})`);
             await refreshPodcastFeed(podcastId);
         },
@@ -28,8 +33,11 @@ export function startPodcastEnrichmentWorker(): Worker {
 
     worker.on("failed", async (job, err) => {
         if (!job) return;
-        const { podcastId, podcastTitle } = job.data;
-        logger.error(`[PodcastWorker] Podcast ${podcastId} failed (attempt ${job.attemptsMade}): ${err.message}`);
+        const { podcastId, podcastTitle } = job.data ?? ({} as PodcastJobData);
+        logger.error(`[PodcastWorker] Podcast ${podcastId ?? "<unknown>"} failed (attempt ${job.attemptsMade}): ${err.message}`);
+        // A corrupt/data-less job has nothing to record against -- the cleaned
+        // jobId lets the next cycle re-queue it with real data.
+        if (!podcastId) return;
 
         const isEntityGone = (err as any).entityNotFound === true;
         if (isEntityGone) {
