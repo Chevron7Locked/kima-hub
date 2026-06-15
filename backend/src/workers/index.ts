@@ -28,6 +28,10 @@ import {
     startDataCleanupCron,
     stopDataCleanupCron,
 } from "./dataCleanup";
+import {
+    startLibrarySyncCron,
+    stopLibrarySyncCron,
+} from "./librarySyncCron";
 import { runDataIntegrityCheck } from "./dataIntegrity";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { queueCleaner } from "../jobs/queueCleaner";
@@ -186,6 +190,9 @@ startDiscoverWeeklyCron();
 
 // Start data cleanup cron scheduler (daily at 2 AM)
 startDataCleanupCron();
+
+// Start library auto-sync cron (every 6h, gated on the autoSync setting)
+startLibrarySyncCron();
 
 // Running guards to prevent pile-up when tasks take longer than their interval
 let dataIntegrityRunning = false;
@@ -391,6 +398,9 @@ export async function shutdownWorkers(): Promise<void> {
 
     // Stop data cleanup cron
     stopDataCleanupCron();
+
+    // Stop library auto-sync cron
+    stopLibrarySyncCron();
 
     // Shutdown download queue manager
     downloadQueueManager.shutdown();

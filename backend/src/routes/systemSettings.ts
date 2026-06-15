@@ -334,6 +334,13 @@ router.post("/", async (req, res) => {
         LIDARR_URL: data.lidarrUrl || null,
         AUDIOBOOKSHELF_URL: data.audiobookshelfUrl || null,
         SOULSEEK_USERNAME: data.soulseekUsername || null,
+        // The transcode cache cap is read from config (env) at startup, which is
+        // why the UI flags a restart. Persist it to .env so the saved slider
+        // value actually takes effect on the next boot.
+        TRANSCODE_CACHE_MAX_GB:
+          data.transcodeCacheMaxGb != null
+            ? String(data.transcodeCacheMaxGb)
+            : null,
       });
       logger.debug(".env file synchronized with database settings");
     } catch (envError) {
