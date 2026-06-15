@@ -854,26 +854,27 @@ router.post("/queue-cleaner/stop", (req, res) => {
   });
 });
 
-// Cache key prefixes that are safe to drop -- external-API and image-derivation
-// caches that rebuild on demand. Deliberately an allowlist: it must never touch
-// BullMQ queue state ("bull:"), the enrichment/analysis control plane
-// ("enrichment", "audio:", "clap:"), or sessions ("sess:"). The previous
-// "delete everything except sess:" approach would have wiped live job state --
-// and it never ran anyway because it used the node-redis scan signature against
-// our ioredis client (positional args + array return), so it threw every time.
-const CLEARABLE_CACHE_PREFIXES = [
-  "mb:",
-  "album-cover:",
-  "hero:",
-  "cover-art:",
-  "caa:",
-  "lastfm:",
-  "wikidata:",
-  "deezer:",
-  "itunes:",
+// Operational Redis namespaces that "Clear Caches" must NEVER delete: BullMQ
+// queues, sessions, the enrichment/analysis control plane, distributed locks,
+// and short-lived SSE auth tickets. Everything else is a rebuildable cache
+// (external-API responses, cover art, derived data). This is a DENYLIST, not an
+// allowlist, on purpose -- the codebase has 20+ cache prefixes and adds more
+// over time, so an allowlist would silently leave new caches uncleared. Sparing
+// only this small, well-defined operational set keeps the clear complete while
+// never touching live state. (The prior version both used the wrong scan API
+// for our ioredis client -- so it threw every call -- and, had it run, would
+// have wiped queue state.)
+const PROTECTED_KEY_PREFIXES = [
+  "bull:",
+  "sess:",
+  "audio:",
+  "clap:",
+  "enrichment",
+  "lock:",
+  "sse:",
 ];
 
-// Clear external-API / image caches (not queue or control-plane state)
+// Clear all rebuildable caches (never queue, session, or control-plane state)
 router.post("/clear-caches", async (req, res) => {
   try {
     const { redisClient } = require("../utils/redis");
@@ -894,7 +895,7 @@ router.post("/clear-caches", async (req, res) => {
       );
       cursor = next;
       for (const key of keys) {
-        if (CLEARABLE_CACHE_PREFIXES.some((p) => key.startsWith(p))) {
+        if (!PROTECTED_KEY_PREFIXES.some((p) => key.startsWith(p))) {
           keysToDelete.push(key);
         }
       }
