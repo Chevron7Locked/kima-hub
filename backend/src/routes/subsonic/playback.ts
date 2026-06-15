@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { ListenSource } from "@prisma/client";
 import { prisma } from "../../utils/db";
+import { logger } from "../../utils/logger";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { getAudioStreamingService } from "../../services/audioStreaming";
 import { config } from "../../config";
@@ -326,7 +327,7 @@ playbackRouter.all("/scrobble.view", wrap(async (req, res) => {
             const playedAt = isNaN(timeMs) ? new Date() : new Date(timeMs);
             await prisma.play
                 .create({ data: { userId, trackId: id, playedAt, source: ListenSource.SUBSONIC } })
-                .catch(() => {});
+                .catch((err) => logger.warn("[Subsonic] scrobble play-log failed:", err));
         }
     }
 

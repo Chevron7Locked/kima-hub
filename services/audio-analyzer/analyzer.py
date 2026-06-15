@@ -1160,6 +1160,7 @@ class AnalysisWorker:
         self._last_work_time = time.time()
         self._pending_resize: int | None = None
         self._pending_resize_time: float = 0.0
+        self._last_perm_failed_count: int | None = None
         self._setup_control_channel()
     
     def _setup_control_channel(self):
@@ -1503,8 +1504,10 @@ class AnalysisWorker:
             """, (MAX_RETRIES,))
             
             perm_failed = cursor.fetchone()
-            if perm_failed and perm_failed['count'] > 0:
-                logger.warning(f"{perm_failed['count']} tracks have permanently failed (exceeded {MAX_RETRIES} retries)")
+            perm_failed_count = perm_failed['count'] if perm_failed else 0
+            if perm_failed_count > 0 and perm_failed_count != self._last_perm_failed_count:
+                logger.warning(f"{perm_failed_count} tracks have permanently failed (exceeded {MAX_RETRIES} retries)")
+            self._last_perm_failed_count = perm_failed_count
             
             self.db.commit()
         except Exception as e:

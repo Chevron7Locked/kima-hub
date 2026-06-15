@@ -189,10 +189,10 @@ export default function PodcastsPage() {
         const sorted = [...podcasts];
         switch (sortBy) {
             case "title":
-                sorted.sort((a, b) => a.title.localeCompare(b.title));
+                sorted.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
                 break;
             case "author":
-                sorted.sort((a, b) => a.author.localeCompare(b.author));
+                sorted.sort((a, b) => (a.author || "").localeCompare(b.author || ""));
                 break;
             case "recent":
                 sorted.sort((a, b) => (b.episodeCount || 0) - (a.episodeCount || 0));

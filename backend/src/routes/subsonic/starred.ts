@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../../utils/db";
+import { logger } from "../../utils/logger";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { mapSong, firstArtistGenre, wrap, parseRepeatedQueryParam } from "./mappers";
 
@@ -81,13 +82,18 @@ starredRouter.all("/star.view", wrap(async (req, res) => {
     const ids = parseRepeatedQueryParam(req.query.id);
 
     for (const trackId of ids) {
-        await prisma.likedTrack
-            .upsert({
+        try {
+            await prisma.likedTrack.upsert({
                 where: { userId_trackId: { userId, trackId } },
                 create: { userId, trackId },
                 update: {},
-            })
-            .catch(() => {}); // Absorbs FK violation if trackId doesn't exist
+            });
+        } catch (err) {
+            // P2003 = FK violation: trackId doesn't exist. Absorb silently.
+            if ((err as { code?: string }).code === "P2003") continue;
+            logger.warn("[Subsonic] star failed:", err);
+            return subsonicError(req, res, SubsonicError.GENERIC, "Failed to star track");
+        }
     }
     return subsonicOk(req, res);
 }));
