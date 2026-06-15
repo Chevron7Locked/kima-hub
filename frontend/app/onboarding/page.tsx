@@ -104,9 +104,27 @@ export default function OnboardingPage() {
             const message = err instanceof Error ? err.message : String(err);
             // Check if user already exists
             if (message?.includes("already taken")) {
-                setError(
-                    "Username already taken. If this is you, please refresh and continue where you left off.",
-                );
+                // Usually a refresh/retry race: the account was created but the
+                // token never persisted client-side. Rather than dead-end on a
+                // "refresh" instruction that can't recover the session, try
+                // logging in with the same credentials and continue.
+                try {
+                    const user = await api.login(username, password);
+                    if (user.requires2FA) {
+                        router.push("/login");
+                        return;
+                    }
+                    if (user.onboardingComplete) {
+                        router.push("/");
+                        return;
+                    }
+                    setStep(2);
+                    return;
+                } catch {
+                    setError(
+                        "That username already exists and the password didn't match. If it's your account, sign in instead.",
+                    );
+                }
             } else {
                 setError(message || "Failed to create account");
             }

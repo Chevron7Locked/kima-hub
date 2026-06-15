@@ -124,6 +124,18 @@ export function useSoulseekSearch({
         };
     }, [query, soulseekEnabled]);
 
+    // Fallback completion: the SSE "complete" event can be dropped (connection
+    // blip, or the backend never emits it). Without a terminal signal
+    // isSoulseekPolling stays true and the search UI spins forever. Force the
+    // search complete after a ceiling so the user sees whatever results arrived
+    // instead of an endless spinner; late results still stream in via the store
+    // subscription, only the spinner is resolved.
+    useEffect(() => {
+        if (!hasActiveSearch || isComplete) return;
+        const timeout = setTimeout(() => setIsComplete(true), 45000);
+        return () => clearTimeout(timeout);
+    }, [hasActiveSearch, isComplete]);
+
     const handleDownload = useCallback(async (result: SoulseekResult) => {
         const downloadKey = `${result.username}:${result.path}`;
         try {
