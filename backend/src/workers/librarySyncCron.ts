@@ -31,6 +31,15 @@ export function startLibrarySyncCron() {
                 return;
             }
 
+            // Skip if a scan (manual, webhook, or a prior auto-sync) is already
+            // active or waiting -- no point queuing a redundant full rescan
+            // behind one that's about to cover the same files.
+            const counts = await scanQueue.getJobCounts("active", "waiting");
+            if ((counts.active ?? 0) + (counts.waiting ?? 0) > 0) {
+                logger.debug("[LibrarySync] scan already in progress, skipping");
+                return;
+            }
+
             await scanQueue.add("scan", {
                 musicPath: config.music.musicPath,
                 source: "auto-sync",

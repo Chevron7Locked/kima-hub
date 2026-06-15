@@ -1764,8 +1764,14 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
     for (const ep of result.episodes) {
         if (existingGuids.has(ep.guid)) continue;
 
-        await prisma.podcastEpisode.create({
-            data: {
+        // upsert, not create: the manual refresh route and the auto-refresh job
+        // can run concurrently, and find-then-create is a TOCTOU race -- both
+        // would see "not existing" and the second create would throw on the
+        // (podcastId, guid) unique constraint. The update branch is a no-op so
+        // an episode that already exists is left untouched.
+        await prisma.podcastEpisode.upsert({
+            where: { podcastId_guid: { podcastId, guid: ep.guid } },
+            create: {
                 podcastId,
                 guid: ep.guid,
                 title: ep.title,
@@ -1779,6 +1785,7 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
                 fileSize: ep.fileSize,
                 mimeType: ep.mimeType,
             },
+            update: {},
         });
         newEpisodesCount++;
     }

@@ -109,12 +109,12 @@ export default function OnboardingPage() {
                 // "refresh" instruction that can't recover the session, try
                 // logging in with the same credentials and continue.
                 try {
-                    const user = await api.login(username, password);
-                    if (user.requires2FA) {
+                    const loggedInUser = await api.login(username, password);
+                    if (loggedInUser.requires2FA) {
                         router.push("/login");
                         return;
                     }
-                    if (user.onboardingComplete) {
+                    if (loggedInUser.onboardingComplete) {
                         router.push("/");
                         return;
                     }

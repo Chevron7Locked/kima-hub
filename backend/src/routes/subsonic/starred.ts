@@ -81,6 +81,15 @@ starredRouter.all("/star.view", wrap(async (req, res) => {
     const userId = req.user!.id;
     const ids = parseRepeatedQueryParam(req.query.id);
 
+    // Best-effort: attempt every id, skip ones whose track doesn't exist
+    // (P2003), and log genuine failures rather than swallowing them. Don't
+    // early-return mid-loop -- that would leave some tracks starred while
+    // telling the client it failed. Only report an error if a real failure
+    // occurred and nothing got starred (e.g. the DB is down); a partial
+    // failure is logged and reported ok so the client keeps its successes
+    // (the upsert is idempotent, so a retry is safe).
+    let anySucceeded = false;
+    let realFailure = false;
     for (const trackId of ids) {
         try {
             await prisma.likedTrack.upsert({
@@ -88,12 +97,15 @@ starredRouter.all("/star.view", wrap(async (req, res) => {
                 create: { userId, trackId },
                 update: {},
             });
+            anySucceeded = true;
         } catch (err) {
-            // P2003 = FK violation: trackId doesn't exist. Absorb silently.
             if ((err as { code?: string }).code === "P2003") continue;
-            logger.warn("[Subsonic] star failed:", err);
-            return subsonicError(req, res, SubsonicError.GENERIC, "Failed to star track");
+            realFailure = true;
+            logger.warn(`[Subsonic] star failed for track ${trackId}:`, err);
         }
+    }
+    if (realFailure && !anySucceeded) {
+        return subsonicError(req, res, SubsonicError.GENERIC, "Failed to star track");
     }
     return subsonicOk(req, res);
 }));
