@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.9.0] - 2026-06-15
+
+A reliability release built around a ground-up rewrite of the audio playback engine. After an end-to-end audit of the player turned up 30 issues across the frontend and backend, the tangle of overlapping recovery mechanisms was replaced with a single, predictable engine; audiobooks became proper sessions; and a long-dead podcast auto-refresh was brought back. Several settings that looked functional but did nothing now actually work.
+
+### Changed
+
+- **The audio player is now driven by one state machine instead of four competing recovery mechanisms.** The old controller had a 3-second stall watchdog, a 10-second stall grace, a network-retry loop, and a reload-on-error path all running at once with inconsistent thresholds. They are replaced by a single engine with one recovery ladder: every wait has a deadline, every state has a way out, and the play/pause button is never disabled -- so the "endless spinner you can't even pause" state is no longer possible. iOS's noisy `stalled` event (which fired over a thousand times during healthy playback in a real trace) is now ignored entirely.
+- **Audiobooks are handled as sessions, not loose URLs.** All book-time math goes through one place backed by a verified per-file track map, so a multi-file book can no longer seek to the wrong file or mark itself finished partway through.
+
+### Fixed
+
+- **Multi-file audiobooks could wipe your place and mark themselves finished.** Started from the series or list page, a multi-file book had no file map, so it seeked the first file to a book-absolute position, hit the end, and the player treated that as "book complete" -- overwriting saved progress. The track map is now cached server-side and carried on every surface, and a book is never marked finished without a confirmed last file.
+- **Chapter taps did nothing when the book wasn't already playing.** Tapping a chapter started playback and then seeked against state that hadn't committed yet, so the seek was discarded. The chapter position now rides the load itself.
+- **Podcasts stopped pulling new episodes.** A corrupted background job left a stuck marker that silently blocked every future refresh; the refresh button appeared to work but couldn't dislodge it. Failed jobs are now cleared so a refresh can recover, and a refresh that fails backs off instead of retrying in a tight loop. The same dedup trap was fixed on the artist, track, and embedding queues.
+- **Pausing from the lock screen could un-pause itself when you reopened the app.** A lock-screen pause wasn't recorded as a deliberate pause, so the next time the app came to the foreground it resumed on its own (and could play through the speaker if earbuds had been removed). Lock-screen pause is now a real pause and is respected.
+- **A long-idle session could stop playing after about a day.** The stream token expired and the next request failed silently; the player now refreshes the token before it expires and recovers a stream at its saved position instead of tearing down. A transient network blip no longer logs you out.
+- **Subsonic "star" could silently fail.** A third-party app could star a track that never saved because every error was swallowed and success was reported regardless. Genuine failures now surface; missing tracks are skipped; partial successes are kept.
+- **"Clear Caches" did nothing.** The handler used the wrong Redis client API and threw on every call. It now works and clears all rebuildable caches while leaving queue and control-plane state untouched.
+
+### Added
+
+- **Settings that used to be inert now work.** The transcode-cache-size slider is honored on restart, and the "Auto sync library" toggle now drives a periodic library scan (every 6 hours) so music added outside the download pipeline gets picked up automatically.
+
+### Backend
+
+- Stream lifecycle hardening: removed a per-user stream cap that could truncate the track you were listening to; added server socket timeouts so dead mobile connections can't accumulate; bounded the Audiobookshelf proxy with a real timeout and cached its track lookups so seeks stop paying a round-trip each; ran transcodes through a real concurrency queue with a kill-switch; aligned HTTP range handling (416 vs full-file) across the music, audiobook, podcast, share, and Subsonic routes; and shortened the year-long cache header so a replaced file isn't served stale.
+
 ## [1.8.2] - 2026-06-10
 
 A playback-reliability release: faster track starts, audiobook progress that survives backgrounding and updates, and a round of audiobook and podcast fixes.
