@@ -10,14 +10,16 @@
 
 const mockArtistAdd = jest.fn().mockResolvedValue({ id: "j" });
 const mockArtistClean = jest.fn().mockResolvedValue([]);
+const mockArtistGetJob = jest.fn().mockResolvedValue(null);
 const mockTrackAdd = jest.fn().mockResolvedValue({ id: "j" });
 const mockTrackClean = jest.fn().mockResolvedValue([]);
+const mockTrackGetJob = jest.fn().mockResolvedValue(null);
 
 jest.mock("../enrichmentQueues", () => ({
-    artistQueue: { add: mockArtistAdd, clean: mockArtistClean, resume: jest.fn() },
-    trackQueue: { add: mockTrackAdd, clean: mockTrackClean, resume: jest.fn() },
-    vibeQueue: { add: jest.fn(), clean: jest.fn(), resume: jest.fn() },
-    podcastQueue: { add: jest.fn(), clean: jest.fn(), resume: jest.fn() },
+    artistQueue: { add: mockArtistAdd, clean: mockArtistClean, getJob: mockArtistGetJob, resume: jest.fn() },
+    trackQueue: { add: mockTrackAdd, clean: mockTrackClean, getJob: mockTrackGetJob, resume: jest.fn() },
+    vibeQueue: { add: jest.fn(), clean: jest.fn(), getJob: jest.fn(), resume: jest.fn() },
+    podcastQueue: { add: jest.fn(), clean: jest.fn(), getJob: jest.fn(), resume: jest.fn() },
     closeEnrichmentQueues: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock("../artistEnrichmentWorker", () => ({ startArtistEnrichmentWorker: jest.fn() }));
@@ -74,7 +76,11 @@ const cleanCallsFor = (mock: jest.Mock, type: string) =>
     mock.mock.calls.filter((c) => c[2] === type);
 
 describe("enrichment phases -- clean completed immediately, failed with backoff", () => {
-    beforeEach(() => jest.clearAllMocks());
+    beforeEach(() => {
+        jest.clearAllMocks();
+        mockArtistGetJob.mockResolvedValue(null);
+        mockTrackGetJob.mockResolvedValue(null);
+    });
 
     it("artists phase cleans completed (grace 0) and failed (grace > 0) before queuing", async () => {
         mockArtistFindMany.mockResolvedValue([{ id: "a1", name: "Artist One" }]);
@@ -110,6 +116,24 @@ describe("enrichment phases -- clean completed immediately, failed with backoff"
             { trackId: "t1", trackTitle: "Track One" },
             { jobId: "track-t1" },
         );
+    });
+
+    it("backs off (does not re-add or park) when the jobId slot is still held", async () => {
+        // A failed job younger than the grace still holds the jobId; getJob
+        // returns it, so the phase must skip -- not re-add, not park the entity
+        // out of selection.
+        mockArtistFindMany.mockResolvedValue([{ id: "a1", name: "Artist One" }]);
+        mockArtistGetJob.mockResolvedValue({ id: "artist-a1" }); // slot held
+        mockTrackFindMany.mockResolvedValue([{ id: "t1", title: "Track One" }]);
+        mockTrackGetJob.mockResolvedValue({ id: "track-t1" }); // slot held
+
+        await executeArtistsPhase();
+        await executeMoodTagsPhase();
+
+        expect(mockArtistAdd).not.toHaveBeenCalled();
+        expect(mockArtistUpdate).not.toHaveBeenCalled(); // not parked "enriching"
+        expect(mockTrackAdd).not.toHaveBeenCalled();
+        expect(mockTrackUpdateMany).not.toHaveBeenCalled(); // not parked "_queued"
     });
 
     it("no work: no clean, no queue", async () => {

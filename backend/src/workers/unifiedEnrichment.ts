@@ -48,12 +48,13 @@ import { precomputeProjection } from "../services/umapProjection";
 const ARTIST_BATCH_SIZE = 10;
 const TRACK_BATCH_SIZE = 20;
 const ENRICHMENT_INTERVAL_MS = 5 * 1000; // 5 seconds - rate limiter handles API limits
-// BullMQ retains a failed job's jobId dedup marker, so an entity that fails
-// enrichment can't be re-queued until the marker is gone. Cleaning failed jobs
-// older than this grace window frees the jobId for a retry while still backing
-// off a genuinely-failing entity (without it, a permanent failure would re-add
-// every 5s cycle). Completed jobs are cleaned with grace 0 -- a success should
-// be immediately re-queueable if the entity legitimately needs reprocessing.
+// Backoff window for a failed enrichment job. A failed job keeps its jobId
+// marker, and the phases skip an entity whose jobId is still held (getJob
+// check), so a failure backs off until this grace elapses and the failed job
+// is cleaned -- then the slot is free and the entity retries. Without the grace
+// a failure would retry every 5s cycle; without the getJob skip it would park
+// out of selection until restart. Completed jobs are cleaned with grace 0 -- a
+// success should be immediately re-queueable if the entity is legitimately reset.
 const FAILED_JOB_RETRY_GRACE_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_CONSECUTIVE_SYSTEM_FAILURES = 5; // Circuit breaker threshold
 
@@ -1084,11 +1085,20 @@ export async function executeArtistsPhase(): Promise<number> {
     let queued = 0;
     for (const artist of pendingArtists) {
         try {
+            // Only enqueue + park as "enriching" when the jobId slot is actually
+            // free. A failed job younger than the grace still holds the slot, so
+            // a plain add() would no-op while we parked the artist as
+            // "enriching" anyway -- removing it from selection until a process
+            // restart, never actually retrying. Skipping here leaves it
+            // "failed"/"pending" so it backs off and retries once the grace
+            // clean above frees the slot.
+            const jobId = `artist-${artist.id}`;
+            if (await artistQueue.getJob(jobId)) continue;
             // Add FIRST — if Redis is down, status stays "pending" and retries naturally
             await artistQueue.add(
                 "enrich",
                 { artistId: artist.id, artistName: artist.name },
-                { jobId: `artist-${artist.id}` }, // dedup — no-op if already queued
+                { jobId },
             );
             // Update AFTER successful add
             await prisma.artist.update({
@@ -1140,10 +1150,18 @@ export async function executeMoodTagsPhase(): Promise<number> {
     const queuedIds: string[] = [];
     for (const track of tracks) {
         try {
+            // Only enqueue + mark "_queued" when the jobId slot is free. A failed
+            // job younger than the grace still holds it, so a plain add() would
+            // no-op while we marked the track in-flight anyway -- parking it out
+            // of selection until restart instead of retrying. Skipping leaves it
+            // selectable so it backs off and retries once the grace clean frees
+            // the slot.
+            const jobId = `track-${track.id}`;
+            if (await trackQueue.getJob(jobId)) continue;
             await trackQueue.add(
                 "enrich",
                 { trackId: track.id, trackTitle: track.title },
-                { jobId: `track-${track.id}` }, // dedup — no-op if already queued
+                { jobId },
             );
             queuedIds.push(track.id);
         } catch (err) {
