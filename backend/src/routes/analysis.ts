@@ -561,8 +561,11 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             });
         }
 
-        // Clean completed jobs to prevent jobId dedup from silently dropping re-queued tracks
+        // Clean completed AND failed jobs so jobId dedup can't silently drop a
+        // re-queued track. This is a manual retry action, so failed jobs are
+        // cleared immediately (grace 0) -- the user asked to retry now.
         await vibeQueue.clean(0, 0, "completed");
+        await vibeQueue.clean(0, 0, "failed");
 
         // Queue tracks for CLAP embedding via BullMQ (jobId deduplication)
         await vibeQueue.addBulk(
@@ -626,8 +629,11 @@ router.post("/vibe/retry", requireAuth, requireAdmin, async (req, res) => {
             data: { vibeAnalysisStatus: null, vibeAnalysisRetryCount: 0, vibeAnalysisStatusUpdatedAt: null },
         });
 
-        // Clean completed jobs to prevent jobId dedup from silently dropping re-queued tracks
+        // Clean completed AND failed jobs so jobId dedup can't silently drop a
+        // re-queued track. This is a manual retry action, so failed jobs are
+        // cleared immediately (grace 0) -- the user asked to retry now.
         await vibeQueue.clean(0, 0, "completed");
+        await vibeQueue.clean(0, 0, "failed");
 
         // Queue for retry via BullMQ (jobId deduplication)
         await vibeQueue.addBulk(

@@ -48,6 +48,13 @@ import { precomputeProjection } from "../services/umapProjection";
 const ARTIST_BATCH_SIZE = 10;
 const TRACK_BATCH_SIZE = 20;
 const ENRICHMENT_INTERVAL_MS = 5 * 1000; // 5 seconds - rate limiter handles API limits
+// BullMQ retains a failed job's jobId dedup marker, so an entity that fails
+// enrichment can't be re-queued until the marker is gone. Cleaning failed jobs
+// older than this grace window frees the jobId for a retry while still backing
+// off a genuinely-failing entity (without it, a permanent failure would re-add
+// every 5s cycle). Completed jobs are cleaned with grace 0 -- a success should
+// be immediately re-queueable if the entity legitimately needs reprocessing.
+const FAILED_JOB_RETRY_GRACE_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_CONSECUTIVE_SYSTEM_FAILURES = 5; // Circuit breaker threshold
 
 let isRunning = false;
@@ -1036,7 +1043,7 @@ async function runPhase(
     return result;
 }
 
-async function executeArtistsPhase(): Promise<number> {
+export async function executeArtistsPhase(): Promise<number> {
     // Reset temp-MBID artists that have been unresolvable for >24h
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     await prisma.artist.updateMany({
@@ -1064,6 +1071,16 @@ async function executeArtistsPhase(): Promise<number> {
 
     if (pendingArtists.length === 0) return 0;
 
+    // Free reusable jobIds: completed immediately, failed after a backoff grace.
+    // Without this a failed artist's `artist-<id>` marker blocks every re-add
+    // until BullMQ's removeOnFail age (24h) expires -- far slower than intended.
+    try {
+        await artistQueue.clean(0, 0, "completed");
+        await artistQueue.clean(FAILED_JOB_RETRY_GRACE_MS, 0, "failed");
+    } catch (err) {
+        logger.warn(`[Enrichment] artistQueue clean failed: ${(err as Error).message}`);
+    }
+
     let queued = 0;
     for (const artist of pendingArtists) {
         try {
@@ -1090,7 +1107,7 @@ async function executeArtistsPhase(): Promise<number> {
     return queued;
 }
 
-async function executeMoodTagsPhase(): Promise<number> {
+export async function executeMoodTagsPhase(): Promise<number> {
     const tracks = await prisma.track.findMany({
         where: {
             OR: [
@@ -1109,6 +1126,16 @@ async function executeMoodTagsPhase(): Promise<number> {
     });
 
     if (tracks.length === 0) return 0;
+
+    // Free reusable jobIds: completed immediately, failed after a backoff grace.
+    // The worker clears a failed track's tags to re-enable it, but the held
+    // `track-<id>` marker silently defeats that re-pickup until cleaned.
+    try {
+        await trackQueue.clean(0, 0, "completed");
+        await trackQueue.clean(FAILED_JOB_RETRY_GRACE_MS, 0, "failed");
+    } catch (err) {
+        logger.warn(`[Enrichment] trackQueue clean failed: ${(err as Error).message}`);
+    }
 
     const queuedIds: string[] = [];
     for (const track of tracks) {
