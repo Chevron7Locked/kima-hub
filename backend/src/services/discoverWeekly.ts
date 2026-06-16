@@ -1647,9 +1647,24 @@ export class DiscoverWeeklyService {
 
                 try {
                     await prisma.$transaction(async (tx) => {
-                        // Create DiscoveryAlbum
-                        const discoveryAlbum = await tx.discoveryAlbum.create({
-                            data: {
+                        // Upsert DiscoveryAlbum -- the scan-completion and
+                        // reconciliation paths can both reach this for the same
+                        // album in the same week. A plain create then violates the
+                        // (userId, weekStartDate, rgMbid) unique constraint, throws,
+                        // and rolls back the whole transaction -- losing the
+                        // DiscoveryTrack records too. Upsert makes it idempotent;
+                        // an existing record is left as-is (don't reset the user's
+                        // status/downloadedAt) and the track loop below fills any
+                        // missing tracks.
+                        const discoveryAlbum = await tx.discoveryAlbum.upsert({
+                            where: {
+                                userId_weekStartDate_rgMbid: {
+                                    userId: batch.userId,
+                                    weekStartDate: batch.weekStart,
+                                    rgMbid: album.rgMbid,
+                                },
+                            },
+                            create: {
                                 userId: batch.userId,
                                 rgMbid: album.rgMbid,
                                 artistName: album.artist.name,
@@ -1662,6 +1677,7 @@ export class DiscoverWeeklyService {
                                 downloadedAt: new Date(),
                                 status: "ACTIVE",
                             },
+                            update: {},
                         });
 
                         // Create DiscoveryTrack for each track
