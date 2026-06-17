@@ -95,11 +95,13 @@ export const config = {
         process.env.ALLOWED_ORIGINS?.split(",").map((o) => o.trim()) ||
         (process.env.NODE_ENV === "development" ? true : []),
 
-    // Socket inactivity timeout for active requests. 5 minutes bounds dead
-    // peers without cutting live audio streams -- clients transparently re-range
-    // on resume. Injectable via env so tests can use a small value.
-    serverSocketTimeoutMs: parseInt(
-        process.env.SERVER_SOCKET_TIMEOUT_MS || "300000",
+    // TCP keepalive idle delay for incoming connections. Dead/half-open peers
+    // (a mobile client whose network vanished without FIN/RST) are reaped by the
+    // OS once keepalive probes start failing, WITHOUT cutting a paused-but-alive
+    // audio stream -- unlike a blunt socket-inactivity timeout, which fires on a
+    // paused stream (no bytes flow) and forces a reconnect on resume.
+    socketKeepAliveDelayMs: parseInt(
+        process.env.SOCKET_KEEPALIVE_DELAY_MS || "30000",
         10
     ),
 };
