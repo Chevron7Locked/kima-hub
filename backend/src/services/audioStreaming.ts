@@ -67,7 +67,8 @@ export class AudioStreamingService {
         trackId: string,
         quality: Quality,
         sourceModified: Date,
-        sourceAbsolutePath: string
+        sourceAbsolutePath: string,
+        priority = 0
     ): Promise<StreamFileInfo> {
         logger.debug(`[AudioStreaming] Request: trackId=${trackId}, quality=${quality}, source=${path.basename(sourceAbsolutePath)}`);
 
@@ -153,7 +154,7 @@ export class AudioStreamingService {
             // request queued behind a burst gets a clean 500 before connection reset.
             const promise = this.transcodeQueue.add(
                 () => this.transcodeToCache(trackId, quality, sourceAbsolutePath, sourceModified),
-                { timeout: 240_000 }
+                { timeout: 240_000, priority }
             ) as Promise<string>;
             this.inFlightTranscodes.set(dedupeKey, promise);
             try {

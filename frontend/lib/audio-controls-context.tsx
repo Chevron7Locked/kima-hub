@@ -161,6 +161,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const justFinishedRef = useRef(false);
     const lastSaveTimeRef = useRef(0);
     const errorClassifyingRef = useRef(false);
+    const prewarmFiredForRef = useRef<string | null>(null);
 
     // Session ref: always consulted by seek, handleEnded, and progress saves.
     const bookSessionRef = useRef<BookSession | null>(null);
@@ -1230,6 +1231,36 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         return () => ctrl.off("ended", handleEnded);
     }, [controller, state, playback]);
 
+    // -- Next-track prewarm trigger --
+    // Fires once per upcoming track when ≤30s remain; guards via ref so it
+    // never blocks the playback path.
+    useEffect(() => {
+        const ctrl = controllerRef.current;
+        if (!ctrl) return;
+
+        const handleTimeUpdate = (data?: unknown) => {
+            if (playbackTypeRef.current !== "track") return;
+            const { time } = data as { time: number };
+            const duration = currentTrackRef.current?.duration;
+            if (!duration || duration - time > 30) return;
+
+            const nextTrack = getNextTrackInfo(
+                queueRef.current,
+                currentIndexRef.current,
+                isShuffleRef.current,
+                shuffleIndicesRef.current,
+                repeatModeRef.current
+            );
+            if (!nextTrack) return;
+            if (prewarmFiredForRef.current === nextTrack.id) return;
+            prewarmFiredForRef.current = nextTrack.id;
+            api.prewarmTrack(nextTrack.id);
+        };
+
+        ctrl.on("timeupdate", handleTimeUpdate);
+        return () => ctrl.off("timeupdate", handleTimeUpdate);
+    }, [controller]);
+
     // -- Canplay handler: duration update only --
     useEffect(() => {
         const ctrl = controllerRef.current;
@@ -1496,6 +1527,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         try {
             const handler = () => {
                 iosAudioLog("devicechange", "audio-controls-context", null);
+                controllerRef.current?.notifyForeground();
             };
             navigator.mediaDevices?.addEventListener("devicechange", handler);
             deviceChangeAbort = () => navigator.mediaDevices?.removeEventListener("devicechange", handler);

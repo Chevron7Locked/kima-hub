@@ -183,4 +183,56 @@ router.get("/tracks/:id/stream", async (req, res) => {
   }
 });
 
+router.post("/tracks/:id/prewarm", async (req, res) => {
+  try {
+    const { quality } = req.query;
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const [track, settings] = await Promise.all([
+      prisma.track.findUnique({ where: { id: req.params.id } }),
+      quality
+        ? Promise.resolve(null)
+        : prisma.userSettings.findUnique({ where: { userId } }),
+    ]);
+
+    if (!track) {
+      return res.status(404).json({ error: "Track not found" });
+    }
+
+    if (!track.filePath || !track.fileModified) {
+      return res.status(202).json({ ok: true });
+    }
+
+    const requestedQuality: string = quality
+      ? (quality as string)
+      : settings?.playbackQuality || "original";
+
+    const streamingService = getAudioStreamingService(
+      config.music.transcodeCachePath,
+      config.music.transcodeCacheMaxGb,
+    );
+
+    const normalizedFilePath = track.filePath.replace(/\\/g, "/");
+    const absolutePath = path.join(config.music.musicPath, normalizedFilePath);
+
+    // Fire-and-forget at low priority so on-demand streams always preempt.
+    void streamingService.getStreamFilePath(
+      track.id,
+      requestedQuality as any,
+      track.fileModified,
+      absolutePath,
+      -1,
+    ).catch(() => {});
+
+    return res.status(202).json({ ok: true });
+  } catch (error) {
+    logger.error("Prewarm track error:", error);
+    res.status(500).json({ error: "Failed to prewarm track" });
+  }
+});
+
 export default router;

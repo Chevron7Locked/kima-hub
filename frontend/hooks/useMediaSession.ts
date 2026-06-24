@@ -48,7 +48,8 @@ export function useMediaSession() {
                 status === "paused" ||
                 status === "blocked" ||
                 status === "error" ||
-                status === "idle"
+                status === "idle" ||
+                status === "loading"
             ) {
                 navigator.mediaSession.playbackState = "paused";
             }
