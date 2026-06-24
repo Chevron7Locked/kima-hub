@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+### Fixed
+
+- **iOS background audio holds through interruptions and track changes.** Playback no longer dies after a call, Siri, a notification, or toggling earbuds/headphones, and the multi-second gap between tracks no longer strands the player. The AudioContext now resumes alongside (not before) `play()` so the iOS autoplay grant is preserved on auto-advance; a load-deadline timer covers the inter-track `loading` window the recovery ladder previously ignored; the audio session re-arms on foreground and route changes; and the lock-screen transport reflects buffering state.
+- **Audiobooks with broken Audiobookshelf chapters now navigate correctly.** Books whose ABS chapter data is sparse or doesn't span the file (it would show, e.g., two markers covering the first hour of a six-hour book) no longer surface that misleading list. Navigation uses a validated section model: real chapters when they cover the book, otherwise parts derived from the audio files.
+
+### Changed
+
+- **Next track is pre-transcoded during playback** so non-original-quality transitions don't stall on a cold cache.
+- **The audiobook detail view no longer hits Audiobookshelf on every page load.** Sections are computed and validated once at sync and served from cache, removing a per-request round-trip and the live-fetch/lazy-fill path.
+
 ## [1.9.0] - 2026-06-15
 
 A reliability release built around a ground-up rewrite of the audio playback engine. After an end-to-end audit of the player turned up 30 issues across the frontend and backend, the tangle of overlapping recovery mechanisms was replaced with a single, predictable engine; audiobooks became proper sessions; and a long-dead podcast auto-refresh was brought back. Several settings that looked functional but did nothing now actually work.
