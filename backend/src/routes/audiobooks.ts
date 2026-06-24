@@ -487,7 +487,7 @@ router.get("/:id/cover", async (req, res) => {
 
 /**
  * GET /audiobooks/:id
- * Get a specific audiobook with full details (from cache, fallback to API)
+ * Get a specific audiobook with full details (cache-only; syncs when missing/stale/no sections).
  */
 router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
     try {
@@ -499,20 +499,14 @@ router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
 
         const { id } = req.params;
 
-        // Try to get from cache first
-        let audiobook = await prisma.audiobook.findUnique({
-            where: { id },
-        });
+        let audiobook = await prisma.audiobook.findUnique({ where: { id } });
 
-        // If not cached or stale, fetch from API and cache it
         if (
             !audiobook ||
-            audiobook.lastSyncedAt <
-                new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+            audiobook.lastSyncedAt < new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) ||
+            audiobook.sectionsJson === null
         ) {
-            logger.debug(
-                `[AUDIOBOOK] Audiobook ${id} not cached or stale, fetching...`
-            );
+            logger.debug(`[AUDIOBOOK] Audiobook ${id} not cached, stale, or missing sections; syncing...`);
             audiobook = await audiobookCacheService.getAudiobook(id);
         }
 
@@ -520,22 +514,6 @@ router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
             return res.status(404).json({ error: "Audiobook not found" });
         }
 
-        // Get chapters and audio files from ABS (these change less frequently).
-        // Track whether the live fetch succeeded so we can distinguish
-        // "ABS unreachable" from "book has no tracks".
-        let absBook: any = null;
-        let absReachable = false;
-        try {
-            absBook = await audiobookshelfService.getAudiobook(id);
-            absReachable = true;
-        } catch (apiError: any) {
-            logger.warn(
-                `  Failed to fetch live data from Audiobookshelf for ${id}, using cached data only:`,
-                apiError.message
-            );
-        }
-
-        // Get user's progress
         const progress = await prisma.audiobookProgress.findUnique({
             where: {
                 userId_audiobookshelfId: {
@@ -545,43 +523,16 @@ router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
             },
         });
 
-        // Resolve tracks: prefer live ABS data; fall back to DB cache.
-        const liveTracks: { index: number; startOffset: number; duration: number }[] | null =
-            absReachable && absBook?.media?.tracks?.length > 0
-                ? (absBook.media.tracks as any[])
-                      .slice()
-                      .sort((a: any, b: any) => (a.startOffset ?? 0) - (b.startOffset ?? 0))
-                      .map((t: any) => ({
-                          index: t.index,
-                          startOffset: t.startOffset ?? 0,
-                          duration: t.duration ?? 0,
-                      }))
-                : null;
+        const tracks =
+            (audiobook.tracksJson as
+                | { index: number; startOffset: number; duration: number }[]
+                | null) ?? [];
+        const sections =
+            (audiobook.sectionsJson as
+                | { index: number; title: string; start: number }[]
+                | null) ?? [];
 
-        const dbTracks = audiobook.tracksJson as
-            | { index: number; startOffset: number; duration: number }[]
-            | null;
-
-        const resolvedTracks = liveTracks ?? dbTracks;
-        const tracksUnavailable = !absReachable && resolvedTracks === null;
-
-        // Lazy fill: if ABS returned tracks and the DB row doesn't have them yet,
-        // upsert in the background so future list/series responses include them.
-        if (liveTracks !== null && dbTracks === null) {
-            prisma.audiobook
-                .update({
-                    where: { id },
-                    data: {
-                        tracksJson: liveTracks,
-                        ...(audiobook.numTracks == null && { numTracks: liveTracks.length }),
-                    },
-                })
-                .catch((err: any) =>
-                    logger.warn(`[AUDIOBOOK] Lazy tracksJson fill failed for ${id}:`, err.message)
-                );
-        }
-
-        const response: Record<string, any> = {
+        res.json({
             id: audiobook.id,
             title: audiobook.title,
             author: audiobook.author || "Unknown Author",
@@ -592,12 +543,8 @@ router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
                     ? `/audiobooks/${audiobook.id}/cover`
                     : null,
             duration: audiobook.duration || 0,
-            chapters: absReachable
-                ? (absBook.media?.chapters || [])
-                      .slice()
-                      .sort((a: any, b: any) => (a.start ?? 0) - (b.start ?? 0))
-                : [],
-            audioFiles: absReachable ? absBook.media?.audioFiles || [] : [],
+            tracks,
+            sections,
             libraryId: audiobook.libraryId,
             ...(audiobook.numTracks != null && { trackCount: audiobook.numTracks }),
             progress: progress
@@ -611,15 +558,7 @@ router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
                       lastPlayedAt: progress.lastPlayedAt,
                   }
                 : null,
-        };
-
-        if (tracksUnavailable) {
-            response["tracksUnavailable"] = true;
-        } else {
-            response["tracks"] = resolvedTracks ?? [];
-        }
-
-        res.json(response);
+        });
     } catch (error) {
         safeError(res, "Failed to fetch audiobook", error);
     }

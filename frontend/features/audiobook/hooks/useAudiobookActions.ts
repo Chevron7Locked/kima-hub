@@ -131,7 +131,7 @@ export function useAudiobookActions(
     refetch,
   ]);
 
-  const seekToChapter = useCallback(
+  const seekToSection = useCallback(
     (startTime: number) => {
       if (!audiobook) return;
 
@@ -152,6 +152,6 @@ export function useAudiobookActions(
     handlePlayPause,
     handleMarkAsCompleted,
     handleResetProgress,
-    seekToChapter,
+    seekToSection,
   };
 }

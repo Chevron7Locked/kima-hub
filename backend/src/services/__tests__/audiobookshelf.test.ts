@@ -211,6 +211,7 @@ describe("syncAudiobooksToCache expanded fetch", () => {
                 id: "book-ok",
                 numTracks: 3,
                 tracksJson: [{ index: 1, startOffset: 0, duration: 1200 }],
+                sectionsJson: [{ index: 1, title: "Part 1", start: 0 }],
             },
         ]);
 
@@ -271,6 +272,65 @@ describe("syncAudiobooksToCache expanded fetch", () => {
         expect(tracks).toHaveLength(2);
         expect(tracks[0]).toMatchObject({ index: 1, startOffset: 0, duration: 1200 });
         expect(tracks[1]).toMatchObject({ index: 2, startOffset: 1200, duration: 1200 });
+    });
+
+    it("persists sectionsJson in the upsert with {index,title,start} shape", async () => {
+        jest.spyOn(audiobookshelfService as any, "getAllAudiobooks").mockResolvedValue([
+            minifiedItem("book-sections", 2),
+        ]);
+        prisma.audiobook.findMany.mockResolvedValue([]);
+        jest.spyOn(audiobookshelfService as any, "getAudiobook").mockResolvedValue({
+            media: {
+                numTracks: 2,
+                duration: 2400,
+                tracks: [
+                    { index: 1, startOffset: 0, duration: 1200 },
+                    { index: 2, startOffset: 1200, duration: 1200 },
+                ],
+                audioFiles: [
+                    { index: 1, metadata: { filename: "001 - Chapter One.mp3" } },
+                    { index: 2, metadata: { filename: "002 - Chapter Two.mp3" } },
+                ],
+                chapters: [],
+            },
+        });
+
+        await audiobookshelfService.syncAudiobooksToCache();
+
+        const upsertCall = prisma.audiobook.upsert.mock.calls[0][0];
+        const sections = upsertCall.update.sectionsJson;
+        expect(sections).toHaveLength(2);
+        expect(sections[0]).toMatchObject({ index: 1, title: "Chapter One", start: 0 });
+        expect(sections[1]).toMatchObject({ index: 2, title: "Chapter Two", start: 1200 });
+    });
+
+    it("derives section titles from audioFiles filenames (Part NNN pattern)", async () => {
+        jest.spyOn(audiobookshelfService as any, "getAllAudiobooks").mockResolvedValue([
+            minifiedItem("book-partnames", 2),
+        ]);
+        prisma.audiobook.findMany.mockResolvedValue([]);
+        jest.spyOn(audiobookshelfService as any, "getAudiobook").mockResolvedValue({
+            media: {
+                numTracks: 2,
+                duration: 3600,
+                tracks: [
+                    { index: 1, startOffset: 0, duration: 1800 },
+                    { index: 2, startOffset: 1800, duration: 1800 },
+                ],
+                audioFiles: [
+                    { index: 1, metadata: { filename: "Part 001.mp3" } },
+                    { index: 2, metadata: { filename: "Part 002.mp3" } },
+                ],
+                chapters: [],
+            },
+        });
+
+        await audiobookshelfService.syncAudiobooksToCache();
+
+        const upsertCall = prisma.audiobook.upsert.mock.calls[0][0];
+        const sections = upsertCall.update.sectionsJson;
+        expect(sections[0].title).toBe("Part 001");
+        expect(sections[1].title).toBe("Part 002");
     });
 
     it("calls getAudiobook for each book that needs an expanded fetch", async () => {
