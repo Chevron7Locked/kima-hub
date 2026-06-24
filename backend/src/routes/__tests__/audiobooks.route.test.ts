@@ -1,11 +1,11 @@
 /**
- * Audiobooks Route Tests -- spec 1.10
+ * Audiobooks Route Tests -- spec 1.10 + sections remediation
  *
  * Covers:
  * - List (GET /) and series (GET /series/:name): tracks + trackCount present
  *   when DB row has tracksJson; NULL numTracks -> trackCount absent, never 0/1.
- * - Detail (GET /:id): ABS failure + DB cache -> tracks from DB; ABS failure
- *   + no DB cache -> tracksUnavailable:true, no tracks array.
+ * - Detail (GET /:id): cache-only response with sections + tracks from DB;
+ *   null sectionsJson triggers audiobookCacheService resync.
  */
 
 // All mocks before imports.
@@ -40,7 +40,10 @@ jest.mock("../../utils/errors", () => ({
 
 jest.mock("../../services/audiobookshelf", () => ({
     audiobookshelfService: {
-        getAudiobook: jest.fn(),
+        getAllAudiobooks: jest.fn(),
+        searchAudiobooks: jest.fn(),
+        streamAudiobook: jest.fn(),
+        updateProgress: jest.fn(),
     },
 }));
 
@@ -77,7 +80,6 @@ import request from "supertest";
 import audiobooksRoutes from "../audiobooks";
 import { prisma } from "../../utils/db";
 import { getSystemSettings } from "../../utils/systemSettings";
-import { audiobookshelfService } from "../../services/audiobookshelf";
 import { audiobookCacheService } from "../../services/audiobookCache";
 
 function createApp() {
@@ -92,6 +94,11 @@ const enabledSettings = { audiobookshelfEnabled: true };
 const tracksFixture = [
     { index: 1, startOffset: 0, duration: 1200 },
     { index: 2, startOffset: 1200, duration: 1200 },
+];
+
+const sectionsFixture = [
+    { index: 1, title: "Part 1", start: 0 },
+    { index: 2, title: "Part 2", start: 1200 },
 ];
 
 const bookRow = {
@@ -110,6 +117,7 @@ const bookRow = {
     lastSyncedAt: new Date(),
     numTracks: 2,
     tracksJson: tracksFixture,
+    sectionsJson: sectionsFixture,
 };
 
 const bookRowNullTracks = {
@@ -117,6 +125,7 @@ const bookRowNullTracks = {
     id: "abs-book-2",
     numTracks: null,
     tracksJson: null,
+    sectionsJson: null,
 };
 
 // ── GET / (list) ──────────────────────────────────────────────────────────────
@@ -207,55 +216,52 @@ describe("GET /audiobooks/:id", () => {
         (audiobookCacheService.getAudiobook as jest.Mock).mockResolvedValue(bookRow);
     });
 
-    it("returns tracks from DB when ABS is unreachable and DB has tracksJson", async () => {
+    it("returns sections and tracks from DB cache without hitting ABS", async () => {
         (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(bookRow);
-        (audiobookshelfService.getAudiobook as jest.Mock).mockRejectedValue(
-            new Error("connection refused"),
-        );
 
         const res = await request(app).get("/audiobooks/abs-book-1");
 
         expect(res.status).toBe(200);
+        expect(res.body.sections).toEqual(sectionsFixture);
         expect(res.body.tracks).toEqual(tracksFixture);
         expect(res.body.tracksUnavailable).toBeUndefined();
+        expect(res.body.chapters).toBeUndefined();
+        expect(res.body.audioFiles).toBeUndefined();
     });
 
-    it("returns tracksUnavailable:true when ABS is unreachable and DB has no tracksJson", async () => {
+    it("triggers resync via audiobookCacheService when sectionsJson is null", async () => {
+        (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(bookRowNullTracks);
+        (audiobookCacheService.getAudiobook as jest.Mock).mockResolvedValue(bookRow);
+
+        const res = await request(app).get("/audiobooks/abs-book-2");
+
+        expect(res.status).toBe(200);
+        expect(audiobookCacheService.getAudiobook).toHaveBeenCalledWith("abs-book-2");
+        expect(res.body.sections).toEqual(sectionsFixture);
+    });
+
+    it("returns empty sections array when audiobookCacheService returns book with null sectionsJson", async () => {
         (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(bookRowNullTracks);
         (audiobookCacheService.getAudiobook as jest.Mock).mockResolvedValue(bookRowNullTracks);
-        (audiobookshelfService.getAudiobook as jest.Mock).mockRejectedValue(
-            new Error("connection refused"),
-        );
 
         const res = await request(app).get("/audiobooks/abs-book-2");
 
         expect(res.status).toBe(200);
-        expect(res.body.tracksUnavailable).toBe(true);
-        expect(res.body.tracks).toBeUndefined();
+        expect(res.body.sections).toEqual([]);
+        expect(res.body.tracks).toEqual([]);
     });
 
-    it("returns tracks from live ABS when available", async () => {
-        const liveTracks = [
-            { index: 1, startOffset: 0, duration: 600, contentUrl: "/abs/t1" },
-        ];
-        (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(bookRowNullTracks);
-        (audiobookshelfService.getAudiobook as jest.Mock).mockResolvedValue({
-            media: { chapters: [], audioFiles: [], tracks: liveTracks },
-        });
+    it("returns 404 when audiobook is not found after resync", async () => {
+        (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(null);
+        (audiobookCacheService.getAudiobook as jest.Mock).mockResolvedValue(null);
 
-        const res = await request(app).get("/audiobooks/abs-book-2");
+        const res = await request(app).get("/audiobooks/missing-id");
 
-        expect(res.status).toBe(200);
-        expect(res.body.tracks).toHaveLength(1);
-        expect(res.body.tracks[0].index).toBe(1);
-        expect(res.body.tracksUnavailable).toBeUndefined();
+        expect(res.status).toBe(404);
     });
 
     it("includes trackCount from numTracks when present", async () => {
         (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(bookRow);
-        (audiobookshelfService.getAudiobook as jest.Mock).mockResolvedValue({
-            media: { chapters: [], audioFiles: [], tracks: [] },
-        });
 
         const res = await request(app).get("/audiobooks/abs-book-1");
 
@@ -266,9 +272,6 @@ describe("GET /audiobooks/:id", () => {
     it("omits trackCount when numTracks is NULL", async () => {
         (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(bookRowNullTracks);
         (audiobookCacheService.getAudiobook as jest.Mock).mockResolvedValue(bookRowNullTracks);
-        (audiobookshelfService.getAudiobook as jest.Mock).mockResolvedValue({
-            media: { chapters: [], audioFiles: [], tracks: [] },
-        });
 
         const res = await request(app).get("/audiobooks/abs-book-2");
 

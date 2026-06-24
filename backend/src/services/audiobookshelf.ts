@@ -3,6 +3,7 @@ import pLimit from "p-limit";
 import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
+import { buildSections, resolveMetaTags } from "./audiobookSections";
 
 const TRACK_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -145,31 +146,6 @@ class AudiobookshelfService {
             if (library.mediaType === "book") {
                 // Only get audiobook libraries
                 const items = await this.getLibraryItems(library.id);
-
-                // DEBUG: Log the structure of the first item with series
-                if (items.length > 0) {
-                    const itemsWithSeries = items.filter(
-                        (item: any) =>
-                            item.media?.metadata?.series ||
-                            item.media?.metadata?.seriesName
-                    );
-                    if (itemsWithSeries.length > 0) {
-                        logger.debug(
-                            "[AUDIOBOOKSHELF DEBUG] Sample item WITH series:",
-                            JSON.stringify(
-                                itemsWithSeries[0],
-                                null,
-                                2
-                            ).substring(0, 2000)
-                        );
-                    } else {
-                        logger.debug(
-                            "[AUDIOBOOKSHELF DEBUG] No items with series found! Sample item:",
-                            JSON.stringify(items[0], null, 2).substring(0, 1000)
-                        );
-                    }
-                }
-
                 allBooks.push(...items);
             }
         }
@@ -387,7 +363,7 @@ class AudiobookshelfService {
 
             // Load existing rows so we can decide which need an expanded fetch.
             const existingRows = await prisma.audiobook.findMany({
-                select: { id: true, numTracks: true, tracksJson: true },
+                select: { id: true, numTracks: true, tracksJson: true, sectionsJson: true },
             });
             const existingMap = new Map(existingRows.map((r) => [r.id, r]));
 
@@ -400,13 +376,16 @@ class AudiobookshelfService {
                 return trackCount > 1000 ? trackCount : null;
             };
 
-            // Prefetch expanded track maps with real concurrency (4 in flight)
-            // BEFORE the sequential upsert loop -- awaiting inside the loop
-            // would serialize the fetches one book at a time.
+            // Prefetch expanded data (tracks, chapters, audioFiles) with bounded concurrency
+            // BEFORE the sequential upsert loop -- awaiting inside the loop would serialize.
             const limit = pLimit(4);
-            const expandedTracks = new Map<
+            const expandedData = new Map<
                 string,
-                { index: number; startOffset: number; duration: number }[]
+                {
+                    tracks: { index: number; startOffset: number; duration: number }[];
+                    sections: { index: number; title: string; start: number }[];
+                    firstFileMeta: Record<string, string> | null;
+                }
             >();
             const needsExpanded = audiobooks.filter((item) => {
                 if (miscatalogedTrackCount(item) !== null) return false;
@@ -414,6 +393,7 @@ class AudiobookshelfService {
                 return (
                     !existing ||
                     existing.tracksJson === null ||
+                    existing.sectionsJson === null ||
                     existing.numTracks !== (item.media?.numTracks ?? null)
                 );
             });
@@ -423,17 +403,30 @@ class AudiobookshelfService {
                         try {
                             const expanded = await this.getAudiobook(item.id);
                             const rawTracks: any[] = expanded.media?.tracks ?? [];
-                            expandedTracks.set(
-                                item.id,
-                                rawTracks.map((t) => ({
-                                    index: t.index as number,
+                            const rawChapters: any[] = expanded.media?.chapters ?? [];
+                            const rawAudioFiles: any[] = expanded.media?.audioFiles ?? [];
+                            const expandedDuration: number =
+                                expanded.media?.duration ?? item.media?.duration ?? 0;
+
+                            const tracks = rawTracks.map((t) => ({
+                                index: t.index as number,
+                                startOffset: (t.startOffset ?? 0) as number,
+                                duration: (t.duration ?? 0) as number,
+                            }));
+                            const sections = buildSections({
+                                duration: expandedDuration,
+                                chapters: rawChapters,
+                                tracks: rawTracks.map((t: any) => ({
                                     startOffset: (t.startOffset ?? 0) as number,
-                                    duration: (t.duration ?? 0) as number,
-                                }))
-                            );
+                                    name: rawAudioFiles.find((af: any) => af.index === t.index)?.metadata?.filename as string | undefined,
+                                })),
+                            });
+                            const firstFileMeta = rawAudioFiles[0]?.metaTags ?? null;
+
+                            expandedData.set(item.id, { tracks, sections, firstFileMeta });
                         } catch (err: any) {
                             logger.warn(
-                                `[AUDIOBOOKSHELF] Could not fetch expanded tracks for ${item.id}: ${err.message}`
+                                `[AUDIOBOOKSHELF] Could not fetch expanded data for ${item.id}: ${err.message}`
                             );
                         }
                     })
@@ -468,27 +461,38 @@ class AudiobookshelfService {
                     }
 
                     const incomingNumTracks: number | null = item.media?.numTracks ?? null;
-                    const tracksJson = expandedTracks.get(item.id);
+                    const expandedEntry = expandedData.get(item.id);
+                    const tracksJson = expandedEntry?.tracks;
+                    const sectionsJson = expandedEntry?.sections;
+                    const firstMeta = expandedEntry?.firstFileMeta ?? null;
+
+                    const {
+                        narrator: resolvedNarrator,
+                        genres: resolvedGenres,
+                        publishedYear: resolvedYear,
+                    } = resolveMetaTags(
+                        metadata.narratorName || metadata.narrator || null,
+                        metadata.genres || [],
+                        metadata.publishedYear ? parseInt(metadata.publishedYear, 10) : null,
+                        firstMeta,
+                    );
 
                     const sharedData = {
                         title: metadata.title || "Untitled",
                         author: metadata.authorName || metadata.author || null,
-                        narrator: metadata.narratorName || metadata.narrator || null,
+                        narrator: resolvedNarrator,
                         description: metadata.description || null,
-                        publishedYear: metadata.publishedYear
-                            ? parseInt(metadata.publishedYear, 10)
-                            : null,
+                        publishedYear: resolvedYear,
                         publisher: metadata.publisher || null,
                         series,
                         seriesSequence,
                         duration: item.media?.duration || null,
                         numTracks: incomingNumTracks,
-                        numChapters: item.media?.numChapters || null,
                         size: item.media?.size ? BigInt(item.media.size) : null,
                         isbn: metadata.isbn || null,
                         asin: metadata.asin || null,
                         language: metadata.language || null,
-                        genres: metadata.genres || [],
+                        genres: resolvedGenres,
                         tags: item.media?.tags || [],
                         coverUrl: metadata.coverPath
                             ? `${this.baseUrl}${metadata.coverPath}`
@@ -497,6 +501,7 @@ class AudiobookshelfService {
                         libraryId: item.libraryId || null,
                         lastSyncedAt: new Date(),
                         ...(tracksJson !== undefined && { tracksJson }),
+                        ...(sectionsJson !== undefined && { sectionsJson }),
                     };
 
                     await prisma.audiobook.upsert({

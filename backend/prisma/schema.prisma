@@ -85,7 +85,7 @@ model Audiobook {
   duration       Float?
   numTracks      Int?
   tracksJson     Json?
-  numChapters    Int?
+  sectionsJson   Json?
   size           BigInt?
   isbn           String?
   asin           String?

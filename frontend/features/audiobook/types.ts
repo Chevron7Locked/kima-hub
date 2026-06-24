@@ -5,11 +5,10 @@ export interface AudiobookProgress {
     lastPlayedAt: Date;
 }
 
-export interface AudiobookChapter {
-    id: number;
+export interface AudiobookSection {
+    index: number;
     title: string;
     start: number;
-    end: number;
 }
 
 export interface AudiobookSeries {
@@ -17,21 +16,10 @@ export interface AudiobookSeries {
     sequence: string;
 }
 
-export interface AudiobookMetaTags {
-    tagGenre?: string;
-    tagDate?: string;
-    tagComment?: string;
-    tagAlbum?: string;
-}
-
 export interface AudiobookTrack {
     index: number;
     startOffset: number;
     duration: number;
-}
-
-export interface AudiobookAudioFile {
-    metaTags?: AudiobookMetaTags;
 }
 
 export interface Audiobook {
@@ -53,8 +41,7 @@ export interface Audiobook {
     progress?: AudiobookProgress | null;
     tracks?: AudiobookTrack[];
     trackCount?: number;
-    chapters?: AudiobookChapter[];
-    audioFiles?: AudiobookAudioFile[];
+    sections?: AudiobookSection[];
 }
 
 export interface AudiobookMetadata {

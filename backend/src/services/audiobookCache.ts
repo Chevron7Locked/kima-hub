@@ -1,4 +1,5 @@
 import { audiobookshelfService } from "./audiobookshelf";
+import { buildSections, resolveMetaTags } from "./audiobookSections";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import fs from "fs/promises";
@@ -144,7 +145,6 @@ export class AudiobookCacheService {
                 : Array.isArray(book.media?.tracks) && book.media.tracks.length > 0
                   ? (book.media.tracks.length as number)
                   : null;
-        const numChapters = book.media?.numChapters || null;
         const size = book.media?.size ? BigInt(book.media.size) : null;
         const libraryId = book.libraryId || null;
 
@@ -205,15 +205,40 @@ export class AudiobookCacheService {
             );
         }
 
-        // If this is an expanded response (has media.tracks), persist the track map.
+        // Pull expanded data when present (chapters, tracks, audioFiles come from ?expanded=1 fetch).
+        const rawChapters: any[] = Array.isArray(book.media?.chapters) ? book.media.chapters : [];
+        const rawTracks: any[] = Array.isArray(book.media?.tracks) ? book.media.tracks : [];
+        const rawAudioFiles: any[] = Array.isArray(book.media?.audioFiles) ? book.media.audioFiles : [];
+        const firstFileMeta: Record<string, string> | null = rawAudioFiles[0]?.metaTags ?? null;
+
+        const {
+            narrator: resolvedNarrator,
+            genres: resolvedGenres,
+            publishedYear: resolvedPublishedYear,
+        } = resolveMetaTags(narrator, genres, publishedYear, firstFileMeta);
+
+        // Only persist track map when the expanded response carries tracks.
         const tracksJson: { index: number; startOffset: number; duration: number }[] | null =
-            Array.isArray(book.media?.tracks) && book.media.tracks.length > 0
-                ? (book.media.tracks as any[]).map((t: any) => ({
+            rawTracks.length > 0
+                ? rawTracks.map((t: any) => ({
                       index: t.index as number,
                       startOffset: (t.startOffset ?? 0) as number,
                       duration: (t.duration ?? 0) as number,
                   }))
                 : null;
+
+        // Only compute sections when we have expanded data; null means "not computed yet".
+        const isExpanded = rawTracks.length > 0 || rawChapters.length > 0 || rawAudioFiles.length > 0;
+        const sectionsJson: { index: number; title: string; start: number }[] | null = isExpanded
+            ? buildSections({
+                  duration: duration ?? 0,
+                  chapters: rawChapters,
+                  tracks: rawTracks.map((t: any) => ({
+                      startOffset: (t.startOffset ?? 0) as number,
+                      name: rawAudioFiles.find((af: any) => af.index === t.index)?.metadata?.filename as string | undefined,
+                  })),
+              })
+            : null;
 
         let localCoverPath: string | null = null;
         if (coverUrl) {
@@ -233,20 +258,19 @@ export class AudiobookCacheService {
                 id: book.id,
                 title,
                 author,
-                narrator,
+                narrator: resolvedNarrator,
                 description,
-                publishedYear,
+                publishedYear: resolvedPublishedYear,
                 publisher,
                 series,
                 seriesSequence,
                 duration,
                 numTracks,
-                numChapters,
                 size,
                 isbn,
                 asin,
                 language,
-                genres,
+                genres: resolvedGenres,
                 tags,
                 localCoverPath,
                 coverUrl,
@@ -254,24 +278,24 @@ export class AudiobookCacheService {
                 libraryId,
                 lastSyncedAt: new Date(),
                 ...(tracksJson !== null && { tracksJson }),
+                ...(sectionsJson !== null && { sectionsJson }),
             },
             update: {
                 title,
                 author,
-                narrator,
+                narrator: resolvedNarrator,
                 description,
-                publishedYear,
+                publishedYear: resolvedPublishedYear,
                 publisher,
                 series,
                 seriesSequence,
                 duration,
                 numTracks,
-                numChapters,
                 size,
                 isbn,
                 asin,
                 language,
-                genres,
+                genres: resolvedGenres,
                 tags,
                 localCoverPath: localCoverPath || undefined,
                 coverUrl,
@@ -279,6 +303,7 @@ export class AudiobookCacheService {
                 libraryId,
                 lastSyncedAt: new Date(),
                 ...(tracksJson !== null && { tracksJson }),
+                ...(sectionsJson !== null && { sectionsJson }),
             },
         });
 
@@ -374,11 +399,11 @@ export class AudiobookCacheService {
             where: { id: audiobookId },
         });
 
-        // If not in cache or stale (> 7 days), try to sync it
+        // Sync when missing, stale (> 7 days), or sectionsJson not yet populated (backfill).
         if (
             !audiobook ||
-            audiobook.lastSyncedAt <
-                new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+            audiobook.lastSyncedAt < new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) ||
+            audiobook.sectionsJson === null
         ) {
             logger.debug(
                 `[AUDIOBOOK] Audiobook ${audiobookId} not cached or stale, syncing...`
