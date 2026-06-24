@@ -15,7 +15,7 @@ export type EngineStatus =
 
 export type PauseClass = "user" | "system";
 
-export type TimerId = "nudge-settle" | "reload-settle";
+export type TimerId = "nudge-settle" | "reload-settle" | "load-deadline";
 
 export interface EngineSnapshot {
     status: EngineStatus;
@@ -80,6 +80,7 @@ export const RECOVERY = {
     stallDeadlineMs: 5_000,
     nudgeSettleMs: 4_000,
     reloadSettleMs: 12_000,
+    loadDeadlineMs: 15_000,
     maxAttempts: 4,
     budgetResetAfterMs: 60_000,
     endedToleranceS: 3,
@@ -125,6 +126,7 @@ function cancelBothTimers(): Effect[] {
     return [
         { kind: "cancel-timer", timer: "nudge-settle" },
         { kind: "cancel-timer", timer: "reload-settle" },
+        { kind: "cancel-timer", timer: "load-deadline" },
     ];
 }
 
@@ -270,6 +272,7 @@ export function transition(
             const effects: Effect[] = [
                 ...cancelBothTimers(),
                 { kind: "set-src-and-load", src: event.src },
+                { kind: "arm-timer", timer: "load-deadline", ms: RECOVERY.loadDeadlineMs },
             ];
             if (event.autoplay) {
                 effects.push({ kind: "claim-session" });
@@ -317,6 +320,7 @@ export function transition(
                             ...cancelBothTimers(),
                             { kind: "claim-session" },
                             { kind: "set-src-and-load", src: snap.src },
+                            { kind: "arm-timer", timer: "load-deadline", ms: RECOVERY.loadDeadlineMs },
                             { kind: "call-play" },
                         ],
                     };
@@ -362,6 +366,7 @@ export function transition(
                     rung: "none",
                     progressStreakStartedAt: snap.progressStreakStartedAt ?? event.now,
                     lastProgressAt: event.now,
+                    resumeOnForeground: false,
                 },
                 effects: cancelBothTimers(),
             };
@@ -377,6 +382,7 @@ export function transition(
                     pauseClass: "system",
                     rung: "none",
                     progressStreakStartedAt: null,
+                    resumeOnForeground: snap.intent === "play",
                 },
                 effects: cancelBothTimers(),
             };
@@ -618,6 +624,15 @@ export function transition(
                 // Start nudge rung for next cycle.
                 const result = startNudgeRung(snap, event.now);
                 return result;
+            }
+
+            if (event.timer === "load-deadline") {
+                // Load stalled (iOS throttles setTimeout while backgrounded -- expected).
+                if (snap.status !== "loading") {
+                    return { snapshot: snap, effects: [] };
+                }
+                const updated: EngineSnapshot = { ...snap, status: "buffering" };
+                return escalate(updated, event.now, false);
             }
 
             return { snapshot: snap, effects: [] };

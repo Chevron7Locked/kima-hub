@@ -624,6 +624,12 @@ class ApiClient {
         return baseUrl;
     }
 
+    prewarmTrack(trackId: string): void {
+        void this.request<{ ok: boolean }>(`/library/tracks/${trackId}/prewarm`, {
+            method: "POST",
+        }).catch(() => {});
+    }
+
     /**
      * Get the current token, lazily loading from localStorage if needed.
      * This handles the case where the singleton was created during SSR

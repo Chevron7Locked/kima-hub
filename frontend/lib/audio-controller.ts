@@ -194,6 +194,11 @@ export class AudioController {
                     // The whole dispatch including audio.play() runs synchronously to
                     // preserve the iOS autoplay grant in event tails (e.g. ended -> next track).
                     const capturedGen = this.snapshot.generation;
+                    // Resume AudioContext in parallel (fire-and-forget) so it is running
+                    // by the time the first audio frames need routing. Must NOT be awaited
+                    // or chained -- play() must remain synchronous for the iOS event-tail grant.
+                    const ctx = this.audioContext;
+                    if (ctx && ctx.state !== "running") ctx.resume().catch(() => {});
                     this.audio.play().then(() => {
                         // Play succeeded -- nothing to do; native-playing fires
                     }).catch((err: unknown) => {
