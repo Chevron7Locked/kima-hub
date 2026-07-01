@@ -28,12 +28,13 @@ interface AuthContextType {
         password: string,
         token?: string
     ) => Promise<void>;
+    completeOidcLogin: (code: string, state: string) => Promise<void>;
     logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const publicPaths = ["/login", "/register", "/onboarding", "/sync", "/share"];
+const publicPaths = ["/login", "/register", "/onboarding", "/sync", "/share", "/auth"];
 
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -129,6 +130,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, [router]);
 
+    const completeOidcLogin = useCallback(async (code: string, state: string) => {
+        const userData = await api.oidcCallback(code, state);
+        setUser(userData);
+        setIsAuthenticated(true);
+        if (userData.onboardingComplete === false) {
+            router.push("/onboarding");
+        } else {
+            router.push("/");
+        }
+    }, [router]);
+
     const logout = useCallback(async () => {
         await api.logout();
         setIsAuthenticated(false);
@@ -142,8 +154,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading,
         user,
         login,
+        completeOidcLogin,
         logout,
-    }), [isAuthenticated, isLoading, user, login, logout]);
+    }), [isAuthenticated, isLoading, user, login, completeOidcLogin, logout]);
 
     return (
         <AuthContext.Provider value={contextValue}>

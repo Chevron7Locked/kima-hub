@@ -448,6 +448,49 @@ class ApiClient {
         };
     }
 
+    // Which login methods are available (public endpoint)
+    async getAuthProviders() {
+        return this.request<{
+            local: boolean;
+            oidc: { enabled: boolean; name: string } | null;
+        }>("/auth/providers", { method: "GET" });
+    }
+
+    // Begin SSO: returns the provider authorization URL to redirect the browser to
+    async oidcStart() {
+        return this.request<{ authorizationUrl: string }>("/auth/oidc/start", {
+            method: "GET",
+        });
+    }
+
+    // Complete SSO: exchange the code+state for a Kima session
+    async oidcCallback(code: string, state: string): Promise<{
+        id: string;
+        username: string;
+        role: string;
+        onboardingComplete?: boolean;
+    }> {
+        const data = await this.request<{
+            token?: string;
+            refreshToken?: string;
+            user?: {
+                id: string;
+                username: string;
+                role: string;
+                onboardingComplete?: boolean;
+            };
+        }>("/auth/oidc/callback", {
+            method: "POST",
+            body: JSON.stringify({ code, state }),
+        });
+        if (data.token) {
+            this.setToken(data.token, data.refreshToken);
+        }
+        return (
+            data.user || { id: "", username: "", role: "" }
+        );
+    }
+
     async register(username: string, password: string, email?: string) {
         const data = await this.request<{
             id: string;
@@ -889,6 +932,18 @@ class ApiClient {
         });
     }
 
+    async testOidc(issuer: string) {
+        return this.request<ServiceTestResult & {
+            message?: string;
+            issuer?: string;
+            authorizationEndpoint?: string;
+            tokenEndpoint?: string;
+            jwksUri?: string;
+        }>("/system-settings/test-oidc", {
+            method: "POST",
+            body: JSON.stringify({ issuer }),
+        });
+    }
     async testOpenai(apiKey: string, model: string) {
         return this.request<ServiceTestResult>("/system-settings/test-openai", {
             method: "POST",

@@ -50,6 +50,20 @@ const systemSettingsSchema = z.object({
   lidarrQualityProfileId: z.number().int().positive().nullable().optional(),
   lidarrMetadataProfileId: z.number().int().positive().nullable().optional(),
 
+  // OIDC / SSO
+  oidcEnabled: z.boolean().optional(),
+  oidcProviderName: z.string().nullable().optional(),
+  oidcIssuer: z
+    .union([z.string().url(), z.literal("")])
+    .nullable()
+    .optional(),
+  oidcClientId: z.string().nullable().optional(),
+  oidcClientSecret: z.string().nullable().optional(),
+  oidcScopes: z.string().nullable().optional(),
+  oidcRoleClaim: z.string().nullable().optional(),
+  oidcAdminValue: z.string().nullable().optional(),
+  oidcAutoLinkByUsername: z.boolean().optional(),
+
   // AI Services
   openaiEnabled: z.boolean().optional(),
   openaiApiKey: z.string().nullable().optional(),
@@ -168,6 +182,7 @@ router.get("/", async (req, res) => {
       soulseekPassword: safeDecrypt(settings.soulseekPassword),
       slskdApiKey: safeDecrypt(settings.slskdApiKey),
       spotifyClientSecret: safeDecrypt(settings.spotifyClientSecret),
+      oidcClientSecret: safeDecrypt(settings.oidcClientSecret),
     };
 
     res.json(decryptedSettings);
@@ -213,6 +228,8 @@ router.post("/", async (req, res) => {
       encryptedData.slskdApiKey = encrypt(data.slskdApiKey);
     if (data.spotifyClientSecret)
       encryptedData.spotifyClientSecret = encrypt(data.spotifyClientSecret);
+    if (data.oidcClientSecret)
+      encryptedData.oidcClientSecret = encrypt(data.oidcClientSecret);
 
     // Fetch existing settings before save to detect credential changes
     const existingSettings = await prisma.systemSettings.findUnique({ where: { id: "default" } });
@@ -307,6 +324,22 @@ router.post("/", async (req, res) => {
       fanartService.reinitialize();
     } catch (err) {
       logger.warn("[SYSTEM SETTINGS] Could not reinitialize Fanart service:", err);
+    }
+
+    // Drop the cached OIDC discovery client so issuer/client changes apply now.
+    if (
+      data.oidcIssuer !== undefined ||
+      data.oidcClientId !== undefined ||
+      data.oidcClientSecret !== undefined ||
+      data.oidcScopes !== undefined ||
+      data.oidcEnabled !== undefined
+    ) {
+      try {
+        const { oidcService } = await import("../services/oidc");
+        oidcService.reset();
+      } catch (err) {
+        logger.warn("[SYSTEM SETTINGS] Could not reset OIDC service:", err);
+      }
     }
 
     // If Audiobookshelf was disabled, clear all audiobook-related data
@@ -678,6 +711,24 @@ router.post("/test-lastfm", async (req, res) => {
   }
 });
 
+// Test OIDC issuer (runs discovery against the issuer URL)
+router.post("/test-oidc", async (req, res) => {
+  try {
+    const { issuer } = req.body;
+    if (!issuer || typeof issuer !== "string") {
+      return res.status(400).json({ error: "Issuer URL is required" });
+    }
+    const { oidcService } = await import("../services/oidc");
+    const info = await oidcService.testIssuer(issuer.trim());
+    res.json({
+      success: true,
+      message: `Discovered ${info.issuer}`,
+      ...info,
+    });
+  } catch (error) {
+    safeError(res, "OIDC discovery test", error);
+  }
+});
 // Test Audiobookshelf connection
 router.post("/test-audiobookshelf", async (req, res) => {
   try {

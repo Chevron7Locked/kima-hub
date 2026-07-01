@@ -582,6 +582,16 @@ model SystemSettings {
   registrationOpen            Boolean  @default(false)
   lidarrQualityProfileId      Int?
   lidarrMetadataProfileId     Int?
+  // OIDC / SSO (Authorization Code + PKCE). clientSecret is encrypted at rest.
+  oidcEnabled                 Boolean  @default(false)
+  oidcProviderName            String?  @default("SSO")
+  oidcIssuer                  String?
+  oidcClientId                String?
+  oidcClientSecret            String?
+  oidcScopes                  String?  @default("openid profile email")
+  oidcRoleClaim               String?
+  oidcAdminValue              String?
+  oidcAutoLinkByUsername      Boolean  @default(true)
 }
 
 model Track {
@@ -717,6 +727,8 @@ model User {
   twoFactorRecoveryCodes String?
   moodMixParams          Json?
   tokenVersion           Int                   @default(0)
+  oidcSub                String?               @unique // OIDC subject claim; set when the account is linked to an SSO identity
+  email                  String? // populated from the OIDC email claim; used for account linking
   createdAt              DateTime              @default(now())
   apiKeys                ApiKey[]
   audiobookProgress      AudiobookProgress[]

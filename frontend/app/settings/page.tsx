@@ -20,6 +20,7 @@ import { LidarrSection } from "@/features/settings/components/sections/LidarrSec
 import { AudiobookshelfSection } from "@/features/settings/components/sections/AudiobookshelfSection";
 import { SoulseekSection } from "@/features/settings/components/sections/SoulseekSection";
 import { AIServicesSection } from "@/features/settings/components/sections/AIServicesSection";
+import { SSOSection } from "@/features/settings/components/sections/SSOSection";
 import { StoragePathsSection } from "@/features/settings/components/sections/StoragePathsSection";
 import { CacheSection } from "@/features/settings/components/sections/CacheSection";
 import { UserManagementSection } from "@/features/settings/components/sections/UserManagementSection";
@@ -185,6 +186,12 @@ export default function SettingsPage() {
                             onUpdate={updateSystemSettings}
                             onTest={handleTestService}
                             isTesting={testingServices.openai || testingServices.fanart || false}
+                        />
+
+                        {/* Single Sign-On (OIDC) */}
+                        <SSOSection
+                            settings={systemSettings}
+                            onUpdate={updateSystemSettings}
                         />
 
                         {/* Storage */}

@@ -20,7 +20,7 @@ import { useIsTV } from "@/lib/tv-utils";
 import { useActivityPanel } from "@/hooks/useActivityPanel";
 import { useImportToasts } from "@/hooks/useImportToasts";
 
-const publicPaths = ["/login", "/register", "/onboarding", "/sync", "/share"];
+const publicPaths = ["/login", "/register", "/onboarding", "/sync", "/share", "/auth"];
 
 export function AuthenticatedLayout({ children }: { children: ReactNode }) {
     const { isAuthenticated, isLoading } = useAuth();
