@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken } from "../middleware/auth";
+import { requireAuthOrToken, requireAdmin } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { config } from "../config";
 import { getSystemSettings } from "../utils/systemSettings";
@@ -573,7 +573,7 @@ router.delete("/clear-all", async (req, res) => {
 });
 
 // POST /downloads/clear-lidarr-queue - Clear stuck/failed items from Lidarr's queue
-router.post("/clear-lidarr-queue", async (_req, res) => {
+router.post("/clear-lidarr-queue", requireAdmin, async (_req, res) => {
     try {
         const result = await simpleDownloadManager.clearLidarrQueue();
         res.json({

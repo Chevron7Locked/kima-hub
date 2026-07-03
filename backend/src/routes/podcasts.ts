@@ -10,6 +10,7 @@ import { validateUrlForFetch } from "../utils/ssrf";
 import { deezerService, mergeAndDedupePodcasts } from "../services/deezer";
 import axios from "axios";
 import fs from "fs";
+import { resolveCorsOrigin } from "./audiobooks";
 
 const router = Router();
 
@@ -987,6 +988,9 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
         const { podcastId, episodeId } = req.params;
         const userId = req.user?.id;
         const podcastDebug = process.env.PODCAST_DEBUG === "1";
+        // Resolve once; reused by every writeHead() below instead of blindly
+        // reflecting the request's Origin header (see resolveCorsOrigin in ./audiobooks)
+        const corsOrigin = resolveCorsOrigin(req.headers.origin);
 
         logger.debug(`\n [PODCAST STREAM] Request:`);
         logger.debug(`   Podcast ID: ${podcastId}`);
@@ -1049,9 +1053,10 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                                 "Content-Length": fileSize,
                                 "Accept-Ranges": "bytes",
                                 "Cache-Control": "public, max-age=3600",
-                                "Access-Control-Allow-Origin":
-                                    req.headers.origin || "*",
-                                "Access-Control-Allow-Credentials": "true",
+                                ...(corsOrigin && {
+                                    "Access-Control-Allow-Origin": corsOrigin,
+                                    "Access-Control-Allow-Credentials": "true",
+                                }),
                             });
                             const fullStream = fs.createReadStream(cachedPath);
                             res.on("close", () => {
@@ -1088,9 +1093,10 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                         "Content-Length": chunkSize,
                         "Content-Type": episode.mimeType || "audio/mpeg",
                         "Cache-Control": "public, max-age=3600",
-                        "Access-Control-Allow-Origin":
-                            req.headers.origin || "*",
-                        "Access-Control-Allow-Credentials": "true",
+                        ...(corsOrigin && {
+                            "Access-Control-Allow-Origin": corsOrigin,
+                            "Access-Control-Allow-Credentials": "true",
+                        }),
                     });
 
                     const fileStream = fs.createReadStream(cachedPath, {
@@ -1124,8 +1130,10 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                     "Content-Length": fileSize,
                     "Accept-Ranges": "bytes",
                     "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": req.headers.origin || "*",
-                    "Access-Control-Allow-Credentials": "true",
+                    ...(corsOrigin && {
+                        "Access-Control-Allow-Origin": corsOrigin,
+                        "Access-Control-Allow-Credentials": "true",
+                    }),
                 });
 
                 const fileStream = fs.createReadStream(cachedPath);
@@ -1241,9 +1249,10 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                         "Content-Length":
                             response.headers["content-length"] || fileSize,
                         "Cache-Control": "public, max-age=3600",
-                        "Access-Control-Allow-Origin":
-                            req.headers.origin || "*",
-                        "Access-Control-Allow-Credentials": "true",
+                        ...(corsOrigin && {
+                            "Access-Control-Allow-Origin": corsOrigin,
+                            "Access-Control-Allow-Credentials": "true",
+                        }),
                     });
                 } else {
                     // Send 206 Partial Content with proper range
@@ -1253,9 +1262,10 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                         "Content-Length": chunkSize,
                         "Content-Type": episode.mimeType || "audio/mpeg",
                         "Cache-Control": "public, max-age=3600",
-                        "Access-Control-Allow-Origin":
-                            req.headers.origin || "*",
-                        "Access-Control-Allow-Credentials": "true",
+                        ...(corsOrigin && {
+                            "Access-Control-Allow-Origin": corsOrigin,
+                            "Access-Control-Allow-Credentials": "true",
+                        }),
                     });
                 }
 
@@ -1305,8 +1315,10 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                     "Accept-Ranges": "bytes",
                     ...(contentLength && { "Content-Length": contentLength }),
                     "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": req.headers.origin || "*",
-                    "Access-Control-Allow-Credentials": "true",
+                    ...(corsOrigin && {
+                        "Access-Control-Allow-Origin": corsOrigin,
+                        "Access-Control-Allow-Credentials": "true",
+                    }),
                 });
 
                 // Handle stream errors to prevent process crash
@@ -1355,8 +1367,10 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                     "Accept-Ranges": "bytes",
                     ...(contentLength && { "Content-Length": contentLength }),
                     "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": req.headers.origin || "*",
-                    "Access-Control-Allow-Credentials": "true",
+                    ...(corsOrigin && {
+                        "Access-Control-Allow-Origin": corsOrigin,
+                        "Access-Control-Allow-Credentials": "true",
+                    }),
                 });
 
                 // Handle stream errors to prevent process crash
@@ -1605,9 +1619,11 @@ router.get("/:id/similar", async (req, res) => {
  * Handle CORS preflight request for podcast cover images
  */
 router.options("/:id/cover", (req, res) => {
-    const origin = req.headers.origin || "*";
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+    const origin = resolveCorsOrigin(req.headers.origin);
+    if (origin) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours
@@ -1637,11 +1653,11 @@ router.get("/:id/cover", async (req, res) => {
                 "Cache-Control",
                 "public, max-age=31536000, immutable"
             );
-            res.setHeader(
-                "Access-Control-Allow-Origin",
-                req.headers.origin || "*"
-            );
-            res.setHeader("Access-Control-Allow-Credentials", "true");
+            const origin = resolveCorsOrigin(req.headers.origin);
+            if (origin) {
+                res.setHeader("Access-Control-Allow-Origin", origin);
+                res.setHeader("Access-Control-Allow-Credentials", "true");
+            }
             res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
             return res.sendFile(podcast.localCoverPath);
         }
@@ -1662,9 +1678,11 @@ router.get("/:id/cover", async (req, res) => {
  * Handle CORS preflight request for episode cover images
  */
 router.options("/episodes/:episodeId/cover", (req, res) => {
-    const origin = req.headers.origin || "*";
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+    const origin = resolveCorsOrigin(req.headers.origin);
+    if (origin) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours
@@ -1694,11 +1712,11 @@ router.get("/episodes/:episodeId/cover", async (req, res) => {
                 "Cache-Control",
                 "public, max-age=31536000, immutable"
             );
-            res.setHeader(
-                "Access-Control-Allow-Origin",
-                req.headers.origin || "*"
-            );
-            res.setHeader("Access-Control-Allow-Credentials", "true");
+            const origin = resolveCorsOrigin(req.headers.origin);
+            if (origin) {
+                res.setHeader("Access-Control-Allow-Origin", origin);
+                res.setHeader("Access-Control-Allow-Credentials", "true");
+            }
             res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
             return res.sendFile(episode.localCoverPath);
         }

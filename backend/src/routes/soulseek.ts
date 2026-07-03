@@ -25,6 +25,7 @@ interface SearchSession {
     query: string;
     results: SearchResult[];
     createdAt: Date;
+    userId: string;
 }
 
 const searchSessions = new Map<string, SearchSession>();
@@ -179,16 +180,17 @@ router.post(
                 if (oldestId) searchSessions.delete(oldestId);
             }
 
+            // Extract userId for SSE targeting and session ownership
+            const userId = (req as any).user?.id;
+
             // Create search session
             const searchId = randomUUID();
             searchSessions.set(searchId, {
                 query: searchQuery,
                 results: [],
                 createdAt: new Date(),
+                userId,
             });
-
-            // Extract userId for SSE targeting
-            const userId = (req as any).user?.id;
 
             // Track streamed results count to limit UI overload
             let streamedCount = 0;
@@ -290,8 +292,9 @@ router.get("/search/:searchId", requireAuth, async (req, res) => {
     try {
         const { searchId } = req.params;
         const session = searchSessions.get(searchId);
+        const userId = (req as any).user?.id;
 
-        if (!session) {
+        if (!session || session.userId !== userId) {
             return res.status(404).json({
                 error: "Search not found or expired",
                 results: [],

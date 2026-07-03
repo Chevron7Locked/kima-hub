@@ -12,6 +12,34 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { notificationService } from "../services/notificationService";
 import { config } from "../config";
 
+/**
+ * Resolve the Access-Control-Allow-Origin value for a cover/stream response,
+ * honoring the same allowlist as the global CORS middleware (src/index.ts)
+ * instead of blindly reflecting the request's Origin header. A credentialed
+ * response (Access-Control-Allow-Credentials: true) must never be paired with
+ * a reflected origin unless that origin is actually allowed.
+ * Returns `fallback` when no Origin header is present (non-browser request),
+ * or null when the request's origin is explicitly disallowed - callers should
+ * omit the ACAO/ACAC headers in that case. Shared with routes/podcasts.ts.
+ */
+export function resolveCorsOrigin(
+    reqOrigin: string | undefined,
+    fallback: string = "*"
+): string | null {
+    if (!reqOrigin) return fallback;
+    if (config.allowedOrigins === true || config.nodeEnv === "development") {
+        return reqOrigin;
+    }
+    if (Array.isArray(config.allowedOrigins)) {
+        if (config.allowedOrigins.length === 0) {
+            // No restriction configured - self-hosted default (matches global CORS)
+            return reqOrigin;
+        }
+        return config.allowedOrigins.includes(reqOrigin) ? reqOrigin : null;
+    }
+    return null;
+}
+
 const router = Router();
 
 /**
@@ -390,9 +418,11 @@ router.get(
  * Handle CORS preflight request for cover images
  */
 router.options("/:id/cover", (req, res) => {
-    const origin = req.headers.origin || "http://localhost:3030";
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+    const origin = resolveCorsOrigin(req.headers.origin, "http://localhost:3030");
+    if (origin) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours
@@ -437,10 +467,12 @@ router.get("/:id/cover", async (req, res) => {
 
         // If local cover exists, serve it
         if (coverPath && fs.existsSync(coverPath)) {
-            const origin = req.headers.origin || "http://localhost:3030";
+            const origin = resolveCorsOrigin(req.headers.origin, "http://localhost:3030");
             res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-            res.setHeader("Access-Control-Allow-Origin", origin);
-            res.setHeader("Access-Control-Allow-Credentials", "true");
+            if (origin) {
+                res.setHeader("Access-Control-Allow-Origin", origin);
+                res.setHeader("Access-Control-Allow-Credentials", "true");
+            }
             res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
             return res.sendFile(coverPath);
         }
@@ -461,11 +493,13 @@ router.get("/:id/cover", async (req, res) => {
                     });
                     
                     if (response.ok) {
-                        const origin = req.headers.origin || "http://localhost:3030";
+                        const origin = resolveCorsOrigin(req.headers.origin, "http://localhost:3030");
                         res.setHeader("Content-Type", response.headers.get("content-type") || "image/jpeg");
                         res.setHeader("Cache-Control", "public, max-age=86400"); // 24 hours for proxied
-                        res.setHeader("Access-Control-Allow-Origin", origin);
-                        res.setHeader("Access-Control-Allow-Credentials", "true");
+                        if (origin) {
+                            res.setHeader("Access-Control-Allow-Origin", origin);
+                            res.setHeader("Access-Control-Allow-Credentials", "true");
+                        }
                         res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
                         
                         // Stream the response body to client

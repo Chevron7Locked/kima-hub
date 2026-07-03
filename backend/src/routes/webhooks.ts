@@ -57,32 +57,35 @@ router.post("/lidarr", async (req, res) => {
             });
         }
 
-        // Verify webhook secret if configured
-        if (!settings.lidarrWebhookSecret && !webhookSecretWarned) {
-            logger.warn(
-                "[WEBHOOK] No webhook secret configured. Set lidarrWebhookSecret in settings for security."
-            );
-            webhookSecretWarned = true;
+        // Verify webhook secret - mandatory; reject if not configured
+        if (!settings.lidarrWebhookSecret) {
+            if (!webhookSecretWarned) {
+                logger.warn(
+                    "[WEBHOOK] Rejecting Lidarr webhooks - no lidarrWebhookSecret configured. Set lidarrWebhookSecret in settings."
+                );
+                webhookSecretWarned = true;
+            }
+            return res.status(401).json({
+                error: "Unauthorized - Webhook secret not configured",
+            });
         }
 
-        if (settings.lidarrWebhookSecret) {
-            const providedSecret = req.headers["x-webhook-secret"] as string;
+        const providedSecret = req.headers["x-webhook-secret"] as string;
 
-            if (
-                !providedSecret ||
-                providedSecret.length !== settings.lidarrWebhookSecret.length ||
-                !crypto.timingSafeEqual(
-                    Buffer.from(providedSecret),
-                    Buffer.from(settings.lidarrWebhookSecret)
-                )
-            ) {
-                logger.debug(
-                    `[WEBHOOK] Lidarr webhook received with invalid or missing secret`
-                );
-                return res.status(401).json({
-                    error: "Unauthorized - Invalid webhook secret",
-                });
-            }
+        if (
+            !providedSecret ||
+            providedSecret.length !== settings.lidarrWebhookSecret.length ||
+            !crypto.timingSafeEqual(
+                Buffer.from(providedSecret),
+                Buffer.from(settings.lidarrWebhookSecret)
+            )
+        ) {
+            logger.debug(
+                `[WEBHOOK] Lidarr webhook received with invalid or missing secret`
+            );
+            return res.status(401).json({
+                error: "Unauthorized - Invalid webhook secret",
+            });
         }
 
         const eventType = req.body.eventType;

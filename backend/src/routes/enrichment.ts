@@ -451,86 +451,127 @@ router.post("/retry", requireAdmin, async (req, res) => {
       ids.map((id) => enrichmentFailureService.getFailure(id)),
     );
 
-    // Group by type and trigger appropriate re-enrichment
+    // Group by entity type so existence can be checked with one findMany
+    // per type instead of a findUnique+update per failure.
+    const idsByType = new Map<string, Set<string>>();
+    for (const failure of failures) {
+      if (!failure) continue;
+      if (!idsByType.has(failure.entityType)) {
+        idsByType.set(failure.entityType, new Set());
+      }
+      idsByType.get(failure.entityType)!.add(failure.entityId);
+    }
+
+    const existingArtistIds = idsByType.has("artist")
+      ? new Set(
+          (
+            await prisma.artist.findMany({
+              where: { id: { in: [...idsByType.get("artist")!] } },
+              select: { id: true },
+            })
+          ).map((a) => a.id),
+        )
+      : new Set<string>();
+
+    const trackFailureIds = new Set<string>([
+      ...(idsByType.get("track") ?? []),
+      ...(idsByType.get("audio") ?? []),
+    ]);
+    const existingTrackIds =
+      trackFailureIds.size > 0
+        ? new Set(
+            (
+              await prisma.track.findMany({
+                where: { id: { in: [...trackFailureIds] } },
+                select: { id: true },
+              })
+            ).map((t) => t.id),
+          )
+        : new Set<string>();
 
     let queued = 0;
     let skipped = 0;
+    const toResolve: string[] = [];
+    const artistIdsToReset: string[] = [];
+    const trackTagIdsToReset: string[] = [];
+    const audioIdsToReset: string[] = [];
 
     for (const failure of failures) {
       if (!failure) continue;
 
-      try {
-        if (failure.entityType === "artist") {
-          // Check if artist still exists
-          const artist = await prisma.artist.findUnique({
-            where: { id: failure.entityId },
-            select: { id: true },
-          });
-
-          if (!artist) {
-            // Entity was deleted - mark failure as resolved
-            await enrichmentFailureService.resolveFailures([failure.id]);
-            skipped++;
-            continue;
-          }
-
-          // Reset artist enrichment status
-          await prisma.artist.update({
-            where: { id: failure.entityId },
-            data: { enrichmentStatus: "pending" },
-          });
-          queued++;
-        } else if (failure.entityType === "track") {
-          // Check if track still exists
-          const track = await prisma.track.findUnique({
-            where: { id: failure.entityId },
-            select: { id: true },
-          });
-
-          if (!track) {
-            // Entity was deleted - mark failure as resolved
-            await enrichmentFailureService.resolveFailures([failure.id]);
-            skipped++;
-            continue;
-          }
-
-          // Reset track tag status
-          await prisma.track.update({
-            where: { id: failure.entityId },
-            data: { lastfmTags: [] },
-          });
-          queued++;
-        } else if (failure.entityType === "audio") {
-          // Check if track still exists
-          const track = await prisma.track.findUnique({
-            where: { id: failure.entityId },
-            select: { id: true },
-          });
-
-          if (!track) {
-            // Entity was deleted - mark failure as resolved
-            await enrichmentFailureService.resolveFailures([failure.id]);
-            skipped++;
-            continue;
-          }
-
-          // Reset audio analysis status
-          await prisma.track.update({
-            where: { id: failure.entityId },
-            data: {
-              analysisStatus: "pending",
-              analysisRetryCount: 0,
-            },
-          });
+      if (failure.entityType === "artist") {
+        if (!existingArtistIds.has(failure.entityId)) {
+          toResolve.push(failure.id);
+          skipped++;
+        } else {
+          artistIdsToReset.push(failure.entityId);
           queued++;
         }
-      } catch (error) {
-        logger.error(
-          `Failed to reset ${failure.entityType} ${failure.entityId}:`,
-          error,
-        );
-        // Don't re-throw - continue processing other failures
+      } else if (failure.entityType === "track") {
+        if (!existingTrackIds.has(failure.entityId)) {
+          toResolve.push(failure.id);
+          skipped++;
+        } else {
+          trackTagIdsToReset.push(failure.entityId);
+          queued++;
+        }
+      } else if (failure.entityType === "audio") {
+        if (!existingTrackIds.has(failure.entityId)) {
+          toResolve.push(failure.id);
+          skipped++;
+        } else {
+          audioIdsToReset.push(failure.entityId);
+          queued++;
+        }
       }
+    }
+
+    // One batch update per type instead of one per failure. Each is isolated
+    // so a failure resetting one type doesn't block the others (mirrors the
+    // previous per-failure try/catch's "don't re-throw, keep going" behavior).
+    try {
+      if (artistIdsToReset.length > 0) {
+        await prisma.artist.updateMany({
+          where: { id: { in: artistIdsToReset } },
+          data: { enrichmentStatus: "pending" },
+        });
+      }
+    } catch (error) {
+      logger.error("Failed to reset artist enrichment for retry:", error);
+    }
+
+    try {
+      if (trackTagIdsToReset.length > 0) {
+        await prisma.track.updateMany({
+          where: { id: { in: trackTagIdsToReset } },
+          data: { lastfmTags: [] },
+        });
+      }
+    } catch (error) {
+      logger.error("Failed to reset track tags for retry:", error);
+    }
+
+    try {
+      if (audioIdsToReset.length > 0) {
+        await prisma.track.updateMany({
+          where: { id: { in: audioIdsToReset } },
+          data: {
+            analysisStatus: "pending",
+            analysisRetryCount: 0,
+          },
+        });
+      }
+    } catch (error) {
+      logger.error("Failed to reset audio analysis for retry:", error);
+    }
+
+    try {
+      if (toResolve.length > 0) {
+        // Entities deleted since the failure was recorded - mark resolved
+        await enrichmentFailureService.resolveFailures(toResolve);
+      }
+    } catch (error) {
+      logger.error("Failed to resolve stale enrichment failures:", error);
     }
 
     res.json({
@@ -617,7 +658,7 @@ router.delete("/failures/:id", requireAdmin, async (req, res) => {
  * Update artist metadata manually (non-destructive overrides)
  * User edits are stored as overrides; canonical data preserved for API lookups
  */
-router.put("/artists/:id/metadata", async (req, res) => {
+router.put("/artists/:id/metadata", requireAdmin, async (req, res) => {
     try {
       const { name, bio, genres, heroUrl, mbid } = req.body;
   
@@ -695,7 +736,7 @@ router.put("/artists/:id/metadata", async (req, res) => {
  * Update album metadata manually (non-destructive overrides)
  * User edits are stored as overrides; canonical data preserved for API lookups
  */
-router.put("/albums/:id/metadata", async (req, res) => {
+router.put("/albums/:id/metadata", requireAdmin, async (req, res) => {
     try {
       const { title, year, genres, coverUrl, rgMbid } = req.body;
   
@@ -772,7 +813,7 @@ router.put("/albums/:id/metadata", async (req, res) => {
  * Update track metadata manually (non-destructive overrides)
  * User edits are stored as overrides; canonical data preserved
  */
-router.put("/tracks/:id/metadata", async (req, res) => {
+router.put("/tracks/:id/metadata", requireAdmin, async (req, res) => {
   try {
     const { title, trackNo } = req.body;
 
