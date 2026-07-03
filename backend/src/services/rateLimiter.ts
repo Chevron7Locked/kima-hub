@@ -29,6 +29,9 @@ interface ServiceConfig {
     coverart: RateLimitConfig;
     lrclib: RateLimitConfig;
     songlink: RateLimitConfig;
+    wikidata: RateLimitConfig;
+    fanart: RateLimitConfig;
+    itunes: RateLimitConfig;
 }
 
 // Service-specific rate limit configurations
@@ -81,6 +84,27 @@ const SERVICE_CONFIGS: ServiceConfig = {
         concurrency: 2,
         maxRetries: 2,
         baseDelay: 1000,
+    },
+    wikidata: {
+        intervalCap: 5, // Wikidata/Wikimedia API - no hard published limit, stay polite
+        interval: 1000,
+        concurrency: 3,
+        maxRetries: 2,
+        baseDelay: 1000,
+    },
+    fanart: {
+        intervalCap: 2, // fanart.tv - personal API keys are lightly rate limited
+        interval: 1000,
+        concurrency: 1,
+        maxRetries: 2,
+        baseDelay: 1000,
+    },
+    itunes: {
+        intervalCap: 1, // iTunes Search API - Apple documents ~20 requests/minute; stay conservative
+        interval: 3000,
+        concurrency: 1,
+        maxRetries: 2,
+        baseDelay: 2000,
     },
 };
 
