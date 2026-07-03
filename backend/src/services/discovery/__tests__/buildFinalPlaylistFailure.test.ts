@@ -32,6 +32,10 @@ jest.mock("../../../utils/db", () => ({
         discoveryBatch: { findUnique: jest.fn(), update: jest.fn() },
         downloadJob: { findMany: jest.fn().mockResolvedValue([]) },
         track: { findMany: jest.fn().mockResolvedValue([]) },
+        // Hoisted out of the $transaction by DISC-8, so it now runs against the
+        // real (mocked) client before the transaction. Returns undefined -> the
+        // service falls back to exclusionMonths=6, which these failure tests don't assert on.
+        userDiscoverConfig: { findUnique: jest.fn() },
         $transaction: jest.fn(),
     },
 }));

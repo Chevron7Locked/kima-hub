@@ -23,6 +23,8 @@ module.exports = {
         // p-queue is pure ESM and cannot be required() by Jest's CJS runner.
         // Map it to a minimal CJS mock that executes functions immediately.
         '^p-queue$': '<rootDir>/src/__mocks__/p-queue.cjs',
+        // p-limit (and its yocto-queue dep) are pure ESM too; same treatment.
+        '^p-limit$': '<rootDir>/src/__mocks__/p-limit.cjs',
         // music-metadata is pure ESM with no CJS entry point; map to a CJS stub.
         '^music-metadata$': '<rootDir>/__mocks__/music-metadata.js',
     },

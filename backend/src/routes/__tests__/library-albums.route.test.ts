@@ -13,6 +13,15 @@ jest.mock('p-limit', () => {
     return () => (fn: (...args: any[]) => any) => fn();
 });
 
+// DELETE /albums/:id now requires admin (STREAM-1 fix). Inject an admin user so
+// these tests exercise the handler rather than 403 at the guard.
+jest.mock('../../middleware/auth', () => ({
+    requireAdmin: (req: any, _res: any, next: any) => {
+        req.user = { id: 'test-admin', username: 'admin', role: 'admin' };
+        next();
+    },
+}));
+
 jest.mock('../../utils/db', () => ({
     Prisma: {
         SortOrder: { asc: 'asc', desc: 'desc' },
