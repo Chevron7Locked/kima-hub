@@ -250,6 +250,10 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
       if (decodedId.startsWith("audiobook__")) {
         const audiobookPath = decodedId.replace("audiobook__", "");
 
+        if (audiobookPath.includes("..") || audiobookPath.includes("://")) {
+          return res.status(400).json({ error: "Invalid audiobook cover path" });
+        }
+
         const settings = await getSystemSettings();
         const audiobookshelfUrl =
           settings?.audiobookshelfUrl || process.env.AUDIOBOOKSHELF_URL || "";
@@ -503,6 +507,12 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
       }
     } catch (cacheError) {
       logger.warn("[COLORS] Redis cache read error:", cacheError);
+    }
+
+    const ssrfError = await validateUrlForFetch(imageUrl);
+    if (ssrfError) {
+      logger.warn(`[COLORS] SSRF blocked: ${ssrfError} for ${imageUrl.substring(0, 100)}`);
+      return res.status(400).json({ error: "Invalid image URL" });
     }
 
     logger.debug(`[COLORS] Fetching image: ${imageUrl.substring(0, 100)}...`);

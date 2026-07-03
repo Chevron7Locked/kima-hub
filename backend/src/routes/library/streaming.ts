@@ -1,8 +1,9 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { config } from "../../config";
 import { getAudioStreamingService } from "../../services/audioStreaming";
+import { resolveTrackFilePath } from "./trackPath";
 import path from "path";
 
 // Play-logging dedup window. The DB recent-play check + insert now run
@@ -25,6 +26,47 @@ function claimPlayLog(userId: string, trackId: string): boolean {
     }
   }
   return true;
+}
+
+type StreamableTrack = { id: string; filePath: string; fileModified: Date };
+
+// Shared by the primary quality attempt and the FFMPEG_NOT_FOUND fallback:
+// resolves the track's on-disk path (rejecting any escape from the music
+// root) and streams it at the given quality.
+async function resolveAndStream(
+  track: StreamableTrack,
+  quality: string,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const absolutePath = resolveTrackFilePath(track.filePath);
+  if (!absolutePath) {
+    logger.warn(`[STREAM] Rejected out-of-root path for track ${track.id}`);
+    res.status(404).json({ error: "Track not available" });
+    return;
+  }
+
+  const streamingService = getAudioStreamingService(
+    config.music.transcodeCachePath,
+    config.music.transcodeCacheMaxGb,
+  );
+
+  logger.debug(
+    `[STREAM] Using native file: ${track.filePath} (${quality})`,
+  );
+
+  const { filePath, mimeType } = await streamingService.getStreamFilePath(
+    track.id,
+    quality as any,
+    track.fileModified,
+    absolutePath,
+  );
+
+  logger.debug(`[STREAM] Sending file: ${filePath}, mimeType: ${mimeType}`);
+
+  await streamingService.streamFileWithRangeSupport(req, res, filePath, mimeType);
+
+  logger.debug(`[STREAM] File sent successfully: ${path.basename(filePath)}`);
 }
 
 const router = Router();
@@ -96,43 +138,14 @@ router.get("/tracks/:id/stream", async (req, res) => {
     );
 
     if (track.filePath && track.fileModified) {
+      const streamableTrack: StreamableTrack = {
+        id: track.id,
+        filePath: track.filePath,
+        fileModified: track.fileModified,
+      };
+
       try {
-        const streamingService = getAudioStreamingService(
-          config.music.transcodeCachePath,
-          config.music.transcodeCacheMaxGb,
-        );
-
-        const normalizedFilePath = track.filePath.replace(/\\/g, "/");
-        const absolutePath = path.join(
-          config.music.musicPath,
-          normalizedFilePath,
-        );
-
-        logger.debug(
-          `[STREAM] Using native file: ${track.filePath} (${requestedQuality})`,
-        );
-
-        const { filePath, mimeType } = await streamingService.getStreamFilePath(
-          track.id,
-          requestedQuality as any,
-          track.fileModified,
-          absolutePath,
-        );
-
-        logger.debug(
-          `[STREAM] Sending file: ${filePath}, mimeType: ${mimeType}`,
-        );
-
-        await streamingService.streamFileWithRangeSupport(
-          req,
-          res,
-          filePath,
-          mimeType,
-        );
-        logger.debug(
-          `[STREAM] File sent successfully: ${path.basename(filePath)}`,
-        );
-
+        await resolveAndStream(streamableTrack, requestedQuality, req, res);
         return;
       } catch (err: any) {
         if (
@@ -142,31 +155,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
           logger.warn(
             `[STREAM] FFmpeg not available, falling back to original quality`,
           );
-          const fallbackFilePath = track.filePath.replace(/\\/g, "/");
-          const absolutePath = path.join(
-            config.music.musicPath,
-            fallbackFilePath,
-          );
-
-          const streamingService = getAudioStreamingService(
-            config.music.transcodeCachePath,
-            config.music.transcodeCacheMaxGb,
-          );
-
-          const { filePath, mimeType } =
-            await streamingService.getStreamFilePath(
-              track.id,
-              "original",
-              track.fileModified,
-              absolutePath,
-            );
-
-          await streamingService.streamFileWithRangeSupport(
-            req,
-            res,
-            filePath,
-            mimeType,
-          );
+          await resolveAndStream(streamableTrack, "original", req, res);
           return;
         }
 
@@ -211,13 +200,16 @@ router.post("/tracks/:id/prewarm", async (req, res) => {
       ? (quality as string)
       : settings?.playbackQuality || "original";
 
+    const absolutePath = resolveTrackFilePath(track.filePath);
+    if (!absolutePath) {
+      logger.warn(`[STREAM] Rejected out-of-root path for track ${track.id}`);
+      return res.status(202).json({ ok: true });
+    }
+
     const streamingService = getAudioStreamingService(
       config.music.transcodeCachePath,
       config.music.transcodeCacheMaxGb,
     );
-
-    const normalizedFilePath = track.filePath.replace(/\\/g, "/");
-    const absolutePath = path.join(config.music.musicPath, normalizedFilePath);
 
     // Fire-and-forget at low priority so on-demand streams always preempt.
     void streamingService.getStreamFilePath(

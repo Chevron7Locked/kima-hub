@@ -5,7 +5,7 @@ import { redisClient } from "../../utils/redis";
 import { logger } from "../../utils/logger";
 import { config } from "../../config";
 import ffmpegPath from "@ffmpeg-installer/ffmpeg";
-import path from "path";
+import { resolveTrackFilePath } from "./trackPath";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -273,10 +273,11 @@ router.get("/tracks/:id/waveform", async (req, res) => {
             return res.status(404).json({ error: "Track audio file unavailable" });
         }
 
-        const absolutePath = path.join(
-            config.music.musicPath,
-            track.filePath.replace(/\\/g, "/"),
-        );
+        const absolutePath = resolveTrackFilePath(track.filePath);
+        if (!absolutePath) {
+            logger.warn(`[WAVEFORM] Rejected out-of-root path for track ${track.id}`);
+            return res.status(404).json({ error: "Track audio file unavailable" });
+        }
 
         const payload = await getOrComputeWaveform(
             track.id,

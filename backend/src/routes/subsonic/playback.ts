@@ -9,6 +9,7 @@ import { getAudioStreamingService } from "../../services/audioStreaming";
 import { config } from "../../config";
 import { bitrateToQuality, firstArtistGenre, mapSong, wrap } from "./mappers";
 import { normalizeArtistName } from "../../utils/artistNormalization";
+import { resolveTrackFilePath } from "../library/trackPath";
 
 export const playbackRouter = Router();
 
@@ -23,11 +24,8 @@ async function streamTrackById(
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
     }
 
-    const normalizedFilePath = track.filePath.replace(/\\/g, "/");
-    const resolvedMusicPath = path.resolve(config.music.musicPath);
-    const absolutePath = path.resolve(resolvedMusicPath, normalizedFilePath);
-
-    if (!absolutePath.startsWith(resolvedMusicPath + path.sep)) {
+    const absolutePath = resolveTrackFilePath(track.filePath);
+    if (!absolutePath) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
     }
 
@@ -202,12 +200,8 @@ playbackRouter.all("/download.view", wrap(async (req, res) => {
     const track = await prisma.track.findUnique({ where: { id } });
     if (!track || !track.filePath) return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
 
-    const normalizedFilePath = track.filePath.replace(/\\/g, "/");
-    const resolvedMusicPath = path.resolve(config.music.musicPath);
-    const absolutePath = path.resolve(resolvedMusicPath, normalizedFilePath);
-
-    // Security: ensure resolved path stays within the music directory
-    if (!absolutePath.startsWith(resolvedMusicPath + path.sep)) {
+    const absolutePath = resolveTrackFilePath(track.filePath);
+    if (!absolutePath) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
     }
 
