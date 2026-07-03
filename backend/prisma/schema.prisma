@@ -210,6 +210,9 @@ model DiscoveryTrack {
   userKept         Boolean        @default(false)
   lastPlayedAt     DateTime?
   discoveryAlbum   DiscoveryAlbum @relation(fields: [discoveryAlbumId], references: [id], onDelete: Cascade)
+
+  @@index([discoveryAlbumId])
+  @@index([trackId])
 }
 
 model DislikedEntity {
@@ -335,6 +338,9 @@ model Notification {
   cleared   Boolean  @default(false)
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, cleared, read])
+  @@index([userId, cleared, createdAt])
 }
 
 model OwnedAlbum {
@@ -354,6 +360,10 @@ model Play {
   source   ListenSource @default(LIBRARY)
   track    Track        @relation(fields: [trackId], references: [id], onDelete: Cascade)
   user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, playedAt])
+  @@index([userId, trackId])
+  @@index([trackId])
 }
 
 model PlaybackState {
@@ -660,6 +670,7 @@ model Track {
   @@index([vibeAnalysisStatus])
   @@index([analysisStatus, vibeAnalysisStatus])
   @@index([isrc])
+  @@index([albumId])
 }
 
 model TrackGenre {
