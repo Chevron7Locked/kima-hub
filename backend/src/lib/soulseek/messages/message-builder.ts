@@ -1,54 +1,53 @@
 export class MessageBuilder {
-  data: Buffer
+  chunks: Buffer[]
 
   constructor() {
-    this.data = Buffer.alloc(0)
+    this.chunks = []
   }
 
   int8(value: number) {
     const b = Buffer.alloc(1)
     b.writeUInt8(value, 0)
-    this.data = Buffer.concat([this.data, b])
+    this.chunks.push(b)
     return this
   }
 
   int32(value: number) {
     const b = Buffer.alloc(4)
     b.writeUInt32LE(value, 0)
-    this.data = Buffer.concat([this.data, b])
+    this.chunks.push(b)
     return this
   }
 
   int64(value: number | bigint) {
     const b = Buffer.alloc(8)
     b.writeBigUInt64LE(BigInt(value), 0)
-    this.data = Buffer.concat([this.data, b])
+    this.chunks.push(b)
     return this
   }
 
   str(value: string) {
-    let b = Buffer.from(value, 'utf8')
+    const b = Buffer.from(value, 'utf8')
     const s = Buffer.alloc(4)
     s.writeUInt32LE(b.length, 0)
-    b = Buffer.concat([s, b])
-    this.data = Buffer.concat([this.data, b])
+    this.chunks.push(s, b)
     return this
   }
 
   rawHexStr(value: string) {
-    const b = Buffer.from(value, 'hex')
-    this.data = Buffer.concat([this.data, b])
+    this.chunks.push(Buffer.from(value, 'hex'))
     return this
   }
 
   buffer(value: Buffer) {
-    this.data = Buffer.concat([this.data, value])
+    this.chunks.push(value)
     return this
   }
 
   getBuffer() {
+    const data = Buffer.concat(this.chunks)
     const b = Buffer.alloc(4)
-    b.writeUInt32LE(this.data.length, 0)
-    return Buffer.concat([b, this.data])
+    b.writeUInt32LE(data.length, 0)
+    return Buffer.concat([b, data])
   }
 }

@@ -31,6 +31,10 @@ export class SlskServer extends (EventEmitter as new () => TypedEventEmitter<Sls
     })
 
     this.msgs = new MessageStream()
+    this.msgs.on('error', (error) => {
+      logger.error(`[Soulseek] Server message stream error: ${error}`)
+      this.conn.destroy()
+    })
 
     this.conn.on('error', (error) => {
       this.emit('error', error)

@@ -37,6 +37,10 @@ export class SlskPeer extends (EventEmitter as new () => TypedEventEmitter<SlskP
     }
 
     this.msgs = new MessageStream()
+    this.msgs.on('error', (error) => {
+      logger.error(`[Soulseek] Peer message stream error: ${error}`)
+      this.conn.destroy()
+    })
 
     this.conn.on('connect', () => this.emit('connect'))
     this.conn.on('error', (error) => this.emit('error', error))
