@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from "axios";
+import pLimit from "p-limit";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { getSystemSettings } from "../utils/systemSettings";
@@ -645,15 +646,34 @@ class LidarrService {
                             `   Found ${albums.length} albums to monitor`
                         );
 
-                        // Monitor all albums
-                        for (const album of albums) {
-                            if (!album.monitored) {
-                                await this.client.put(
-                                    `/api/v1/album/${album.id}`,
-                                    {
-                                        ...album,
-                                        monitored: true,
-                                    }
+                        // Monitor all albums - batch via Lidarr's bulk endpoint,
+                        // falling back to a small concurrent pool if it's unavailable
+                        const unmonitoredAlbums = albums.filter(
+                            (album) => !album.monitored
+                        );
+                        if (unmonitoredAlbums.length > 0) {
+                            try {
+                                await this.client.put("/api/v1/album/monitor", {
+                                    albumIds: unmonitoredAlbums.map((a) => a.id),
+                                    monitored: true,
+                                });
+                            } catch (bulkMonitorError: any) {
+                                logger.debug(
+                                    `   Bulk album monitor failed, falling back to per-album updates: ${bulkMonitorError.message}`
+                                );
+                                const albumLimit = pLimit(5);
+                                await Promise.all(
+                                    unmonitoredAlbums.map((album) =>
+                                        albumLimit(() =>
+                                            this.client!.put(
+                                                `/api/v1/album/${album.id}`,
+                                                {
+                                                    ...album,
+                                                    monitored: true,
+                                                }
+                                            )
+                                        )
+                                    )
                                 );
                             }
                         }

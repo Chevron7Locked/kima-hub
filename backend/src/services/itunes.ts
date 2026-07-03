@@ -1,6 +1,7 @@
 import axios, { AxiosInstance } from "axios";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
+import { rateLimiter } from "./rateLimiter";
 
 interface ItunesPodcast {
     collectionId: number;
@@ -19,26 +20,12 @@ interface ItunesPodcast {
 
 class ItunesService {
     private client: AxiosInstance;
-    private lastRequestTime = 0;
-    private readonly RATE_LIMIT_MS = 3000; // 20 requests per minute = 3 seconds between requests
 
     constructor() {
         this.client = axios.create({
             baseURL: "https://itunes.apple.com",
             timeout: 10000,
         });
-    }
-
-    private async rateLimit() {
-        const now = Date.now();
-        const timeSinceLastRequest = now - this.lastRequestTime;
-
-        if (timeSinceLastRequest < this.RATE_LIMIT_MS) {
-            const delay = this.RATE_LIMIT_MS - timeSinceLastRequest;
-            await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-
-        this.lastRequestTime = Date.now();
     }
 
     private async cachedRequest<T>(
@@ -55,8 +42,7 @@ class ItunesService {
             logger.warn("Redis get error:", err);
         }
 
-        await this.rateLimit();
-        const data = await requestFn();
+        const data = await rateLimiter.execute("itunes", requestFn);
 
         try {
             await redisClient.setex(cacheKey, ttlSeconds, JSON.stringify(data));

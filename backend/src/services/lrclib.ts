@@ -1,6 +1,7 @@
 import axios from "axios";
 import { logger } from "../utils/logger";
 import { USER_AGENT } from "../config";
+import { rateLimiter } from "./rateLimiter";
 
 const LRCLIB_API = "https://lrclib.net/api";
 
@@ -28,18 +29,20 @@ async function fetchLyrics(
     durationSecs: number
 ): Promise<LrclibResult | null> {
     try {
-        const response = await axios.get<LrclibResponse>(`${LRCLIB_API}/get`, {
-            params: {
-                track_name: trackName,
-                artist_name: artistName,
-                album_name: albumName,
-                duration: Math.round(durationSecs),
-            },
-            headers: {
-                "User-Agent": USER_AGENT,
-            },
-            timeout: 5000,
-        });
+        const response = await rateLimiter.execute("lrclib", () =>
+            axios.get<LrclibResponse>(`${LRCLIB_API}/get`, {
+                params: {
+                    track_name: trackName,
+                    artist_name: artistName,
+                    album_name: albumName,
+                    duration: Math.round(durationSecs),
+                },
+                headers: {
+                    "User-Agent": USER_AGENT,
+                },
+                timeout: 5000,
+            })
+        );
 
         return {
             plainLyrics: response.data.plainLyrics,

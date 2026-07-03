@@ -14,6 +14,7 @@ import {
 import { notificationService } from "./notificationService";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
+import { LIBRARY_ALBUM_WHERE } from "./libraryFilters";
 import { redisClient } from "../utils/redis";
 import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";
@@ -344,6 +345,7 @@ class SpotifyImportService {
     let exactMatch = await prisma.track.findFirst({
       where: {
         album: {
+          ...LIBRARY_ALBUM_WHERE,
           artist: {
             normalizedName: normalizedPrimaryArtist,
           },
@@ -371,6 +373,7 @@ class SpotifyImportService {
       exactMatch = await prisma.track.findFirst({
         where: {
           album: {
+            ...LIBRARY_ALBUM_WHERE,
             artist: {
               normalizedName: dbNormalizedArtist,
             },
@@ -415,6 +418,7 @@ class SpotifyImportService {
       let normalizedAlbumMatch = await prisma.track.findFirst({
         where: {
           album: {
+            ...LIBRARY_ALBUM_WHERE,
             artist: {
               normalizedName: normalizedPrimaryArtist,
             },
@@ -442,6 +446,7 @@ class SpotifyImportService {
         // Get all albums by this artist and check if any starts with the cleaned album name
         const artistAlbums = await prisma.album.findMany({
           where: {
+            ...LIBRARY_ALBUM_WHERE,
             artist: {
               normalizedName: normalizedPrimaryArtist,
             },
@@ -507,6 +512,7 @@ class SpotifyImportService {
     const artistTitleMatches = await prisma.track.findMany({
       where: {
         album: {
+          ...LIBRARY_ALBUM_WHERE,
           artist: {
             normalizedName: normalizedPrimaryArtist,
           },
@@ -534,6 +540,7 @@ class SpotifyImportService {
       const fullArtistMatches = await prisma.track.findMany({
         where: {
           album: {
+            ...LIBRARY_ALBUM_WHERE,
             artist: {
               normalizedName: dbNormalizedArtist,
             },
@@ -611,6 +618,7 @@ class SpotifyImportService {
       fuzzyMatches = await prisma.track.findMany({
         where: {
           album: {
+            ...LIBRARY_ALBUM_WHERE,
             artist: {
               normalizedName: {
                 contains: firstWord,
@@ -634,6 +642,7 @@ class SpotifyImportService {
       fuzzyMatches = await prisma.track.findMany({
         where: {
           album: {
+            ...LIBRARY_ALBUM_WHERE,
             artist: {
               normalizedName: {
                 startsWith: normalizedPrimaryArtist.substring(
@@ -662,6 +671,7 @@ class SpotifyImportService {
         fuzzyMatches = await prisma.track.findMany({
           where: {
             album: {
+              ...LIBRARY_ALBUM_WHERE,
               artist: {
                 normalizedName: {
                   contains: fullArtistFirstWord,

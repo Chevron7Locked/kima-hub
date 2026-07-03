@@ -547,6 +547,8 @@ class SpotifyService {
         let offset = firstPageItems.length;
         let currentToken = token;
         let hasRefreshedToken = false;
+        let rateLimitRetries = 0;
+        const MAX_RATE_LIMIT_RETRIES = 5;
         const trackFields = "items(track(id,name,artists(id,name),album(id,name,images),duration_ms,track_number,preview_url,external_ids)),next,total";
 
         logger.debug(`Spotify: Playlist has ${total} tracks, fetched ${allItems.length}, paginating remainder...`);
@@ -585,8 +587,13 @@ class SpotifyService {
                 await new Promise(r => setTimeout(r, 100));
             } catch (error: any) {
                 if (error.response?.status === 429) {
+                    rateLimitRetries++;
+                    if (rateLimitRetries > MAX_RATE_LIMIT_RETRIES) {
+                        logger.warn(`Spotify: Rate limited ${rateLimitRetries} times, giving up pagination at offset ${offset} — returning ${allItems.length} tracks fetched so far`);
+                        break;
+                    }
                     const retryAfter = parseInt(error.response?.headers?.["retry-after"] || "5", 10);
-                    logger.warn(`Spotify: Rate limited, waiting ${retryAfter}s...`);
+                    logger.warn(`Spotify: Rate limited, waiting ${retryAfter}s... (attempt ${rateLimitRetries}/${MAX_RATE_LIMIT_RETRIES})`);
                     await new Promise(r => setTimeout(r, retryAfter * 1000));
                     continue;
                 }
