@@ -51,6 +51,7 @@ import { requireAuth, requireAdmin } from "./middleware/auth";
 import {
     authLimiter,
     apiLimiter,
+    webhookLimiter,
 } from "./middleware/rateLimiter";
 const app = express();
 
@@ -157,7 +158,7 @@ app.use("/api/search", apiLimiter, searchRoutes);
 app.use("/api/recommendations", apiLimiter, recommendationsRoutes);
 app.use("/api/downloads", apiLimiter, downloadsRoutes);
 app.use("/api/notifications", apiLimiter, notificationsRoutes);
-app.use("/api/webhooks", webhooksRoutes); // Webhooks should not be rate limited
+app.use("/api/webhooks", webhookLimiter, webhooksRoutes); // Excluded from apiLimiter; bounded by a dedicated webhookLimiter (120/min)
 // NOTE: /api/audiobooks has its own rate limiting (imageLimiter for covers, apiLimiter for others)
 app.use("/api/audiobooks", audiobooksRoutes);
 app.use("/api/podcasts", apiLimiter, podcastsRoutes);

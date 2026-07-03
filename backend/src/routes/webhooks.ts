@@ -57,35 +57,34 @@ router.post("/lidarr", async (req, res) => {
             });
         }
 
-        // Verify webhook secret - mandatory; reject if not configured
-        if (!settings.lidarrWebhookSecret) {
-            if (!webhookSecretWarned) {
-                logger.warn(
-                    "[WEBHOOK] Rejecting Lidarr webhooks - no lidarrWebhookSecret configured. Set lidarrWebhookSecret in settings."
+        // Verify the webhook secret IF one is configured. When it's unset we accept
+        // the request (warn once) rather than reject: the secret is optional by
+        // design and Lidarr ships webhooks without one, so a hard 401 would break the
+        // default integration. Abuse of the unauthenticated path is bounded instead
+        // by the dedicated webhookLimiter applied at the mount (see index.ts).
+        if (settings.lidarrWebhookSecret) {
+            const providedSecret = req.headers["x-webhook-secret"] as string;
+
+            if (
+                !providedSecret ||
+                providedSecret.length !== settings.lidarrWebhookSecret.length ||
+                !crypto.timingSafeEqual(
+                    Buffer.from(providedSecret),
+                    Buffer.from(settings.lidarrWebhookSecret)
+                )
+            ) {
+                logger.debug(
+                    `[WEBHOOK] Lidarr webhook received with invalid or missing secret`
                 );
-                webhookSecretWarned = true;
+                return res.status(401).json({
+                    error: "Unauthorized - Invalid webhook secret",
+                });
             }
-            return res.status(401).json({
-                error: "Unauthorized - Webhook secret not configured",
-            });
-        }
-
-        const providedSecret = req.headers["x-webhook-secret"] as string;
-
-        if (
-            !providedSecret ||
-            providedSecret.length !== settings.lidarrWebhookSecret.length ||
-            !crypto.timingSafeEqual(
-                Buffer.from(providedSecret),
-                Buffer.from(settings.lidarrWebhookSecret)
-            )
-        ) {
-            logger.debug(
-                `[WEBHOOK] Lidarr webhook received with invalid or missing secret`
+        } else if (!webhookSecretWarned) {
+            logger.warn(
+                "[WEBHOOK] Lidarr webhooks accepted without a lidarrWebhookSecret configured (rate-limited). Set lidarrWebhookSecret in settings to require authentication."
             );
-            return res.status(401).json({
-                error: "Unauthorized - Invalid webhook secret",
-            });
+            webhookSecretWarned = true;
         }
 
         const eventType = req.body.eventType;
