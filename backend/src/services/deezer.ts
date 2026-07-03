@@ -630,6 +630,9 @@ class DeezerService {
      */
     async getRadioTracks(radioId: string): Promise<DeezerPlaylist | null> {
         try {
+            // Cache the assembled playlist so we don't hit Deezer twice (radio info +
+            // tracks) on every call (35b review).
+            return await this.cachedRequest(`radio:tracks:${radioId}`, async () => {
             logger.debug(`Deezer: Fetching radio ${radioId} tracks...`);
 
             // First get radio info
@@ -667,6 +670,7 @@ class DeezerService {
                 tracks,
                 isPublic: true,
             };
+            });
         } catch (error: any) {
             logger.error("Deezer radio tracks error:", error.message);
             return null;
@@ -691,19 +695,12 @@ class DeezerService {
             // Search for playlists with this genre
             const playlists = genreName ? await this.searchPlaylists(genreName, 20) : [];
 
-            // Get radios for this genre from the genres endpoint
-            const radiosBody = await this.deezerGet<any>("/radio/genres", {
-                timeout: 10000,
-            });
-
-            const genreRadios = (radiosBody?.data || []).find((g: any) => g.id === genreId);
-            const radios: DeezerRadioStation[] = (genreRadios?.radios || []).map((radio: any) => ({
-                id: String(radio.id),
-                title: radio.title || "Unknown",
-                description: null,
-                imageUrl: radio.picture_medium || radio.picture || null,
-                type: "radio" as const,
-            }));
+            // Get radios for this genre from getRadiosByGenre (24h cached) instead of
+            // re-fetching /radio/genres uncached on every call (35b review).
+            const genreRadios = (await this.getRadiosByGenre()).find(
+                (g) => g.id === genreId
+            );
+            const radios: DeezerRadioStation[] = genreRadios?.radios ?? [];
 
             return { playlists, radios };
         } catch (error: any) {

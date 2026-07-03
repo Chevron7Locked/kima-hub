@@ -2761,28 +2761,17 @@ export class DiscoverWeeklyService {
                     );
                     if (!mbAlbum || seenAlbums.has(mbAlbum.id)) continue;
 
-                    // Check if owned (with fuzzy matching)
-                    const owned = await discoverySeeding.isAlbumOwned(
+                    // Owned / owned-by-name / excluded -- shared helper, run
+                    // concurrently. Dedups the 3rd copy of this logic and makes error
+                    // handling consistent with the other two call sites (skip the one
+                    // candidate on error rather than aborting the genre; DISC-11 follow-up).
+                    const candidate = await this.isValidUnownedAlbum(
                         mbAlbum.id,
                         userId,
                         artistName,
                         album.name
                     );
-                    if (owned) continue;
-
-                    // Check if owned by name (catches MBID mismatches)
-                    const ownedByName = await this.isAlbumOwnedByName(
-                        artistName,
-                        album.name
-                    );
-                    if (ownedByName) continue;
-
-                    // Check if album was recently recommended (exclusion period)
-                    const excluded = await this.isAlbumExcluded(
-                        mbAlbum.id,
-                        userId
-                    );
-                    if (excluded) continue;
+                    if (!candidate.valid) continue;
 
                     // Check if artist is in library (prefer new artists)
                     const inLibrary = await this.isArtistInLibrary(
