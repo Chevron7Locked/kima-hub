@@ -9,6 +9,7 @@ import tracksRouter from "./tracks";
 import streamingRouter from "./streaming";
 import coverArtRouter from "./coverArt";
 import backfillRouter from "./backfill";
+import waveformRouter from "./waveform";
 
 const router = Router();
 
@@ -34,5 +35,6 @@ router.use(tracksRouter);
 router.use(streamingRouter);
 router.use(coverArtRouter);
 router.use(backfillRouter);
+router.use(waveformRouter);
 
 export default router;
