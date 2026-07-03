@@ -37,6 +37,7 @@ export class DiscoverySeeding {
     private readonly RECENT_PLAYS_LIMIT = 50;
     private readonly OWNED_INDEX_TTL_MS = 5 * 60 * 1000; // one discovery run's worth of candidate checks
     private ownedIndexCache: (OwnedAlbumIndex & { builtAt: number }) | null = null;
+    private ownedIndexLoad: Promise<OwnedAlbumIndex> | null = null;
 
     /**
      * Gets seed artists based on user's listening history.
@@ -192,7 +193,19 @@ export class DiscoverySeeding {
         if (this.ownedIndexCache && now - this.ownedIndexCache.builtAt < this.OWNED_INDEX_TTL_MS) {
             return this.ownedIndexCache;
         }
+        // Single-flight: concurrent candidate checks on a cold/expired cache share
+        // one DB load instead of each firing the full-table album/ownedAlbum scan
+        // (35b review follow-up).
+        if (!this.ownedIndexLoad) {
+            this.ownedIndexLoad = this.buildOwnedAlbumIndex().finally(() => {
+                this.ownedIndexLoad = null;
+            });
+        }
+        return this.ownedIndexLoad;
+    }
 
+    private async buildOwnedAlbumIndex(): Promise<OwnedAlbumIndex> {
+        const now = Date.now();
         const [albumRows, ownedAlbumRows] = await Promise.all([
             prisma.album.findMany({
                 select: { rgMbid: true, title: true, location: true, artist: { select: { name: true } } },

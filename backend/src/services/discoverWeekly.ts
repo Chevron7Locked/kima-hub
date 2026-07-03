@@ -1003,6 +1003,7 @@ export class DiscoverWeeklyService {
                         },
                     },
                     include: { artist: true, tracks: true },
+                    orderBy: { title: "asc" }, // deterministic subset for the take:20 fallback (35b review)
                     take: 20,
                 });
 
