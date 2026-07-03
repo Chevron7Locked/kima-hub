@@ -12,6 +12,8 @@ import {
     requireAdmin,
     generateToken,
     generateRefreshToken,
+    generateStreamTicket,
+    STREAM_TICKET_TTL_SECONDS,
 } from "../middleware/auth";
 import { encrypt, decrypt } from "../utils/encryption";
 
@@ -531,6 +533,28 @@ router.post("/2fa/disable", requireAuth, async (req, res) => {
     } catch (error) {
         logger.error("2FA disable error:", error);
         res.status(500).json({ error: "Failed to disable 2FA" });
+    }
+});
+
+// POST /auth/stream-ticket - Mint a short-lived, stream-scoped JWT for AVPlayer URLs.
+// Accepts the same header auth as other API calls (Bearer JWT or x-api-key).
+// Response: { ticket: string, expiresIn: number (seconds) }
+router.post("/stream-ticket", requireAuth, async (req, res) => {
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: req.user!.id },
+            select: { id: true, tokenVersion: true },
+        });
+
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const ticket = generateStreamTicket(user);
+        return res.json({ ticket, expiresIn: STREAM_TICKET_TTL_SECONDS });
+    } catch (error) {
+        logger.error("Stream ticket error:", error);
+        return res.status(500).json({ error: "Failed to mint stream ticket" });
     }
 });
 

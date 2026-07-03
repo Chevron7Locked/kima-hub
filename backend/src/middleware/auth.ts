@@ -33,6 +33,7 @@ interface JWTPayload {
     role: string;
     tokenVersion?: number;
     type?: string;
+    scope?: string;
 }
 
 export function generateToken(user: {
@@ -50,6 +51,26 @@ export function generateToken(user: {
         },
         JWT_SECRET_VALIDATED,
         { expiresIn: "24h" }
+    );
+}
+
+// Stream ticket TTL — tunable. 4h covers multi-hour audiobook sessions without
+// requiring a mid-playback re-auth. Scoped to streaming paths only.
+const STREAM_TICKET_TTL = "4h";
+export const STREAM_TICKET_TTL_SECONDS = 14400; // 4 * 60 * 60
+
+export function generateStreamTicket(user: {
+    id: string;
+    tokenVersion: number;
+}): string {
+    return jwt.sign(
+        {
+            userId: user.id,
+            tokenVersion: user.tokenVersion,
+            scope: "stream"
+        },
+        JWT_SECRET_VALIDATED,
+        { expiresIn: STREAM_TICKET_TTL }
     );
 }
 
@@ -127,17 +148,27 @@ async function authenticateRequest(
                     tokenParam,
                     JWT_SECRET_VALIDATED
                 ) as unknown as JWTPayload;
-                const user = await prisma.user.findUnique({
-                    where: { id: decoded.userId },
-                    select: { id: true, username: true, role: true, tokenVersion: true },
-                });
-                if (user) {
-                    // Validate tokenVersion - reject if password was changed
-                    if (decoded.tokenVersion === undefined || decoded.tokenVersion !== user.tokenVersion) {
-                        return null;
+                // Stream-scoped tickets are only valid on /stream paths.
+                // Unscoped tokens (web client cover-art / legacy usage) are accepted everywhere.
+                // endsWith (not includes) so "/stream" must be the FINAL path segment: all stream
+                // routes end in /stream (/tracks/:id/stream, /audiobooks/:id/stream, …). Substring
+                // matching would wrongly accept e.g. /tracks/stream_abc (a track id starting "stream").
+                const isStreamScoped = decoded.scope === "stream";
+                const isStreamPath = req.path.endsWith("/stream");
+                if (!isStreamScoped || isStreamPath) {
+                    const user = await prisma.user.findUnique({
+                        where: { id: decoded.userId },
+                        select: { id: true, username: true, role: true, tokenVersion: true },
+                    });
+                    if (user) {
+                        // Validate tokenVersion - reject if password was changed
+                        if (decoded.tokenVersion === undefined || decoded.tokenVersion !== user.tokenVersion) {
+                            return null;
+                        }
+                        return { id: user.id, username: user.username, role: user.role };
                     }
-                    return { id: user.id, username: user.username, role: user.role };
                 }
+                // Stream-scoped ticket on a non-stream path: fall through to other auth methods
             } catch (error) {
                 // Token invalid, try other methods
             }

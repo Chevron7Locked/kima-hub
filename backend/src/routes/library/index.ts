@@ -22,7 +22,7 @@ router.use((req, res, next) => {
   if (req.path.startsWith("/cover-art")) {
     return next();
   }
-  if (req.path.includes("/stream")) {
+  if (req.path.endsWith("/stream")) {   // final segment only (matches stream routes; not /tracks/stream_x)
     return next();
   }
   return apiLimiter(req, res, next);
