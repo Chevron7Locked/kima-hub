@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { requireAdmin } from "../../middleware/auth";
 import { prisma, Prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { lrclibService } from "../../services/lrclib";
@@ -10,6 +11,7 @@ import {
   getDecadeFromYear,
 } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
+import { LIBRARY_TRACK_WHERE } from "../../services/libraryFilters";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
 import { config } from "../../config";
 import path from "path";
@@ -283,7 +285,7 @@ router.get("/tracks", async (req, res) => {
       orderBy = TRACK_SORT_MAP[sortBy as string] ?? { title: "asc" as const };
     }
 
-    const where: any = {};
+    const where: any = { ...LIBRARY_TRACK_WHERE };
     if (albumId) {
       where.albumId = albumId as string;
     }
@@ -333,7 +335,7 @@ router.get("/tracks/shuffle", async (req, res) => {
       MAX_LIMIT,
     );
 
-    const totalTracks = await prisma.track.count();
+    const totalTracks = await prisma.track.count({ where: LIBRARY_TRACK_WHERE });
 
     if (totalTracks === 0) {
       return res.json({ tracks: [], total: 0 });
@@ -342,6 +344,7 @@ router.get("/tracks/shuffle", async (req, res) => {
     let tracksData;
     if (totalTracks <= limit) {
       tracksData = await prisma.track.findMany({
+        where: LIBRARY_TRACK_WHERE,
         include: {
           album: {
             include: {
@@ -359,6 +362,7 @@ router.get("/tracks/shuffle", async (req, res) => {
     } else {
       const randomIds = await prisma.$queryRaw<{ id: string }[]>`
                 SELECT id FROM "Track"
+                WHERE EXISTS (SELECT 1 FROM "Album" a WHERE a.id = "Track"."albumId" AND a.location = 'LIBRARY')
                 ORDER BY RANDOM()
                 LIMIT ${limit}
             `;
@@ -578,7 +582,7 @@ router.get("/tracks/:id/lyrics", async (req, res) => {
       }
     });
 
-router.delete("/tracks/:id", async (req, res) => {
+router.delete("/tracks/:id", requireAdmin, async (req, res) => {
   try {
 const track = await prisma.track.findUnique({
   where: { id: req.params.id },

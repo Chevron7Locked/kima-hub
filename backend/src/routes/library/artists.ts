@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { requireAdmin } from "../../middleware/auth";
 import { prisma, Prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { logger } from "../../utils/logger";
@@ -236,7 +237,7 @@ router.get("/artist-counts/status", async (_req, res) => {
   }
 });
 
-router.post("/artist-counts/backfill", async (_req, res) => {
+router.post("/artist-counts/backfill", requireAdmin, async (_req, res) => {
   try {
     if (isBackfillInProgress()) {
       return res.json({
@@ -260,7 +261,7 @@ router.post("/artist-counts/backfill", async (_req, res) => {
   }
 });
 
-router.post("/backfill-genres", async (_req, res) => {
+router.post("/backfill-genres", requireAdmin, async (_req, res) => {
   try {
     const artistsToBackfill = await prisma.artist.findMany({
       where: {
@@ -890,7 +891,7 @@ router.get("/artists/:id", async (req, res) => {
   }
 });
 
-router.delete("/artists/:id", async (req, res) => {
+router.delete("/artists/:id", requireAdmin, async (req, res) => {
   try {
     const artist = await prisma.artist.findUnique({
       where: { id: req.params.id },
