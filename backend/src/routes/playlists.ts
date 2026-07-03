@@ -634,21 +634,26 @@ router.delete("/:id/pending/:trackId", async (req, res) => {
         const userId = req.user!.id;
         const { id: playlistId, trackId: pendingTrackId } = req.params;
 
-        // Check ownership
-        const playlist = await prisma.playlist.findUnique({
-            where: { id: playlistId },
-        });
-
-        if (!playlist) {
-            return res.status(404).json({ error: "Playlist not found" });
+        const pendingResult = await getOwnedPendingTrack(
+            userId,
+            playlistId,
+            pendingTrackId
+        );
+        // Return an identical 404 for both "missing" and "wrong playlist" to avoid
+        // leaking existence of other users' pending track IDs via distinguishable messages.
+        if (
+            pendingResult.error === "pending_not_found" ||
+            pendingResult.error === "playlist_mismatch"
+        ) {
+            return res.status(404).json({ error: "Pending track not found" });
         }
-
-        if (playlist.userId !== userId) {
+        if (pendingResult.error === "forbidden") {
             return res.status(403).json({ error: "Access denied" });
         }
+        const { pendingTrack } = pendingResult;
 
         await prisma.playlistPendingTrack.delete({
-            where: { id: pendingTrackId },
+            where: { id: pendingTrack.id },
         });
 
         res.json({ message: "Pending track removed" });
@@ -941,21 +946,28 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
             `Request: userId=${userId} playlistId=${playlistId} pendingTrackId=${pendingTrackId}`
         );
 
-        // Check ownership
-        const playlist = await prisma.playlist.findUnique({
-            where: { id: playlistId },
-        });
+        // Verify the pending track exists and belongs to this playlist/user
+        // (returns an identical 404 for "missing" and "wrong playlist" to avoid
+        // leaking existence of other users' pending track IDs)
+        const pendingResult = await getOwnedPendingTrack(
+            userId,
+            playlistId,
+            pendingTrackId
+        );
 
-        if (!playlist) {
+        if (
+            pendingResult.error === "pending_not_found" ||
+            pendingResult.error === "playlist_mismatch"
+        ) {
             sessionLog(
                 "PENDING-RETRY",
-                `Playlist not found: ${playlistId}`,
+                `Pending track not found: ${pendingTrackId}`,
                 "WARN"
             );
-            return res.status(404).json({ error: "Playlist not found" });
+            return res.status(404).json({ error: "Pending track not found" });
         }
 
-        if (playlist.userId !== userId) {
+        if (pendingResult.error === "forbidden") {
             sessionLog(
                 "PENDING-RETRY",
                 `Access denied: playlistId=${playlistId} userId=${userId}`,
@@ -964,19 +976,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
             return res.status(403).json({ error: "Access denied" });
         }
 
-        // Get the pending track
-        const pendingTrack = await prisma.playlistPendingTrack.findUnique({
-            where: { id: pendingTrackId },
-        });
-
-        if (!pendingTrack) {
-            sessionLog(
-                "PENDING-RETRY",
-                `Pending track not found: ${pendingTrackId}`,
-                "WARN"
-            );
-            return res.status(404).json({ error: "Pending track not found" });
-        }
+        const { pendingTrack } = pendingResult;
 
         sessionLog(
             "PENDING-RETRY",

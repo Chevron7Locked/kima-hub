@@ -14,7 +14,9 @@ import {
     generateRefreshToken,
     generateStreamTicket,
     STREAM_TICKET_TTL_SECONDS,
+    JWT_SECRET_VALIDATED,
 } from "../middleware/auth";
+import { authLimiter } from "../middleware/rateLimiter";
 import { encrypt, decrypt } from "../utils/encryption";
 
 const router = Router();
@@ -140,7 +142,7 @@ router.post("/logout", (req, res) => {
 });
 
 // POST /auth/refresh - Refresh access token using refresh token
-router.post("/refresh", async (req, res) => {
+router.post("/refresh", authLimiter, async (req, res) => {
     const { refreshToken } = req.body;
 
     if (!refreshToken) {
@@ -148,10 +150,7 @@ router.post("/refresh", async (req, res) => {
     }
 
     try {
-        const decoded = jwt.verify(
-            refreshToken,
-            process.env.JWT_SECRET || process.env.SESSION_SECRET!
-        ) as any;
+        const decoded = jwt.verify(refreshToken, JWT_SECRET_VALIDATED) as any;
 
         if (decoded.type !== "refresh") {
             return res.status(401).json({ error: "Invalid refresh token" });
@@ -215,7 +214,7 @@ router.get("/me", requireAuth, async (req, res) => {
 });
 
 // POST /auth/change-password
-router.post("/change-password", requireAuth, async (req, res) => {
+router.post("/change-password", requireAuth, authLimiter, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
 
@@ -413,7 +412,7 @@ router.post("/2fa/setup", requireAuth, async (req, res) => {
 });
 
 // POST /auth/2fa/enable - Verify token and enable 2FA
-router.post("/2fa/enable", requireAuth, async (req, res) => {
+router.post("/2fa/enable", requireAuth, authLimiter, async (req, res) => {
     try {
         const { secret, token } = req.body;
 
@@ -479,7 +478,7 @@ router.post("/2fa/enable", requireAuth, async (req, res) => {
 });
 
 // POST /auth/2fa/disable - Disable 2FA
-router.post("/2fa/disable", requireAuth, async (req, res) => {
+router.post("/2fa/disable", requireAuth, authLimiter, async (req, res) => {
     try {
         const { password, token } = req.body;
 

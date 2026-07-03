@@ -13,7 +13,7 @@ if (!JWT_SECRET) {
 }
 
 // Type assertion after validation - JWT_SECRET is guaranteed to be a string
-const JWT_SECRET_VALIDATED: string = JWT_SECRET;
+export const JWT_SECRET_VALIDATED: string = JWT_SECRET;
 
 declare global {
     namespace Express {

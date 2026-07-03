@@ -134,7 +134,6 @@ app.use(
 // Routes - All API routes prefixed with /api for clear separation from frontend
 // Apply rate limiting to auth routes
 app.use("/api/auth/login", authLimiter);
-app.use("/api/auth/register", authLimiter);
 app.use("/api/auth", authRoutes);
 app.use("/api/onboarding/register", authLimiter);
 app.use("/api/onboarding", onboardingRoutes);
