@@ -9,6 +9,7 @@ import {
 } from "../services/moodBucketService";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
+import { MOOD_MIX_LIMIT, validateSaveTrackIds } from "./mixesValidation";
 
 const router = Router();
 
@@ -387,7 +388,19 @@ router.post("/mood/buckets/:mood/save", async (req, res) => {
             });
         }
 
-        const savedMix = await moodBucketService.saveUserMoodMix(userId, mood);
+        // Validate optional trackIds from request body (pure helper — see tests).
+        const validation = validateSaveTrackIds(req.body.trackIds, MOOD_MIX_LIMIT);
+        if ("error" in validation) {
+            return res.status(400).json({ error: validation.error });
+        }
+        const trackIds = validation.trackIds;
+
+        const savedMix = await moodBucketService.saveUserMoodMix(
+            userId,
+            mood,
+            MOOD_MIX_LIMIT,
+            trackIds
+        );
 
         if (!savedMix) {
             return res.status(400).json({

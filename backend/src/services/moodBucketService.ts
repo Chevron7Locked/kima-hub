@@ -482,13 +482,17 @@ export class MoodBucketService {
     }
 
     /**
-     * Save a mood mix as the user's active mood mix
+     * Save a mood mix as the user's active mood mix.
+     * If trackIds is provided, persist those that resolve to real tracks — order
+     * preserved, unknown ids silently dropped (coverUrls derived from the resolved set).
+     * Otherwise, regenerate a fresh mix via getMoodMix.
      * Returns the saved mix for immediate UI update
      */
     async saveUserMoodMix(
         userId: string,
         mood: MoodType,
-        limit: number = 15
+        limit: number = 15,
+        trackIds?: string[]
     ): Promise<{
         id: string;
         mood: string;
@@ -500,12 +504,69 @@ export class MoodBucketService {
         color: string;
         generatedAt: string;
     } | null> {
-        // Generate a fresh mix
-        const mix = await this.getMoodMix(mood, limit);
-        if (!mix) return null;
-
         const config = MOOD_CONFIG[mood];
         const generatedAt = new Date();
+
+        // If explicit trackIds are provided, derive coverUrls from them and persist
+        if (trackIds && trackIds.length > 0) {
+            const tracks = await prisma.track.findMany({
+                where: { id: { in: trackIds } },
+                select: {
+                    id: true,
+                    album: { select: { coverUrl: true } },
+                },
+            });
+
+            // Preserve order of provided trackIds
+            const orderedTracks = trackIds
+                .map((id) => tracks.find((t) => t.id === id))
+                .filter(Boolean);
+
+            const coverUrls = orderedTracks
+                .filter((t) => t?.album.coverUrl)
+                .slice(0, 4)
+                .map((t) => t!.album.coverUrl!);
+
+            const persistedTrackIds = orderedTracks.map((t) => t!.id);
+
+            // Upsert the user's mood mix with explicit trackIds
+            await prisma.userMoodMix.upsert({
+                where: { userId },
+                create: {
+                    userId,
+                    mood,
+                    trackIds: persistedTrackIds,
+                    coverUrls,
+                    generatedAt,
+                },
+                update: {
+                    mood,
+                    trackIds: persistedTrackIds,
+                    coverUrls,
+                    generatedAt,
+                },
+            });
+
+            logger.debug(
+                `[MoodBucket] Saved ${mood} mix for user ${userId} (${persistedTrackIds.length} explicit tracks)`
+            );
+
+            return {
+                id: `your-mood-mix-${generatedAt.getTime()}`,
+                mood,
+                name: `Your ${config.name} Mix`,
+                description: `Based on your ${config.name.toLowerCase()} preferences`,
+                trackIds: persistedTrackIds,
+                coverUrls,
+                trackCount: persistedTrackIds.length,
+                color: MOOD_GRADIENTS[mood],
+                generatedAt: generatedAt.toISOString(),
+            };
+        }
+
+        // Fallback: regenerate a fresh mix via getMoodMix
+        const mix = await this.getMoodMix(mood, limit);
+        if (!mix) return null;
 
         // Upsert the user's mood mix
         await prisma.userMoodMix.upsert({
