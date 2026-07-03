@@ -20,6 +20,11 @@ import { lastFmService } from "./lastfm";
 import { musicBrainzService } from "./musicbrainz";
 import { imageProviderService } from "./imageProvider";
 import { downloadAndStoreImage, isNativePath } from "./imageStorage";
+import {
+    DuplicateMbidError,
+    reassignAlbumRgMbid,
+    reassignArtistMbid,
+} from "./mbidReassign";
 
 export interface EnrichmentSettings {
     enabled: boolean;
@@ -421,8 +426,19 @@ export class EnrichmentService {
     ): Promise<void> {
         const updateData: any = {};
 
-        if (data.mbid) {
-            updateData.mbid = data.mbid;
+        // Reassign canonical MBID via shared helper (catches P2002 -> log+skip)
+        if (data.mbid && data.mbid.trim() !== "") {
+            try {
+                await reassignArtistMbid(artistId, data.mbid.trim());
+            } catch (err) {
+                if (err instanceof DuplicateMbidError) {
+                    logger.debug(
+                        `MBID ${data.mbid} already in use, skipping artist mbid reassign`
+                    );
+                } else {
+                    throw err;
+                }
+            }
         }
 
         if (data.bio) updateData.summary = data.bio;
@@ -451,30 +467,13 @@ export class EnrichmentService {
         }
 
         if (Object.keys(updateData).length > 0) {
-            try {
-                await prisma.artist.update({
-                    where: { id: artistId },
-                    data: updateData,
-                });
-                logger.debug(
-                    `   Saved ${data.genres?.length || 0} genres for artist`
-                );
-            } catch (error: any) {
-                if (error.code === "P2002" && updateData.mbid) {
-                    logger.debug(
-                        `MBID ${updateData.mbid} already used by another artist, retrying without mbid`
-                    );
-                    delete updateData.mbid;
-                    if (Object.keys(updateData).length > 0) {
-                        await prisma.artist.update({
-                            where: { id: artistId },
-                            data: updateData,
-                        });
-                    }
-                } else {
-                    throw error;
-                }
-            }
+            await prisma.artist.update({
+                where: { id: artistId },
+                data: updateData,
+            });
+            logger.debug(
+                `   Saved ${data.genres?.length || 0} genres for artist`
+            );
         }
     }
 
@@ -487,7 +486,21 @@ export class EnrichmentService {
     ): Promise<void> {
         const updateData: any = {};
 
-        if (data.rgMbid) updateData.rgMbid = data.rgMbid;
+        // Reassign canonical rgMbid via shared helper (handles Album update + OwnedAlbum migration)
+        if (data.rgMbid && data.rgMbid.trim() !== "") {
+            try {
+                await reassignAlbumRgMbid(albumId, data.rgMbid.trim());
+            } catch (err) {
+                if (err instanceof DuplicateMbidError) {
+                    logger.debug(
+                        `rgMbid ${data.rgMbid} already in use, skipping album rgMbid reassign`
+                    );
+                } else {
+                    throw err;
+                }
+            }
+        }
+
         if (data.coverUrl) {
             // Download cover locally if it's an external URL
             if (!isNativePath(data.coverUrl)) {
@@ -522,31 +535,6 @@ export class EnrichmentService {
                     data.genres?.length || 0
                 } genres, label: ${data.label || "none"}`
             );
-        }
-
-        // Update OwnedAlbum table if MBID changed
-        if (data.rgMbid) {
-            const album = await prisma.album.findUnique({
-                where: { id: albumId },
-                select: { artistId: true },
-            });
-
-            if (album) {
-                await prisma.ownedAlbum.upsert({
-                    where: {
-                        artistId_rgMbid: {
-                            artistId: album.artistId,
-                            rgMbid: data.rgMbid,
-                        },
-                    },
-                    create: {
-                        artistId: album.artistId,
-                        rgMbid: data.rgMbid,
-                        source: "enrichment",
-                    },
-                    update: {},
-                });
-            }
         }
     }
 

@@ -22,6 +22,11 @@ import {
 import { rateLimiter } from "../services/rateLimiter";
 import { redisClient } from "../utils/redis";
 import { repairBrokenCovers } from "../services/imageBackfill";
+import {
+  DuplicateMbidError,
+  reassignAlbumRgMbid,
+  reassignArtistMbid,
+} from "../services/mbidReassign";
 
 const router = Router();
 
@@ -613,62 +618,77 @@ router.delete("/failures/:id", requireAdmin, async (req, res) => {
  * User edits are stored as overrides; canonical data preserved for API lookups
  */
 router.put("/artists/:id/metadata", async (req, res) => {
-  try {
-    const { name, bio, genres, heroUrl } = req.body;
-
-    const updateData: any = {};
-    let hasOverrides = false;
-
-    // Map user edits to override fields (non-destructive)
-    if (name !== undefined) {
-      updateData.displayName = name;
-      hasOverrides = true;
-    }
-    if (bio !== undefined) {
-      updateData.userSummary = bio;
-      hasOverrides = true;
-    }
-    if (heroUrl !== undefined) {
-      updateData.userHeroUrl = heroUrl;
-      hasOverrides = true;
-    }
-    if (genres !== undefined) {
-      updateData.userGenres = genres;
-      hasOverrides = true;
-    }
-
-    // Set override flag
-    if (hasOverrides) {
-      updateData.hasUserOverrides = true;
-    }
-
-    const artist = await prisma.artist.update({
-      where: { id: req.params.id },
-      data: updateData,
-      include: {
-        albums: {
-          select: {
-            id: true,
-            title: true,
-            year: true,
-            coverUrl: true,
+    try {
+      const { name, bio, genres, heroUrl, mbid } = req.body;
+  
+      const updateData: any = {};
+      let hasOverrides = false;
+  
+      // Map user edits to override fields (non-destructive)
+      if (name !== undefined) {
+        updateData.displayName = name;
+        hasOverrides = true;
+      }
+      if (bio !== undefined) {
+        updateData.userSummary = bio;
+        hasOverrides = true;
+      }
+      if (heroUrl !== undefined) {
+        updateData.userHeroUrl = heroUrl;
+        hasOverrides = true;
+      }
+      if (genres !== undefined) {
+        updateData.userGenres = genres;
+        hasOverrides = true;
+      }
+  
+      // Set override flag
+      if (hasOverrides) {
+        updateData.hasUserOverrides = true;
+      }
+  
+      // Reassign canonical MBID if provided (trim once; skip empty/whitespace/non-string)
+      const trimmedMbid = typeof mbid === "string" ? mbid.trim() : "";
+      if (trimmedMbid !== "") {
+        try {
+          await reassignArtistMbid(req.params.id, trimmedMbid);
+        } catch (err) {
+          if (err instanceof DuplicateMbidError) {
+            return res.status(409).json({
+              error: `MBID ${trimmedMbid} is already in use by another artist`,
+            });
+          }
+          throw err;
+        }
+      }
+  
+      const artist = await prisma.artist.update({
+        where: { id: req.params.id },
+        data: updateData,
+        include: {
+          albums: {
+            select: {
+              id: true,
+              title: true,
+              year: true,
+              coverUrl: true,
+            },
           },
         },
-      },
-    });
-
-    // Invalidate Redis cache for artist hero image
-    try {
-      await redisClient.del(`hero:${req.params.id}`);
-    } catch (err) {
-      logger.warn("Failed to invalidate Redis cache:", err);
+      });
+  
+      // Invalidate Redis cache for artist hero image
+      try {
+        await redisClient.del(`hero:${req.params.id}`);
+      } catch (err) {
+        logger.warn("Failed to invalidate Redis cache:", err);
+      }
+  
+      res.json(artist);
+    } catch (error) {
+      safeError(res, "Update artist metadata", error);
     }
-
-    res.json(artist);
-  } catch (error) {
-    safeError(res, "Update artist metadata", error);
-  }
-});
+  });
 
 /**
  * PUT /enrichment/albums/:id/metadata
@@ -676,61 +696,76 @@ router.put("/artists/:id/metadata", async (req, res) => {
  * User edits are stored as overrides; canonical data preserved for API lookups
  */
 router.put("/albums/:id/metadata", async (req, res) => {
-  try {
-    const { title, year, genres, coverUrl } = req.body;
-
-    const updateData: any = {};
-    let hasOverrides = false;
-
-    // Map user edits to override fields (non-destructive)
-    if (title !== undefined) {
-      updateData.displayTitle = title;
-      hasOverrides = true;
-    }
-    if (year !== undefined) {
-      updateData.displayYear = parseInt(year);
-      hasOverrides = true;
-    }
-    if (coverUrl !== undefined) {
-      updateData.userCoverUrl = coverUrl;
-      hasOverrides = true;
-    }
-    if (genres !== undefined) {
-      updateData.userGenres = genres;
-      hasOverrides = true;
-    }
-
-    // Set override flag
-    if (hasOverrides) {
-      updateData.hasUserOverrides = true;
-    }
-
-    const album = await prisma.album.update({
-      where: { id: req.params.id },
-      data: updateData,
-      include: {
-        artist: {
-          select: {
-            id: true,
-            name: true,
+    try {
+      const { title, year, genres, coverUrl, rgMbid } = req.body;
+  
+      const updateData: any = {};
+      let hasOverrides = false;
+  
+      // Map user edits to override fields (non-destructive)
+      if (title !== undefined) {
+        updateData.displayTitle = title;
+        hasOverrides = true;
+      }
+      if (year !== undefined) {
+        updateData.displayYear = parseInt(year);
+        hasOverrides = true;
+      }
+      if (coverUrl !== undefined) {
+        updateData.userCoverUrl = coverUrl;
+        hasOverrides = true;
+      }
+      if (genres !== undefined) {
+        updateData.userGenres = genres;
+        hasOverrides = true;
+      }
+  
+      // Set override flag
+      if (hasOverrides) {
+        updateData.hasUserOverrides = true;
+      }
+  
+      // Reassign canonical rgMbid if provided (trim once; skip empty/whitespace/non-string)
+      const trimmedRgMbid = typeof rgMbid === "string" ? rgMbid.trim() : "";
+      if (trimmedRgMbid !== "") {
+        try {
+          await reassignAlbumRgMbid(req.params.id, trimmedRgMbid);
+        } catch (err) {
+          if (err instanceof DuplicateMbidError) {
+            return res.status(409).json({
+              error: `rgMbid ${trimmedRgMbid} is already in use by another album`,
+            });
+          }
+          throw err;
+        }
+      }
+  
+      const album = await prisma.album.update({
+        where: { id: req.params.id },
+        data: updateData,
+        include: {
+          artist: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          tracks: {
+            select: {
+              id: true,
+              title: true,
+              trackNo: true,
+              duration: true,
+            },
           },
         },
-        tracks: {
-          select: {
-            id: true,
-            title: true,
-            trackNo: true,
-            duration: true,
-          },
-        },
-      },
-    });
-
-    res.json(album);
-  } catch (error) {
-    safeError(res, "Update album metadata", error);
-  }
-});
+      });
+  
+      res.json(album);
+    } catch (error) {
+      safeError(res, "Update album metadata", error);
+    }
+  });
 
 /**
  * PUT /enrichment/tracks/:id/metadata
