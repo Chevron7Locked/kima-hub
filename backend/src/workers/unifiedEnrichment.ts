@@ -279,6 +279,17 @@ export async function startUnifiedEnrichmentWorker() {
          where: { analysisStatus: { in: ["processing", "queued"] } },
          data: { analysisStatus: "pending", analysisStartedAt: null, analysisRetryCount: 0 },
      });
+     // Flush the Redis audio-analysis list to match. Without this, a track that was
+     // rpush'd but crashed before its DB row got marked "queued" (see queueAudioAnalysis's
+     // two-phase push-then-mark) stays "pending" in Postgres while its entry lingers in
+     // the list -- the next cycle re-selects it as pending and re-pushes it, double-queuing
+     // it for the Python analyzer. Since we just reset every "queued"/"processing" track
+     // above, the list is redundant regardless of what it actually contains -- drop it.
+     try {
+         await getRedis().del("audio:analysis:queue");
+     } catch (err) {
+         logger.warn(`[Enrichment] Failed to flush audio:analysis:queue on crash recovery: ${(err as Error).message}`);
+     }
      const orphanedVibe = await prisma.track.updateMany({
          where: { vibeAnalysisStatus: "processing" },
          data: { vibeAnalysisStatus: "pending", vibeAnalysisStartedAt: null },

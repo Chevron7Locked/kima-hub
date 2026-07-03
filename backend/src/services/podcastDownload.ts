@@ -281,12 +281,12 @@ async function performDownload(
         await new Promise<void>((resolve, reject) => {
             response.data.on('data', (chunk: Buffer) => {
                 bytesDownloaded += chunk.length;
-                downloadProgress.set(episodeId, { bytesDownloaded, totalBytes: contentLength });
+                downloadProgress.set(episodeId, { bytesDownloaded, totalBytes: expectedBytes });
                 
                 // Log progress every 30 seconds for long downloads
                 const now = Date.now();
                 if (now - lastLogTime > 30000) {
-                    const percent = contentLength > 0 ? Math.round((bytesDownloaded / contentLength) * 100) : 0;
+                    const percent = expectedBytes > 0 ? Math.round((bytesDownloaded / expectedBytes) * 100) : 0;
                     logger.debug(`[PODCAST-DL] Download progress ${episodeId}: ${percent}% (${Math.round(bytesDownloaded / 1024 / 1024)}MB)`);
                     lastLogTime = now;
                 }

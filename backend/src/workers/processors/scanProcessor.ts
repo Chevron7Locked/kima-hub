@@ -270,18 +270,25 @@ export async function processScan(
                     });
                     if (artist && artist.enrichmentStatus === "pending") {
                         logger.debug(
-                            `[ScanJob ${job.id}] Triggering enrichment for artist: ${artist.name}`
+                            `[ScanJob ${job.id}] Queueing enrichment for artist: ${artist.name}`
                         );
-                        const { enrichSimilarArtist } = await import(
-                            "../artistEnrichment"
+                        // Route through the enrichment queue (jobId-deduped) instead of firing
+                        // directly -- avoids racing executeArtistsPhase() over the same artist
+                        const { artistQueue } = await import(
+                            "../enrichmentQueues"
                         );
-                        // Run enrichment in background (don't await)
-                        enrichSimilarArtist(artist).catch((err) => {
-                            logger.error(
-                                `[ScanJob ${job.id}]  Enrichment failed for ${artist.name}:`,
-                                err
+                        const jobId = `artist-${artist.id}`;
+                        if (!(await artistQueue.getJob(jobId))) {
+                            await artistQueue.add(
+                                "enrich",
+                                { artistId: artist.id, artistName: artist.name },
+                                { jobId }
                             );
-                        });
+                            await prisma.artist.update({
+                                where: { id: artist.id },
+                                data: { enrichmentStatus: "enriching" },
+                            });
+                        }
                     }
                 } catch (error) {
                     logger.error(
@@ -359,18 +366,25 @@ export async function processScan(
                         album.artist.enrichmentStatus === "pending"
                     ) {
                         logger.debug(
-                            `[ScanJob ${job.id}] Triggering enrichment for artist: ${album.artist.name}`
+                            `[ScanJob ${job.id}] Queueing enrichment for artist: ${album.artist.name}`
                         );
-                        const { enrichSimilarArtist } = await import(
-                            "../artistEnrichment"
+                        // Route through the enrichment queue (jobId-deduped) instead of firing
+                        // directly -- avoids racing executeArtistsPhase() over the same artist
+                        const { artistQueue } = await import(
+                            "../enrichmentQueues"
                         );
-                        // Run enrichment in background (don't await)
-                        enrichSimilarArtist(album.artist).catch((err) => {
-                            logger.error(
-                                `[ScanJob ${job.id}]  Enrichment failed for ${album.artist.name}:`,
-                                err
+                        const jobId = `artist-${album.artist.id}`;
+                        if (!(await artistQueue.getJob(jobId))) {
+                            await artistQueue.add(
+                                "enrich",
+                                { artistId: album.artist.id, artistName: album.artist.name },
+                                { jobId }
                             );
-                        });
+                            await prisma.artist.update({
+                                where: { id: album.artist.id },
+                                data: { enrichmentStatus: "enriching" },
+                            });
+                        }
                     }
                 } catch (error) {
                     logger.error(

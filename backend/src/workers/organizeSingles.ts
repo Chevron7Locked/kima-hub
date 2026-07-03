@@ -10,8 +10,19 @@
 import { logger } from "../utils/logger";
 import path from "path";
 import fs from "fs";
+import { readdir, copyFile, unlink, mkdir, rmdir, writeFile, stat } from "fs/promises";
 import { sessionLog } from "../utils/playlistLogger";
 import { prisma } from "../utils/db";
+
+/** Async existsSync equivalent -- avoids blocking the event loop on a stat check. */
+async function pathExists(p: string): Promise<boolean> {
+    try {
+        await stat(p);
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 /**
  * Migrate existing files from Soulseek/ directory to Singles/Artist/Album/ structure
@@ -23,15 +34,15 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
     const migrationMarker = path.join(musicPath, ".soulseek-migrated");
 
     // Check if already migrated
-    if (fs.existsSync(migrationMarker)) {
+    if (await pathExists(migrationMarker)) {
         return; // Already migrated
     }
 
     // Check if Soulseek directory exists
-    if (!fs.existsSync(soulseekDir)) {
+    if (!(await pathExists(soulseekDir))) {
         // No Soulseek folder, mark as migrated
         try {
-            fs.writeFileSync(migrationMarker, new Date().toISOString());
+            await writeFile(migrationMarker, new Date().toISOString());
         } catch (e) {
             // Ignore write errors
         }
@@ -46,7 +57,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
     async function findAudioFiles(dir: string): Promise<string[]> {
         const files: string[] = [];
         try {
-            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            const entries = await readdir(dir, { withFileTypes: true });
             for (const entry of entries) {
                 const fullPath = path.join(dir, entry.name);
                 if (entry.isDirectory()) {
@@ -69,7 +80,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
     if (audioFiles.length === 0) {
         sessionLog('ORGANIZE', 'No audio files found in Soulseek folder');
         try {
-            fs.writeFileSync(migrationMarker, new Date().toISOString());
+            await writeFile(migrationMarker, new Date().toISOString());
         } catch (e) {
             // Ignore
         }
@@ -115,21 +126,21 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
             const destFile = path.join(destDir, filename);
 
             // Skip if destination already exists
-            if (fs.existsSync(destFile)) {
+            if (await pathExists(destFile)) {
                 continue;
             }
 
             // Create destination directory (idempotent - won't fail if exists)
             try {
-                fs.mkdirSync(destDir, { recursive: true });
+                await mkdir(destDir, { recursive: true });
             } catch (err: any) {
                 sessionLog('ORGANIZE', `Failed to create directory ${destDir}: ${err.message}`, 'WARN');
                 continue; // Skip this file, try next
             }
 
             // Move file (copy then delete original)
-            fs.copyFileSync(filePath, destFile);
-            fs.unlinkSync(filePath);
+            await copyFile(filePath, destFile);
+            await unlink(filePath);
             migrated++;
 
             sessionLog('ORGANIZE', `Migrated: ${filename} -> Singles/${artist}/${album}/`);
@@ -140,23 +151,23 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
 
     // Clean up empty directories in Soulseek folder
     try {
-        const cleanEmptyDirs = (dir: string) => {
-            const entries = fs.readdirSync(dir, { withFileTypes: true });
+        const cleanEmptyDirs = async (dir: string): Promise<void> => {
+            const entries = await readdir(dir, { withFileTypes: true });
             for (const entry of entries) {
                 if (entry.isDirectory()) {
-                    cleanEmptyDirs(path.join(dir, entry.name));
+                    await cleanEmptyDirs(path.join(dir, entry.name));
                 }
             }
             // Check if directory is now empty
-            if (fs.readdirSync(dir).length === 0 && dir !== soulseekDir) {
-                fs.rmdirSync(dir);
+            if ((await readdir(dir)).length === 0 && dir !== soulseekDir) {
+                await rmdir(dir);
             }
         };
-        cleanEmptyDirs(soulseekDir);
+        await cleanEmptyDirs(soulseekDir);
 
         // Remove Soulseek folder if empty
-        if (fs.readdirSync(soulseekDir).length === 0) {
-            fs.rmdirSync(soulseekDir);
+        if ((await readdir(soulseekDir)).length === 0) {
+            await rmdir(soulseekDir);
             sessionLog('ORGANIZE', 'Removed empty Soulseek folder');
         }
     } catch (e) {
@@ -165,7 +176,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
 
     // Mark migration as complete
     try {
-        fs.writeFileSync(migrationMarker, new Date().toISOString());
+        await writeFile(migrationMarker, new Date().toISOString());
     } catch (e) {
         // Ignore
     }
