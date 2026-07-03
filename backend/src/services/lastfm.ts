@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from "axios";
+import pLimit from "p-limit";
 import { logger } from "../utils/logger";
 import * as fuzz from "fuzzball";
 import { config } from "../config";
@@ -1036,9 +1037,12 @@ class LastFmService {
 
             const artists = data.artists?.artist || [];
 
-            // Get detailed info for each artist with images
+            // Get detailed info for each artist with images. Bounded concurrency -
+            // each artist fans out to Fanart.tv + Deezer lookups, and unbounded
+            // Promise.all here would blow past those services' rate limits.
+            const concurrencyLimit = pLimit(4);
             const detailedArtists = await Promise.all(
-                artists.map(async (artist: any) => {
+                artists.map((artist: any) => concurrencyLimit(async () => {
                     // Try to get image from Fanart.tv using MBID
                     let image = null;
                     if (artist.mbid) {
@@ -1087,7 +1091,7 @@ class LastFmService {
                         image,
                         mbid: artist.mbid,
                     };
-                })
+                }))
             );
 
             // Cache for 6 hours (charts update frequently)

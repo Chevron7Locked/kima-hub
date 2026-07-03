@@ -1,6 +1,7 @@
-import axios from "axios";
+import { AxiosRequestConfig } from "axios";
 import { logger } from "../utils/logger";
 import { CacheWrapper } from "../utils/cacheWrapper";
+import { rateLimitedGet } from "./httpClient";
 
 /**
  * Deezer Service
@@ -98,24 +99,51 @@ class DeezerService {
     }
 
     /**
+     * Cache-then-fetch helper: checks Redis first, and on a miss runs `requestFn`
+     * (which must issue its Deezer calls via `deezerGet`) and caches the result.
+     * Negative results are cached too, under the "null" sentinel, since getCached/
+     * setCache already round-trip through CacheWrapper's own JSON encoding.
+     * Mirrors MusicBrainzService.cachedRequest.
+     */
+    private async cachedRequest<T>(cacheKey: string, requestFn: () => Promise<T>): Promise<T> {
+        const cached = await this.getCached(cacheKey);
+        if (cached !== null) {
+            try {
+                return cached === "null" ? (null as T) : (JSON.parse(cached) as T);
+            } catch {
+                // Stale/incompatible cache entry - fall through and refetch.
+            }
+        }
+
+        const data = await requestFn();
+        await this.setCache(cacheKey, data === null || data === undefined ? "null" : JSON.stringify(data));
+        return data;
+    }
+
+    /**
+     * Rate-limited Deezer GET. Routes every request through the global rate
+     * limiter (service key "deezer") instead of calling axios directly.
+     */
+    private deezerGet<T = any>(path: string, config?: AxiosRequestConfig): Promise<T> {
+        return rateLimitedGet<T>("deezer", `${DEEZER_API}${path}`, config);
+    }
+
+    /**
      * Search for an artist and get their image URL
      */
     async getArtistImage(artistName: string): Promise<string | null> {
         const cacheKey = `artist:${artistName.toLowerCase()}`;
-        const cached = await this.getCached(cacheKey);
-        if (cached) return cached === "null" ? null : cached;
 
         try {
-            const response = await axios.get(`${DEEZER_API}/search/artist`, {
-                params: { q: artistName, limit: 1 },
-                timeout: 5000,
+            return await this.cachedRequest(cacheKey, async () => {
+                const body = await this.deezerGet<any>("/search/artist", {
+                    params: { q: artistName, limit: 1 },
+                    timeout: 5000,
+                });
+
+                const artist = body?.data?.[0];
+                return artist?.picture_xl || artist?.picture_big || artist?.picture_medium || null;
             });
-
-            const artist = response.data?.data?.[0];
-            const imageUrl = artist?.picture_xl || artist?.picture_big || artist?.picture_medium || null;
-
-            await this.setCache(cacheKey, imageUrl || "null");
-            return imageUrl;
         } catch (error: any) {
             logger.error(`Deezer artist image error for ${artistName}:`, error.message);
             return null;
@@ -127,43 +155,40 @@ class DeezerService {
      */
     async getAlbumCover(artistName: string, albumName: string): Promise<string | null> {
         const cacheKey = `album:${artistName.toLowerCase()}:${albumName.toLowerCase()}`;
-        const cached = await this.getCached(cacheKey);
-        if (cached) return cached === "null" ? null : cached;
 
         try {
-            // Try structured query first, fall back to unstructured if no results.
-            // Deezer's structured syntax (artist:"..." album:"...") fails for some albums.
-            let albums: any[] = [];
+            return await this.cachedRequest(cacheKey, async () => {
+                // Try structured query first, fall back to unstructured if no results.
+                // Deezer's structured syntax (artist:"..." album:"...") fails for some albums.
+                let albums: any[] = [];
 
-            const structured = await axios.get(`${DEEZER_API}/search/album`, {
-                params: { q: `artist:"${artistName}" album:"${albumName}"`, limit: 5 },
-                timeout: 5000,
-            });
-            albums = structured.data?.data || [];
-
-            if (albums.length === 0) {
-                const unstructured = await axios.get(`${DEEZER_API}/search/album`, {
-                    params: { q: `${artistName} ${albumName}`, limit: 5 },
+                const structured = await this.deezerGet<any>("/search/album", {
+                    params: { q: `artist:"${artistName}" album:"${albumName}"`, limit: 5 },
                     timeout: 5000,
                 });
-                albums = unstructured.data?.data || [];
-            }
+                albums = structured?.data || [];
 
-            // Find the best match
-            let bestMatch = albums[0];
-
-            for (const album of albums) {
-                if (album.artist?.name?.toLowerCase() === artistName.toLowerCase() &&
-                    album.title?.toLowerCase() === albumName.toLowerCase()) {
-                    bestMatch = album;
-                    break;
+                if (albums.length === 0) {
+                    const unstructured = await this.deezerGet<any>("/search/album", {
+                        params: { q: `${artistName} ${albumName}`, limit: 5 },
+                        timeout: 5000,
+                    });
+                    albums = unstructured?.data || [];
                 }
-            }
 
-            const coverUrl = bestMatch?.cover_xl || bestMatch?.cover_big || bestMatch?.cover_medium || null;
+                // Find the best match
+                let bestMatch = albums[0];
 
-            await this.setCache(cacheKey, coverUrl || "null");
-            return coverUrl;
+                for (const album of albums) {
+                    if (album.artist?.name?.toLowerCase() === artistName.toLowerCase() &&
+                        album.title?.toLowerCase() === albumName.toLowerCase()) {
+                        bestMatch = album;
+                        break;
+                    }
+                }
+
+                return bestMatch?.cover_xl || bestMatch?.cover_big || bestMatch?.cover_medium || null;
+            });
         } catch (error: any) {
             logger.error(`Deezer album cover error for ${artistName} - ${albumName}:`, error.message);
             return null;
@@ -174,12 +199,12 @@ class DeezerService {
      * Search Deezer and return the first preview URL for a track.
      */
     private async searchTrackPreview(artistName: string, trackName: string): Promise<string | null> {
-        const response = await axios.get(`${DEEZER_API}/search/track`, {
+        const body = await this.deezerGet<any>("/search/track", {
             params: { q: `artist:"${artistName}" track:"${trackName}"`, limit: 1 },
             timeout: 5000,
         });
 
-        const track = response.data?.data?.[0];
+        const track = body?.data?.[0];
         return track?.preview || null;
     }
 
@@ -188,14 +213,9 @@ class DeezerService {
      */
     async getTrackPreview(artistName: string, trackName: string): Promise<string | null> {
         const cacheKey = `preview:${artistName.toLowerCase()}:${trackName.toLowerCase()}`;
-        const cached = await this.getCached(cacheKey);
-        if (cached) return cached === "null" ? null : cached;
 
         try {
-            const previewUrl = await this.searchTrackPreview(artistName, trackName);
-
-            await this.setCache(cacheKey, previewUrl || "null");
-            return previewUrl;
+            return await this.cachedRequest(cacheKey, () => this.searchTrackPreview(artistName, trackName));
         } catch (error: any) {
             logger.error(`Deezer track preview error for ${artistName} - ${trackName}:`, error.message);
             return null;
@@ -221,56 +241,46 @@ class DeezerService {
      */
     async getTrackAlbum(artistName: string, trackName: string): Promise<{ albumName: string; albumId: string } | null> {
         const cacheKey = `track-album:${artistName.toLowerCase()}:${trackName.toLowerCase()}`;
-        const cached = await this.getCached(cacheKey);
-        if (cached) {
-            if (cached === "null") return null;
-            try {
-                return JSON.parse(cached);
-            } catch {
-                return null;
-            }
-        }
 
         try {
-            // Clean track name - remove featuring/with suffixes for better matching
-            const cleanTrackName = trackName
-                .replace(/\s*[\(\[](?:feat\.?|ft\.?|with|featuring)[^\)\]]*[\)\]]/gi, "")
-                .replace(/\s*(?:feat\.?|ft\.?|featuring)\s+.*/gi, "")
-                .trim();
+            return await this.cachedRequest(cacheKey, async () => {
+                // Clean track name - remove featuring/with suffixes for better matching
+                const cleanTrackName = trackName
+                    .replace(/\s*[\(\[](?:feat\.?|ft\.?|with|featuring)[^\)\]]*[\)\]]/gi, "")
+                    .replace(/\s*(?:feat\.?|ft\.?|featuring)\s+.*/gi, "")
+                    .trim();
 
-            // Use simple space-separated search - more reliable than structured queries
-            const query = `${artistName} ${cleanTrackName}`;
+                // Use simple space-separated search - more reliable than structured queries
+                const query = `${artistName} ${cleanTrackName}`;
 
-            const response = await axios.get(`${DEEZER_API}/search/track`, {
-                params: { q: query, limit: 5 },
-                timeout: 5000,
+                const body = await this.deezerGet<any>("/search/track", {
+                    params: { q: query, limit: 5 },
+                    timeout: 5000,
+                });
+
+                // Find best match - prefer exact artist match
+                const tracks = body?.data || [];
+                const artistLower = artistName.toLowerCase();
+
+                // First try exact artist match
+                let match = tracks.find((t: any) =>
+                    t.artist?.name?.toLowerCase() === artistLower
+                );
+
+                // Fall back to first result if no exact match
+                if (!match && tracks.length > 0) {
+                    match = tracks[0];
+                }
+
+                if (match?.album?.title) {
+                    return {
+                        albumName: match.album.title,
+                        albumId: String(match.album.id || ""),
+                    };
+                }
+
+                return null;
             });
-
-            // Find best match - prefer exact artist match
-            const tracks = response.data?.data || [];
-            const artistLower = artistName.toLowerCase();
-
-            // First try exact artist match
-            let match = tracks.find((t: any) =>
-                t.artist?.name?.toLowerCase() === artistLower
-            );
-
-            // Fall back to first result if no exact match
-            if (!match && tracks.length > 0) {
-                match = tracks[0];
-            }
-
-            if (match?.album?.title) {
-                const result = {
-                    albumName: match.album.title,
-                    albumId: String(match.album.id || ""),
-                };
-                await this.setCache(cacheKey, JSON.stringify(result));
-                return result;
-            }
-
-            await this.setCache(cacheKey, "null");
-            return null;
         } catch (error: any) {
             logger.debug(`Deezer track album lookup error for ${artistName} - ${trackName}:`, error.message);
             return null;
@@ -304,11 +314,11 @@ class DeezerService {
      */
     async getPlaylistName(playlistId: string): Promise<string | null> {
         try {
-            const resp = await axios.get(`${DEEZER_API}/playlist/${playlistId}`, {
+            const body = await this.deezerGet<any>(`/playlist/${playlistId}`, {
                 timeout: 5000,
                 params: { limit: 1 },
             });
-            return resp.data?.title || null;
+            return body?.title || null;
         } catch {
             return null;
         }
@@ -324,11 +334,10 @@ class DeezerService {
         try {
             logger.debug(`Deezer: Fetching playlist ${playlistId}...`);
 
-            const response = await axios.get(`${DEEZER_API}/playlist/${playlistId}`, {
+            const data = await this.deezerGet<any>(`/playlist/${playlistId}`, {
                 timeout: 15000,
             });
 
-            const data = response.data;
             if (data.error) {
                 logger.error("Deezer API error:", data.error);
                 return null;
@@ -346,12 +355,11 @@ class DeezerService {
 
                 while (index < totalTracks) {
                     try {
-                        const pageResponse = await axios.get(
-                            `${DEEZER_API}/playlist/${playlistId}/tracks`,
+                        const pageData = await this.deezerGet<any>(
+                            `/playlist/${playlistId}/tracks`,
                             { params: { index, limit }, timeout: 15000 }
                         );
 
-                        const pageData = pageResponse.data;
                         if (pageData.error) {
                             logger.error("Deezer pagination error:", pageData.error);
                             break;
@@ -413,12 +421,12 @@ class DeezerService {
      */
     async getChartPlaylists(limit: number = 20): Promise<DeezerPlaylistPreview[]> {
         try {
-            const response = await axios.get(`${DEEZER_API}/chart/0/playlists`, {
+            const body = await this.deezerGet<any>("/chart/0/playlists", {
                 params: { limit },
                 timeout: 10000,
             });
 
-            return (response.data?.data || []).map((playlist: any) => ({
+            return (body?.data || []).map((playlist: any) => ({
                 id: String(playlist.id),
                 title: playlist.title || "Unknown",
                 description: null,
@@ -438,12 +446,12 @@ class DeezerService {
      */
     async searchPlaylists(query: string, limit: number = 20): Promise<DeezerPlaylistPreview[]> {
         try {
-            const response = await axios.get(`${DEEZER_API}/search/playlist`, {
+            const body = await this.deezerGet<any>("/search/playlist", {
                 params: { q: query, limit },
                 timeout: 10000,
             });
 
-            return (response.data?.data || []).map((playlist: any) => ({
+            return (body?.data || []).map((playlist: any) => ({
                 id: String(playlist.id),
                 title: playlist.title || "Unknown",
                 description: null,
@@ -465,52 +473,48 @@ class DeezerService {
      */
     async getFeaturedPlaylists(limit: number = 50): Promise<DeezerPlaylistPreview[]> {
         const cacheKey = `playlists:featured:${limit}`;
-        const cached = await this.getCached(cacheKey);
-        if (cached) {
-            logger.debug("Deezer: Returning cached featured playlists");
-            return JSON.parse(cached);
-        }
 
         try {
-            const allPlaylists: DeezerPlaylistPreview[] = [];
-            const seenIds = new Set<string>();
+            return await this.cachedRequest(cacheKey, async () => {
+                const allPlaylists: DeezerPlaylistPreview[] = [];
+                const seenIds = new Set<string>();
 
-            // 1. Get chart playlists (max 99 available)
-            logger.debug("Deezer: Fetching chart playlists from API...");
-            const chartPlaylists = await this.getChartPlaylists(Math.min(limit, 99));
-            for (const p of chartPlaylists) {
-                if (!seenIds.has(p.id)) {
-                    seenIds.add(p.id);
-                    allPlaylists.push(p);
-                }
-            }
-            logger.debug(`Deezer: Got ${chartPlaylists.length} chart playlists`);
-
-            // 2. If we need more, search for popular genre playlists
-            if (allPlaylists.length < limit) {
-                const genres = ["pop", "rock", "hip hop", "electronic", "r&b", "indie", "jazz", "classical", "metal", "country"];
-                
-                for (const genre of genres) {
-                    if (allPlaylists.length >= limit) break;
-                    
-                    try {
-                        const genrePlaylists = await this.searchPlaylists(genre, 10);
-                        for (const p of genrePlaylists) {
-                            if (!seenIds.has(p.id) && allPlaylists.length < limit) {
-                                seenIds.add(p.id);
-                                allPlaylists.push(p);
-                            }
-                        }
-                    } catch (e) {
-                        // Continue with other genres
+                // 1. Get chart playlists (max 99 available)
+                logger.debug("Deezer: Fetching chart playlists from API...");
+                const chartPlaylists = await this.getChartPlaylists(Math.min(limit, 99));
+                for (const p of chartPlaylists) {
+                    if (!seenIds.has(p.id)) {
+                        seenIds.add(p.id);
+                        allPlaylists.push(p);
                     }
                 }
-            }
+                logger.debug(`Deezer: Got ${chartPlaylists.length} chart playlists`);
 
-            const result = allPlaylists.slice(0, limit);
-            logger.debug(`Deezer: Caching ${result.length} featured playlists`);
-            await this.setCache(cacheKey, JSON.stringify(result));
-            return result;
+                // 2. If we need more, search for popular genre playlists
+                if (allPlaylists.length < limit) {
+                    const genres = ["pop", "rock", "hip hop", "electronic", "r&b", "indie", "jazz", "classical", "metal", "country"];
+
+                    for (const genre of genres) {
+                        if (allPlaylists.length >= limit) break;
+
+                        try {
+                            const genrePlaylists = await this.searchPlaylists(genre, 10);
+                            for (const p of genrePlaylists) {
+                                if (!seenIds.has(p.id) && allPlaylists.length < limit) {
+                                    seenIds.add(p.id);
+                                    allPlaylists.push(p);
+                                }
+                            }
+                        } catch (e) {
+                            // Continue with other genres
+                        }
+                    }
+                }
+
+                const result = allPlaylists.slice(0, limit);
+                logger.debug(`Deezer: Caching ${result.length} featured playlists`);
+                return result;
+            });
         } catch (error: any) {
             logger.error("Deezer featured playlists error:", error.message);
             return [];
@@ -519,36 +523,29 @@ class DeezerService {
 
     /**
      * Get genres/categories available on Deezer
-     */
-    /**
-     * Get genres/categories available on Deezer
      * Cached for 24 hours
      */
     async getGenres(): Promise<Array<{ id: number; name: string; imageUrl: string | null }>> {
         const cacheKey = "genres:all";
-        const cached = await this.getCached(cacheKey);
-        if (cached) {
-            logger.debug("Deezer: Returning cached genres");
-            return JSON.parse(cached);
-        }
 
         try {
-            logger.debug("Deezer: Fetching genres from API...");
-            const response = await axios.get(`${DEEZER_API}/genre`, {
-                timeout: 10000,
+            return await this.cachedRequest(cacheKey, async () => {
+                logger.debug("Deezer: Fetching genres from API...");
+                const body = await this.deezerGet<any>("/genre", {
+                    timeout: 10000,
+                });
+
+                const genres = (body?.data || [])
+                    .filter((g: any) => g.id !== 0) // Skip "All" genre
+                    .map((genre: any) => ({
+                        id: genre.id,
+                        name: genre.name,
+                        imageUrl: genre.picture_medium || genre.picture || null,
+                    }));
+
+                logger.debug(`Deezer: Caching ${genres.length} genres`);
+                return genres;
             });
-
-            const genres = (response.data?.data || [])
-                .filter((g: any) => g.id !== 0) // Skip "All" genre
-                .map((genre: any) => ({
-                    id: genre.id,
-                    name: genre.name,
-                    imageUrl: genre.picture_medium || genre.picture || null,
-                }));
-
-            logger.debug(`Deezer: Caching ${genres.length} genres`);
-            await this.setCache(cacheKey, JSON.stringify(genres));
-            return genres;
         } catch (error: any) {
             logger.error("Deezer genres error:", error.message);
             return [];
@@ -568,29 +565,25 @@ class DeezerService {
      */
     async getRadioStations(): Promise<DeezerRadioStation[]> {
         const cacheKey = "radio:stations";
-        const cached = await this.getCached(cacheKey);
-        if (cached) {
-            logger.debug("Deezer: Returning cached radio stations");
-            return JSON.parse(cached);
-        }
 
         try {
-            logger.debug("Deezer: Fetching radio stations from API...");
-            const response = await axios.get(`${DEEZER_API}/radio`, {
-                timeout: 10000,
+            return await this.cachedRequest(cacheKey, async () => {
+                logger.debug("Deezer: Fetching radio stations from API...");
+                const body = await this.deezerGet<any>("/radio", {
+                    timeout: 10000,
+                });
+
+                const stations = (body?.data || []).map((radio: any) => ({
+                    id: String(radio.id),
+                    title: radio.title || "Unknown",
+                    description: null,
+                    imageUrl: radio.picture_medium || radio.picture || null,
+                    type: "radio" as const,
+                }));
+
+                logger.debug(`Deezer: Got ${stations.length} radio stations, caching...`);
+                return stations;
             });
-
-            const stations = (response.data?.data || []).map((radio: any) => ({
-                id: String(radio.id),
-                title: radio.title || "Unknown",
-                description: null,
-                imageUrl: radio.picture_medium || radio.picture || null,
-                type: "radio" as const,
-            }));
-
-            logger.debug(`Deezer: Got ${stations.length} radio stations, caching...`);
-            await this.setCache(cacheKey, JSON.stringify(stations));
-            return stations;
         } catch (error: any) {
             logger.error("Deezer radio stations error:", error.message);
             return [];
@@ -599,40 +592,33 @@ class DeezerService {
 
     /**
      * Get radio stations organized by genre
-     */
-    /**
-     * Get radio stations organized by genre
      * Cached for 24 hours
      */
     async getRadiosByGenre(): Promise<DeezerGenreWithRadios[]> {
         const cacheKey = "radio:by-genre";
-        const cached = await this.getCached(cacheKey);
-        if (cached) {
-            logger.debug("Deezer: Returning cached radios by genre");
-            return JSON.parse(cached);
-        }
 
         try {
-            logger.debug("Deezer: Fetching radios by genre from API...");
-            const response = await axios.get(`${DEEZER_API}/radio/genres`, {
-                timeout: 10000,
+            return await this.cachedRequest(cacheKey, async () => {
+                logger.debug("Deezer: Fetching radios by genre from API...");
+                const body = await this.deezerGet<any>("/radio/genres", {
+                    timeout: 10000,
+                });
+
+                const genres = (body?.data || []).map((genre: any) => ({
+                    id: genre.id,
+                    name: genre.title || "Unknown",
+                    radios: (genre.radios || []).map((radio: any) => ({
+                        id: String(radio.id),
+                        title: radio.title || "Unknown",
+                        description: null,
+                        imageUrl: radio.picture_medium || radio.picture || null,
+                        type: "radio" as const,
+                    })),
+                }));
+
+                logger.debug(`Deezer: Got ${genres.length} genre categories with radios, caching...`);
+                return genres;
             });
-
-            const genres = (response.data?.data || []).map((genre: any) => ({
-                id: genre.id,
-                name: genre.title || "Unknown",
-                radios: (genre.radios || []).map((radio: any) => ({
-                    id: String(radio.id),
-                    title: radio.title || "Unknown",
-                    description: null,
-                    imageUrl: radio.picture_medium || radio.picture || null,
-                    type: "radio" as const,
-                })),
-            }));
-
-            logger.debug(`Deezer: Got ${genres.length} genre categories with radios, caching...`);
-            await this.setCache(cacheKey, JSON.stringify(genres));
-            return genres;
         } catch (error: any) {
             logger.error("Deezer radios by genre error:", error.message);
             return [];
@@ -647,18 +633,17 @@ class DeezerService {
             logger.debug(`Deezer: Fetching radio ${radioId} tracks...`);
 
             // First get radio info
-            const infoResponse = await axios.get(`${DEEZER_API}/radio/${radioId}`, {
+            const radioInfo = await this.deezerGet<any>(`/radio/${radioId}`, {
                 timeout: 10000,
             });
-            const radioInfo = infoResponse.data;
 
             // Then get tracks
-            const tracksResponse = await axios.get(`${DEEZER_API}/radio/${radioId}/tracks`, {
+            const tracksBody = await this.deezerGet<any>(`/radio/${radioId}/tracks`, {
                 params: { limit: 100 },
                 timeout: 15000,
             });
 
-            const tracks: DeezerTrack[] = (tracksResponse.data?.data || []).map((track: any) => ({
+            const tracks: DeezerTrack[] = (tracksBody?.data || []).map((track: any) => ({
                 deezerId: String(track.id),
                 title: track.title || "Unknown",
                 artist: track.artist?.name || "Unknown Artist",
@@ -698,20 +683,20 @@ class DeezerService {
     }> {
         try {
             // Get genre-specific playlists via search
-            const genreResponse = await axios.get(`${DEEZER_API}/genre/${genreId}`, {
+            const genreBody = await this.deezerGet<any>(`/genre/${genreId}`, {
                 timeout: 10000,
             });
-            const genreName = genreResponse.data?.name || "";
-            
+            const genreName = genreBody?.name || "";
+
             // Search for playlists with this genre
             const playlists = genreName ? await this.searchPlaylists(genreName, 20) : [];
 
             // Get radios for this genre from the genres endpoint
-            const radiosResponse = await axios.get(`${DEEZER_API}/radio/genres`, {
+            const radiosBody = await this.deezerGet<any>("/radio/genres", {
                 timeout: 10000,
             });
-            
-            const genreRadios = (radiosResponse.data?.data || []).find((g: any) => g.id === genreId);
+
+            const genreRadios = (radiosBody?.data || []).find((g: any) => g.id === genreId);
             const radios: DeezerRadioStation[] = (genreRadios?.radios || []).map((radio: any) => ({
                 id: String(radio.id),
                 title: radio.title || "Unknown",
@@ -731,12 +716,12 @@ class DeezerService {
     // Only the popular-podcasts feed is cached since it's a shared response.
     async searchPodcasts(query: string, limit: number = 20): Promise<DeezerPodcast[]> {
         try {
-            const response = await axios.get(`${DEEZER_API}/search/podcast`, {
+            const body = await this.deezerGet<any>("/search/podcast", {
                 params: { q: query, limit },
                 timeout: 10000,
             });
 
-            return (response.data?.data || []).map((podcast: any) => ({
+            return (body?.data || []).map((podcast: any) => ({
                 id: podcast.id,
                 title: podcast.title || "Unknown",
                 description: podcast.description || "",
@@ -752,26 +737,23 @@ class DeezerService {
 
     async getTopPodcasts(limit: number = 20): Promise<DeezerPodcast[]> {
         const cacheKey = `podcasts:top:${limit}`;
-        const cached = await this.getCached(cacheKey);
-        if (cached) return JSON.parse(cached);
 
         try {
-            const response = await axios.get(`${DEEZER_API}/chart/0/podcasts`, {
-                params: { limit },
-                timeout: 10000,
+            return await this.cachedRequest(cacheKey, async () => {
+                const body = await this.deezerGet<any>("/chart/0/podcasts", {
+                    params: { limit },
+                    timeout: 10000,
+                });
+
+                return (body?.data || []).map((podcast: any) => ({
+                    id: podcast.id,
+                    title: podcast.title || "Unknown",
+                    description: podcast.description || "",
+                    fans: podcast.fans || 0,
+                    link: podcast.link || "",
+                    pictureUrl: podcast.picture_big || podcast.picture_medium || podcast.picture || null,
+                }));
             });
-
-            const results: DeezerPodcast[] = (response.data?.data || []).map((podcast: any) => ({
-                id: podcast.id,
-                title: podcast.title || "Unknown",
-                description: podcast.description || "",
-                fans: podcast.fans || 0,
-                link: podcast.link || "",
-                pictureUrl: podcast.picture_big || podcast.picture_medium || podcast.picture || null,
-            }));
-
-            await this.setCache(cacheKey, JSON.stringify(results));
-            return results;
         } catch (error: any) {
             logger.error("Deezer top podcasts error:", error.message);
             return [];

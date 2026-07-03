@@ -1,8 +1,9 @@
-import axios, { AxiosInstance } from "axios";
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { getSystemSettings } from "../utils/systemSettings";
 import { USER_AGENT } from "../config";
+import { rateLimiter } from "./rateLimiter";
 
 /**
  * Fanart.tv API Service
@@ -62,6 +63,15 @@ class FanartService {
     }
 
     /**
+     * Rate-limited fanart.tv GET. Routes every request through the global
+     * rate limiter (service key "fanart") instead of calling the axios
+     * instance directly.
+     */
+    private fanartGet(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse> {
+        return rateLimiter.execute("fanart", () => this.client.get(url, config));
+    }
+
+    /**
      * Get artist images (background, thumbnail, logo)
      * Returns the highest quality artist image available
      */
@@ -89,7 +99,7 @@ class FanartService {
 
         try {
             logger.debug(`  Fetching from Fanart.tv...`);
-            const response = await this.client.get(`/music/${mbid}`, {
+            const response = await this.fanartGet(`/music/${mbid}`, {
                 params: { api_key: this.apiKey },
             });
 
@@ -182,7 +192,7 @@ class FanartService {
         }
 
         try {
-            const response = await this.client.get(`/music/albums/${mbid}`, {
+            const response = await this.fanartGet(`/music/albums/${mbid}`, {
                 params: { api_key: this.apiKey },
             });
 

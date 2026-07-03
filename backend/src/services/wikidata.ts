@@ -1,8 +1,9 @@
 import crypto from "crypto";
-import axios, { AxiosInstance } from "axios";
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { USER_AGENT } from "../config";
+import { rateLimiter } from "./rateLimiter";
 
 interface WikidataResult {
     summary?: string;
@@ -19,6 +20,15 @@ class WikidataService {
                 "User-Agent": USER_AGENT,
             },
         });
+    }
+
+    /**
+     * Rate-limited Wikidata/Wikipedia GET. Routes every request through the
+     * global rate limiter (service key "wikidata") instead of calling the
+     * axios instance directly.
+     */
+    private wikidataGet(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse> {
+        return rateLimiter.execute("wikidata", () => this.client.get(url, config));
     }
 
     async getArtistInfo(
@@ -79,7 +89,7 @@ class WikidataService {
       LIMIT 1
     `;
 
-        const response = await this.client.get("https://query.wikidata.org/sparql", {
+        const response = await this.wikidataGet("https://query.wikidata.org/sparql", {
             params: {
                 query: sparqlQuery,
                 format: "json",
@@ -98,7 +108,7 @@ class WikidataService {
     ): Promise<string | undefined> {
         try {
             // Get English Wikipedia article title
-            const response = await this.client.get(
+            const response = await this.wikidataGet(
                 `https://www.wikidata.org/wiki/Special:EntityData/${wikidataId}.json`
             );
 
@@ -108,7 +118,7 @@ class WikidataService {
             if (!enWikiTitle) return undefined;
 
             // Get article summary from Wikipedia API
-            const summaryResponse = await this.client.get(
+            const summaryResponse = await this.wikidataGet(
                 "https://en.wikipedia.org/api/rest_v1/page/summary/" +
                     encodeURIComponent(enWikiTitle)
             );
@@ -127,7 +137,7 @@ class WikidataService {
         wikidataId: string
     ): Promise<string | undefined> {
         try {
-            const response = await this.client.get(
+            const response = await this.wikidataGet(
                 `https://www.wikidata.org/wiki/Special:EntityData/${wikidataId}.json`
             );
 
