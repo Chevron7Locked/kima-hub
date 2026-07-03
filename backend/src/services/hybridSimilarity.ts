@@ -154,6 +154,22 @@ async function findSimilarClapOnly(
     return results;
 }
 
+/**
+ * Fallback path (DB-9): used by findSimilarTracks only when MusicCNN features
+ * are available but CLAP embeddings are not (see the mode selection above) --
+ * the hybrid and CLAP-only paths above are the well-trodden ones and are not
+ * touched here. This is a full CROSS JOIN scan over every Track, computing
+ * the weighted feature-similarity expression per row before ORDER BY/LIMIT;
+ * cost scales with total track count, which is fine for typical self-hosted
+ * library sizes. A cheap bpm/key prefilter was considered to prune candidates
+ * before that computation, but bpm_similarity() normalizes BPM into a 70-140
+ * band via repeated doubling/halving to catch half-/double-time matches
+ * (e.g. 70 vs 140 BPM scores as near-identical) -- a naive `ABS(t.bpm - s.bpm)`
+ * prefilter in the WHERE clause would incorrectly exclude those without
+ * reimplementing the same normalization, so it was left out rather than risk
+ * silently dropping valid matches for a low-traffic fallback.
+ */
+
 async function findSimilarFeaturesOnly(
     trackId: string,
     limit: number

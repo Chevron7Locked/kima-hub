@@ -220,24 +220,33 @@ export class DiscoveryAlbumLifecycle {
             }
         }
 
-        for (const album of activeAlbums) {
-            try {
-                await this.deleteRejectedAlbum(
-                    {
-                        id: album.id,
-                        rgMbid: album.rgMbid,
-                        artistName: album.artistName,
-                        albumTitle: album.albumTitle,
-                        lidarrAlbumId: album.lidarrAlbumId,
-                    },
-                    settings
-                );
-                deleted++;
-            } catch (error: any) {
-                logger.error(
-                    `[DiscoveryLifecycle] Failed to delete ${album.albumTitle}: ${error.message}`
-                );
-            }
+        // Each delete does an axios call to Lidarr with a 10s timeout; running
+        // them fully serially made cleanup of a large batch take minutes. Run
+        // in small bounded-concurrency chunks instead of one at a time (DISC-13).
+        const DELETE_CONCURRENCY = 5;
+        for (let i = 0; i < activeAlbums.length; i += DELETE_CONCURRENCY) {
+            const chunk = activeAlbums.slice(i, i + DELETE_CONCURRENCY);
+            await Promise.all(
+                chunk.map(async (album) => {
+                    try {
+                        await this.deleteRejectedAlbum(
+                            {
+                                id: album.id,
+                                rgMbid: album.rgMbid,
+                                artistName: album.artistName,
+                                albumTitle: album.albumTitle,
+                                lidarrAlbumId: album.lidarrAlbumId,
+                            },
+                            settings
+                        );
+                        deleted++;
+                    } catch (error: any) {
+                        logger.error(
+                            `[DiscoveryLifecycle] Failed to delete ${album.albumTitle}: ${error.message}`
+                        );
+                    }
+                })
+            );
         }
 
         await prisma.unavailableAlbum.deleteMany({ where: { userId } });

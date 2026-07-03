@@ -985,17 +985,25 @@ export class DiscoverWeeklyService {
                 const normalizedAlbum = normalizeStr(criteria.albumTitle);
                 const normalizedArtist = normalizeStr(criteria.artistName);
 
-                // Get all albums from this artist (by normalized name)
+                // Get all albums from this artist (by normalized name).
+                // Match on the full normalized name when it has more than one
+                // token; a bare first-word `contains` (e.g. "the", "dj") was
+                // over-broad enough to match most of the library (DISC-9).
+                const artistTokens = normalizedArtist.split(" ").filter(Boolean);
+                const artistSearchTerm =
+                    artistTokens.length > 1 ? normalizedArtist : artistTokens[0];
+
                 const artistAlbums = await prisma.album.findMany({
                     where: {
                         artist: {
                             name: {
                                 mode: "insensitive",
-                                contains: normalizedArtist.split(" ")[0],
+                                contains: artistSearchTerm,
                             },
                         },
                     },
                     include: { artist: true, tracks: true },
+                    take: 20,
                 });
 
                 // Find matching album by normalized title
@@ -1266,6 +1274,16 @@ export class DiscoverWeeklyService {
             );
         }
 
+        // Hoisted out of the transaction/loop below: userId is invariant for
+        // this whole playlist build, so there's no need to re-query it once
+        // per album inside the interactive $transaction. Doing so also
+        // stretches transaction duration towards Postgres's default 5s
+        // interactive-transaction timeout on large playlists (DISC-8).
+        const userConfig = await prisma.userDiscoverConfig.findUnique({
+            where: { userId: batch.userId },
+        });
+        const exclusionMonths = userConfig?.exclusionMonths ?? 6;
+
         // Create discovery records in transaction
         let result: { albumCount: number; trackCount: number } | null = null;
         try {
@@ -1375,14 +1393,8 @@ export class DiscoverWeeklyService {
                         discoveryAlbumId = discoveryAlbum.id;
                         createdAlbums.set(albumKey, discoveryAlbumId);
 
-                        // Add to exclusion list (if user has exclusions enabled)
-                        const userConfig =
-                            await tx.userDiscoverConfig.findUnique({
-                                where: { userId: batch.userId },
-                            });
-                        const exclusionMonths =
-                            userConfig?.exclusionMonths ?? 6;
-
+                        // Add to exclusion list (if user has exclusions enabled).
+                        // exclusionMonths is hoisted above, outside the transaction (DISC-8).
                         if (exclusionMonths > 0) {
                             const expiresAt = new Date();
                             expiresAt.setMonth(
@@ -2004,15 +2016,18 @@ export class DiscoverWeeklyService {
             )
             .trim();
 
-        // Check Album table by name
-        const album = await prisma.album.findFirst({
-            where: {
-                title: { contains: normalizedAlbum, mode: "insensitive" },
-                artist: {
-                    name: { contains: normalizedArtist, mode: "insensitive" },
-                },
-            },
-        });
+        // Scan the cached owned-album snapshot in-memory instead of a
+        // contains/ILIKE query per candidate (DISC-5, shared with
+        // discoverySeeding.isAlbumOwned via the same cache).
+        const { albums, ownedAlbumArtists, albumTitleByRgMbid } =
+            await discoverySeeding.getOwnedAlbumIndex();
+
+        // Check Album table by name (any location, matching the prior query)
+        const album = albums.find(
+            (a) =>
+                a.title.toLowerCase().includes(normalizedAlbum) &&
+                a.artistName.toLowerCase().includes(normalizedArtist)
+        );
         if (album) {
             logger.debug(
                 `     [OWNED-NAME] Found "${albumTitle}" by "${artistName}" in Album table`
@@ -2021,39 +2036,27 @@ export class DiscoverWeeklyService {
         }
 
         // Check OwnedAlbum by looking up associated Album records through rgMbid
-        const ownedAlbumRefs = await prisma.ownedAlbum.findMany({
-            where: {
-                artist: {
-                    name: { contains: normalizedArtist, mode: "insensitive" },
-                },
-            },
-            select: { rgMbid: true },
-        });
+        const ownedAlbumRefs = ownedAlbumArtists.filter((o) =>
+            o.artistName.toLowerCase().includes(normalizedArtist)
+        );
 
         // Look up the actual album titles for these owned albums
-        if (ownedAlbumRefs.length > 0) {
-            const rgMbids = ownedAlbumRefs.map((o) => o.rgMbid);
-            const ownedAlbumRecords = await prisma.album.findMany({
-                where: { rgMbid: { in: rgMbids } },
-                select: { title: true },
-            });
-
-            for (const owned of ownedAlbumRecords) {
-                const ownedNormalized = owned.title
-                    ?.toLowerCase()
-                    .replace(/\(.*?\)/g, "")
-                    .replace(/\[.*?\]/g, "")
-                    .trim();
-                if (
-                    ownedNormalized &&
-                    (ownedNormalized.includes(normalizedAlbum) ||
-                        normalizedAlbum.includes(ownedNormalized))
-                ) {
-                    logger.debug(
-                        `     [OWNED-NAME] Found "${albumTitle}" by "${artistName}" in OwnedAlbum table`
-                    );
-                    return true;
-                }
+        for (const ref of ownedAlbumRefs) {
+            const title = albumTitleByRgMbid.get(ref.rgMbid);
+            const ownedNormalized = title
+                ?.toLowerCase()
+                .replace(/\(.*?\)/g, "")
+                .replace(/\[.*?\]/g, "")
+                .trim();
+            if (
+                ownedNormalized &&
+                (ownedNormalized.includes(normalizedAlbum) ||
+                    normalizedAlbum.includes(ownedNormalized))
+            ) {
+                logger.debug(
+                    `     [OWNED-NAME] Found "${albumTitle}" by "${artistName}" in OwnedAlbum table`
+                );
+                return true;
             }
         }
 
@@ -2075,6 +2078,41 @@ export class DiscoverWeeklyService {
             },
         });
         return !!exclusion;
+    }
+
+    /**
+     * Shared "is this a valid, not-owned, not-excluded album candidate" check,
+     * used by both findReplacementAlbum and findValidAlbumForArtist (DISC-11).
+     * The three lookups are independent reads with no shared state, so they run
+     * concurrently instead of serially awaiting each one (DISC-4). A thrown
+     * check is treated as "not a valid candidate", matching the previous
+     * per-check try/catch -> continue behavior in both callers.
+     */
+    private async isValidUnownedAlbum(
+        albumMbid: string,
+        userId: string,
+        artistName: string,
+        albumTitle: string
+    ): Promise<{ valid: boolean; reason: "owned" | "excluded" | "error" | null }> {
+        const ERROR = Symbol("error");
+        const [owned, ownedByName, excluded] = await Promise.all([
+            discoverySeeding
+                .isAlbumOwned(albumMbid, userId, artistName, albumTitle)
+                .catch(() => ERROR),
+            this.isAlbumOwnedByName(artistName, albumTitle).catch(() => ERROR),
+            this.isAlbumExcluded(albumMbid, userId).catch(() => ERROR),
+        ]);
+
+        if (owned === ERROR || ownedByName === ERROR || excluded === ERROR) {
+            return { valid: false, reason: "error" };
+        }
+        if (owned || ownedByName) {
+            return { valid: false, reason: "owned" };
+        }
+        if (excluded) {
+            return { valid: false, reason: "excluded" };
+        }
+        return { valid: true, reason: null };
     }
 
     /**
@@ -2125,8 +2163,14 @@ export class DiscoverWeeklyService {
         );
         const seeds = await discoverySeeding.getSeedArtists(batch.userId);
 
+        // Cap total MusicBrainz lookups across ALL seeds (not per-seed) - this loop is
+        // fully serial (seeds x similarArtists[30] x albums[5]) and each iteration awaits
+        // a network call, so an unbounded search can take a very long time (DISC-4).
+        const MAX_MB_LOOKUPS = 40;
+        let mbLookupsAttempted = 0;
+
         // Search ALL seeds (not just 5) to maximize chances of finding new artists
-        for (const seed of seeds) {
+        seedSearch: for (const seed of seeds) {
             if (!seed.mbid) continue;
 
             try {
@@ -2153,6 +2197,14 @@ export class DiscoverWeeklyService {
                     );
 
                     for (const album of albums) {
+                        if (mbLookupsAttempted >= MAX_MB_LOOKUPS) {
+                            logger.debug(
+                                `[Discovery]   Reached MusicBrainz lookup cap (${MAX_MB_LOOKUPS}) for this replacement search`
+                            );
+                            break seedSearch;
+                        }
+                        mbLookupsAttempted++;
+
                         // Get MBID from MusicBrainz
                         const mbAlbum = await musicBrainzService.searchAlbum(
                             album.name,
@@ -2180,35 +2232,16 @@ export class DiscoverWeeklyService {
                                 // Continue anyway - assume not in library if check fails
                             }
 
-                            // Check if owned (with fuzzy matching)
-                            try {
-                                const owned = await discoverySeeding.isAlbumOwned(
-                                    mbAlbum.id,
-                                    batch.userId,
-                                    similar.name,
-                                    album.name
-                                );
-                                if (owned) continue;
-                            } catch (e: any) {
-                                logger.error(
-                                    `[Discovery]   isAlbumOwned error: ${e.message}`
-                                );
-                                continue; // Skip on error
-                            }
-
-                            // Check if excluded
-                            try {
-                                const excluded = await this.isAlbumExcluded(
-                                    mbAlbum.id,
-                                    batch.userId
-                                );
-                                if (excluded) continue;
-                            } catch (e: any) {
-                                logger.error(
-                                    `[Discovery]   isAlbumExcluded error: ${e.message}`
-                                );
-                                continue; // Skip on error
-                            }
+                            // Ownership + exclusion checks are independent reads; run them
+                            // concurrently and share the logic with findValidAlbumForArtist
+                            // (DISC-4/DISC-11).
+                            const candidate = await this.isValidUnownedAlbum(
+                                mbAlbum.id,
+                                batch.userId,
+                                similar.name,
+                                album.name
+                            );
+                            if (!candidate.valid) continue;
 
                             logger.debug(
                                 `[Discovery]   Tier 2 replacement found: ${album.name} by ${similar.name} (NEW artist!)`
@@ -2385,47 +2418,23 @@ export class DiscoverWeeklyService {
                     continue;
                 }
 
-                // Skip if owned (with fuzzy matching)
-                try {
-                    const owned = await discoverySeeding.isAlbumOwned(
-                        mbAlbum.id,
-                        userId,
-                        artist.name,
-                        album.name
-                    );
-                    if (owned) {
+                // Ownership + exclusion checks are independent reads; run them
+                // concurrently via the shared helper also used by
+                // findReplacementAlbum (DISC-4/DISC-11).
+                const candidate = await this.isValidUnownedAlbum(
+                    mbAlbum.id,
+                    userId,
+                    artist.name,
+                    album.name
+                );
+                if (!candidate.valid) {
+                    if (candidate.reason === "owned") {
                         skippedOwned++;
-                        continue;
-                    }
-                } catch (e: any) {
-                    continue;
-                }
-
-                // Skip if owned by name (catches MBID mismatches)
-                try {
-                    const ownedByName = await this.isAlbumOwnedByName(
-                        artist.name,
-                        album.name
-                    );
-                    if (ownedByName) {
-                        skippedOwned++;
-                        continue;
-                    }
-                } catch (e: any) {
-                    continue;
-                }
-
-                // Check if album was recently recommended (exclusion period)
-                try {
-                    const excluded = await this.isAlbumExcluded(
-                        mbAlbum.id,
-                        userId
-                    );
-                    if (excluded) {
+                    } else if (candidate.reason === "excluded") {
                         skippedExcluded++;
-                        continue;
                     }
-                } catch (e: any) {
+                    // reason === "error": skip silently, matching the previous
+                    // per-check catch -> continue behavior.
                     continue;
                 }
 
@@ -2505,17 +2514,23 @@ export class DiscoverWeeklyService {
      */
     private async getUserTopGenres(userId: string): Promise<string[]> {
         try {
-            // Get recent plays with artist info
+            // Get recent plays - only the genre fields are read below, so
+            // select just those instead of pulling full Track/Album/Artist
+            // rows via `include` (DB-8).
             const recentPlays = await prisma.play.findMany({
                 where: {
                     userId,
                     playedAt: { gte: subWeeks(new Date(), 12) }, // Last 3 months
                 },
-                include: {
+                select: {
                     track: {
-                        include: {
+                        select: {
                             album: {
-                                include: { artist: true },
+                                select: {
+                                    artist: {
+                                        select: { genres: true, userGenres: true },
+                                    },
+                                },
                             },
                         },
                     },

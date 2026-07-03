@@ -18,10 +18,25 @@ export interface SeedArtist {
     mbid?: string;
 }
 
+/**
+ * In-memory snapshot of owned albums, built once per TTL window instead of
+ * re-querying Postgres for every candidate album checked during a discovery
+ * run (DISC-5). `albums` covers every Album row (any location) since
+ * isAlbumOwnedByName's Album-table check is intentionally not location-scoped;
+ * callers that need LIBRARY-only semantics filter on `location` themselves.
+ */
+interface OwnedAlbumIndex {
+    albums: Array<{ artistName: string; title: string; location: string; rgMbid: string }>;
+    ownedAlbumArtists: Array<{ artistName: string; rgMbid: string }>;
+    albumTitleByRgMbid: Map<string, string>;
+}
+
 export class DiscoverySeeding {
     private readonly DEFAULT_SEED_COUNT = 10;
     private readonly MIN_PLAYS_THRESHOLD = 5;
     private readonly RECENT_PLAYS_LIMIT = 50;
+    private readonly OWNED_INDEX_TTL_MS = 5 * 60 * 1000; // one discovery run's worth of candidate checks
+    private ownedIndexCache: (OwnedAlbumIndex & { builtAt: number }) | null = null;
 
     /**
      * Gets seed artists based on user's listening history.
@@ -166,6 +181,47 @@ export class DiscoverySeeding {
     }
 
     /**
+     * Loads (and caches for OWNED_INDEX_TTL_MS) a snapshot of owned-album data
+     * used by the per-candidate fuzzy/name matching in `isAlbumOwned` and
+     * `DiscoverWeeklyService.isAlbumOwnedByName`. Replaces what used to be a
+     * fresh `contains`/ILIKE query per candidate album with one bulk load that
+     * both checks then scan in-memory (DISC-5).
+     */
+    async getOwnedAlbumIndex(): Promise<OwnedAlbumIndex> {
+        const now = Date.now();
+        if (this.ownedIndexCache && now - this.ownedIndexCache.builtAt < this.OWNED_INDEX_TTL_MS) {
+            return this.ownedIndexCache;
+        }
+
+        const [albumRows, ownedAlbumRows] = await Promise.all([
+            prisma.album.findMany({
+                select: { rgMbid: true, title: true, location: true, artist: { select: { name: true } } },
+            }),
+            prisma.ownedAlbum.findMany({
+                select: { rgMbid: true, artist: { select: { name: true } } },
+            }),
+        ]);
+
+        const albums = albumRows.map((a) => ({
+            artistName: a.artist.name,
+            title: a.title,
+            location: a.location as string,
+            rgMbid: a.rgMbid,
+        }));
+
+        this.ownedIndexCache = {
+            builtAt: now,
+            albums,
+            ownedAlbumArtists: ownedAlbumRows.map((o) => ({
+                artistName: o.artist.name,
+                rgMbid: o.rgMbid,
+            })),
+            albumTitleByRgMbid: new Map(albums.map((a) => [a.rgMbid, a.title])),
+        };
+        return this.ownedIndexCache;
+    }
+
+    /**
      * Checks if an album is already owned through any source:
      * - OwnedAlbum table
      * - Album table
@@ -222,25 +278,18 @@ export class DiscoverySeeding {
 
             // Allow 2+ character names (handles U2, AC/DC, M83, etc.)
             if (artistFirstWord && artistFirstWord.length >= 2) {
-                const candidates = await prisma.album.findMany({
-                    where: {
-                        location: 'LIBRARY',
-                        artist: {
-                            name: {
-                                startsWith: artistFirstWord,  // More precise than contains
-                                mode: 'insensitive',
-                            },
-                        },
-                    },
-                    include: {
-                        artist: true,
-                    },
-                    take: 50,  // Increased to catch more potential matches
-                });
+                // Scan the cached owned-album snapshot in-memory instead of a
+                // startsWith/contains query per candidate (DISC-5).
+                const { albums } = await this.getOwnedAlbumIndex();
+                const candidates = albums.filter(
+                    (a) =>
+                        a.location === 'LIBRARY' &&
+                        a.artistName.toLowerCase().startsWith(artistFirstWord)
+                );
 
                 for (const album of candidates) {
-                    if (matchAlbum(artistName, albumTitle, album.artist.name, album.title)) {
-                        logger.debug(`[DiscoverySeeding] Fuzzy match: ${artistName} - ${albumTitle} = ${album.artist.name} - ${album.title}`);
+                    if (matchAlbum(artistName, albumTitle, album.artistName, album.title)) {
+                        logger.debug(`[DiscoverySeeding] Fuzzy match: ${artistName} - ${albumTitle} = ${album.artistName} - ${album.title}`);
                         return true;
                     }
                 }
