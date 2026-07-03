@@ -107,24 +107,13 @@ class QueueCleanerService {
                 this.emptyQueueChecks = 0; // Reset counter
             }
 
-            // PART 0.25: Reconcile processing jobs with Lidarr (fix missed webhooks)
-            const reconcileResult =
-                await simpleDownloadManager.reconcileWithLidarr();
-            if (reconcileResult.reconciled > 0) {
-                logger.debug(
-                    `✓ Reconciled ${reconcileResult.reconciled} job(s) with Lidarr`
-                );
-                this.emptyQueueChecks = 0; // Reset counter
-            }
-
-            // PART 0.26: Sync with Lidarr queue (detect cancelled downloads)
-            const queueSyncResult = await simpleDownloadManager.syncWithLidarrQueue();
-            if (queueSyncResult.cancelled > 0) {
-                logger.debug(
-                    `✓ Synced ${queueSyncResult.cancelled} job(s) with Lidarr queue (cancelled/completed)`
-                );
-                this.emptyQueueChecks = 0; // Reset counter
-            }
+            // PART 0.25/0.26 (reconcileWithLidarr / syncWithLidarrQueue) removed: both
+            // early-return as no-ops without a Lidarr reconciliation snapshot, and building
+            // one here would mean re-fetching every artist's full album list from Lidarr on
+            // every 30s tick of this loop (the artist list has a 30s cache, but album fetches
+            // don't) - too expensive for this cadence. workers/index.ts's runReconciliationCycle
+            // already builds that snapshot and calls both of these every 2 minutes against the
+            // same DownloadJob rows, so it's covered there instead of duplicated here.
 
             // PART 0.3: Reconcile processing jobs with local library (critical fix for #31)
             // Check if albums already exist in Kima's database even if Lidarr webhooks were missed

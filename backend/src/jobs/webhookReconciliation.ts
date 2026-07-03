@@ -1,25 +1,24 @@
 /**
  * Webhook Reconciliation Job
  *
- * Runs every 5 minutes to:
- * 1. Process unprocessed webhook events (failed/missed webhooks)
- * 2. Reconcile DownloadJobs with Lidarr's queue (update statuses)
+ * Self-reschedules every 5 minutes (next run is queued only after the
+ * current one finishes, so a slow cycle can't overlap itself) to process
+ * unprocessed webhook events (failed/missed webhooks) and retry them.
  *
- * This ensures:
- * - Failed webhook processing gets retried
- * - Download job statuses stay in sync with Lidarr
- * - No events are permanently lost
+ * This ensures failed webhook processing gets retried and no events are
+ * permanently lost. Periodic Lidarr-snapshot reconciliation of DownloadJob
+ * statuses is handled separately by workers/index.ts's runReconciliationCycle.
  */
 
 import { logger } from "../utils/logger";
 import { webhookEventStore } from "../services/webhookEventStore";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { getSystemSettings } from "../utils/systemSettings";
-import { prisma } from "../utils/db";
 
 class WebhookReconciliationService {
     private isRunning = false;
-    private intervalId?: NodeJS.Timeout;
+    private cycleRunning = false;
+    private timeoutId?: NodeJS.Timeout;
     private readonly RECONCILE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
     private readonly MAX_RETRIES = 3;
 
@@ -39,19 +38,15 @@ class WebhookReconciliationService {
         );
 
         this.runReconciliation();
-
-        this.intervalId = setInterval(() => {
-            this.runReconciliation();
-        }, this.RECONCILE_INTERVAL_MS);
     }
 
     /**
      * Stop the reconciliation loop
      */
     stop() {
-        if (this.intervalId) {
-            clearInterval(this.intervalId);
-            this.intervalId = undefined;
+        if (this.timeoutId) {
+            clearTimeout(this.timeoutId);
+            this.timeoutId = undefined;
         }
         this.isRunning = false;
         logger.info("[WEBHOOK-RECONCILE] Stopped");
@@ -61,7 +56,10 @@ class WebhookReconciliationService {
      * Run a single reconciliation cycle
      */
     async runReconciliation() {
-        if (!this.isRunning) return;
+        // in-flight guard: a slow cycle (Lidarr latency, large event backlog) must not
+        // overlap itself once rescheduled below - only one cycle runs at a time
+        if (!this.isRunning || this.cycleRunning) return;
+        this.cycleRunning = true;
 
         try {
             const settings = await getSystemSettings();
@@ -105,26 +103,28 @@ class WebhookReconciliationService {
                 }
             }
 
-            const processingJobCount = await prisma.downloadJob.count({
-                where: { status: "processing" },
-            });
-
-            let reconciledCount = 0;
-            if (processingJobCount > 0) {
-                const lidarrResult = await simpleDownloadManager.reconcileWithLidarr();
-                reconciledCount = lidarrResult.reconciled;
-            } else {
-                logger.debug("[WEBHOOK-RECONCILE] No processing jobs, skipping Lidarr reconciliation");
-            }
-
+            // Lidarr reconciliation (matching "processing" DownloadJob rows against a Lidarr
+            // snapshot) is NOT done here: reconcileWithLidarr() needs a snapshot from
+            // lidarrService.getReconciliationSnapshot() - a full artist + album fetch that
+            // isn't cached - to do anything; calling it with no snapshot was a permanent
+            // no-op. workers/index.ts's runReconciliationCycle already builds that snapshot
+            // and reconciles the same rows every 2 minutes, so it's covered there rather
+            // than duplicating the Lidarr fetch on this 5-minute loop too.
             const duration = Date.now() - startTime;
             logger.debug(
                 `[WEBHOOK-RECONCILE] Cycle complete in ${duration}ms: ` +
-                `${processedCount} events processed, ${failedCount} failed, ` +
-                `${reconciledCount} jobs reconciled from Lidarr`
+                `${processedCount} events processed, ${failedCount} failed`
             );
         } catch (error: any) {
             logger.error("[WEBHOOK-RECONCILE] Reconciliation cycle failed:", error.message);
+        } finally {
+            this.cycleRunning = false;
+            if (this.isRunning) {
+                // Schedule next run AFTER this one completes (prevents pile-up)
+                this.timeoutId = setTimeout(() => {
+                    this.runReconciliation();
+                }, this.RECONCILE_INTERVAL_MS);
+            }
         }
     }
 

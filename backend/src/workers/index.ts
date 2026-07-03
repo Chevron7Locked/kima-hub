@@ -239,8 +239,16 @@ async function withTimeout<T>(
         }, timeoutMs);
     });
 
+    // Hold the operation's promise directly (rather than inline in Promise.race) and
+    // attach a no-op catch to it: if the timeout wins the race, operation() keeps running
+    // unobserved, and a rejection that arrives afterward would otherwise surface as an
+    // unhandled rejection. This swallows that late rejection without affecting the value
+    // raced below.
+    const operationPromise = operation();
+    operationPromise.catch(() => {});
+
     try {
-        const result = await Promise.race([operation(), timeoutPromise]);
+        const result = await Promise.race([operationPromise, timeoutPromise]);
         if (!timedOut && timeoutId) {
             clearTimeout(timeoutId);
         }
