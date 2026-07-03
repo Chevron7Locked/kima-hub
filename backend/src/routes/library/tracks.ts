@@ -10,6 +10,7 @@ import {
   getDecadeFromYear,
 } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
+import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
 import { config } from "../../config";
 import path from "path";
 import fs from "fs";
@@ -514,62 +515,81 @@ router.get("/tracks/:id/lyrics", async (req, res) => {
   }
 });
 
-router.get("/tracks/:id", async (req, res) => {
-  try {
-    const track = await prisma.track.findUnique({
-      where: { id: req.params.id },
-      include: {
-        album: {
-          include: {
-            artist: {
-              select: {
-                id: true,
-                name: true,
+    router.get("/tracks/:id", async (req, res) => {
+      try {
+        const track = await prisma.track.findUnique({
+          where: { id: req.params.id },
+          select: {
+            id: true,
+            title: true,
+            duration: true,
+            bpm: true,
+            energy: true,
+            valence: true,
+            arousal: true,
+            danceability: true,
+            keyScale: true,
+            instrumentalness: true,
+            analysisMode: true,
+            moodHappy: true,
+            moodSad: true,
+            moodRelaxed: true,
+            moodAggressive: true,
+            moodParty: true,
+            moodAcoustic: true,
+            moodElectronic: true,
+            album: {
+              include: {
+                artist: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
               },
             },
           },
+        });
+
+      if (!track) {
+        return res.status(404).json({ error: "Track not found" });
+      }
+
+      const formattedTrack = {
+        id: track.id,
+        title: track.title,
+        artist: {
+          name: track.album?.artist?.name || "Unknown Artist",
+          id: track.album?.artist?.id,
         },
-      },
-    });
+        album: {
+          title: track.album?.title || "Unknown Album",
+          coverArt: track.album?.coverUrl,
+          id: track.album?.id,
+        },
+        duration: track.duration,
+        audioFeatures: toAudioFeaturesDTO(track),
+      };
 
-    if (!track) {
-      return res.status(404).json({ error: "Track not found" });
-    }
-
-    const formattedTrack = {
-      id: track.id,
-      title: track.title,
-      artist: {
-        name: track.album?.artist?.name || "Unknown Artist",
-        id: track.album?.artist?.id,
-      },
-      album: {
-        title: track.album?.title || "Unknown Album",
-        coverArt: track.album?.coverUrl,
-        id: track.album?.id,
-      },
-      duration: track.duration,
-    };
-
-    res.json(formattedTrack);
-  } catch (error) {
+      res.json(formattedTrack);
+      } catch (error) {
     logger.error("Get track error:", error);
     res.status(500).json({ error: "Failed to fetch track" });
-  }
-});
+      }
+    });
 
 router.delete("/tracks/:id", async (req, res) => {
   try {
-    const track = await prisma.track.findUnique({
-      where: { id: req.params.id },
+const track = await prisma.track.findUnique({
+  where: { id: req.params.id },
+  include: {
+    album: {
       include: {
-        album: {
-          include: {
-            artist: true,
-          },
-        },
+        artist: true,
       },
-    });
+    },
+  },
+});
 
     if (!track) {
       return res.status(404).json({ error: "Track not found" });
@@ -1766,25 +1786,9 @@ router.get("/radio", async (req, res) => {
         title: track.album.title,
         coverArt: track.album.coverUrl,
       },
-      ...(vibeSourceFeatures && {
-        audioFeatures: {
-          bpm: track.bpm,
-          energy: track.energy,
-          valence: track.valence,
-          arousal: track.arousal,
-          danceability: track.danceability,
-          keyScale: track.keyScale,
-          instrumentalness: track.instrumentalness,
-          analysisMode: track.analysisMode,
-          moodHappy: track.moodHappy,
-          moodSad: track.moodSad,
-          moodRelaxed: track.moodRelaxed,
-          moodAggressive: track.moodAggressive,
-          moodParty: track.moodParty,
-          moodAcoustic: track.moodAcoustic,
-          moodElectronic: track.moodElectronic,
-        },
-      }),
+        ...(vibeSourceFeatures && {
+          audioFeatures: toAudioFeaturesDTO(track),
+        }),
     }));
 
     const finalTracks =
