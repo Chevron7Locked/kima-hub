@@ -10,6 +10,7 @@ import {
     getMixColor,
     randomSample,
     getSeededRandom,
+    seededShuffle,
     findTracksByGenrePatterns,
 } from "./helpers";
 
@@ -220,11 +221,7 @@ export async function generatePartyMix(
     }
 
     const seed = getSeededRandom(`party-${today}`);
-    let random = seed;
-    const shuffled = tracks.sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
     const coverUrls = selectedTracks
@@ -380,11 +377,7 @@ export async function generateWorkoutMix(
     }
 
     const seed = getSeededRandom(`workout-${today}`);
-    let random = seed;
-    const shuffled = tracks.sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
     const coverUrls = selectedTracks
@@ -487,11 +480,7 @@ export async function generateFocusMix(
     }
 
     const seed = getSeededRandom(`focus-${today}`);
-    let random = seed;
-    const shuffled = tracks.sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
     const coverUrls = selectedTracks

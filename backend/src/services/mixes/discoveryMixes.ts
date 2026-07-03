@@ -7,6 +7,7 @@ import {
     getMixColor,
     randomSample,
     getSeededRandom,
+    seededShuffle,
 } from "./helpers";
 
 const TRACK_LIMIT = 20;
@@ -85,11 +86,7 @@ export async function generateRediscoverMix(
     if (underplayedTracks.length < 5) return null;
 
     const seed = getSeededRandom(`rediscover-${today}`);
-    let random = seed;
-    const shuffled = underplayedTracks.sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(underplayedTracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
     const coverUrls = selectedTracks

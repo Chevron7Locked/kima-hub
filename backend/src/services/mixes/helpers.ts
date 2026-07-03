@@ -125,6 +125,25 @@ export function getSeededRandom(seed: string): number {
     return Math.abs(hash);
 }
 
+
+/**
+ * Deterministic Fisher-Yates shuffle driven by the same LCG progression used
+ * to derive `seed` from getSeededRandom(). Unlike `array.sort(() => random - 0.5)`,
+ * this always makes exactly array.length - 1 swaps regardless of how many times
+ * a sort implementation calls the comparator, so the result is uniformly
+ * shuffled instead of biased.
+ */
+export function seededShuffle<T>(array: T[], seed: number): T[] {
+    const result = [...array];
+    let random = seed;
+    for (let i = result.length - 1; i > 0; i--) {
+        random = (random * 9301 + 49297) % 233280;
+        const j = Math.floor((random / 233280) * (i + 1));
+        [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+}
+
 export type TrackWithAlbumCover = {
     id: string;
     album: {

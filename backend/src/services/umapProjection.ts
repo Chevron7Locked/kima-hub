@@ -416,16 +416,119 @@ async function doCompute(): Promise<MapResponse> {
     return result;
 }
 
-// Note: read-modify-write on Redis is not atomic -- concurrent vibe/success
-// callbacks can cause a lost append. Acceptable because precomputeProjection()
-// runs at enrichment completion and catches all tracks with a full UMAP.
+// Incremental appends buffer in memory and flush to Redis on a short debounce
+// instead of doing a JSON.parse(full cache) -> push 1 -> JSON.stringify -> SETEX
+// round-trip per track -- during an analysis burst that's O(map size) per call,
+// i.e. O(n^2) for n tracks finishing around the same time.
+//
+// Note: the flush is still a whole-key SETEX, not atomic with a concurrent full
+// recompute (doCompute/cacheResult). We guard against clobbering one by
+// re-checking the cache's `computedAt` immediately before writing; if a full
+// recompute landed mid-buffer we drop the flush and let that recompute stand.
+// Acceptable because precomputeProjection() runs at enrichment completion and
+// catches all tracks with a full UMAP regardless.
+const APPEND_FLUSH_DEBOUNCE_MS = 2000;
+const APPEND_FLUSH_MAX_BATCH = 50;
+
+let workingProjection: MapResponse | null = null;
+let workingTrackIds: Set<string> | null = null;
+let workingProjectionLoad: Promise<MapResponse | null> | null = null;
+let pendingFlushIds: string[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function getWorkingProjection(): Promise<MapResponse | null> {
+    if (workingProjection && workingTrackIds) return workingProjection;
+
+    if (!workingProjectionLoad) {
+        workingProjectionLoad = (async () => {
+            const cached = await redisClient.get(CACHE_KEY);
+            if (!cached) return null;
+            const projection: MapResponse = JSON.parse(cached);
+            workingProjection = projection;
+            workingTrackIds = new Set(projection.tracks.map(t => t.id));
+            return projection;
+        })();
+    }
+
+    try {
+        return await workingProjectionLoad;
+    } finally {
+        workingProjectionLoad = null;
+    }
+}
+
+function scheduleAppendFlush(): void {
+    if (pendingFlushIds.length >= APPEND_FLUSH_MAX_BATCH) {
+        if (flushTimer) {
+            clearTimeout(flushTimer);
+            flushTimer = null;
+        }
+        flushPendingAppends().catch(e =>
+            logger.warn("[VIBE-MAP] Append flush failed:", (e as Error).message)
+        );
+        return;
+    }
+    if (!flushTimer) {
+        flushTimer = setTimeout(() => {
+            flushTimer = null;
+            flushPendingAppends().catch(e =>
+                logger.warn("[VIBE-MAP] Append flush failed:", (e as Error).message)
+            );
+        }, APPEND_FLUSH_DEBOUNCE_MS);
+    }
+}
+
+async function flushPendingAppends(): Promise<void> {
+    if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+    }
+    if (pendingFlushIds.length === 0 || !workingProjection) return;
+
+    const projection = workingProjection;
+    const flushedIds = pendingFlushIds;
+    pendingFlushIds = [];
+    // Drop the working copy either way -- the next append reloads fresh from
+    // Redis, so we never keep interpolating on top of an increasingly stale base.
+    workingProjection = null;
+    workingTrackIds = null;
+
+    try {
+        const current = await redisClient.get(CACHE_KEY);
+        if (!current) return; // cache evicted; the next full recompute will rebuild it
+
+        const currentProjection: MapResponse = JSON.parse(current);
+        if (currentProjection.computedAt !== projection.computedAt) {
+            // A full recompute landed while we were buffering -- it already
+            // supersedes our interpolated appends, so don't clobber it.
+            logger.debug(
+                "[VIBE-MAP] Skipping buffered flush: superseded by a full recompute"
+            );
+            return;
+        }
+
+        const pipeline = redisClient.multi();
+        pipeline.setex(CACHE_KEY, CACHE_TTL, JSON.stringify(projection));
+        pipeline.sadd(TRACK_IDS_KEY, flushedIds);
+        await pipeline.exec();
+
+        logger.debug(
+            `[VIBE-MAP] Flushed ${flushedIds.length} buffered append(s) to projection cache`
+        );
+    } catch (e) {
+        logger.warn(
+            "[VIBE-MAP] Failed to flush buffered projection appends:",
+            (e as Error).message
+        );
+    }
+}
+
 export async function appendTrackToProjection(trackId: string): Promise<boolean> {
     try {
-        const cached = await redisClient.get(CACHE_KEY);
-        if (!cached) return false;
+        const projection = await getWorkingProjection();
+        if (!projection || !workingTrackIds) return false;
 
-        const alreadyIncluded = await redisClient.sismember(TRACK_IDS_KEY, trackId);
-        if (alreadyIncluded) return false;
+        if (workingTrackIds.has(trackId)) return false;
 
         // Find K nearest neighbors via pgvector cosine distance
         const neighbors = await prisma.$queryRaw<Array<{
@@ -444,7 +547,6 @@ export async function appendTrackToProjection(trackId: string): Promise<boolean>
 
         if (neighbors.length === 0) return false;
 
-        const projection: MapResponse = JSON.parse(cached);
         const trackPositions = new Map<string, { x: number; y: number }>();
         for (const t of projection.tracks) {
             trackPositions.set(t.id, { x: t.x, y: t.y });
@@ -505,18 +607,19 @@ export async function appendTrackToProjection(trackId: string): Promise<boolean>
             valence: row.valence,
         };
 
+        // Merge into the shared in-memory working copy; the actual Redis
+        // write is coalesced across all appends in this debounce window.
         projection.tracks.push(newTrack);
         projection.trackCount = projection.tracks.length;
+        workingTrackIds.add(trackId);
+        pendingFlushIds.push(trackId);
+        scheduleAppendFlush();
 
-        const pipeline = redisClient.multi();
-        pipeline.setex(CACHE_KEY, CACHE_TTL, JSON.stringify(projection));
-        pipeline.sadd(TRACK_IDS_KEY, trackId);
-        await pipeline.exec();
-
-        // Persist so it survives Redis expiry and feeds hydrateFromDb().
+        // Persist so it survives Redis expiry and feeds hydrateFromDb(), and
+        // so the position isn't lost even if the process restarts before flush.
         await persistPositions([trackId], [newX], [newY]);
 
-        logger.debug(`[VIBE-MAP] Appended track ${trackId} via KNN interpolation (${validNeighbors.length} neighbors)`);
+        logger.debug(`[VIBE-MAP] Buffered append for track ${trackId} via KNN interpolation (${validNeighbors.length} neighbors)`);
         return true;
     } catch (e) {
         logger.warn(`[VIBE-MAP] Failed to append track ${trackId}:`, (e as Error).message);

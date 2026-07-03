@@ -5,6 +5,7 @@ import {
     getMixColor,
     randomSample,
     getSeededRandom,
+    seededShuffle,
     findTracksByGenrePatterns,
 } from "./helpers";
 
@@ -71,11 +72,7 @@ export async function generateChillMix(
     }
 
     const seed = getSeededRandom(`chill-${today}`);
-    let random = seed;
-    const shuffled = tracks.sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(tracks, seed);
 
     const isWeekly = tracks.length >= MIN_TRACKS_WEEKLY;
     const trackLimit = isWeekly ? WEEKLY_TRACK_LIMIT : DAILY_TRACK_LIMIT;
@@ -151,11 +148,7 @@ export async function generateHighEnergyMix(
     }
 
     const seed = getSeededRandom(`high-energy-${today}`);
-    let random = seed;
-    const shuffled = tracks.sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
     const coverUrls = selectedTracks
@@ -235,11 +228,7 @@ export async function generateLateNightMix(
     }
 
     const seed = getSeededRandom(`late-night-${today}`);
-    let random = seed;
-    const shuffled = tracks.sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(tracks, seed);
 
     const isWeekly = tracks.length >= MIN_TRACKS_WEEKLY;
     const trackLimit = isWeekly ? WEEKLY_TRACK_LIMIT : DAILY_TRACK_LIMIT;
@@ -333,11 +322,7 @@ export async function generateHappyMix(
     }
 
     const seed = getSeededRandom(`happy-${today}`);
-    let random = seed;
-    const shuffled = tracks.sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
     const coverUrls = selectedTracks
@@ -465,11 +450,7 @@ export async function generateMelancholyMix(
     });
 
     const seed = getSeededRandom(`melancholy-${today}`);
-    let random = seed;
-    const shuffled = sortedTracks.slice(0, 50).sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(sortedTracks.slice(0, 50), seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
     const coverUrls = selectedTracks
@@ -541,11 +522,7 @@ export async function generateDanceFloorMix(
     }
 
     const seed = getSeededRandom(`dance-floor-${today}`);
-    let random = seed;
-    const shuffled = tracks.sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
     const coverUrls = selectedTracks
@@ -615,11 +592,7 @@ export async function generateAcousticMix(
     }
 
     const seed = getSeededRandom(`acoustic-${today}`);
-    let random = seed;
-    const shuffled = tracks.sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
     const coverUrls = selectedTracks
@@ -690,11 +663,7 @@ export async function generateInstrumentalMix(
     }
 
     const seed = getSeededRandom(`instrumental-${today}`);
-    let random = seed;
-    const shuffled = tracks.sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
     const coverUrls = selectedTracks
@@ -736,11 +705,7 @@ export async function generateMoodTagMix(
     if (tracks.length < 15) return null;
 
     const seed = getSeededRandom(`mood-${moodTag}-${today}`);
-    let random = seed;
-    const shuffled = tracks.sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
     const coverUrls = selectedTracks
@@ -838,11 +803,7 @@ export async function generateRoadTripMix(
     }
 
     const seed = getSeededRandom(`road-trip-${today}`);
-    let random = seed;
-    const shuffled = tracks.sort(() => {
-        random = (random * 9301 + 49297) % 233280;
-        return random / 233280 - 0.5;
-    });
+    const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
     const coverUrls = selectedTracks
@@ -1625,8 +1586,6 @@ export async function generateKeyJourney(
     }
 
     const journey: typeof tracks = [];
-    const seed = getSeededRandom(`key-journey-${today}`);
-    let seedVal = seed;
 
     for (const key of keyOrder) {
         const keyTracks = byKey.get(key) || [];
@@ -1636,11 +1595,8 @@ export async function generateKeyJourney(
                 keyTracks.length,
                 WEEKLY_TRACK_LIMIT - journey.length
             );
-            seedVal = (seedVal * 9301 + 49297) % 233280;
-            const shuffled = keyTracks.sort(() => {
-                seedVal = (seedVal * 9301 + 49297) % 233280;
-                return seedVal / 233280 - 0.5;
-            });
+            const keySeed = getSeededRandom(`key-journey-${today}-${key}`);
+            const shuffled = seededShuffle(keyTracks, keySeed);
             journey.push(...shuffled.slice(0, count));
         }
     }
