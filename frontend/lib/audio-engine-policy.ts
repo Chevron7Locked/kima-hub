@@ -34,10 +34,20 @@ export interface EngineSnapshot {
     resumeOnForeground: boolean;
     // Tracks document.hidden from the most recent tick delivered to us.
     lastKnownHidden: boolean;
+    // Server-reported track duration for the current load, used as a second
+    // "honest end" signal alongside the (sometimes unreliable) element duration.
+    expectedDurationS: number | null;
 }
 
 export type EngineEvent =
-    | { type: "load"; src: string; autoplay: boolean; seekTo?: number; now: number }
+    | {
+          type: "load";
+          src: string;
+          autoplay: boolean;
+          seekTo?: number;
+          expectedDurationS?: number;
+          now: number;
+      }
     | { type: "play-requested"; now: number }
     | { type: "pause-requested"; cls: PauseClass; now: number }
     | { type: "native-playing"; now: number }
@@ -119,6 +129,7 @@ export function initialSnapshot(): EngineSnapshot {
         pendingSeek: null,
         resumeOnForeground: false,
         lastKnownHidden: false,
+        expectedDurationS: null,
     };
 }
 
@@ -295,6 +306,7 @@ export function transition(
                     lastProgressAt: event.now,
                     currentTime: 0,
                     duration: snap.duration,
+                    expectedDurationS: event.expectedDurationS ?? null,
                 },
                 effects,
             };
@@ -391,10 +403,14 @@ export function transition(
 
         case "native-ended": {
             const { currentTime, duration } = event;
-            const isHonest =
-                isFinite(duration) &&
-                duration > 0 &&
-                currentTime >= duration - RECOVERY.endedToleranceS;
+            const tol = RECOVERY.endedToleranceS;
+            const honestByElement =
+                isFinite(duration) && duration > 0 && currentTime >= duration - tol;
+            const honestByServer =
+                snap.expectedDurationS != null &&
+                snap.expectedDurationS > 0 &&
+                currentTime >= snap.expectedDurationS - tol;
+            const isHonest = honestByElement || honestByServer;
 
             if (!isHonest && snap.src && ESCALATABLE_STATUSES.has(snap.status)) {
                 // Truncated delivery -- escalate like native-error (skip nudge).

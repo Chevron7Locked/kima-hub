@@ -544,6 +544,90 @@ describe("native-ended: truncated vs honest", () => {
 });
 
 // ---------------------------------------------------------------------------
+// native-ended: server-reported duration as a second "honest end" signal (R1.1)
+// ---------------------------------------------------------------------------
+
+describe("native-ended: expectedDurationS honesty (VBR-MP3 unreliable element duration)", () => {
+    it("wrong element duration (Infinity) but expectedDurationS reached -> paused + emit-ended", () => {
+        const base = playingSnap({ currentTime: 200, expectedDurationS: 200 });
+        const { snapshot, effects } = tr(base, {
+            type: "native-ended",
+            currentTime: 200,
+            duration: Infinity,
+            now: NOW,
+        });
+        expect(snapshot.status).toBe("paused");
+        expect(hasEffect(effects, "emit-ended")).toBe(true);
+        expect(hasEffect(effects, "emit-error")).toBe(false);
+    });
+
+    it("wrong element duration (0) but expectedDurationS reached within tolerance -> paused + emit-ended", () => {
+        const base = playingSnap({ currentTime: 198, expectedDurationS: 200 });
+        const { snapshot, effects } = tr(base, {
+            type: "native-ended",
+            currentTime: 198,
+            duration: 0,
+            now: NOW,
+        });
+        expect(snapshot.status).toBe("paused");
+        expect(hasEffect(effects, "emit-ended")).toBe(true);
+    });
+
+    it("genuinely truncated: both element duration and expectedDurationS far ahead -> still escalates", () => {
+        const base = playingSnap({ currentTime: 50, expectedDurationS: 200 });
+        const { snapshot, effects } = tr(base, {
+            type: "native-ended",
+            currentTime: 50,
+            duration: 200,
+            now: NOW,
+        });
+        expect(hasEffect(effects, "emit-ended")).toBe(false);
+        expect(["recovering", "error"]).toContain(snapshot.status);
+    });
+
+    it("no expectedDurationS set (audiobook/podcast path): falls back to element-only honesty", () => {
+        const base = playingSnap({ currentTime: 200, expectedDurationS: null });
+        const { snapshot, effects } = tr(base, {
+            type: "native-ended",
+            currentTime: 200,
+            duration: 200,
+            now: NOW,
+        });
+        expect(snapshot.status).toBe("paused");
+        expect(hasEffect(effects, "emit-ended")).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// load: expectedDurationS is set per-load and reset (not carried across)
+// ---------------------------------------------------------------------------
+
+describe("load: expectedDurationS threading", () => {
+    it("load with expectedDurationS sets it on the snapshot", () => {
+        const base = snap();
+        const { snapshot } = tr(base, {
+            type: "load",
+            src: "http://x.com/a.mp3",
+            autoplay: true,
+            expectedDurationS: 245,
+            now: NOW,
+        });
+        expect(snapshot.expectedDurationS).toBe(245);
+    });
+
+    it("load without expectedDurationS resets it to null (not carried across loads)", () => {
+        const base = snap({ expectedDurationS: 245 });
+        const { snapshot } = tr(base, {
+            type: "load",
+            src: "http://x.com/b.mp3",
+            autoplay: true,
+            now: NOW,
+        });
+        expect(snapshot.expectedDurationS).toBeNull();
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Stale play-rejected ignored; not-allowed -> blocked
 // ---------------------------------------------------------------------------
 
@@ -915,6 +999,7 @@ describe("initialSnapshot", () => {
         expect(s.resumeOnForeground).toBe(false);
         expect(s.lastKnownHidden).toBe(false);
         expect(s.error).toBeNull();
+        expect(s.expectedDurationS).toBeNull();
     });
 });
 

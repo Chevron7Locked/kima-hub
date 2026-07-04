@@ -44,6 +44,11 @@ export function useMediaSession() {
             if (status === "playing") {
                 navigator.mediaSession.playbackState = "playing";
                 lastPositionUpdateRef.current = 0;
+            } else if (status === "buffering" || status === "recovering") {
+                // Brief self-healing transient -- keep the lock screen "playing" to
+                // avoid flicker; it corrects to "paused" if the ladder resolves to
+                // error/blocked/paused.
+                navigator.mediaSession.playbackState = "playing";
             } else if (
                 status === "paused" ||
                 status === "blocked" ||
@@ -58,13 +63,32 @@ export function useMediaSession() {
         // ended still emitted as an event; map to paused for MediaSession.
         const onEnded = () => { navigator.mediaSession.playbackState = "paused"; };
         const onError = () => { navigator.mediaSession.playbackState = "paused"; };
+        const onSeeked = () => {
+            if (!("setPositionState" in navigator.mediaSession)) return;
+            const duration = controller.getDuration();
+            const position = controller.getCurrentTime();
+            if (duration > 0) {
+                try {
+                    navigator.mediaSession.setPositionState({
+                        duration,
+                        playbackRate: 1,
+                        position: Math.min(position, duration),
+                    });
+                    lastPositionUpdateRef.current = Date.now();
+                } catch {
+                    // Position state not supported
+                }
+            }
+        };
         controller.on("ended", onEnded);
         controller.on("error", onError);
+        controller.on("seeked", onSeeked);
 
         return () => {
             if (typeof unsubscribe === "function") unsubscribe();
             controller.off("ended", onEnded);
             controller.off("error", onError);
+            controller.off("seeked", onSeeked);
         };
     }, [controller]);
 

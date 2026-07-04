@@ -159,6 +159,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const shuffleIndicesRef = useRef(state.shuffleIndices);
     const consecutiveErrorCountRef = useRef(0);
     const justFinishedRef = useRef(false);
+    const lastManualAdvanceAtRef = useRef(0);
     const lastSaveTimeRef = useRef(0);
     const errorClassifyingRef = useRef(false);
     const prewarmFiredForRef = useRef<string | null>(null);
@@ -269,7 +270,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setRepeatOneCount(0);
 
             const streamUrl = api.getStreamUrl(track.id);
-            controllerRef.current?.load(streamUrl, { autoplay: true });
+            controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: track.duration });
         },
         [state]
     );
@@ -305,7 +306,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             );
 
             const streamUrl = api.getStreamUrl(tracks[startIndex].id);
-            controllerRef.current?.load(streamUrl, { autoplay: true });
+            controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: tracks[startIndex].duration });
         },
         [state, generateShuffleIndices]
     );
@@ -426,7 +427,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         if (!ctrl || ctrl.getState().currentSrc) return false;
 
         if (state.playbackType === "track" && state.currentTrack) {
-            ctrl.load(api.getStreamUrl(state.currentTrack.id));
+            ctrl.load(api.getStreamUrl(state.currentTrack.id), { expectedDurationS: state.currentTrack.duration });
             return true;
         }
         if (state.playbackType === "audiobook" && state.currentAudiobook) {
@@ -605,9 +606,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         state.setCurrentIndex(nextIndex);
         state.setCurrentTrack(state.queue[nextIndex]);
         setCurrentTimeRef.current(0);
+        lastManualAdvanceAtRef.current = Date.now();
 
         const streamUrl = api.getStreamUrl(state.queue[nextIndex].id);
-        controllerRef.current?.load(streamUrl, { autoplay: true });
+        controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: state.queue[nextIndex].duration });
     }, [state, seek]);
 
     const previous = useCallback(() => {
@@ -646,9 +648,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         state.setCurrentIndex(prevIndex);
         state.setCurrentTrack(state.queue[prevIndex]);
         setCurrentTimeRef.current(0);
+        lastManualAdvanceAtRef.current = Date.now();
 
         const streamUrl = api.getStreamUrl(state.queue[prevIndex].id);
-        controllerRef.current?.load(streamUrl, { autoplay: true });
+        controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: state.queue[prevIndex].duration });
     }, [state, seek]);
 
     const addToQueue = useCallback(
@@ -664,7 +667,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 state.setShuffleIndices([0]);
 
                 const streamUrl = api.getStreamUrl(track.id);
-                controllerRef.current?.load(streamUrl, { autoplay: true });
+                controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: track.duration });
                 return;
             }
 
@@ -778,7 +781,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     }
 
                     const streamUrl = api.getStreamUrl(tracks[0].id);
-                    controllerRef.current?.load(streamUrl, { autoplay: true });
+                    controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: tracks[0].duration });
                 }
                 return;
             }
@@ -1143,6 +1146,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         if (!ctrl) return;
 
         const handleEnded = () => {
+            if (Date.now() - lastManualAdvanceAtRef.current <= 1000) return;
             iosAudioLog("ended:queue-advance", "audio-controls-context", null, { currentIndex: currentIndexRef.current, queueLength: queueRef.current.length });
             if (playbackTypeRef.current === "audiobook") {
                 const audiobook = currentAudiobookRef.current;
@@ -1224,7 +1228,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setCurrentTrack(queueRef.current[nextIndex]);
             playback.setCurrentTime(0);
 
-            ctrl.load(api.getStreamUrl(nextTrack.id), { autoplay: true });
+            ctrl.load(api.getStreamUrl(nextTrack.id), { autoplay: true, expectedDurationS: queueRef.current[nextIndex].duration });
         };
 
         ctrl.on("ended", handleEnded);
@@ -1382,7 +1386,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                         if (type === "track") {
                             const track = currentTrackRef.current;
                             if (!track) { doTeardown(); return; }
-                            ctrl2.load(api.getStreamUrl(track.id), { autoplay: true, seekTo: position });
+                            ctrl2.load(api.getStreamUrl(track.id), { autoplay: true, seekTo: position, expectedDurationS: track.duration });
                         } else if (type === "audiobook") {
                             const book = currentAudiobookRef.current;
                             if (!book) { doTeardown(); return; }

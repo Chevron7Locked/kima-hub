@@ -48,7 +48,7 @@ export function ConditionalAudioProvider({
     const pathname = usePathname();
     const { isAuthenticated, isLoading } = useAuth();
 
-    const publicPages = ["/login", "/register", "/onboarding", "/setup", "/share"];
+    const publicPages = ["/login", "/register", "/onboarding", "/setup"];
     const isPublicPage = publicPages.some(p => pathname === p || pathname.startsWith(p + "/"));
 
     // Public pages: render children directly without audio providers

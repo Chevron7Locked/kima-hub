@@ -600,8 +600,8 @@ export class AudioController {
     // Public API
     // -------------------------------------------------------------------------
 
-    load(src: string, opts: { autoplay?: boolean; seekTo?: number } = {}): void {
-        const { autoplay = false, seekTo } = opts;
+    load(src: string, opts: { autoplay?: boolean; seekTo?: number; expectedDurationS?: number } = {}): void {
+        const { autoplay = false, seekTo, expectedDurationS } = opts;
         this.armDetectorUntil = Date.now() + 15000;
         this.lastAnalyserCurrentTime = this.audio.currentTime;
         iosAudioLog("load:entry", "audio-controller:load", this.audio, {
@@ -623,6 +623,7 @@ export class AudioController {
             src,
             autoplay,
             seekTo,
+            expectedDurationS,
             now: Date.now(),
         });
     }
