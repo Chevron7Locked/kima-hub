@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { AudioStateProvider } from "@/lib/audio-state-context";
 import { AudioPlaybackProvider } from "@/lib/audio-playback-context";
@@ -11,19 +11,21 @@ import { useAuth } from "@/lib/auth-context";
 import { AudioErrorBoundary } from "@/components/providers/AudioErrorBoundary";
 
 function AudioProviderInner({ children }: { children: React.ReactNode }) {
-    const audioRef = useRef<HTMLAudioElement>(null);
     const [controller, setController] = useState<AudioController | null>(null);
 
     useEffect(() => {
-        if (audioRef.current) {
-            const ctrl = new AudioController(audioRef.current);
-            setController(ctrl);
+        const ctrl = new AudioController();
+        // The owned <audio> element + AudioContext must be created here (not in
+        // a lazy useState initializer) so Strict Mode's double-invoke
+        // create -> cleanup -> create cycle can't leak a duplicate DOM element;
+        // exposing the instance to the context value then requires this setState.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setController(ctrl);
 
-            return () => {
-                ctrl.destroy();
-                setController(null);
-            };
-        }
+        return () => {
+            ctrl.destroy();
+            setController(null);
+        };
     }, []);
 
     return (
@@ -31,7 +33,6 @@ function AudioProviderInner({ children }: { children: React.ReactNode }) {
             <AudioStateProvider>
                 <AudioPlaybackProvider>
                     <AudioControlsProvider>
-                        <audio ref={audioRef} playsInline preload="auto" crossOrigin="anonymous" style={{ display: "none" }} />
                         {children}
                     </AudioControlsProvider>
                 </AudioPlaybackProvider>

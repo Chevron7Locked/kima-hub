@@ -19,6 +19,7 @@ class MockAudioContext {
     startCallCount = 0;
     createBufferCallCount = 0;
     createBufferSourceCallCount = 0;
+    closeCallCount = 0;
 
     constructor() {
         MockAudioContext.instances.push(this);
@@ -62,6 +63,7 @@ class MockAudioContext {
     }
 
     close() {
+        this.closeCallCount++;
         return Promise.resolve();
     }
 
@@ -72,6 +74,7 @@ class MockAudioContext {
 function createFakeAudioElement() {
     return {
         preload: "",
+        crossOrigin: "",
         src: "",
         currentTime: 0,
         duration: 0,
@@ -80,14 +83,19 @@ function createFakeAudioElement() {
         muted: false,
         readyState: 0,
         error: null,
+        style: {} as Record<string, string>,
+        setAttribute: vi.fn(),
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
         play: vi.fn().mockResolvedValue(undefined),
         pause: vi.fn(),
         load: vi.fn(),
         removeAttribute: vi.fn(),
+        remove: vi.fn(),
     };
 }
+
+type FakeAudioElement = ReturnType<typeof createFakeAudioElement>;
 
 type DocListeners = Record<string, Array<() => void>>;
 
@@ -100,6 +108,8 @@ function installEnv(opts: {
     const fakeDocument = {
         visibilityState: "visible",
         hasFocus: () => true,
+        createElement: (_tag: string) => createFakeAudioElement(),
+        body: { appendChild: vi.fn() },
         addEventListener(type: string, handler: () => void) {
             (docListeners[type] ??= []).push(handler);
         },
@@ -132,6 +142,15 @@ function installEnv(opts: {
     vi.stubGlobal("localStorage", fakeLocalStorage);
 
     return { docListeners, navigator: fakeNavigator };
+}
+
+// The controller now creates + owns its <audio> element via
+// document.createElement("audio") rather than receiving one -- construct it
+// and pull the created element back out via its private field for assertions.
+function newController(): { controller: AudioController; audio: FakeAudioElement } {
+    const controller = new AudioController();
+    const audio = (controller as unknown as { audio: FakeAudioElement }).audio;
+    return { controller, audio };
 }
 
 const IPHONE_STANDALONE = {
@@ -185,8 +204,7 @@ describe("AudioController.prime() -- unlockOnce retry-on-throw", () => {
         installEnv(IPHONE_STANDALONE);
         MockAudioContext.throwOnStart = true;
 
-        const audio = createFakeAudioElement();
-        const controller = new AudioController(audio as unknown as HTMLAudioElement);
+        const { controller } = newController();
 
         controller.prime();
         const ctx = MockAudioContext.instances[0];
@@ -217,8 +235,7 @@ describe("AudioController.prime() -- inert off-iOS", () => {
     it("does not claim the audio session, create an AudioContext, or throw on a non-iOS-standalone environment", () => {
         const { navigator } = installEnv(DESKTOP_NON_IOS);
 
-        const audio = createFakeAudioElement();
-        const controller = new AudioController(audio as unknown as HTMLAudioElement);
+        const { controller } = newController();
 
         expect(() => controller.prime()).not.toThrow();
 
@@ -231,8 +248,7 @@ describe("AudioController.prime() -- inert off-iOS", () => {
     it("a pointerdown gesture on a non-iOS page does not create an AudioContext", () => {
         const { docListeners } = installEnv(DESKTOP_NON_IOS);
 
-        const audio = createFakeAudioElement();
-        new AudioController(audio as unknown as HTMLAudioElement);
+        new AudioController();
 
         expect(docListeners["pointerdown"]?.length).toBeGreaterThan(0);
         docListeners["pointerdown"].forEach((h) => h());
@@ -249,8 +265,7 @@ describe("AudioController.prime() -- iPad detection", () => {
     it("acts on an iPad reporting a Mac UA with maxTouchPoints > 1", () => {
         installEnv(IPAD_STANDALONE_MAC_UA);
 
-        const audio = createFakeAudioElement();
-        const controller = new AudioController(audio as unknown as HTMLAudioElement);
+        const { controller } = newController();
         controller.prime();
 
         expect(MockAudioContext.instances.length).toBe(1);
@@ -259,8 +274,7 @@ describe("AudioController.prime() -- iPad detection", () => {
     it("does not act on a real Mac desktop (Mac UA, maxTouchPoints = 0)", () => {
         installEnv(MAC_DESKTOP_NO_TOUCH);
 
-        const audio = createFakeAudioElement();
-        const controller = new AudioController(audio as unknown as HTMLAudioElement);
+        const { controller } = newController();
         controller.prime();
 
         expect(MockAudioContext.instances.length).toBe(0);
@@ -269,8 +283,7 @@ describe("AudioController.prime() -- iPad detection", () => {
     it("does not act on an Android device even with a high touch-point count", () => {
         installEnv(ANDROID_STANDALONE);
 
-        const audio = createFakeAudioElement();
-        const controller = new AudioController(audio as unknown as HTMLAudioElement);
+        const { controller } = newController();
         controller.prime();
 
         expect(MockAudioContext.instances.length).toBe(0);
@@ -310,8 +323,7 @@ describe("AudioController -- ensureContextRunning (C2)", () => {
         vi.useFakeTimers();
         installEnv(IPHONE_STANDALONE);
 
-        const audio = createFakeAudioElement();
-        const controller = new AudioController(audio as unknown as HTMLAudioElement);
+        const { controller } = newController();
         const ctx = new FlippingAudioContext(2);
         const internals = controller as unknown as ControllerInternals;
         internals.audioContext = ctx;
@@ -334,8 +346,7 @@ describe("AudioController -- ensureContextRunning (C2)", () => {
         vi.useFakeTimers();
         installEnv(IPHONE_STANDALONE);
 
-        const audio = createFakeAudioElement();
-        const controller = new AudioController(audio as unknown as HTMLAudioElement);
+        const { controller } = newController();
         const ctx = new FlippingAudioContext(Infinity);
         const internals = controller as unknown as ControllerInternals;
         internals.audioContext = ctx;
@@ -368,8 +379,7 @@ describe("AudioController -- analyser wiring and bridge latch ordering (F-A)", (
     it("wires a non-null analyser after prime() on iPhone-standalone", () => {
         installEnv(IPHONE_STANDALONE);
 
-        const audio = createFakeAudioElement();
-        const controller = new AudioController(audio as unknown as HTMLAudioElement);
+        const { controller } = newController();
         controller.prime();
 
         const internals = controller as unknown as AnalyserInternals;
@@ -395,8 +405,7 @@ describe("AudioController -- analyser wiring and bridge latch ordering (F-A)", (
             matchMedia: () => ({ matches: false }),
         });
 
-        const audio = createFakeAudioElement();
-        const controller = new AudioController(audio as unknown as HTMLAudioElement);
+        const { controller } = newController();
         const internals = controller as unknown as AnalyserInternals;
 
         controller.prime();
@@ -431,8 +440,7 @@ describe("AudioController -- analyser wiring and bridge latch ordering (F-A)", (
             matchMedia: () => ({ matches: false }),
         });
 
-        const audio = createFakeAudioElement();
-        const controller = new AudioController(audio as unknown as HTMLAudioElement);
+        const { controller } = newController();
         controller.prime();
 
         const internals = controller as unknown as AnalyserInternals;
@@ -467,8 +475,8 @@ type SilentDetectorInternals = {
     analyser: { getByteTimeDomainData: (buf: Uint8Array) => void } | null;
 };
 
-function primeToPlaying(audio: ReturnType<typeof createFakeAudioElement>) {
-    const controller = new AudioController(audio as unknown as HTMLAudioElement);
+function primeToPlaying(): { controller: AudioController; audio: FakeAudioElement } {
+    const { controller, audio } = newController();
     controller.prime();
     controller.load("http://x.com/a.mp3");
     audio.paused = false;
@@ -476,7 +484,7 @@ function primeToPlaying(audio: ReturnType<typeof createFakeAudioElement>) {
         type: "native-playing",
         now: Date.now(),
     });
-    return controller;
+    return { controller, audio };
 }
 
 function fillFlat(buf: Uint8Array) {
@@ -495,8 +503,7 @@ describe("AudioController -- checkSilentPlayback (C3 / F-B)", () => {
         vi.setSystemTime(0);
         installEnv(IPHONE_STANDALONE);
 
-        const audio = createFakeAudioElement();
-        const controller = primeToPlaying(audio);
+        const { controller, audio } = primeToPlaying();
         const internals = controller as unknown as SilentDetectorInternals;
         expect(controller.getSnapshot().status).toBe("playing");
 
@@ -514,8 +521,7 @@ describe("AudioController -- checkSilentPlayback (C3 / F-B)", () => {
         vi.setSystemTime(0);
         installEnv(IPHONE_STANDALONE);
 
-        const audio = createFakeAudioElement();
-        const controller = primeToPlaying(audio);
+        const { controller, audio } = primeToPlaying();
         const internals = controller as unknown as SilentDetectorInternals;
         internals.analyser!.getByteTimeDomainData = fillNoisy;
 
@@ -533,8 +539,7 @@ describe("AudioController -- checkSilentPlayback (C3 / F-B)", () => {
         vi.setSystemTime(0);
         installEnv(IPHONE_STANDALONE);
 
-        const audio = createFakeAudioElement();
-        const controller = primeToPlaying(audio);
+        const { controller, audio } = primeToPlaying();
         const internals = controller as unknown as SilentDetectorInternals;
         internals.analyser!.getByteTimeDomainData = fillFlat;
 
@@ -553,8 +558,7 @@ describe("AudioController -- checkSilentPlayback (C3 / F-B)", () => {
         vi.setSystemTime(0);
         installEnv(IPHONE_STANDALONE);
 
-        const audio = createFakeAudioElement();
-        const controller = primeToPlaying(audio);
+        const { controller } = primeToPlaying();
         const internals = controller as unknown as SilentDetectorInternals;
 
         // currentTime frozen at its post-load() value -- "advanced" never
@@ -564,6 +568,105 @@ describe("AudioController -- checkSilentPlayback (C3 / F-B)", () => {
             internals.checkSilentPlayback();
         }
 
+        expect(controller.getSnapshot().status).toBe("playing");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// 7. rebuildAudioContextBridge -- in-page recovery for a wedged context (R2.2)
+// ---------------------------------------------------------------------------
+
+type RebuildInternals = {
+    checkSilentPlayback(): void;
+    analyser: { getByteTimeDomainData: (buf: Uint8Array) => void } | null;
+    audio: FakeAudioElement;
+    audioContext: (MockAudioContext & { closeCallCount: number }) | null;
+    rebuildCount: number;
+    snapshot: { status: string };
+};
+
+// Directly flips the private snapshot's status back to "playing" so a second
+// silence episode can be driven without re-running the full load/play policy
+// flow (checkSilentPlayback is a no-op unless status === "playing").
+function forcePlaying(internals: RebuildInternals): void {
+    internals.snapshot = { ...internals.snapshot, status: "playing" };
+}
+
+describe("AudioController -- rebuildAudioContextBridge (R2.2)", () => {
+    it("a genuine silence episode rebuilds a fresh element + AudioContext, closes the old one, and never calls play", () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(0);
+        installEnv(IPHONE_STANDALONE);
+
+        const { controller, audio: oldAudio } = primeToPlaying();
+        const internals = controller as unknown as RebuildInternals;
+        const oldCtx = internals.audioContext!;
+
+        for (let i = 1; i <= 5; i++) {
+            oldAudio.currentTime = i;
+            vi.setSystemTime(i * 1000);
+            internals.checkSilentPlayback();
+        }
+
+        expect(controller.getSnapshot().status).toBe("blocked");
+        expect(MockAudioContext.instances.length).toBe(2);
+        expect(oldCtx.closeCallCount).toBe(1);
+        expect(oldAudio.remove).toHaveBeenCalledTimes(1);
+        expect(internals.audio).not.toBe(oldAudio);
+        expect(internals.audio.play).not.toHaveBeenCalled();
+        expect(internals.rebuildCount).toBe(1);
+    });
+
+    it("a further silent episode with rebuildCount >= 1 skips the rebuild but still dispatches silent-playback-detected", () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(0);
+        installEnv(IPHONE_STANDALONE);
+
+        const { controller } = primeToPlaying();
+        const internals = controller as unknown as RebuildInternals;
+
+        for (let i = 1; i <= 5; i++) {
+            internals.audio.currentTime = i;
+            vi.setSystemTime(i * 1000);
+            internals.checkSilentPlayback();
+        }
+        expect(internals.rebuildCount).toBe(1);
+        expect(MockAudioContext.instances.length).toBe(2);
+
+        forcePlaying(internals);
+        for (let i = 6; i <= 10; i++) {
+            internals.audio.currentTime = i;
+            vi.setSystemTime(i * 1000);
+            internals.checkSilentPlayback();
+        }
+
+        expect(controller.getSnapshot().status).toBe("blocked");
+        expect(internals.rebuildCount).toBe(1);
+        expect(MockAudioContext.instances.length).toBe(2);
+    });
+
+    it("an audible tick resets rebuildCount to 0", () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(0);
+        installEnv(IPHONE_STANDALONE);
+
+        const { controller } = primeToPlaying();
+        const internals = controller as unknown as RebuildInternals;
+
+        for (let i = 1; i <= 5; i++) {
+            internals.audio.currentTime = i;
+            vi.setSystemTime(i * 1000);
+            internals.checkSilentPlayback();
+        }
+        expect(internals.rebuildCount).toBe(1);
+
+        forcePlaying(internals);
+        internals.analyser!.getByteTimeDomainData = fillNoisy;
+        internals.audio.currentTime = 6;
+        vi.setSystemTime(6000);
+        internals.checkSilentPlayback();
+
+        expect(internals.rebuildCount).toBe(0);
         expect(controller.getSnapshot().status).toBe("playing");
     });
 });

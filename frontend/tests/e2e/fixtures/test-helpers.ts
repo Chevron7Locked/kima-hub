@@ -70,20 +70,20 @@ export async function waitForPlaying(page: Page, timeoutMs = 8_000): Promise<voi
 /** Get the current <audio> src -- the stream URL. */
 export async function getAudioSrc(page: Page): Promise<string> {
     return page.evaluate(() => {
-        const el = document.querySelector("audio");
+        const el = document.querySelector('[data-kima-player="main"]') as HTMLAudioElement | null;
         return el?.src ?? "";
     });
 }
 
 /** Get the current playback position in seconds. */
 export async function getAudioCurrentTime(page: Page): Promise<number> {
-    return page.evaluate(() => document.querySelector("audio")?.currentTime ?? -1);
+    return page.evaluate(() => (document.querySelector('[data-kima-player="main"]') as HTMLAudioElement | null)?.currentTime ?? -1);
 }
 
 /** Force-set the audio element currentTime (bypasses player seek logic -- test only). */
 export async function setAudioCurrentTime(page: Page, seconds: number): Promise<void> {
     await page.evaluate((t) => {
-        const el = document.querySelector("audio");
+        const el = document.querySelector('[data-kima-player="main"]') as HTMLAudioElement | null;
         if (el) el.currentTime = t;
     }, seconds);
 }
@@ -92,7 +92,7 @@ export async function setAudioCurrentTime(page: Page, seconds: number): Promise<
 export async function waitForSrcChange(page: Page, prevSrc: string, timeoutMs = 6_000): Promise<string> {
     await page.waitForFunction(
         (prev) => {
-            const src = document.querySelector("audio")?.src ?? "";
+            const src = (document.querySelector('[data-kima-player="main"]') as HTMLAudioElement | null)?.src ?? "";
             return src !== prev && src !== "";
         },
         prevSrc,

@@ -87,12 +87,12 @@ const AudioControlsContext = createContext<
 >(undefined);
 
 function getNextTrackInfo(
-    queue: { id: string }[],
+    queue: Track[],
     currentIndex: number,
     isShuffle: boolean,
     shuffleIndices: number[],
     repeatMode: "off" | "one" | "all"
-): { id: string } | null {
+): (Track & { index: number }) | null {
     if (queue.length === 0) return null;
 
     let nextIndex: number;
@@ -115,7 +115,7 @@ function getNextTrackInfo(
         }
     }
 
-    return queue[nextIndex] || null;
+    return queue[nextIndex] ? { ...queue[nextIndex], index: nextIndex } : null;
 }
 
 export function AudioControlsProvider({ children }: { children: ReactNode }) {
@@ -1210,25 +1210,11 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            let nextIndex: number;
-            if (isShuffleRef.current) {
-                const currentShufflePos = shuffleIndicesRef.current.indexOf(currentIndexRef.current);
-                nextIndex = shuffleIndicesRef.current[currentShufflePos + 1];
-                if (nextIndex === undefined && repeatModeRef.current === "all") {
-                    nextIndex = shuffleIndicesRef.current[0];
-                }
-            } else {
-                nextIndex = currentIndexRef.current + 1;
-                if (nextIndex >= queueRef.current.length && repeatModeRef.current === "all") {
-                    nextIndex = 0;
-                }
-            }
-
-            state.setCurrentIndex(nextIndex);
-            state.setCurrentTrack(queueRef.current[nextIndex]);
+            state.setCurrentIndex(nextTrack.index);
+            state.setCurrentTrack(nextTrack);
             playback.setCurrentTime(0);
 
-            ctrl.load(api.getStreamUrl(nextTrack.id), { autoplay: true, expectedDurationS: queueRef.current[nextIndex].duration });
+            ctrl.load(api.getStreamUrl(nextTrack.id), { autoplay: true, expectedDurationS: nextTrack.duration });
         };
 
         ctrl.on("ended", handleEnded);

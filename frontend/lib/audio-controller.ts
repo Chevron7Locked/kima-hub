@@ -67,6 +67,12 @@ export class AudioController {
     private silentStreak = 0;
     private lastAnalyserCurrentTime: number | null = null;
 
+    // Bounds how many times a single silent episode may trigger a full
+    // DOM/Web-Audio rebuild. Reset ONLY when audible output is confirmed
+    // (see checkSilentPlayback), so a genuinely wedged context gets one
+    // rebuild attempt per episode rather than thrashing every 5 ticks.
+    private rebuildCount = 0;
+
     // Silent-buffer unlock latch (see unlockOnce) and the persistent global
     // gesture listener that keeps the AudioContext resumed across iOS
     // backgrounding/interruption without needing a prime() call at every
@@ -74,9 +80,8 @@ export class AudioController {
     private unlockedOnce = false;
     private gestureUnlockHandler: (() => void) | null = null;
 
-    constructor(audio: HTMLAudioElement) {
-        this.audio = audio;
-        this.audio.preload = "auto";
+    constructor() {
+        this.audio = typeof document === "undefined" ? ({} as HTMLAudioElement) : this.createOwnedElement();
 
         const events: ExternalEvent[] = ["ended", "timeupdate", "canplay", "seeked", "error"];
         events.forEach((e) => this.externalListeners.set(e, new Set()));
@@ -86,6 +91,21 @@ export class AudioController {
         this.attachNativeListeners();
         this.initializeVolume();
         this.attachGestureUnlock();
+    }
+
+    // The controller owns its <audio> element rather than receiving one from
+    // React -- this lets rebuildAudioContextBridge() tear down and recreate
+    // the element/AudioContext graph entirely in-page (no remount) when the
+    // iOS audio session is genuinely wedged.
+    private createOwnedElement(): HTMLAudioElement {
+        const el = document.createElement("audio");
+        el.setAttribute("playsinline", "");
+        el.preload = "auto";
+        el.crossOrigin = "anonymous";
+        el.style.display = "none";
+        el.setAttribute("data-kima-player", "main");
+        document.body.appendChild(el);
+        return el;
     }
 
     // -------------------------------------------------------------------------
@@ -445,13 +465,61 @@ export class AudioController {
         if (rms < 1.0 && maxDeviation < 2) {
             this.silentStreak++;
             if (this.silentStreak >= 5) {
-                this.silentStreak = 0;
                 this.ensureContextRunning();
+                if (this.rebuildCount < 1) {
+                    this.rebuildAudioContextBridge();
+                    this.rebuildCount++;
+                }
                 this.dispatch({ type: "silent-playback-detected", now: Date.now() });
+                this.silentStreak = 0;
             }
         } else {
+            // Real output confirmed -- the only place rebuildCount resets, so a
+            // rebuild is attempted at most once per genuine silence episode.
             this.silentStreak = 0;
+            this.rebuildCount = 0;
         }
+    }
+
+    // In-page recovery for a genuinely wedged iOS audio session: rebuilds
+    // the <audio> element + AudioContext/analyser graph from scratch. Does
+    // NOT touch engine state and does NOT play -- the snapshot's src/
+    // currentTime stay intact, the trigger below moves status to "blocked",
+    // and the existing play-requested-from-blocked path (audio-engine-policy.ts)
+    // reloads snap.src, seeks to snap.currentTime, and plays on this fresh
+    // element in-gesture when the user taps retry.
+    private rebuildAudioContextBridge(): void {
+        if (!this.isIosStandalone()) return;
+
+        // Detach listeners FIRST -- otherwise pause/emptied events fired by
+        // tearing down the old element dispatch into the live engine mid-rebuild.
+        this.detachNativeListeners();
+        this.audio.pause();
+        this.audio.removeAttribute("src");
+        this.audio.load();
+        this.audio.remove();
+
+        if (this.audioContextStateHandler) {
+            this.audioContext?.removeEventListener("statechange", this.audioContextStateHandler);
+        }
+        this.audioContext?.close().catch(() => {});
+        this.audioContext = null;
+        this.mediaSourceNode = null;
+        this.analyser = null;
+        this.audioContextStateHandler = null;
+
+        this.audioContextBridgeAttempted = false;
+        this.unlockedOnce = false;
+        this.silentStreak = 0;
+
+        this.audio = this.createOwnedElement();
+        this.attachNativeListeners();
+        this.audio.volume = this.isMuted ? 0 : this.volume;
+        this.audio.muted = this.isMuted;
+
+        // Fresh context + analyser on the new element. Deliberately does NOT
+        // set src / seek / play here.
+        this.setupAudioContextBridge();
     }
 
     // -------------------------------------------------------------------------
@@ -697,6 +765,13 @@ export class AudioController {
             this.audioContext = null;
             this.mediaSourceNode = null;
         }
+
+        // Owned-element teardown -- the controller appended it to
+        // document.body itself, so it must remove it here too.
+        this.audio.pause();
+        this.audio.removeAttribute("src");
+        this.audio.load();
+        this.audio.remove();
 
         this.subscribers.clear();
     }
