@@ -12,7 +12,7 @@ export type Download =
   | CompleteDownload
   | DeniedDownload
 
-export type SlskDownloadEvents = {
+type SlskDownloadEvents = {
   status: (status: Download['status'], data: DownloadStatusData) => void
   data?: (data: Buffer) => void
   progress?: (metadata: { totalBytes: bigint; receivedBytes: bigint; progress: number }) => void
@@ -31,7 +31,7 @@ export type RequestedDownload = {
   requestQueuePosition: () => void
 }
 
-export type QueuedDownload = Omit<RequestedDownload, 'status'> & {
+type QueuedDownload = Omit<RequestedDownload, 'status'> & {
   status: 'queued'
   queuePosition: number
 }
@@ -41,22 +41,22 @@ export type ConnectedDownload = Omit<QueuedDownload, 'status'> & {
   token: string
   totalBytes: bigint
 }
-export const isConnectedDownload = (download: Download): download is ConnectedDownload =>
+const isConnectedDownload = (download: Download): download is ConnectedDownload =>
   download.status === 'connected'
 
 export type DownloadingDownload = Omit<ConnectedDownload, 'status'> & {
   status: 'downloading'
 }
-export const isDownloadingDownload = (download: Download): download is DownloadingDownload =>
+const isDownloadingDownload = (download: Download): download is DownloadingDownload =>
   download.status === 'downloading'
 
 export type CompleteDownload = Omit<DownloadingDownload, 'status'> & {
   status: 'complete'
 }
-export const isCompleteDownload = (download: Download): download is CompleteDownload =>
+const isCompleteDownload = (download: Download): download is CompleteDownload =>
   download.status === 'complete'
 
-export type DeniedDownload = Omit<RequestedDownload, 'status'> & {
+type DeniedDownload = Omit<RequestedDownload, 'status'> & {
   status: 'denied'
   reason: string
 }

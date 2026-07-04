@@ -16,13 +16,13 @@ export type GetPeerAddress = {
   port: number
 }
 
-export type GetUserStatus = {
+type GetUserStatus = {
   kind: 'getUserStatus'
   username: string
   status: number
 }
 
-export type ConnectToPeer = {
+type ConnectToPeer = {
   kind: 'connectToPeer'
   username: string
   type: ConnectionType
@@ -31,7 +31,7 @@ export type ConnectToPeer = {
   token: string
 }
 
-export type GetUserStats = {
+type GetUserStats = {
   kind: 'getUserStats'
   username: string
   avgSpeed: number
@@ -40,17 +40,17 @@ export type GetUserStats = {
   dirs: number
 }
 
-export type RoomList = {
+type RoomList = {
   kind: 'roomList'
   rooms: { name: string; users: number }[]
 }
 
-export type PossibleParents = {
+type PossibleParents = {
   kind: 'possibleParents'
   parents: { username: string; host: string; port: number }[]
 }
 
-export const fromServerMessage = {
+const fromServerMessage = {
   login: (msg: MessageParser): Login => {
     const success = msg.int8()
     if (success === 1) {

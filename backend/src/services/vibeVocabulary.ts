@@ -74,7 +74,7 @@ export function getVocabulary(): Vocabulary | null {
 /**
  * Calculate cosine similarity between two vectors
  */
-export function cosineSimilarity(a: number[], b: number[]): number {
+function cosineSimilarity(a: number[], b: number[]): number {
     if (a.length !== b.length) return 0;
 
     let dotProduct = 0;
@@ -94,7 +94,7 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 /**
  * Calculate weighted average of multiple embeddings
  */
-export function blendEmbeddings(
+function blendEmbeddings(
     items: Array<{ embedding: number[]; weight: number }>
 ): number[] {
     if (items.length === 0) return [];
@@ -122,7 +122,7 @@ export function blendEmbeddings(
 /**
  * Find vocabulary terms similar to a query embedding
  */
-export function findSimilarTerms(
+function findSimilarTerms(
     queryEmbedding: number[],
     vocab: Vocabulary,
     minSimilarity: number = 0.55,
@@ -193,7 +193,7 @@ export function expandQueryWithVocabulary(
 /**
  * Blend multiple feature profiles into a target profile
  */
-export function blendFeatureProfiles(terms: VocabTerm[]): FeatureProfile {
+function blendFeatureProfiles(terms: VocabTerm[]): FeatureProfile {
     if (terms.length === 0) return {};
 
     const features = ["energy", "valence", "danceability", "acousticness",
@@ -219,7 +219,7 @@ export function blendFeatureProfiles(terms: VocabTerm[]): FeatureProfile {
 /**
  * Calculate how well a track's features match a target profile
  */
-export function calculateFeatureMatch(
+function calculateFeatureMatch(
     trackFeatures: Record<string, number | null>,
     targetProfile: FeatureProfile
 ): number {

@@ -18,7 +18,7 @@ export type SearchFn = (
     options?: { timeout?: number; onResult?: (result: FileSearchResponse) => void }
 ) => Promise<FileSearchResponse[]>;
 
-export interface SearchStrategy {
+interface SearchStrategy {
     name: string;
     buildQuery: (artist: string, track: string, album?: string) => string;
     priority: number;
@@ -127,7 +127,7 @@ export function normalizeArtistName(artist: string): string {
 /**
  * All available search strategies, ordered by priority (simple to complex)
  */
-export const SEARCH_STRATEGIES: SearchStrategy[] = [
+const SEARCH_STRATEGIES: SearchStrategy[] = [
     {
         name: "artist-title-aggressive",
         buildQuery: (artist, track) => {

@@ -455,7 +455,7 @@ export async function runFullEnrichment(): Promise<{
  * Reset only artist enrichment (keeps mood tags and audio analysis intact)
  * Used when user wants to re-fetch artist metadata without touching track data
  */
-export async function resetArtistsOnly(): Promise<{ count: number }> {
+async function resetArtistsOnly(): Promise<{ count: number }> {
     logger.debug("[Enrichment] Resetting ONLY artist enrichment status...");
 
     const result = await prisma.artist.updateMany({
@@ -474,7 +474,7 @@ export async function resetArtistsOnly(): Promise<{ count: number }> {
  * Reset only mood tags (keeps artist metadata and audio analysis intact)
  * Used when user wants to re-fetch Last.fm mood tags without touching other enrichment
  */
-export async function resetMoodTagsOnly(): Promise<{ count: number }> {
+async function resetMoodTagsOnly(): Promise<{ count: number }> {
     logger.debug("[Enrichment] Resetting ONLY mood tags...");
 
     const result = await prisma.track.updateMany({

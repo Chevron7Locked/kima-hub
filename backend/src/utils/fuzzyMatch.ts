@@ -65,7 +65,7 @@ function calculateSimilarity(str1: string, str2: string): number {
  * @param str2 Second string
  * @param threshold Minimum similarity score (0-1), default 0.8
  */
-export function fuzzyMatch(
+function fuzzyMatch(
     str1: string,
     str2: string,
     threshold: number = 0.8

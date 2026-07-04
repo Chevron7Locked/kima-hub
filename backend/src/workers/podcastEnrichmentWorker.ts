@@ -4,7 +4,7 @@ import { refreshPodcastFeed } from "../routes/podcasts";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { logger } from "../utils/logger";
 
-export interface PodcastJobData {
+interface PodcastJobData {
     podcastId: string;
     podcastTitle: string;
 }

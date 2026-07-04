@@ -32,7 +32,7 @@ export interface SearchResult {
     speed: number;
 }
 
-export interface TrackMatch {
+interface TrackMatch {
     username: string;
     filename: string;
     fullPath: string;
@@ -42,7 +42,7 @@ export interface TrackMatch {
     score: number;
 }
 
-export interface SearchTrackResult {
+interface SearchTrackResult {
     found: boolean;
     bestMatch: TrackMatch | null;
     allMatches: TrackMatch[];
@@ -187,7 +187,7 @@ class SlidingWindowRateLimiter {
     }
 }
 
-export class SoulseekService {
+class SoulseekService {
     private client: InstanceType<typeof SlskClient> | null = null;
     private connecting = false;
     private connectPromise: Promise<void> | null = null;

@@ -1,7 +1,7 @@
 import { randomBytes } from 'crypto';
 import { redisClient } from './redis';
 
-export class DistributedLock {
+class DistributedLock {
   private lockValue: string;
 
   constructor(private redis: typeof redisClient) {

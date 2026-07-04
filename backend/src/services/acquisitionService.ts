@@ -26,7 +26,7 @@ import {
  * Context for tracking acquisition origin
  * Used to link download jobs to their source (Discovery batch or Spotify import)
  */
-export interface AcquisitionContext {
+interface AcquisitionContext {
     userId: string;
     discoveryBatchId?: string;
     spotifyImportJobId?: string;
@@ -38,7 +38,7 @@ export interface AcquisitionContext {
 /**
  * Request to acquire an album
  */
-export interface AlbumAcquisitionRequest {
+interface AlbumAcquisitionRequest {
     albumTitle: string;
     artistName: string;
     mbid?: string;
@@ -49,7 +49,7 @@ export interface AlbumAcquisitionRequest {
 /**
  * Request to acquire individual tracks (for Unknown Album case)
  */
-export interface TrackAcquisitionRequest {
+interface TrackAcquisitionRequest {
     trackTitle: string;
     artistName: string;
     albumTitle?: string;
@@ -58,7 +58,7 @@ export interface TrackAcquisitionRequest {
 /**
  * Result of an acquisition attempt
  */
-export interface AcquisitionResult {
+interface AcquisitionResult {
     success: boolean;
     downloadJobId?: string;
     source?: "soulseek" | "lidarr";

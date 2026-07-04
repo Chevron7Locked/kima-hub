@@ -16,7 +16,7 @@ import { parseFile } from "music-metadata";
 ffmpeg.setFfmpegPath(ffmpegPath.path);
 
 // Quality settings
-export const QUALITY_SETTINGS = {
+const QUALITY_SETTINGS = {
     original: { bitrate: null, format: null }, // No transcoding
     high: { bitrate: 320, format: "mp3" },
     medium: { bitrate: 192, format: "mp3" },

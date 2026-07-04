@@ -7,7 +7,7 @@ import { logger } from "../utils/logger";
 const ESSENTIA_ANALYZER_PATH = "/app/audio-analyzer/analyzer.py";
 const CLAP_ANALYZER_PATH = "/app/audio-analyzer-clap/analyzer.py";
 
-export interface AvailableFeatures {
+interface AvailableFeatures {
     musicCNN: boolean;
     vibeEmbeddings: boolean;
     audiobookshelfEnabled: boolean;

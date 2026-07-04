@@ -10,7 +10,7 @@ const STALE_THRESHOLDS = {
     bullQueueRetention: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
 
-export interface CleanupResult {
+interface CleanupResult {
     discoveryBatches: { cleaned: number; ids: string[] };
     downloadJobs: { cleaned: number; ids: string[] };
     spotifyImportJobs: { cleaned: number; ids: string[] };

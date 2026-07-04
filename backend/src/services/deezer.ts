@@ -12,7 +12,7 @@ import { rateLimitedGet } from "./httpClient";
 
 const DEEZER_API = "https://api.deezer.com";
 
-export interface DeezerTrack {
+interface DeezerTrack {
     deezerId: string;
     title: string;
     artist: string;
@@ -24,7 +24,7 @@ export interface DeezerTrack {
     coverUrl: string | null;
 }
 
-export interface DeezerPlaylist {
+interface DeezerPlaylist {
     id: string;
     title: string;
     description: string | null;
@@ -53,13 +53,13 @@ export interface DeezerRadioStation {
     type: "radio";
 }
 
-export interface DeezerGenre {
+interface DeezerGenre {
     id: number;
     name: string;
     imageUrl: string | null;
 }
 
-export interface DeezerPodcast {
+interface DeezerPodcast {
     id: number;
     title: string;
     description: string;
@@ -68,7 +68,7 @@ export interface DeezerPodcast {
     pictureUrl: string | null;
 }
 
-export interface DeezerGenreWithRadios {
+interface DeezerGenreWithRadios {
     id: number;
     name: string;
     radios: DeezerRadioStation[];

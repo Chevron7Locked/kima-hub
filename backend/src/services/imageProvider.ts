@@ -11,18 +11,18 @@
 import { logger } from "../utils/logger";
 import axios from "axios";
 
-export interface ImageSearchOptions {
+interface ImageSearchOptions {
     preferredSize?: "small" | "medium" | "large" | "extralarge" | "mega";
     timeout?: number;
 }
 
-export interface ImageResult {
+interface ImageResult {
     url: string;
     source: "deezer" | "fanart" | "musicbrainz" | "lastfm" | "spotify";
     size?: string;
 }
 
-export class ImageProviderService {
+class ImageProviderService {
     private readonly FANART_API_KEY = process.env.FANART_API_KEY;
     private readonly DEEZER_API_URL = "https://api.deezer.com";
     private readonly FANART_API_URL = "https://webservice.fanart.tv/v3";

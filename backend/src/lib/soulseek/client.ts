@@ -22,14 +22,14 @@ import type { Download } from './downloads'
 import type { FileSearchResponse } from './messages/from/peer'
 
 /** Options accepted by a Soulseek search (shared by both backends). */
-export interface SlskSearchOptions {
+interface SlskSearchOptions {
   timeout?: number
   onResult?: (result: FileSearchResponse) => void
   maxResponses?: number
 }
 
 /** Minimal surface of the server connection that SoulseekService reads. */
-export interface SlskServerConn {
+interface SlskServerConn {
   once(event: string, listener: (...args: any[]) => void): unknown
   readonly destroyed: boolean
   readonly writable: boolean

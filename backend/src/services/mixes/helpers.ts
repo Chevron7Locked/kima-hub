@@ -13,7 +13,7 @@ export interface ProgrammaticMix {
 
 // Research-based color psychology for mix vibes
 // Using actual CSS rgba values for inline styles (Tailwind classes get purged at build time)
-export const MIX_COLORS: Record<string, string> = {
+const MIX_COLORS: Record<string, string> = {
     // Night/Introspection - Deep blues and purples for calm, night sky, solitude
     "late-night":
         "linear-gradient(to bottom, rgba(30, 27, 75, 0.7), rgba(30, 58, 138, 0.5), rgba(15, 23, 42, 0.4))",

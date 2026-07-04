@@ -17,7 +17,7 @@ export type PeerInit = {
   token: string
 }
 
-export const fromPeerInitMessage = {
+const fromPeerInitMessage = {
   pierceFirewall: (msg: MessageParser): PierceFirewall => {
     const token = msg.rawHexStr(4)
     return { kind: 'pierceFirewall', token }

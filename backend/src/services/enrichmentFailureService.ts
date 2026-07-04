@@ -8,7 +8,7 @@
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 
-export interface EnrichmentFailure {
+interface EnrichmentFailure {
     id: string;
     entityType: "artist" | "track" | "audio" | "vibe" | "podcast" | "scan";
     entityId: string;
@@ -26,7 +26,7 @@ export interface EnrichmentFailure {
     metadata: any;
 }
 
-export interface RecordFailureInput {
+interface RecordFailureInput {
     entityType: "artist" | "track" | "audio" | "vibe" | "podcast" | "scan";
     entityId: string;
     entityName?: string;
@@ -35,7 +35,7 @@ export interface RecordFailureInput {
     metadata?: any;
 }
 
-export interface GetFailuresOptions {
+interface GetFailuresOptions {
     entityType?: "artist" | "track" | "audio" | "vibe" | "podcast" | "scan";
     includeSkipped?: boolean;
     includeResolved?: boolean;

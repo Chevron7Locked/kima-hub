@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
 import { logger } from "../utils/logger";
 
-export type SSEEventType =
+type SSEEventType =
     | "notification"
     | "notification:cleared"
     | "download:progress"

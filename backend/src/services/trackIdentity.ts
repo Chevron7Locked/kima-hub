@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { songLinkService, SongLinkResult } from "./songlink";
 import { musicBrainzService } from "./musicbrainz";
 
-export interface ResolvedTrack {
+interface ResolvedTrack {
     sourceUrl: string;
     platform: string | null;
     spotifyId: string | null;

@@ -26,7 +26,7 @@ import {
     reassignArtistMbid,
 } from "./mbidReassign";
 
-export interface EnrichmentSettings {
+interface EnrichmentSettings {
     enabled: boolean;
     autoEnrichOnScan: boolean;
     sources: {
@@ -42,7 +42,7 @@ export interface EnrichmentSettings {
     matchingConfidence: "strict" | "moderate" | "loose";
 }
 
-export interface ArtistEnrichmentData {
+interface ArtistEnrichmentData {
     mbid?: string;
     bio?: string;
     genres?: string[];
@@ -53,7 +53,7 @@ export interface ArtistEnrichmentData {
     confidence: number;
 }
 
-export interface AlbumEnrichmentData {
+interface AlbumEnrichmentData {
     rgMbid?: string;
     releaseDate?: Date;
     albumType?: string;
@@ -65,7 +65,7 @@ export interface AlbumEnrichmentData {
     confidence: number;
 }
 
-export class EnrichmentService {
+class EnrichmentService {
     private defaultSettings: EnrichmentSettings = {
         enabled: false, // Opt-in by default
         autoEnrichOnScan: false,

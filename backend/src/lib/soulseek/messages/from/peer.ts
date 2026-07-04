@@ -29,13 +29,13 @@ export type FileSearchResponse = {
 }
 
 export type TransferRequest = TransferRequestDownload | TransferRequestUpload
-export type TransferRequestDownload = {
+type TransferRequestDownload = {
   kind: 'transferRequest'
   direction: 0
   token: string
   filename: string
 }
-export type TransferRequestUpload = {
+type TransferRequestUpload = {
   kind: 'transferRequest'
   direction: 1
   token: string
@@ -70,7 +70,7 @@ export type UploadDenied = {
   reason: string
 }
 
-export const fromPeerMessage = {
+const fromPeerMessage = {
   sharedFileListRequest: (): SharedFileListRequest => {
     return { kind: 'sharedFileListRequest' }
   },

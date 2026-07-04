@@ -13,7 +13,7 @@ import { shuffleArray } from "../utils/shuffle";
 // Mood configuration with scoring rules
 // Primary = uses ML mood predictions (enhanced mode)
 // Fallback = uses basic audio features (standard mode)
-export const MOOD_CONFIG = {
+const MOOD_CONFIG = {
     happy: {
         name: "Happy & Upbeat",
         color: "from-yellow-400 to-orange-500",
@@ -137,7 +137,7 @@ interface TrackWithAnalysis {
     moodTags: string[];
 }
 
-export class MoodBucketService {
+class MoodBucketService {
     /**
      * Calculate mood scores for a track and assign to appropriate buckets
      * Called after audio analysis completes

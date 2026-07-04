@@ -93,7 +93,7 @@ function getTierFromSimilarity(
     return "wildcard";
 }
 
-export class DiscoverWeeklyService {
+class DiscoverWeeklyService {
     /**
      * Main entry: Generate Discovery Weekly
      */

@@ -19,7 +19,7 @@ interface SyncResult {
     errors: string[];
 }
 
-export class AudiobookCacheService {
+class AudiobookCacheService {
     private coverCacheDir: string;
     private coverCacheAvailable: boolean = false;
 

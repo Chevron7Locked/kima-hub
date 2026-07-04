@@ -2,7 +2,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { eventBus } from "./eventBus";
 
-export type NotificationType =
+type NotificationType =
     | "system"
     | "download_complete"
     | "download_failed"
@@ -10,7 +10,7 @@ export type NotificationType =
     | "import_complete"
     | "error";
 
-export interface CreateNotificationParams {
+interface CreateNotificationParams {
     userId: string;
     type: NotificationType;
     title: string;

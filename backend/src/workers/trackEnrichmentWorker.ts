@@ -6,7 +6,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 
-export interface TrackJobData {
+interface TrackJobData {
     trackId: string;
     trackTitle: string;
 }

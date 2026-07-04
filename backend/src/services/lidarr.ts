@@ -2746,7 +2746,7 @@ export interface ReconciliationSnapshot {
     fetchedAt: Date;
 }
 
-export interface QueueSnapshotItem {
+interface QueueSnapshotItem {
     id: number;
     downloadId: string;
     status: string;
@@ -2754,7 +2754,7 @@ export interface QueueSnapshotItem {
     title: string;
 }
 
-export interface AlbumSnapshotInfo {
+interface AlbumSnapshotInfo {
     id: number;
     title: string;
     foreignAlbumId: string;

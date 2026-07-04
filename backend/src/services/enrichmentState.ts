@@ -16,10 +16,10 @@ const AUDIO_ANALYSIS_CONTROL_CHANNEL = "audio:analysis:control";
 // Eliminates pub/sub timing races between Node.js stop and Python work pickup.
 const AUDIO_ANALYSIS_GATE_KEY = "audio:analysis:gate";
 
-export type EnrichmentStatus = "idle" | "running" | "paused" | "stopping";
-export type EnrichmentPhase = "artists" | "tracks" | "scan" | "audio" | "vibe" | "podcasts" | null;
+type EnrichmentStatus = "idle" | "running" | "paused" | "stopping";
+type EnrichmentPhase = "artists" | "tracks" | "scan" | "audio" | "vibe" | "podcasts" | null;
 
-export interface EnrichmentState {
+interface EnrichmentState {
     status: EnrichmentStatus;
     startedAt?: string;
     pausedAt?: string;

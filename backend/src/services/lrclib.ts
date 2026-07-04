@@ -16,7 +16,7 @@ interface LrclibResponse {
     syncedLyrics: string | null;
 }
 
-export interface LrclibResult {
+interface LrclibResult {
     plainLyrics: string | null;
     syncedLyrics: string | null;
     id: number;

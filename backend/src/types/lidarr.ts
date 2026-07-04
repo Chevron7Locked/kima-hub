@@ -37,7 +37,7 @@ export interface LidarrAlbum {
   grabbed?: boolean;
 }
 
-export interface LidarrRelease {
+interface LidarrRelease {
   id: number;
   albumId: number;
   foreignReleaseId: string;
@@ -54,7 +54,7 @@ export interface LidarrRelease {
   monitored: boolean;
 }
 
-export interface LidarrMedia {
+interface LidarrMedia {
   mediumNumber: number;
   mediumName: string;
   mediumFormat: string;
@@ -100,7 +100,7 @@ export interface LidarrArtist {
   };
 }
 
-export interface LidarrLink {
+interface LidarrLink {
   url: string;
   name: string;
 }

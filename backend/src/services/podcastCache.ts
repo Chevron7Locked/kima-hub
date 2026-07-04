@@ -17,7 +17,7 @@ interface CoverSyncResult {
     errors: string[];
 }
 
-export class PodcastCacheService {
+class PodcastCacheService {
     private coverCacheDir: string;
 
     constructor() {

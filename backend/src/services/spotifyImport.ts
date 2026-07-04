@@ -42,7 +42,7 @@ const jobLoggers = new Map<string, ReturnType<typeof createPlaylistLogger>>();
  * Handles matching Spotify tracks to local library and managing imports
  */
 
-export interface MatchedTrack {
+interface MatchedTrack {
   spotifyTrack: SpotifyTrack;
   localTrack: {
     id: string;
@@ -55,7 +55,7 @@ export interface MatchedTrack {
   matchConfidence: number; // 0-100
 }
 
-export interface AlbumToDownload {
+interface AlbumToDownload {
   spotifyAlbumId: string;
   albumName: string;
   artistName: string;
@@ -66,7 +66,7 @@ export interface AlbumToDownload {
   tracksNeeded: SpotifyTrack[];
 }
 
-export interface ImportPreview {
+interface ImportPreview {
   playlist: {
     id: string;
     name: string;
@@ -85,7 +85,7 @@ export interface ImportPreview {
   };
 }
 
-export interface ImportJob {
+interface ImportJob {
   id: string;
   userId: string;
   spotifyPlaylistId: string;

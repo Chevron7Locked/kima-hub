@@ -128,7 +128,7 @@ function estimateBitrateFromMime(mime: string | null): number {
     return 192;
 }
 
-export function mimeToSuffix(mime: string | null): string {
+function mimeToSuffix(mime: string | null): string {
     const m = normalizeMime(mime);
     if (!m) return "mp3";
     const map: Record<string, string> = {

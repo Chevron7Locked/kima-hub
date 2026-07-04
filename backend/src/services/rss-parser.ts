@@ -32,22 +32,22 @@ interface ParsedPodcastFeed {
     episodes: RSSEpisode[];
 }
 
-export interface FeedFetchOptions {
+interface FeedFetchOptions {
     etag?: string | null;
     lastModified?: string | null;
 }
 
-export interface FeedFetchResult extends ParsedPodcastFeed {
+interface FeedFetchResult extends ParsedPodcastFeed {
     notModified: false;
     etag?: string;
     lastModified?: string;
 }
 
-export interface FeedNotModifiedResult {
+interface FeedNotModifiedResult {
     notModified: true;
 }
 
-export type ParseFeedResult = FeedFetchResult | FeedNotModifiedResult;
+type ParseFeedResult = FeedFetchResult | FeedNotModifiedResult;
 
 class RSSParserService {
     private parser: Parser;

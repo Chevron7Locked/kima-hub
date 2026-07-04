@@ -12,12 +12,12 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import * as crypto from "crypto";
 
-export interface WebhookEventPayload {
+interface WebhookEventPayload {
     eventType: string;
     [key: string]: any;
 }
 
-export interface StoredWebhookEvent {
+interface StoredWebhookEvent {
     id: string;
     eventId: string;
     source: string;

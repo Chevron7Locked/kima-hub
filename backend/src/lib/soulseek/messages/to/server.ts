@@ -3,7 +3,7 @@ import crypto from 'crypto'
 import type { ConnectionType, UserStatus } from '../common'
 import { MessageBuilder } from '../message-builder'
 
-export type ToServerMessage = Parameters<(typeof toServerMessage)[keyof typeof toServerMessage]>[0]
+type ToServerMessage = Parameters<(typeof toServerMessage)[keyof typeof toServerMessage]>[0]
 
 export type Login = {
   username: string

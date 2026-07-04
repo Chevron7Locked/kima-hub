@@ -2,7 +2,7 @@ import type { ConnectionType, FileAttribute } from '../common'
 import { TransferDirection } from '../common'
 import { MessageBuilder } from '../message-builder'
 
-export type ToPeerMessage = Parameters<(typeof toPeerMessage)[keyof typeof toPeerMessage]>[0]
+type ToPeerMessage = Parameters<(typeof toPeerMessage)[keyof typeof toPeerMessage]>[0]
 
 export type PierceFirewall = {
   token: string

@@ -21,7 +21,7 @@ export async function generateDayMix(
     }
 }
 
-export async function generateSundayMix(
+async function generateSundayMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
@@ -72,7 +72,7 @@ export async function generateSundayMix(
     };
 }
 
-export async function generateMondayMix(
+async function generateMondayMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
@@ -122,7 +122,7 @@ export async function generateMondayMix(
     };
 }
 
-export async function generateFridayMix(
+async function generateFridayMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {

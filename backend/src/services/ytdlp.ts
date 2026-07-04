@@ -1,7 +1,7 @@
 import { execFile } from "child_process";
 import { logger } from "../utils/logger";
 
-export interface YtDlpTrack {
+interface YtDlpTrack {
   id: string;
   title: string;
   artist: string;
