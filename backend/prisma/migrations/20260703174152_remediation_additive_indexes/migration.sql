@@ -7,14 +7,16 @@
 -- other models). Those @@index lines were added to schema.prisma to bring it back in
 -- sync with reality, but no CREATE INDEX is needed for them here since they already
 -- exist. Only the genuinely new indexes are created below.
+-- Uses IF NOT EXISTS to match this project's migration convention and stay safe on
+-- any deployment where an index may already be present (never fail a migrate deploy).
 -- CreateIndex
-CREATE INDEX "Play_userId_trackId_idx" ON "Play"("userId", "trackId");
+CREATE INDEX IF NOT EXISTS "Play_userId_trackId_idx" ON "Play"("userId", "trackId");
 
 -- CreateIndex
-CREATE INDEX "Notification_userId_cleared_read_idx" ON "Notification"("userId", "cleared", "read");
+CREATE INDEX IF NOT EXISTS "Notification_userId_cleared_read_idx" ON "Notification"("userId", "cleared", "read");
 
 -- CreateIndex
-CREATE INDEX "Notification_userId_cleared_createdAt_idx" ON "Notification"("userId", "cleared", "createdAt");
+CREATE INDEX IF NOT EXISTS "Notification_userId_cleared_createdAt_idx" ON "Notification"("userId", "cleared", "createdAt");
 
 -- CreateIndex
-CREATE INDEX "DiscoveryTrack_trackId_idx" ON "DiscoveryTrack"("trackId");
+CREATE INDEX IF NOT EXISTS "DiscoveryTrack_trackId_idx" ON "DiscoveryTrack"("trackId");
