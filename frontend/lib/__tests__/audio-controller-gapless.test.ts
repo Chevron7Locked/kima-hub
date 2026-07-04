@@ -189,7 +189,7 @@ describe("AudioController -- gapless swap: eligible", () => {
         // React layer notified via gapless-advance; native "ended" must NOT fire
         // (that would imply a cold-load fallback, defeating the whole point).
         expect(gaplessCb).toHaveBeenCalledTimes(1);
-        expect(gaplessCb).toHaveBeenCalledWith({ durationS: 210 });
+        expect(gaplessCb).toHaveBeenCalledWith({ durationS: 210, trackId: "track-2" });
         expect(endedCb).not.toHaveBeenCalled();
     });
 
@@ -201,12 +201,20 @@ describe("AudioController -- gapless swap: eligible", () => {
         expect(audioNext.volume).toBe(0.4);
 
         makeEligible(controller, audioNext, "track-2", "http://x.com/b.mp3", 100);
+
+        // Poison the element that will become the reused idle -- setVolume(0.4)
+        // above already wrote 0.4 onto it, so without this the test would pass
+        // even if the swap-time re-sync lines (FIX B) were deleted.
+        audio.volume = 1;
+        audio.muted = true;
+
         audio.__fire("ended");
         await flushMicrotasks();
 
         // `audio` (the fake) is now the reused idle element -- must carry the
-        // volume that was set before the swap, not the browser default (1).
+        // controller's tracked volume/mute, not the poisoned values.
         expect(audio.volume).toBe(0.4);
+        expect(audio.muted).toBe(false);
     });
 });
 
@@ -302,5 +310,38 @@ describe("AudioController -- gapless swap: repeat-one suppression", () => {
         audio.__fire("ended");
 
         expect(audioNext.play).not.toHaveBeenCalled();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Generation guard: a manual skip / ctrl.load() races the swap's play() (FIX 4)
+// ---------------------------------------------------------------------------
+
+describe("AudioController -- gapless swap: generation guard", () => {
+    it("aborts the commit if generation changed between the synchronous play() call and its promise resolving", async () => {
+        const { controller, audio, audioNext } = newController();
+        const gaplessCb = vi.fn();
+        controller.on("gapless-advance", gaplessCb);
+
+        makeEligible(controller, audioNext, "track-2", "http://x.com/b.mp3", 100);
+
+        audio.__fire("ended");
+        expect(audioNext.play).toHaveBeenCalledTimes(1);
+
+        // A manual skip / ctrl.load() lands before the swap's play() promise
+        // resolves -- this bumps `generation` via the "load" transition and
+        // applies its own set-src-and-load to the pre-flip `this.audio`.
+        controller.load("http://x.com/manual-skip.mp3");
+
+        await flushMicrotasks();
+
+        // Commit must be aborted: pointers unchanged, no gapless-advance
+        // emitted, and the started idle-swap element gets paused so it
+        // doesn't play over the intervening track.
+        const state = internals(controller);
+        expect(state.audio).toBe(audio);
+        expect(state.audioNext).toBe(audioNext);
+        expect(gaplessCb).not.toHaveBeenCalled();
+        expect(audioNext.pause).toHaveBeenCalled();
     });
 });

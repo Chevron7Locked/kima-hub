@@ -163,6 +163,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const lastSaveTimeRef = useRef(0);
     const errorClassifyingRef = useRef(false);
     const prewarmFiredForRef = useRef<string | null>(null);
+    const pendingGaplessNextRef = useRef<(Track & { index: number }) | null>(null);
 
     // Session ref: always consulted by seek, handleEnded, and progress saves.
     const bookSessionRef = useRef<BookSession | null>(null);
@@ -1251,6 +1252,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             if (repeatModeRef.current === "one") return;
             const ctrl2 = controllerRef.current;
             if (!ctrl2) return;
+            pendingGaplessNextRef.current = nextTrack;
             ctrl2.setUpcoming2B(api.getStreamUrl(nextTrack.id), nextTrack.id, nextTrack.duration);
             ctrl2.preloadNext();
         };
@@ -1268,22 +1270,33 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         if (!ctrl) return;
 
         const handleGaplessAdvance = (data?: unknown) => {
-            const { durationS } = (data ?? {}) as { durationS?: number };
+            const { durationS, trackId } = (data ?? {}) as { durationS?: number; trackId?: string };
 
-            const nextTrack = getNextTrackInfo(
-                queueRef.current,
-                currentIndexRef.current,
-                isShuffleRef.current,
-                shuffleIndicesRef.current,
-                repeatModeRef.current
-            );
-            if (!nextTrack) return;
+            let resolved: (Track & { index: number }) | null = null;
+            if (pendingGaplessNextRef.current?.id === trackId) {
+                resolved = pendingGaplessNextRef.current;
+            } else {
+                const queueIdx = queueRef.current.findIndex((t) => t.id === trackId);
+                if (queueIdx >= 0) {
+                    resolved = { ...queueRef.current[queueIdx], index: queueIdx };
+                } else {
+                    resolved = getNextTrackInfo(
+                        queueRef.current,
+                        currentIndexRef.current,
+                        isShuffleRef.current,
+                        shuffleIndicesRef.current,
+                        repeatModeRef.current
+                    );
+                }
+            }
+            if (!resolved) return;
 
-            state.setCurrentIndex(nextTrack.index);
-            state.setCurrentTrack(nextTrack);
-            playback.setDuration(durationS || nextTrack.duration || 0);
+            state.setCurrentIndex(resolved.index);
+            state.setCurrentTrack(resolved);
+            playback.setDuration(durationS || resolved.duration || 0);
             playback.setCurrentTime(0);
             lastManualAdvanceAtRef.current = Date.now();
+            pendingGaplessNextRef.current = null;
         };
 
         ctrl.on("gapless-advance", handleGaplessAdvance);

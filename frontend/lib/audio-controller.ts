@@ -729,16 +729,34 @@ export class AudioController {
         // a microtask later) has nothing to unwind. Committing unconditionally
         // right after this call would already have mutated pointers/generation
         // by the time a rejection arrived, silently swallowing the fallback.
-        const p = this.audioNext.play();
+        const swapGen = this.snapshot.generation;
+        let p: ReturnType<HTMLAudioElement["play"]> | undefined;
+        try {
+            p = this.audioNext.play();
+        } catch {
+            this.onSwapFailed();
+            return;
+        }
         if (p && typeof p.then === "function") {
-            p.then(() => this.onSwapCommitted()).catch(() => this.onSwapFailed());
+            p.then(() => this.onSwapCommitted(swapGen)).catch(() => this.onSwapFailed());
         } else {
             // No promise returned (old browsers) -- treat as committed.
-            this.onSwapCommitted();
+            this.onSwapCommitted(swapGen);
         }
     }
 
-    private onSwapCommitted(): void {
+    private onSwapCommitted(swapGen: number): void {
+        if (this.snapshot.generation !== swapGen) {
+            // A generation-bumping event (manual skip / ctrl.load()) landed
+            // between the synchronous play() and this resolving -- that path
+            // already applied its own set-src-and-load to the pre-flip
+            // `this.audio`. Abort the swap without flipping pointers or
+            // dispatching/emitting so it doesn't clobber the user's skip.
+            this.audioNext.pause();
+            return;
+        }
+
+        const swappedTrackId = this.expectedNextTrackId;
         const newSrc = this.audioNext.src;
         const newDur = this.audioNext.duration;
         const expectedDurationS = this.expectedNextDurationS;
@@ -785,6 +803,7 @@ export class AudioController {
 
         this.emitExternal("gapless-advance", {
             durationS: isFinite(newDur) ? newDur : (expectedDurationS ?? 0),
+            trackId: swappedTrackId,
         });
 
         // Re-arm the silence detector for the freshly-active element -- the

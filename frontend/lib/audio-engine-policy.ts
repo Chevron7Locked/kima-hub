@@ -770,6 +770,8 @@ export function transition(
                     pendingSeek: null,
                     progressStreakStartedAt: null,
                     lastProgressAt: event.now,
+                    pauseClass: null,
+                    resumeOnForeground: false,
                 },
                 effects: cancelBothTimers(),
             };

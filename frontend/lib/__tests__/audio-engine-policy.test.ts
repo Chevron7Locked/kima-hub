@@ -1367,4 +1367,23 @@ describe("gapless-swapped", () => {
         });
         expect(base).toEqual(frozen);
     });
+
+    it("resets a stale resumeOnForeground/pauseClass left by the native-pause that always precedes ended (FIX 2)", () => {
+        // A native `pause` fires immediately before every `ended` and sets
+        // these via the native-pause transition -- gapless-swapped must clear
+        // them or a later `foreground` would force a spurious "blocked" onto
+        // genuinely-playing audio.
+        const base = playingSnap({
+            pauseClass: "system",
+            resumeOnForeground: true,
+        });
+        const { snapshot } = tr(base, {
+            type: "gapless-swapped",
+            src: "http://example.com/next.mp3",
+            durationS: 100,
+            now: NOW,
+        });
+        expect(snapshot.pauseClass).toBeNull();
+        expect(snapshot.resumeOnForeground).toBe(false);
+    });
 });
