@@ -62,7 +62,8 @@ export type EngineEvent =
           now: number;
       }
     | { type: "foreground"; now: number }
-    | { type: "cleanup"; now: number };
+    | { type: "cleanup"; now: number }
+    | { type: "silent-playback-detected"; now: number };
 
 export type Effect =
     | { kind: "set-src-and-load"; src: string }
@@ -710,6 +711,21 @@ export function transition(
         case "cleanup": {
             return {
                 snapshot: initialSnapshot(),
+                effects: cancelBothTimers(),
+            };
+        }
+
+        case "silent-playback-detected": {
+            if (snap.status !== "playing") {
+                return { snapshot: snap, effects: [] };
+            }
+            return {
+                snapshot: {
+                    ...snap,
+                    status: "blocked",
+                    rung: "none",
+                    progressStreakStartedAt: null,
+                },
                 effects: cancelBothTimers(),
             };
         }

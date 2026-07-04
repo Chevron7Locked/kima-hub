@@ -81,6 +81,13 @@ export const getApiBaseUrl = () => {
 
 type RefreshResult = "refreshed" | "rejected" | "network-error";
 
+// Distinguishes a transient network outage during token refresh from a real
+// 401 (session expired) so callers don't log the user out on a dropped
+// connection.
+export class NetworkError extends Error {
+    name = "NetworkError";
+}
+
 class ApiClient {
     private token: string | null = null;
     private tokenInitialized: boolean = false;
@@ -166,11 +173,11 @@ class ApiClient {
      * Refresh the access token using the refresh token.
      * Deduplicates concurrent refresh calls -- all concurrent 401s share one refresh attempt.
      */
-    private async refreshAccessToken(): Promise<boolean> {
-        if (this.refreshPromise) return (await this.refreshPromise) === "refreshed";
+    private async refreshAccessToken(): Promise<RefreshResult> {
+        if (this.refreshPromise) return this.refreshPromise;
         this.refreshPromise = this._doRefresh();
         try {
-            return (await this.refreshPromise) === "refreshed";
+            return await this.refreshPromise;
         } finally {
             this.refreshPromise = null;
         }
@@ -352,15 +359,26 @@ class ApiClient {
                 _retryCount === 0 &&
                 endpoint !== "/auth/refresh"
             ) {
-                const refreshed = await this.refreshAccessToken();
+                const refreshResult = await this.refreshAccessToken();
 
-                if (refreshed) {
+                if (refreshResult === "refreshed") {
                     // Retry the request with new token
                     return this.request<T>(endpoint, {
                         ...options,
                         _retryCount: 1, // Prevent infinite loops
                     });
                 }
+
+                if (refreshResult === "network-error") {
+                    // Transient outage -- tokens are left intact by _doRefresh.
+                    // Do not throw "Not authenticated": that would look like a
+                    // real session expiry and log the user out over a dropped
+                    // connection.
+                    throw new NetworkError("Token refresh failed: network error");
+                }
+
+                // "rejected" -- server invalidated the refresh token, a real
+                // session expiry. Fall through to the 401 handling below.
             }
 
             if (response.status === 401) {

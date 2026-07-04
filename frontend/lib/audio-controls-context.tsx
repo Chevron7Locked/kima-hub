@@ -1312,22 +1312,26 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         const doTeardown = () => {
             if (playbackTypeRef.current === "track") {
                 consecutiveErrorCountRef.current++;
-                if (consecutiveErrorCountRef.current >= 3 || queueRef.current.length <= 1) {
+                if (queueRef.current.length <= 1) {
+                    // Single track: retain + allow indefinite retry.
+                    return;
+                } else if (consecutiveErrorCountRef.current >= 3) {
                     state.setCurrentTrack(null);
                     state.setPlaybackType(null);
                 } else {
+                    // Multi-track: skip the bad track.
                     nextRef.current();
                 }
             } else {
+                // Single item (audiobook/podcast queues are always empty): retain
+                // the item and playbackType so the shared player keeps rendering
+                // (hasMedia + audioError), just persist progress before retry.
                 if (playbackTypeRef.current === "audiobook") {
                     saveAudiobookProgressRef.current();
-                    state.setCurrentAudiobook(null);
                 }
                 if (playbackTypeRef.current === "podcast") {
                     savePodcastProgressRef.current();
-                    state.setCurrentPodcast(null);
                 }
-                state.setPlaybackType(null);
             }
         };
 

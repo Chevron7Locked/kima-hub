@@ -95,6 +95,7 @@ const SAMPLE_EVENTS: EngineEvent[] = [
     },
     { type: "foreground", now: NOW },
     { type: "cleanup", now: NOW },
+    { type: "silent-playback-detected", now: NOW },
 ];
 
 describe("table test: every (status x event) pair produces a defined status", () => {
@@ -1172,5 +1173,46 @@ describe("foreground: resumeOnForeground=false -> claim-session only, no blocked
         expect(snapshot.status).toBe("paused");
         expect(snapshot.resumeOnForeground).toBe(false);
         expect(hasEffect(effects, "claim-session")).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// silent-playback-detected: running-but-silent safety net (C3)
+// ---------------------------------------------------------------------------
+
+describe("silent-playback-detected", () => {
+    it("from playing -> blocked, timers cancelled", () => {
+        const base = playingSnap({ generation: 3, intent: "play" });
+        const { snapshot, effects } = tr(base, {
+            type: "silent-playback-detected",
+            now: NOW,
+        });
+        expect(snapshot.status).toBe("blocked");
+        expect(snapshot.rung).toBe("none");
+        expect(snapshot.progressStreakStartedAt).toBeNull();
+        expect(hasEffect(effects, "cancel-timer")).toBe(true);
+        expect(effectsOf(effects, "cancel-timer")).toHaveLength(3);
+    });
+
+    it("non-playing status -> no-op (guarded like native-waiting)", () => {
+        const nonPlayingStatuses: EngineStatus[] = [
+            "idle",
+            "loading",
+            "buffering",
+            "paused",
+            "recovering",
+            "blocked",
+            "error",
+        ];
+        for (const status of nonPlayingStatuses) {
+            const base = snap({ status, generation: 3, intent: "play" });
+            const { snapshot, effects } = tr(base, {
+                type: "silent-playback-detected",
+                now: NOW,
+            });
+            expect(snapshot).toBe(base);
+            expect(snapshot.status).toBe(status);
+            expect(effects).toHaveLength(0);
+        }
     });
 });

@@ -36,7 +36,19 @@ export class AudioErrorBoundary extends Component<Props, State> {
 
     render() {
         if (this.state.hasError) {
-            return this.props.fallback || null;
+            return (
+                this.props.fallback ?? (
+                    <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
+                        <p className="text-white/70">Playback system error</p>
+                        <button
+                            onClick={() => window.location.reload()}
+                            className="px-4 py-2 rounded-lg bg-brand hover:bg-[#d4a000] text-black font-semibold transition-all"
+                        >
+                            Reload
+                        </button>
+                    </div>
+                )
+            );
         }
 
         return this.props.children;

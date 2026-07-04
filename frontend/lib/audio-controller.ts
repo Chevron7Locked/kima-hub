@@ -57,6 +57,23 @@ export class AudioController {
     private audioContextBridgeAttempted = false;
     private audioContextStateHandler: (() => void) | null = null;
 
+    // "Running-but-silent" safety net: an AnalyserNode tapped off the media
+    // source. iOS can leave the AudioContext state "running" with the element
+    // "playing" but genuinely emit no audio (post-interruption/backgrounding
+    // edge cases). Only armed for a window after cold-start/foreground since
+    // that is when this has been observed; null off-iOS (bridge never builds).
+    private analyser: AnalyserNode | null = null;
+    private armDetectorUntil = 0;
+    private silentStreak = 0;
+    private lastAnalyserCurrentTime: number | null = null;
+
+    // Silent-buffer unlock latch (see unlockOnce) and the persistent global
+    // gesture listener that keeps the AudioContext resumed across iOS
+    // backgrounding/interruption without needing a prime() call at every
+    // playback call site.
+    private unlockedOnce = false;
+    private gestureUnlockHandler: (() => void) | null = null;
+
     constructor(audio: HTMLAudioElement) {
         this.audio = audio;
         this.audio.preload = "auto";
@@ -68,6 +85,7 @@ export class AudioController {
 
         this.attachNativeListeners();
         this.initializeVolume();
+        this.attachGestureUnlock();
     }
 
     // -------------------------------------------------------------------------
@@ -96,13 +114,66 @@ export class AudioController {
     private isIosStandalone(): boolean {
         if (typeof window === "undefined") return false;
         try {
-            const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
+            const isIos =
+                /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+                (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
             if (!isIos) return false;
             const legacy = (navigator as { standalone?: boolean }).standalone === true;
             const modern = window.matchMedia?.("(display-mode: standalone)").matches === true;
             return legacy || modern;
         } catch {
             return false;
+        }
+    }
+
+    // Persistent (non-one-shot) capture-phase gesture listener. iOS re-suspends
+    // the AudioContext on backgrounding, so a single early-page-life unlock is
+    // not enough -- every later gesture must be able to re-resume it. prime()
+    // is a cheap no-op once the context is already running, so this costs
+    // nothing on repeat gestures or on non-iOS platforms.
+    private attachGestureUnlock(): void {
+        if (typeof document === "undefined") return;
+        this.gestureUnlockHandler = () => this.prime();
+        document.addEventListener("pointerdown", this.gestureUnlockHandler, { passive: true, capture: true });
+        document.addEventListener("touchend", this.gestureUnlockHandler, { passive: true, capture: true });
+    }
+
+    // Synchronous, idempotent gesture-time unlock. Contains no `await` and never
+    // calls audio.play() -- it only re-asserts the audio session and nudges the
+    // AudioContext so iOS keeps CoreAudio clocking. Gated on iOS-standalone (its
+    // only purpose is the WebKit #261858 bridge), so it is a true no-op on web,
+    // Android, and even a plain iOS Safari tab.
+    prime(): void {
+        if (!this.isIosStandalone()) return;
+        this.setAudioSessionPlayback(true);
+        this.setupAudioContextBridge();
+        this.ensureContextRunning();
+        this.unlockOnce();
+    }
+
+    // resume() resolving does not guarantee CoreAudio actually started clocking --
+    // starting a 1-frame silent buffer source forces it. Latched so it only runs once.
+    private unlockOnce(): void {
+        if (this.unlockedOnce) return;
+        if (!this.isIosStandalone() || !this.audioContext) return;
+        try {
+            const ctx = this.audioContext;
+            const buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(ctx.destination);
+            source.start();
+            source.onended = () => {
+                try {
+                    source.disconnect();
+                } catch {
+                    // Already disconnected
+                }
+            };
+            // Latch ONLY on success -- a failed attempt stays retryable on a later gesture.
+            this.unlockedOnce = true;
+        } catch {
+            // Not fatal -- leave the latch unset so a later gesture retries.
         }
     }
 
@@ -113,7 +184,6 @@ export class AudioController {
             return;
         }
         if (!this.isIosStandalone()) return;
-        this.audioContextBridgeAttempted = true;
         try {
             const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
             if (!AC) return;
@@ -138,8 +208,23 @@ export class AudioController {
             };
             this.audioContext.addEventListener("statechange", this.audioContextStateHandler);
             this.mediaSourceNode = this.audioContext.createMediaElementSource(this.audio);
-            this.mediaSourceNode.connect(this.audioContext.destination);
-            this.audioContext.resume().catch(() => {});
+            try {
+                this.analyser = this.audioContext.createAnalyser();
+                this.analyser.fftSize = 256;
+                this.mediaSourceNode.connect(this.analyser);
+                this.analyser.connect(this.audioContext.destination);
+            } catch {
+                // Analyser is an enhancement; if it fails, still route audio to the
+                // destination so playback works (the silence detector just won't run).
+                this.analyser = null;
+                this.mediaSourceNode.connect(this.audioContext.destination);
+            }
+            // Latch only after the audio path is fully routed -- a throw in
+            // createMediaElementSource or the routing above leaves this false so
+            // a later gesture can retry building the bridge instead of the
+            // early-return path above permanently latching it half-wired.
+            this.audioContextBridgeAttempted = true;
+            this.ensureContextRunning();
             iosAudioLog(
                 "audio-context:bridge-up",
                 "audio-controller:setupAudioContextBridge",
@@ -154,6 +239,16 @@ export class AudioController {
                 { error: err instanceof Error ? err.message : String(err) },
             );
         }
+    }
+
+    // Non-blocking resume confirmation: resume() resolving does not guarantee
+    // the context actually reached "running" on iOS. Retries up to 3 times
+    // with backoff, never awaited by any caller (INV-1).
+    private ensureContextRunning(attempt = 0): void {
+        const ctx = this.audioContext;
+        if (!ctx || ctx.state === "running" || attempt >= 3) return;
+        ctx.resume().catch(() => {});
+        setTimeout(() => this.ensureContextRunning(attempt + 1), 150 * (attempt + 1));
     }
 
     // -------------------------------------------------------------------------
@@ -197,8 +292,7 @@ export class AudioController {
                     // Resume AudioContext in parallel (fire-and-forget) so it is running
                     // by the time the first audio frames need routing. Must NOT be awaited
                     // or chained -- play() must remain synchronous for the iOS event-tail grant.
-                    const ctx = this.audioContext;
-                    if (ctx && ctx.state !== "running") ctx.resume().catch(() => {});
+                    this.ensureContextRunning();
                     this.audio.play().then(() => {
                         // Play succeeded -- nothing to do; native-playing fires
                     }).catch((err: unknown) => {
@@ -305,10 +399,58 @@ export class AudioController {
                     hidden: document.visibilityState === "hidden",
                     now: Date.now(),
                 });
+                this.checkSilentPlayback();
             }, TICKER_INTERVAL_MS);
         } else if (!active && this.tickerInterval) {
             clearInterval(this.tickerInterval);
             this.tickerInterval = null;
+        }
+    }
+
+    // "Running-but-silent" detector -- reads the analyser only inside the
+    // armed window while genuinely playing with an advancing decode clock.
+    // Requires 5 consecutive silent ticks (true digital silence) before
+    // dispatching, so ordinary quiet passages (which are never bit-exact
+    // 128 across the whole buffer) do not false-positive.
+    private checkSilentPlayback(): void {
+        if (!this.analyser) return;
+
+        if (this.snapshot.status !== "playing" || Date.now() >= this.armDetectorUntil) {
+            this.silentStreak = 0;
+            this.lastAnalyserCurrentTime = null;
+            return;
+        }
+
+        const currentTime = this.audio.currentTime;
+        const advanced =
+            this.lastAnalyserCurrentTime !== null && currentTime !== this.lastAnalyserCurrentTime;
+        this.lastAnalyserCurrentTime = currentTime;
+        if (!advanced) {
+            this.silentStreak = 0;
+            return;
+        }
+
+        const buf = new Uint8Array(this.analyser.fftSize);
+        this.analyser.getByteTimeDomainData(buf);
+        let sumSq = 0;
+        let maxDeviation = 0;
+        for (let i = 0; i < buf.length; i++) {
+            const deviation = buf[i] - 128;
+            sumSq += deviation * deviation;
+            const abs = Math.abs(deviation);
+            if (abs > maxDeviation) maxDeviation = abs;
+        }
+        const rms = Math.sqrt(sumSq / buf.length);
+
+        if (rms < 1.0 && maxDeviation < 2) {
+            this.silentStreak++;
+            if (this.silentStreak >= 5) {
+                this.silentStreak = 0;
+                this.ensureContextRunning();
+                this.dispatch({ type: "silent-playback-detected", now: Date.now() });
+            }
+        } else {
+            this.silentStreak = 0;
         }
     }
 
@@ -460,6 +602,8 @@ export class AudioController {
 
     load(src: string, opts: { autoplay?: boolean; seekTo?: number } = {}): void {
         const { autoplay = false, seekTo } = opts;
+        this.armDetectorUntil = Date.now() + 15000;
+        this.lastAnalyserCurrentTime = this.audio.currentTime;
         iosAudioLog("load:entry", "audio-controller:load", this.audio, {
             autoplay,
             seekTo,
@@ -531,6 +675,12 @@ export class AudioController {
         this.cleanup();
         this.detachNativeListeners();
 
+        if (this.gestureUnlockHandler) {
+            document.removeEventListener("pointerdown", this.gestureUnlockHandler, { capture: true });
+            document.removeEventListener("touchend", this.gestureUnlockHandler, { capture: true });
+            this.gestureUnlockHandler = null;
+        }
+
         if (this.tickerInterval) {
             clearInterval(this.tickerInterval);
             this.tickerInterval = null;
@@ -551,6 +701,8 @@ export class AudioController {
     }
 
     notifyForeground(): void {
+        this.armDetectorUntil = Date.now() + 15000;
+        this.lastAnalyserCurrentTime = this.audio.currentTime;
         this.dispatch({ type: "foreground", now: Date.now() });
     }
 

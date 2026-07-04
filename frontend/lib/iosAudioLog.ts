@@ -27,7 +27,9 @@ function detectEnabled(): boolean {
     if (enabled !== null) return enabled;
     if (typeof window === "undefined") return false;
     try {
-        const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        const isIos =
+            /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+            (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
         const flagged = window.localStorage.getItem(FLAG_KEY) === "1";
         // Auto-capture graduated out: the unconditional standalone enable was itself
         // perturbing the system under observation. The kima_ios_debug localStorage flag
