@@ -18,6 +18,7 @@
         "typecheck": "tsc --noEmit",
         "test": "jest",
         "test:smoke": "tsx scripts/smoke.ts",
+    "check:doc-refs": "node scripts/check-doc-refs.mjs",
         "sync": "tsx src/workers/sync.ts",
         "create:testuser": "tsx scripts/create-test-user.ts",
         "generate:vocabulary": "tsx scripts/generateVibeVocabulary.ts"
