@@ -36,15 +36,7 @@ export interface SpotifyPlaylist {
     isPublic: boolean;
 }
 
-interface SpotifyAlbum {
-    id: string;
-    name: string;
-    artist: string;
-    artistId: string;
-    imageUrl: string | null;
-    releaseDate: string | null;
-    trackCount: number;
-}
+
 
 interface SpotifyPlaylistPreview {
     id: string;

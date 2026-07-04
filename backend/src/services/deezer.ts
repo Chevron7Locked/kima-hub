@@ -53,11 +53,7 @@ export interface DeezerRadioStation {
     type: "radio";
 }
 
-interface DeezerGenre {
-    id: number;
-    name: string;
-    imageUrl: string | null;
-}
+
 
 interface DeezerPodcast {
     id: number;
