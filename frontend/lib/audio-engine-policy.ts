@@ -73,7 +73,14 @@ export type EngineEvent =
       }
     | { type: "foreground"; now: number }
     | { type: "cleanup"; now: number }
-    | { type: "silent-playback-detected"; now: number };
+    | { type: "silent-playback-detected"; now: number }
+    | {
+          type: "gapless-swapped";
+          src: string;
+          durationS?: number;
+          expectedDurationS?: number;
+          now: number;
+      };
 
 export type Effect =
     | { kind: "set-src-and-load"; src: string }
@@ -741,6 +748,28 @@ export function transition(
                     status: "blocked",
                     rung: "none",
                     progressStreakStartedAt: null,
+                },
+                effects: cancelBothTimers(),
+            };
+        }
+
+        case "gapless-swapped": {
+            // The controller already swapped elements and is playing -- this is
+            // a pure bookkeeping transition only (no set-src-and-load/call-play).
+            return {
+                snapshot: {
+                    ...snap,
+                    src: event.src,
+                    currentTime: 0,
+                    duration: event.durationS ?? 0,
+                    expectedDurationS: event.expectedDurationS ?? null,
+                    status: "playing",
+                    generation: snap.generation + 1,
+                    attempts: 0,
+                    rung: "none",
+                    pendingSeek: null,
+                    progressStreakStartedAt: null,
+                    lastProgressAt: event.now,
                 },
                 effects: cancelBothTimers(),
             };

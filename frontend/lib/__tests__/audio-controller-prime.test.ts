@@ -451,7 +451,26 @@ describe("AudioController -- analyser wiring and bridge latch ordering (F-A)", (
         const ctx = MockAudioContext.instances[
             MockAudioContext.instances.length - 1
         ] as unknown as ThrowingAnalyserContext;
-        expect(ctx.mediaSourceConnectedTo).toEqual([ctx.destination]);
+        // Phase 2B: BOTH owned elements (active + idle) get a source node
+        // routed straight to the destination when the analyser enhancement fails.
+        expect(ctx.mediaSourceConnectedTo).toEqual([ctx.destination, ctx.destination]);
+    });
+
+    it("wires a source node for BOTH owned elements into the shared analyser (Phase 2B)", () => {
+        installEnv(IPHONE_STANDALONE);
+
+        const { controller } = newController();
+        controller.prime();
+
+        const internals = controller as unknown as {
+            mediaSourceNode: unknown;
+            mediaSourceNodeNext: unknown;
+            analyser: unknown;
+        };
+        expect(internals.mediaSourceNode).not.toBeNull();
+        expect(internals.mediaSourceNodeNext).not.toBeNull();
+        expect(internals.mediaSourceNode).not.toBe(internals.mediaSourceNodeNext);
+        expect(internals.analyser).not.toBeNull();
     });
 });
 

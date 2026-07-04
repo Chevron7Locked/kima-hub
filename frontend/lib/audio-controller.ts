@@ -14,24 +14,39 @@ import { initialSnapshot, transition } from "./audio-engine-policy";
 // Re-export types consumers may need
 export type { EngineStatus, PauseClass, EngineSnapshot };
 
-type ExternalEvent = "ended" | "timeupdate" | "canplay" | "seeked" | "error";
+type ExternalEvent = "ended" | "timeupdate" | "canplay" | "seeked" | "error" | "gapless-advance";
 type ExternalCallback = (data?: unknown) => void;
 
 const TICKER_INTERVAL_MS = 1000;
 
 export class AudioController {
+    // ACTIVE element -- drives the reducer, emits external events.
     private audio: HTMLAudioElement;
+    // IDLE element -- pre-buffers the next track for a true-gapless boundary
+    // swap on `ended`. Bare (no context) off-iOS; both elements share the
+    // iOS AudioContext/analyser graph when it exists.
+    private audioNext: HTMLAudioElement;
     private audioSessionSet = false;
 
     // State machine
     private snapshot: EngineSnapshot;
     private subscribers: Set<(snap: EngineSnapshot) => void> = new Set();
 
-    // External event listeners (ended / timeupdate / canplay / seeked / error)
+    // External event listeners (ended / timeupdate / canplay / seeked / error / gapless-advance)
     private externalListeners: Map<ExternalEvent, Set<ExternalCallback>> = new Map();
 
-    // Native element listeners for cleanup
+    // Native element listeners for cleanup -- one store per owned element.
     private nativeListeners: Array<{ event: string; handler: EventListener }> = [];
+    private nativeListenersNext: Array<{ event: string; handler: EventListener }> = [];
+
+    // Gapless preload bookkeeping (Phase 2B). `expectedNext*` is set by the
+    // React layer once it knows what's next; `preloadedTrackId`/`idleReady`
+    // track what the idle element has actually buffered.
+    private expectedNextTrackId: string | null = null;
+    private expectedNextUrl: string | null = null;
+    private expectedNextDurationS: number | null = null;
+    private preloadedTrackId: string | null = null;
+    private idleReady = false;
 
     // Timers keyed by TimerId
     private timers: Map<TimerId, ReturnType<typeof setTimeout>> = new Map();
@@ -54,6 +69,7 @@ export class AudioController {
     // WebKit #261858. Bridge set up lazily on the first user-gesture play.
     private audioContext: AudioContext | null = null;
     private mediaSourceNode: MediaElementAudioSourceNode | null = null;
+    private mediaSourceNodeNext: MediaElementAudioSourceNode | null = null;
     private audioContextBridgeAttempted = false;
     private audioContextStateHandler: (() => void) | null = null;
 
@@ -81,29 +97,32 @@ export class AudioController {
     private gestureUnlockHandler: (() => void) | null = null;
 
     constructor() {
-        this.audio = typeof document === "undefined" ? ({} as HTMLAudioElement) : this.createOwnedElement();
+        this.audio = typeof document === "undefined" ? ({} as HTMLAudioElement) : this.createOwnedElement("main");
+        this.audioNext = typeof document === "undefined" ? ({} as HTMLAudioElement) : this.createOwnedElement("next");
 
-        const events: ExternalEvent[] = ["ended", "timeupdate", "canplay", "seeked", "error"];
+        const events: ExternalEvent[] = ["ended", "timeupdate", "canplay", "seeked", "error", "gapless-advance"];
         events.forEach((e) => this.externalListeners.set(e, new Set()));
 
         this.snapshot = initialSnapshot();
 
-        this.attachNativeListeners();
+        this.attachNativeListeners(this.audio, this.nativeListeners);
+        this.attachIdleListeners(this.audioNext, this.nativeListenersNext);
         this.initializeVolume();
         this.attachGestureUnlock();
     }
 
-    // The controller owns its <audio> element rather than receiving one from
+    // The controller owns its <audio> elements rather than receiving them from
     // React -- this lets rebuildAudioContextBridge() tear down and recreate
     // the element/AudioContext graph entirely in-page (no remount) when the
-    // iOS audio session is genuinely wedged.
-    private createOwnedElement(): HTMLAudioElement {
+    // iOS audio session is genuinely wedged, and lets the idle element
+    // pre-buffer the next track for a true-gapless boundary swap.
+    private createOwnedElement(role: "main" | "next"): HTMLAudioElement {
         const el = document.createElement("audio");
         el.setAttribute("playsinline", "");
         el.preload = "auto";
         el.crossOrigin = "anonymous";
         el.style.display = "none";
-        el.setAttribute("data-kima-player", "main");
+        el.setAttribute("data-kima-player", role);
         document.body.appendChild(el);
         return el;
     }
@@ -199,8 +218,8 @@ export class AudioController {
 
     private setupAudioContextBridge(): void {
         if (this.audioContextBridgeAttempted) {
-            // Already attempted; resume if suspended (idempotent, cheap).
-            this.audioContext?.resume?.().catch(() => {});
+            // Already attempted; resume (with the retry ladder) if suspended.
+            this.ensureContextRunning();
             return;
         }
         if (!this.isIosStandalone()) return;
@@ -227,17 +246,23 @@ export class AudioController {
                 }
             };
             this.audioContext.addEventListener("statechange", this.audioContextStateHandler);
+            // Both owned elements route into the SAME context/analyser -- the
+            // idle element is paused (silent) so it never pollutes the
+            // running-but-silent detector; the two inputs simply sum.
             this.mediaSourceNode = this.audioContext.createMediaElementSource(this.audio);
+            this.mediaSourceNodeNext = this.audioContext.createMediaElementSource(this.audioNext);
             try {
                 this.analyser = this.audioContext.createAnalyser();
                 this.analyser.fftSize = 256;
                 this.mediaSourceNode.connect(this.analyser);
+                this.mediaSourceNodeNext.connect(this.analyser);
                 this.analyser.connect(this.audioContext.destination);
             } catch {
                 // Analyser is an enhancement; if it fails, still route audio to the
                 // destination so playback works (the silence detector just won't run).
                 this.analyser = null;
                 this.mediaSourceNode.connect(this.audioContext.destination);
+                this.mediaSourceNodeNext.connect(this.audioContext.destination);
             }
             // Latch only after the audio path is fully routed -- a throw in
             // createMediaElementSource or the routing above leaves this false so
@@ -292,6 +317,12 @@ export class AudioController {
         for (const effect of effects) {
             switch (effect.kind) {
                 case "set-src-and-load": {
+                    // Re-arm the silence detector here too (not just in the
+                    // public load()) -- the recovery ladder's own reloads
+                    // (e.g. the hidden/blocked->retry path) dispatch this
+                    // effect directly without going through load().
+                    this.armDetectorUntil = Date.now() + 15000;
+                    this.lastAnalyserCurrentTime = this.audio.currentTime;
                     this.audio.src = effect.src;
                     this.audio.load();
                     break;
@@ -492,12 +523,26 @@ export class AudioController {
         if (!this.isIosStandalone()) return;
 
         // Detach listeners FIRST -- otherwise pause/emptied events fired by
-        // tearing down the old element dispatch into the live engine mid-rebuild.
-        this.detachNativeListeners();
+        // tearing down the old elements dispatch into the live engine mid-rebuild.
+        this.detachNativeListeners(this.audio, this.nativeListeners);
+        this.detachNativeListeners(this.audioNext, this.nativeListenersNext);
         this.audio.pause();
         this.audio.removeAttribute("src");
         this.audio.load();
-        this.audio.remove();
+        try {
+            this.audio.remove();
+        } catch {
+            // Element already detached
+        }
+
+        this.audioNext.pause();
+        this.audioNext.removeAttribute("src");
+        this.audioNext.load();
+        try {
+            this.audioNext.remove();
+        } catch {
+            // Element already detached
+        }
 
         if (this.audioContextStateHandler) {
             this.audioContext?.removeEventListener("statechange", this.audioContextStateHandler);
@@ -505,6 +550,7 @@ export class AudioController {
         this.audioContext?.close().catch(() => {});
         this.audioContext = null;
         this.mediaSourceNode = null;
+        this.mediaSourceNodeNext = null;
         this.analyser = null;
         this.audioContextStateHandler = null;
 
@@ -512,33 +558,54 @@ export class AudioController {
         this.unlockedOnce = false;
         this.silentStreak = 0;
 
-        this.audio = this.createOwnedElement();
-        this.attachNativeListeners();
+        this.audio = this.createOwnedElement("main");
+        this.audioNext = this.createOwnedElement("next");
+        this.attachNativeListeners(this.audio, this.nativeListeners);
+        this.attachIdleListeners(this.audioNext, this.nativeListenersNext);
         this.audio.volume = this.isMuted ? 0 : this.volume;
         this.audio.muted = this.isMuted;
+        this.audioNext.volume = this.isMuted ? 0 : this.volume;
+        this.audioNext.muted = this.isMuted;
 
-        // Fresh context + analyser on the new element. Deliberately does NOT
-        // set src / seek / play here.
+        // The fresh idle element has no buffer -- drop the stale preload
+        // bookkeeping and re-issue the preload from the cached expected-next
+        // info (if any) rather than waiting for the next 30s prewarm tick.
+        this.preloadedTrackId = null;
+        this.idleReady = false;
+
+        // Fresh context + analyser on the new elements. Deliberately does NOT
+        // set src / seek / play on the active element here.
         this.setupAudioContextBridge();
+
+        if (this.expectedNextUrl && this.expectedNextTrackId) {
+            this.preloadNext();
+        }
     }
 
     // -------------------------------------------------------------------------
     // Native element listeners
     // -------------------------------------------------------------------------
 
-    private attachNativeListeners(): void {
+    // ACTIVE element gets the full listener set -- it drives the reducer and
+    // emits every external event. `el`/`store` are captured by closure so
+    // these handlers stay bound to the element they were attached to even
+    // after a later gapless swap repoints `this.audio` elsewhere.
+    private attachNativeListeners(
+        el: HTMLAudioElement,
+        store: Array<{ event: string; handler: EventListener }>,
+    ): void {
         const add = (event: string, handler: EventListener) => {
-            this.audio.addEventListener(event, handler);
-            this.nativeListeners.push({ event, handler });
+            el.addEventListener(event, handler);
+            store.push({ event, handler });
         };
 
         add("playing", () => {
-            iosAudioLog("playing", "audio-controller:listeners", this.audio);
+            iosAudioLog("playing", "audio-controller:listeners", el);
             this.dispatch({ type: "native-playing", now: Date.now() });
         });
 
         add("pause", () => {
-            iosAudioLog("pause", "audio-controller:listeners", this.audio);
+            iosAudioLog("pause", "audio-controller:listeners", el);
             if (this.expectingPause) {
                 // Our own call-pause effect fired this -- do not dispatch native-pause
                 this.expectingPause = false;
@@ -549,25 +616,20 @@ export class AudioController {
         });
 
         add("ended", () => {
-            iosAudioLog("ended", "audio-controller:listeners", this.audio);
-            this.dispatch({
-                type: "native-ended",
-                currentTime: this.audio.currentTime,
-                duration: this.audio.duration,
-                now: Date.now(),
-            });
+            iosAudioLog("ended", "audio-controller:listeners", el);
+            this.handleActiveEnded(el);
         });
 
         add("timeupdate", () => {
             // Suppress upstream timeupdate while transitioning (avoids 0-position flash)
             if (!this.isTransitioning) {
-                this.emitExternal("timeupdate", { time: this.audio.currentTime });
+                this.emitExternal("timeupdate", { time: el.currentTime });
             }
         });
 
         add("canplay", () => {
-            const dur = this.audio.duration;
-            iosAudioLog("canplay", "audio-controller:listeners", this.audio, {
+            const dur = el.duration;
+            iosAudioLog("canplay", "audio-controller:listeners", el, {
                 gen: this.snapshot.generation,
                 pendingSeek: this.snapshot.pendingSeek,
             });
@@ -582,12 +644,12 @@ export class AudioController {
         });
 
         add("seeked", () => {
-            this.emitExternal("seeked", { time: this.audio.currentTime });
+            this.emitExternal("seeked", { time: el.currentTime });
         });
 
         add("error", () => {
-            const err = this.audio.error;
-            iosAudioLog("error", "audio-controller:listeners", this.audio, {
+            const err = el.error;
+            iosAudioLog("error", "audio-controller:listeners", el, {
                 code: err?.code,
                 message: err?.message,
             });
@@ -604,11 +666,144 @@ export class AudioController {
         // all during healthy playback with readyState=4. Pure noise on iOS.
     }
 
-    private detachNativeListeners(): void {
-        for (const { event, handler } of this.nativeListeners) {
-            this.audio.removeEventListener(event, handler);
+    // IDLE element gets a minimal listener set -- it never drives the
+    // reducer. `canplay` marks the preload as ready to swap into; `error`
+    // clears the preload so a stale/broken buffer can never be swapped in.
+    private attachIdleListeners(
+        el: HTMLAudioElement,
+        store: Array<{ event: string; handler: EventListener }>,
+    ): void {
+        const add = (event: string, handler: EventListener) => {
+            el.addEventListener(event, handler);
+            store.push({ event, handler });
+        };
+
+        add("canplay", () => {
+            this.idleReady = true;
+        });
+
+        add("error", () => {
+            this.preloadedTrackId = null;
+            this.idleReady = false;
+        });
+    }
+
+    private detachNativeListeners(
+        el: HTMLAudioElement,
+        store: Array<{ event: string; handler: EventListener }>,
+    ): void {
+        for (const { event, handler } of store) {
+            el.removeEventListener(event, handler);
         }
-        this.nativeListeners = [];
+        store.length = 0;
+    }
+
+    // -------------------------------------------------------------------------
+    // Gapless swap (Phase 2B) -- fires from the ACTIVE element's native `ended`.
+    // -------------------------------------------------------------------------
+
+    // Deliberate controller-side (impure) eligibility check -- justified by
+    // INV-1: only the swap's `.play()` call needs to be synchronous in this
+    // tail to preserve the iOS user-activation grant, so the eligibility
+    // decision has to live here rather than round-tripping through the pure
+    // reducer first.
+    private handleActiveEnded(el: HTMLAudioElement): void {
+        const eligible =
+            !!this.expectedNextTrackId &&
+            this.preloadedTrackId === this.expectedNextTrackId &&
+            this.idleReady &&
+            !!this.audioNext;
+
+        if (!eligible) {
+            this.dispatch({
+                type: "native-ended",
+                currentTime: el.currentTime,
+                duration: el.duration,
+                now: Date.now(),
+            });
+            return;
+        }
+
+        // Only this call must be synchronous (INV-1) -- the commit work below
+        // is deferred into `.then()` so a rejection (a `.catch()`, which fires
+        // a microtask later) has nothing to unwind. Committing unconditionally
+        // right after this call would already have mutated pointers/generation
+        // by the time a rejection arrived, silently swallowing the fallback.
+        const p = this.audioNext.play();
+        if (p && typeof p.then === "function") {
+            p.then(() => this.onSwapCommitted()).catch(() => this.onSwapFailed());
+        } else {
+            // No promise returned (old browsers) -- treat as committed.
+            this.onSwapCommitted();
+        }
+    }
+
+    private onSwapCommitted(): void {
+        const newSrc = this.audioNext.src;
+        const newDur = this.audioNext.duration;
+        const expectedDurationS = this.expectedNextDurationS;
+
+        // Detach from BOTH elements before the pointer flip -- otherwise a
+        // pause/emptied event fired by the reused-as-idle element below could
+        // dispatch into the live engine using the wrong listener set.
+        this.detachNativeListeners(this.audio, this.nativeListeners);
+        this.detachNativeListeners(this.audioNext, this.nativeListenersNext);
+
+        const oldActive = this.audio;
+        this.audio = this.audioNext;
+        this.audioNext = oldActive;
+
+        const oldNode = this.mediaSourceNode;
+        this.mediaSourceNode = this.mediaSourceNodeNext;
+        this.mediaSourceNodeNext = oldNode;
+
+        this.attachNativeListeners(this.audio, this.nativeListeners);
+        this.attachIdleListeners(this.audioNext, this.nativeListenersNext);
+
+        // Reuse the old active element as the new idle.
+        this.audioNext.pause();
+        this.audioNext.removeAttribute("src");
+        this.audioNext.load();
+        // Sync volume/mute onto the reused idle element (FIX B) so the NEXT
+        // swap carries no jump even if setVolume/setMuted fired in between.
+        this.audioNext.volume = this.isMuted ? 0 : this.volume;
+        this.audioNext.muted = this.isMuted;
+
+        this.preloadedTrackId = null;
+        this.idleReady = false;
+        this.expectedNextTrackId = null;
+        this.expectedNextUrl = null;
+        this.expectedNextDurationS = null;
+
+        this.dispatch({
+            type: "gapless-swapped",
+            src: newSrc,
+            durationS: isFinite(newDur) ? newDur : undefined,
+            expectedDurationS: expectedDurationS ?? undefined,
+            now: Date.now(),
+        });
+
+        this.emitExternal("gapless-advance", {
+            durationS: isFinite(newDur) ? newDur : (expectedDurationS ?? 0),
+        });
+
+        // Re-arm the silence detector for the freshly-active element -- the
+        // swap bypasses load(), which is where this normally happens.
+        this.armDetectorUntil = Date.now() + 15000;
+        this.lastAnalyserCurrentTime = null;
+        this.silentStreak = 0;
+        this.rebuildCount = 0;
+    }
+
+    private onSwapFailed(): void {
+        // Nothing was mutated (see handleActiveEnded) -- fall through exactly
+        // like the not-eligible path so the cold-load recovery takes over.
+        this.dispatch({
+            type: "native-ended",
+            currentTime: this.audio.currentTime,
+            duration: this.audio.duration,
+            now: Date.now(),
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -742,7 +937,8 @@ export class AudioController {
 
     destroy(): void {
         this.cleanup();
-        this.detachNativeListeners();
+        this.detachNativeListeners(this.audio, this.nativeListeners);
+        this.detachNativeListeners(this.audioNext, this.nativeListenersNext);
 
         if (this.gestureUnlockHandler) {
             document.removeEventListener("pointerdown", this.gestureUnlockHandler, { capture: true });
@@ -764,14 +960,28 @@ export class AudioController {
             this.audioContext.close().catch(() => {});
             this.audioContext = null;
             this.mediaSourceNode = null;
+            this.mediaSourceNodeNext = null;
         }
 
-        // Owned-element teardown -- the controller appended it to
-        // document.body itself, so it must remove it here too.
+        // Owned-element teardown -- the controller appended these itself, so
+        // it must remove them here too.
         this.audio.pause();
         this.audio.removeAttribute("src");
         this.audio.load();
-        this.audio.remove();
+        try {
+            this.audio.remove();
+        } catch {
+            // Element already detached
+        }
+
+        this.audioNext.pause();
+        this.audioNext.removeAttribute("src");
+        this.audioNext.load();
+        try {
+            this.audioNext.remove();
+        } catch {
+            // Element already detached
+        }
 
         this.subscribers.clear();
     }
@@ -810,10 +1020,41 @@ export class AudioController {
         return { currentSrc: this.snapshot.src, volume: this.volume, isMuted: this.isMuted };
     }
 
+    // Preload the idle element (Phase 2B). setUpcoming2B() records what the
+    // React layer expects to play next; preloadNext() actually starts
+    // buffering it into the idle element. Kept separate so a queue/shuffle
+    // mutation can update the expectation without necessarily re-triggering
+    // a fetch that's already in flight for the same track.
+    setUpcoming2B(url: string, trackId: string, durationS?: number): void {
+        this.expectedNextTrackId = trackId;
+        this.expectedNextUrl = url;
+        this.expectedNextDurationS = durationS ?? null;
+    }
+
+    preloadNext(): void {
+        if (!this.expectedNextUrl || !this.expectedNextTrackId) return;
+        if (this.preloadedTrackId === this.expectedNextTrackId) return;
+        this.idleReady = false;
+        this.audioNext.src = this.expectedNextUrl;
+        this.audioNext.load();
+        this.preloadedTrackId = this.expectedNextTrackId;
+    }
+
+    // Called when the upcoming-track expectation is no longer valid (queue
+    // left "track" playback, or repeat mode switched to "one" -- which has
+    // no real next track) so a stale preload can never be swapped in.
+    clearUpcoming2B(): void {
+        this.expectedNextTrackId = null;
+        this.expectedNextUrl = null;
+        this.expectedNextDurationS = null;
+        this.preloadedTrackId = null;
+    }
+
     setVolume(volume: number): void {
         this.volume = Math.max(0, Math.min(1, volume));
         if (!this.isMuted) {
             this.audio.volume = this.volume;
+            if (this.audioNext) this.audioNext.volume = this.volume;
         }
     }
 
@@ -821,9 +1062,11 @@ export class AudioController {
         this.isMuted = muted;
         // FE14: must use audio.muted on iOS (audio.volume is read-only there)
         this.audio.muted = muted;
+        if (this.audioNext) this.audioNext.muted = muted;
         // Also set volume for non-iOS devices
         if (!muted) {
             this.audio.volume = this.volume;
+            if (this.audioNext) this.audioNext.volume = this.volume;
         }
     }
 
@@ -845,6 +1088,9 @@ export class AudioController {
             }
 
             this.audio.volume = this.isMuted ? 0 : this.volume;
+            if (this.audioNext) {
+                this.audioNext.volume = this.isMuted ? 0 : this.volume;
+            }
         } catch (error) {
             console.error("[AudioController] Failed to initialize from storage:", error);
         }

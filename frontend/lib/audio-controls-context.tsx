@@ -1223,7 +1223,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     // -- Next-track prewarm trigger --
     // Fires once per upcoming track when ≤30s remain; guards via ref so it
-    // never blocks the playback path.
+    // never blocks the playback path. Also feeds the controller's gapless
+    // preload (Phase 2B) so the idle element has the next track buffered by
+    // the time this one ends -- repeat-one has no real next, so it's suppressed.
     useEffect(() => {
         const ctrl = controllerRef.current;
         if (!ctrl) return;
@@ -1245,11 +1247,57 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             if (prewarmFiredForRef.current === nextTrack.id) return;
             prewarmFiredForRef.current = nextTrack.id;
             api.prewarmTrack(nextTrack.id);
+
+            if (repeatModeRef.current === "one") return;
+            const ctrl2 = controllerRef.current;
+            if (!ctrl2) return;
+            ctrl2.setUpcoming2B(api.getStreamUrl(nextTrack.id), nextTrack.id, nextTrack.duration);
+            ctrl2.preloadNext();
         };
 
         ctrl.on("timeupdate", handleTimeUpdate);
         return () => ctrl.off("timeupdate", handleTimeUpdate);
     }, [controller]);
+
+    // -- Gapless-advance handler (Phase 2B) --
+    // The controller already swapped elements synchronously on `ended`; this
+    // only advances the queue's index/currentTrack (and duration/time) to
+    // match -- no ctrl.load(), the audio is already playing.
+    useEffect(() => {
+        const ctrl = controllerRef.current;
+        if (!ctrl) return;
+
+        const handleGaplessAdvance = (data?: unknown) => {
+            const { durationS } = (data ?? {}) as { durationS?: number };
+
+            const nextTrack = getNextTrackInfo(
+                queueRef.current,
+                currentIndexRef.current,
+                isShuffleRef.current,
+                shuffleIndicesRef.current,
+                repeatModeRef.current
+            );
+            if (!nextTrack) return;
+
+            state.setCurrentIndex(nextTrack.index);
+            state.setCurrentTrack(nextTrack);
+            playback.setDuration(durationS || nextTrack.duration || 0);
+            playback.setCurrentTime(0);
+            lastManualAdvanceAtRef.current = Date.now();
+        };
+
+        ctrl.on("gapless-advance", handleGaplessAdvance);
+        return () => ctrl.off("gapless-advance", handleGaplessAdvance);
+    }, [controller, state, playback]);
+
+    // -- Clear a stale gapless preload expectation (Phase 2B) --
+    // Once playback leaves "track" mode or repeat flips to "one", any
+    // preloaded next-track buffer can no longer be swapped in validly.
+    useEffect(() => {
+        if (state.playbackType !== "track" || state.repeatMode === "one") {
+            controllerRef.current?.clearUpcoming2B();
+        }
+    }, [state.playbackType, state.repeatMode]);
 
     // -- Canplay handler: duration update only --
     useEffect(() => {

@@ -96,6 +96,7 @@ const SAMPLE_EVENTS: EngineEvent[] = [
     { type: "foreground", now: NOW },
     { type: "cleanup", now: NOW },
     { type: "silent-playback-detected", now: NOW },
+    { type: "gapless-swapped", src: "http://x.com/b.mp3", now: NOW },
 ];
 
 describe("table test: every (status x event) pair produces a defined status", () => {
@@ -1299,5 +1300,71 @@ describe("silent-playback-detected", () => {
             expect(snapshot.status).toBe(status);
             expect(effects).toHaveLength(0);
         }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// gapless-swapped: dual-element boundary swap bookkeeping (Phase 2B)
+// ---------------------------------------------------------------------------
+
+describe("gapless-swapped", () => {
+    it("transitions to playing, increments generation, takes duration/expectedDurationS from the event, and only cancels timers (no set-src-and-load/call-play)", () => {
+        const base = playingSnap({
+            generation: 3,
+            duration: 200,
+            currentTime: 150,
+            expectedDurationS: 200,
+            attempts: 2,
+            rung: "none",
+            pendingSeek: 10,
+        });
+        const { snapshot, effects } = tr(base, {
+            type: "gapless-swapped",
+            src: "http://example.com/next.mp3",
+            durationS: 210,
+            expectedDurationS: 215,
+            now: NOW + 1000,
+        });
+
+        expect(snapshot.status).toBe("playing");
+        expect(snapshot.generation).toBe(4);
+        expect(snapshot.src).toBe("http://example.com/next.mp3");
+        expect(snapshot.currentTime).toBe(0);
+        expect(snapshot.duration).toBe(210);
+        expect(snapshot.expectedDurationS).toBe(215);
+        expect(snapshot.attempts).toBe(0);
+        expect(snapshot.rung).toBe("none");
+        expect(snapshot.pendingSeek).toBeNull();
+        expect(snapshot.lastProgressAt).toBe(NOW + 1000);
+
+        expect(effects.length).toBeGreaterThan(0);
+        expect(hasEffect(effects, "set-src-and-load")).toBe(false);
+        expect(hasEffect(effects, "call-play")).toBe(false);
+        for (const e of effects) {
+            expect(e.kind).toBe("cancel-timer");
+        }
+    });
+
+    it("defaults duration to 0 and expectedDurationS to null when not provided by the event", () => {
+        const base = playingSnap({ duration: 999, expectedDurationS: 999 });
+        const { snapshot } = tr(base, {
+            type: "gapless-swapped",
+            src: "http://example.com/next.mp3",
+            now: NOW,
+        });
+        expect(snapshot.duration).toBe(0);
+        expect(snapshot.expectedDurationS).toBeNull();
+    });
+
+    it("is pure: does not mutate the input snapshot", () => {
+        const base = playingSnap({ generation: 1 });
+        const frozen = { ...base };
+        tr(base, {
+            type: "gapless-swapped",
+            src: "http://example.com/next.mp3",
+            durationS: 100,
+            now: NOW,
+        });
+        expect(base).toEqual(frozen);
     });
 });
