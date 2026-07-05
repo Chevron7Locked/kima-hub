@@ -184,16 +184,24 @@ async function authenticateRequest(
     if (token) {
         try {
             const decoded = jwt.verify(token, JWT_SECRET_VALIDATED) as unknown as JWTPayload;
-            const user = await prisma.user.findUnique({
-                where: { id: decoded.userId },
-                select: { id: true, username: true, role: true, tokenVersion: true },
-            });
-            if (user) {
-                // Validate tokenVersion - reject if password was changed
-                if (decoded.tokenVersion === undefined || decoded.tokenVersion !== user.tokenVersion) {
-                    return null;
+            // Stream-scoped tickets are leak-prone URL tokens; they must NOT act as a
+            // full-privilege Bearer credential off the /stream paths. Mirror the
+            // query-param branch above — otherwise the scope restriction is trivially
+            // bypassed by sending the ticket as `Authorization: Bearer <ticket>`.
+            const isStreamScoped = decoded.scope === "stream";
+            const isStreamPath = req.path.endsWith("/stream");
+            if (!isStreamScoped || isStreamPath) {
+                const user = await prisma.user.findUnique({
+                    where: { id: decoded.userId },
+                    select: { id: true, username: true, role: true, tokenVersion: true },
+                });
+                if (user) {
+                    // Validate tokenVersion - reject if password was changed
+                    if (decoded.tokenVersion === undefined || decoded.tokenVersion !== user.tokenVersion) {
+                        return null;
+                    }
+                    return { id: user.id, username: user.username, role: user.role };
                 }
-                return { id: user.id, username: user.username, role: user.role };
             }
         } catch (error) {
             // Token invalid

@@ -564,16 +564,31 @@ router.post("/:id/items/batch", async (req, res) => {
             return res.json({ added: 0, skippedExisting, skippedInvalid, items: [] });
         }
 
-        // Append in order: maxSort+1, +2, +3, … in a single call.
-        const baseSort = playlist.items[0]?.sort || 0;
-        await prisma.playlistItem.createMany({
-            data: toAdd.map((trackId, i) => ({
-                playlistId: req.params.id,
-                trackId,
-                sort: baseSort + 1 + i,
-            })),
-            skipDuplicates: true,
-        });
+        // Append in order inside a Serializable txn: re-read the max sort and insert
+        // maxSort+1, +2, … atomically, so a concurrent batch can't hand two tracks the
+        // same sort value (the ordering guarantee this endpoint exists to provide).
+        // NOTE: the single-item add (`POST /:id/items`) is a bare create and shares this
+        // read-then-write race with itself; fully closing the cross-endpoint race needs
+        // the same treatment there (tracked as a repo-wide follow-up).
+        const { count } = await prisma.$transaction(
+            async (tx) => {
+                const top = await tx.playlistItem.findFirst({
+                    where: { playlistId: req.params.id },
+                    orderBy: { sort: "desc" },
+                    select: { sort: true },
+                });
+                const baseSort = top?.sort || 0;
+                return tx.playlistItem.createMany({
+                    data: toAdd.map((trackId, i) => ({
+                        playlistId: req.params.id,
+                        trackId,
+                        sort: baseSort + 1 + i,
+                    })),
+                    skipDuplicates: true,
+                });
+            },
+            { isolationLevel: "Serializable" }
+        );
 
         const items = await prisma.playlistItem.findMany({
             where: { playlistId: req.params.id, trackId: { in: toAdd } },
@@ -583,8 +598,10 @@ router.post("/:id/items/batch", async (req, res) => {
             orderBy: { sort: "asc" },
         });
 
+        // `count` is createMany's actual insert count (skipDuplicates may drop a row
+        // under a concurrent add), not the intended toAdd.length.
         return res.json({
-            added: toAdd.length,
+            added: count,
             skippedExisting,
             skippedInvalid,
             items,

@@ -269,6 +269,18 @@ router.post("/download/:albumMbid", async (req, res) => {
         );
         void acquisitionService
             .acquireAlbum({ albumTitle, artistName, mbid: albumMbid }, { userId })
+            .then((result) => {
+                // acquireAlbum returns { success:false } for common config errors (no
+                // download source, no music path) WITHOUT throwing — surface those too,
+                // else they vanish silently after the client already received its 202.
+                if (!result?.success) {
+                    logger.error(
+                        `[Releases] Acquisition did not start for ${albumMbid}: ${
+                            result?.error || "unknown error"
+                        }`
+                    );
+                }
+            })
             .catch((error: any) => {
                 logger.error(
                     `[Releases] Background acquisition failed for ${albumMbid}:`,
