@@ -259,11 +259,17 @@ router.post("/download/:albumMbid", async (req, res) => {
         );
 
         // Pre-create (or reuse an in-flight) DownloadJob so the download is trackable by
-        // id AND failures stay visible. acquireAlbum can exit EARLY (no download source /
-        // no music path configured) BEFORE it would create its own job — which otherwise
-        // leaves the client, already handed a success, with no trace of the failure.
-        // Mirrors the discover.ts pre-create pattern; a light dedup avoids duplicate jobs
-        // on a double-tap.
+        // id AND early config-error failures stay visible (acquireAlbum can exit BEFORE
+        // it would create its own job, otherwise leaving the client — already handed a
+        // success — with no trace). The dedup + create runs under the SAME distributed
+        // lock acquisitionService.createDownloadJob uses, so two concurrent taps for the
+        // same album can't both create a job / launch a download. Dynamic imports avoid
+        // circular deps.
+        const { acquisitionService } = await import(
+            "../services/acquisitionService"
+        );
+        const { distributedLock } = await import("../utils/distributedLock");
+
         const jobWhere: any = {
             userId,
             status: { in: ["pending", "downloading"] },
@@ -271,77 +277,86 @@ router.post("/download/:albumMbid", async (req, res) => {
         if (albumMbid) jobWhere.targetMbid = albumMbid;
         else jobWhere.subject = `${artistName} - ${albumTitle}`;
 
-        let job = await prisma.downloadJob.findFirst({ where: jobWhere });
-        if (!job) {
-            job = await prisma.downloadJob.create({
-                data: {
-                    userId,
-                    subject: `${artistName} - ${albumTitle}`,
-                    type: "album",
-                    targetMbid: albumMbid || null,
-                    status: "pending",
-                    metadata: {
-                        artistName,
-                        albumTitle,
-                        albumMbid: albumMbid || null,
-                    },
-                },
-            });
-        }
-        const jobId = job.id;
-
-        const markFailed = (message: string) =>
-            prisma.downloadJob
-                .update({
-                    where: { id: jobId },
+        const dedupKey = albumMbid || `${artistName}::${albumTitle}`;
+        const { jobId, started } = await distributedLock.withLock(
+            `release-download:${userId}:${dedupKey}`,
+            5000,
+            async () => {
+                const existing = await prisma.downloadJob.findFirst({
+                    where: jobWhere,
+                });
+                if (existing) return { jobId: existing.id, started: false };
+                const created = await prisma.downloadJob.create({
                     data: {
-                        status: "failed",
-                        error: message,
-                        completedAt: new Date(),
+                        userId,
+                        subject: `${artistName} - ${albumTitle}`,
+                        type: "album",
+                        targetMbid: albumMbid || null,
+                        status: "pending",
+                        metadata: {
+                            artistName,
+                            albumTitle,
+                            albumMbid: albumMbid || null,
+                        },
                     },
-                })
-                .catch(() => {});
-
-        // Route through the shared acquisition service — the same path discover and
-        // import use — so it honours the user's configured download source
-        // (Soulseek/Lidarr) instead of hardcoding one. acquireAlbum runs the full
-        // acquisition (up to minutes), so fire it in the background against the
-        // pre-created job and return immediately; the client tracks progress via the
-        // existing /downloads endpoints keyed by jobId. Dynamic import avoids a
-        // circular dependency.
-        const { acquisitionService } = await import(
-            "../services/acquisitionService"
+                });
+                return { jobId: created.id, started: true };
+            }
         );
-        void acquisitionService
-            .acquireAlbum(
-                { albumTitle, artistName, mbid: albumMbid },
-                { userId, existingJobId: jobId }
-            )
-            .then((result) => {
-                // acquireAlbum returns { success:false } for config errors WITHOUT
-                // throwing, and its early exits run before it would mark the job — so
-                // reflect the failure here, else the job is stuck "pending" forever.
-                if (!result?.success) {
+
+        // Only launch the acquisition for a FRESHLY-created job. A reused in-flight job
+        // already has an acquisition running; re-triggering would start a duplicate
+        // download and race two status writers on the same row.
+        if (started) {
+            const markFailed = (message: string) =>
+                prisma.downloadJob
+                    .update({
+                        where: { id: jobId },
+                        data: {
+                            status: "failed",
+                            error: message,
+                            completedAt: new Date(),
+                        },
+                    })
+                    .catch(() => {});
+
+            // Route through the shared acquisition service — the same path discover and
+            // import use — so it honours the user's configured download source
+            // (Soulseek/Lidarr). Fire in the background against the pre-created job and
+            // return immediately; the client tracks progress via /downloads keyed by
+            // jobId. Config errors THROW (caught by .catch); acquisition-level failures
+            // resolve as { success:false } (handled in .then) — both mark the job failed
+            // so it doesn't sit "pending" forever.
+            void acquisitionService
+                .acquireAlbum(
+                    { albumTitle, artistName, mbid: albumMbid },
+                    { userId, existingJobId: jobId }
+                )
+                .then((result) => {
+                    if (!result?.success) {
+                        logger.error(
+                            `[Releases] Acquisition did not start for ${albumMbid}: ${
+                                result?.error || "unknown error"
+                            }`
+                        );
+                        void markFailed(result?.error || "Acquisition did not start");
+                    }
+                })
+                .catch((error: any) => {
                     logger.error(
-                        `[Releases] Acquisition did not start for ${albumMbid}: ${
-                            result?.error || "unknown error"
-                        }`
+                        `[Releases] Background acquisition failed for ${albumMbid}:`,
+                        error?.message || error
                     );
-                    void markFailed(result?.error || "Acquisition did not start");
-                }
-            })
-            .catch((error: any) => {
-                logger.error(
-                    `[Releases] Background acquisition failed for ${albumMbid}:`,
-                    error?.message || error
-                );
-                void markFailed(error?.message || "Acquisition failed");
-            });
+                    void markFailed(error?.message || "Acquisition failed");
+                });
+        }
 
         return res.status(200).json({
             success: true,
             jobId,
-            message: `Download started for ${artistName} - ${albumTitle}`,
+            message: started
+                ? `Download started for ${artistName} - ${albumTitle}`
+                : `Download already in progress for ${artistName} - ${albumTitle}`,
         });
     } catch (error: any) {
         logger.error("[Releases] Download error:", error.message);

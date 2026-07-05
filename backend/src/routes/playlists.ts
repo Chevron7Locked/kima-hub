@@ -11,6 +11,18 @@ const router = Router();
 
 router.use(requireAuthOrToken);
 
+// Serializable transactions abort a conflicting txn with Prisma P2034 rather than
+// blocking; retry once transparently (mirrors routes/share.ts) so a benign write-write
+// conflict on the same playlist doesn't surface to the client as an opaque 500.
+async function withSerializableRetry<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+        return await fn();
+    } catch (e: any) {
+        if (e?.code === "P2034") return await fn();
+        throw e;
+    }
+}
+
 async function getOwnedPendingTrack(
     userId: string,
     playlistId: string,
@@ -470,34 +482,36 @@ router.post("/:id/items", async (req, res) => {
         // Append atomically (Serializable) so a concurrent add can't hand two tracks
         // the same sort value — re-read the current max inside the txn rather than
         // trusting the ownership-check snapshot (matches the batch endpoint).
-        const item = await prisma.$transaction(
-            async (tx) => {
-                const top = await tx.playlistItem.findFirst({
-                    where: { playlistId: req.params.id },
-                    orderBy: { sort: "desc" },
-                    select: { sort: true },
-                });
-                const maxSort = top?.sort || 0;
-                return tx.playlistItem.create({
-                    data: {
-                        playlistId: req.params.id,
-                        trackId,
-                        sort: maxSort + 1,
-                    },
-                    include: {
-                        track: {
-                            include: {
-                                album: {
-                                    include: {
-                                        artist: true,
+        const item = await withSerializableRetry(() =>
+            prisma.$transaction(
+                async (tx) => {
+                    const top = await tx.playlistItem.findFirst({
+                        where: { playlistId: req.params.id },
+                        orderBy: { sort: "desc" },
+                        select: { sort: true },
+                    });
+                    const maxSort = top?.sort || 0;
+                    return tx.playlistItem.create({
+                        data: {
+                            playlistId: req.params.id,
+                            trackId,
+                            sort: maxSort + 1,
+                        },
+                        include: {
+                            track: {
+                                include: {
+                                    album: {
+                                        include: {
+                                            artist: true,
+                                        },
                                     },
                                 },
                             },
                         },
-                    },
-                });
-            },
-            { isolationLevel: "Serializable" }
+                    });
+                },
+                { isolationLevel: "Serializable" }
+            )
         );
 
         res.json(item);
@@ -581,24 +595,26 @@ router.post("/:id/items/batch", async (req, res) => {
         // NOTE: the single-item add (`POST /:id/items`) is a bare create and shares this
         // read-then-write race with itself; fully closing the cross-endpoint race needs
         // the same treatment there (tracked as a repo-wide follow-up).
-        const { count } = await prisma.$transaction(
-            async (tx) => {
-                const top = await tx.playlistItem.findFirst({
-                    where: { playlistId: req.params.id },
-                    orderBy: { sort: "desc" },
-                    select: { sort: true },
-                });
-                const baseSort = top?.sort || 0;
-                return tx.playlistItem.createMany({
-                    data: toAdd.map((trackId, i) => ({
-                        playlistId: req.params.id,
-                        trackId,
-                        sort: baseSort + 1 + i,
-                    })),
-                    skipDuplicates: true,
-                });
-            },
-            { isolationLevel: "Serializable" }
+        const { count } = await withSerializableRetry(() =>
+            prisma.$transaction(
+                async (tx) => {
+                    const top = await tx.playlistItem.findFirst({
+                        where: { playlistId: req.params.id },
+                        orderBy: { sort: "desc" },
+                        select: { sort: true },
+                    });
+                    const baseSort = top?.sort || 0;
+                    return tx.playlistItem.createMany({
+                        data: toAdd.map((trackId, i) => ({
+                            playlistId: req.params.id,
+                            trackId,
+                            sort: baseSort + 1 + i,
+                        })),
+                        skipDuplicates: true,
+                    });
+                },
+                { isolationLevel: "Serializable" }
+            )
         );
 
         const items = await prisma.playlistItem.findMany({
