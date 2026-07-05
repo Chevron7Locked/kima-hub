@@ -501,6 +501,105 @@ router.post("/:id/items", async (req, res) => {
     }
 });
 
+// POST /playlists/:id/items/batch
+// Append multiple tracks in one ordered call, preserving the submitted order. iOS
+// uses this to add a whole album/artist without a serial round-trip per track
+// (which would also risk scrambled order under the single-item max-sort+1 append).
+const addTracksBatchSchema = z.object({
+    trackIds: z.array(z.string()).min(1).max(500),
+});
+router.post("/:id/items/batch", async (req, res) => {
+    try {
+        if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+        const userId = req.user.id;
+
+        const parsed = addTracksBatchSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({
+                error: "Invalid request",
+                details: parsed.error.errors,
+            });
+        }
+        const { trackIds } = parsed.data;
+
+        // Ownership check + current max sort (mirrors the single-item add).
+        const playlist = await prisma.playlist.findUnique({
+            where: { id: req.params.id },
+            include: { items: { orderBy: { sort: "desc" }, take: 1 } },
+        });
+        if (!playlist) {
+            return res.status(404).json({ error: "Playlist not found" });
+        }
+        if (playlist.userId !== userId) {
+            return res.status(403).json({ error: "Access denied" });
+        }
+
+        // De-dup the submitted list, preserving first-occurrence order.
+        const requested = [...new Set(trackIds)];
+
+        // Keep only tracks that exist AND aren't already in the playlist.
+        const [existingTracks, alreadyIn] = await Promise.all([
+            prisma.track.findMany({
+                where: { id: { in: requested } },
+                select: { id: true },
+            }),
+            prisma.playlistItem.findMany({
+                where: { playlistId: req.params.id, trackId: { in: requested } },
+                select: { trackId: true },
+            }),
+        ]);
+        const validIds = new Set(existingTracks.map((t) => t.id));
+        const alreadyInIds = new Set(alreadyIn.map((i) => i.trackId));
+
+        // Preserve the caller's submitted order for the append.
+        const toAdd = requested.filter(
+            (id) => validIds.has(id) && !alreadyInIds.has(id)
+        );
+        const skippedExisting = requested.filter((id) =>
+            alreadyInIds.has(id)
+        ).length;
+        const skippedInvalid = requested.filter((id) => !validIds.has(id)).length;
+
+        if (toAdd.length === 0) {
+            return res.json({ added: 0, skippedExisting, skippedInvalid, items: [] });
+        }
+
+        // Append in order: maxSort+1, +2, +3, … in a single call.
+        const baseSort = playlist.items[0]?.sort || 0;
+        await prisma.playlistItem.createMany({
+            data: toAdd.map((trackId, i) => ({
+                playlistId: req.params.id,
+                trackId,
+                sort: baseSort + 1 + i,
+            })),
+            skipDuplicates: true,
+        });
+
+        const items = await prisma.playlistItem.findMany({
+            where: { playlistId: req.params.id, trackId: { in: toAdd } },
+            include: {
+                track: { include: { album: { include: { artist: true } } } },
+            },
+            orderBy: { sort: "asc" },
+        });
+
+        return res.json({
+            added: toAdd.length,
+            skippedExisting,
+            skippedInvalid,
+            items,
+        });
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            return res
+                .status(400)
+                .json({ error: "Invalid request", details: error.errors });
+        }
+        logger.error("Batch add tracks to playlist error:", error);
+        res.status(500).json({ error: "Failed to add tracks to playlist" });
+    }
+});
+
 // DELETE /playlists/:id/items/:trackId
 router.delete("/:id/items/:trackId", async (req, res) => {
     try {
