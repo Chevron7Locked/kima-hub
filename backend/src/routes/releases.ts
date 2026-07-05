@@ -12,6 +12,7 @@ import { Router } from "express";
 import { lidarrService, CalendarRelease } from "../services/lidarr";
 import { prisma } from "../utils/db";
 import { requireAuthOrToken } from "../middleware/auth";
+import { z } from "zod";
 
 const router = Router();
 router.use(requireAuthOrToken);
@@ -227,6 +228,11 @@ router.get("/recent", async (req, res) => {
  * 
  * Download a release from the radar
  */
+const downloadReleaseSchema = z.object({
+    artistName: z.string().min(1),
+    albumTitle: z.string().min(1),
+});
+
 router.post("/download/:albumMbid", async (req, res) => {
     try {
         const { albumMbid } = req.params;
@@ -236,12 +242,43 @@ router.post("/download/:albumMbid", async (req, res) => {
             return res.status(401).json({ error: "Authentication required" });
         }
 
-        logger.debug(`[Releases] Download requested for album: ${albumMbid}`);
+        // The radar row the client is showing already carries artist + title;
+        // they're required because the acquisition service resolves the album by
+        // name (the release-group mbid alone isn't enough for the source search).
+        const parsed = downloadReleaseSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({
+                error: "artistName and albumTitle are required to download a release",
+                details: parsed.error.errors,
+            });
+        }
+        const { artistName, albumTitle } = parsed.data;
 
-        // TODO: Implement downloadAlbum method on LidarrService
-        // For now, return not implemented error
-        res.status(501).json({
-            error: "Download feature not yet implemented for release radar"
+        logger.debug(
+            `[Releases] Download requested: ${artistName} - ${albumTitle} (${albumMbid})`
+        );
+
+        // Route through the shared acquisition service — the same path discover and
+        // import use — so it honours the user's configured download source
+        // (Soulseek/Lidarr) instead of hardcoding one. acquireAlbum runs the full
+        // acquisition (up to minutes), so fire it in the background and return
+        // immediately; the client tracks progress via the existing /downloads
+        // activity endpoints. Dynamic import avoids a circular dependency.
+        const { acquisitionService } = await import(
+            "../services/acquisitionService"
+        );
+        void acquisitionService
+            .acquireAlbum({ albumTitle, artistName, mbid: albumMbid }, { userId })
+            .catch((error: any) => {
+                logger.error(
+                    `[Releases] Background acquisition failed for ${albumMbid}:`,
+                    error?.message || error
+                );
+            });
+
+        return res.status(202).json({
+            started: true,
+            message: `Download started for ${artistName} - ${albumTitle}`,
         });
     } catch (error: any) {
         logger.error("[Releases] Download error:", error.message);
