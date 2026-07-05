@@ -467,27 +467,38 @@ router.post("/:id/items", async (req, res) => {
             });
         }
 
-        // Get next sort position
-        const maxSort = playlist.items[0]?.sort || 0;
-
-        const item = await prisma.playlistItem.create({
-            data: {
-                playlistId: req.params.id,
-                trackId,
-                sort: maxSort + 1,
-            },
-            include: {
-                track: {
+        // Append atomically (Serializable) so a concurrent add can't hand two tracks
+        // the same sort value — re-read the current max inside the txn rather than
+        // trusting the ownership-check snapshot (matches the batch endpoint).
+        const item = await prisma.$transaction(
+            async (tx) => {
+                const top = await tx.playlistItem.findFirst({
+                    where: { playlistId: req.params.id },
+                    orderBy: { sort: "desc" },
+                    select: { sort: true },
+                });
+                const maxSort = top?.sort || 0;
+                return tx.playlistItem.create({
+                    data: {
+                        playlistId: req.params.id,
+                        trackId,
+                        sort: maxSort + 1,
+                    },
                     include: {
-                        album: {
+                        track: {
                             include: {
-                                artist: true,
+                                album: {
+                                    include: {
+                                        artist: true,
+                                    },
+                                },
                             },
                         },
                     },
-                },
+                });
             },
-        });
+            { isolationLevel: "Serializable" }
+        );
 
         res.json(item);
     } catch (error) {

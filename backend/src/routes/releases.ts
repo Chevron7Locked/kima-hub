@@ -258,27 +258,76 @@ router.post("/download/:albumMbid", async (req, res) => {
             `[Releases] Download requested: ${artistName} - ${albumTitle} (${albumMbid})`
         );
 
+        // Pre-create (or reuse an in-flight) DownloadJob so the download is trackable by
+        // id AND failures stay visible. acquireAlbum can exit EARLY (no download source /
+        // no music path configured) BEFORE it would create its own job — which otherwise
+        // leaves the client, already handed a success, with no trace of the failure.
+        // Mirrors the discover.ts pre-create pattern; a light dedup avoids duplicate jobs
+        // on a double-tap.
+        const jobWhere: any = {
+            userId,
+            status: { in: ["pending", "downloading"] },
+        };
+        if (albumMbid) jobWhere.targetMbid = albumMbid;
+        else jobWhere.subject = `${artistName} - ${albumTitle}`;
+
+        let job = await prisma.downloadJob.findFirst({ where: jobWhere });
+        if (!job) {
+            job = await prisma.downloadJob.create({
+                data: {
+                    userId,
+                    subject: `${artistName} - ${albumTitle}`,
+                    type: "album",
+                    targetMbid: albumMbid || null,
+                    status: "pending",
+                    metadata: {
+                        artistName,
+                        albumTitle,
+                        albumMbid: albumMbid || null,
+                    },
+                },
+            });
+        }
+        const jobId = job.id;
+
+        const markFailed = (message: string) =>
+            prisma.downloadJob
+                .update({
+                    where: { id: jobId },
+                    data: {
+                        status: "failed",
+                        error: message,
+                        completedAt: new Date(),
+                    },
+                })
+                .catch(() => {});
+
         // Route through the shared acquisition service — the same path discover and
         // import use — so it honours the user's configured download source
         // (Soulseek/Lidarr) instead of hardcoding one. acquireAlbum runs the full
-        // acquisition (up to minutes), so fire it in the background and return
-        // immediately; the client tracks progress via the existing /downloads
-        // activity endpoints. Dynamic import avoids a circular dependency.
+        // acquisition (up to minutes), so fire it in the background against the
+        // pre-created job and return immediately; the client tracks progress via the
+        // existing /downloads endpoints keyed by jobId. Dynamic import avoids a
+        // circular dependency.
         const { acquisitionService } = await import(
             "../services/acquisitionService"
         );
         void acquisitionService
-            .acquireAlbum({ albumTitle, artistName, mbid: albumMbid }, { userId })
+            .acquireAlbum(
+                { albumTitle, artistName, mbid: albumMbid },
+                { userId, existingJobId: jobId }
+            )
             .then((result) => {
-                // acquireAlbum returns { success:false } for common config errors (no
-                // download source, no music path) WITHOUT throwing — surface those too,
-                // else they vanish silently after the client already received its 202.
+                // acquireAlbum returns { success:false } for config errors WITHOUT
+                // throwing, and its early exits run before it would mark the job — so
+                // reflect the failure here, else the job is stuck "pending" forever.
                 if (!result?.success) {
                     logger.error(
                         `[Releases] Acquisition did not start for ${albumMbid}: ${
                             result?.error || "unknown error"
                         }`
                     );
+                    void markFailed(result?.error || "Acquisition did not start");
                 }
             })
             .catch((error: any) => {
@@ -286,10 +335,12 @@ router.post("/download/:albumMbid", async (req, res) => {
                     `[Releases] Background acquisition failed for ${albumMbid}:`,
                     error?.message || error
                 );
+                void markFailed(error?.message || "Acquisition failed");
             });
 
-        return res.status(202).json({
-            started: true,
+        return res.status(200).json({
+            success: true,
+            jobId,
             message: `Download started for ${artistName} - ${albumTitle}`,
         });
     } catch (error: any) {
