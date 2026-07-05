@@ -557,6 +557,46 @@ router.post("/stream-ticket", requireAuth, async (req, res) => {
     }
 });
 
+// DELETE /auth/account - Delete the current user's own account (App Store §5.1.1)
+router.delete("/account", requireAuth, async (req, res) => {
+    try {
+        // Last-admin guard: refuse if this account is the only admin on the server.
+        // Deleting the sole admin on a self-hosted instance would permanently brick it.
+        if (req.user!.role === "admin") {
+            const adminCount = await prisma.user.count({
+                where: { role: "admin" },
+            });
+            if (adminCount <= 1) {
+                return res.status(409).json({
+                    error: "Cannot delete the only administrator account",
+                });
+            }
+        }
+
+        await prisma.$transaction(async (tx) => {
+            // UserMoodMix carries no @relation / onDelete: Cascade — delete manually
+            // before removing the user row to avoid a FK violation (or orphaned rows on
+            // DBs that don't enforce the bare string column as a FK).
+            await tx.userMoodMix.deleteMany({ where: { userId: req.user!.id } });
+
+            // Every other User relation declares onDelete: Cascade; deleting the User
+            // row propagates automatically to ApiKey, Playlist, Play, LikedTrack,
+            // ListeningState, PlaybackState, Notification, AudiobookProgress,
+            // PodcastProgress, PodcastSubscription, PodcastDownload, CachedTrack,
+            // DeviceLinkCode, DownloadJob, DiscoveryAlbum, DiscoverExclusion,
+            // DislikedEntity, HiddenPlaylist, SpotifyImportJob, UnavailableAlbum,
+            // UserDiscoverConfig, UserSettings, ShareLink, SubsonicBookmark,
+            // SubsonicPlayQueue.
+            await tx.user.delete({ where: { id: req.user!.id } });
+        });
+
+        return res.json({ deleted: true });
+    } catch (error) {
+        logger.error("Account deletion error:", error);
+        return res.status(500).json({ error: "Failed to delete account" });
+    }
+});
+
 // GET /auth/2fa/status - Check if 2FA is enabled
 router.get("/2fa/status", requireAuth, async (req, res) => {
     try {
