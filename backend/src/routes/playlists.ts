@@ -6,6 +6,7 @@ import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { sessionLog } from "../utils/playlistLogger";
 import { safeError } from "../utils/errors";
+import { toAudioFeaturesDTO } from "../utils/audioFeatures";
 
 const router = Router();
 
@@ -245,6 +246,7 @@ router.get("/:id", async (req, res) => {
                     ...item.track.album,
                     coverArt: item.track.album.coverUrl,
                 },
+                audioFeatures: toAudioFeaturesDTO(item.track),
             },
         }));
 

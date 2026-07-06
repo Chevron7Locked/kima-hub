@@ -318,6 +318,7 @@ router.get("/tracks", async (req, res) => {
         ...track.album,
         coverArt: track.album.coverUrl,
       },
+      audioFeatures: toAudioFeaturesDTO(track),
     }));
 
     res.json({ tracks, total, offset, limit });

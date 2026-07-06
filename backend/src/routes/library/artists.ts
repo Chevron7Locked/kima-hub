@@ -19,6 +19,7 @@ import {
 } from "../../utils/metadataOverrides";
 import { safeError } from "../../utils/errors";
 import pLimit from "p-limit";
+import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
 
 const ARTIST_SORT_MAP: Record<string, any> = {
   name: { name: "asc" as const },
@@ -386,6 +387,10 @@ router.get("/artists/:id", async (req, res) => {
 
     const dbAlbums = artist.albums.map((album) => ({
       ...album,
+      tracks: album.tracks.map((t) => ({
+        ...t,
+        audioFeatures: toAudioFeaturesDTO(t),
+      })),
       owned: true,
       coverArt: album.coverUrl,
       source: "database" as const,
@@ -653,6 +658,7 @@ router.get("/artists/:id", async (req, res) => {
           ...t.album,
           coverArt: t.album.coverUrl,
         },
+        audioFeatures: toAudioFeaturesDTO(t),
       }));
     }
 

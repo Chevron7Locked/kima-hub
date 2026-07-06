@@ -56,3 +56,27 @@ export function toAudioFeaturesDTO(track: {
     moodElectronic: track.moodElectronic ?? null,
   };
 }
+
+/**
+ * Prisma `select` fragment for the 15 columns `toAudioFeaturesDTO` reads. Spread into
+ * a track `select` on list/collection endpoints so `audioFeatures` can be inlined
+ * without over- or under-selecting. Endpoints that fetch full tracks via `include`
+ * already have these columns and don't need this.
+ */
+export const AUDIO_FEATURE_SELECT = {
+  bpm: true,
+  energy: true,
+  valence: true,
+  arousal: true,
+  danceability: true,
+  keyScale: true,
+  instrumentalness: true,
+  analysisMode: true,
+  moodHappy: true,
+  moodSad: true,
+  moodRelaxed: true,
+  moodAggressive: true,
+  moodParty: true,
+  moodAcoustic: true,
+  moodElectronic: true,
+} as const;

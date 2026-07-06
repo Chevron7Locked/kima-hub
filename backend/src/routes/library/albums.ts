@@ -9,6 +9,7 @@ import { config } from "../../config";
 import path from "path";
 import fs from "fs";
 import pLimit from "p-limit";
+import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
 
 const ALBUM_SORT_MAP: Record<string, any> = {
   name: { title: "asc" as const },
@@ -177,6 +178,10 @@ router.get("/albums/:id", async (req, res) => {
 
     res.json({
       ...album,
+      tracks: album.tracks.map((t) => ({
+        ...t,
+        audioFeatures: toAudioFeaturesDTO(t),
+      })),
       artist: artistData,
       owned: isOwned,
       coverArt: album.coverUrl,
