@@ -47,6 +47,7 @@ model Artist {
   mbid                String                   @unique
   name                String
   normalizedName      String                   @default("")
+  aliases             String[]                 @default([])
   summary             String?
   heroUrl             String?
   genres              Json?

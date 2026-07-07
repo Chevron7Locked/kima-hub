@@ -1330,6 +1330,19 @@ class ApiClient {
         );
     }
 
+    // Lightweight typeahead/suggest for the search box (artists + albums)
+    async getSearchSuggest(query: string, signal?: AbortSignal) {
+        return this.request<{
+            artists: Array<{ id: string; name: string; heroUrl: string | null }>;
+            albums: Array<{
+                id: string;
+                title: string;
+                artistName: string;
+                coverUrl: string | null;
+            }>;
+        }>(`/search/suggest?q=${encodeURIComponent(query)}`, { signal });
+    }
+
     async discoverSearch(
         query: string,
         type: "music" | "podcasts" | "all" = "music",

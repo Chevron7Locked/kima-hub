@@ -98,6 +98,32 @@ router.get("/", async (req, res) => {
     }
 });
 
+/**
+ * GET /search/suggest?q=query&limit=8
+ * Phase H: fast typeahead for the search box. Returns a small, ranked set of
+ * artist + album suggestions (Redis-cached in the service for 60s). Empty/short
+ * (<2 char) queries return empty arrays.
+ */
+router.get("/suggest", async (req, res) => {
+    try {
+        const { q = "", limit = "8" } = req.query;
+
+        const query = (q as string).trim();
+        const parsed = parseInt(limit as string, 10);
+        const suggestLimit = Number.isNaN(parsed) ? 8 : Math.min(Math.max(parsed, 1), 10);
+
+        if (query.length < 2) {
+            return res.json({ artists: [], albums: [] });
+        }
+
+        const results = await searchService.suggest({ query, limit: suggestLimit });
+        res.json(results);
+    } catch (error) {
+        logger.error("Search suggest error:", error);
+        res.status(500).json({ error: "Suggest failed" });
+    }
+});
+
 // GET /search/genres
 router.get("/genres", async (_req, res) => {
     try {
