@@ -900,6 +900,72 @@ class LidarrService {
         throw new Error(`Command ${commandId} timed out after ${timeoutMs}ms`);
     }
 
+    /**
+     * Add a specific album to Lidarr by its release-group MBID, via Lidarr's
+     * own album/lookup endpoint. Used as a fallback when the album isn't present
+     * in the artist's auto-populated catalog (compilations, obscure releases, or
+     * albums filtered out by the artist's metadata profile). This mirrors how
+     * Lidarr's UI adds a single album, so it enters the wanted list regardless of
+     * the catalog/metadata-profile state (Lidarr/Soularr then fulfill it).
+     */
+    private async addAlbumByLookup(
+        rgMbid: string,
+        artist: LidarrArtist,
+        rootFolderPath: string
+    ): Promise<LidarrAlbum | null> {
+        if (!this.client) return null;
+        try {
+            const lookup = await this.client.get("/api/v1/album/lookup", {
+                params: { term: `lidarr:${rgMbid}` },
+            });
+            const results: any[] = lookup.data || [];
+            const found = results.find((a) => a.foreignAlbumId === rgMbid) || null;
+            if (!found) {
+                logger.debug(`   [add-by-lookup] No Lidarr result for lidarr:${rgMbid}`);
+                return null;
+            }
+
+            // Already in Lidarr's library — hand back for the normal monitor/search path.
+            if (found.id && found.id > 0) {
+                logger.debug(`   [add-by-lookup] Album already in Lidarr (id=${found.id})`);
+                return found;
+            }
+
+            const validRootFolder = await this.ensureRootFolderExists(rootFolderPath);
+
+            const payload: any = {
+                ...found,
+                monitored: true,
+                profileId: this.qualityProfileId,
+                qualityProfileId: this.qualityProfileId,
+                addOptions: { searchForNewAlbum: true },
+                artist: {
+                    ...found.artist,
+                    id: artist.id,
+                    foreignArtistId:
+                        artist.foreignArtistId || found.artist?.foreignArtistId,
+                    qualityProfileId: this.qualityProfileId,
+                    metadataProfileId: this.metadataProfileId,
+                    rootFolderPath: validRootFolder,
+                    monitored: true,
+                    monitorNewItems: "none",
+                    addOptions: { monitor: "none", searchForMissingAlbums: false },
+                },
+            };
+
+            const resp = await this.client.post("/api/v1/album", payload);
+            logger.debug(`   [add-by-lookup] Added "${found.title}" (id=${resp.data?.id})`);
+            return resp.data;
+        } catch (err: any) {
+            logger.warn(
+                `   [add-by-lookup] failed: ${
+                    err.response?.data?.[0]?.errorMessage || err.message
+                }`
+            );
+            return null;
+        }
+    }
+
     async addAlbum(
         rgMbid: string,
         artistName: string,
@@ -1146,6 +1212,23 @@ class LidarrService {
                 } else {
                     logger.debug(
                         ` No strict match found - will NOT use loose matching to avoid wrong albums`
+                    );
+                }
+            }
+
+            // Fallback: the album isn't in the artist's auto-populated catalog
+            // (compilation / obscure release / metadata-profile filtered). Add it
+            // directly via Lidarr's MBID lookup so it still enters the wanted list.
+            if (!albumData) {
+                logger.debug(
+                    `   Album not in artist catalog — trying direct Lidarr MBID-lookup add...`
+                );
+                albumData =
+                    (await this.addAlbumByLookup(rgMbid, artist, rootFolderPath)) ??
+                    undefined;
+                if (albumData) {
+                    logger.debug(
+                        `   [add-by-lookup] success: "${albumData.title}" (id=${albumData.id})`
                     );
                 }
             }

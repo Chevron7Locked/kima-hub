@@ -42,6 +42,10 @@ export interface AlbumAcquisitionRequest {
     albumTitle: string;
     artistName: string;
     mbid?: string;
+    // Artist release-group MBID, when the caller already knows it (discovery /
+    // playlist pending tracks). Lets the Lidarr path skip a per-download
+    // MusicBrainz lookup that gets rate-limited in bursts.
+    artistMbid?: string;
     lastfmUrl?: string;
     requestedTracks?: Array<{ title: string; position?: number }>;
 }
@@ -775,7 +779,8 @@ class AcquisitionService {
                 request.albumTitle,
                 request.mbid,
                 context.userId,
-                isDiscovery
+                isDiscovery,
+                request.artistMbid
             );
 
             if (result.success) {

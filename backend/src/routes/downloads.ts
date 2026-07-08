@@ -8,6 +8,7 @@ import { lidarrService } from "../services/lidarr";
 import { musicBrainzService } from "../services/musicbrainz";
 import { lastFmService } from "../services/lastfm";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
+import { acquisitionService } from "../services/acquisitionService";
 import crypto from "crypto";
 import { safeError } from "../utils/errors";
 
@@ -118,8 +119,28 @@ router.post("/", async (req, res) => {
             });
         }
 
-        // Check if Lidarr is enabled (database or .env)
+        // Auto-falling back to Soulseek when Lidarr is unavailable is opt-in:
+        // by default a failed/retried album download does NOT silently route to
+        // Soulseek. Enable with DOWNLOAD_SOULSEEK_AUTO_FALLBACK=true.
+        const soulseekAutoFallback =
+            (process.env.DOWNLOAD_SOULSEEK_AUTO_FALLBACK || "false").toLowerCase() === "true";
         const lidarrEnabled = await lidarrService.isEnabled();
+        if (soulseekAutoFallback && !lidarrEnabled && type === "album" && artistName && albumTitle) {
+            logger.info(`[DOWNLOAD] Lidarr unavailable, using Soulseek: ${artistName} - ${albumTitle} (${mbid})`);
+            res.json({ id: null, status: "downloading", downloadType, message: `Downloading via Soulseek: ${artistName} - ${albumTitle}` });
+            acquisitionService.acquireAlbum({
+                albumTitle, artistName, mbid,
+            }, { userId }).then(result => {
+                if (result.success) {
+                    logger.info(`[DOWNLOAD] Soulseek success: ${artistName} - ${albumTitle}`);
+                } else {
+                    logger.warn(`[DOWNLOAD] Soulseek failed: ${artistName} - ${albumTitle}: ${result.error}`);
+                }
+            }).catch(err => {
+                logger.error(`[DOWNLOAD] Soulseek error: ${err.message}`);
+            });
+            return;
+        }
         if (!lidarrEnabled) {
             return res.status(400).json({
                 error: "Lidarr not configured. Please add albums manually to your library.",

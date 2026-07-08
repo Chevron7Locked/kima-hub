@@ -51,10 +51,10 @@ export default function ReleasesPage() {
         fetchReleases();
     }, []);
 
-    const handleDownload = async (albumMbid: string, releaseId: string | number) => {
+    const handleDownload = async (albumMbid: string, releaseId: string | number, artistName: string, title: string) => {
         try {
             setDownloadingId(releaseId);
-            await api.post(`/releases/download/${albumMbid}`);
+            await api.post(`/releases/download/${albumMbid}`, { artistName, title });
             await fetchReleases();
         } catch (err) {
             console.error("Download failed:", err);
@@ -200,7 +200,7 @@ function ReleaseCard({
 }: {
     release: ReleaseItem;
     formatDate: (date: string) => string;
-    onDownload: (albumMbid: string, releaseId: string | number) => void;
+    onDownload: (albumMbid: string, releaseId: string | number, artistName: string, title: string) => void;
     isDownloading: boolean;
 }) {
     const isUpcoming = release.status === 'upcoming';
@@ -238,7 +238,7 @@ function ReleaseCard({
                 {/* Download Button Overlay */}
                 {release.canDownload && !hasIt && (
                     <button
-                        onClick={() => onDownload(release.albumMbid, release.id)}
+                        onClick={() => onDownload(release.albumMbid, release.id, release.artistName, release.title)}
                         disabled={isDownloading}
                         className={cn(
                             "absolute inset-0 flex items-center justify-center",

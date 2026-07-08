@@ -12,6 +12,7 @@ import { Router } from "express";
 import { lidarrService, CalendarRelease } from "../services/lidarr";
 import { prisma } from "../utils/db";
 import { requireAuthOrToken } from "../middleware/auth";
+import { acquisitionService } from "../services/acquisitionService";
 
 const router = Router();
 router.use(requireAuthOrToken);
@@ -236,12 +237,30 @@ router.post("/download/:albumMbid", async (req, res) => {
             return res.status(401).json({ error: "Authentication required" });
         }
 
-        logger.debug(`[Releases] Download requested for album: ${albumMbid}`);
+        const { artistName, title } = req.body || {};
 
-        // TODO: Implement downloadAlbum method on LidarrService
-        // For now, return not implemented error
-        res.status(501).json({
-            error: "Download feature not yet implemented for release radar"
+        if (!artistName || !title) {
+            return res.status(400).json({ error: "artistName and title are required in request body" });
+        }
+
+        logger.info(`[Releases] Download requested: ${artistName} - ${title} (${albumMbid})`);
+
+        res.json({ status: "downloading", albumMbid, title, artist: artistName });
+
+        acquisitionService.acquireAlbum({
+            albumTitle: title,
+            artistName,
+            mbid: albumMbid,
+        }, {
+            userId,
+        }).then(result => {
+            if (result.success) {
+                logger.info(`[Releases] Downloaded: ${artistName} - ${title}`);
+            } else {
+                logger.warn(`[Releases] Download failed: ${artistName} - ${title}: ${result.error}`);
+            }
+        }).catch(error => {
+            logger.error(`[Releases] Download error for ${albumMbid}:`, error);
         });
     } catch (error: any) {
         logger.error("[Releases] Download error:", error.message);

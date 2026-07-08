@@ -9,12 +9,50 @@ import { redisClient } from "../utils/redis";
 import { normalizeToArray } from "../utils/normalize";
 import { requireAuthOrToken } from "../middleware/auth";
 import { safeError } from "../utils/errors";
+import { Prisma } from "@prisma/client";
+import { prisma } from "../utils/db";
+import { normalizeArtistName } from "../utils/artistNormalization";
 
 const router = Router();
 router.use(requireAuthOrToken);
 
 // Cache TTL for discovery content (shorter since it's not owned)
 const DISCOVERY_CACHE_TTL = 24 * 60 * 60; // 24 hours
+
+/**
+ * Find an artist we already own that matches the given identifier(s).
+ *
+ * The discovery route builds an artist page from external metadata
+ * (MusicBrainz/Last.fm). If the artist is actually in the library we must
+ * NOT build a separate foreign page - that is how one artist ends up with
+ * two different pages ("library" vs "discovery") depending on which link the
+ * user followed. By resolving to the canonical library artist first we keep a
+ * single page per artist.
+ *
+ * Matches by exact MBID or by normalizedName (diacritic/"&"-folded), and only
+ * returns artists that actually have albums (mirrors the search filter, avoids
+ * redirecting to empty stub rows).
+ */
+async function findOwnedArtist(opts: {
+    mbid?: string | null;
+    name?: string | null;
+}): Promise<{ id: string } | null> {
+    const or: Prisma.ArtistWhereInput[] = [];
+    if (opts.mbid) {
+        or.push({ id: opts.mbid });
+        or.push({ mbid: opts.mbid });
+    }
+    if (opts.name) {
+        const norm = normalizeArtistName(opts.name);
+        if (norm) or.push({ normalizedName: norm });
+    }
+    if (or.length === 0) return null;
+
+    return prisma.artist.findFirst({
+        where: { AND: [{ OR: or }, { albums: { some: {} } }] },
+        select: { id: true },
+    });
+}
 
 // GET /artists/preview/:artistName/:trackTitle - Get Deezer preview URL for a track
 router.get("/preview/:artistName/:trackTitle", async (req, res) => {
@@ -109,8 +147,32 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
     try {
         const { nameOrMbid } = req.params;
 
+        // Identity guard (tier 1): if this raw identifier already maps to an
+        // artist we own, redirect to the canonical library page rather than
+        // building a discovery page. Done before the cache read so a stale
+        // cached discovery payload can never shadow an owned artist.
+        // nameOrMbid is already URL-decoded by Express. Decoding it a second
+        // time throws URIError on any literal '%' in the name (e.g. "50%"),
+        // which previously 500'd this route. Decode defensively, falling back
+        // to the raw value.
+        let decodedName = nameOrMbid;
+        try {
+            decodedName = decodeURIComponent(nameOrMbid);
+        } catch {
+            decodedName = nameOrMbid;
+        }
+        const ownedByInput = await findOwnedArtist({
+            mbid: nameOrMbid,
+            name: decodedName,
+        });
+        if (ownedByInput) {
+            return res.redirect(307, `/api/library/artists/${ownedByInput.id}`);
+        }
+
         // Check Redis cache first for discovery content
-        const cacheKey = `discovery:artist:${nameOrMbid}`;
+        // (v2: bumped when the identity guard above was added so previously
+        // cached discovery pages for owned artists no longer shadow it)
+        const cacheKey = `discovery:artist:v2:${nameOrMbid}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
@@ -128,7 +190,7 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
             );
 
         let mbid: string | null = isMbid ? nameOrMbid : null;
-        let artistName: string = isMbid ? "" : decodeURIComponent(nameOrMbid);
+        let artistName: string = isMbid ? "" : decodedName;
 
         // If we have a name but no MBID, search for it
         if (!mbid && artistName) {
@@ -150,6 +212,16 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
 
         if (!artistName) {
             return res.status(404).json({ error: "Artist not found" });
+        }
+
+        // Identity guard (tier 2): MusicBrainz has now canonicalised the
+        // name/MBID. This catches the case the raw-input guard cannot - an
+        // owned artist stored under a different MBID (or a temp- MBID) than the
+        // one in the inbound link. Resolving by canonical MBID or normalized
+        // name collapses those into the single library page.
+        const ownedByCanonical = await findOwnedArtist({ mbid, name: artistName });
+        if (ownedByCanonical) {
+            return res.redirect(307, `/api/library/artists/${ownedByCanonical.id}`);
         }
 
         // Get artist info from Last.fm

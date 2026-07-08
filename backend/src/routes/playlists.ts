@@ -768,7 +768,7 @@ router.post("/:id/pending/retry-all", async (req, res) => {
             return res.status(404).json({ error: "Playlist not found" });
         }
 
-        if (playlist.userId !== userId) {
+        if (playlist.userId !== userId && req.user!.role !== "admin") {
             return res.status(403).json({ error: "Access denied" });
         }
 
@@ -780,16 +780,10 @@ router.post("/:id/pending/retry-all", async (req, res) => {
             return res.json({ success: true, queued: 0, message: "No pending tracks to retry" });
         }
 
-        const { soulseekService } = await import("../services/soulseek");
-        const { getSystemSettings } = await import("../utils/systemSettings");
-
-        const settings = await getSystemSettings();
-        if (!settings?.musicPath) {
-            return res.status(400).json({ error: "Music path not configured" });
-        }
-        if (!settings?.soulseekUsername || !settings?.soulseekPassword) {
-            return res.status(400).json({ error: "Soulseek credentials not configured" });
-        }
+        // Route retries through the normal acquisition pipeline (respects the
+        // configured downloadSource: Lidarr or Soulseek) instead of hardcoding
+        // Soulseek. acquireAlbum reuses the per-track job via existingJobId.
+        const { acquisitionService } = await import("../services/acquisitionService");
 
         // Create download jobs for all pending tracks
         const downloadJobs = [];
@@ -833,70 +827,30 @@ router.post("/:id/pending/retry-all", async (req, res) => {
             message: `Retrying ${downloadJobs.length} tracks`,
         });
 
-        // Process sequentially in background to avoid flooding Soulseek
+        // Process sequentially in background through the acquisition pipeline.
         (async () => {
             for (const { job, pendingTrack } of downloadJobs) {
                 try {
-                    const albumName =
+                    const albumTitle =
+                        pendingTrack.spotifyAlbum &&
                         pendingTrack.spotifyAlbum !== "Unknown Album"
                             ? pendingTrack.spotifyAlbum
-                            : pendingTrack.spotifyArtist;
+                            : pendingTrack.spotifyTitle;
 
-                    const searchResult = await soulseekService.searchTrack(
-                        pendingTrack.spotifyArtist,
-                        pendingTrack.spotifyTitle,
-                        pendingTrack.spotifyAlbum !== "Unknown Album" ? pendingTrack.spotifyAlbum : undefined
+                    const result = await acquisitionService.acquireAlbum(
+                        {
+                            albumTitle,
+                            artistName: pendingTrack.spotifyArtist,
+                            mbid: pendingTrack.albumMbid || undefined,
+                            artistMbid: pendingTrack.artistMbid || undefined,
+                        },
+                        { userId, existingJobId: job.id }
                     );
 
-                    if (!searchResult.found || searchResult.allMatches.length === 0) {
-                        await prisma.downloadJob.update({
-                            where: { id: job.id },
-                            data: {
-                                status: "failed",
-                                error: "No matching files found",
-                                completedAt: new Date(),
-                            },
-                        });
-                        continue;
-                    }
-
-                    const result = await soulseekService.downloadBestMatch(
-                        pendingTrack.spotifyArtist,
-                        pendingTrack.spotifyTitle,
-                        albumName,
-                        searchResult.allMatches,
-                        settings.musicPath
-                    );
-
-                    if (result.success) {
-                        await prisma.downloadJob.update({
-                            where: { id: job.id },
-                            data: {
-                                status: "completed",
-                                completedAt: new Date(),
-                                metadata: {
-                                    ...(job.metadata as any),
-                                    filePath: result.filePath,
-                                },
-                            },
-                        });
-
-                        try {
-                            const { scanQueue } = await import("../workers/queues");
-                            await scanQueue.add(
-                                "scan",
-                                {
-                                    userId,
-                                    source: "retry-pending-track-batch",
-                                    albumMbid: pendingTrack.albumMbid || undefined,
-                                    artistMbid: pendingTrack.artistMbid || undefined,
-                                },
-                                { priority: 1, removeOnComplete: true }
-                            );
-                        } catch (scanError) {
-                            logger.error(`[Retry-All] Failed to queue scan:`, scanError);
-                        }
-                    } else {
+                    // acquireAlbum + the Lidarr/Soulseek paths manage the job's
+                    // lifecycle (Lidarr completion arrives via webhook). Only
+                    // mark failed here if acquisition could not be started.
+                    if (!result.success) {
                         await prisma.downloadJob.update({
                             where: { id: job.id },
                             data: {
@@ -904,7 +858,7 @@ router.post("/:id/pending/retry-all", async (req, res) => {
                                 error: result.error || "Download failed",
                                 completedAt: new Date(),
                             },
-                        });
+                        }).catch(() => {});
                     }
                 } catch (error: any) {
                     logger.error(`[Retry-All] Error processing ${pendingTrack.spotifyTitle}:`, error);
@@ -912,7 +866,7 @@ router.post("/:id/pending/retry-all", async (req, res) => {
                         where: { id: job.id },
                         data: {
                             status: "failed",
-                            error: error?.message || "Download exception",
+                            error: error?.message || "Acquisition exception",
                             completedAt: new Date(),
                         },
                     }).catch(() => {});
@@ -955,7 +909,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
             return res.status(404).json({ error: "Playlist not found" });
         }
 
-        if (playlist.userId !== userId) {
+        if (playlist.userId !== userId && req.user!.role !== "admin") {
             sessionLog(
                 "PENDING-RETRY",
                 `Access denied: playlistId=${playlistId} userId=${userId}`,
@@ -1017,203 +971,72 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
             `Created download job: downloadJobId=${downloadJob.id} target=${retryTargetId}`
         );
 
-        // Import soulseek service and try to download
-        const { soulseekService } = await import("../services/soulseek");
-        const { getSystemSettings } = await import("../utils/systemSettings");
+        // Route through the normal acquisition pipeline (respects the
+        // configured downloadSource: Lidarr or Soulseek) instead of hardcoding
+        // Soulseek. acquireAlbum reuses this job via existingJobId.
+        const { acquisitionService } = await import("../services/acquisitionService");
 
-        const settings = await getSystemSettings();
-        if (!settings?.musicPath) {
-            sessionLog("PENDING-RETRY", `Music path not configured`, "WARN");
-            await prisma.downloadJob.update({
-                where: { id: downloadJob.id },
-                data: {
-                    status: "failed",
-                    error: "Music path not configured",
-                    completedAt: new Date(),
-                },
-            });
-            return res.status(400).json({ error: "Music path not configured" });
-        }
-
-        if (!settings?.soulseekUsername || !settings?.soulseekPassword) {
-            sessionLog(
-                "PENDING-RETRY",
-                `Soulseek credentials not configured`,
-                "WARN"
-            );
-            await prisma.downloadJob.update({
-                where: { id: downloadJob.id },
-                data: {
-                    status: "failed",
-                    error: "Soulseek credentials not configured",
-                    completedAt: new Date(),
-                },
-            });
-            return res
-                .status(400)
-                .json({ error: "Soulseek credentials not configured" });
-        }
-
-        // Use a better album name if possible - extract from stored title or use artist name
         const albumName =
+            pendingTrack.spotifyAlbum &&
             pendingTrack.spotifyAlbum !== "Unknown Album"
                 ? pendingTrack.spotifyAlbum
-                : pendingTrack.spotifyArtist; // Use artist as fallback folder name
+                : pendingTrack.spotifyTitle;
 
-        logger.debug(
-            `[Retry] Starting download for: ${pendingTrack.spotifyArtist} - ${pendingTrack.spotifyTitle}`
-        );
         sessionLog(
             "PENDING-RETRY",
-            `Search: ${pendingTrack.spotifyArtist} - ${pendingTrack.spotifyTitle}`
+            `Queuing via acquisition pipeline: ${pendingTrack.spotifyArtist} - ${pendingTrack.spotifyTitle}`
         );
 
-        // First do a quick search to see if track is available (15s timeout)
-        // This way we can tell the user immediately if it's not found
-        const searchResult = await soulseekService.searchTrack(
-            pendingTrack.spotifyArtist,
-            pendingTrack.spotifyTitle,
-            pendingTrack.spotifyAlbum !== "Unknown Album" ? pendingTrack.spotifyAlbum : undefined
-        );
-
-        if (!searchResult.found || searchResult.allMatches.length === 0) {
-            logger.debug(`[Retry] No results found on Soulseek`);
-            sessionLog("PENDING-RETRY", `No results found on Soulseek`, "INFO");
-
-            await prisma.downloadJob.update({
-                where: { id: downloadJob.id },
-                data: {
-                    status: "failed",
-                    error: "No matching files found",
-                    completedAt: new Date(),
-                },
-            });
-
-            return res.status(200).json({
-                success: false,
-                message: "Track not found on Soulseek",
-                error: "No matching files found",
-            });
-        }
-
-        logger.debug(
-            `[Retry] ✓ Found ${searchResult.allMatches.length} results, starting download in background`
-        );
-        sessionLog(
-            "PENDING-RETRY",
-            `Found ${searchResult.allMatches.length} candidate(s); starting background download`
-        );
-
-        // Return immediately - download happens in background
+        // Respond immediately; acquisition runs in the background and updates the job.
         res.json({
             success: true,
             message: "Download started",
-            note: `Found ${searchResult.allMatches.length} sources. Downloading... Track will appear after scan.`,
+            note: "Queued via the configured download pipeline. Track will appear after import/scan.",
             downloadJobId: downloadJob.id,
         });
 
-        // Start download in background (don't await)
-        soulseekService
-            .downloadBestMatch(
-                pendingTrack.spotifyArtist,
-                pendingTrack.spotifyTitle,
-                albumName,
-                searchResult.allMatches,
-                settings.musicPath
+        acquisitionService
+            .acquireAlbum(
+                {
+                    albumTitle: albumName,
+                    artistName: pendingTrack.spotifyArtist,
+                    mbid: pendingTrack.albumMbid || undefined,
+                    artistMbid: pendingTrack.artistMbid || undefined,
+                },
+                { userId, existingJobId: downloadJob.id }
             )
             .then(async (result) => {
-                if (result.success) {
-                    logger.debug(
-                        `[Retry] ✓ Download complete: ${result.filePath}`
-                    );
+                if (!result.success) {
                     sessionLog(
                         "PENDING-RETRY",
-                        `Download complete: filePath=${result.filePath}`
-                    );
-
-                    await prisma.downloadJob.update({
-                        where: { id: downloadJob.id },
-                        data: {
-                            status: "completed",
-                            completedAt: new Date(),
-                            metadata: {
-                                ...(downloadJob.metadata as any),
-                                filePath: result.filePath,
-                            },
-                        },
-                    });
-
-                    // Trigger a library scan to add the track and reconcile pending
-                    try {
-                        const { scanQueue } = await import("../workers/queues");
-                        const scanJob = await scanQueue.add(
-                            "scan",
-                            {
-                                userId,
-                                source: "retry-pending-track",
-                                albumMbid: pendingTrack.albumMbid || undefined,
-                                artistMbid:
-                                    pendingTrack.artistMbid || undefined,
-                            },
-                            {
-                                priority: 1, // High priority
-                                removeOnComplete: true,
-                            }
-                        );
-                        logger.debug(
-                            `[Retry] Queued library scan to reconcile pending tracks`
-                        );
-                        sessionLog(
-                            "PENDING-RETRY",
-                            `Queued library scan (bullJobId=${
-                                scanJob.id ?? "unknown"
-                            })`
-                        );
-                    } catch (scanError) {
-                        logger.error(
-                            `[Retry] Failed to queue scan:`,
-                            scanError
-                        );
-                        sessionLog(
-                            "PENDING-RETRY",
-                            `Failed to queue scan: ${
-                                (scanError as any)?.message || scanError
-                            }`,
-                            "ERROR"
-                        );
-                    }
-                } else {
-                    logger.debug(`[Retry] Download failed: ${result.error}`);
-                    sessionLog(
-                        "PENDING-RETRY",
-                        `Download failed: ${result.error || "unknown error"}`,
+                        `Acquisition failed: ${result.error || "unknown error"}`,
                         "WARN"
                     );
-
-                    await prisma.downloadJob.update({
-                        where: { id: downloadJob.id },
-                        data: {
-                            status: "failed",
-                            error: result.error || "Download failed",
-                            completedAt: new Date(),
-                        },
-                    });
+                    await prisma.downloadJob
+                        .update({
+                            where: { id: downloadJob.id },
+                            data: {
+                                status: "failed",
+                                error: result.error || "Download failed",
+                                completedAt: new Date(),
+                            },
+                        })
+                        .catch(() => undefined);
+                } else {
+                    sessionLog(
+                        "PENDING-RETRY",
+                        `Acquisition started via ${result.source || "pipeline"}`
+                    );
                 }
             })
             .catch((error) => {
-                logger.error(`[Retry] Download error:`, error);
-                sessionLog(
-                    "PENDING-RETRY",
-                    `Download exception: ${error?.message || error}`,
-                    "ERROR"
-                );
-
+                logger.error(`[Retry] Acquisition error:`, error);
                 prisma.downloadJob
                     .update({
                         where: { id: downloadJob.id },
                         data: {
                             status: "failed",
-                            error: error?.message || "Download exception",
+                            error: error?.message || "Acquisition exception",
                             completedAt: new Date(),
                         },
                     })

@@ -1696,17 +1696,49 @@ async searchAndDownloadAlbum(
                 .map((_, i) => i)
                 .filter(i => !matchedTracks.has(i));
 
+            // Quality is a PER-CANDIDATE signal (average format score), not a
+            // per-file sum: summing rewarded large file counts, so a deluxe
+            // FLAC set scored so high it swamped the edition/bloat penalties
+            // below and always beat the original edition. Averaging keeps this
+            // bounded (~0..3) regardless of track count.
             let qualityBonus = 0;
-            for (const f of files) {
-                const lower = f.file.toLowerCase();
-                if (lower.endsWith(".flac")) qualityBonus += 3;
-                else if (lower.endsWith(".mp3") && (f.bitrate || 0) >= 320) qualityBonus += 2;
-                else if (lower.endsWith(".mp3") && (f.bitrate || 0) >= 256) qualityBonus += 1;
+            if (files.length > 0) {
+                let qualitySum = 0;
+                for (const f of files) {
+                    const lower = f.file.toLowerCase();
+                    if (lower.endsWith(".flac")) qualitySum += 3;
+                    else if (lower.endsWith(".mp3") && (f.bitrate || 0) >= 320) qualitySum += 2;
+                    else if (lower.endsWith(".mp3") && (f.bitrate || 0) >= 256) qualitySum += 1;
+                }
+                qualityBonus = qualitySum / files.length;
             }
 
             const slotsBonus = files.some(f => f.slots) ? 10 : 0;
             const speedBonus = Math.min(files[0]?.speed || 0, 10000000) / 1000000;
-            const totalScore = matchRatio * 100 + qualityBonus + slotsBonus + speedBonus;
+
+            // Edition preference scoring — penalize bloated/deluxe releases,
+            // reward groups whose file count closely matches the expected track count.
+            const fileCountRatio = files.length / Math.max(tracks.length, 1);
+            const bloatPenalty = fileCountRatio > 1.5
+                ? Math.min((fileCountRatio - 1) * 20, 40)
+                : 0;
+            const dirPath = key.split("|||")[1] || "";
+            const dirLower = dirPath.toLowerCase();
+            // Word-bounded so the separator dots are literal and terms like
+            // "limited"/"explicit"/"japan" don't match inside longer words.
+            const editionPattern = /\b(?:deluxe|super[\s._-]?deluxe|anniversary|box[\s._-]?set|collector|expanded|remaster|limited|platinum|explicit|japan|bonus|special[\s._-]?edition)\b/;
+            const editionPenalty = editionPattern.test(dirLower) ? 25 : 0;
+            const sizeMatchBonus = (fileCountRatio >= 0.8 && fileCountRatio <= 1.3) ? 15 : 0;
+            if (bloatPenalty > 0 || editionPenalty > 0) {
+                sessionLog(
+                    "SOULSEEK",
+                    `[Album Search] Group ${key.split("|||")[0]}: ${files.length} files/${tracks.length} tracks ` +
+                    `(ratio ${fileCountRatio.toFixed(1)}x) bloat=-${bloatPenalty.toFixed(0)} edition=-${editionPenalty} sizeMatch=+${sizeMatchBonus}`,
+                    "DEBUG"
+                );
+            }
+
+            const totalScore = matchRatio * 100 + qualityBonus + slotsBonus + speedBonus + sizeMatchBonus - bloatPenalty - editionPenalty;
 
             scoredGroups.push({
                 key,

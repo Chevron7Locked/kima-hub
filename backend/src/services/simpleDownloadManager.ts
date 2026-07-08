@@ -134,7 +134,8 @@ class SimpleDownloadManager {
         albumTitle: string,
         albumMbid: string,
         userId: string,
-        isDiscovery: boolean = false
+        isDiscovery: boolean = false,
+        providedArtistMbid?: string
     ): Promise<{ success: boolean; correlationId?: string; error?: string; errorType?: AcquisitionErrorType; isRecoverable?: boolean }> {
         logger.debug(
             `\n Starting download: ${artistName} - ${albumTitle}${
@@ -152,27 +153,38 @@ class SimpleDownloadManager {
             const settings = await getSystemSettings();
             const musicPath = settings?.musicPath || config.music.musicPath;
 
-            // Fetch artist MBID from MusicBrainz using the album MBID
-            let artistMbid: string | undefined;
-            try {
-                logger.debug(`   Fetching artist MBID from MusicBrainz...`);
-                const releaseGroup = await musicBrainzService.getReleaseGroup(
-                    albumMbid
-                );
+            // Resolve the artist MBID. Prefer a value the caller already has
+            // (discovery and playlist pending tracks store it) so we don't make
+            // a per-download MusicBrainz call — those get rate-limited in bursts
+            // (shared VPN exit IP) and the whole add then fails "album not found".
+            // Fall back to a MusicBrainz lookup only when it's unknown.
+            let artistMbid: string | undefined =
+                providedArtistMbid && !providedArtistMbid.startsWith("temp-")
+                    ? providedArtistMbid
+                    : undefined;
+            if (artistMbid) {
+                logger.debug(`   Using caller-provided artist MBID: ${artistMbid}`);
+            } else {
+                try {
+                    logger.debug(`   Fetching artist MBID from MusicBrainz...`);
+                    const releaseGroup = await musicBrainzService.getReleaseGroup(
+                        albumMbid
+                    );
 
-                if (releaseGroup?.["artist-credit"]?.[0]?.artist?.id) {
-                    artistMbid = releaseGroup["artist-credit"][0].artist.id;
-                    logger.debug(`   Found artist MBID: ${artistMbid}`);
-                } else {
-                    logger.warn(
-                        `   Could not extract artist MBID from release group`
+                    if (releaseGroup?.["artist-credit"]?.[0]?.artist?.id) {
+                        artistMbid = releaseGroup["artist-credit"][0].artist.id;
+                        logger.debug(`   Found artist MBID: ${artistMbid}`);
+                    } else {
+                        logger.warn(
+                            `   Could not extract artist MBID from release group`
+                        );
+                    }
+                } catch (mbError) {
+                    logger.error(
+                        `   Failed to fetch artist MBID from MusicBrainz:`,
+                        mbError
                     );
                 }
-            } catch (mbError) {
-                logger.error(
-                    `   Failed to fetch artist MBID from MusicBrainz:`,
-                    mbError
-                );
             }
 
             // Add album to Lidarr (with discovery tag if this is a discovery download)
