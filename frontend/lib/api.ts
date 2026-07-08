@@ -402,6 +402,14 @@ class ApiClient {
         });
     }
 
+    // Generic PATCH method for convenience
+    async patch<T = unknown>(endpoint: string, data?: unknown): Promise<T> {
+        return this.request<T>(endpoint, {
+            method: "PATCH",
+            body: data ? JSON.stringify(data) : undefined,
+        });
+    }
+
     // Auth
     async login(username: string, password: string, token?: string): Promise<{
         id: string;

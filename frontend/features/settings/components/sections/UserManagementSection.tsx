@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, KeyRound, Pencil } from "lucide-react";
 import { SettingsSection, SettingsInput, SettingsSelect } from "../ui";
 import { Modal } from "@/components/ui/Modal";
 import { useAuth } from "@/lib/auth-context";
@@ -28,6 +28,15 @@ export function UserManagementSection() {
     const [createMessage, setCreateMessage] = useState("");
     const [deleteStatus, setDeleteStatus] = useState<StatusType>("idle");
     const [deleteMessage, setDeleteMessage] = useState("");
+    const [resetTarget, setResetTarget] = useState<User | null>(null);
+    const [resetPassword, setResetPassword] = useState("");
+    const [resetStatus, setResetStatus] = useState<StatusType>("idle");
+    const [resetMessage, setResetMessage] = useState("");
+    const [editTarget, setEditTarget] = useState<User | null>(null);
+    const [editUsername, setEditUsername] = useState("");
+    const [editRole, setEditRole] = useState<"user" | "admin">("user");
+    const [editStatus, setEditStatus] = useState<StatusType>("idle");
+    const [editMessage, setEditMessage] = useState("");
 
     useEffect(() => {
         loadUsers();
@@ -71,6 +80,71 @@ export function UserManagementSection() {
             setCreateMessage(error instanceof Error ? error.message : "Failed");
         } finally {
             setCreating(false);
+        }
+    };
+
+    const openReset = (user: User) => {
+        setResetTarget(user);
+        setResetPassword("");
+        setResetStatus("idle");
+        setResetMessage("");
+    };
+
+    const handleResetPassword = async () => {
+        if (!resetTarget || resetPassword.length < 6) {
+            setResetStatus("error");
+            setResetMessage("Password 6+ chars");
+            return;
+        }
+        setResetStatus("loading");
+        try {
+            await api.post(`/auth/users/${resetTarget.id}/reset-password`, {
+                newPassword: resetPassword,
+            });
+            setResetStatus("success");
+            setResetMessage("Password reset");
+            setResetPassword("");
+            // brief pause so the success state is visible before closing
+            setTimeout(() => setResetTarget(null), 800);
+        } catch (error: unknown) {
+            setResetStatus("error");
+            setResetMessage(error instanceof Error ? error.message : "Failed");
+        }
+    };
+
+    const openEdit = (user: User) => {
+        setEditTarget(user);
+        setEditUsername(user.username);
+        setEditRole(user.role);
+        setEditStatus("idle");
+        setEditMessage("");
+    };
+
+    const handleEdit = async () => {
+        if (!editTarget) return;
+        const trimmed = editUsername.trim();
+        if (!trimmed) {
+            setEditStatus("error");
+            setEditMessage("Username required");
+            return;
+        }
+        if (trimmed === editTarget.username && editRole === editTarget.role) {
+            setEditTarget(null);
+            return;
+        }
+        setEditStatus("loading");
+        try {
+            await api.patch(`/auth/users/${editTarget.id}`, {
+                username: trimmed,
+                role: editRole,
+            });
+            setEditStatus("success");
+            setEditMessage("Saved");
+            setTimeout(() => setEditTarget(null), 800);
+            loadUsers();
+        } catch (error: unknown) {
+            setEditStatus("error");
+            setEditMessage(error instanceof Error ? error.message : "Failed");
         }
     };
 
@@ -174,14 +248,31 @@ export function UserManagementSection() {
                                     </div>
                                 </div>
 
-                                {currentUser?.id !== user.id && (
+                                <div className="flex items-center gap-1">
                                     <button
-                                        onClick={() => setConfirmDelete(user.id)}
-                                        className="p-2 text-white/20 hover:text-red-400 transition-colors"
+                                        onClick={() => openEdit(user)}
+                                        title="Edit username / role"
+                                        className="p-2 text-white/20 hover:text-white transition-colors"
                                     >
-                                        <Trash2 className="w-4 h-4" />
+                                        <Pencil className="w-4 h-4" />
                                     </button>
-                                )}
+                                    <button
+                                        onClick={() => openReset(user)}
+                                        title="Reset password"
+                                        className="p-2 text-white/20 hover:text-brand transition-colors"
+                                    >
+                                        <KeyRound className="w-4 h-4" />
+                                    </button>
+                                    {currentUser?.id !== user.id && (
+                                        <button
+                                            onClick={() => setConfirmDelete(user.id)}
+                                            title="Delete user"
+                                            className="p-2 text-white/20 hover:text-red-400 transition-colors"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         ))
                     )}
@@ -215,6 +306,111 @@ export function UserManagementSection() {
                             className="px-4 py-2 text-xs font-black bg-red-500 text-white rounded-lg uppercase tracking-wider hover:bg-red-600 transition-colors"
                         >
                             Delete
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Reset Password Modal */}
+            <Modal
+                isOpen={!!resetTarget}
+                onClose={() => setResetTarget(null)}
+                title={`Reset Password${resetTarget ? ` — ${resetTarget.username}` : ""}`}
+            >
+                <div className="space-y-4">
+                    <p className="text-xs font-mono text-white/50 uppercase tracking-wider">
+                        Set a new password for this user. Their existing sessions will be
+                        signed out.
+                        {resetTarget && currentUser?.id === resetTarget.id && (
+                            <span className="block mt-2 text-amber-400/70">
+                                This is your own account — you&apos;ll be logged out.
+                            </span>
+                        )}
+                    </p>
+                    <SettingsInput
+                        type="password"
+                        value={resetPassword}
+                        onChange={setResetPassword}
+                        placeholder="New password (6+ chars)"
+                        className="w-full"
+                    />
+                    <div className="flex gap-2 justify-end items-center">
+                        <InlineStatus
+                            status={resetStatus}
+                            message={resetMessage}
+                            onClear={() => setResetStatus("idle")}
+                        />
+                        <button
+                            onClick={() => setResetTarget(null)}
+                            className="px-4 py-2 text-xs font-mono text-white/40 hover:text-white/70 uppercase tracking-wider transition-colors"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleResetPassword}
+                            disabled={resetStatus === "loading" || resetPassword.length < 6}
+                            className="px-4 py-2 text-xs font-black bg-brand text-black rounded-lg uppercase tracking-wider hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                            {resetStatus === "loading" ? "Resetting..." : "Reset Password"}
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Edit User Modal */}
+            <Modal
+                isOpen={!!editTarget}
+                onClose={() => setEditTarget(null)}
+                title={`Edit User${editTarget ? ` — ${editTarget.username}` : ""}`}
+            >
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-[10px] font-mono text-white/40 mb-1 uppercase tracking-wider">
+                            Username
+                        </label>
+                        <SettingsInput
+                            value={editUsername}
+                            onChange={setEditUsername}
+                            placeholder="Username"
+                            className="w-full"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-[10px] font-mono text-white/40 mb-1 uppercase tracking-wider">
+                            Role
+                        </label>
+                        <SettingsSelect
+                            value={editRole}
+                            onChange={(v) => setEditRole(v as "user" | "admin")}
+                            options={[
+                                { value: "user", label: "User" },
+                                { value: "admin", label: "Admin" },
+                            ]}
+                        />
+                    </div>
+                    {editTarget && currentUser?.id === editTarget.id && editRole !== "admin" && (
+                        <p className="text-xs font-mono text-amber-400/70 uppercase tracking-wider">
+                            ⚠ Demoting yourself will remove your admin access.
+                        </p>
+                    )}
+                    <div className="flex gap-2 justify-end items-center">
+                        <InlineStatus
+                            status={editStatus}
+                            message={editMessage}
+                            onClear={() => setEditStatus("idle")}
+                        />
+                        <button
+                            onClick={() => setEditTarget(null)}
+                            className="px-4 py-2 text-xs font-mono text-white/40 hover:text-white/70 uppercase tracking-wider transition-colors"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleEdit}
+                            disabled={editStatus === "loading" || !editUsername.trim()}
+                            className="px-4 py-2 text-xs font-black bg-brand text-black rounded-lg uppercase tracking-wider hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                            {editStatus === "loading" ? "Saving..." : "Save"}
                         </button>
                     </div>
                 </div>
