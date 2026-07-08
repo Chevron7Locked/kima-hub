@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { prisma } from "../utils/db";
 import { subsonicError, SubsonicError } from "../utils/subsonicResponse";
+import { logger } from "../utils/logger";
 
 export async function subsonicAuth(
     req: Request,
@@ -13,8 +14,19 @@ export async function subsonicAuth(
     const apiKey = req.query.apiKey as string | undefined;
     const password = req.query.p as string | undefined;
     const tokenMd5 = req.query.t as string | undefined;
+    const requestId = res.locals.subsonicRequestId as string | undefined;
+    const authMode = tokenMd5 ? "token" : apiKey ? "apiKey" : password ? "password" : "none";
+
+    logger.debug("[SubsonicAuth] Authenticating request", {
+        requestId,
+        path: req.path,
+        username,
+        authMode,
+        userAgent: req.get("user-agent") || "unknown",
+    });
 
     if (!username) {
+        logger.debug("[SubsonicAuth] Missing username parameter", { requestId, path: req.path });
         subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: u");
         return;
     }
@@ -28,6 +40,7 @@ export async function subsonicAuth(
         if (tokenMd5) {
             const salt = req.query.s as string | undefined;
             if (!salt) {
+                logger.debug("[SubsonicAuth] Missing salt for token auth", { requestId, path: req.path, username });
                 subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: s");
                 return;
             }
@@ -38,6 +51,7 @@ export async function subsonicAuth(
             });
 
             if (!user) {
+                logger.debug("[SubsonicAuth] Unknown user during token auth", { requestId, path: req.path, username });
                 subsonicError(req, res, SubsonicError.WRONG_CREDENTIALS, "Wrong username or password");
                 return;
             }
@@ -57,6 +71,7 @@ export async function subsonicAuth(
             }
 
             if (!matchedKeyId) {
+                logger.debug("[SubsonicAuth] Token auth failed", { requestId, path: req.path, username });
                 subsonicError(req, res, SubsonicError.WRONG_CREDENTIALS, "Wrong username or password");
                 return;
             }
@@ -64,6 +79,7 @@ export async function subsonicAuth(
             prisma.apiKey.update({ where: { id: matchedKeyId }, data: { lastUsed: new Date() } }).catch(() => {});
 
             req.user = user;
+            logger.debug("[SubsonicAuth] Token auth success", { requestId, path: req.path, username, userId: user.id });
             next();
             return;
         }
@@ -78,6 +94,7 @@ export async function subsonicAuth(
             });
 
             if (!keyRecord || keyRecord.user.username !== username) {
+                logger.debug("[SubsonicAuth] API key auth failed", { requestId, path: req.path, username });
                 subsonicError(req, res, SubsonicError.WRONG_CREDENTIALS, "Wrong username or password");
                 return;
             }
@@ -88,6 +105,12 @@ export async function subsonicAuth(
                 .catch(() => {});
 
             req.user = keyRecord.user;
+            logger.debug("[SubsonicAuth] API key auth success", {
+                requestId,
+                path: req.path,
+                username,
+                userId: keyRecord.user.id,
+            });
             next();
             return;
         }
@@ -116,17 +139,26 @@ export async function subsonicAuth(
             }
 
             if (!valid || !user) {
+                logger.debug("[SubsonicAuth] Password auth failed", { requestId, path: req.path, username });
                 subsonicError(req, res, SubsonicError.WRONG_CREDENTIALS, "Wrong username or password");
                 return;
             }
 
             req.user = { id: user.id, username: user.username, role: user.role };
+            logger.debug("[SubsonicAuth] Password auth success", { requestId, path: req.path, username, userId: user.id });
             next();
             return;
         }
 
+        logger.debug("[SubsonicAuth] Missing auth credentials", { requestId, path: req.path, username });
         subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: p or apiKey");
     } catch (_err) {
+        logger.error("[SubsonicAuth] Authentication error", {
+            requestId,
+            path: req.path,
+            username,
+            authMode,
+        });
         subsonicError(req, res, SubsonicError.GENERIC, "Authentication error");
     }
 }

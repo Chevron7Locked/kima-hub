@@ -3,14 +3,112 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { searchService } from "../../services/search";
-import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong } from "./mappers";
+import { wrap, clamp, parseIntParam, firstArtistGenre, mapArtist, mapAlbum, mapSong } from "./mappers";
 
 export const searchRouter = Router();
+
+function normalizeSearchQuery(rawQuery: string | undefined): string {
+    const query = (rawQuery ?? "").trim();
+
+    // Some clients send a literal quoted empty string (e.g. query=%22%22).
+    if (query === '""' || query === "''") {
+        return "";
+    }
+
+    return query;
+}
+
+async function getEmptySearchArtists(limit: number, offset: number) {
+    if (limit <= 0) return [];
+
+    return prisma.artist.findMany({
+        where: { libraryAlbumCount: { gt: 0 } },
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+        take: limit,
+        skip: offset,
+        select: {
+            id: true,
+            name: true,
+            displayName: true,
+            heroUrl: true,
+            libraryAlbumCount: true,
+        },
+    });
+}
+
+async function getEmptySearchAlbums(limit: number, offset: number) {
+    if (limit <= 0) return [];
+
+    return prisma.album.findMany({
+        where: { location: "LIBRARY", tracks: { some: {} } },
+        orderBy: [{ title: "asc" }, { id: "asc" }],
+        take: limit,
+        skip: offset,
+        select: {
+            id: true,
+            title: true,
+            displayTitle: true,
+            year: true,
+            coverUrl: true,
+            userCoverUrl: true,
+            artistId: true,
+            _count: { select: { tracks: true } },
+            artist: {
+                select: {
+                    name: true,
+                    displayName: true,
+                    genres: true,
+                    userGenres: true,
+                },
+            },
+        },
+    });
+}
+
+async function getEmptySearchTracks(limit: number, offset: number) {
+    if (limit <= 0) return [];
+
+    return prisma.track.findMany({
+        where: {
+            corrupt: false,
+            album: { location: "LIBRARY" },
+        },
+        orderBy: [{ title: "asc" }, { id: "asc" }],
+        take: limit,
+        skip: offset,
+        select: {
+            id: true,
+            title: true,
+            trackNo: true,
+            duration: true,
+            filePath: true,
+            mime: true,
+            fileSize: true,
+            album: {
+                select: {
+                    id: true,
+                    title: true,
+                    displayTitle: true,
+                    year: true,
+                    artistId: true,
+                    artist: {
+                        select: {
+                            name: true,
+                            displayName: true,
+                            genres: true,
+                            userGenres: true,
+                        },
+                    },
+                },
+            },
+        },
+    });
+}
 
 // ===================== SEARCH =====================
 
 searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async (req, res) => {
-    const query = (req.query.query as string | undefined) ?? "";
+    const query = normalizeSearchQuery(req.query.query as string | undefined);
 
     const artistCount = clamp(parseIntParam(req.query.artistCount as string | undefined, 20), 0, 500);
     const albumCount  = clamp(parseIntParam(req.query.albumCount  as string | undefined, 20), 0, 500);
@@ -23,7 +121,67 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
     const isLegacySearch = req.path.startsWith("/search.") || req.path.startsWith("/search/") || req.path.startsWith("/search");
     const responseKey = isSearch3 ? "searchResult3" : isLegacySearch ? "searchResult" : "searchResult2";
 
-    if (!query.trim()) {
+    if (!query) {
+        if (isSearch3) {
+            const [artists, albums, tracks] = await Promise.all([
+                getEmptySearchArtists(artistCount, artistOffset),
+                getEmptySearchAlbums(albumCount, albumOffset),
+                getEmptySearchTracks(songCount, songOffset),
+            ]);
+
+            const result: Record<string, unknown> = {};
+
+            if (artists.length > 0) {
+                result.artist = artists.map((artist) => mapArtist({
+                    ...artist,
+                    albumCount: artist.libraryAlbumCount,
+                }));
+            }
+
+            if (albums.length > 0) {
+                result.album = albums.map((album) => mapAlbum(
+                    {
+                        id: album.id,
+                        title: album.title,
+                        displayTitle: album.displayTitle,
+                        year: album.year,
+                        coverUrl: album.coverUrl,
+                        userCoverUrl: album.userCoverUrl,
+                        artistId: album.artistId,
+                        songCount: album._count.tracks,
+                        genre: firstArtistGenre(album.artist.genres, album.artist.userGenres),
+                    },
+                    album.artist.displayName || album.artist.name
+                ));
+            }
+
+            if (tracks.length > 0) {
+                result.song = tracks.map((track) => mapSong(
+                    {
+                        id: track.id,
+                        title: track.title,
+                        trackNo: track.trackNo,
+                        discNumber: null,
+                        duration: track.duration,
+                        filePath: track.filePath,
+                        mime: track.mime,
+                        fileSize: track.fileSize,
+                    },
+                    {
+                        id: track.album.id,
+                        title: track.album.title,
+                        displayTitle: track.album.displayTitle,
+                        year: track.album.year,
+                    },
+                    track.album.artist.displayName || track.album.artist.name,
+                    track.album.artistId,
+                    firstArtistGenre(track.album.artist.genres, track.album.artist.userGenres)
+                ));
+            }
+
+            return subsonicOk(req, res, { [responseKey]: result });
+        }
+
         return subsonicOk(req, res, { [responseKey]: {} });
     }
 
