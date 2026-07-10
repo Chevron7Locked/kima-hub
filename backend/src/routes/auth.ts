@@ -14,6 +14,8 @@ import {
     generateRefreshToken,
 } from "../middleware/auth";
 import { encrypt, decrypt } from "../utils/encryption";
+import { authenticateLdapUser, isLdapEnabled } from "../services/ldapAuth";
+import { ldapConfig } from "../config/ldap";
 
 const router = Router();
 
@@ -38,14 +40,71 @@ router.post("/login", async (req, res) => {
         // Timing-safe: always run bcrypt to prevent username enumeration
         const dummyHash = "$2b$10$invalidhashfortimingsafety.00000000000000000000";
         const valid = await bcrypt.compare(password, user?.passwordHash ?? dummyHash);
-        if (!user || !valid) {
+
+        let authenticatedUser = user && valid ? user : null;
+
+        // LDAP fallback: if local auth fails and LDAP is enabled, try directory auth.
+        // This preserves local auth behavior while allowing external LLDAP accounts.
+        if (!authenticatedUser && isLdapEnabled()) {
+            logger.debug(`[AUTH] Local auth failed for ${username}; attempting LDAP`);
+            const ldapResult = await authenticateLdapUser(username, password);
+
+            if (ldapResult.success && ldapResult.profile) {
+                const profile = ldapResult.profile;
+                logger.debug(`[AUTH] LDAP authentication succeeded for ${profile.username}`);
+
+                // Look up an existing local account for this LDAP username.
+                let localUser = await prisma.user.findUnique({
+                    where: { username: profile.username },
+                });
+
+                // Auto-provision a local user if none exists so that tokens,
+                // settings, and relationships work without schema changes.
+                if (!localUser) {
+                    logger.info(
+                        `[AUTH] Auto-provisioning local user from LDAP: ${profile.username}`
+                    );
+                    const placeholderHash = await bcrypt.hash(
+                        crypto.randomBytes(32).toString("hex"),
+                        10
+                    );
+                    localUser = await prisma.user.create({
+                        data: {
+                            username: profile.username,
+                            passwordHash: placeholderHash,
+                            role: ldapConfig.defaultRole,
+                            onboardingComplete: false,
+                        },
+                    });
+
+                    // Create default settings for the provisioned user
+                    await prisma.userSettings.create({
+                        data: {
+                            userId: localUser.id,
+                            playbackQuality: "original",
+                            wifiOnly: false,
+                            offlineEnabled: false,
+                            maxCacheSizeMb: 10240,
+                        },
+                    });
+                }
+
+                authenticatedUser = localUser;
+            } else {
+                logger.debug(
+                    `[AUTH] LDAP authentication failed for ${username}: ${ldapResult.error}`
+                );
+            }
+        }
+
+        if (!authenticatedUser) {
             logger.debug(`[AUTH] Invalid credentials for: ${username}`);
             return res.status(401).json({ error: "Invalid credentials" });
         }
         logger.debug(`[AUTH] Password verified for user: ${username}`);
 
         // Check if 2FA is enabled
-        if (user.twoFactorEnabled && user.twoFactorSecret) {
+        if (authenticatedUser.twoFactorEnabled && authenticatedUser.twoFactorSecret) {
             if (!token) {
                 return res.status(200).json({
                     requires2FA: true,
@@ -56,8 +115,8 @@ router.post("/login", async (req, res) => {
             // Check if it's a recovery code
             const isRecoveryCode = /^[A-F0-9]{8}$/i.test(token);
 
-            if (isRecoveryCode && user.twoFactorRecoveryCodes) {
-                const encryptedCodes = user.twoFactorRecoveryCodes;
+            if (isRecoveryCode && authenticatedUser.twoFactorRecoveryCodes) {
+                const encryptedCodes = authenticatedUser.twoFactorRecoveryCodes;
                 const decryptedCodes = decrypt2FASecret(encryptedCodes);
                 const hashedCodes = decryptedCodes.split(",");
 
@@ -75,7 +134,7 @@ router.post("/login", async (req, res) => {
 
                 hashedCodes.splice(codeIndex, 1);
                 await prisma.user.update({
-                    where: { id: user.id },
+                    where: { id: authenticatedUser.id },
                     data: {
                         twoFactorRecoveryCodes: encrypt2FASecret(
                             hashedCodes.join(",")
@@ -84,7 +143,7 @@ router.post("/login", async (req, res) => {
                 });
             } else {
                 // Verify TOTP token
-                const secret = decrypt2FASecret(user.twoFactorSecret);
+                const secret = decrypt2FASecret(authenticatedUser.twoFactorSecret);
                 const verified = speakeasy.totp.verify({
                     secret,
                     encoding: "base32",
@@ -100,23 +159,23 @@ router.post("/login", async (req, res) => {
 
         // Generate JWT tokens
         const jwtToken = generateToken({
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            tokenVersion: user.tokenVersion,
+            id: authenticatedUser.id,
+            username: authenticatedUser.username,
+            role: authenticatedUser.role,
+            tokenVersion: authenticatedUser.tokenVersion,
         });
         const refreshToken = generateRefreshToken({
-            id: user.id,
-            tokenVersion: user.tokenVersion,
+            id: authenticatedUser.id,
+            tokenVersion: authenticatedUser.tokenVersion,
         });
 
         res.json({
             token: jwtToken,
             refreshToken: refreshToken,
             user: {
-                id: user.id,
-                username: user.username,
-                role: user.role,
+                id: authenticatedUser.id,
+                username: authenticatedUser.username,
+                role: authenticatedUser.role,
             },
         });
     } catch (err) {

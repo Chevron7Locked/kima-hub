@@ -6,6 +6,9 @@ import packageJson from "../package.json";
 
 dotenv.config();
 
+// Import LDAP config to ensure it is validated and logged on startup
+import "./config/ldap";
+
 // Validate critical environment variables on startup
 const envSchema = z.object({
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
