@@ -36,6 +36,7 @@ Thanks for your patience while I work through this.
     -   [Using the Vibe System](#using-the-vibe-system)
 -   [Administration](#administration)
 -   [Architecture](#architecture)
+-   [Development](#development)
 -   [Roadmap](#roadmap)
 -   [License](#license)
 -   [Acknowledgments](#acknowledgments)
@@ -982,6 +983,110 @@ Kima consists of several components working together:
 | Audio Analyzer CLAP | Vibe similarity embeddings (LAION CLAP)    | --           |
 
 ---
+
+## Development
+
+You can run the backend and frontend directly on your machine, while PostgreSQL, Redis, and the audio analyzers run in Docker.
+
+### Prerequisites
+
+- **Node.js 20+** and npm
+- **Docker** and the Docker Compose plugin
+
+### 1. Start the infrastructure
+
+`docker-compose.dev.yml` provides PostgreSQL (with pgvector), Redis, and the two
+audio analyzer services. PostgreSQL and Redis are published on non-default host
+ports (5433 / 6380) to avoid clashing with any local instances.
+
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
+
+In case you only want the database and cache and not have the analysers running:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d postgres redis
+```
+
+### 2. Configure the backend
+
+Create `backend/.env` from the example and fill in the required values:
+
+```bash
+cp .env.example backend/.env
+```
+
+At a minimum, set the following in `backend/.env`:
+
+```bash
+DATABASE_URL="postgresql://kima:kima@localhost:5433/kima"
+REDIS_URL="redis://localhost:6380"
+MUSIC_PATH=/path/to/your/music
+
+# Generate each with: openssl rand -base64 32
+SESSION_SECRET=<32+ character secret>
+SETTINGS_ENCRYPTION_KEY=<32+ character secret>
+
+# Required by the audio analyzers to authenticate their callbacks to the backend.
+INTERNAL_API_SECRET=kima-internal-secret-change-me
+```
+
+### 3. Install dependencies and set up the database
+
+```bash
+cd backend
+npm install
+npx prisma migrate deploy # apply migrations to the dev database manually.
+```
+
+### 4. Run the backend
+
+```bash
+cd backend
+npm run dev              # tsx watch, hot-reloads on save (http://localhost:3006)
+```
+
+### 5. Run the frontend
+
+In a second terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev              # Next.js dev server (http://localhost:3030)
+```
+
+The frontend proxies API requests to the backend at `http://127.0.0.1:3006` by
+default, so no extra configuration is needed. Open <http://localhost:3030> and
+create your account.
+
+### Dev ports
+
+| Service    | URL / Port              |
+| ---------- | ----------------------- |
+| Frontend   | <http://localhost:3030>   |
+| Backend    | <http://localhost:3006>   |
+| PostgreSQL | localhost:5433          |
+| Redis      | localhost:6380          |
+
+### Useful commands
+
+```bash
+# Backend
+npm run typecheck        # type-check without emitting
+npm test                 # run the Jest test suite
+npx prisma studio        # browse the database in your browser
+
+# Stop the dev infrastructure (keeps data)
+docker compose -f docker-compose.dev.yml stop
+
+# Tear it down (add -v to also delete the database volume)
+docker compose -f docker-compose.dev.yml down
+```
+
+---
+
 
 ## Roadmap
 

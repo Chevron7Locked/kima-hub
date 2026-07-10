@@ -77,6 +77,19 @@ except ImportError:
             """Compatibility shim for Python < 3.9"""
             pass
 
+
+def _pool_kwargs(max_tasks_per_child):
+    """Build ProcessPoolExecutor kwargs, honoring max_tasks_per_child only where supported.
+
+    The max_tasks_per_child parameter was added to ProcessPoolExecutor in
+    Python 3.11. On older interpreters (e.g. Python 3.8 in the service image)
+    passing it raises TypeError, so we omit it there.
+    """
+    if sys.version_info >= (3, 11):
+        return {"max_tasks_per_child": max_tasks_per_child}
+    return {}
+
+
 # Force spawn mode for TensorFlow compatibility (must be called before any multiprocessing)
 try:
     multiprocessing.set_start_method('spawn', force=True)
