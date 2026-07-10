@@ -11,7 +11,7 @@
 
 services:
     postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         container_name: kima_dev_db
         environment:
             POSTGRES_USER: kima
@@ -67,7 +67,3 @@ services:
 
 volumes:
     postgres_dev_data:
-
-
-
-
