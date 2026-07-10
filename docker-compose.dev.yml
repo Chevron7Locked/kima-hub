@@ -40,13 +40,13 @@ services:
             timeout: 5s
             retries: 5
 
-    # Audio Analyzer - Essentia with ML models for Enhanced vibe matching
+    # Audio Analyzer - Essential with ML models for Enhanced vibe matching
     audio-analyzer:
         build:
             context: ./services/audio-analyzer
         container_name: kima_audio_analyzer
         environment:
-            # Connect to host machine's services (or Docker services)
+            # Connect to the compose Postgres/Redis via their service names
             REDIS_URL: redis://redis:6379
             DATABASE_URL: postgresql://kima:kima@postgres:5432/kima
             # Music path inside container (mounted from host)
@@ -56,8 +56,36 @@ services:
             BRPOP_TIMEOUT: 10
             MODEL_IDLE_TIMEOUT: 60
         volumes:
-            # Mount your music library - UPDATE THIS PATH
-            - "${MUSIC_PATH:-C:/Users/kevin/Music}:/music:ro"
+            - "${MUSIC_PATH:-./music}:/music:ro"
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        restart: unless-stopped
+
+    audio-analyzer-clap:
+        build:
+            context: ./services/audio-analyzer-clap
+        container_name: kima_audio_analyzer_clap
+        env_file:
+            - .env
+        environment:
+            REDIS_URL: redis://redis:6379
+            DATABASE_URL: postgresql://kima:kima@postgres:5432/kima
+            # Backend runs on the host during dev, reach it via the docker host gateway
+            BACKEND_URL: http://host.docker.internal:3006
+            MUSIC_PATH: /music
+            SLEEP_INTERVAL: 5
+            NUM_WORKERS: 2
+            THREADS_PER_WORKER: 1
+            MODEL_IDLE_TIMEOUT: 300
+            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-kima-internal-secret-change-me}
+        volumes:
+            - "${MUSIC_PATH:-./music}:/music:ro"
+        # Lets the container resolve host.docker.internal to the host machine (Linux)
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
         depends_on:
             postgres:
                 condition: service_healthy
