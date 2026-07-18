@@ -132,6 +132,65 @@ MODEL_IDLE_TIMEOUT = int(os.getenv('MODEL_IDLE_TIMEOUT', '300'))
 # Debounce delay for worker resize (seconds) -- prevents pool churn when user drags a slider
 RESIZE_DEBOUNCE_SECONDS = 5
 
+# Forced teardown is reserved for timeout/recovery paths. Bounded waits keep a
+# wedged native TensorFlow/Essentia worker from hanging recovery indefinitely.
+PROCESS_TERMINATE_WAIT_SECONDS = 2
+PROCESS_KILL_WAIT_SECONDS = 1
+
+
+def _force_shutdown_executor(executor):
+    """Cancel pending work and forcibly reap an executor's live processes.
+
+    ProcessPoolExecutor has no public API for terminating running work. The
+    CPython-specific process snapshot is guarded so other implementations can
+    still cancel queued work and request nonblocking shutdown safely.
+    """
+    if executor is None:
+        return
+
+    processes = []
+    executor_processes = getattr(executor, '_processes', None)
+    if executor_processes is not None:
+        try:
+            processes = list(executor_processes.values())
+        except (AttributeError, RuntimeError):
+            logger.warning("Could not snapshot process pool workers for forced teardown")
+
+    try:
+        executor.shutdown(wait=False, cancel_futures=True)
+    except TypeError:
+        # cancel_futures was added in Python 3.9.
+        try:
+            executor.shutdown(wait=False)
+        except Exception as e:
+            logger.warning(f"Error requesting compatible executor shutdown: {e}")
+    except Exception as e:
+        logger.warning(f"Error requesting executor shutdown: {e}")
+
+    for process in processes:
+        try:
+            if process.is_alive():
+                process.terminate()
+        except Exception as e:
+            logger.warning(f"Error terminating pool worker: {e}")
+
+    for process in processes:
+        try:
+            process.join(timeout=PROCESS_TERMINATE_WAIT_SECONDS)
+        except Exception as e:
+            logger.warning(f"Error joining terminated pool worker: {e}")
+
+    for process in processes:
+        try:
+            if process.is_alive():
+                logger.warning(f"Pool worker {process.pid} did not terminate; killing it")
+                process.kill()
+                process.join(timeout=PROCESS_KILL_WAIT_SECONDS)
+        except (AttributeError, NotImplementedError):
+            logger.warning("Pool worker survived termination but kill is unavailable")
+        except Exception as e:
+            logger.warning(f"Error killing pool worker: {e}")
+
 
 class DatabaseConnection:
     """PostgreSQL connection manager"""
@@ -1302,10 +1361,7 @@ class AnalysisWorker:
             return
         if self.executor is not None:
             # Stale executor reference, clean it up
-            try:
-                self.executor.shutdown(wait=False)
-            except Exception:
-                pass
+            self._force_shutdown_pool()
         logger.info(f"Starting worker pool with {NUM_WORKERS} processes...")
         self.executor = ProcessPoolExecutor(
             max_workers=NUM_WORKERS,
@@ -1329,7 +1385,7 @@ class AnalysisWorker:
         # Also shut down scan pool when idle
         if self.scan_executor:
             try:
-                self.scan_executor.shutdown(wait=False)
+                self.scan_executor.shutdown(wait=True)
             except Exception:
                 pass
             self.scan_executor = None
@@ -1349,14 +1405,7 @@ class AnalysisWorker:
         """
         logger.warning("Recreating process pool due to broken workers...")
 
-        # Attempt graceful shutdown first
-        if self.executor:
-            try:
-                self.executor.shutdown(wait=False)
-            except Exception as e:
-                logger.warning(f"Error during executor shutdown: {e}")
-            self.executor = None
-            self.pool_active = False
+        self._force_shutdown_pool()
 
         # Small delay to allow cleanup
         time.sleep(2)
@@ -1364,6 +1413,19 @@ class AnalysisWorker:
         # Create fresh pool
         self._ensure_pool()
         logger.info(f"Process pool recreated with {NUM_WORKERS} workers")
+
+    def _force_shutdown_pool(self):
+        """Force worker teardown and reset the normal pool state."""
+        executor = self.executor
+        self.executor = None
+        self.pool_active = False
+        _force_shutdown_executor(executor)
+
+    def _force_shutdown_scan_pool(self):
+        """Force worker teardown and reset the scan pool state."""
+        executor = self.scan_executor
+        self.scan_executor = None
+        _force_shutdown_executor(executor)
     
     def _cleanup_stale_processing(self):
         """Reset tracks stuck in 'processing' status (from crashed workers).
@@ -1824,12 +1886,7 @@ class AnalysisWorker:
                     failed += 1
                     logger.error(f"✗ Batch timeout (no penalty): {track_info[1]}")
             # Restart the pool to evict any stuck worker processes
-            try:
-                self.executor.shutdown(wait=False)
-            except Exception:
-                pass
-            self.executor = None
-            self.pool_active = False
+            self._force_shutdown_pool()
 
         elapsed = time.time() - start_time
         rate = len(tracks) / elapsed if elapsed > 0 else 0
@@ -2078,12 +2135,7 @@ class AnalysisWorker:
                     """, (tid,))
             self.db.commit()
             logger.error("Scan pool crash/timeout -- reset remaining tracks to pending")
-            try:
-                if self.scan_executor:
-                    self.scan_executor.shutdown(wait=False)
-            except Exception:
-                pass
-            self.scan_executor = None
+            self._force_shutdown_scan_pool()
         except Exception as e:
             logger.error(f"Scan validation failed: {e}")
             self.db.rollback()
@@ -2113,4 +2165,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
