@@ -149,7 +149,7 @@ export class SearchService {
         offset = 0,
     }: SearchOptions): Promise<ArtistSearchResult[]> {
         if (!query || query.trim().length === 0) {
-            return [];
+            return this.searchArtistsFallback({ query: "", limit, offset });
         }
 
         const tsquery = this.queryToTsquery(query);
@@ -241,7 +241,7 @@ export class SearchService {
         offset = 0,
     }: SearchOptions): Promise<AlbumSearchResult[]> {
         if (!query || query.trim().length === 0) {
-            return [];
+            return this.searchAlbumsFallback({ query: "", limit, offset });
         }
 
         const tsquery = this.queryToTsquery(query);
@@ -348,7 +348,7 @@ export class SearchService {
         offset = 0,
     }: SearchOptions): Promise<TrackSearchResult[]> {
         if (!query || query.trim().length === 0) {
-            return [];
+            return this.searchTracksFallback({ query: "", limit, offset });
         }
 
         const tsquery = this.queryToTsquery(query);
