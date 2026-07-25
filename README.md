@@ -432,6 +432,7 @@ Kima uses several sensitive environment variables. Never commit your `.env` file
 -   **Password changes** - Changing your password invalidates all existing sessions
 -   **Session cookies** - Secured with `httpOnly`, `sameSite=strict`, and `secure` (in production)
 -   **Encryption validation** - Encryption key is validated on startup to prevent insecure defaults
+-   **Optional LDAP/LLDAP support** - Kima can authenticate against an external LDAP directory (including LLDAP) as a fallback after local bcrypt auth. Set `LDAP_ENABLED=true` and configure `LDAP_URL`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_BASE_DN`, and `LDAP_USER_FILTER`. Users who succeed via LDAP but do not exist locally are auto-provisioned with the role configured in `LDAP_DEFAULT_ROLE`. See `backend/.env.example` for a complete LLDAP sample.
 
 ### Webhook Security
 
