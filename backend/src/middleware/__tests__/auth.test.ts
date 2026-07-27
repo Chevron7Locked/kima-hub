@@ -47,6 +47,11 @@ function mockReq(overrides: Partial<Request> = {}): Request {
         headers: {},
         query: {},
         session: {},
+        // Express always populates `path`; the query-token branch reads it to
+        // decide whether a stream-scoped ticket is on a stream route. Omitting
+        // it here made that branch throw into a swallowed catch and report a
+        // silent auth failure.
+        path: '/api/library/albums',
         ...overrides,
     } as unknown as Request;
 }

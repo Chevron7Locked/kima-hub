@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken } from "../middleware/auth";
+import { requireAuthOrToken, requireAdmin } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { lastFmService } from "../services/lastfm";
 import { startOfWeek, endOfWeek } from "date-fns";
@@ -2260,10 +2260,22 @@ router.delete("/exclusions/:id", async (req, res) => {
 
 // POST /discover/cleanup-lidarr - Remove discovery-only artists from Lidarr
 // This cleans up artists that were added for discovery but shouldn't remain
-router.post("/cleanup-lidarr", async (req, res) => {
+// Garbage-collects artists that discovery added to Lidarr purely to fetch
+// candidate albums, and which nothing now references. DESTRUCTIVE: removing an
+// artist also removes its files from disk.
+//
+// Dry-run is the DEFAULT. Pass ?dryRun=false to actually delete.
+//
+// The protection sets below are deliberately GLOBAL, not per-user: Lidarr is one
+// shared instance for the whole install, so an artist must survive if *any* user
+// owns or liked their work. Scoping these by the calling user would let one user
+// delete artists another user cares about.
+router.post("/cleanup-lidarr", requireAdmin, async (req, res) => {
     try {
+        const dryRun = req.query.dryRun !== "false";
+
         logger.debug(
-            "\n[CLEANUP] Starting Lidarr cleanup of discovery-only artists..."
+            `\n[CLEANUP] Starting Lidarr cleanup of discovery-only artists (dryRun=${dryRun})...`
         );
 
         const settings = await getSystemSettings();
@@ -2276,16 +2288,7 @@ router.post("/cleanup-lidarr", async (req, res) => {
             return res.status(400).json({ error: "Lidarr not configured" });
         }
 
-        // Get all artists from Lidarr
-        const lidarrResponse = await axios.get(
-            `${settings.lidarrUrl}/api/v1/artist`,
-            {
-                headers: { "X-Api-Key": settings.lidarrApiKey },
-                timeout: 30000,
-            }
-        );
-
-        const lidarrArtists = lidarrResponse.data;
+        const lidarrArtists = await lidarrService.getArtists();
         logger.debug(
             `[CLEANUP] Found ${lidarrArtists.length} artists in Lidarr`
         );
@@ -2346,18 +2349,23 @@ router.post("/cleanup-lidarr", async (req, res) => {
 
                 // This artist has no library albums and no active/kept discovery albums
                 // They should be removed from Lidarr
+                if (dryRun) {
+                    artistsRemoved.push(artistName);
+                    continue;
+                }
+
                 logger.debug(
                     `[CLEANUP] Removing discovery-only artist: ${artistName}`
                 );
 
-                await axios.delete(
-                    `${settings.lidarrUrl}/api/v1/artist/${lidarrArtist.id}`,
-                    {
-                        params: { deleteFiles: true },
-                        headers: { "X-Api-Key": settings.lidarrApiKey },
-                        timeout: 30000,
-                    }
+                const deleted = await lidarrService.deleteArtistById(
+                    lidarrArtist.id,
+                    true
                 );
+                if (!deleted.success) {
+                    errors.push(`Failed to remove ${artistName}: ${deleted.message}`);
+                    continue;
+                }
 
                 artistsRemoved.push(artistName);
                 logger.debug(`[CLEANUP] Removed: ${artistName}`);
@@ -2375,6 +2383,8 @@ router.post("/cleanup-lidarr", async (req, res) => {
 
         res.json({
             success: true,
+            dryRun,
+            // In a dry run this is the list that WOULD be removed; nothing was touched.
             removed: artistsRemoved,
             kept: artistsKept,
             errors,
@@ -2399,9 +2409,15 @@ router.post("/cleanup-lidarr", async (req, res) => {
 // POST /discover/fix-tagging - Fix albums incorrectly tagged as LIBRARY that should be DISCOVER
 // This repairs existing bad data caused by scanner timing issues
 // IMPORTANT: Does NOT touch albums that user has LIKED (discovery_liked) or native library
-router.post("/fix-tagging", async (req, res) => {
+// DESTRUCTIVE: re-tags albums LIBRARY -> DISCOVER and deletes OwnedAlbum rows.
+// Dry-run is the DEFAULT; pass ?dryRun=false to actually write.
+router.post("/fix-tagging", requireAdmin, async (req, res) => {
     try {
-        logger.debug("\n[FIX-TAGGING] Starting album tagging repair...");
+        const dryRun = req.query.dryRun !== "false";
+
+        logger.debug(
+            `\n[FIX-TAGGING] Starting album tagging repair (dryRun=${dryRun})...`
+        );
 
         // Get all discovery artists (from DiscoveryAlbum records)
         const discoveryArtists = await prisma.discoveryAlbum.findMany({
@@ -2413,6 +2429,39 @@ router.post("/fix-tagging", async (req, res) => {
             `[FIX-TAGGING] Found ${discoveryArtists.length} artists with discovery records`
         );
 
+        // Pre-load both protection sets in two queries instead of two per artist.
+        const candidateMbids = discoveryArtists
+            .map((da) => da.artistMbid)
+            .filter((mbid): mbid is string => Boolean(mbid));
+
+        const protectedByOwnership = new Set(
+            (
+                await prisma.ownedAlbum.findMany({
+                    where: {
+                        artist: { mbid: { in: candidateMbids } },
+                        source: { in: ["native_scan", "discovery_liked"] },
+                    },
+                    select: { artist: { select: { mbid: true } } },
+                    distinct: ["artistId"],
+                })
+            )
+                .map((oa) => oa.artist.mbid)
+                .filter(Boolean) as string[]
+        );
+
+        const protectedByLikedDiscovery = new Set(
+            (
+                await prisma.discoveryAlbum.findMany({
+                    where: {
+                        artistMbid: { in: candidateMbids },
+                        status: { in: ["LIKED", "MOVED"] },
+                    },
+                    select: { artistMbid: true },
+                    distinct: ["artistMbid"],
+                })
+            ).map((da) => da.artistMbid)
+        );
+
         let albumsFixed = 0;
         let ownedRecordsRemoved = 0;
         const fixedArtists: string[] = [];
@@ -2420,34 +2469,17 @@ router.post("/fix-tagging", async (req, res) => {
         for (const da of discoveryArtists) {
             if (!da.artistMbid) continue;
 
-            // Check if artist has ANY protected content:
+            // Protected content:
             // 1. native_scan = real user library from before discovery
-            // 2. discovery_liked = user liked a discovery album (should be kept!)
-            const hasProtectedContent = await prisma.ownedAlbum.findFirst({
-                where: {
-                    artist: { mbid: da.artistMbid },
-                    source: { in: ["native_scan", "discovery_liked"] },
-                },
-            });
-
-            if (hasProtectedContent) {
-                // Artist has protected content - don't touch their albums
+            // 2. discovery_liked / LIKED / MOVED = user chose to keep it
+            if (protectedByOwnership.has(da.artistMbid)) {
                 logger.debug(
-                    `[FIX-TAGGING] Skipping ${da.artistName} - has protected content (${hasProtectedContent.source})`
+                    `[FIX-TAGGING] Skipping ${da.artistName} - has protected content`
                 );
                 continue;
             }
 
-            // Also check if artist has any LIKED discovery albums (double-check)
-            const hasLikedDiscovery = await prisma.discoveryAlbum.findFirst({
-                where: {
-                    artistMbid: da.artistMbid,
-                    status: { in: ["LIKED", "MOVED"] },
-                },
-            });
-
-            if (hasLikedDiscovery) {
-                // User liked albums from this artist - don't touch
+            if (protectedByLikedDiscovery.has(da.artistMbid)) {
                 logger.debug(
                     `[FIX-TAGGING] Skipping ${da.artistName} - has LIKED discovery albums`
                 );
@@ -2456,14 +2488,20 @@ router.post("/fix-tagging", async (req, res) => {
 
             // This artist has NO protected content - they're purely an ACTIVE discovery artist
             // Fix any of their albums that are incorrectly tagged as LIBRARY
-            const mistaggedAlbums = await prisma.album.findMany({
+            const mistaggedCount = await prisma.album.count({
                 where: {
                     artist: { mbid: da.artistMbid },
                     location: "LIBRARY",
                 },
             });
 
-            if (mistaggedAlbums.length > 0) {
+            if (mistaggedCount > 0) {
+                if (dryRun) {
+                    albumsFixed += mistaggedCount;
+                    fixedArtists.push(da.artistName);
+                    continue;
+                }
+
                 // Update all these albums to DISCOVER
                 const updated = await prisma.album.updateMany({
                     where: {
@@ -2497,6 +2535,8 @@ router.post("/fix-tagging", async (req, res) => {
 
         res.json({
             success: true,
+            dryRun,
+            // In a dry run these are the counts that WOULD change; nothing was written.
             albumsFixed,
             ownedRecordsRemoved,
             fixedArtists,

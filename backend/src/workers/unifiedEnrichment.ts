@@ -360,8 +360,25 @@ export async function startUnifiedEnrichmentWorker() {
  */
 function scheduleNextEnrichmentCycle() {
     enrichmentInterval = setTimeout(async () => {
-        await runEnrichmentCycle(false);
-        scheduleNextEnrichmentCycle();
+        // The reschedule MUST be in a finally. Without it, a single rejection
+        // from runEnrichmentCycle (a Redis reconnect, a DB failover) skips the
+        // next-schedule call and the enrichment chain is dead for the lifetime
+        // of the process, silently -- the only trace is one unhandledRejection
+        // log line.
+        try {
+            await runEnrichmentCycle(false);
+        } catch (error) {
+            logger.error(
+                "[Enrichment] Cycle failed; continuing with the next cycle:",
+                error instanceof Error ? error.message : String(error)
+            );
+        } finally {
+            // stopUnifiedEnrichmentWorker() nulls this out; don't resurrect the
+            // chain after an explicit stop.
+            if (enrichmentInterval !== null) {
+                scheduleNextEnrichmentCycle();
+            }
+        }
     }, ENRICHMENT_INTERVAL_MS);
 }
 

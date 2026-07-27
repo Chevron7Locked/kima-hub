@@ -32,6 +32,10 @@ jest.mock('../../middleware/auth', () => ({
         req.user = { id: 'user-123' };
         next();
     },
+    requireAdmin: (req: any, _res: any, next: any) => {
+        req.user = { id: 'user-123', role: 'admin' };
+        next();
+    },
 }));
 
 jest.mock('../../services/lastfm', () => ({ lastFmService: {} }));

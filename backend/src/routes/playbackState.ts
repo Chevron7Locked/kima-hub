@@ -85,10 +85,27 @@ router.post("/", requireAuth, async (req, res) => {
             }
         }
         
-        const safeCurrentIndex = Math.min(
-            Math.max(0, currentIndex || 0),
-            safeQueue?.length ? safeQueue.length - 1 : 0
-        );
+        // A request without a `queue` is a partial update — a shuffle toggle, or a
+        // track change within the queue the client already has. It must NOT clear
+        // the stored queue: only an explicit array replaces it. Same for the fields
+        // below; an omitted field is left alone rather than reset to its default.
+        const queueProvided = Array.isArray(queue);
+
+        const safeCurrentIndex = queueProvided
+            ? Math.min(
+                  Math.max(0, currentIndex || 0),
+                  safeQueue?.length ? safeQueue.length - 1 : 0
+              )
+            : Math.max(0, currentIndex || 0);
+
+        const queueUpdate = queueProvided
+            ? {
+                  queue: safeQueue === null ? Prisma.DbNull : safeQueue,
+                  currentIndex: safeCurrentIndex,
+              }
+            : typeof currentIndex === "number"
+              ? { currentIndex: safeCurrentIndex }
+              : {};
 
         const playbackState = await prisma.playbackState.upsert({
             where: { userId },
@@ -97,9 +114,8 @@ router.post("/", requireAuth, async (req, res) => {
                 trackId: trackId || null,
                 audiobookId: audiobookId || null,
                 podcastId: podcastId || null,
-                queue: safeQueue === null ? Prisma.DbNull : safeQueue,
-                currentIndex: safeCurrentIndex,
-                isShuffle: isShuffle || false,
+                ...queueUpdate,
+                ...(typeof isShuffle === "boolean" ? { isShuffle } : {}),
             },
             create: {
                 userId,

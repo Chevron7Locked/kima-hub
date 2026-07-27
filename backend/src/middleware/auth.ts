@@ -170,7 +170,12 @@ async function authenticateRequest(
                 }
                 // Stream-scoped ticket on a non-stream path: fall through to other auth methods
             } catch (error) {
-                // Token invalid, try other methods
+                // Token invalid, try other methods. Log non-JWT errors: a bug in
+                // this block (e.g. reading a property off an absent req field)
+                // would otherwise be swallowed and surface only as a silent 401.
+                if (!(error instanceof jwt.JsonWebTokenError)) {
+                    logger.error("Query-token auth error:", error);
+                }
             }
         }
     }
