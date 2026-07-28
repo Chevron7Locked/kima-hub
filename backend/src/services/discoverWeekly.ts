@@ -13,6 +13,10 @@
 
 import { logger } from "../utils/logger";
 import { normalizeArtistName } from "../utils/artistNormalization";
+import { hasRealMbid } from "./artistIdentity";
+// Canonical definition lives with the seeding service; this file used to declare
+// a second, subtly different copy of it.
+import type { SeedArtist } from "./discovery/discoverySeeding";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import axios from "axios";
@@ -35,11 +39,6 @@ import { shuffleArray } from "../utils/shuffle";
 import { updateArtistCounts } from "./artistCountsService";
 import { config as appConfig } from "../config";
 import { eventBus } from "./eventBus";
-
-interface SeedArtist {
-    name: string;
-    mbid?: string;
-}
 
 interface RecommendedAlbum {
     artistName: string;
@@ -1966,7 +1965,7 @@ class DiscoverWeeklyService {
         artistMbid: string | undefined
     ): Promise<boolean> {
         // Check by MBID first (most accurate)
-        if (artistMbid && !artistMbid.startsWith("temp-")) {
+        if (hasRealMbid(artistMbid)) {
             const byMbid = await prisma.artist.findFirst({
                 where: { mbid: artistMbid },
                 include: { albums: { take: 1 } },

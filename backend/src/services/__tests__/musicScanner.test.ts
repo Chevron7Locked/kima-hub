@@ -51,7 +51,6 @@ import { MusicScannerService } from '../musicScanner';
 import {
     normalizeArtistName,
     canonicalizeVariousArtists,
-    extractPrimaryArtist,
     sanitizeTagString,
     collapseForComparison,
     parseArtistFromPath,
@@ -206,47 +205,6 @@ describe('canonicalizeVariousArtists', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// extractPrimaryArtist
-// ---------------------------------------------------------------------------
-
-describe('extractPrimaryArtist', () => {
-    it('extracts primary from "feat." collaborations', () => {
-        expect(extractPrimaryArtist('Artist A feat. Artist B')).toBe('Artist A');
-    });
-
-    it('extracts primary from "ft." collaborations', () => {
-        expect(extractPrimaryArtist('Artist A ft. Artist B')).toBe('Artist A');
-    });
-
-    it('extracts primary from "featuring" collaborations', () => {
-        expect(extractPrimaryArtist('Artist A featuring Artist B')).toBe('Artist A');
-    });
-
-    it('extracts primary from "x" hip-hop collaboration separator', () => {
-        expect(extractPrimaryArtist('Artist A x Artist B')).toBe('Artist A');
-    });
-
-    it('preserves "Of Mice & Men" as a band name', () => {
-        expect(extractPrimaryArtist('Of Mice & Men')).toBe('Of Mice & Men');
-    });
-
-    it('preserves "Earth, Wind & Fire" as a band name', () => {
-        expect(extractPrimaryArtist('Earth, Wind & Fire')).toBe('Earth, Wind & Fire');
-    });
-
-    it('preserves "The Naked and Famous" as a band name', () => {
-        expect(extractPrimaryArtist('The Naked and Famous')).toBe('The Naked and Famous');
-    });
-
-    it('splits "CHVRCHES & Robert Smith" as collaboration (both parts >= 2 words)', () => {
-        expect(extractPrimaryArtist('CHVRCHES & Robert Smith')).toBe('CHVRCHES');
-    });
-
-    it('returns "Unknown Artist" for empty string', () => {
-        expect(extractPrimaryArtist('')).toBe('Unknown Artist');
-    });
-});
 
 // ---------------------------------------------------------------------------
 // sanitizeTagString

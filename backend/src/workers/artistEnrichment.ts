@@ -7,6 +7,7 @@ import { fanartService } from "../services/fanart";
 import { deezerService } from "../services/deezer";
 import { musicBrainzService } from "../services/musicbrainz";
 import { normalizeArtistName } from "../utils/artistNormalization";
+import { hasRealMbid } from "../services/artistIdentity";
 import { coverArtService } from "../services/coverArt";
 import { redisClient } from "../utils/redis";
 import { downloadAndStoreImage, isNativePath, nativeFileExists } from "../services/imageStorage";
@@ -33,7 +34,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
 
     try {
         // If artist has a temp MBID, try to get the real one from MusicBrainz
-        if (artist.mbid.startsWith("temp-")) {
+        if (!hasRealMbid(artist.mbid)) {
             logger.debug(
                 `${logPrefix} Temp MBID detected, searching MusicBrainz...`
             );
@@ -92,7 +93,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
             : null;
         let genres: string[] = [];
 
-        if (!artist.mbid.startsWith("temp-")) {
+        if (hasRealMbid(artist.mbid)) {
             logger.debug(
                 `${logPrefix} Wikidata: Fetching for MBID ${artist.mbid}...`
             );
@@ -131,9 +132,9 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                 `${logPrefix} Last.fm: Fetching (need summary: ${!summary}, need image: ${!heroUrl})...`
             );
             try {
-                const validMbid = artist.mbid.startsWith("temp-")
-                    ? undefined
-                    : artist.mbid;
+                const validMbid = hasRealMbid(artist.mbid)
+                    ? artist.mbid
+                    : undefined;
                 const lastfmInfo = await lastFmService.getArtistInfo(
                     artist.name,
                     validMbid
@@ -172,7 +173,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
 
         // Image fallbacks run independently of Last.fm success
         // Try Fanart.tv (only with real MBID)
-        if (!heroUrl && !artist.mbid.startsWith("temp-")) {
+        if (!heroUrl && hasRealMbid(artist.mbid)) {
             logger.debug(
                 `${logPrefix} Fanart.tv: Fetching for MBID ${artist.mbid}...`
             );
@@ -216,7 +217,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
         }
 
         // Genre fallback: MusicBrainz curated genres (if Last.fm didn't return any)
-        if (genres.length === 0 && !artist.mbid.startsWith("temp-")) {
+        if (genres.length === 0 && hasRealMbid(artist.mbid)) {
             try {
                 const mbArtist = await musicBrainzService.getArtist(artist.mbid, ["genres"]);
                 if (mbArtist?.genres && Array.isArray(mbArtist.genres)) {
@@ -242,9 +243,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
         }> = [];
         try {
             // Filter out temp MBIDs
-            const validMbid = artist.mbid.startsWith("temp-")
-                ? ""
-                : artist.mbid;
+            const validMbid = hasRealMbid(artist.mbid) ? artist.mbid : "";
             similarArtists = await lastFmService.getSimilarArtists(
                 validMbid,
                 artist.name

@@ -18,6 +18,7 @@ import {
   getArtistDisplaySummary,
 } from "../../utils/metadataOverrides";
 import { safeError } from "../../utils/errors";
+import { hasRealMbid } from "../../services/artistIdentity";
 import pLimit from "p-limit";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
 
@@ -197,7 +198,7 @@ router.get("/artists", async (req, res) => {
 
       return {
         id: artist.id,
-        mbid: artist.mbid?.startsWith("temp-") ? null : artist.mbid,
+        mbid: hasRealMbid(artist.mbid) ? artist.mbid : null,
         name: artist.name,
         heroUrl: coverArt,
         coverArt,
@@ -400,10 +401,9 @@ router.get("/artists/:id", async (req, res) => {
       `[Artist] Found ${dbAlbums.length} albums from database (actual owned files)`,
     );
 
-    const shouldFetchDiscography =
-      effectiveMbid && !effectiveMbid.startsWith("temp-");
-
-    if (shouldFetchDiscography) {
+    // Inline guard, not a boolean intermediate: the type predicate has to be in
+    // the condition for effectiveMbid to narrow to string inside the block.
+    if (hasRealMbid(effectiveMbid)) {
       try {
         const discoCacheKey = `discography:${effectiveMbid}`;
         let releaseGroups: any[] = [];
@@ -551,7 +551,7 @@ router.get("/artists/:id", async (req, res) => {
         );
       } else {
         const validMbid =
-          effectiveMbid && !effectiveMbid.startsWith("temp-")
+          hasRealMbid(effectiveMbid)
             ? effectiveMbid
             : "";
         lastfmTopTracks = await lastFmService.getArtistTopTracks(
@@ -780,7 +780,7 @@ router.get("/artists/:id", async (req, res) => {
 
         try {
           const validMbid =
-            effectiveMbid && !effectiveMbid.startsWith("temp-")
+            hasRealMbid(effectiveMbid)
               ? effectiveMbid
               : "";
           const lastfmSimilar = await lastFmService.getSimilarArtists(
@@ -883,7 +883,7 @@ router.get("/artists/:id", async (req, res) => {
 
     res.json({
       ...artist,
-      mbid: artist.mbid?.startsWith("temp-") ? null : artist.mbid,
+      mbid: hasRealMbid(artist.mbid) ? artist.mbid : null,
       coverArt: heroUrl,
       bio: getArtistDisplaySummary(artist),
       genres: getMergedGenres(artist),
@@ -1038,7 +1038,7 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
 
     let lidarrDeleted = false;
     let lidarrError: string | null = null;
-    if (artist.mbid && !artist.mbid.startsWith("temp-")) {
+    if (hasRealMbid(artist.mbid)) {
       try {
         const { lidarrService } = await import("../../services/lidarr");
         const lidarrResult = await lidarrService.deleteArtist(

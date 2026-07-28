@@ -8,15 +8,13 @@ import { CoverArtExtractor } from "./coverArtExtractor";
 import { deezerService } from "./deezer";
 import {
     normalizeArtistName,
-    areArtistNamesSimilar,
     canonicalizeVariousArtists,
-    extractPrimaryArtist,
     parseArtistFromPath,
     extractArtistFromRelativePath,
     extractAlbumFromRelativePath,
-    collapseForComparison,
     sanitizeTagString,
 } from "../utils/artistNormalization";
+import { parseCredit, resolveArtist } from "./artistIdentity";
 import { backfillAllArtistCounts } from "./artistCountsService";
 import { checkLocalArtistImage } from "./imageStorage";
 
@@ -368,8 +366,8 @@ export class MusicScannerService {
         const normalizedArtist = this.normalizeForMatching(artistName);
         const normalizedAlbum = this.normalizeForMatching(albumTitle);
 
-        // Also try with primary artist extracted (handles "Artist A feat. Artist B")
-        const primaryArtist = extractPrimaryArtist(artistName);
+        // Also try without featured credits (handles "Artist A feat. Artist B")
+        const primaryArtist = parseCredit(artistName).primary || artistName;
         const normalizedPrimaryArtist =
             this.normalizeForMatching(primaryArtist);
 
@@ -638,194 +636,52 @@ export class MusicScannerService {
             || "Unknown Album";
         const year = metadata.common.year || null;
 
-        // ALWAYS extract primary artist first - this handles both:
-        // - Featured artists: "Artist A feat. Artist B" -> "Artist A"
-        // - Collaborations: "Artist A & Artist B" -> "Artist A"
-        // Band names like "Of Mice & Men" are preserved because extractPrimaryArtist
-        // only splits on " feat.", " ft.", " featuring ", " & ", etc. (with spaces)
-        const extractedPrimaryArtist = extractPrimaryArtist(rawArtistName);
-        let artistName = extractedPrimaryArtist;
+        // Resolve the artist through the single identity path. This used to be
+        // ~170 lines of guessing: split the tag on " & "/" and "/" with "/",",
+        // look the fragment up, then a space-collapse pass, then a fuzzy pass at
+        // 95%, and only THEN consult the MusicBrainz id that was sitting in the
+        // tag the whole time. The split truncated real band names ("Dance With
+        // the Dead" -> "Dance") and the space-collapse pass could never fire
+        // because it filtered candidates on the un-collapsed name.
+        const credit = parseCredit(
+            rawArtistName,
+            metadata.common.artists as string[] | undefined
+        );
+        const artistName = credit.primary || rawArtistName;
 
-        // Canonicalize Various Artists variations (VA, V.A., <Various Artists>, etc.)
-        artistName = canonicalizeVariousArtists(artistName);
-
-        // Try to find artist with the canonicalized name first
-        // This ensures "VA", "V.A.", etc. all find the canonical "Various Artists"
-        const normalizedPrimaryName = normalizeArtistName(artistName);
-        let artist = await prisma.artist.findFirst({
-            where: { normalizedName: normalizedPrimaryName },
+        let artist = await resolveArtist(prisma, {
+            name: artistName,
+            mbid: metadata.common.musicbrainz_artistid?.[0],
         });
 
-        // If no match with primary name and we actually extracted something,
-        // also try the full raw name (for bands like "Of Mice & Men")
-        if (!artist && extractedPrimaryArtist !== rawArtistName) {
-            const normalizedRawName = normalizeArtistName(rawArtistName);
-            artist = await prisma.artist.findFirst({
-                where: { normalizedName: normalizedRawName },
+        // Prefer better capitalisation when the tag has it and the stored row
+        // does not (e.g. a row created from a lowercase folder name).
+        if (
+            artist.name !== artistName &&
+            artist.name[0] === artist.name[0].toLowerCase() &&
+            artistName[0] === artistName[0].toUpperCase()
+        ) {
+            artist = await prisma.artist.update({
+                where: { id: artist.id },
+                data: { name: artistName },
             });
-            // If full name matches an existing artist, use that instead
-            if (artist) {
-                artistName = rawArtistName;
-            }
         }
 
-        // Update normalized name for use below
-        const normalizedArtistName = normalizeArtistName(artistName);
-
-        // If we found an artist, optionally update to better capitalization
-        if (artist && artist.name !== artistName) {
-            // Check if the new name has better capitalization (starts with uppercase)
-            const currentNameIsLowercase =
-                artist.name[0] === artist.name[0].toLowerCase();
-            const newNameIsCapitalized =
-                artistName[0] === artistName[0].toUpperCase();
-
-            if (currentNameIsLowercase && newNameIsCapitalized) {
-                logger.debug(
-                    `Updating artist name capitalization: "${artist.name}" -> "${artistName}"`
-                );
-                artist = await prisma.artist.update({
-                    where: { id: artist.id },
-                    data: { name: artistName },
-                });
-            }
-        }
-
-        // Space-collapsed matching: catches "Dead Mau5" vs "Deadmau5"
-        if (!artist) {
-            const collapsedName = collapseForComparison(normalizedArtistName);
-            const collapsedCandidates = await prisma.artist.findMany({
-                where: {
-                    normalizedName: {
-                        startsWith: normalizedArtistName.substring(
-                            0,
-                            Math.min(5, normalizedArtistName.length)
-                        ),
-                    },
-                },
-                take: 50,
-                select: {
-                    id: true,
-                    name: true,
-                    normalizedName: true,
-                    mbid: true,
-                },
-            });
-
-            for (const candidate of collapsedCandidates) {
-                if (collapseForComparison(candidate.normalizedName) === collapsedName) {
-                    logger.debug(
-                        `Space-collapsed match found: "${artistName}" -> "${candidate.name}"`
-                    );
-                    artist = candidate as any;
-                    break;
-                }
-            }
-        }
-
-        if (!artist) {
-            // Try fuzzy matching to catch typos like "the weeknd" vs "the weekend"
-            // Only check artists with similar normalized names (performance optimization)
-            const similarArtists = await prisma.artist.findMany({
-                where: {
-                    normalizedName: {
-                        // Get artists whose normalized names start with similar prefix
-                        startsWith: normalizedArtistName.substring(
-                            0,
-                            Math.min(3, normalizedArtistName.length)
-                        ),
-                    },
-                },
-                select: {
-                    id: true,
-                    name: true,
-                    normalizedName: true,
-                    mbid: true,
-                },
-            });
-
-            // Check for fuzzy matches
-            for (const candidate of similarArtists) {
-                if (areArtistNamesSimilar(artistName, candidate.name, 95)) {
-                    logger.debug(
-                        `Fuzzy match found: "${artistName}" -> "${candidate.name}"`
-                    );
-                    artist = candidate as any;
-                    break;
-                }
-            }
-        }
-
-        if (!artist) {
-            // Try to find by MusicBrainz ID if available
-            const artistMbid = metadata.common.musicbrainz_artistid?.[0];
-            if (artistMbid) {
-                artist = await prisma.artist.findUnique({
-                    where: { mbid: artistMbid },
-                });
-
-                // If we have a real MBID but no artist exists, check if there's a temp artist we should consolidate
-                if (!artist) {
-                    const tempArtist = await prisma.artist.findFirst({
-                        where: {
-                            normalizedName: normalizedArtistName,
-                            mbid: { startsWith: "temp-" },
-                        },
+        // Check for local artist image if none set yet
+        if (!artist.heroUrl) {
+            const pathParts = relativePath.split(path.sep);
+            for (let i = pathParts.length - 2; i >= 0; i--) {
+                const candidateDir = pathParts.slice(0, i + 1).join(path.sep);
+                const localImage = await checkLocalArtistImage(musicPath, candidateDir, artist.id);
+                if (localImage) {
+                    const updated = await prisma.artist.updateMany({
+                        where: { id: artist.id, heroUrl: null },
+                        data: { heroUrl: localImage },
                     });
-
-                    if (tempArtist) {
-                        // Consolidate: update temp artist to real MBID
-                        logger.debug(
-                            `[SCANNER] Consolidating temp artist "${tempArtist.name}" with real MBID: ${artistMbid}`
-                        );
-                        try {
-                            artist = await prisma.artist.update({
-                                where: { id: tempArtist.id },
-                                data: { mbid: artistMbid },
-                            });
-                        } catch (mbidError: any) {
-                            if (mbidError.code === "P2002") {
-                                logger.debug(
-                                    `[SCANNER] MBID ${artistMbid} already used by another artist, keeping temp`
-                                );
-                                artist = tempArtist;
-                            } else {
-                                throw mbidError;
-                            }
-                        }
+                    if (updated.count > 0) {
+                        artist = { ...artist, heroUrl: localImage };
                     }
-                }
-            }
-
-            if (!artist) {
-                // Create new artist (use a temporary MBID for now)
-                artist = await prisma.artist.create({
-                    data: {
-                        name: artistName,
-                        normalizedName: normalizedArtistName,
-                        mbid:
-                            artistMbid || `temp-${Date.now()}-${Math.random()}`,
-                        enrichmentStatus: "pending",
-                    },
-                });
-            }
-
-            // Check for local artist image if none set yet
-            if (!artist.heroUrl) {
-                const pathParts = relativePath.split(path.sep);
-                for (let i = pathParts.length - 2; i >= 0; i--) {
-                    const candidateDir = pathParts.slice(0, i + 1).join(path.sep);
-                    const localImage = await checkLocalArtistImage(musicPath, candidateDir, artist.id);
-                    if (localImage) {
-                        const updated = await prisma.artist.updateMany({
-                            where: { id: artist.id, heroUrl: null },
-                            data: { heroUrl: localImage },
-                        });
-                        if (updated.count > 0) {
-                            artist = { ...artist, heroUrl: localImage };
-                        }
-                        break;
-                    }
+                    break;
                 }
             }
         }

@@ -18,7 +18,8 @@ import { LIBRARY_ALBUM_WHERE } from "./libraryFilters";
 import { redisClient } from "../utils/redis";
 import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";
-import { extractPrimaryArtist, normalizeArtistName } from "../utils/artistNormalization";
+import { normalizeArtistName } from "../utils/artistNormalization";
+import { parseCredit } from "./artistIdentity";
 import { trackIdentityService } from "./trackIdentity";
 import { songLinkService } from "./songlink";
 import { eventBus } from "./eventBus";
@@ -306,8 +307,9 @@ class SpotifyImportService {
     const dbNormalizedArtist = normalizeArtistName(spotifyTrack.artist);
     const cleanedTrackTitle = normalizeTrackTitle(spotifyTrack.title);
 
-    // Extract primary artist for better matching (handles "Artist feat. Someone")
-    const primaryArtist = extractPrimaryArtist(spotifyTrack.artist);
+    // Strip featured credits for better matching ("Artist feat. Someone").
+    // Does NOT split on "&"/"and"/"with" -- those live inside band names.
+    const primaryArtist = parseCredit(spotifyTrack.artist).primary || spotifyTrack.artist;
     // Use normalizeArtistName to match DB storage format (preserves punctuation like R.E.M.)
     const normalizedPrimaryArtist = normalizeArtistName(primaryArtist);
 

@@ -15,7 +15,8 @@ interface SearchOptions {
 export interface ArtistSearchResult {
     id: string;
     name: string;
-    mbid: string;
+    /** null when MusicBrainz has not resolved this artist yet. */
+    mbid: string | null;
     heroUrl: string | null;
     summary?: string;
     rank: number;

@@ -53,8 +53,10 @@ model ApiKey {
 
 model Artist {
   id                  String                   @id @default(cuid())
-  mbid                String                   @unique
+  mbid                String?                  @unique
   name                String
+  identityKey         String                   @unique
+  sortName            String                   @default("")
   normalizedName      String                   @default("")
   summary             String?
   heroUrl             String?
@@ -84,6 +86,7 @@ model Artist {
   @@index([libraryAlbumCount])
   @@index([name])
   @@index([normalizedName])
+  @@index([sortName])
   @@index([searchVector], type: Gin)
   @@index([totalTrackCount])
 }

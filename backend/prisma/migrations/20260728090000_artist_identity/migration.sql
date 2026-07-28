@@ -1,0 +1,134 @@
+-- Artist identity: make duplicate artists impossible at the database level.
+--
+-- Before this, `mbid` was the only UNIQUE column on Artist and it was NOT NULL,
+-- so the scanner fabricated `temp-<timestamp>-<random>` whenever MusicBrainz did
+-- not supply one. A guaranteed-unique value on the only unique column means the
+-- database could never reject a duplicate: every miss by the name-matching
+-- heuristics became a permanent second row for the same artist.
+--
+-- This adds `identityKey` (casefolded, unaccented, punctuation- and
+-- whitespace-stripped) as the real identity, merges existing duplicates into one
+-- row each, and only then applies the UNIQUE constraint -- the constraint cannot
+-- be added first because the duplicates it forbids are already in the table.
+
+-- 1. New columns, nullable for now so the backfill has somewhere to land.
+ALTER TABLE "Artist"
+  ADD COLUMN IF NOT EXISTS "identityKey" TEXT,
+  ADD COLUMN IF NOT EXISTS "sortName" TEXT;
+
+-- 2. Backfill. Mirrors artistIdentity.ts: lower + unaccent + drop everything
+--    that is not a letter or a digit. `unaccent` needs the extension; the
+--    regexp fallback below handles the common Latin-1 range if it is absent.
+CREATE EXTENSION IF NOT EXISTS unaccent;
+
+UPDATE "Artist"
+SET "identityKey" = regexp_replace(lower(unaccent(name)), '[^[:alnum:]]', '', 'g'),
+    "sortName"    = regexp_replace(
+                        regexp_replace(lower(unaccent(name)), '\s+', ' ', 'g'),
+                        '^(the|a|an|le|la|les|los|las|die|der|das)\s+', '', 'i'
+                    )
+WHERE "identityKey" IS NULL;
+
+-- An artist whose name is entirely punctuation would collapse to '' and then
+-- collide with every other such artist. Fall back to the row id, which is
+-- unique by construction.
+UPDATE "Artist" SET "identityKey" = id WHERE "identityKey" IS NULL OR "identityKey" = '';
+UPDATE "Artist" SET "sortName" = lower(name) WHERE "sortName" IS NULL OR "sortName" = '';
+
+-- 3. Choose one surviving row per identityKey. Preference order:
+--    a real MusicBrainz id first (the temp- sentinels are not real ids), then
+--    the row carrying the most library content, then the lowest id so the
+--    result is deterministic.
+-- Plain TEMP (not ON COMMIT DROP): psql in autocommit would drop it at the end
+-- of this very statement, leaving every step below referencing nothing.
+CREATE TEMP TABLE artist_merge_map AS
+WITH ranked AS (
+    SELECT
+        id,
+        "identityKey",
+        ROW_NUMBER() OVER (
+            PARTITION BY "identityKey"
+            ORDER BY
+                CASE WHEN mbid IS NOT NULL AND mbid NOT LIKE 'temp-%' THEN 0 ELSE 1 END,
+                "libraryAlbumCount" DESC,
+                "totalTrackCount" DESC,
+                id
+        ) AS rn
+    FROM "Artist"
+)
+SELECT loser.id AS loser_id, winner.id AS winner_id
+FROM ranked loser
+JOIN ranked winner
+  ON winner."identityKey" = loser."identityKey"
+ AND winner.rn = 1
+WHERE loser.rn > 1;
+
+-- 4. Repoint every relation onto the winner BEFORE deleting anything. All three
+--    cascade on artist delete, so deleting first would destroy the rows we are
+--    trying to preserve.
+
+-- Album has no unique on (artistId, title): a plain repoint is safe.
+UPDATE "Album" a
+SET "artistId" = m.winner_id
+FROM artist_merge_map m
+WHERE a."artistId" = m.loser_id;
+
+-- OwnedAlbum is keyed (artistId, rgMbid); the winner may already own the same
+-- release group. On collision keep the STRONGER provenance rather than whichever
+-- row happened to be the winner's: 'native_scan' means the user genuinely owns
+-- it, and cleanup-lidarr keys artist protection on that exact value, so silently
+-- downgrading it to 'discovery_liked' would make an artist eligible for deletion
+-- that should have been protected.
+INSERT INTO "OwnedAlbum" ("artistId", "rgMbid", "source")
+SELECT m.winner_id, o."rgMbid", o."source"
+FROM "OwnedAlbum" o
+JOIN artist_merge_map m ON o."artistId" = m.loser_id
+ON CONFLICT ("artistId", "rgMbid") DO UPDATE
+SET source = CASE
+        WHEN "OwnedAlbum".source = 'native_scan' OR EXCLUDED.source = 'native_scan'
+            THEN 'native_scan'
+        ELSE "OwnedAlbum".source
+    END;
+
+DELETE FROM "OwnedAlbum" o
+USING artist_merge_map m
+WHERE o."artistId" = m.loser_id;
+
+-- SimilarArtist is keyed (fromArtistId, toArtistId) and both ends can point at
+-- a loser. Rebuild the edges, drop duplicates, and drop self-edges that appear
+-- when two rows that referenced each other turn out to be the same artist.
+INSERT INTO "SimilarArtist" ("fromArtistId", "toArtistId", "weight")
+SELECT
+    COALESCE(mf.winner_id, s."fromArtistId"),
+    COALESCE(mt.winner_id, s."toArtistId"),
+    s."weight"
+FROM "SimilarArtist" s
+LEFT JOIN artist_merge_map mf ON s."fromArtistId" = mf.loser_id
+LEFT JOIN artist_merge_map mt ON s."toArtistId"   = mt.loser_id
+WHERE (mf.loser_id IS NOT NULL OR mt.loser_id IS NOT NULL)
+  AND COALESCE(mf.winner_id, s."fromArtistId") <> COALESCE(mt.winner_id, s."toArtistId")
+ON CONFLICT ("fromArtistId", "toArtistId") DO NOTHING;
+
+DELETE FROM "SimilarArtist" s
+USING artist_merge_map m
+WHERE s."fromArtistId" = m.loser_id OR s."toArtistId" = m.loser_id;
+
+-- 5. Losers are now unreferenced.
+DELETE FROM "Artist" a USING artist_merge_map m WHERE a.id = m.loser_id;
+
+-- 6. Retire the temp- sentinel. mbid becomes nullable and "unknown" is
+--    expressed as NULL, which is what it always meant. Postgres treats NULLs as
+--    distinct under a UNIQUE constraint, so many artists may lack an mbid.
+ALTER TABLE "Artist" ALTER COLUMN "mbid" DROP NOT NULL;
+UPDATE "Artist" SET mbid = NULL WHERE mbid LIKE 'temp-%';
+
+-- 7. Now the constraints can hold.
+UPDATE "Artist" SET "sortName" = '' WHERE "sortName" IS NULL;
+ALTER TABLE "Artist" ALTER COLUMN "identityKey" SET NOT NULL;
+ALTER TABLE "Artist" ALTER COLUMN "sortName" SET NOT NULL;
+ALTER TABLE "Artist" ALTER COLUMN "sortName" SET DEFAULT '';
+
+CREATE UNIQUE INDEX IF NOT EXISTS "Artist_identityKey_key" ON "Artist"("identityKey");
+CREATE INDEX IF NOT EXISTS "Artist_sortName_idx" ON "Artist"("sortName");
+
+DROP TABLE IF EXISTS artist_merge_map;

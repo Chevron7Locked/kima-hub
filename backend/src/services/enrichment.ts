@@ -15,6 +15,7 @@
  */
 
 import { logger } from "../utils/logger";
+import { hasRealMbid } from "./artistIdentity";
 import { prisma } from "../utils/db";
 import { lastFmService } from "./lastfm";
 import { musicBrainzService } from "./musicbrainz";
@@ -168,7 +169,7 @@ class EnrichmentService {
         // Step 1: Get/verify MBID from MusicBrainz
         if (
             config.sources.musicbrainz &&
-            (!artist.mbid || artist.mbid.startsWith("temp-"))
+            !hasRealMbid(artist.mbid)
         ) {
             try {
                 const mbResults = await musicBrainzService.searchArtist(
@@ -191,7 +192,7 @@ class EnrichmentService {
                 const artistMbid = enrichmentData.mbid || artist.mbid;
                 const lastfmInfo = await lastFmService.getArtistInfo(
                     artist.name,
-                    artistMbid && !artistMbid.startsWith("temp-")
+                    hasRealMbid(artistMbid)
                         ? artistMbid
                         : undefined
                 );
@@ -211,7 +212,7 @@ class EnrichmentService {
                     // Get similar artists
                     const artistMbidForSimilar = enrichmentData.mbid || artist.mbid;
                     const similar = await lastFmService.getSimilarArtists(
-                        artistMbidForSimilar && !artistMbidForSimilar.startsWith("temp-")
+                        hasRealMbid(artistMbidForSimilar)
                             ? artistMbidForSimilar
                             : "",
                         artist.name,
@@ -235,7 +236,7 @@ class EnrichmentService {
             const artistMbid = enrichmentData.mbid || artist.mbid;
             const imageResult = await imageProviderService.getArtistImage(
                 artist.name,
-                artistMbid && !artistMbid.startsWith("temp-")
+                hasRealMbid(artistMbid)
                     ? artistMbid
                     : undefined
             );
@@ -300,7 +301,7 @@ class EnrichmentService {
                 // If artist has MBID, search their discography
                 if (
                     album.artist.mbid &&
-                    !album.artist.mbid.startsWith("temp-")
+                    hasRealMbid(album.artist.mbid)
                 ) {
                     const releaseGroups =
                         await musicBrainzService.getReleaseGroups(

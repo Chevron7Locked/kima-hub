@@ -15,7 +15,8 @@ import { normalizeForMatching, matchAlbum } from '../../utils/fuzzyMatch';
 
 export interface SeedArtist {
     name: string;
-    mbid?: string;
+    /** absent or null when MusicBrainz has not resolved this artist yet. */
+    mbid?: string | null;
 }
 
 /**
