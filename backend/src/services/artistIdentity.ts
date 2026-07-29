@@ -38,8 +38,41 @@ const FEATURED_MARKER =
 /** Leading articles stripped for sort order. */
 const LEADING_ARTICLE = /^(?:the|a|an|le|la|les|los|las|die|der|das)\s+/i;
 
+/**
+ * Characters that carry no combining mark, so NFD leaves them intact, but which
+ * Postgres `unaccent()` still folds. The identity keys are backfilled in SQL and
+ * recomputed here at scan time -- if the two disagree, the backfilled key is
+ * unreachable from the runtime and the next scan creates the duplicate this
+ * whole mechanism exists to prevent. Verified against `unaccent()` on the
+ * shipped Postgres image; extend both sides together.
+ */
+const LIGATURE_FOLD: Record<string, string> = {
+    æ: "ae", Æ: "AE",
+    œ: "oe", Œ: "OE",
+    ø: "o",  Ø: "O",
+    ß: "ss",
+    ð: "d",  Ð: "D",
+    þ: "th", Þ: "TH",
+    đ: "d",  Đ: "D",
+    ł: "l",  Ł: "L",
+    ħ: "h",  Ħ: "H",
+    ı: "i",
+    ŧ: "t",  Ŧ: "T",
+};
+
+/**
+ * Casefold-safe text normalisation shared by every identity key in the app.
+ * Exported so album identity uses the SAME rules; a second copy would drift.
+ */
+export function foldIdentityText(value: string): string {
+    return value
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[æÆœŒøØßðÐþÞđĐłŁħĦıŧŦ]/g, (c) => LIGATURE_FOLD[c] ?? c);
+}
+
 function stripDiacritics(value: string): string {
-    return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return foldIdentityText(value);
 }
 
 /**

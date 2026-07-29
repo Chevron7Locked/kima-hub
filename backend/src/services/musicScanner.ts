@@ -15,6 +15,7 @@ import {
     sanitizeTagString,
 } from "../utils/artistNormalization";
 import { parseCredit, resolveArtist } from "./artistIdentity";
+import { albumIdentityKey, isGenericAlbumTitle } from "./albumIdentity";
 import { backfillAllArtistCounts } from "./artistCountsService";
 import { checkLocalArtistImage } from "./imageStorage";
 
@@ -686,46 +687,41 @@ export class MusicScannerService {
             }
         }
 
-        // Get or create album
-        let album = await prisma.album.findFirst({
+        // Resolve the album through the single identity path. Lookup used to
+        // match `title` raw and un-normalised, so "Abbey Road", "abbey road" and
+        // "Abbey Road (2019 Remaster)" became three rows under one artist -- and
+        // Album models a release GROUP, so those are one album. The cross-artist
+        // fallback that kept VA compilations together fired for EVERY album with
+        // a known year, which merged unrelated albums sharing a title; it is now
+        // gated on the compilation tag inside resolveAlbum.
+        const albumMbid = metadata.common.musicbrainz_releasegroupid;
+        const albumIdKey = albumIdentityKey(albumTitle) || `untitled-${artist.id}`;
+
+        let album = await prisma.album.findUnique({
             where: {
-                artistId: artist.id,
-                title: albumTitle,
+                artistId_identityKey: { artistId: artist.id, identityKey: albumIdKey },
             },
         });
 
+        if (!album && albumMbid) {
+            album = await prisma.album.findUnique({ where: { rgMbid: albumMbid } });
+        }
+
+        if (!album && metadata.common.compilation && year !== null && !isGenericAlbumTitle(albumTitle)) {
+            // Compilations only: hold a VA release together when albumartist tags
+            // disagree between its files.
+            album = await prisma.album.findFirst({
+                where: { identityKey: albumIdKey, year, location: "LIBRARY" },
+            });
+            if (album) {
+                logger.debug(
+                    `[Scanner] Compilation match: "${albumTitle}" (${year}) -> album ${album.id} (artist ${album.artistId})`,
+                );
+            }
+        }
+
         if (!album) {
-            // Try to find by release group MBID if available
-            const albumMbid = metadata.common.musicbrainz_releasegroupid;
-            if (albumMbid) {
-                album = await prisma.album.findUnique({
-                    where: { rgMbid: albumMbid },
-                });
-            }
-
-            // Cross-artist fallback: if an album with the same title and year already
-            // exists under any artist in the library, reuse it to prevent splitting
-            // multi-artist / VA albums when albumartist tags are inconsistent.
-            // Guards: title must not be generic, year must be known (non-null).
-            if (!album && albumTitle !== "Unknown Album" && albumTitle !== "Unknown" && year !== null) {
-                album = await prisma.album.findFirst({
-                    where: {
-                        title: albumTitle,
-                        year: year,
-                        location: "LIBRARY",
-                    },
-                });
-                if (album) {
-                    logger.debug(
-                        `[Scanner] Cross-artist album match: "${albumTitle}" (${year}) -> album ${album.id} (artist ${album.artistId})`,
-                    );
-                }
-            }
-
-            if (!album) {
-                // Create new album (use a temporary MBID for now)
-                const rgMbid =
-                    albumMbid || `temp-${Date.now()}-${Math.random()}`;
+            const rgMbid = albumMbid || `temp-${Date.now()}-${Math.random()}`;
 
                 // Determine if this is a discovery album:
                 // 1. Check file path (legacy: /music/discovery/ folder)
@@ -767,6 +763,7 @@ export class MusicScannerService {
                     data: {
                         title: albumTitle,
                         artistId: artist.id,
+                        identityKey: albumIdKey,
                         rgMbid,
                         year,
                         primaryType: "Album",
@@ -792,62 +789,61 @@ export class MusicScannerService {
                         update: {},
                     });
                 }
+        }
+
+    // Extract cover art if we have an extractor
+        // Re-extract if: no cover, OR native cover file is missing
+        if (this.coverArtExtractor) {
+            let needsExtraction = !album.coverUrl;
+
+            // Check if existing native cover file is missing
+            if (album.coverUrl?.startsWith("native:")) {
+                const nativePath = album.coverUrl.replace("native:", "");
+                const coverCachePath = path.join(
+                    path.dirname(absolutePath),
+                    "..",
+                    "..",
+                    "cache",
+                    "covers",
+                    nativePath
+                );
+                // Use the extractor's cache path instead
+                const extractorCachePath = path.join(
+                    (this.coverArtExtractor as any).coverCachePath,
+                    nativePath
+                );
+                if (!fs.existsSync(extractorCachePath)) {
+                    needsExtraction = true;
+                }
             }
 
-            // Extract cover art if we have an extractor
-            // Re-extract if: no cover, OR native cover file is missing
-            if (this.coverArtExtractor) {
-                let needsExtraction = !album.coverUrl;
-
-                // Check if existing native cover file is missing
-                if (album.coverUrl?.startsWith("native:")) {
-                    const nativePath = album.coverUrl.replace("native:", "");
-                    const coverCachePath = path.join(
-                        path.dirname(absolutePath),
-                        "..",
-                        "..",
-                        "cache",
-                        "covers",
-                        nativePath
+            if (needsExtraction) {
+                const coverPath =
+                    await this.coverArtExtractor.extractCoverArt(
+                        absolutePath,
+                        album.id
                     );
-                    // Use the extractor's cache path instead
-                    const extractorCachePath = path.join(
-                        (this.coverArtExtractor as any).coverCachePath,
-                        nativePath
-                    );
-                    if (!fs.existsSync(extractorCachePath)) {
-                        needsExtraction = true;
-                    }
-                }
-
-                if (needsExtraction) {
-                    const coverPath =
-                        await this.coverArtExtractor.extractCoverArt(
-                            absolutePath,
-                            album.id
-                        );
-                    if (coverPath) {
-                        await prisma.album.update({
-                            where: { id: album.id },
-                            data: { coverUrl: `native:${coverPath}` },
-                        });
-                    } else {
-                        // No embedded art, try fetching from Deezer
-                        try {
-                            const deezerCover =
-                                await deezerService.getAlbumCover(
-                                    artistName,
-                                    albumTitle
-                                );
-                            if (deezerCover) {
-                                await prisma.album.update({
-                                    where: { id: album.id },
-                                    data: { coverUrl: deezerCover },
-                                });
-                            }
-                        } catch (error) {
-                            // Silently fail - cover art is optional
+                if (coverPath) {
+                    await prisma.album.update({
+                        where: { id: album.id },
+                        data: { coverUrl: `native:${coverPath}` },
+                    });
+                } else {
+                    // No embedded art, try fetching from Deezer
+                    try {
+                        const deezerCover =
+                            await deezerService.getAlbumCover(
+                                artistName,
+                                albumTitle
+                            );
+                        if (deezerCover) {
+                            await prisma.album.update({
+                                where: { id: album.id },
+                                data: { coverUrl: deezerCover },
+                            });
                         }
+                    } catch (error) {
+                        // Silently fail - cover art is optional
                     }
                 }
             }

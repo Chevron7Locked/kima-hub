@@ -12,6 +12,7 @@ model Album {
   rgMbid           String                   @unique
   artistId         String
   title            String
+  identityKey      String                   @default("")
   year             Int?
   coverUrl         String?
   primaryType      String
@@ -29,6 +30,7 @@ model Album {
   artist           Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
   tracks           Track[]
 
+  @@unique([artistId, identityKey])
   @@index([title])
   @@index([artistId])
   @@index([artistId, location])
