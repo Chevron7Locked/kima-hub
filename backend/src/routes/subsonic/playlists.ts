@@ -46,7 +46,7 @@ playlistRouter.all("/getPlaylist.view", wrap(async (req, res) => {
         include: {
             user: { select: { username: true } },
             items: {
-                orderBy: { sort: "asc" },
+                orderBy: { rank: "asc" },
                 include: {
                     track: {
                         include: {
@@ -163,7 +163,7 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
         include: {
             user: { select: { username: true } },
             items: {
-                orderBy: { sort: "asc" },
+                orderBy: { rank: "asc" },
                 include: { track: { include: { album: { include: { artist: true } } } } },
             },
         },
@@ -251,7 +251,7 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
             if (indexesToRemove.length > 0) {
                 const currentItems = await tx.playlistItem.findMany({
                     where: { playlistId },
-                    orderBy: { sort: "asc" },
+                    orderBy: { rank: "asc" },
                     select: { id: true },
                 });
                 const idsToDelete = indexesToRemove

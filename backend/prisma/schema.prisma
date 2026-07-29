@@ -455,6 +455,7 @@ model Playlist {
   name               String
   isPublic           Boolean                @default(false)
   createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @default(now()) @updatedAt
   spotifyPlaylistId  String?
   spotifyPlaylistUrl String?
   hiddenByUsers      HiddenPlaylist[]
@@ -463,6 +464,7 @@ model Playlist {
   pendingTracks      PlaylistPendingTrack[]
 
   @@unique([userId, mixId])
+  @@index([isPublic])
   @@index([spotifyPlaylistId])
   @@index([userId])
 }
@@ -472,11 +474,13 @@ model PlaylistItem {
   playlistId String
   trackId    String
   sort       Int
+  rank       String   @default("")
   playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
   track      Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
 
   @@unique([playlistId, trackId])
-  @@index([playlistId, sort])
+  @@unique([playlistId, rank])
+  @@index([playlistId, rank])
 }
 
 model PlaylistPendingTrack {
@@ -489,12 +493,14 @@ model PlaylistPendingTrack {
   artistMbid       String?
   deezerPreviewUrl String?
   sort             Int
+  rank             String   @default("")
   createdAt        DateTime @default(now())
   isrc             String?
   missingFromDisk  Boolean  @default(false)
   playlist         Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
 
   @@unique([playlistId, spotifyArtist, spotifyTitle])
+  @@index([playlistId, rank])
   @@index([albumMbid])
   @@index([artistMbid])
   @@index([playlistId])

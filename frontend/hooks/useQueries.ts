@@ -688,13 +688,21 @@ export function useAddToPlaylistMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
+        // Accepts a single trackId or many. Callers building a playlist from a
+        // mix used to loop this hook once per track, which is one HTTP request
+        // each; pass trackIds instead and it is one request.
         mutationFn: ({
             playlistId,
             trackId,
+            trackIds,
         }: {
             playlistId: string;
-            trackId: string;
-        }) => api.addTrackToPlaylist(playlistId, trackId),
+            trackId?: string;
+            trackIds?: string[];
+        }) =>
+            trackIds?.length
+                ? api.addTracksToPlaylist(playlistId, trackIds)
+                : api.addTrackToPlaylist(playlistId, trackId!),
         onSettled: (_, __, variables) => {
             queryClient.invalidateQueries({
                 queryKey: queryKeys.playlist(variables.playlistId),

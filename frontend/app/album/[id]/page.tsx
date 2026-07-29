@@ -190,9 +190,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         if (!pendingTrackIds.length) return;
 
         try {
-            for (const trackId of pendingTrackIds) {
-                await api.addTrackToPlaylist(playlistId, trackId);
-            }
+            await api.addTracksToPlaylist(playlistId, pendingTrackIds);
             queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
             queryClient.invalidateQueries({ queryKey: queryKeys.playlist(playlistId) });
             setPendingTrackIds([]);

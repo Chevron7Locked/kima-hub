@@ -760,6 +760,22 @@ class ApiClient {
         });
     }
 
+    /**
+     * Add many tracks in ONE request. Looping addTrackToPlaylist cost a round
+     * trip per track (four queries each server-side), so adding a 12-track album
+     * was 12 requests and 48 queries.
+     */
+    async addTracksToPlaylist(playlistId: string, trackIds: string[]) {
+        return this.request<{
+            added: number;
+            duplicates: number;
+            rejected: string[];
+        }>(`/playlists/${playlistId}/items`, {
+            method: "POST",
+            body: JSON.stringify({ trackIds }),
+        });
+    }
+
     async removeTrackFromPlaylist(playlistId: string, trackId: string) {
         return this.request<void>(`/playlists/${playlistId}/items/${trackId}`, {
             method: "DELETE",

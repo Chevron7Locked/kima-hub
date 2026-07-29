@@ -20,6 +20,7 @@ import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";
 import { normalizeArtistName } from "../utils/artistNormalization";
 import { parseCredit } from "./artistIdentity";
+import { rankForPosition } from "../utils/lexoRank";
 import { trackIdentityService } from "./trackIdentity";
 import { songLinkService } from "./songlink";
 import { eventBus } from "./eventBus";
@@ -2115,6 +2116,11 @@ class SpotifyImportService {
 
     // Match all pending tracks against the pre-loaded library
     const matchedTrackIds: string[] = [];
+    // Position of each matched track in the ORIGINAL Spotify order. Items used
+    // to be numbered 0..m-1 over the matched subset while pending tracks kept
+    // their true 0..N-1 positions -- two different scales in what the read path
+    // treated as one ordering, which is the scramble at its source.
+    const matchedPositions = new Map<string, number>();
     let trackIndex = 0;
     const unmatchedForTitleOnly: Array<{
       pendingTrack: typeof job.pendingTracks[number];
@@ -2131,6 +2137,7 @@ class SpotifyImportService {
         const existingTrack = verifiedPreMatched.get(pendingTrack.preMatchedTrackId);
         if (existingTrack) {
           matchedTrackIds.push(existingTrack.id);
+          if (!matchedPositions.has(existingTrack.id)) matchedPositions.set(existingTrack.id, trackIndex);
           logger?.debug(
             `   ✓ Pre-matched: "${pendingTrack.title}" -> track ${existingTrack.id}`,
           );
@@ -2146,6 +2153,7 @@ class SpotifyImportService {
         const isrcMatch = isrcMatches.get(pendingTrack.isrc);
         if (isrcMatch) {
           matchedTrackIds.push(isrcMatch.id);
+          if (!matchedPositions.has(isrcMatch.id)) matchedPositions.set(isrcMatch.id, trackIndex);
           logger?.debug(`   ISRC match: "${pendingTrack.title}" -> ${isrcMatch.id}`);
           logger?.logTrackMatch(trackIndex, job.tracksTotal, pendingTrack.title, pendingTrack.artist, true, isrcMatch.id);
           continue;
@@ -2254,6 +2262,7 @@ class SpotifyImportService {
 
       if (localTrack) {
         matchedTrackIds.push(localTrack.id);
+          if (!matchedPositions.has(localTrack.id)) matchedPositions.set(localTrack.id, trackIndex);
         logger?.debug(`   ✓ Matched: "${pendingTrack.title}" -> track ${localTrack.id}`);
         logger?.logTrackMatch(trackIndex, job.tracksTotal, pendingTrack.title, pendingTrack.artist, true, localTrack.id);
       } else if (cleanedTitle.length >= 10) {
@@ -2344,6 +2353,10 @@ class SpotifyImportService {
                 create: uniqueTrackIds.map((trackId, index) => ({
                   trackId,
                   sort: index,
+                  // Rank from the track's ORIGINAL Spotify position, the same
+                  // scale the pending tracks use, so the two interleave into the
+                  // playlist's real order rather than forming two sequences.
+                  rank: rankForPosition(matchedPositions.get(trackId) ?? index),
                 })),
               }
             : undefined,
@@ -2447,6 +2460,7 @@ class SpotifyImportService {
           deezerPreviewUrl: track.deezerPreviewUrl,
           isrc: track.isrc || null,
           sort: track.originalIndex,
+          rank: rankForPosition(track.originalIndex),
         })),
         skipDuplicates: true,
       });
@@ -2727,7 +2741,7 @@ class SpotifyImportService {
     }
 
     // Match pending tracks in-memory
-    const newPlaylistItems: { playlistId: string; trackId: string; sort: number }[] = [];
+    const newPlaylistItems: { playlistId: string; trackId: string; sort: number; rank: string }[] = [];
     for (const pendingTrack of job.pendingTracks) {
       const dbArtist = normalizeArtistName(pendingTrack.artist);
       const candidates = candidatesByArtist.get(dbArtist.toLowerCase()) || [];
@@ -2741,6 +2755,7 @@ class SpotifyImportService {
           playlistId: job.createdPlaylistId,
           trackId: localTrack.id,
           sort: nextPosition++,
+          rank: rankForPosition(nextPosition),
         });
         existingTrackIds.add(localTrack.id);
         added++;
@@ -2931,7 +2946,7 @@ class SpotifyImportService {
           },
         },
       },
-      orderBy: [{ playlistId: "asc" }, { sort: "asc" }],
+      orderBy: [{ playlistId: "asc" }, { rank: "asc" }],
     });
 
     if (allPendingTracks.length === 0) {
@@ -3165,6 +3180,7 @@ class SpotifyImportService {
               playlistId,
               trackId: localTrack.id,
               sort: nextSort++,
+              rank: rankForPosition(nextSort),
             },
           });
 
@@ -3252,7 +3268,7 @@ class SpotifyImportService {
   > {
     const tracks = await prisma.playlistPendingTrack.findMany({
       where: { playlistId },
-      orderBy: { sort: "asc" },
+      orderBy: { rank: "asc" },
     });
 
     return tracks.map((t) => ({
@@ -3520,6 +3536,7 @@ class SpotifyImportService {
                 create: uniqueTrackIds.map((trackId, index) => ({
                   trackId,
                   sort: index,
+                  rank: rankForPosition(index),
                 })),
               }
             : undefined,

@@ -7,6 +7,11 @@ import { prisma } from "../utils/db";
 import { sessionLog } from "../utils/playlistLogger";
 import { safeError } from "../utils/errors";
 import { toAudioFeaturesDTO } from "../utils/audioFeatures";
+import {
+    requirePlaylistOwner,
+    requirePlaylistReader,
+} from "../middleware/playlistOwner";
+import * as playlistService from "../services/playlistService";
 
 const router = Router();
 
@@ -66,8 +71,21 @@ const updatePlaylistSchema = z.object({
     isPublic: z.boolean().optional(),
 });
 
-const addTrackSchema = z.object({
-    trackId: z.string(),
+const addTracksSchema = z
+    .object({
+        trackId: z.string().optional(),
+        trackIds: z.array(z.string()).min(1).max(1000).optional(),
+    })
+    .refine((d) => Boolean(d.trackId) !== Boolean(d.trackIds), {
+        message: "Provide exactly one of trackId or trackIds",
+    });
+
+const removeTracksSchema = z.object({
+    trackIds: z.array(z.string()).min(1).max(1000),
+});
+
+const moveItemSchema = z.object({
+    afterItemId: z.string().nullable().optional(),
 });
 
 // GET /playlists
@@ -118,7 +136,7 @@ router.get("/", async (req, res) => {
                             },
                         },
                     },
-                    orderBy: { sort: "asc" },
+                    orderBy: { rank: "asc" },
                 },
             },
         });
@@ -129,21 +147,6 @@ router.get("/", async (req, res) => {
             isOwner: playlist.userId === userId,
             isHidden: hiddenPlaylistIds.has(playlist.id),
         }));
-
-        // Debug: log shared playlists with user info
-        const sharedPlaylists = playlistsWithCounts.filter((p) => !p.isOwner);
-        if (sharedPlaylists.length > 0) {
-            logger.debug(
-                `[Playlists] Found ${sharedPlaylists.length} shared playlists for user ${userId}:`
-            );
-            sharedPlaylists.forEach((p) => {
-                logger.debug(
-                    `  - "${p.name}" by ${
-                        p.user?.username || "UNKNOWN"
-                    } (owner: ${p.userId})`
-                );
-            });
-        }
 
         res.json(playlistsWithCounts);
     } catch (error) {
@@ -182,7 +185,7 @@ router.post("/", async (req, res) => {
 });
 
 // GET /playlists/:id
-router.get("/:id", async (req, res) => {
+router.get("/:id", requirePlaylistReader, async (req, res) => {
     try {
         if (!req.user) {
             return res.status(401).json({ error: "Unauthorized" });
@@ -219,21 +222,16 @@ router.get("/:id", async (req, res) => {
                             },
                         },
                     },
-                    orderBy: { sort: "asc" },
+                    orderBy: { rank: "asc" },
                 },
                 pendingTracks: {
-                    orderBy: { sort: "asc" },
+                    orderBy: { rank: "asc" },
                 },
             },
         });
 
         if (!playlist) {
             return res.status(404).json({ error: "Playlist not found" });
-        }
-
-        // Check access permissions
-        if (!playlist.isPublic && playlist.userId !== userId) {
-            return res.status(403).json({ error: "Access denied" });
         }
 
         // Format playlist items
@@ -255,6 +253,7 @@ router.get("/:id", async (req, res) => {
             id: pending.id,
             type: "pending" as const,
             sort: pending.sort,
+            rank: pending.rank,
             pending: {
                 id: pending.id,
                 artist: pending.spotifyArtist,
@@ -267,9 +266,13 @@ router.get("/:id", async (req, res) => {
 
         // Merge and sort by position
         const mergedItems = [
-            ...formattedItems.map((item) => ({ ...item, sort: item.sort })),
+            ...formattedItems,
             ...formattedPending,
-        ].sort((a, b) => a.sort - b.sort);
+            // Both tables draw from ONE rank space, so a string compare is a
+            // real ordering. Previously this compared two independent integer
+            // counters against each other, which is why a reorder scrambled
+            // every imported playlist.
+        ].sort((a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0));
 
         res.json({
             ...playlist,
@@ -288,26 +291,13 @@ router.get("/:id", async (req, res) => {
 });
 
 // PUT /playlists/:id
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePlaylistOwner, async (req, res) => {
     try {
         if (!req.user) {
             return res.status(401).json({ error: "Unauthorized" });
         }
         const userId = req.user.id;
         const data = updatePlaylistSchema.parse(req.body);
-
-        // Check ownership
-        const existing = await prisma.playlist.findUnique({
-            where: { id: req.params.id },
-        });
-
-        if (!existing) {
-            return res.status(404).json({ error: "Playlist not found" });
-        }
-
-        if (existing.userId !== userId) {
-            return res.status(403).json({ error: "Access denied" });
-        }
 
         const playlist = await prisma.playlist.update({
             where: { id: req.params.id },
@@ -330,27 +320,13 @@ router.put("/:id", async (req, res) => {
 });
 
 // POST /playlists/:id/hide - Hide any playlist from your view
-router.post("/:id/hide", async (req, res) => {
+router.post("/:id/hide", requirePlaylistReader, async (req, res) => {
     try {
         if (!req.user) {
             return res.status(401).json({ error: "Unauthorized" });
         }
         const userId = req.user.id;
         const playlistId = req.params.id;
-
-        // Check playlist exists
-        const playlist = await prisma.playlist.findUnique({
-            where: { id: playlistId },
-        });
-
-        if (!playlist) {
-            return res.status(404).json({ error: "Playlist not found" });
-        }
-
-        // User must own the playlist OR it must be public (shared)
-        if (playlist.userId !== userId && !playlist.isPublic) {
-            return res.status(403).json({ error: "Access denied" });
-        }
 
         // Create hidden record (upsert to handle re-hiding)
         await prisma.hiddenPlaylist.upsert({
@@ -390,7 +366,7 @@ router.delete("/:id/hide", async (req, res) => {
 });
 
 // DELETE /playlists/:id
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePlaylistOwner, async (req, res) => {
     try {
         if (!req.user) {
             return res.status(401).json({ error: "Unauthorized" });
@@ -398,18 +374,6 @@ router.delete("/:id", async (req, res) => {
         const userId = req.user.id;
 
         // Check ownership
-        const existing = await prisma.playlist.findUnique({
-            where: { id: req.params.id },
-        });
-
-        if (!existing) {
-            return res.status(404).json({ error: "Playlist not found" });
-        }
-
-        if (existing.userId !== userId) {
-            return res.status(403).json({ error: "Access denied" });
-        }
-
         await prisma.playlist.delete({
             where: { id: req.params.id },
         });
@@ -422,109 +386,76 @@ router.delete("/:id", async (req, res) => {
 });
 
 // POST /playlists/:id/items
-router.post("/:id/items", async (req, res) => {
+// POST /playlists/:id/items
+//
+// Accepts a single { trackId } or a bulk { trackIds: [...] }. The single form is
+// kept because existing clients use it, but "add this album" should send one
+// bulk request -- the browser was issuing one HTTP call per track at four
+// queries each.
+router.post("/:id/items", requirePlaylistOwner, async (req, res) => {
     try {
-        if (!req.user) return res.status(401).json({ error: "Unauthorized" });
-        const userId = req.user.id;
-        const parsedBody = addTrackSchema.safeParse(req.body);
-        if (!parsedBody.success) {
+        const parsed = addTracksSchema.safeParse(req.body);
+        if (!parsed.success) {
             return res.status(400).json({
                 error: "Invalid request",
-                details: parsedBody.error.errors,
-            });
-        }
-        const { trackId } = parsedBody.data;
-
-        // Check ownership
-        const playlist = await prisma.playlist.findUnique({
-            where: { id: req.params.id },
-            include: {
-                items: {
-                    orderBy: { sort: "desc" },
-                    take: 1,
-                },
-            },
-        });
-
-        if (!playlist) {
-            return res.status(404).json({ error: "Playlist not found" });
-        }
-
-        if (playlist.userId !== userId) {
-            return res.status(403).json({ error: "Access denied" });
-        }
-
-        // Check if track exists
-        const track = await prisma.track.findUnique({
-            where: { id: trackId },
-        });
-
-        if (!track) {
-            return res.status(404).json({ error: "Track not found" });
-        }
-
-        // Check if track already in playlist
-        const existing = await prisma.playlistItem.findUnique({
-            where: {
-                playlistId_trackId: {
-                    playlistId: req.params.id,
-                    trackId,
-                },
-            },
-        });
-
-        if (existing) {
-            return res.status(200).json({
-                message: "Track already in playlist",
-                duplicated: true,
-                item: existing,
+                details: parsed.error.errors,
             });
         }
 
-        // Append atomically (Serializable) so a concurrent add can't hand two tracks
-        // the same sort value — re-read the current max inside the txn rather than
-        // trusting the ownership-check snapshot (matches the batch endpoint).
-        const item = await withSerializableRetry(() =>
-            prisma.$transaction(
-                async (tx) => {
-                    const top = await tx.playlistItem.findFirst({
-                        where: { playlistId: req.params.id },
-                        orderBy: { sort: "desc" },
-                        select: { sort: true },
-                    });
-                    const maxSort = top?.sort || 0;
-                    return tx.playlistItem.create({
-                        data: {
-                            playlistId: req.params.id,
-                            trackId,
-                            sort: maxSort + 1,
-                        },
-                        include: {
-                            track: {
-                                include: {
-                                    album: {
-                                        include: {
-                                            artist: true,
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    });
-                },
-                { isolationLevel: "Serializable" }
-            )
-        );
+        const trackIds = parsed.data.trackIds ?? [parsed.data.trackId!];
+        const result = await playlistService.addTracks(req.params.id, trackIds);
 
-        res.json(item);
-    } catch (error) {
+        if (result.added === 0 && result.duplicates === 0) {
+            return res.status(404).json({
+                error: "No playable library tracks in request",
+                rejected: result.rejected,
+            });
+        }
+
+        res.json({
+            added: result.added,
+            duplicated: result.duplicates > 0,
+            duplicates: result.duplicates,
+            rejected: result.rejected,
+        });
+    } catch (error: any) {
         if (error instanceof z.ZodError) {
             return res
                 .status(400)
                 .json({ error: "Invalid request", details: error.errors });
         }
-        logger.error("Add track to playlist error:", error);
-        res.status(500).json({ error: "Failed to add track to playlist" });
+        if (String(error?.message || "").includes("more than")) {
+            return res.status(400).json({ error: error.message });
+        }
+        logger.error("Add tracks to playlist error:", error);
+        res.status(500).json({ error: "Failed to add tracks to playlist" });
+    }
+});
+
+// DELETE /playlists/:id/items  { trackIds: [...] }  — bulk removal
+router.delete("/:id/items", requirePlaylistOwner, async (req, res) => {
+    try {
+        const parsed = removeTracksSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({
+                error: "Invalid request",
+                details: parsed.error.errors,
+            });
+        }
+
+        const removed = await playlistService.removeTracks(
+            req.params.id,
+            parsed.data.trackIds
+        );
+        if (removed === 0) {
+            return res
+                .status(404)
+                .json({ error: "No matching tracks in playlist" });
+        }
+        res.json({ removed });
+    } catch (error) {
+        logger.error("Bulk remove from playlist error:", error);
+        res.status(500).json({ error: "Failed to remove tracks from playlist" });
     }
 });
 
@@ -647,81 +578,55 @@ router.post("/:id/items/batch", async (req, res) => {
 });
 
 // DELETE /playlists/:id/items/:trackId
-router.delete("/:id/items/:trackId", async (req, res) => {
+//
+// 404 when the row is already gone. This used to call prisma.delete, which
+// throws P2025 on a missing row, and the generic catch turned that into a 500 --
+// so double-clicking remove surfaced a server error.
+router.delete("/:id/items/:trackId", requirePlaylistOwner, async (req, res) => {
     try {
-        const userId = req.user!.id;
-
-        // Check ownership
-        const playlist = await prisma.playlist.findUnique({
-            where: { id: req.params.id },
-        });
-
-        if (!playlist) {
-            return res.status(404).json({ error: "Playlist not found" });
+        const removed = await playlistService.removeTracks(req.params.id, [
+            req.params.trackId,
+        ]);
+        if (removed === 0) {
+            return res.status(404).json({ error: "Track not in playlist" });
         }
-
-        if (playlist.userId !== userId) {
-            return res.status(403).json({ error: "Access denied" });
-        }
-
-        await prisma.playlistItem.delete({
-            where: {
-                playlistId_trackId: {
-                    playlistId: req.params.id,
-                    trackId: req.params.trackId,
-                },
-            },
-        });
-
-        res.json({ message: "Track removed from playlist" });
+        res.json({ success: true, removed });
     } catch (error) {
         logger.error("Remove track from playlist error:", error);
         res.status(500).json({ error: "Failed to remove track from playlist" });
     }
 });
 
-// PUT /playlists/:id/items/reorder
-router.put("/:id/items/reorder", async (req, res) => {
+// PATCH /playlists/:id/items/:itemId/move  { afterItemId: string | null }
+//
+// Replaces PUT /items/reorder, which required the client to send the complete
+// ordering, rewrote every row one UPDATE at a time, and silently reshuffled the
+// rest of the playlist if given a partial list. It also had no callers.
+router.patch("/:id/items/:itemId/move", requirePlaylistOwner, async (req, res) => {
     try {
-        const userId = req.user!.id;
-        const { trackIds } = req.body; // Array of track IDs in new order
-
-        if (!Array.isArray(trackIds)) {
-            return res.status(400).json({ error: "trackIds must be an array" });
+        const parsed = moveItemSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({
+                error: "Invalid request",
+                details: parsed.error.errors,
+            });
         }
 
-        // Check ownership
-        const playlist = await prisma.playlist.findUnique({
-            where: { id: req.params.id },
-        });
-
-        if (!playlist) {
-            return res.status(404).json({ error: "Playlist not found" });
-        }
-
-        if (playlist.userId !== userId) {
-            return res.status(403).json({ error: "Access denied" });
-        }
-
-        // Update sort order for each track
-        const updates = trackIds.map((trackId, index) =>
-            prisma.playlistItem.update({
-                where: {
-                    playlistId_trackId: {
-                        playlistId: req.params.id,
-                        trackId,
-                    },
-                },
-                data: { sort: index },
-            })
+        const { rank } = await playlistService.moveItem(
+            req.params.id,
+            req.params.itemId,
+            parsed.data.afterItemId ?? null
         );
-
-        await prisma.$transaction(updates);
-
-        res.json({ message: "Playlist reordered" });
-    } catch (error) {
-        logger.error("Reorder playlist error:", error);
-        res.status(500).json({ error: "Failed to reorder playlist" });
+        res.json({ success: true, rank });
+    } catch (error: any) {
+        if (error?.code === "ITEM_NOT_FOUND") {
+            return res.status(404).json({ error: "Item not in playlist" });
+        }
+        if (error?.code === "ANCHOR_NOT_FOUND") {
+            return res.status(400).json({ error: "Anchor item not in playlist" });
+        }
+        logger.error("Move playlist item error:", error);
+        res.status(500).json({ error: "Failed to move item" });
     }
 });
 
@@ -729,46 +634,6 @@ router.put("/:id/items/reorder", async (req, res) => {
  * GET /playlists/:id/pending
  * Get pending tracks for a playlist (tracks from Spotify that haven't been matched yet)
  */
-router.get("/:id/pending", async (req, res) => {
-    try {
-        const userId = req.user!.id;
-        const playlistId = req.params.id;
-
-        // Check ownership or public access
-        const playlist = await prisma.playlist.findUnique({
-            where: { id: playlistId },
-        });
-
-        if (!playlist) {
-            return res.status(404).json({ error: "Playlist not found" });
-        }
-
-        if (playlist.userId !== userId && !playlist.isPublic) {
-            return res.status(403).json({ error: "Access denied" });
-        }
-
-        const pendingTracks = await prisma.playlistPendingTrack.findMany({
-            where: { playlistId },
-            orderBy: { sort: "asc" },
-        });
-
-        res.json({
-            count: pendingTracks.length,
-            tracks: pendingTracks.map((t) => ({
-                id: t.id,
-                artist: t.spotifyArtist,
-                title: t.spotifyTitle,
-                album: t.spotifyAlbum,
-                position: t.sort,
-                previewUrl: t.deezerPreviewUrl,
-            })),
-            spotifyPlaylistId: playlist.spotifyPlaylistId,
-        });
-    } catch (error) {
-        logger.error("Get pending tracks error:", error);
-        res.status(500).json({ error: "Failed to get pending tracks" });
-    }
-});
 
 /**
  * DELETE /playlists/:id/pending/:trackId
