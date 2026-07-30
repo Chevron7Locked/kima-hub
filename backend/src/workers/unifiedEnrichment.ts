@@ -48,6 +48,11 @@ import { precomputeProjection } from "../services/umapProjection";
 const ARTIST_BATCH_SIZE = 10;
 const TRACK_BATCH_SIZE = 20;
 const ENRICHMENT_INTERVAL_MS = 5 * 1000; // 5 seconds - rate limiter handles API limits
+// Idle backoff. The cycle is cheap only when it finds work; when there is none
+// it still pays for the progress queries, which include a full scan of Track.
+// A library that is fully enriched -- the steady state -- was paying that every
+// 5 seconds forever against the pool that also serves audio streaming.
+const ENRICHMENT_IDLE_INTERVAL_MS = 60 * 1000;
 // Backoff window for a failed enrichment job. A failed job keeps its jobId
 // marker, and the phases skip an entity whose jobId is still held (getJob
 // check), so a failure backs off until this grace elapses and the failed job
@@ -358,16 +363,22 @@ export async function startUnifiedEnrichmentWorker() {
  * Schedule the next enrichment cycle after the current one completes.
  * Replaces setInterval to prevent pile-up when cycles exceed ENRICHMENT_INTERVAL_MS.
  */
-function scheduleNextEnrichmentCycle() {
+function scheduleNextEnrichmentCycle(delayMs: number = ENRICHMENT_INTERVAL_MS) {
     enrichmentInterval = setTimeout(async () => {
+        let didWork = false;
         // The reschedule MUST be in a finally. Without it, a single rejection
         // from runEnrichmentCycle (a Redis reconnect, a DB failover) skips the
         // next-schedule call and the enrichment chain is dead for the lifetime
         // of the process, silently -- the only trace is one unhandledRejection
         // log line.
         try {
-            await runEnrichmentCycle(false);
+            const result = await runEnrichmentCycle(false);
+            didWork =
+                result.artists > 0 || result.tracks > 0 || result.audioQueued > 0;
         } catch (error) {
+            // Treat a failure as "work pending" so the retry is prompt rather
+            // than backed off for a minute.
+            didWork = true;
             logger.error(
                 "[Enrichment] Cycle failed; continuing with the next cycle:",
                 error instanceof Error ? error.message : String(error)
@@ -376,10 +387,28 @@ function scheduleNextEnrichmentCycle() {
             // stopUnifiedEnrichmentWorker() nulls this out; don't resurrect the
             // chain after an explicit stop.
             if (enrichmentInterval !== null) {
-                scheduleNextEnrichmentCycle();
+                scheduleNextEnrichmentCycle(
+                    didWork
+                        ? ENRICHMENT_INTERVAL_MS
+                        : ENRICHMENT_IDLE_INTERVAL_MS
+                );
             }
         }
-    }, ENRICHMENT_INTERVAL_MS);
+    }, delayMs);
+}
+
+/**
+ * Pull the next scheduled cycle forward to the fast interval.
+ *
+ * The trigger paths call runEnrichmentCycle directly, so a user-initiated run is
+ * never blocked by the idle backoff. But the timer that was already pending is
+ * still on the idle delay, so the FOLLOW-UP cycle would be a minute away just as
+ * work starts flowing. Reset it.
+ */
+function bumpScheduleToFastInterval(): void {
+    if (enrichmentInterval === null) return;
+    clearTimeout(enrichmentInterval);
+    scheduleNextEnrichmentCycle(ENRICHMENT_INTERVAL_MS);
 }
 
 /**
@@ -668,10 +697,15 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         }
 
         const features = await featureDetection.getFeatures();
+        // Computed ONCE per cycle. This used to be called here and again
+        // unconditionally below, so a tick that did work paid for the whole
+        // progress query set twice.
+        const progress = await getEnrichmentProgress();
+        const didWork =
+            artistsProcessed > 0 || tracksProcessed > 0 || audioQueued > 0;
 
          // Log progress (only if work was done)
-         if (artistsProcessed > 0 || tracksProcessed > 0 || audioQueued > 0) {
-            const progress = await getEnrichmentProgress();
+         if (didWork) {
             logger.debug(`\n[Enrichment Progress]`);
             logger.debug(
                 `   Artists: ${progress.artists.completed}/${progress.artists.total} (${progress.artists.progress}%)`,
@@ -713,8 +747,6 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         }
 
         // If everything is complete, mark as idle and send notification (only once)
-        const progress = await getEnrichmentProgress();
-
         // Clear mixes cache when core enrichment completes (artist images now available)
         if (progress.coreComplete) {
             const state = await enrichmentStateService.getState();
@@ -1535,7 +1567,35 @@ export async function executePodcastRefreshPhase(): Promise<number> {
  * - Artists & Track Tags: "Core" enrichment (must complete before app is fully usable)
  * - Audio Analysis: "Background" enrichment (runs in separate container, non-blocking)
  */
-export async function getEnrichmentProgress() {
+/**
+ * Short-lived memo for the progress readout.
+ *
+ * The same figures are wanted by the orchestrator tick AND by
+ * GET /enrichment/progress, which the settings UI polls every few seconds --
+ * per open tab. Recomputing per caller meant the poll rate multiplied a
+ * full-table aggregate. The worker's own cycle is never faster than
+ * ENRICHMENT_INTERVAL_MS, so a memo of that length costs it nothing.
+ */
+let progressMemo: { at: number; value: EnrichmentProgress } | null = null;
+const PROGRESS_MEMO_MS = 5 * 1000;
+
+type EnrichmentProgress = Awaited<ReturnType<typeof computeEnrichmentProgress>>;
+
+export async function getEnrichmentProgress(): Promise<EnrichmentProgress> {
+    if (progressMemo && Date.now() - progressMemo.at < PROGRESS_MEMO_MS) {
+        return progressMemo.value;
+    }
+    const value = await computeEnrichmentProgress();
+    progressMemo = { at: Date.now(), value };
+    return value;
+}
+
+/** Drop the memo so the next read reflects a write that just happened. */
+export function invalidateEnrichmentProgress(): void {
+    progressMemo = null;
+}
+
+async function computeEnrichmentProgress() {
     // Artist progress
     const artistCounts = await prisma.artist.groupBy({
         by: ["enrichmentStatus"],
@@ -1549,77 +1609,94 @@ export async function getEnrichmentProgress() {
     const artistPending =
         artistCounts.find((s) => s.enrichmentStatus === "pending")?._count || 0;
 
-    // Exclude permanently_failed and corrupt tracks from enrichment totals --
-    // these will never complete and should not drag down progress percentages
-    const excludedCount = await prisma.track.count({
-        where: {
-            OR: [
-                { analysisStatus: "permanently_failed" },
-                { corrupt: true },
-            ],
-        },
-    });
-    const permanentlyFailedCount = await prisma.track.count({
-        where: { analysisStatus: "permanently_failed" },
-    });
+    // ONE pass over Track with conditional aggregates, instead of seven separate
+    // COUNT queries. This function runs on every 5-second orchestrator tick, and
+    // several of those counts had no index to use -- notably the lastfmTags
+    // predicate -- so each tick was issuing repeated sequential scans of the
+    // largest table in the schema against the same connection pool that serves
+    // audio streaming.
+    const [trackStats] = await prisma.$queryRaw<
+        {
+            total: bigint;
+            excluded: bigint;
+            tags_enriched: bigint;
+            audio_pending: bigint;
+            audio_queued: bigint;
+            audio_processing: bigint;
+            audio_completed: bigint;
+            audio_failed: bigint;
+            permanently_failed: bigint;
+            clap_processing: bigint;
+            clap_failed: bigint;
+        }[]
+    >`
+        SELECT
+            count(*)                                                  AS total,
+            count(*) FILTER (
+                WHERE "analysisStatus" = 'permanently_failed' OR "corrupt"
+            )                                                         AS excluded,
+            count(*) FILTER (
+                WHERE array_length("lastfmTags", 1) > 0
+                  AND "analysisStatus" <> 'permanently_failed'
+                  AND NOT "corrupt"
+            )                                                         AS tags_enriched,
+            count(*) FILTER (WHERE "analysisStatus" = 'pending')      AS audio_pending,
+            count(*) FILTER (WHERE "analysisStatus" = 'queued')       AS audio_queued,
+            count(*) FILTER (WHERE "analysisStatus" = 'processing')   AS audio_processing,
+            count(*) FILTER (WHERE "analysisStatus" = 'completed')    AS audio_completed,
+            count(*) FILTER (WHERE "analysisStatus" = 'failed')       AS audio_failed,
+            -- Reported separately from the excluded count, which also folds in corrupt.
+            count(*) FILTER (
+                WHERE "analysisStatus" = 'permanently_failed'
+            )                                                         AS permanently_failed,
+            count(*) FILTER (WHERE "vibeAnalysisStatus" = 'processing') AS clap_processing,
+            count(*) FILTER (WHERE "vibeAnalysisStatus" = 'failed')   AS clap_failed
+        FROM "Track"
+    `;
 
-    // Track tag progress (exclude unreachable tracks)
-    const rawTrackTotal = await prisma.track.count();
+    const excludedCount = Number(trackStats?.excluded ?? 0);
+    const rawTrackTotal = Number(trackStats?.total ?? 0);
     const trackTotal = rawTrackTotal - excludedCount;
-    const trackTagsEnriched = await prisma.track.count({
-        where: {
-            AND: [
-                { NOT: { lastfmTags: { equals: [] } } },
-                { NOT: { lastfmTags: { equals: null } } },
-                { analysisStatus: { not: "permanently_failed" } },
-                { corrupt: false },
-            ],
-        },
-    });
+    const trackTagsEnriched = Number(trackStats?.tags_enriched ?? 0);
+    const audioPending = Number(trackStats?.audio_pending ?? 0);
+    const audioQueued = Number(trackStats?.audio_queued ?? 0);
+    const audioProcessing = Number(trackStats?.audio_processing ?? 0);
+    const clapProcessing = Number(trackStats?.clap_processing ?? 0);
+    // v1 still reports these; upstream dropped them when its vibe rebuild
+    // changed the return shape. They are counted in the SAME pass rather than
+    // restored as separate queries, which is the entire point of the change.
+    const audioCompleted = Number(trackStats?.audio_completed ?? 0);
+    const audioFailed = Number(trackStats?.audio_failed ?? 0);
+    const permanentlyFailedCount = Number(trackStats?.permanently_failed ?? 0);
+    const clapFailed = Number(trackStats?.clap_failed ?? 0);
 
-    // Audio analysis progress (background task, excludes permanently_failed/corrupt)
-    const audioCompleted = await prisma.track.count({
-        where: { analysisStatus: "completed" },
-    });
-    const audioPending = await prisma.track.count({
-        where: { analysisStatus: "pending" },
-    });
-    const audioQueued = await prisma.track.count({
-        where: { analysisStatus: "queued" },
-    });
-    const audioProcessing = await prisma.track.count({
-        where: { analysisStatus: "processing" },
-    });
-    const audioFailed = await prisma.track.count({
-        where: { analysisStatus: "failed" },
-    });
-
-    // CLAP embedding progress (for vibe similarity)
-    const [clapEmbeddingCount, clapProcessing, clapQueueCounts, clapFailedCount, clapUnembeddedCount] = await Promise.all([
+    // These three are NOT Track scans -- track_embeddings, a LEFT JOIN, and the
+    // queue -- so they were never part of the seven-count storm and stay
+    // separate. Run together rather than sequentially.
+    const [clapEmbeddingCount, clapQueueCounts] = await Promise.all([
         prisma.$queryRaw<{ count: bigint }[]>`
             SELECT COUNT(*) as count FROM track_embeddings
         `,
-        prisma.track.count({
-            where: { vibeAnalysisStatus: "processing" },
-        }),
         vibeQueue.getJobCounts("active", "waiting", "delayed"),
-        prisma.track.count({
-            where: { vibeAnalysisStatus: "failed" },
-        }),
-        // Tracks with completed audio but no embedding and not failed
-        prisma.$queryRaw<{ count: bigint }[]>`
-            SELECT COUNT(*) as count
-            FROM "Track" t
-            LEFT JOIN track_embeddings te ON t.id = te.track_id
-            WHERE te.track_id IS NULL
-              AND t."analysisStatus" = 'completed'
-              AND t."filePath" IS NOT NULL
-              AND (t."vibeAnalysisStatus" IS DISTINCT FROM 'failed')
-        `,
     ]);
-    const clapQueueLength = (clapQueueCounts.active ?? 0) + (clapQueueCounts.waiting ?? 0) + (clapQueueCounts.delayed ?? 0);
     const clapCompleted = Number(clapEmbeddingCount[0]?.count || 0);
-    const clapFailed = clapFailedCount;
+    const clapQueueLength =
+        (clapQueueCounts.active ?? 0) +
+        (clapQueueCounts.waiting ?? 0) +
+        (clapQueueCounts.delayed ?? 0);
+
+    // Kept separate because it joins track_embeddings. VIBE-owned: this gate
+    // exists only to drain tracks left mid-flight by a retired producer, and if
+    // it can be dropped this becomes a single query.
+    const clapUnembeddedCount = await prisma.$queryRaw<{ count: bigint }[]>`
+        SELECT COUNT(*) as count
+        FROM "Track" t
+        LEFT JOIN track_embeddings te ON t.id = te.track_id
+        WHERE te.track_id IS NULL
+          AND t."analysisStatus" = 'completed'
+          AND t."filePath" IS NOT NULL
+          AND (t."vibeAnalysisStatus" IS DISTINCT FROM 'failed')
+    `;
     const clapUnembedded = Number(clapUnembeddedCount[0]?.count || 0);
 
     // Core enrichment is complete when artists and track tags are done
@@ -1711,6 +1788,8 @@ export async function triggerEnrichmentNow(): Promise<{
     // Set flag to bypass the minimum interval check (does NOT bypass isRunning —
     // a concurrent cycle will still cause this call to return an empty result)
     immediateEnrichmentRequested = true;
+    invalidateEnrichmentProgress();
+    bumpScheduleToFastInterval();
 
     return runEnrichmentCycle(false);
 }
@@ -1727,6 +1806,9 @@ export async function triggerEnrichmentNow(): Promise<{
      logger.debug("[Enrichment] Starting sequential enrichment from artists phase...");
      await clearPauseState();
      immediateEnrichmentRequested = true;
+     invalidateEnrichmentProgress();
+     bumpScheduleToFastInterval();
+    bumpScheduleToFastInterval();
 
      // Run full cycle but it will stop after artists phase if paused/stopped
      await runEnrichmentCycle(false);
@@ -1746,6 +1828,9 @@ export async function triggerEnrichmentNow(): Promise<{
      logger.debug("[Enrichment] Starting sequential enrichment from mood tags phase...");
      await clearPauseState();
      immediateEnrichmentRequested = true;
+     invalidateEnrichmentProgress();
+     bumpScheduleToFastInterval();
+    bumpScheduleToFastInterval();
 
      await runEnrichmentCycle(false);
 
