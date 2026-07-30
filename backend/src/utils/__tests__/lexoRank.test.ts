@@ -10,6 +10,7 @@
 
 import {
     rankAfter,
+    rankForPosition,
     rankBefore,
     rankBetween,
     rankSequence,
@@ -197,5 +198,40 @@ describe("rankSequence — seeding a list", () => {
         const seq = rankSequence(3000);
         expect(seq).toEqual([...seq].sort());
         expect(new Set(seq).size).toBe(3000);
+    });
+});
+
+describe("collation assumption", () => {
+    /**
+     * The ranks are compared BOTH in Postgres (ORDER BY rank, rank > $x) and in
+     * JavaScript (the merge of items with pending tracks). Those two comparisons
+     * must agree.
+     *
+     * They did not: under the database's default locale collation Postgres
+     * ordered 'F' < 'j' < 'U' while JavaScript orders 'F' < 'U' < 'j', so the
+     * displayed order and the order the service computed against were different.
+     * The rank columns are now declared COLLATE "C" (byte order) to match.
+     *
+     * This test pins the JavaScript half. If it ever fails, the alphabet changed
+     * and the column collation has to be revisited with it.
+     */
+    it("orders by byte value, which is what COLLATE \"C\" gives Postgres", () => {
+        expect(["F", "U", "j"].sort()).toEqual(["F", "U", "j"]);
+        // Digits before uppercase before lowercase -- the alphabet's own order.
+        expect(["a", "0", "Z", "9", "A", "z"].sort()).toEqual([
+            "0",
+            "9",
+            "A",
+            "Z",
+            "a",
+            "z",
+        ]);
+    });
+
+    it("every alphabet character is in ascending byte order", () => {
+        const seq = Array.from({ length: 62 }, (_, i) => rankForPosition(i));
+        for (let i = 1; i < seq.length; i += 1) {
+            expect(seq[i] > seq[i - 1]).toBe(true);
+        }
     });
 });
