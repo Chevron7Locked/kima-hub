@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { invalidateUserCache } from "../../middleware/auth";
 import bcrypt from "bcrypt";
 import { prisma } from "../../utils/db";
 import { subsonicError, subsonicOk, SubsonicError } from "../../utils/subsonicResponse";
@@ -59,6 +60,9 @@ userManagementRouter.all("/changePassword.view", wrap(async (req, res) => {
             tokenVersion: { increment: 1 },
         },
     });
+    // tokenVersion revokes issued tokens; drop the cached row so it takes
+    // effect immediately rather than after the auth cache TTL.
+    invalidateUserCache(user.id);
 
     return subsonicOk(req, res);
 }));
@@ -155,6 +159,10 @@ userManagementRouter.all("/updateUser.view", wrap(async (req, res) => {
             ...passwordData,
         },
     });
+    // The auth layer caches this row, and it carries both `role` and
+    // `tokenVersion` -- a stale entry would keep an old role (or a revoked
+    // token) working until the TTL elapsed.
+    invalidateUserCache(target.id);
 
     return subsonicOk(req, res);
 }));
@@ -182,5 +190,6 @@ userManagementRouter.all("/deleteUser.view", wrap(async (req, res) => {
     }
 
     await prisma.user.delete({ where: { id: target.id } });
+    invalidateUserCache(target.id);
     return subsonicOk(req, res);
 }));

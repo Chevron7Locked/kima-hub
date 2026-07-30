@@ -95,6 +95,83 @@ export function generateRefreshToken(user: {
  * @param checkQueryToken Whether to check for token in query params (for streaming)
  * @returns User object if authenticated, null otherwise
  */
+/**
+ * Short-lived cache of the user row that every authenticated request needs.
+ *
+ * Auth hit Postgres on EVERY request, on all four paths -- session, API key,
+ * query token and JWT -- and requireAdmin re-ran the whole thing from scratch,
+ * so `requireAuth, requireAdmin` cost two full passes and two round trips for
+ * one request. For a PWA firing cover-art, playback-state and polling requests
+ * continuously this was the highest-frequency query in the system, sharing the
+ * 20-connection pool with every worker.
+ *
+ * In-process rather than Redis on purpose: swapping a Postgres round trip for a
+ * Redis round trip is not obviously a win, and this data is tiny.
+ *
+ * SECURITY: `tokenVersion` is what revokes issued tokens when a password
+ * changes, and it is read from this cache -- so a stale entry would keep a
+ * revoked token working. Every site that bumps tokenVersion calls
+ * `invalidateUserCache`, making revocation immediate rather than
+ * eventually-consistent. The TTL is the backstop for anything that changes the
+ * row without going through those paths.
+ */
+const USER_CACHE_TTL_MS = 30_000;
+
+interface CachedUser {
+    id: string;
+    username: string;
+    role: string;
+    tokenVersion: number;
+}
+
+const userCache = new Map<string, { at: number; user: CachedUser | null }>();
+
+/** Drop a user's cached row. Call this wherever tokenVersion changes. */
+export function invalidateUserCache(userId: string): void {
+    userCache.delete(userId);
+}
+
+/** Drop everything; used by tests and on shutdown. */
+export function clearUserCache(): void {
+    userCache.clear();
+}
+
+async function loadUser(userId: string): Promise<CachedUser | null> {
+    const hit = userCache.get(userId);
+    if (hit && Date.now() - hit.at < USER_CACHE_TTL_MS) {
+        return hit.user;
+    }
+
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, username: true, role: true, tokenVersion: true },
+    });
+
+    // Negative results are cached too, so a request loop with a deleted user's
+    // token cannot hammer the database.
+    userCache.set(userId, { at: Date.now(), user });
+    return user;
+}
+
+/**
+ * Record that an API key was used, at most once a minute per key.
+ *
+ * This was a fire-and-forget UPDATE on EVERY request authenticated by API key.
+ * "Last used" is a human-facing timestamp on a settings screen; minute
+ * granularity is indistinguishable there and removes a write from the hot path.
+ */
+const API_KEY_TOUCH_INTERVAL_MS = 60_000;
+const apiKeyTouchedAt = new Map<string, number>();
+
+function touchApiKey(apiKeyId: string): void {
+    const last = apiKeyTouchedAt.get(apiKeyId) ?? 0;
+    if (Date.now() - last < API_KEY_TOUCH_INTERVAL_MS) return;
+    apiKeyTouchedAt.set(apiKeyId, Date.now());
+    prisma.apiKey
+        .update({ where: { id: apiKeyId }, data: { lastUsed: new Date() } })
+        .catch(() => {});
+}
+
 async function authenticateRequest(
     req: Request,
     checkQueryToken: boolean = false
@@ -102,11 +179,14 @@ async function authenticateRequest(
     // Check session-based auth
     if (req.session?.userId) {
         try {
-            const user = await prisma.user.findUnique({
-                where: { id: req.session.userId },
-                select: { id: true, username: true, role: true },
-            });
-            if (user) return user;
+            const user = await loadUser(req.session.userId);
+            if (user) {
+                return {
+                    id: user.id,
+                    username: user.username,
+                    role: user.role,
+                };
+            }
         } catch (error) {
             logger.error("Session auth error:", error);
         }
@@ -124,14 +204,7 @@ async function authenticateRequest(
             });
 
             if (apiKeyRecord && apiKeyRecord.user) {
-                // Update last used timestamp (async, don't block)
-                prisma.apiKey
-                    .update({
-                        where: { id: apiKeyRecord.id },
-                        data: { lastUsed: new Date() },
-                    })
-                    .catch(() => {});
-
+                touchApiKey(apiKeyRecord.id);
                 return apiKeyRecord.user;
             }
         } catch (error) {
@@ -156,10 +229,7 @@ async function authenticateRequest(
                 const isStreamScoped = decoded.scope === "stream";
                 const isStreamPath = req.path.endsWith("/stream");
                 if (!isStreamScoped || isStreamPath) {
-                    const user = await prisma.user.findUnique({
-                        where: { id: decoded.userId },
-                        select: { id: true, username: true, role: true, tokenVersion: true },
-                    });
+                    const user = await loadUser(decoded.userId);
                     if (user) {
                         // Validate tokenVersion - reject if password was changed
                         if (decoded.tokenVersion === undefined || decoded.tokenVersion !== user.tokenVersion) {
@@ -196,10 +266,7 @@ async function authenticateRequest(
             const isStreamScoped = decoded.scope === "stream";
             const isStreamPath = req.path.endsWith("/stream");
             if (!isStreamScoped || isStreamPath) {
-                const user = await prisma.user.findUnique({
-                    where: { id: decoded.userId },
-                    select: { id: true, username: true, role: true, tokenVersion: true },
-                });
+                const user = await loadUser(decoded.userId);
                 if (user) {
                     // Validate tokenVersion - reject if password was changed
                     if (decoded.tokenVersion === undefined || decoded.tokenVersion !== user.tokenVersion) {
@@ -234,7 +301,9 @@ export async function requireAdmin(
     res: Response,
     next: NextFunction
 ) {
-    const user = await authenticateRequest(req, false);
+    // Reuse the result when requireAuth already ran on this request. Chained as
+    // `requireAuth, requireAdmin` this used to authenticate twice from scratch.
+    const user = req.user ?? (await authenticateRequest(req, false));
     if (!user) {
         return res.status(401).json({ error: "Not authenticated" });
     }

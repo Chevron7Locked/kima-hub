@@ -46,7 +46,7 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import authRoutes from '../../routes/auth';
-import { generateToken, generateRefreshToken } from '../../middleware/auth';
+import { generateToken, generateRefreshToken, clearUserCache} from '../../middleware/auth';
 import { prisma } from '../../utils/db';
 
 const TEST_SECRET = process.env.JWT_SECRET!;
@@ -84,7 +84,11 @@ describe('POST /auth/login', () => {
     let app: express.Application;
 
     beforeAll(() => { app = createTestApp(); });
-    beforeEach(() => { jest.clearAllMocks(); });
+    beforeEach(() => {
+        jest.clearAllMocks();
+        // Auth caches the user row; these tests reuse one userId across roles.
+        clearUserCache();
+    });
 
     it('returns 400 when username or password is missing', async () => {
         const res = await request(app).post('/auth/login').send({ username: '' });
@@ -185,7 +189,11 @@ describe('POST /auth/refresh', () => {
     let app: express.Application;
 
     beforeAll(() => { app = createTestApp(); });
-    beforeEach(() => { jest.clearAllMocks(); });
+    beforeEach(() => {
+        jest.clearAllMocks();
+        // Auth caches the user row; these tests reuse one userId across roles.
+        clearUserCache();
+    });
 
     it('returns 400 when refreshToken is not provided', async () => {
         const res = await request(app).post('/auth/refresh').send({});
@@ -242,7 +250,11 @@ describe('Admin-only routes', () => {
     }
 
     beforeAll(() => { app = createTestApp(); });
-    beforeEach(() => { jest.clearAllMocks(); });
+    beforeEach(() => {
+        jest.clearAllMocks();
+        // Auth caches the user row; these tests reuse one userId across roles.
+        clearUserCache();
+    });
 
     it('GET /auth/users returns 403 for non-admin user', async () => {
         (prisma.user.findUnique as jest.Mock).mockResolvedValue({ ...BASE_USER, role: 'user' });

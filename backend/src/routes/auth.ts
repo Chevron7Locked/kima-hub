@@ -15,6 +15,7 @@ import {
     generateStreamTicket,
     STREAM_TICKET_TTL_SECONDS,
     JWT_SECRET_VALIDATED,
+    invalidateUserCache,
 } from "../middleware/auth";
 import { authLimiter } from "../middleware/rateLimiter";
 import { encrypt, decrypt } from "../utils/encryption";
@@ -256,6 +257,10 @@ router.post("/change-password", requireAuth, authLimiter, async (req, res) => {
                 tokenVersion: { increment: 1 },
             },
         });
+        // The auth layer caches the user row, and tokenVersion is what revokes
+        // issued tokens -- without this the old tokens keep working until the
+        // cache TTL elapses.
+        invalidateUserCache(req.user!.id);
 
         res.json({ message: "Password changed successfully" });
     } catch (error) {

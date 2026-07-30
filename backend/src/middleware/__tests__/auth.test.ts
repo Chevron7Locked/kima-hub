@@ -35,7 +35,13 @@ jest.mock('../../utils/logger', () => ({
     },
 }));
 
-import { requireAuth, requireAdmin, requireAuthOrToken } from '../../middleware/auth';
+import {
+    requireAuth,
+    requireAdmin,
+    requireAuthOrToken,
+    clearUserCache,
+    invalidateUserCache,
+} from '../../middleware/auth';
 import { prisma } from '../../utils/db';
 
 const TEST_SECRET = process.env.JWT_SECRET!;
@@ -94,6 +100,9 @@ const DB_USER = { id: 'user-123', username: 'testuser', role: 'user', tokenVersi
 describe('requireAuth', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        // The auth layer caches the user row across requests; without this the
+        // previous test's user leaks into this one.
+        clearUserCache();
         (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
         (prisma.apiKey.findUnique as jest.Mock).mockResolvedValue(null);
     });
@@ -234,6 +243,9 @@ describe('requireAuth', () => {
 describe('requireAdmin', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        // The auth layer caches the user row across requests; without this the
+        // previous test's user leaks into this one.
+        clearUserCache();
         (prisma.apiKey.findUnique as jest.Mock).mockResolvedValue(null);
     });
 
@@ -286,6 +298,9 @@ describe('requireAdmin', () => {
 describe('requireAuthOrToken', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        // The auth layer caches the user row across requests; without this the
+        // previous test's user leaks into this one.
+        clearUserCache();
         (prisma.apiKey.findUnique as jest.Mock).mockResolvedValue(null);
     });
 
@@ -320,5 +335,90 @@ describe('requireAuthOrToken', () => {
 
         expect(status).toHaveBeenCalledWith(401);
         expect(next).not.toHaveBeenCalled();
+    });
+});
+
+// ── user cache ────────────────────────────────────────────────────────────────
+
+describe('user row cache', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        clearUserCache();
+        (prisma.apiKey.findUnique as jest.Mock).mockResolvedValue(null);
+    });
+
+    it('hits the database once across repeated requests', async () => {
+        (prisma.user.findUnique as jest.Mock).mockResolvedValue(DB_USER);
+        const token = validToken('user-123', 1);
+
+        for (let i = 0; i < 5; i += 1) {
+            const req = mockReq({ headers: { authorization: `Bearer ${token}` } });
+            const { res } = mockRes();
+            await requireAuth(req, res, mockNext());
+        }
+
+        // Five authenticated requests, one query. This was five.
+        expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it('requireAdmin reuses an already-authenticated request', async () => {
+        (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+            ...DB_USER,
+            role: 'admin',
+        });
+        const token = validToken('user-123', 1, 'admin');
+
+        const req = mockReq({ headers: { authorization: `Bearer ${token}` } });
+        const { res } = mockRes();
+        const next = mockNext();
+
+        // The real chain: app.use(path, requireAuth, requireAdmin, ...)
+        await requireAuth(req, res, next);
+        clearUserCache(); // prove the reuse, not the cache
+        await requireAdmin(req, res, next);
+
+        expect(next).toHaveBeenCalledTimes(2);
+        // requireAdmin re-authenticated from scratch before; with req.user
+        // already populated it must not query again.
+        expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it('revocation takes effect immediately once the cache is invalidated', async () => {
+        (prisma.user.findUnique as jest.Mock).mockResolvedValue(DB_USER);
+        const token = validToken('user-123', 1);
+
+        const first = mockReq({ headers: { authorization: `Bearer ${token}` } });
+        const r1 = mockRes();
+        const n1 = mockNext();
+        await requireAuth(first, r1.res, n1);
+        expect(n1).toHaveBeenCalledTimes(1);
+
+        // Password changed: tokenVersion bumped, and the route invalidates.
+        (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+            ...DB_USER,
+            tokenVersion: 2,
+        });
+        invalidateUserCache('user-123');
+
+        const second = mockReq({ headers: { authorization: `Bearer ${token}` } });
+        const r2 = mockRes();
+        const n2 = mockNext();
+        await requireAuth(second, r2.res, n2);
+
+        expect(r2.status).toHaveBeenCalledWith(401);
+        expect(n2).not.toHaveBeenCalled();
+    });
+
+    it('caches a missing user so a bad token cannot hammer the database', async () => {
+        (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+        const token = validToken('deleted-user', 1);
+
+        for (let i = 0; i < 4; i += 1) {
+            const req = mockReq({ headers: { authorization: `Bearer ${token}` } });
+            const { res } = mockRes();
+            await requireAuth(req, res, mockNext());
+        }
+
+        expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
     });
 });
