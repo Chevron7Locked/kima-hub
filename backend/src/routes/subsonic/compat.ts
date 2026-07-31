@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { prisma } from "../../utils/db";
 import { subsonicError, subsonicOk, SubsonicError } from "../../utils/subsonicResponse";
 import { parseRepeatedQueryParam } from "./mappers";
+import { createShareLink, ShareError } from "../../services/shareService";
 
 export const compatRouter = Router();
 
@@ -59,27 +60,58 @@ compatRouter.all("/getShares.view", (req: Request, res: Response) => {
     subsonicOk(req, res, { shares: {} });
 });
 
-compatRouter.all("/createShare.view", (req: Request, res: Response) => {
+// Creates a REAL share link through the same service the web route uses.
+//
+// This used to fabricate one: a synthetic `kima-<timestamp>` id and a URL
+// pointing at `/share/unsupported`, a path that does not exist. A client handed
+// the user a link that was dead on arrival, which is worse than refusing.
+compatRouter.all("/createShare.view", async (req: Request, res: Response) => {
     const ids = parseRepeatedQueryParam(req.query.id);
     if (ids.length === 0) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
 
-    const created = new Date().toISOString();
-    return subsonicOk(req, res, {
-        shares: {
-            share: [
-                {
-                    "@_id": `kima-${Date.now()}`,
-                    "@_url": `${req.protocol}://${req.get("host")}/share/unsupported`,
-                    "@_description": (req.query.description as string | undefined) || undefined,
-                    "@_username": req.user!.username,
-                    "@_created": created,
-                    "@_visitCount": 0,
-                },
-            ],
-        },
-    });
+    // Subsonic ids are opaque; resolve what each one actually is. Only the
+    // first is shared -- ShareLink covers a single entity.
+    const [id] = ids;
+    const [track, album, playlist] = await Promise.all([
+        prisma.track.findUnique({ where: { id }, select: { id: true } }),
+        prisma.album.findUnique({ where: { id }, select: { id: true } }),
+        prisma.playlist.findUnique({ where: { id }, select: { id: true } }),
+    ]);
+    const entityType = track ? "track" : album ? "album" : playlist ? "playlist" : null;
+
+    if (!entityType) {
+        return subsonicError(req, res, SubsonicError.NOT_FOUND, "Item not found");
+    }
+
+    try {
+        const share = await createShareLink(req.user!.id, entityType, id);
+        const base = `${req.protocol}://${req.get("host")}`;
+        return subsonicOk(req, res, {
+            shares: {
+                share: [
+                    {
+                        "@_id": share.token,
+                        "@_url": `${base}${share.url}`,
+                        "@_description": (req.query.description as string | undefined) || undefined,
+                        "@_username": req.user!.username,
+                        "@_created": new Date().toISOString(),
+                        "@_visitCount": 0,
+                    },
+                ],
+            },
+        });
+    } catch (error: any) {
+        if (error instanceof ShareError) {
+            const code =
+                error.code === "FORBIDDEN" ? SubsonicError.NOT_AUTHORIZED
+                : error.code === "NOT_FOUND" ? SubsonicError.NOT_FOUND
+                : SubsonicError.GENERIC;
+            return subsonicError(req, res, code, error.message);
+        }
+        throw error;
+    }
 });
 
 compatRouter.all("/updateShare.view", (req: Request, res: Response) => {

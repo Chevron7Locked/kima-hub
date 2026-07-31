@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { createShareLink, ShareError } from "../services/shareService";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
@@ -59,85 +60,24 @@ function getMimeType(filePath: string): string {
 router.post("/", requireAuth, async (req: Request, res: Response) => {
     try {
         const { entityType, entityId } = req.body;
-        const userId = req.user!.id;
-
         if (!entityType || !entityId) {
-            return res.status(400).json({ error: "entityType and entityId are required" });
+            return res
+                .status(400)
+                .json({ error: "entityType and entityId are required" });
         }
 
-        if (!["playlist", "track", "album"].includes(entityType)) {
-            return res.status(400).json({ error: "entityType must be playlist, track, or album" });
-        }
-
-        if (entityType === "playlist") {
-            const playlist = await prisma.playlist.findUnique({ where: { id: entityId } });
-            if (!playlist) return res.status(404).json({ error: "Playlist not found" });
-            if (playlist.userId !== userId) return res.status(403).json({ error: "Not the playlist owner" });
-        } else if (entityType === "track") {
-            const track = await prisma.track.findUnique({ where: { id: entityId } });
-            if (!track) return res.status(404).json({ error: "Track not found" });
-        } else if (entityType === "album") {
-            const album = await prisma.album.findUnique({ where: { id: entityId } });
-            if (!album) return res.status(404).json({ error: "Album not found" });
-        }
-
-        const createShareLink = () => prisma.$transaction(async (tx) => {
-            const existing = await tx.shareLink.findFirst({
-                where: {
-                    entityType,
-                    entityId,
-                    createdBy: userId,
-                    OR: [
-                        { expiresAt: null },
-                        { expiresAt: { gt: new Date() } },
-                    ],
-                },
-            });
-
-            if (existing) {
-                return { token: existing.token, url: `/share/${existing.token}`, existing: true };
-            }
-
-            const userLinkCount = await tx.shareLink.count({
-                where: {
-                    createdBy: userId,
-                    OR: [
-                        { expiresAt: null },
-                        { expiresAt: { gt: new Date() } },
-                    ],
-                },
-            });
-            if (userLinkCount >= 500) {
-                throw new Error("SHARE_LIMIT_REACHED");
-            }
-
-            const shareLink = await tx.shareLink.create({
-                data: {
-                    token: randomBytes(24).toString("base64url"),
-                    entityType,
-                    entityId,
-                    createdBy: userId,
-                },
-            });
-
-            return { token: shareLink.token, url: `/share/${shareLink.token}` };
-        }, { isolationLevel: "Serializable" });
-
-        let result;
-        try {
-            result = await createShareLink();
-        } catch (retryError: any) {
-            if (retryError.code === "P2034") {
-                result = await createShareLink();
-            } else {
-                throw retryError;
-            }
-        }
-
+        // Creation lives in shareService so the Subsonic surface can create a
+        // REAL share rather than fabricating one.
+        const result = await createShareLink(req.user!.id, entityType, entityId);
         res.json(result);
     } catch (error: any) {
-        if (error.message === "SHARE_LIMIT_REACHED") {
-            return res.status(429).json({ error: "Share link limit reached (max 500)" });
+        if (error instanceof ShareError) {
+            const status =
+                error.code === "INVALID_ENTITY_TYPE" ? 400
+                : error.code === "NOT_FOUND" ? 404
+                : error.code === "FORBIDDEN" ? 403
+                : 429;
+            return res.status(status).json({ error: error.message });
         }
         logger.error(`[Share] Failed to create share link: ${error.message}`);
         res.status(500).json({ error: "Failed to create share link" });
