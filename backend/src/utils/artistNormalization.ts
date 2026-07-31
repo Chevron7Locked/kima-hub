@@ -36,14 +36,6 @@ export function canonicalizeVariousArtists(name: string): string {
 }
 
 /**
- * Strip diacritics/accents from a string
- * e.g., "Ólafur" → "Olafur", "Björk" → "Bjork"
- */
-function stripDiacritics(str: string): string {
-    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
-
-/**
  * Strip characters that PostgreSQL rejects in UTF-8 text columns.
  * Removes null bytes and ASCII control characters (C0 range) while
  * preserving all legitimate Unicode including accented chars, CJK, emoji.

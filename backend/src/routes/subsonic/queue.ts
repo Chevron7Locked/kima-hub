@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Request, Router } from "express";
 import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap } from "./mappers";
@@ -91,6 +91,19 @@ async function hydrateQueue(ids: string[]): Promise<QueueTrack[]> {
         }));
 }
 
+/**
+ * The client that is WRITING the queue.
+ *
+ * `changedBy` exists so a device can tell that ANOTHER device changed the
+ * queue. Echoing `req.query.c` back on read reported the reading client, so
+ * every queue looked self-authored and the field was useless -- it has to be
+ * captured at write time and stored.
+ */
+function clientName(req: Request): string {
+    const c = req.query.c as string | undefined;
+    return c && c.trim() ? c.trim().slice(0, 64) : "Kima";
+}
+
 queueRouter.all("/getPlayQueue.view", wrap(async (req, res) => {
     const userId = req.user!.id;
     const state = await prisma.playbackState.findUnique({ where: { userId } });
@@ -106,10 +119,10 @@ queueRouter.all("/getPlayQueue.view", wrap(async (req, res) => {
     return subsonicOk(req, res, {
         playQueue: {
             "@_current": currentId,
-            "@_position": 0,
+            "@_position": state?.position ?? 0,
             "@_username": req.user!.username,
             "@_changed": state?.updatedAt?.toISOString() || new Date().toISOString(),
-            "@_changedBy": (req.query.c as string | undefined) || "Kima",
+            "@_changedBy": state?.changedBy || "Kima",
             ...(entry.length > 0 ? { entry } : {}),
         },
     });
@@ -129,10 +142,10 @@ queueRouter.all("/getPlayQueueByIndex.view", wrap(async (req, res) => {
     return subsonicOk(req, res, {
         playQueueByIndex: {
             "@_currentIndex": currentIndex,
-            "@_position": 0,
+            "@_position": state?.position ?? 0,
             "@_username": req.user!.username,
             "@_changed": state?.updatedAt?.toISOString() || new Date().toISOString(),
-            "@_changedBy": (req.query.c as string | undefined) || "Kima",
+            "@_changedBy": state?.changedBy || "Kima",
             ...(entry.length > 0 ? { entry } : {}),
         },
     });
@@ -153,6 +166,7 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
     const current = req.query.current as string | undefined;
     const positionRaw = req.query.position as string | undefined;
     const position = positionRaw ? parseInt(positionRaw, 10) : 0;
+    const safePosition = Number.isFinite(position) && position >= 0 ? position : 0;
 
     if (ids.length > 0 && (!current || !ids.includes(current))) {
         return subsonicError(
@@ -179,6 +193,8 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
             queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
             currentIndex,
             isShuffle: false,
+            position: safePosition,
+            changedBy: clientName(req),
         },
         create: {
             userId,
@@ -189,11 +205,10 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
             queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
             currentIndex,
             isShuffle: false,
+            position: safePosition,
+            changedBy: clientName(req),
         },
     });
-
-    // Position is acknowledged but not persisted separately in Kima playback state.
-    void position;
 
     return subsonicOk(req, res);
 }));
@@ -215,6 +230,7 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
     const position = positionRaw === undefined || positionRaw === ""
         ? 0
         : parseInt(positionRaw, 10);
+    const safePosition = Number.isFinite(position) && position >= 0 ? position : 0;
 
     if (ids.length === 0 && currentIndexRaw !== undefined) {
         return subsonicError(
@@ -257,6 +273,8 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
             queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
             currentIndex: ids.length > 0 ? parsedIndex : 0,
             isShuffle: false,
+            position: safePosition,
+            changedBy: clientName(req),
         },
         create: {
             userId,
@@ -267,10 +285,10 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
             queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
             currentIndex: ids.length > 0 ? parsedIndex : 0,
             isShuffle: false,
+            position: safePosition,
+            changedBy: clientName(req),
         },
     });
-
-    void position;
 
     return subsonicOk(req, res);
 }));

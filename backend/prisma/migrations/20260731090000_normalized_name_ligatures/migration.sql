@@ -42,11 +42,5 @@
 CREATE EXTENSION IF NOT EXISTS unaccent;
 
 UPDATE "Artist"
-SET "normalizedName" = regexp_replace(
-        regexp_replace(lower(unaccent(trim(name))), '\s*&\s*', ' and ', 'g'),
-        '\s+', ' ', 'g'
-    )
-WHERE "normalizedName" IS DISTINCT FROM regexp_replace(
-        regexp_replace(lower(unaccent(trim(name))), '\s*&\s*', ' and ', 'g'),
-        '\s+', ' ', 'g'
-    );
+SET "normalizedName" = kima_normalized_name(name)
+WHERE "normalizedName" IS DISTINCT FROM kima_normalized_name(name);

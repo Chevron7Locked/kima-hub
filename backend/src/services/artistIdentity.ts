@@ -23,6 +23,14 @@
 
 import { Prisma } from "@prisma/client";
 import { canonicalizeVariousArtists } from "../utils/artistNormalization";
+import {
+    PG_LEADING_ARTICLE,
+    pgCollapseSpace,
+    pgLower,
+    pgTrim,
+    stripNonAlnum,
+    unaccent,
+} from "./pgTextRules";
 
 /** Separators that unambiguously mark multiple artists in a tag value. */
 const STRUCTURAL_SPLIT = /[\0;]+/;
@@ -35,40 +43,26 @@ const STRUCTURAL_SPLIT = /[\0;]+/;
 const FEATURED_MARKER =
     /\s+(?:feat\.?|ft\.?|featuring|w\/)\s+/i;
 
-/** Leading articles stripped for sort order. */
-const LEADING_ARTICLE = /^(?:the|a|an|le|la|les|los|las|die|der|das)\s+/i;
-
-/**
- * Characters that carry no combining mark, so NFD leaves them intact, but which
- * Postgres `unaccent()` still folds. The identity keys are backfilled in SQL and
- * recomputed here at scan time -- if the two disagree, the backfilled key is
- * unreachable from the runtime and the next scan creates the duplicate this
- * whole mechanism exists to prevent. Verified against `unaccent()` on the
- * shipped Postgres image; extend both sides together.
- */
-const LIGATURE_FOLD: Record<string, string> = {
-    æ: "ae", Æ: "AE",
-    œ: "oe", Œ: "OE",
-    ø: "o",  Ø: "O",
-    ß: "ss",
-    ð: "d",  Ð: "D",
-    þ: "th", Þ: "TH",
-    đ: "d",  Đ: "D",
-    ł: "l",  Ł: "L",
-    ħ: "h",  Ħ: "H",
-    ı: "i",
-    ŧ: "t",  Ŧ: "T",
-};
 
 /**
  * Casefold-safe text normalisation shared by every identity key in the app.
  * Exported so album identity uses the SAME rules; a second copy would drift.
+ *
+ * This is `unaccent()` and nothing else, because the identity keys are computed
+ * in two places -- here at scan time and in SQL by the migration backfills --
+ * and any disagreement makes a backfilled key unreachable from the runtime, so
+ * the next scan re-creates the duplicate the mechanism exists to prevent.
+ *
+ * It used to be NFD + strip-combining-marks + a 20-entry hand-written table of
+ * "characters unaccent folds that carry no combining mark". That approach
+ * cannot work: it diverged from `unaccent()` on 857 of 2624 sampled codepoints,
+ * and the two are not the same KIND of operation. `unaccent()` strips a bare
+ * combining mark but leaves composed kana intact, where NFD-then-strip turns
+ * \u304C into \u304B. The table is now generated from the shipped Postgres
+ * image (see unaccentFold.ts), so the two sides agree by construction.
  */
 export function foldIdentityText(value: string): string {
-    return value
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[æÆœŒøØßðÐþÞđĐłŁħĦıŧŦ]/g, (c) => LIGATURE_FOLD[c] ?? c);
+    return unaccent(value);
 }
 
 function stripDiacritics(value: string): string {
@@ -82,10 +76,15 @@ function stripDiacritics(value: string): string {
  */
 export function normalizeArtistName(name: string | null | undefined): string {
     if (name == null) return "";
-    return stripDiacritics(name.trim().toLowerCase())
-        .replace(/\s*&\s*/g, " and ")
-        .replace(/\s+/g, " ")
-        .trim();
+    // Fold BEFORE lowercasing, because SQL does lower(unaccent(x)) and some
+    // unaccent expansions are uppercase -- (c) is folded to "(C)", (r) to
+    // "(R)". Lowercasing first left that C uppercase, and the key built from
+    // it could never match the backfilled one.
+    return pgTrim(
+        pgCollapseSpace(
+            pgLower(stripDiacritics(pgTrim(name))).replace(/\s*&\s*/g, " and ")
+        )
+    );
 }
 
 /**
@@ -100,7 +99,7 @@ export function normalizeArtistName(name: string | null | undefined): string {
  * Postgres rather than depending on the lookup code being clever.
  */
 export function artistIdentityKey(name: string | null | undefined): string {
-    return normalizeArtistName(name).replace(/[^\p{L}\p{N}]/gu, "");
+    return stripNonAlnum(normalizeArtistName(name));
 }
 
 /**
@@ -109,8 +108,8 @@ export function artistIdentityKey(name: string | null | undefined): string {
  */
 export function artistSortName(name: string | null | undefined): string {
     if (name == null) return "";
-    const base = stripDiacritics(name.trim().toLowerCase()).replace(/\s+/g, " ");
-    return base.replace(LEADING_ARTICLE, "").trim() || base;
+    const base = pgCollapseSpace(pgLower(stripDiacritics(pgTrim(name))));
+    return pgTrim(base.replace(PG_LEADING_ARTICLE, "")) || base;
 }
 
 /**

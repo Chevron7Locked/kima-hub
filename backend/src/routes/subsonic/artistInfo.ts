@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { normalizeArtistName } from "../../utils/artistNormalization";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap, parseIntParam } from "./mappers";
@@ -30,7 +31,9 @@ artistInfoRouter.all(["/getArtistInfo2.view", "/getArtistInfo.view"], wrap(async
     if (rawSimilar.length > 0) {
         const top = rawSimilar.slice(0, count);
         const mbids = top.filter((s) => s.mbid).map((s) => s.mbid as string);
-        const names = top.map((s) => s.name.toLowerCase());
+        // normalizeArtistName is what writes normalizedName; toLowerCase alone
+        // does not fold accents or ampersands, so accented artists never matched.
+        const names = top.map((s) => normalizeArtistName(s.name));
 
         const candidates = await prisma.artist.findMany({
             where: {

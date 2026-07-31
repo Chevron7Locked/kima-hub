@@ -371,6 +371,13 @@ router.delete("/users/:id", requireAuth, requireAdmin, async (req, res) => {
             where: { id },
         });
 
+        // The auth layer caches the user row for 30s and `loadUser` does not
+        // re-check existence, so without this a deleted user's token keeps
+        // authenticating until the TTL expires -- measured at 28+ seconds of
+        // access after the row was gone. The Subsonic delete path already does
+        // this (routes/subsonic/userManagement.ts); this one was missed.
+        invalidateUserCache(id);
+
         res.json({ message: "User deleted successfully" });
     } catch (error: any) {
         logger.error("Delete user error:", error);

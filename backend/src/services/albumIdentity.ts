@@ -34,6 +34,7 @@
 import { Prisma } from "@prisma/client";
 import { stripAlbumEdition } from "../utils/artistNormalization";
 import { foldIdentityText } from "./artistIdentity";
+import { pgCollapseSpace, pgLower, pgTrim, stripNonAlnum } from "./pgTextRules";
 
 // Same rules as artist identity -- imported, not re-implemented, so the two
 // cannot drift apart from each other or from the SQL backfill.
@@ -74,8 +75,8 @@ const GENERIC_TITLES = new Set([
  */
 export function albumIdentityKey(title: string | null | undefined): string {
     if (title == null) return "";
-    const base = stripAlbumEdition(String(title).trim());
-    return stripDiacritics(base.toLowerCase()).replace(/[^\p{L}\p{N}]/gu, "");
+    const base = stripAlbumEdition(pgTrim(String(title)));
+    return stripNonAlnum(pgLower(stripDiacritics(base)));
 }
 
 /**
@@ -86,11 +87,9 @@ export function albumIdentityKey(title: string | null | undefined): string {
  */
 export function isGenericAlbumTitle(title: string | null | undefined): boolean {
     if (title == null) return true;
-    const normalised = stripDiacritics(
-        stripAlbumEdition(String(title).trim()).toLowerCase()
-    )
-        .replace(/\s+/g, " ")
-        .trim();
+    const normalised = pgTrim(
+        pgCollapseSpace(pgLower(stripDiacritics(stripAlbumEdition(pgTrim(String(title))))))
+    );
     // Emptiness is judged on the identity key, not on this spacing-preserving
     // form: "( )" is non-empty here but collapses to "" as a key, and a title
     // with no identity is exactly the case that must not match across artists.

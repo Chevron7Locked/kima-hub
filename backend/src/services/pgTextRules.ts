@@ -1,0 +1,1773 @@
+/**
+ * GENERATED -- do not hand-edit. Regenerate with `npm run gen:pg-text-rules`.
+ *
+ * Postgres text semantics that the identity keys depend on, swept codepoint by
+ * codepoint from the shipped image across the whole Basic Multilingual Plane:
+ * `unaccent()`, the `[:alnum:]` class, `lower()`, and `\s`.
+ *
+ * Why these are generated rather than written: identity keys are computed in
+ * TWO places -- in the application at scan time, and in SQL by the migration
+ * backfills. If the two disagree by even one character the backfilled key is
+ * unreachable from the runtime, and the next scan re-creates the duplicate the
+ * whole identity mechanism exists to prevent. A hand-maintained fold table had
+ * 20 entries and diverged from unaccent() on 857 of 2624 sampled codepoints
+ * (Hangul 100%, fullwidth forms 99%, presentation forms 51%). It could only
+ * ever cover what someone thought to list.
+ *
+ * Deriving them from the authority makes the two sides agree by construction.
+ */
+
+/** codepoint(hex) SP replacement, one per line. 1613 entries. */
+const UNACCENT_DATA = `\
+00A1 !
+00A9 (C)
+00AB <<
+00AD -
+00AE (R)
+00B1 +/-
+00BB >>
+00BC 1/4
+00BD 1/2
+00BE 3/4
+00BF ?
+00C0 A
+00C1 A
+00C2 A
+00C3 A
+00C4 A
+00C5 A
+00C6 AE
+00C7 C
+00C8 E
+00C9 E
+00CA E
+00CB E
+00CC I
+00CD I
+00CE I
+00CF I
+00D0 D
+00D1 N
+00D2 O
+00D3 O
+00D4 O
+00D5 O
+00D6 O
+00D7 *
+00D8 O
+00D9 U
+00DA U
+00DB U
+00DC U
+00DD Y
+00DE TH
+00DF ss
+00E0 a
+00E1 a
+00E2 a
+00E3 a
+00E4 a
+00E5 a
+00E6 ae
+00E7 c
+00E8 e
+00E9 e
+00EA e
+00EB e
+00EC i
+00ED i
+00EE i
+00EF i
+00F0 d
+00F1 n
+00F2 o
+00F3 o
+00F4 o
+00F5 o
+00F6 o
+00F7 /
+00F8 o
+00F9 u
+00FA u
+00FB u
+00FC u
+00FD y
+00FE th
+00FF y
+0100 A
+0101 a
+0102 A
+0103 a
+0104 A
+0105 a
+0106 C
+0107 c
+0108 C
+0109 c
+010A C
+010B c
+010C C
+010D c
+010E D
+010F d
+0110 D
+0111 d
+0112 E
+0113 e
+0114 E
+0115 e
+0116 E
+0117 e
+0118 E
+0119 e
+011A E
+011B e
+011C G
+011D g
+011E G
+011F g
+0120 G
+0121 g
+0122 G
+0123 g
+0124 H
+0125 h
+0126 H
+0127 h
+0128 I
+0129 i
+012A I
+012B i
+012C I
+012D i
+012E I
+012F i
+0130 I
+0131 i
+0132 IJ
+0133 ij
+0134 J
+0135 j
+0136 K
+0137 k
+0138 q
+0139 L
+013A l
+013B L
+013C l
+013D L
+013E l
+013F L
+0140 l
+0141 L
+0142 l
+0143 N
+0144 n
+0145 N
+0146 n
+0147 N
+0148 n
+0149 'n
+014A N
+014B n
+014C O
+014D o
+014E O
+014F o
+0150 O
+0151 o
+0152 OE
+0153 oe
+0154 R
+0155 r
+0156 R
+0157 r
+0158 R
+0159 r
+015A S
+015B s
+015C S
+015D s
+015E S
+015F s
+0160 S
+0161 s
+0162 T
+0163 t
+0164 T
+0165 t
+0166 T
+0167 t
+0168 U
+0169 u
+016A U
+016B u
+016C U
+016D u
+016E U
+016F u
+0170 U
+0171 u
+0172 U
+0173 u
+0174 W
+0175 w
+0176 Y
+0177 y
+0178 Y
+0179 Z
+017A z
+017B Z
+017C z
+017D Z
+017E z
+017F s
+0180 b
+0181 B
+0182 B
+0183 b
+0187 C
+0188 c
+0189 D
+018A D
+018B D
+018C d
+0190 E
+0191 F
+0192 f
+0193 G
+0195 hv
+0196 I
+0197 I
+0198 K
+0199 k
+019A l
+019D N
+019E n
+01A0 O
+01A1 o
+01A2 OI
+01A3 oi
+01A4 P
+01A5 p
+01AB t
+01AC T
+01AD t
+01AE T
+01AF U
+01B0 u
+01B2 V
+01B3 Y
+01B4 y
+01B5 Z
+01B6 z
+01C4 DZ
+01C5 Dz
+01C6 dz
+01C7 LJ
+01C8 Lj
+01C9 lj
+01CA NJ
+01CB Nj
+01CC nj
+01CD A
+01CE a
+01CF I
+01D0 i
+01D1 O
+01D2 o
+01D3 U
+01D4 u
+01D5 U
+01D6 u
+01D7 U
+01D8 u
+01D9 U
+01DA u
+01DB U
+01DC u
+01DE A
+01DF a
+01E0 A
+01E1 a
+01E4 G
+01E5 g
+01E6 G
+01E7 g
+01E8 K
+01E9 k
+01EA O
+01EB o
+01EC O
+01ED o
+01F0 j
+01F1 DZ
+01F2 Dz
+01F3 dz
+01F4 G
+01F5 g
+01F8 N
+01F9 n
+01FA A
+01FB a
+0200 A
+0201 a
+0202 A
+0203 a
+0204 E
+0205 e
+0206 E
+0207 e
+0208 I
+0209 i
+020A I
+020B i
+020C O
+020D o
+020E O
+020F o
+0210 R
+0211 r
+0212 R
+0213 r
+0214 U
+0215 u
+0216 U
+0217 u
+0218 S
+0219 s
+021A T
+021B t
+021E H
+021F h
+0221 d
+0224 Z
+0225 z
+0226 A
+0227 a
+0228 E
+0229 e
+022A O
+022B o
+022C O
+022D o
+022E O
+022F o
+0230 O
+0231 o
+0232 Y
+0233 y
+0234 l
+0235 n
+0236 t
+0237 j
+0238 db
+0239 qp
+023A A
+023B C
+023C c
+023D L
+023E T
+023F s
+0240 z
+0243 B
+0244 U
+0246 E
+0247 e
+0248 J
+0249 j
+024C R
+024D r
+024E Y
+024F y
+0253 b
+0255 c
+0256 d
+0257 d
+025B e
+025F j
+0260 g
+0261 g
+0262 G
+0266 h
+0267 h
+0268 i
+026A I
+026B l
+026C l
+026D l
+0271 m
+0272 n
+0273 n
+0274 N
+0276 OE
+027C r
+027D r
+027E r
+0280 R
+0282 s
+0288 t
+0289 u
+028B v
+028F Y
+0290 z
+0291 z
+0299 B
+029B G
+029C H
+029D j
+029F L
+02A0 q
+02A3 dz
+02A5 dz
+02A6 ts
+02AA ls
+02AB lz
+02B9 '
+02BA "
+02BB '
+02BC '
+02BD '
+02C2 <
+02C3 >
+02C4 ^
+02C6 ^
+02C8 '
+02CB \`
+02D0 :
+02D6 +
+02D7 -
+02DC ~
+0300 
+0301 
+0302 
+0303 
+0304 
+0305 
+0306 
+0307 
+0308 
+0309 
+030A 
+030B 
+030C 
+030D 
+030E 
+030F 
+0310 
+0311 
+0312 
+0313 
+0314 
+0315 
+0316 
+0317 
+0318 
+0319 
+031A 
+031B 
+031C 
+031D 
+031E 
+031F 
+0320 
+0321 
+0322 
+0323 
+0324 
+0325 
+0326 
+0327 
+0328 
+0329 
+032A 
+032B 
+032C 
+032D 
+032E 
+032F 
+0330 
+0331 
+0332 
+0333 
+0334 
+0335 
+0336 
+0337 
+0338 
+0339 
+033A 
+033B 
+033C 
+033D 
+033E 
+033F 
+0340 
+0341 
+0342 
+0343 
+0344 
+0345 
+0346 
+0347 
+0348 
+0349 
+034A 
+034B 
+034C 
+034D 
+034E 
+034F 
+0350 
+0351 
+0352 
+0353 
+0354 
+0355 
+0356 
+0357 
+0358 
+0359 
+035A 
+035B 
+035C 
+035D 
+035E 
+035F 
+0360 
+0361 
+0362 
+0386 Α
+0388 Ε
+0389 Η
+038A Ι
+038C Ο
+038E Υ
+038F Ω
+0390 ι
+03AA Ι
+03AB Υ
+03AC α
+03AD ε
+03AE η
+03AF ι
+03B0 υ
+03CA ι
+03CB υ
+03CC ο
+03CD υ
+03CE ω
+0401 Е
+0451 е
+1D00 A
+1D01 AE
+1D03 B
+1D04 C
+1D05 D
+1D06 D
+1D07 E
+1D0A J
+1D0B K
+1D0C L
+1D0D M
+1D0F O
+1D18 P
+1D1B T
+1D1C U
+1D20 V
+1D21 W
+1D22 Z
+1D6B ue
+1D6C b
+1D6D d
+1D6E f
+1D6F m
+1D70 n
+1D71 p
+1D72 r
+1D73 r
+1D74 s
+1D75 t
+1D76 z
+1D7A th
+1D7B I
+1D7D p
+1D7E U
+1D80 b
+1D81 d
+1D82 f
+1D83 g
+1D84 k
+1D85 l
+1D86 m
+1D87 n
+1D88 p
+1D89 r
+1D8A s
+1D8C v
+1D8D x
+1D8E z
+1D8F a
+1D91 d
+1D92 e
+1D93 e
+1D96 i
+1D99 u
+1E00 A
+1E01 a
+1E02 B
+1E03 b
+1E04 B
+1E05 b
+1E06 B
+1E07 b
+1E08 C
+1E09 c
+1E0A D
+1E0B d
+1E0C D
+1E0D d
+1E0E D
+1E0F d
+1E10 D
+1E11 d
+1E12 D
+1E13 d
+1E14 E
+1E15 e
+1E16 E
+1E17 e
+1E18 E
+1E19 e
+1E1A E
+1E1B e
+1E1C E
+1E1D e
+1E1E F
+1E1F f
+1E20 G
+1E21 g
+1E22 H
+1E23 h
+1E24 H
+1E25 h
+1E26 H
+1E27 h
+1E28 H
+1E29 h
+1E2A H
+1E2B h
+1E2C I
+1E2D i
+1E2E I
+1E2F i
+1E30 K
+1E31 k
+1E32 K
+1E33 k
+1E34 K
+1E35 k
+1E36 L
+1E37 l
+1E38 L
+1E39 l
+1E3A L
+1E3B l
+1E3C L
+1E3D l
+1E3E M
+1E3F m
+1E40 M
+1E41 m
+1E42 M
+1E43 m
+1E44 N
+1E45 n
+1E46 N
+1E47 n
+1E48 N
+1E49 n
+1E4A N
+1E4B n
+1E4C O
+1E4D o
+1E4E O
+1E4F o
+1E50 O
+1E51 o
+1E52 O
+1E53 o
+1E54 P
+1E55 p
+1E56 P
+1E57 p
+1E58 R
+1E59 r
+1E5A R
+1E5B r
+1E5C R
+1E5D r
+1E5E R
+1E5F r
+1E60 S
+1E61 s
+1E62 S
+1E63 s
+1E64 S
+1E65 s
+1E66 S
+1E67 s
+1E68 S
+1E69 s
+1E6A T
+1E6B t
+1E6C T
+1E6D t
+1E6E T
+1E6F t
+1E70 T
+1E71 t
+1E72 U
+1E73 u
+1E74 U
+1E75 u
+1E76 U
+1E77 u
+1E78 U
+1E79 u
+1E7A U
+1E7B u
+1E7C V
+1E7D v
+1E7E V
+1E7F v
+1E80 W
+1E81 w
+1E82 W
+1E83 w
+1E84 W
+1E85 w
+1E86 W
+1E87 w
+1E88 W
+1E89 w
+1E8A X
+1E8B x
+1E8C X
+1E8D x
+1E8E Y
+1E8F y
+1E90 Z
+1E91 z
+1E92 Z
+1E93 z
+1E94 Z
+1E95 z
+1E96 h
+1E97 t
+1E98 w
+1E99 y
+1E9A a
+1E9C s
+1E9D s
+1E9E SS
+1EA0 A
+1EA1 a
+1EA2 A
+1EA3 a
+1EA4 A
+1EA5 a
+1EA6 A
+1EA7 a
+1EA8 A
+1EA9 a
+1EAA A
+1EAB a
+1EAC A
+1EAD a
+1EAE A
+1EAF a
+1EB0 A
+1EB1 a
+1EB2 A
+1EB3 a
+1EB4 A
+1EB5 a
+1EB6 A
+1EB7 a
+1EB8 E
+1EB9 e
+1EBA E
+1EBB e
+1EBC E
+1EBD e
+1EBE E
+1EBF e
+1EC0 E
+1EC1 e
+1EC2 E
+1EC3 e
+1EC4 E
+1EC5 e
+1EC6 E
+1EC7 e
+1EC8 I
+1EC9 i
+1ECA I
+1ECB i
+1ECC O
+1ECD o
+1ECE O
+1ECF o
+1ED0 O
+1ED1 o
+1ED2 O
+1ED3 o
+1ED4 O
+1ED5 o
+1ED6 O
+1ED7 o
+1ED8 O
+1ED9 o
+1EDA O
+1EDB o
+1EDC O
+1EDD o
+1EDE O
+1EDF o
+1EE0 O
+1EE1 o
+1EE2 O
+1EE3 o
+1EE4 U
+1EE5 u
+1EE6 U
+1EE7 u
+1EE8 U
+1EE9 u
+1EEA U
+1EEB u
+1EEC U
+1EED u
+1EEE U
+1EEF u
+1EF0 U
+1EF1 u
+1EF2 Y
+1EF3 y
+1EF4 Y
+1EF5 y
+1EF6 Y
+1EF7 y
+1EF8 Y
+1EF9 y
+1EFA LL
+1EFB ll
+1EFC V
+1EFD v
+1EFE Y
+1EFF y
+1F00 α
+1F01 α
+1F02 α
+1F03 α
+1F04 α
+1F05 α
+1F06 α
+1F07 α
+1F08 Α
+1F09 Α
+1F0A Α
+1F0B Α
+1F0C Α
+1F0D Α
+1F0E Α
+1F0F Α
+1F10 ε
+1F11 ε
+1F12 ε
+1F13 ε
+1F14 ε
+1F15 ε
+1F18 Ε
+1F19 Ε
+1F1A Ε
+1F1B Ε
+1F1C Ε
+1F1D Ε
+1F20 η
+1F21 η
+1F22 η
+1F23 η
+1F24 η
+1F25 η
+1F26 η
+1F27 η
+1F28 Η
+1F29 Η
+1F2A Η
+1F2B Η
+1F2C Η
+1F2D Η
+1F2E Η
+1F2F Η
+1F30 ι
+1F31 ι
+1F32 ι
+1F33 ι
+1F34 ι
+1F35 ι
+1F36 ι
+1F37 ι
+1F38 Ι
+1F39 Ι
+1F3A Ι
+1F3B Ι
+1F3C Ι
+1F3D Ι
+1F3E Ι
+1F3F Ι
+1F40 ο
+1F41 ο
+1F42 ο
+1F43 ο
+1F44 ο
+1F45 ο
+1F48 Ο
+1F49 Ο
+1F4A Ο
+1F4B Ο
+1F4C Ο
+1F4D Ο
+1F50 υ
+1F51 υ
+1F52 υ
+1F53 υ
+1F54 υ
+1F55 υ
+1F56 υ
+1F57 υ
+1F59 Υ
+1F5B Υ
+1F5D Υ
+1F5F Υ
+1F60 ω
+1F61 ω
+1F62 ω
+1F63 ω
+1F64 ω
+1F65 ω
+1F66 ω
+1F67 ω
+1F68 Ω
+1F69 Ω
+1F6A Ω
+1F6B Ω
+1F6C Ω
+1F6D Ω
+1F6E Ω
+1F6F Ω
+1F70 α
+1F72 ε
+1F74 η
+1F76 ι
+1F78 ο
+1F7A υ
+1F7C ω
+1F80 α
+1F81 α
+1F82 α
+1F83 α
+1F84 α
+1F85 α
+1F86 α
+1F87 α
+1F88 Α
+1F89 Α
+1F8A Α
+1F8B Α
+1F8C Α
+1F8D Α
+1F8E Α
+1F8F Α
+1F90 η
+1F91 η
+1F92 η
+1F93 η
+1F94 η
+1F95 η
+1F96 η
+1F97 η
+1F98 Η
+1F99 Η
+1F9A Η
+1F9B Η
+1F9C Η
+1F9D Η
+1F9E Η
+1F9F Η
+1FA0 ω
+1FA1 ω
+1FA2 ω
+1FA3 ω
+1FA4 ω
+1FA5 ω
+1FA6 ω
+1FA7 ω
+1FA8 Ω
+1FA9 Ω
+1FAA Ω
+1FAB Ω
+1FAC Ω
+1FAD Ω
+1FAE Ω
+1FAF Ω
+1FB0 α
+1FB1 α
+1FB2 α
+1FB3 α
+1FB4 α
+1FB6 α
+1FB7 α
+1FB8 Α
+1FB9 Α
+1FBA Α
+1FBC Α
+1FC2 η
+1FC3 η
+1FC4 η
+1FC6 η
+1FC7 η
+1FC8 Ε
+1FCA Η
+1FCC Η
+1FD0 ι
+1FD1 ι
+1FD2 ι
+1FD6 ι
+1FD7 ι
+1FD8 Ι
+1FD9 Ι
+1FDA Ι
+1FE0 υ
+1FE1 υ
+1FE2 υ
+1FE4 ρ
+1FE5 ρ
+1FE6 υ
+1FE7 υ
+1FE8 Υ
+1FE9 Υ
+1FEA Υ
+1FEC Ρ
+1FF2 ω
+1FF3 ω
+1FF4 ω
+1FF6 ω
+1FF7 ω
+1FF8 Ο
+1FFA Ω
+1FFC Ω
+2010 -
+2011 -
+2012 -
+2013 -
+2014 -
+2015 -
+2016 ||
+2018 '
+2019 '
+201A ,
+201B '
+201C "
+201D "
+201E ,,
+201F "
+2024 .
+2025 ..
+2026 ...
+2032 '
+2033 "
+2039 <
+203A >
+203C !!
+2044 /
+2045 [
+2046 ]
+2047 ??
+2048 ?!
+2049 !?
+204E *
+20A0 CE
+20A2 Cr
+20A3 Fr.
+20A4 L.
+20A7 Pts
+20B9 Rs
+20BA TL
+20DD 
+20DE 
+20DF 
+20E0 
+20E2 
+20E3 
+20E4 
+2100 a/c
+2101 a/s
+2102 C
+2103 °C
+2105 c/o
+2106 c/u
+2109 °F
+210A g
+210B H
+210C x
+210D H
+210E h
+2110 I
+2111 I
+2112 L
+2113 l
+2115 N
+2116 No
+2117 (P)
+2118 P
+2119 P
+211A Q
+211B R
+211C R
+211D R
+211E Rx
+2121 TEL
+2124 Z
+2128 Z
+212C B
+212D C
+212F e
+2130 E
+2131 F
+2133 M
+2134 o
+2139 i
+213B FAX
+2145 D
+2146 d
+2147 e
+2148 i
+2149 j
+2150 1/7
+2151 1/9
+2152 1/10
+2153 1/3
+2154 2/3
+2155 1/5
+2156 2/5
+2157 3/5
+2158 4/5
+2159 1/6
+215A 5/6
+215B 1/8
+215C 3/8
+215D 5/8
+215E 7/8
+215F 1/
+2160 I
+2161 II
+2162 III
+2163 IV
+2164 V
+2165 VI
+2166 VII
+2167 VIII
+2168 IX
+2169 X
+216A XI
+216B XII
+216C L
+216D C
+216E D
+216F M
+2170 i
+2171 ii
+2172 iii
+2173 iv
+2174 v
+2175 vi
+2176 vii
+2177 viii
+2178 ix
+2179 x
+217A xi
+217B xii
+217C l
+217D c
+217E d
+217F m
+2189 0/3
+2212 -
+2215 /
+2216 \\
+2223 |
+2225 ||
+226A <<
+226B >>
+2474 (1)
+2475 (2)
+2476 (3)
+2477 (4)
+2478 (5)
+2479 (6)
+247A (7)
+247B (8)
+247C (9)
+247D (10)
+247E (11)
+247F (12)
+2480 (13)
+2481 (14)
+2482 (15)
+2483 (16)
+2484 (17)
+2485 (18)
+2486 (19)
+2487 (20)
+2488 1.
+2489 2.
+248A 3.
+248B 4.
+248C 5.
+248D 6.
+248E 7.
+248F 8.
+2490 9.
+2491 10.
+2492 11.
+2493 12.
+2494 13.
+2495 14.
+2496 15.
+2497 16.
+2498 17.
+2499 18.
+249A 19.
+249B 20.
+249C (a)
+249D (b)
+249E (c)
+249F (d)
+24A0 (e)
+24A1 (f)
+24A2 (g)
+24A3 (h)
+24A4 (i)
+24A5 (j)
+24A6 (k)
+24A7 (l)
+24A8 (m)
+24A9 (n)
+24AA (o)
+24AB (p)
+24AC (q)
+24AD (r)
+24AE (s)
+24AF (t)
+24B0 (u)
+24B1 (v)
+24B2 (w)
+24B3 (x)
+24B4 (y)
+24B5 (z)
+2985 ((
+2986 ))
+2A74 ::=
+2A75 ==
+2A76 ===
+2C60 L
+2C61 l
+2C62 L
+2C63 P
+2C64 R
+2C65 a
+2C66 t
+2C67 H
+2C68 h
+2C69 K
+2C6A k
+2C6B Z
+2C6C z
+2C6E M
+2C71 v
+2C72 W
+2C73 w
+2C74 v
+2C78 e
+2C7A o
+2C7E S
+2C7F Z
+3001 ,
+3002 .
+3007 0
+3008 <
+3009 >
+300A <<
+300B >>
+3014 [
+3015 ]
+3018 [
+3019 ]
+301A [
+301B ]
+301D "
+301E "
+3371 hPa
+3372 da
+3373 AU
+3374 bar
+3375 oV
+3376 pc
+3377 dm
+337A IU
+3380 pA
+3381 nA
+3383 mA
+3384 kA
+3385 KB
+3386 MB
+3387 GB
+3388 cal
+3389 kcal
+338A pF
+338B nF
+338E mg
+338F kg
+3390 Hz
+3391 kHz
+3392 MHz
+3393 GHz
+3394 THz
+3399 fm
+339A nm
+339C mm
+339D cm
+339E km
+33A7 m/s
+33A9 Pa
+33AA kPa
+33AB MPa
+33AC GPa
+33AD rad
+33AE rad/s
+33B0 ps
+33B1 ns
+33B3 ms
+33B4 pV
+33B5 nV
+33B7 mV
+33B8 kV
+33B9 MV
+33BA pW
+33BB nW
+33BD mW
+33BE kW
+33BF MW
+33C2 a.m.
+33C3 Bq
+33C4 cc
+33C5 cd
+33C6 C/kg
+33C7 Co.
+33C8 dB
+33C9 Gy
+33CA ha
+33CB HP
+33CC in
+33CD KK
+33CE KM
+33CF kt
+33D0 lm
+33D1 ln
+33D2 log
+33D3 lx
+33D4 mb
+33D5 mil
+33D6 mol
+33D7 pH
+33D8 p.m.
+33D9 PPM
+33DA PR
+33DB sr
+33DC Sv
+33DD Wb
+33DE V/m
+33DF A/m
+A730 F
+A731 S
+A732 AA
+A733 aa
+A734 AO
+A735 ao
+A736 AU
+A737 au
+A738 AV
+A739 av
+A73A AV
+A73B av
+A73C AY
+A73D ay
+A740 K
+A741 k
+A742 K
+A743 k
+A744 K
+A745 k
+A746 L
+A747 l
+A748 L
+A749 l
+A74A O
+A74B o
+A74C O
+A74D o
+A74E OO
+A74F oo
+A750 P
+A751 p
+A752 P
+A753 p
+A754 P
+A755 p
+A756 Q
+A757 q
+A758 Q
+A759 q
+A75E V
+A75F v
+A760 VY
+A761 vy
+A764 TH
+A765 th
+A766 TH
+A767 th
+A771 d
+A772 l
+A773 m
+A774 n
+A775 r
+A776 R
+A777 t
+A779 D
+A77A d
+A77B F
+A77C f
+A786 T
+A787 t
+A790 N
+A791 n
+A792 C
+A793 c
+A7A0 G
+A7A1 g
+A7A2 K
+A7A3 k
+A7A4 N
+A7A5 n
+A7A6 R
+A7A7 r
+A7A8 S
+A7A9 s
+A7AA H
+FB00 ff
+FB01 fi
+FB02 fl
+FB03 ffi
+FB04 ffl
+FB05 st
+FB06 st
+FE10 ,
+FE11 ,
+FE12 .
+FE13 :
+FE14 ;
+FE15 !
+FE16 ?
+FE19 ...
+FE30 ..
+FE31 -
+FE32 -
+FE35 (
+FE36 )
+FE37 {
+FE38 }
+FE39 [
+FE3A ]
+FE3D <<
+FE3E >>
+FE3F <
+FE40 >
+FE47 [
+FE48 ]
+FE50 ,
+FE51 ,
+FE52 .
+FE54 ;
+FE55 :
+FE56 ?
+FE57 !
+FE58 -
+FE59 (
+FE5A )
+FE5B {
+FE5C }
+FE5D [
+FE5E ]
+FE5F #
+FE60 &
+FE61 *
+FE62 +
+FE63 -
+FE64 <
+FE65 >
+FE66 =
+FE68 \\
+FE69 $
+FE6A %
+FE6B @
+FF01 !
+FF02 "
+FF03 #
+FF04 $
+FF05 %
+FF06 &
+FF07 '
+FF08 (
+FF09 )
+FF0A *
+FF0B +
+FF0C ,
+FF0D -
+FF0E .
+FF0F /
+FF10 0
+FF11 1
+FF12 2
+FF13 3
+FF14 4
+FF15 5
+FF16 6
+FF17 7
+FF18 8
+FF19 9
+FF1A :
+FF1B ;
+FF1C <
+FF1D =
+FF1E >
+FF1F ?
+FF20 @
+FF21 A
+FF22 B
+FF23 C
+FF24 D
+FF25 E
+FF26 F
+FF27 G
+FF28 H
+FF29 I
+FF2A J
+FF2B K
+FF2C L
+FF2D M
+FF2E N
+FF2F O
+FF30 P
+FF31 Q
+FF32 R
+FF33 S
+FF34 T
+FF35 U
+FF36 V
+FF37 W
+FF38 X
+FF39 Y
+FF3A Z
+FF3B [
+FF3C \\
+FF3D ]
+FF3E ^
+FF3F _
+FF40 \`
+FF41 a
+FF42 b
+FF43 c
+FF44 d
+FF45 e
+FF46 f
+FF47 g
+FF48 h
+FF49 i
+FF4A j
+FF4B k
+FF4C l
+FF4D m
+FF4E n
+FF4F o
+FF50 p
+FF51 q
+FF52 r
+FF53 s
+FF54 t
+FF55 u
+FF56 v
+FF57 w
+FF58 x
+FF59 y
+FF5A z
+FF5B {
+FF5C |
+FF5D }
+FF5E ~
+FF5F ((
+FF60 ))
+FF61 .
+FF64 ,
+FFE9 <-
+FFEB ->`;
+
+const UNACCENT = new Map<string, string>();
+for (const line of UNACCENT_DATA.split("\n")) {
+    if (!line) continue;
+    const sp = line.indexOf(" ");
+    UNACCENT.set(String.fromCodePoint(parseInt(line.slice(0, sp), 16)), line.slice(sp + 1));
+}
+
+/**
+ * Apply Postgres `unaccent()` semantics to a string.
+ *
+ * A plain per-character substitution, NOT Unicode normalisation -- `unaccent()`
+ * strips a bare combining mark (U+0301 -> "") but leaves composed kana alone
+ * (U+304C stays U+304C), so an NFD-then-strip-marks implementation cannot
+ * reproduce it. Iterates by code point so astral characters pass through whole
+ * rather than as surrogate halves; `unaccent()` ignores those, and so does this.
+ */
+export function unaccent(value: string): string {
+    let out = "";
+    for (const ch of value) out += UNACCENT.get(ch) ?? ch;
+    return out;
+}
+
+/**
+ * Codepoint ranges Postgres `[:alnum:]` accepts. 433 ranges.
+ *
+ * The identity keys strip "everything not alphanumeric", which the SQL spells
+ * `[^[:alnum:]]`. That class is locale-defined and is NOT JavaScript's
+ * \p{L}\p{N}: it accepts 846 codepoints the Unicode classes reject (Hebrew and
+ * Arabic combining points among them) and rejects 300 they accept (superscripts
+ * and fractions). Using \p{L}\p{N} made the same string key two different ways
+ * depending on which side computed it.
+ */
+const ALNUM_RANGES = "00AA,00B5,00BA,00C0-00D6,00D8-00F6,00F8-02C1,02C6-02D1,02E0-02E4,02EC,02EE,0345,0370-0374,0376-0377,037A-037D,037F,0386,0388-038A,038C,038E-03A1,03A3-03F5,03F7-0481,048A-052F,0531-0556,0559,0560-0588,05B0-05BD,05BF,05C1-05C2,05C4-05C5,05C7,05D0-05EA,05EF-05F2,0610-061A,0620-0657,0659-0669,066E-06D3,06D5-06DC,06E1-06E8,06ED-06FC,06FF,0710-073F,074D-07B1,07C0-07EA,07F4-07F5,07FA,0800-0817,081A-082C,0840-0858,0860-086A,0870-0887,0889-088E,08A0-08C9,08D4-08DF,08E3-08E9,08F0-093B,093D-094C,094E-0950,0955-0963,0966-096F,0971-0983,0985-098C,098F-0990,0993-09A8,09AA-09B0,09B2,09B6-09B9,09BD-09C4,09C7-09C8,09CB-09CC,09CE,09D7,09DC-09DD,09DF-09E3,09E6-09F1,09FC,0A01-0A03,0A05-0A0A,0A0F-0A10,0A13-0A28,0A2A-0A30,0A32-0A33,0A35-0A36,0A38-0A39,0A3E-0A42,0A47-0A48,0A4B-0A4C,0A51,0A59-0A5C,0A5E,0A66-0A75,0A81-0A83,0A85-0A8D,0A8F-0A91,0A93-0AA8,0AAA-0AB0,0AB2-0AB3,0AB5-0AB9,0ABD-0AC5,0AC7-0AC9,0ACB-0ACC,0AD0,0AE0-0AE3,0AE6-0AEF,0AF9-0AFC,0B01-0B03,0B05-0B0C,0B0F-0B10,0B13-0B28,0B2A-0B30,0B32-0B33,0B35-0B39,0B3D-0B44,0B47-0B48,0B4B-0B4C,0B56-0B57,0B5C-0B5D,0B5F-0B63,0B66-0B6F,0B71,0B82-0B83,0B85-0B8A,0B8E-0B90,0B92-0B95,0B99-0B9A,0B9C,0B9E-0B9F,0BA3-0BA4,0BA8-0BAA,0BAE-0BB9,0BBE-0BC2,0BC6-0BC8,0BCA-0BCC,0BD0,0BD7,0BE6-0BEF,0C00-0C03,0C05-0C0C,0C0E-0C10,0C12-0C28,0C2A-0C39,0C3D-0C44,0C46-0C48,0C4A-0C4C,0C55-0C56,0C58-0C5A,0C5D,0C60-0C63,0C66-0C6F,0C80-0C83,0C85-0C8C,0C8E-0C90,0C92-0CA8,0CAA-0CB3,0CB5-0CB9,0CBD-0CC4,0CC6-0CC8,0CCA-0CCC,0CD5-0CD6,0CDD-0CDE,0CE0-0CE3,0CE6-0CEF,0CF1-0CF2,0D00-0D0C,0D0E-0D10,0D12-0D3A,0D3D-0D44,0D46-0D48,0D4A-0D4C,0D4E,0D54-0D57,0D5F-0D63,0D66-0D6F,0D7A-0D7F,0D81-0D83,0D85-0D96,0D9A-0DB1,0DB3-0DBB,0DBD,0DC0-0DC6,0DCF-0DD4,0DD6,0DD8-0DDF,0DE6-0DEF,0DF2-0DF3,0E01-0E3A,0E40-0E46,0E4D,0E50-0E59,0E81-0E82,0E84,0E86-0E8A,0E8C-0EA3,0EA5,0EA7-0EB9,0EBB-0EBD,0EC0-0EC4,0EC6,0ECD,0ED0-0ED9,0EDC-0EDF,0F00,0F20-0F29,0F40-0F47,0F49-0F6C,0F71-0F81,0F88-0F97,0F99-0FBC,1000-1036,1038,103B-1049,1050-109D,10A0-10C5,10C7,10CD,10D0-10FA,10FC-1248,124A-124D,1250-1256,1258,125A-125D,1260-1288,128A-128D,1290-12B0,12B2-12B5,12B8-12BE,12C0,12C2-12C5,12C8-12D6,12D8-1310,1312-1315,1318-135A,1380-138F,13A0-13F5,13F8-13FD,1401-166C,166F-167F,1681-169A,16A0-16EA,16EE-16F8,1700-1713,171F-1733,1740-1753,1760-176C,176E-1770,1772-1773,1780-17B3,17B6-17C8,17D7,17DC,17E0-17E9,1810-1819,1820-1878,1880-18AA,18B0-18F5,1900-191E,1920-192B,1930-1938,1946-196D,1970-1974,1980-19AB,19B0-19C9,19D0-19D9,1A00-1A1B,1A20-1A5E,1A61-1A74,1A80-1A89,1A90-1A99,1AA7,1ABF-1AC0,1ACC-1ACE,1B00-1B33,1B35-1B43,1B45-1B4C,1B50-1B59,1B80-1BA9,1BAC-1BE5,1BE7-1BF1,1C00-1C36,1C40-1C49,1C4D-1C7D,1C80-1C88,1C90-1CBA,1CBD-1CBF,1CE9-1CEC,1CEE-1CF3,1CF5-1CF6,1CFA,1D00-1DBF,1DE7-1DF4,1E00-1F15,1F18-1F1D,1F20-1F45,1F48-1F4D,1F50-1F57,1F59,1F5B,1F5D,1F5F-1F7D,1F80-1FB4,1FB6-1FBC,1FBE,1FC2-1FC4,1FC6-1FCC,1FD0-1FD3,1FD6-1FDB,1FE0-1FEC,1FF2-1FF4,1FF6-1FFC,2071,207F,2090-209C,2102,2107,210A-2113,2115,2119-211D,2124,2126,2128,212A-212D,212F-2139,213C-213F,2145-2149,214E,2160-2188,24B6-24E9,2C00-2CE4,2CEB-2CEE,2CF2-2CF3,2D00-2D25,2D27,2D2D,2D30-2D67,2D6F,2D80-2D96,2DA0-2DA6,2DA8-2DAE,2DB0-2DB6,2DB8-2DBE,2DC0-2DC6,2DC8-2DCE,2DD0-2DD6,2DD8-2DDE,2DE0-2DFF,2E2F,3005-3007,3021-3029,3031-3035,3038-303C,3041-3096,309D-309F,30A1-30FA,30FC-30FF,3105-312F,3131-318E,31A0-31BF,31F0-31FF,3400-4DBF,4E00-A48C,A4D0-A4FD,A500-A60C,A610-A62B,A640-A66E,A674-A67B,A67F-A6EF,A717-A71F,A722-A788,A78B-A7CA,A7D0-A7D1,A7D3,A7D5-A7D9,A7F2-A805,A807-A827,A840-A873,A880-A8C3,A8C5,A8D0-A8D9,A8F2-A8F7,A8FB,A8FD-A92A,A930-A952,A960-A97C,A980-A9B2,A9B4-A9BF,A9CF-A9D9,A9E0-A9FE,AA00-AA36,AA40-AA4D,AA50-AA59,AA60-AA76,AA7A-AABE,AAC0,AAC2,AADB-AADD,AAE0-AAEF,AAF2-AAF5,AB01-AB06,AB09-AB0E,AB11-AB16,AB20-AB26,AB28-AB2E,AB30-AB5A,AB5C-AB69,AB70-ABEA,ABF0-ABF9,AC00-D7A3,D7B0-D7C6,D7CB-D7FB,F900-FA6D,FA70-FAD9,FB00-FB06,FB13-FB17,FB1D-FB28,FB2A-FB36,FB38-FB3C,FB3E,FB40-FB41,FB43-FB44,FB46-FBB1,FBD3-FD3D,FD50-FD8F,FD92-FDC7,FDF0-FDFB,FE70-FE74,FE76-FEFC,FF10-FF19,FF21-FF3A,FF41-FF5A,FF66-FFBE,FFC2-FFC7,FFCA-FFCF,FFD2-FFD7,FFDA-FFDC";
+
+const ALNUM: [number, number][] = ALNUM_RANGES.split(",").map((part) => {
+    const dash = part.indexOf("-");
+    if (dash === -1) {
+        const v = parseInt(part, 16);
+        return [v, v] as [number, number];
+    }
+    return [parseInt(part.slice(0, dash), 16), parseInt(part.slice(dash + 1), 16)] as [number, number];
+});
+
+/** ASCII is below every swept range, so it is answered without a search. */
+function isAlnumCodePoint(cp: number): boolean {
+    if (cp < 0x80) {
+        return (cp >= 48 && cp <= 57) || (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122);
+    }
+    let lo = 0;
+    let hi = ALNUM.length - 1;
+    while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (cp < ALNUM[mid][0]) hi = mid - 1;
+        else if (cp > ALNUM[mid][1]) lo = mid + 1;
+        else return true;
+    }
+    return false;
+}
+
+/** Drop every character Postgres `[^[:alnum:]]` would drop. */
+export function stripNonAlnum(value: string): string {
+    let out = "";
+    for (const ch of value) {
+        if (isAlnumCodePoint(ch.codePointAt(0)!)) out += ch;
+    }
+    return out;
+}
+
+/**
+ * Codepoints where Postgres `lower()` disagrees with JavaScript
+ * `toLowerCase()`. 9 of them.
+ *
+ * The identity pipeline is lower(unaccent(x)) on both sides, so a lowercase
+ * disagreement is an identity-key disagreement. The shipped image's libc
+ * predates the Unicode 14/15 additions at U+A7Cx-U+A7Dx and leaves them
+ * uppercase where V8 folds them -- and it folds the Turkish capital dotted I
+ * (U+0130) to plain "i" where JavaScript produces "i" plus a combining dot,
+ * which survives the alphanumeric strip.
+ */
+const LOWER_DELTA_DATA = `\
+0130 i
+1C89 Ᲊ
+A7CB Ɤ
+A7CC Ꟍ
+A7CE ꟎
+A7D2 ꟒
+A7D4 ꟔
+A7DA Ꟛ
+A7DC Ƛ`;
+
+const LOWER_DELTA = new Map<string, string>();
+for (const line of LOWER_DELTA_DATA.split("\n")) {
+    if (!line) continue;
+    const sp = line.indexOf(" ");
+    LOWER_DELTA.set(String.fromCodePoint(parseInt(line.slice(0, sp), 16)), line.slice(sp + 1));
+}
+
+/** `lower()` as this Postgres implements it, not as V8 does. */
+export function pgLower(value: string): string {
+    let out = "";
+    for (const ch of value) out += LOWER_DELTA.get(ch) ?? ch.toLowerCase();
+    return out;
+}
+
+/**
+ * The whitespace set Postgres `\s` matches.
+ *
+ * JavaScript additionally matches U+00A0, U+2007, U+202F and U+FEFF. A name
+ * containing any of them collapsed to a plain space in the runtime and kept the
+ * original character in the backfill, so the two sides stored different
+ * normalizedName and sortName for the same artist.
+ *
+ * `trim()` is worse: SQL `trim(x)` is `btrim(x, ' ')`, which strips ASCII spaces
+ * ONLY -- a leading tab survives it where JS .trim() removes it. The migrations
+ * regex-trim on this same class so the two definitions are one definition.
+ */
+const PG_SPACE = "\\t\\n\\v\\f\\r \\u1680\\u2000-\\u2006\\u2008-\\u200A\\u2028-\\u2029\\u205F\\u3000";
+
+const PG_SPACE_RUN = new RegExp(`[${PG_SPACE}]+`, "g");
+const PG_SPACE_TRIM = new RegExp(`^[${PG_SPACE}]+|[${PG_SPACE}]+$`, "g");
+
+/** `trim()` as Postgres regex-trims it -- NOT JavaScript's `.trim()`. */
+export function pgTrim(value: string): string {
+    return value.replace(PG_SPACE_TRIM, "");
+}
+
+/** Collapse runs of Postgres-whitespace to a single space. */
+export function pgCollapseSpace(value: string): string {
+    return value.replace(PG_SPACE_RUN, " ");
+}
+
+/** Leading-article prefix, using the Postgres whitespace class. */
+export const PG_LEADING_ARTICLE = new RegExp(
+    `^(?:the|a|an|le|la|les|los|las|die|der|das)[${PG_SPACE}]+`,
+    "i"
+);
+
+export const UNACCENT_ENTRY_COUNT = UNACCENT.size;

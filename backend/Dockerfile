@@ -35,6 +35,9 @@ COPY --from=deps /app/prisma ./prisma
 
 # Copy source code (will run with tsx, not compiled)
 COPY src ./src
+# Maintenance tooling: gen-pg-text-rules regenerates the Postgres text-rule
+# tables and the TS/SQL parity fixture, and has to run where the database is.
+COPY scripts ./scripts
 
 # Copy healthcheck script, migration script, and shell entrypoint
 COPY healthcheck.js ./

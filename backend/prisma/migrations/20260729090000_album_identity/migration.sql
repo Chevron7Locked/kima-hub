@@ -19,17 +19,43 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 -- 2. Backfill. Mirrors albumIdentityKey() in albumIdentity.ts: strip edition and
 --    version markers, then lower + unaccent + drop everything non-alphanumeric.
 --    The pattern list is kept in step with stripAlbumEdition().
-UPDATE "Album"
-SET "identityKey" = regexp_replace(
-        lower(unaccent(
+-- Mirrors albumIdentityKey, which calls stripAlbumEdition. That function runs
+-- FOUR passes; an earlier version of this backfill ran only the first, so
+-- "Abbey Road - 2019 Remaster" and "Abbey Road (1969)" backfilled with the
+-- marker intact while the runtime strips it -- the stored key was unreachable
+-- and the duplicate came back on the next scan. All four passes, in order:
+--   1. parenthetical edition markers
+--   2. bracketed edition markers
+--   3. trailing dash/colon content carrying an edition keyword
+--   4. a trailing bare (YYYY)
+-- then lower + unaccent + drop everything non-alphanumeric.
+-- Album identity, mirroring services/albumIdentity.ts. Edition markers are
+-- stripped BEFORE the key is built so every pressing of a release group lands
+-- on one row. stripAlbumEdition runs FOUR passes and so does this: an earlier
+-- version of this backfill ran only the bracketed-marker pass, which left
+-- "Abbey Road - 2019 Remaster" keyed apart from "Abbey Road".
+CREATE OR REPLACE FUNCTION kima_album_edition_strip(v text) RETURNS text AS $$
+    SELECT regexp_replace(
+        regexp_replace(
             regexp_replace(
-                title,
-                '\s*[\(\[][^\)\]]*(deluxe|remaster|expanded|anniversary|bonus|special|limited|collector|platinum|edition|version|original|soundtrack|super deluxe|explicit|clean|mono|stereo|remix|live|acoustic|unplugged|session|recording|import|japan|uk|us)[^\)\]]*[\)\]]\s*',
-                '', 'gi'
-            )
-        )),
+                regexp_replace(v, '\s*\([^)]*(deluxe|remaster|expanded|anniversary|bonus|special|limited|collector|platinum|edition|version|original|soundtrack|motion picture|super deluxe|explicit|clean|mono|stereo|remix|live|acoustic|unplugged|sessions?|recording|import|japan|uk|us)[^)]*\)\s*', '', 'gi'),
+                '\s*\[[^\]]*(deluxe|remaster|expanded|anniversary|bonus|special|limited|collector|platinum|edition|version|original|soundtrack|motion picture|super deluxe|explicit|clean|mono|stereo|remix|live|acoustic|unplugged|sessions?|recording|import|japan|uk|us)[^\]]*\]\s*', '', 'gi'
+            ),
+            '\s*[-–—:]\s*(\d{4}\s+)?(deluxe|remaster|expanded|anniversary|bonus|special|limited|collector|platinum|edition|version|original|soundtrack|motion picture|super deluxe|explicit|clean|mono|stereo|remix|live|acoustic|unplugged|sessions?|recording|import|japan|uk|us).*$', '', 'i'
+        ),
+        '\s*\(\d{4}\)\s*$', '', 'g'
+    );
+$$ LANGUAGE sql IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION kima_album_identity_key(v text) RETURNS text AS $$
+    SELECT regexp_replace(
+        lower(unaccent(kima_album_edition_strip(kima_text_trim(v)))),
         '[^[:alnum:]]', '', 'g'
-    )
+    );
+$$ LANGUAGE sql IMMUTABLE STRICT;
+
+UPDATE "Album"
+SET "identityKey" = kima_album_identity_key(title)
 WHERE "identityKey" IS NULL;
 
 -- A title that collapses to nothing (punctuation-only, e.g. "( )") would collide

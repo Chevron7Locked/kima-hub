@@ -445,6 +445,12 @@ model PlaybackState {
   queue        Json?
   currentIndex Int      @default(0)
   isShuffle    Boolean  @default(false)
+  /// Offset into the current track, milliseconds. Subsonic clients
+  /// (Symfonium, DSub, Amperfy) use it to resume mid-track across devices.
+  position     Int      @default(0)
+  /// Client name that last wrote the queue, so another device can tell the
+  /// change was not its own. Subsonic `changedBy`.
+  changedBy    String?
   updatedAt    DateTime @updatedAt
   createdAt    DateTime @default(now())
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -504,6 +510,7 @@ model PlaylistPendingTrack {
   playlist         Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
 
   @@unique([playlistId, spotifyArtist, spotifyTitle])
+  @@unique([playlistId, rank])
   @@index([playlistId, rank])
   @@index([albumMbid])
   @@index([artistMbid])

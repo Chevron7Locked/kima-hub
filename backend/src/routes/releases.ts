@@ -11,6 +11,7 @@ import { logger } from "../utils/logger";
 import { Router } from "express";
 import { lidarrService, CalendarRelease } from "../services/lidarr";
 import { prisma } from "../utils/db";
+import { ConfigurationError } from "../utils/errors";
 import { requireAuthOrToken } from "../middleware/auth";
 import { z } from "zod";
 
@@ -360,6 +361,19 @@ router.post("/download/:albumMbid", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("[Releases] Download error:", error.message);
+
+        // On a fresh install with no Lidarr configured this is the DEFAULT
+        // outcome of clicking Download: acquireAlbum throws rather than
+        // returning {success:false}, so the 502 branch above never sees it and
+        // the actionable message was logged and then dropped behind a generic
+        // 500. Matches the sibling handler in routes/discover.ts.
+        if (error instanceof ConfigurationError) {
+            return res.status(400).json({
+                error: error.message,
+                code: "CONFIGURATION_ERROR",
+            });
+        }
+
         res.status(500).json({ error: "Failed to start download" });
     }
 });

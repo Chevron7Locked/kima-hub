@@ -55,15 +55,19 @@ SELECT
     ROW_NUMBER() OVER (PARTITION BY "playlistId" ORDER BY "sort", kind, id) - 1 AS pos
 FROM merged;
 
+-- Only rows still holding the column default. `rank` is authoritative once the
+-- app has run and `sort` is NOT maintained alongside it -- moveItem writes rank
+-- only -- so an unguarded replay would recompute from stale sort values and
+-- silently discard every reorder a user had made, or abort on the unique index.
 UPDATE "PlaylistItem" pi
 SET "rank" = kima_rank_from_position(m.pos)
 FROM playlist_rank_map m
-WHERE m.id = pi.id AND m.kind = 'item';
+WHERE m.id = pi.id AND m.kind = 'item' AND pi."rank" = '';
 
 UPDATE "PlaylistPendingTrack" pt
 SET "rank" = kima_rank_from_position(m.pos)
 FROM playlist_rank_map m
-WHERE m.id = pt.id AND m.kind = 'pending';
+WHERE m.id = pt.id AND m.kind = 'pending' AND pt."rank" = '';
 
 DROP TABLE IF EXISTS playlist_rank_map;
 

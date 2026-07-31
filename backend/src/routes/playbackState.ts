@@ -111,9 +111,16 @@ router.post("/", requireAuth, async (req, res) => {
             where: { userId },
             update: {
                 playbackType,
-                trackId: trackId || null,
-                audiobookId: audiobookId || null,
-                podcastId: podcastId || null,
+                // Omitted fields must be LEFT ALONE, the same as `queue` and
+                // `isShuffle` below. Writing `trackId || null` wiped the field
+                // on any partial update -- a track change carrying only
+                // `trackId` cleared audiobookId/podcastId, and a partial write
+                // without one cleared trackId. The web client always sends
+                // every field so it cannot trigger this; the native iOS client
+                // does genuine partial updates.
+                ...(trackId !== undefined ? { trackId: trackId || null } : {}),
+                ...(audiobookId !== undefined ? { audiobookId: audiobookId || null } : {}),
+                ...(podcastId !== undefined ? { podcastId: podcastId || null } : {}),
                 ...queueUpdate,
                 ...(typeof isShuffle === "boolean" ? { isShuffle } : {}),
             },

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { normalizeArtistName } from "../../utils/artistNormalization";
 import { requireAdmin } from "../../middleware/auth";
 import { prisma, Prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
@@ -683,9 +684,14 @@ router.get("/artists/:id", async (req, res) => {
         `[Artist] Using ${enrichedSimilar.length} similar artists from enriched JSON`,
       );
 
+      // normalizeArtistName, not toLowerCase: it is what WRITES normalizedName,
+      // and it also folds accents and ampersands. A lowercase-only key misses
+      // every artist whose name carries one -- "Sigur Rós" is stored
+      // "sigur ros", "Hall & Oates" as "hall and oates" -- so those artists
+      // were silently absent from the in-library similar list.
       const similarNames = enrichedSimilar
         .slice(0, 10)
-        .map((s) => s.name.toLowerCase());
+        .map((s) => normalizeArtistName(s.name));
       const similarMbids = enrichedSimilar
         .slice(0, 10)
         .map((s) => s.mbid)
@@ -791,7 +797,7 @@ router.get("/artists/:id", async (req, res) => {
           );
 
           const similarNames = lastfmSimilar.map((s: any) =>
-            s.name.toLowerCase(),
+            normalizeArtistName(s.name),
           );
           const similarMbids = lastfmSimilar
             .map((s: any) => s.mbid)

@@ -30,22 +30,72 @@ ALTER TABLE "Artist"
 --    ligature case already matched. `unaccent` needs the extension.
 CREATE EXTENSION IF NOT EXISTS unaccent;
 
+-- Mirrors artistIdentityKey / artistSortName. Two details that are easy to get
+-- wrong and were: `&` folds to " and " BEFORE non-alphanumerics are stripped
+-- (otherwise "Hall & Oates" backfills as "halloates" while the runtime computes
+-- "hallandoates", leaving the stored key unreachable and the duplicate it
+-- prevents free to come back), and the name is TRIMMED before the leading
+-- article is stripped (otherwise " The Beatles" keeps its article).
+-- Identity text rules, defined ONCE so later migrations call them instead of
+-- re-typing the expression. Two migrations previously carried hand-copied
+-- copies that had already drifted apart, which is the same failure the
+-- TypeScript side had before it was consolidated into services/pgTextRules.ts.
+--
+-- src/services/pgTextRules.ts mirrors these exactly, and the agreement is swept
+-- across the whole Basic Multilingual Plane -- if the two disagree by one
+-- character, the backfilled key is unreachable from the runtime and the next
+-- scan re-creates the duplicate this whole mechanism exists to prevent.
+--
+-- NOTE trim() is deliberately NOT used: SQL trim(x) is btrim(x, ' '), which
+-- strips ASCII spaces only, so a leading tab survives it where JS .trim()
+-- removes it.
+CREATE OR REPLACE FUNCTION kima_text_trim(v text) RETURNS text AS $$
+    SELECT regexp_replace(regexp_replace(v, '^\s+', ''), '\s+$', '');
+$$ LANGUAGE sql IMMUTABLE STRICT;
+
+-- Case/accent-insensitive form that KEEPS word boundaries. Stored as
+-- Artist.normalizedName.
+CREATE OR REPLACE FUNCTION kima_normalized_name(v text) RETURNS text AS $$
+    SELECT kima_text_trim(
+        regexp_replace(
+            regexp_replace(lower(unaccent(kima_text_trim(v))), '\s*&\s*', ' and ', 'g'),
+            '\s+', ' ', 'g'
+        )
+    );
+$$ LANGUAGE sql IMMUTABLE STRICT;
+
+-- The dedupe key: normalizedName with every non-alphanumeric removed.
+-- `&` folds to " and " BEFORE the strip -- otherwise "Hall & Oates" keys as
+-- "halloates" here and "hallandoates" in the runtime.
+CREATE OR REPLACE FUNCTION kima_identity_key(v text) RETURNS text AS $$
+    SELECT regexp_replace(kima_normalized_name(v), '[^[:alnum:]]', '', 'g');
+$$ LANGUAGE sql IMMUTABLE STRICT;
+
+-- Collation-friendly sort value. The name is trimmed BEFORE the leading
+-- article is stripped (otherwise " The Beatles" keeps its article), and a name
+-- that is nothing but an article falls back to the un-stripped form rather
+-- than to empty.
+CREATE OR REPLACE FUNCTION kima_sort_name(v text) RETURNS text AS $$
+    SELECT CASE WHEN stripped = '' THEN base ELSE stripped END
+    FROM (
+        SELECT base,
+               kima_text_trim(
+                   regexp_replace(base, '^(the|a|an|le|la|les|los|las|die|der|das)\s+', '', 'i')
+               ) AS stripped
+        FROM (SELECT regexp_replace(lower(unaccent(kima_text_trim(v))), '\s+', ' ', 'g') AS base) b
+    ) x;
+$$ LANGUAGE sql IMMUTABLE STRICT;
+
 UPDATE "Artist"
-SET "identityKey" = regexp_replace(
-                          regexp_replace(lower(unaccent(name)), '\s*&\s*', ' and ', 'g'),
-                          '[^[:alnum:]]', '', 'g'
-                      ),
-    "sortName"    = regexp_replace(
-                        regexp_replace(lower(unaccent(name)), '\s+', ' ', 'g'),
-                        '^(the|a|an|le|la|les|los|las|die|der|das)\s+', '', 'i'
-                    )
+SET "identityKey" = kima_identity_key(name),
+    "sortName"    = kima_sort_name(name)
 WHERE "identityKey" IS NULL;
 
 -- An artist whose name is entirely punctuation would collapse to '' and then
 -- collide with every other such artist. Fall back to the row id, which is
 -- unique by construction.
 UPDATE "Artist" SET "identityKey" = id WHERE "identityKey" IS NULL OR "identityKey" = '';
-UPDATE "Artist" SET "sortName" = lower(name) WHERE "sortName" IS NULL OR "sortName" = '';
+UPDATE "Artist" SET "sortName" = kima_sort_name(name) WHERE "sortName" IS NULL OR "sortName" = '';
 
 -- 3. Choose one surviving row per identityKey. Preference order:
 --    a real MusicBrainz id first (the temp- sentinels are not real ids), then
@@ -91,10 +141,20 @@ WHERE a."artistId" = m.loser_id;
 -- it, and cleanup-lidarr keys artist protection on that exact value, so silently
 -- downgrading it to 'discovery_liked' would make an artist eligible for deletion
 -- that should have been protected.
+-- GROUP BY is required, not cosmetic: several loser artists can map to ONE
+-- winner, and an INSERT proposing the same (artistId, rgMbid) twice makes
+-- ON CONFLICT DO UPDATE abort the whole migration with SQLSTATE 21000 -- after
+-- Album rows have already been repointed. Collapse first, keeping the strongest
+-- provenance across the rows being merged.
 INSERT INTO "OwnedAlbum" ("artistId", "rgMbid", "source")
-SELECT m.winner_id, o."rgMbid", o."source"
+SELECT
+    m.winner_id,
+    o."rgMbid",
+    CASE WHEN bool_or(o."source" = 'native_scan') THEN 'native_scan'
+         ELSE min(o."source") END
 FROM "OwnedAlbum" o
 JOIN artist_merge_map m ON o."artistId" = m.loser_id
+GROUP BY m.winner_id, o."rgMbid"
 ON CONFLICT ("artistId", "rgMbid") DO UPDATE
 SET source = CASE
         WHEN "OwnedAlbum".source = 'native_scan' OR EXCLUDED.source = 'native_scan'
