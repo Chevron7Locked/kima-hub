@@ -54,36 +54,18 @@ export function sanitizeTagString(value: string | null | undefined): string {
 }
 
 /**
- * Normalize an artist name for case-insensitive comparison
- * - Converts to lowercase
- * - Trims whitespace
- * - Strips diacritics/accents (Ólafur → olafur)
- * - Normalizes "&" to "and" (Of Mice & Men → of mice and men)
- * - Normalizes common variations
- * - This ensures "Olafur Arnalds" and "Ólafur Arnalds" match
- * - This ensures "Of Mice & Men" and "Of Mice And Men" match
+ * Normalize an artist name for case-insensitive comparison.
+ *
+ * RE-EXPORTED, not re-implemented. Two functions with this exact name and
+ * different behaviour sat on opposite sides of one database column:
+ * artistIdentity's WRITES Artist.normalizedName; this module's was used to
+ * QUERY it from ~20 call sites, and they disagreed on the ligature fold. "MO"
+ * with a slash was stored as "mo" and looked up unfolded, making such artists
+ * unfindable by Spotify import and Discover Weekly seeding. One definition
+ * removes the failure mode instead of keeping two in step by hand.
  */
-export function normalizeArtistName(name: string): string {
-    if (name == null) return "";
-    let normalized = stripDiacritics(name.trim().toLowerCase());
+export { normalizeArtistName } from "../services/artistIdentity";
 
-    // Normalize "&" to "and" (handles "Of Mice & Men" vs "Of Mice And Men")
-    normalized = normalized.replace(/\s*&\s*/g, ' and ');
-
-    // Normalize multiple spaces to single space
-    normalized = normalized.replace(/\s+/g, ' ');
-
-    return normalized.trim();
-}
-
-/**
- * Collapse all whitespace from a normalized name for secondary comparison.
- * Used to catch cases like "Dead Mau5" vs "Deadmau5" where the only
- * difference is spacing. Input should already be normalized via normalizeArtistName().
- */
-export function collapseForComparison(normalizedName: string): string {
-    return normalizedName.replace(/\s+/g, '');
-}
 
 
 /**
@@ -121,33 +103,6 @@ export function stripAlbumEdition(title: string): string {
         .trim();
 }
 
-/**
- * Check if two artist names are similar enough to be considered the same
- * Uses fuzzy matching to catch typos like "the weeknd" vs "the weekend"
- * @param name1 First artist name
- * @param name2 Second artist name
- * @param threshold Similarity threshold (0-100), default 95
- * @returns true if names are similar enough
- */
-export function areArtistNamesSimilar(
-    name1: string,
-    name2: string,
-    threshold: number = 95
-): boolean {
-    if (name1 == null || name2 == null) return false;
-    // First normalize both names
-    const normalized1 = normalizeArtistName(name1);
-    const normalized2 = normalizeArtistName(name2);
-
-    // If they're exactly equal after normalization, return true
-    if (normalized1 === normalized2) {
-        return true;
-    }
-
-    // Use fuzzy matching to catch typos
-    const similarity = fuzz.ratio(normalized1, normalized2);
-    return similarity >= threshold;
-}
 
 /**
  * Parse artist name from folder path patterns

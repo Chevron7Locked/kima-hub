@@ -52,7 +52,6 @@ import {
     normalizeArtistName,
     canonicalizeVariousArtists,
     sanitizeTagString,
-    collapseForComparison,
     parseArtistFromPath,
     extractArtistFromRelativePath,
 } from '../../utils/artistNormalization';
@@ -237,19 +236,6 @@ describe('sanitizeTagString', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// collapseForComparison
-// ---------------------------------------------------------------------------
-
-describe('collapseForComparison', () => {
-    it('removes all spaces from a normalized name', () => {
-        expect(collapseForComparison('dead mau5')).toBe('deadmau5');
-    });
-
-    it('handles names with no spaces', () => {
-        expect(collapseForComparison('radiohead')).toBe('radiohead');
-    });
-});
 
 // ---------------------------------------------------------------------------
 // parseArtistFromPath

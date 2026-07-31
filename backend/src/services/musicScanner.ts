@@ -15,7 +15,7 @@ import {
     sanitizeTagString,
 } from "../utils/artistNormalization";
 import { parseCredit, resolveArtist } from "./artistIdentity";
-import { albumIdentityKey, isGenericAlbumTitle } from "./albumIdentity";
+import { resolveAlbum } from "./albumIdentity";
 import { backfillAllArtistCounts } from "./artistCountsService";
 import { checkLocalArtistImage } from "./imageStorage";
 
@@ -690,64 +690,43 @@ export class MusicScannerService {
         // Resolve the album through the single identity path. Lookup used to
         // match `title` raw and un-normalised, so "Abbey Road", "abbey road" and
         // "Abbey Road (2019 Remaster)" became three rows under one artist -- and
-        // Album models a release GROUP, so those are one album. The cross-artist
-        // fallback that kept VA compilations together fired for EVERY album with
-        // a known year, which merged unrelated albums sharing a title; it is now
-        // gated on the compilation tag inside resolveAlbum.
-        const albumMbid = metadata.common.musicbrainz_releasegroupid;
-        const albumIdKey = albumIdentityKey(albumTitle) || `untitled-${artist.id}`;
+        // Album models a release GROUP, so those are one album.
+        //
+        // This CALLS resolveAlbum rather than repeating it. The inline copy that
+        // lived here checked identityKey BEFORE rgMbid, so a track carrying an
+        // authoritative release-group id could attach to a same-titled album from
+        // a different release group -- the mirror of the defect the artist work
+        // removed -- and it had no unique-violation retry.
+        let isDiscoveryAlbum = false;
 
-        let album = await prisma.album.findUnique({
-            where: {
-                artistId_identityKey: { artistId: artist.id, identityKey: albumIdKey },
-            },
-        });
-
-        if (!album && albumMbid) {
-            album = await prisma.album.findUnique({ where: { rgMbid: albumMbid } });
-        }
-
-        if (!album && metadata.common.compilation && year !== null && !isGenericAlbumTitle(albumTitle)) {
-            // Compilations only: hold a VA release together when albumartist tags
-            // disagree between its files.
-            album = await prisma.album.findFirst({
-                where: { identityKey: albumIdKey, year, location: "LIBRARY" },
-            });
-            if (album) {
-                logger.debug(
-                    `[Scanner] Compilation match: "${albumTitle}" (${year}) -> album ${album.id} (artist ${album.artistId})`,
-                );
-            }
-        }
-
-        if (!album) {
-            const rgMbid = albumMbid || `temp-${Date.now()}-${Math.random()}`;
-
-                // Determine if this is a discovery album:
-                // 1. Check file path (legacy: /music/discovery/ folder)
-                // 2. Check if artist+album matches a discovery download job
-                // 3. Check if artist is a discovery-only artist (has DISCOVER albums but no LIBRARY albums)
+        const album = await resolveAlbum(prisma, {
+            artistId: artist.id,
+            title: albumTitle,
+            rgMbid: metadata.common.musicbrainz_releasegroupid,
+            year,
+            isCompilation: Boolean(metadata.common.compilation),
+            // Runs only when a row is actually created: these checks cost several
+            // queries and are pointless on a lookup hit.
+            createData: async () => {
+                // 1. legacy /music/discovery/ folder
+                // 2. artist+album matches a discovery download job
+                // 3. artist is discovery-only (has albums, none LIBRARY)
                 const isDiscoveryByPath = this.isDiscoveryPath(relativePath);
                 const isDiscoveryByJob = await this.isDiscoveryDownload(
                     artistName,
                     albumTitle
                 );
 
-                // Check if this artist is discovery-only (has no LIBRARY albums)
-                // If so, any new albums from them should also be DISCOVER
                 let isDiscoveryArtist = false;
                 if (!isDiscoveryByPath && !isDiscoveryByJob) {
                     const artistAlbums = await prisma.album.findMany({
                         where: { artistId: artist.id },
                         select: { location: true },
                     });
-
-                    // Artist is discovery-only if they have albums but NONE are LIBRARY
                     if (artistAlbums.length > 0) {
-                        const hasLibraryAlbums = artistAlbums.some(
+                        isDiscoveryArtist = !artistAlbums.some(
                             (a) => a.location === "LIBRARY"
                         );
-                        isDiscoveryArtist = !hasLibraryAlbums;
                         if (isDiscoveryArtist) {
                             logger.debug(
                                 `[Scanner] Discovery-only artist detected: ${artistName}`
@@ -756,39 +735,35 @@ export class MusicScannerService {
                     }
                 }
 
-                const isDiscoveryAlbum =
+                isDiscoveryAlbum =
                     isDiscoveryByPath || isDiscoveryByJob || isDiscoveryArtist;
 
-                album = await prisma.album.create({
-                    data: {
-                        title: albumTitle,
-                        artistId: artist.id,
-                        identityKey: albumIdKey,
-                        rgMbid,
-                        year,
-                        primaryType: "Album",
-                        location: isDiscoveryAlbum ? "DISCOVER" : "LIBRARY",
-                    },
-                });
+                return {
+                    primaryType: "Album",
+                    location: isDiscoveryAlbum ? "DISCOVER" : "LIBRARY",
+                };
+            },
+        });
 
-                // Only create OwnedAlbum record for library albums (not discovery)
-                // Discovery albums are temporary and should not appear in the user's library
-                if (!isDiscoveryAlbum) {
-                    await prisma.ownedAlbum.upsert({
-                        where: {
-                            artistId_rgMbid: {
-                                artistId: artist.id,
-                                rgMbid,
-                            },
-                        },
-                        create: {
-                            rgMbid,
-                            artistId: artist.id,
-                            source: "native_scan",
-                        },
-                        update: {},
-                    });
-                }
+        // Only track ownership for library albums; discovery albums are
+        // provisional and must not appear as owned. Keyed on the album's OWN
+        // rgMbid rather than a locally recomputed one, so a row that resolveAlbum
+        // matched by identity is credited correctly.
+        if (!isDiscoveryAlbum) {
+            await prisma.ownedAlbum.upsert({
+                where: {
+                    artistId_rgMbid: {
+                        artistId: artist.id,
+                        rgMbid: album.rgMbid,
+                    },
+                },
+                create: {
+                    rgMbid: album.rgMbid,
+                    artistId: artist.id,
+                    source: "native_scan",
+                },
+                update: {},
+            });
         }
 
     // Extract cover art if we have an extractor

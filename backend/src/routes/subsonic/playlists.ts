@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { rankAfter, rankForPosition } from "../../utils/lexoRank";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { mapSong, wrap } from "./mappers";
@@ -120,7 +121,16 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
             prisma.playlistItem.deleteMany({ where: { playlistId } }),
             ...(songIds.length > 0 ? [
                 prisma.playlistItem.createMany({
-                    data: songIds.map((trackId, index) => ({ playlistId, trackId, sort: index })),
+                    // rank is the authoritative order and is UNIQUE per playlist.
+                    // Writing only `sort` left every row at the "" default, so the
+                    // unique index rejected all but the first and skipDuplicates
+                    // swallowed it -- an N-track playlist silently stored ONE.
+                    data: songIds.map((trackId, index) => ({
+                        playlistId,
+                        trackId,
+                        sort: index,
+                        rank: rankForPosition(index),
+                    })),
                     skipDuplicates: true,
                 }),
             ] : []),
@@ -133,7 +143,12 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
 
         if (songIds.length > 0) {
             await prisma.playlistItem.createMany({
-                data: songIds.map((trackId, index) => ({ playlistId: playlist.id, trackId, sort: index })),
+                data: songIds.map((trackId, index) => ({
+                    playlistId: playlist.id,
+                    trackId,
+                    sort: index,
+                    rank: rankForPosition(index),
+                })),
                 skipDuplicates: true,
             });
         }
@@ -253,12 +268,38 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
                     _max: { sort: true },
                 });
                 const maxSort = aggregate._max.sort ?? -1;
-                await tx.playlistItem.createMany({
-                    data: songIdsToAdd.map((trackId, index) => ({
+
+                // Chain past the highest rank across BOTH tables: pending tracks
+                // share this key space, so a max taken from items alone can
+                // collide with one and the per-table unique index cannot catch it.
+                const [lastItem, lastPending] = await Promise.all([
+                    tx.playlistItem.findFirst({
+                        where: { playlistId },
+                        orderBy: { rank: "desc" },
+                        select: { rank: true },
+                    }),
+                    tx.playlistPendingTrack.findFirst({
+                        where: { playlistId },
+                        orderBy: { rank: "desc" },
+                        select: { rank: true },
+                    }),
+                ]);
+                const a = lastItem?.rank ?? "";
+                const b = lastPending?.rank ?? "";
+                let cursor = a > b ? a : b;
+
+                const rows = songIdsToAdd.map((trackId, index) => {
+                    cursor = rankAfter(cursor);
+                    return {
                         playlistId,
                         trackId,
                         sort: maxSort + 1 + index,
-                    })),
+                        rank: cursor,
+                    };
+                });
+
+                await tx.playlistItem.createMany({
+                    data: rows,
                     skipDuplicates: true,
                 });
             }

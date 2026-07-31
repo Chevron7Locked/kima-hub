@@ -113,10 +113,16 @@ export interface ResolveAlbumInput {
      * written for, and the only one where it is safe.
      */
     isCompilation?: boolean;
-    /** Applied only when a new row is created. */
-    createData?: Prisma.AlbumUncheckedCreateInput extends infer T
-        ? Omit<Prisma.AlbumUncheckedCreateInput, "artistId" | "title" | "rgMbid" | "identityKey">
-        : never;
+    /**
+     * Extra fields for a NEW row. A function is accepted so a caller whose
+     * create-only work is expensive -- the scanner runs several queries to
+     * decide DISCOVER vs LIBRARY -- does not pay for it on a lookup hit.
+     */
+    createData?:
+        | Omit<Prisma.AlbumUncheckedCreateInput, "artistId" | "title" | "rgMbid" | "identityKey">
+        | (() => Promise<
+              Omit<Prisma.AlbumUncheckedCreateInput, "artistId" | "title" | "rgMbid" | "identityKey">
+          >);
 }
 
 type AlbumClient = Pick<Prisma.TransactionClient, "album">;
@@ -177,10 +183,15 @@ export async function resolveAlbum(
         if (shared) return shared;
     }
 
+    const extra =
+        typeof input.createData === "function"
+            ? await input.createData()
+            : input.createData;
+
     try {
         return await db.album.create({
             data: {
-                ...(input.createData as any),
+                ...(extra as any),
                 artistId: input.artistId,
                 title,
                 identityKey,
