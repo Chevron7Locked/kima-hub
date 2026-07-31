@@ -117,6 +117,41 @@ async function nextRankAfter(
  * rejected: a DISCOVER-location track has no file and would 404 on play, and
  * nothing stopped that before.
  */
+/**
+ * `count` ranks that append to the end of a playlist, in order.
+ *
+ * The ONLY way to allocate an appending rank. It spans BOTH tables, because
+ * items and pending tracks share one ordering space and no per-table index can
+ * see across them.
+ *
+ * It also has to chain from the existing last rank rather than derive keys from
+ * a position. `rankForPosition` emits fixed 3-character keys while
+ * `rankSequence` emits 1-character ones, and "000" < "C" -- so a position-derived
+ * append into a natively-seeded playlist landed the whole batch AHEAD of
+ * everything already there. Chaining preserves whatever width the list already
+ * uses and always lands after the true last entry.
+ */
+export async function allocateAppendRanks(
+    tx: Pick<typeof prisma, "playlistItem" | "playlistPendingTrack">,
+    playlistId: string,
+    count: number
+): Promise<string[]> {
+    if (count <= 0) return [];
+
+    const last = await maxRank(tx, playlistId);
+
+    // An empty playlist gets a spread block so the keys stay short.
+    if (!last) return rankSequence(count);
+
+    const ranks: string[] = [];
+    let prev = last;
+    for (let i = 0; i < count; i += 1) {
+        prev = rankAfter(prev);
+        ranks.push(prev);
+    }
+    return ranks;
+}
+
 export async function addTracks(
     playlistId: string,
     trackIds: string[]
@@ -158,30 +193,24 @@ export async function addTracks(
             return { added: 0, duplicates: alreadyThere.size, rejected };
         }
 
-        const last = await maxRank(tx, playlistId);
+        const ranks = await allocateAppendRanks(tx, playlistId, fresh.length);
 
-        // Seed an empty playlist with a spread block so the keys stay short;
-        // otherwise chain from the current last rank.
-        let ranks: string[];
-        if (!last) {
-            ranks = rankSequence(fresh.length);
-        } else {
-            ranks = [];
-            let prev = last;
-            for (let i = 0; i < fresh.length; i += 1) {
-                prev = rankAfter(prev);
-                ranks.push(prev);
-            }
-        }
+        // `sort` is legacy -- rank is authoritative -- but it must stay
+        // monotonic while anything still reads it. Writing `sort: i` restarted
+        // at 0 on every call, so max(sort) no longer described the end of the
+        // list and any consumer deriving a position from it got a stale one.
+        const maxSort = await tx.playlistItem.aggregate({
+            where: { playlistId },
+            _max: { sort: true },
+        });
+        const firstSort = (maxSort._max.sort ?? -1) + 1;
 
         await tx.playlistItem.createMany({
             data: fresh.map((trackId, i) => ({
                 playlistId,
                 trackId,
                 rank: ranks[i],
-                // `sort` is retained for now because the Spotify import and some
-                // read paths still reference it; rank is authoritative.
-                sort: i,
+                sort: firstSort + i,
             })),
             skipDuplicates: true,
         });
@@ -219,9 +248,20 @@ export async function removeTracks(
     });
 
     if (count > 0) {
-        await prisma.playlist
-            .update({ where: { id: playlistId }, data: { updatedAt: new Date() } })
-            .catch(() => {});
+        // The removal already committed, so a failure here is not worth failing
+        // the request over -- but swallowing it silently meant a playlist could
+        // stop advertising changes with nothing to point at. Log it.
+        try {
+            await prisma.playlist.update({
+                where: { id: playlistId },
+                data: { updatedAt: new Date() },
+            });
+        } catch (error) {
+            logger.warn(
+                `[playlistService] removeTracks: could not touch updatedAt for ${playlistId}`,
+                error
+            );
+        }
     }
     return count;
 }

@@ -143,3 +143,49 @@ export async function createShareLink(
         throw error;
     }
 }
+
+/** A caller's live (unexpired) share links, newest first. */
+export async function listShareLinks(userId: string) {
+    return prisma.shareLink.findMany({
+        where: {
+            createdBy: userId,
+            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+        orderBy: { createdAt: "desc" },
+    });
+}
+
+/**
+ * Change a share's expiry. Only the owner may.
+ *
+ * `expiresAt` of null clears the expiry; omitting it leaves it alone, so the
+ * caller can distinguish "no change" from "never expires".
+ */
+export async function updateShareLink(
+    userId: string,
+    token: string,
+    changes: { expiresAt?: Date | null }
+) {
+    const link = await prisma.shareLink.findUnique({ where: { token } });
+    if (!link) throw new ShareError("Share not found", "NOT_FOUND");
+    if (link.createdBy !== userId) {
+        throw new ShareError("Not the link owner", "FORBIDDEN");
+    }
+    if (changes.expiresAt === undefined) return link;
+
+    return prisma.shareLink.update({
+        where: { id: link.id },
+        data: { expiresAt: changes.expiresAt },
+    });
+}
+
+/** Revoke a share. Only the owner may. */
+export async function deleteShareLink(userId: string, token: string) {
+    const link = await prisma.shareLink.findUnique({ where: { token } });
+    if (!link) throw new ShareError("Share not found", "NOT_FOUND");
+    if (link.createdBy !== userId) {
+        throw new ShareError("Not the link owner", "FORBIDDEN");
+    }
+    await prisma.shareLink.delete({ where: { id: link.id } });
+}
+

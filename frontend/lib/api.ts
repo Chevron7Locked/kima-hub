@@ -1605,8 +1605,11 @@ class ApiClient {
     }
 
     async updateTrackMetadata(trackId: string, data: ApiData) {
-        // Placeholder - not implemented yet
-        return this.request<ApiData>(`/library/tracks/${trackId}/metadata`, {
+        // /library/tracks/:id/metadata does not exist -- library/tracks.ts
+        // registers no metadata route -- so every track metadata edit from
+        // MetadataEditor 404'd. The real endpoint is the same one the artist
+        // and album siblings already use.
+        return this.request<ApiData>(`/enrichment/tracks/${trackId}/metadata`, {
             method: "PUT",
             body: JSON.stringify(data),
         });

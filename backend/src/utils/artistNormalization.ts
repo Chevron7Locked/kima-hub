@@ -8,6 +8,8 @@ import * as fuzz from "fuzzball";
 /**
  * Canonical name and MBID for compilation/various artists
  */
+// Exported because services/soulseek.ts imports it. Upstream un-exported this
+// when it removed Soulseek; this line keeps that subsystem.
 export const VARIOUS_ARTISTS_CANONICAL = "Various Artists";
 
 

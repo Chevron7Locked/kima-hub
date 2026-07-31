@@ -102,25 +102,6 @@ export function rankAfter(last: string | null | undefined): string {
     return last + ALPHABET[0];
 }
 
-/**
- * A key that sorts before everything currently in the list.
- *
- * Steps the leading digit down while there is room. Note the asymmetry with
- * `rankAfter`: nothing sorts below a key of all-zeroes, so unbounded prepending
- * eventually has to subdivide and the keys do grow. That is inherent to
- * fractional indexing, not a defect here -- prepending is rare, and the list
- * can be re-seeded with `rankSequence` if it ever becomes a problem.
- */
-export function rankBefore(first: string | null | undefined): string {
-    if (!first) return rankBetween("", "");
-    const d = digit(first[0]);
-    if (first.length === 1 && d > 1) {
-        // Halve the space below rather than stepping by one, so repeated
-        // prepends stay short for longer.
-        return ALPHABET[d >> 1];
-    }
-    return rankBetween("", first);
-}
 
 /**
  * `count` evenly spread keys, for seeding a list in one shot.

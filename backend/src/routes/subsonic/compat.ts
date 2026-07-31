@@ -2,34 +2,63 @@ import { Router, Request, Response } from "express";
 import { prisma } from "../../utils/db";
 import { subsonicError, subsonicOk, SubsonicError } from "../../utils/subsonicResponse";
 import { parseRepeatedQueryParam, wrap } from "./mappers";
-import { createShareLink, ShareError } from "../../services/shareService";
+import {
+    createShareLink,
+    deleteShareLink,
+    listShareLinks,
+    ShareError,
+    updateShareLink,
+} from "../../services/shareService";
 import { logger } from "../../utils/logger";
 
 export const compatRouter = Router();
 
-// Stubs for endpoints not yet fully implemented.
-// Return valid empty responses so strict clients (e.g. Symfonium) don't error.
+/** Map a ShareError onto the Subsonic error surface. */
+function shareFailure(req: Request, res: Response, error: unknown) {
+    if (error instanceof ShareError) {
+        const code =
+            error.code === "FORBIDDEN" ? SubsonicError.NOT_AUTHORIZED
+            : error.code === "NOT_FOUND" ? SubsonicError.NOT_FOUND
+            : SubsonicError.GENERIC;
+        return subsonicError(req, res, code, error.message);
+    }
+    throw error;
+}
+
+// Endpoints Kima does not implement.
 //
-// Bookmarks are NOT stubbed here. compatRouter mounts before playbackRouter, so
-// stubs at these paths won the route match and the real implementation in
-// playback.ts was unreachable -- clients saw "ok" for every createBookmark and
-// an empty list back, silently discarding resume positions.
+// They answer with a real Subsonic error and a reason, NOT a hollow "ok".
+// Answering ok while discarding the request is worse than refusing: the client
+// believes the operation succeeded and shows the user state the server never
+// stored. That is exactly how the bookmark stubs made resume positions vanish
+// -- they mounted ahead of playback.ts, won the route match, and returned "ok"
+// for every createBookmark.
+//
+// Anything with a real backing model belongs above this line, wired to it.
+
+/** Subsonic has no "unsupported operation" code; 0 with a reason is the convention. */
+function notSupported(req: Request, res: Response, what: string) {
+    return subsonicError(req, res, SubsonicError.GENERIC, `${what} is not supported by this server`);
+}
 
 compatRouter.all("/getInternetRadioStations.view", (req: Request, res: Response) => {
     subsonicOk(req, res, { internetRadioStations: {} });
 });
 
-compatRouter.all("/createInternetRadioStation.view", (req: Request, res: Response) => {
-    subsonicOk(req, res);
-});
+// No internet-radio model exists, so the list is genuinely empty -- but a
+// create that answers "ok" and stores nothing leaves the client showing a
+// station the server has never heard of.
+compatRouter.all("/createInternetRadioStation.view", (req: Request, res: Response) =>
+    notSupported(req, res, "Internet radio")
+);
 
-compatRouter.all("/updateInternetRadioStation.view", (req: Request, res: Response) => {
-    subsonicOk(req, res);
-});
+compatRouter.all("/updateInternetRadioStation.view", (req: Request, res: Response) =>
+    notSupported(req, res, "Internet radio")
+);
 
-compatRouter.all("/deleteInternetRadioStation.view", (req: Request, res: Response) => {
-    subsonicOk(req, res);
-});
+compatRouter.all("/deleteInternetRadioStation.view", (req: Request, res: Response) =>
+    notSupported(req, res, "Internet radio")
+);
 
 // Wrapped for the same reason as createShare below: the user lookup can reject
 // (a dropped connection, a pool timeout), and an unwrapped rejection in
@@ -60,9 +89,26 @@ compatRouter.all("/getAvatar.view", wrap(async (req: Request, res: Response) => 
     return res.send(transparentPng);
 }));
 
-compatRouter.all("/getShares.view", (req: Request, res: Response) => {
-    subsonicOk(req, res, { shares: {} });
-});
+// Real: ShareLink backs this, so report the caller's actual live links rather
+// than a permanent empty list.
+compatRouter.all("/getShares.view", wrap(async (req: Request, res: Response) => {
+    const links = await listShareLinks(req.user!.id);
+    const base = `${req.protocol}://${req.get("host")}`;
+    return subsonicOk(req, res, {
+        shares: links.length
+            ? {
+                  share: links.map((l) => ({
+                      "@_id": l.token,
+                      "@_url": `${base}/share/${l.token}`,
+                      "@_username": req.user!.username,
+                      "@_created": l.createdAt.toISOString(),
+                      "@_expires": l.expiresAt?.toISOString(),
+                      "@_visitCount": l.playCount,
+                  })),
+              }
+            : {},
+    });
+}));
 
 // Creates a REAL share link through the same service the web route uses.
 //
@@ -132,33 +178,55 @@ compatRouter.all("/createShare.view", wrap(async (req: Request, res: Response) =
     }
 }));
 
-compatRouter.all("/updateShare.view", (req: Request, res: Response) => {
+// Real. These used to validate `id`, answer ok and do nothing, so a client
+// could "revoke" a share that stayed live.
+compatRouter.all("/updateShare.view", wrap(async (req: Request, res: Response) => {
     const id = req.query.id as string | undefined;
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
-    subsonicOk(req, res);
-});
 
-compatRouter.all("/deleteShare.view", (req: Request, res: Response) => {
+    // Subsonic sends expires as epoch millis; 0 means "never".
+    const raw = req.query.expires as string | undefined;
+    let expiresAt: Date | null | undefined;
+    if (raw !== undefined && raw !== "") {
+        const ms = Number(raw);
+        if (!Number.isFinite(ms)) {
+            return subsonicError(req, res, SubsonicError.MISSING_PARAM, "expires must be a number");
+        }
+        expiresAt = ms === 0 ? null : new Date(ms);
+    }
+
+    try {
+        await updateShareLink(req.user!.id, id, { expiresAt });
+        return subsonicOk(req, res);
+    } catch (error) {
+        return shareFailure(req, res, error);
+    }
+}));
+
+compatRouter.all("/deleteShare.view", wrap(async (req: Request, res: Response) => {
     const id = req.query.id as string | undefined;
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
-    subsonicOk(req, res);
-});
+    try {
+        await deleteShareLink(req.user!.id, id);
+        return subsonicOk(req, res);
+    } catch (error) {
+        return shareFailure(req, res, error);
+    }
+}));
 
+// No chat model. The empty list is honest; accepting a message and discarding
+// it is not -- the sender saw it "send" and nobody would ever receive it.
 compatRouter.all("/getChatMessages.view", (req: Request, res: Response) => {
     subsonicOk(req, res, { chatMessages: {} });
 });
 
-compatRouter.all("/addChatMessage.view", (req: Request, res: Response) => {
-    const message = req.query.message as string | undefined;
-    if (!message || !message.trim()) {
-        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: message");
-    }
-    subsonicOk(req, res);
-});
+compatRouter.all("/addChatMessage.view", (req: Request, res: Response) =>
+    notSupported(req, res, "Chat")
+);
 
 compatRouter.all("/getVideos.view", (req: Request, res: Response) => {
     subsonicOk(req, res, { videos: {} });
@@ -178,40 +246,27 @@ compatRouter.all("/getCaptions.view", (req: Request, res: Response) => {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
 
-    const format = (req.query.format as string | undefined)?.toLowerCase();
-    const contentType = format === "srt" ? "application/x-subrip" : "text/vtt; charset=utf-8";
-    res.set("Content-Type", contentType);
-    return res.send("");
+    // There is no caption store. An empty body under a captions content-type
+    // reads to the client as "this video has no subtitles", which is a
+    // different claim from "this server does not do captions".
+    return subsonicError(req, res, SubsonicError.NOT_FOUND, "No captions available");
 });
 
+// Jukebox mode is server-side playback: the SERVER drives audio hardware. Kima
+// has no such output, so every action -- start, stop, set, skip -- used to
+// return a hardcoded "not playing" status as though it had been carried out.
 compatRouter.all("/jukeboxControl.view", (req: Request, res: Response) => {
     const action = (req.query.action as string | undefined)?.toLowerCase();
     if (!action) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: action");
     }
-
-    if (action === "get") {
-        return subsonicOk(req, res, {
-            jukeboxPlaylist: {
-                "@_currentIndex": 0,
-                "@_playing": false,
-                "@_gain": 1,
-                "@_position": 0,
-            },
-        });
-    }
-
-    return subsonicOk(req, res, {
-        jukeboxStatus: {
-            "@_currentIndex": 0,
-            "@_playing": false,
-            "@_gain": 1,
-            "@_position": 0,
-        },
-    });
+    return notSupported(req, res, "Jukebox mode");
 });
 
-compatRouter.all("/getTranscodeDecision.view", (req: Request, res: Response) => {
+// Answers from the track's real format instead of claiming canDirectPlay for
+// every id regardless of what it is. A blanket "direct play" told clients they
+// could stream formats they cannot decode.
+compatRouter.all("/getTranscodeDecision.view", wrap(async (req: Request, res: Response) => {
     const mediaId = req.query.mediaId as string | undefined;
     const mediaType = req.query.mediaType as string | undefined;
     if (!mediaId) {
@@ -221,13 +276,26 @@ compatRouter.all("/getTranscodeDecision.view", (req: Request, res: Response) => 
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: mediaType");
     }
 
+    const track = await prisma.track.findUnique({
+        where: { id: mediaId },
+        select: { mime: true },
+    });
+    if (!track) {
+        return subsonicError(req, res, SubsonicError.NOT_FOUND, "Media not found");
+    }
+
+    // What the client asked to be given, if it said.
+    const wanted = (req.query.format as string | undefined)?.toLowerCase();
+    const source = (track.mime || "").toLowerCase();
+    const canDirectPlay = !wanted || wanted === "raw" || wanted === source;
+
     return subsonicOk(req, res, {
         transcodeDecision: {
-            canDirectPlay: true,
+            canDirectPlay,
             canTranscode: true,
-            transcodeReason: [],
+            transcodeReason: canDirectPlay ? [] : [`source is ${source || "unknown"}, client asked for ${wanted}`],
             errorReason: "",
-            transcodeParams: "",
+            transcodeParams: canDirectPlay ? "" : `format=${wanted}`,
         },
     });
-});
+}));

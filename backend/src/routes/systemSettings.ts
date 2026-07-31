@@ -108,8 +108,6 @@ const systemSettingsSchema = z.object({
   autoEnrichMetadata: z.boolean().optional(),
 
   // Advanced Settings
-  maxConcurrentDownloads: z.number().optional(),
-  downloadRetryAttempts: z.number().optional(),
   transcodeCacheMaxGb: z.number().optional(),
   soulseekConcurrentDownloads: z.number().min(1).max(10).optional(),
 
@@ -145,8 +143,6 @@ router.get("/", async (req, res) => {
           downloadPath: "/downloads",
           autoSync: true,
           autoEnrichMetadata: true,
-          maxConcurrentDownloads: 3,
-          downloadRetryAttempts: 3,
           transcodeCacheMaxGb: 10,
           soulseekConcurrentDownloads: 4,
         },

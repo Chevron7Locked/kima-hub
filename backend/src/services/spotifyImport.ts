@@ -20,7 +20,8 @@ import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";
 import { normalizeArtistName } from "../utils/artistNormalization";
 import { parseCredit } from "./artistIdentity";
-import { rankForPosition } from "../utils/lexoRank";
+import { rankAfter, rankForPosition } from "../utils/lexoRank";
+import { allocateAppendRanks } from "./playlistService";
 import { trackIdentityService } from "./trackIdentity";
 import { songLinkService } from "./songlink";
 import { eventBus } from "./eventBus";
@@ -2755,16 +2756,32 @@ class SpotifyImportService {
           playlistId: job.createdPlaylistId,
           trackId: localTrack.id,
           sort: nextPosition++,
-          rank: rankForPosition(nextPosition),
+          // rank is assigned below, once the count is known
+          rank: "",
         });
         existingTrackIds.add(localTrack.id);
         added++;
       }
     }
 
-    // Batch insert all new playlist items
+    // Batch insert all new playlist items.
+    //
+    // Ranks come from the shared allocator rather than rankForPosition: this
+    // appends to a playlist that may already hold natively-added tracks, and
+    // position-derived keys are a different WIDTH from the ones addTracks
+    // emits ("000" < "C"), so the whole batch used to land ahead of everything
+    // already in the list. The old code also read `rank` from the
+    // POST-incremented counter, so rank and sort were off by one from each
+    // other.
     if (newPlaylistItems.length > 0) {
-      await prisma.playlistItem.createMany({ data: newPlaylistItems });
+      const ranks = await allocateAppendRanks(
+        prisma,
+        job.createdPlaylistId,
+        newPlaylistItems.length,
+      );
+      await prisma.playlistItem.createMany({
+        data: newPlaylistItems.map((item, i) => ({ ...item, rank: ranks[i] })),
+      });
     }
 
     job.tracksMatched += added;
@@ -2978,6 +2995,14 @@ class SpotifyImportService {
       });
       let nextSort = (maxSortResult._max.sort ?? -1) + 1;
 
+      // Rank is chained from the playlist's real last rank across BOTH tables,
+      // not derived from nextSort. Deriving it produced keys of a different
+      // width from the ones addTracks emits, so an import appended to a
+      // natively-seeded playlist sorted ahead of it entirely.
+      let nextRank = (
+        await allocateAppendRanks(prisma, playlistId, 1)
+      )[0];
+
       // Get existing track IDs in playlist to avoid duplicates
       const existingItems = await prisma.playlistItem.findMany({
         where: { playlistId },
@@ -3180,9 +3205,10 @@ class SpotifyImportService {
               playlistId,
               trackId: localTrack.id,
               sort: nextSort++,
-              rank: rankForPosition(nextSort),
+              rank: nextRank,
             },
           });
+          nextRank = rankAfter(nextRank);
 
           existingTrackIds.add(localTrack.id);
           matchedPendingTrackIds.push(pendingTrack.id);

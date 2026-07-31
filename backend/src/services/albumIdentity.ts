@@ -36,10 +36,6 @@ import { stripAlbumEdition } from "../utils/artistNormalization";
 import { foldIdentityText } from "./artistIdentity";
 import { pgCollapseSpace, pgLower, pgTrim, stripNonAlnum } from "./pgTextRules";
 
-// Same rules as artist identity -- imported, not re-implemented, so the two
-// cannot drift apart from each other or from the SQL backfill.
-const stripDiacritics = foldIdentityText;
-
 /**
  * Titles too generic to identify a release group on their own. A cross-artist
  * match on any of these is almost certainly two different albums that happen to
@@ -76,7 +72,7 @@ const GENERIC_TITLES = new Set([
 export function albumIdentityKey(title: string | null | undefined): string {
     if (title == null) return "";
     const base = stripAlbumEdition(pgTrim(String(title)));
-    return stripNonAlnum(pgLower(stripDiacritics(base)));
+    return stripNonAlnum(pgLower(foldIdentityText(base)));
 }
 
 /**
@@ -88,7 +84,7 @@ export function albumIdentityKey(title: string | null | undefined): string {
 export function isGenericAlbumTitle(title: string | null | undefined): boolean {
     if (title == null) return true;
     const normalised = pgTrim(
-        pgCollapseSpace(pgLower(stripDiacritics(stripAlbumEdition(pgTrim(String(title))))))
+        pgCollapseSpace(pgLower(foldIdentityText(stripAlbumEdition(pgTrim(String(title))))))
     );
     // Emptiness is judged on the identity key, not on this spacing-preserving
     // form: "( )" is non-empty here but collapses to "" as a key, and a title

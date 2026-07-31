@@ -11,7 +11,6 @@
 import {
     rankAfter,
     rankForPosition,
-    rankBefore,
     rankBetween,
     rankSequence,
 } from "../lexoRank";
@@ -38,7 +37,7 @@ describe("rankBetween — the ordering invariant", () => {
 
     it("treats empty bounds as open ends", () => {
         expect(rankBetween("", "")).toBeTruthy();
-        expect(rankBefore("A") < "A").toBe(true);
+        expect(rankBetween("", "A") < "A").toBe(true);
         expect(rankAfter("A") > "A").toBe(true);
     });
 
@@ -145,11 +144,13 @@ describe("rankBetween — randomised insertion", () => {
         // deep prepending must subdivide and the keys grow. Ordering and
         // uniqueness are the invariants; short keys are not.
         const list: string[] = [];
+        // rankBetween("", x) is how moveItem inserts before the first item;
+        // rankBefore was a second spelling of it with no callers.
         let first = "";
         let inserted = 0;
         for (let n = 0; n < 500; n += 1) {
             try {
-                first = rankBefore(first);
+                first = rankBetween("", first);
             } catch (e: any) {
                 expect(e.message).toMatch(/max depth/);
                 break;
@@ -181,7 +182,7 @@ describe("rankSequence — seeding a list", () => {
 
     it("leaves room to insert before the first and after the last", () => {
         const seq = rankSequence(10);
-        expect(rankBefore(seq[0]) < seq[0]).toBe(true);
+        expect(rankBetween("", seq[0]) < seq[0]).toBe(true);
         expect(rankAfter(seq[seq.length - 1]) > seq[seq.length - 1]).toBe(true);
     });
 

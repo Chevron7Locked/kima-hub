@@ -293,8 +293,6 @@ model DownloadJob {
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
   discoveryBatchId String?
-  triedReleases    String[]        @default([])
-  releaseIndex     Int             @default(0)
   artistMbid       String?
   cleared          Boolean         @default(false)
   discoveryBatch   DiscoveryBatch? @relation(fields: [discoveryBatchId], references: [id])

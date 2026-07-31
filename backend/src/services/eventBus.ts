@@ -69,6 +69,26 @@ class EventBus {
         };
     }
 
+    /**
+     * Remove a subscriber and reap the user's Set if it is now empty.
+     *
+     * The unsubscribe closure already did this; emit's failure path deleted the
+     * subscriber but left the empty Set behind, so `byUser` grew one dead entry
+     * per user whose last connection died on a failed send rather than on a
+     * clean disconnect. Bounded by user count, so a slow leak rather than a bug
+     * -- but two reap paths in one class should not disagree.
+     */
+    private drop(set: Set<SSESubscriber>, subscriber: SSESubscriber): void {
+        set.delete(subscriber);
+        if (set.size > 0) return;
+        for (const [userId, candidate] of this.byUser) {
+            if (candidate === set) {
+                this.byUser.delete(userId);
+                return;
+            }
+        }
+    }
+
     /** How many clients this user currently has connected. */
     connectionCount(userId: string): number {
         return this.byUser.get(userId)?.size ?? 0;
@@ -95,11 +115,11 @@ class EventBus {
             for (const subscriber of [...set]) {
                 try {
                     if (!subscriber.send(event)) {
-                        set.delete(subscriber);
+                        this.drop(set, subscriber);
                     }
                 } catch (error) {
                     logger.error("[EventBus] Subscriber error:", error);
-                    set.delete(subscriber);
+                    this.drop(set, subscriber);
                 }
             }
         }

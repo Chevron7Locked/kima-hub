@@ -65,10 +65,6 @@ export function foldIdentityText(value: string): string {
     return unaccent(value);
 }
 
-function stripDiacritics(value: string): string {
-    return foldIdentityText(value);
-}
-
 /**
  * Case/accent-insensitive form used for display-adjacent comparisons.
  * Keeps word boundaries, so "deadmau5" and "dead mau5" still differ here --
@@ -82,7 +78,7 @@ export function normalizeArtistName(name: string | null | undefined): string {
     // it could never match the backfilled one.
     return pgTrim(
         pgCollapseSpace(
-            pgLower(stripDiacritics(pgTrim(name))).replace(/\s*&\s*/g, " and ")
+            pgLower(foldIdentityText(pgTrim(name))).replace(/\s*&\s*/g, " and ")
         )
     );
 }
@@ -108,7 +104,7 @@ export function artistIdentityKey(name: string | null | undefined): string {
  */
 export function artistSortName(name: string | null | undefined): string {
     if (name == null) return "";
-    const base = pgCollapseSpace(pgLower(stripDiacritics(pgTrim(name))));
+    const base = pgCollapseSpace(pgLower(foldIdentityText(pgTrim(name))));
     return pgTrim(base.replace(PG_LEADING_ARTICLE, "")) || base;
 }
 
