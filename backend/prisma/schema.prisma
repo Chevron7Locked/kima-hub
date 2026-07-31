@@ -83,6 +83,7 @@ model Artist {
   similarTo           SimilarArtist[]          @relation("ToArtist")
 
   @@index([enrichmentStatus])
+  @@index([enrichmentStatus, lastEnriched])
   @@index([discoveryAlbumCount])
   @@index([hasUserOverrides])
   @@index([libraryAlbumCount])
@@ -300,6 +301,7 @@ model DownloadJob {
   @@index([discoveryBatchId])
   @@index([lidarrRef])
   @@index([startedAt])
+  @@index([status, completedAt])
   @@index([status])
   @@index([targetMbid])
   @@index([userId, status])
@@ -757,6 +759,7 @@ model Track {
   @@index([scanStatus])
   @@index([vibeAnalysisStatus])
   @@index([analysisStatus, vibeAnalysisStatus])
+  @@index([lastfmTags], type: Gin, map: "Track_lastfmTags_gin_idx")
   @@index([isrc])
   @@index([albumId])
   @@index([acousticness])
@@ -923,6 +926,7 @@ model WebhookEvent {
   @@index([correlationId])
   @@index([createdAt])
   @@index([processed])
+  @@index([processed, createdAt])
   @@index([source, eventType])
 }
 

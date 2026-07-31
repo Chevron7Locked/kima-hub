@@ -47,7 +47,7 @@ import { subsonicRouter } from "./routes/subsonic/index";
 import { dataCacheService } from "./services/dataCache";
 import { enrichmentStateService } from "./services/enrichmentState";
 import { errorHandler } from "./middleware/errorHandler";
-import { requireAuth, requireAdmin } from "./middleware/auth";
+import { requireAuth, requireAdmin, invalidateUserCache } from "./middleware/auth";
 import {
     authLimiter,
     apiLimiter,
@@ -292,8 +292,17 @@ async function checkPasswordReset() {
     const hashedPassword = await bcrypt.hash(resetPassword, 10);
     await prisma.user.update({
         where: { id: adminUser.id },
-        data: { passwordHash: hashedPassword },
+        data: {
+            passwordHash: hashedPassword,
+            // Bump tokenVersion, exactly as POST /auth/change-password does.
+            // Without it a reset changed the password but left every JWT issued
+            // BEFORE the reset valid until it expired -- so the one path you
+            // reach for when you have lost control of the account was the one
+            // that did not revoke the sessions you are trying to lock out.
+            tokenVersion: { increment: 1 },
+        },
     });
+    invalidateUserCache(adminUser.id);
     logger.warn("[Password Reset] Admin password has been reset via ADMIN_RESET_PASSWORD env var. Remove this env var and restart.");
 }
 
