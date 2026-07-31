@@ -2,8 +2,7 @@
 import { Router } from "express";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { mapArtist, mapAlbum, mapSong, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
-import { normalizeArtistName } from "../../utils/artistNormalization";
+import { mapArtist, mapAlbum, mapSong, firstArtistGenre, wrap } from "./mappers";
 
 export const libraryRouter = Router();
 
@@ -536,140 +535,14 @@ libraryRouter.all("/getGenres.view", wrap(async (req, res) => {
 
     subsonicOk(req, res, { genres: { genre: sorted } });
 }));
+// getTopSongs / getSimilarSongs / getSimilarSongs2 live in search.ts.
+//
+// They were also registered here, and libraryRouter mounts first, so these
+// copies won and search.ts's were dead. Both of these were the worse
+// implementation: getTopSongs derived from play.groupBy, so a library with no
+// Play rows returned an empty list forever, while search.ts LEFT JOINs Play so
+// unplayed tracks still come back. getSimilarSongs took an UNORDERED slice and
+// Fisher-Yates shuffled it -- Postgres returns rows in physical order without
+// an ORDER BY, so it served the same rows on every call, merely permuted;
+// search.ts uses ORDER BY RANDOM().
 
-// ===================== TOP SONGS =====================
-
-libraryRouter.all("/getTopSongs.view", wrap(async (req, res) => {
-    const artistName = req.query.artist as string | undefined;
-    if (!artistName) {
-        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: artist");
-    }
-
-    const count = clamp(parseIntParam(req.query.count as string | undefined, 50), 1, 500);
-    const normalized = normalizeArtistName(artistName);
-
-    const artist = await prisma.artist.findFirst({
-        where: { normalizedName: normalized },
-        select: { id: true, name: true, displayName: true, genres: true, userGenres: true },
-    });
-
-    if (!artist) {
-        return subsonicOk(req, res, { topSongs: {} });
-    }
-
-    const playCounts = await prisma.play.groupBy({
-        by: ["trackId"],
-        where: {
-            track: {
-                corrupt: false,
-                album: { artistId: artist.id, location: "LIBRARY" },
-            },
-        },
-        _count: { id: true },
-        orderBy: { _count: { id: "desc" } },
-        take: count,
-    });
-
-    if (playCounts.length === 0) {
-        return subsonicOk(req, res, { topSongs: {} });
-    }
-
-    const trackIds = playCounts.map((p) => p.trackId);
-    const tracks = await prisma.track.findMany({
-        where: { id: { in: trackIds } },
-        include: { album: true },
-    });
-
-    const trackMap = new Map(tracks.map((t) => [t.id, t]));
-    const effectiveName = artist.displayName || artist.name;
-    const genre = firstArtistGenre(artist.genres, artist.userGenres);
-
-    const songs = playCounts
-        .map((p) => trackMap.get(p.trackId))
-        .filter((t): t is NonNullable<typeof t> => t != null)
-        .map((t) => mapSong(t, t.album, effectiveName, artist.id, genre));
-
-    subsonicOk(req, res, { topSongs: { song: songs } });
-}));
-
-// ===================== SIMILAR SONGS =====================
-
-libraryRouter.all(["/getSimilarSongs.view", "/getSimilarSongs2.view"], wrap(async (req, res) => {
-    const id = req.query.id as string | undefined;
-    if (!id) {
-        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
-    }
-
-    const count = clamp(parseIntParam(req.query.count as string | undefined, 50), 1, 500);
-
-    // Resolve to an artist ID: id could be a track or an artist
-    let artistId: string | null = null;
-
-    const track = await prisma.track.findUnique({
-        where: { id },
-        select: { album: { select: { artistId: true } } },
-    });
-    if (track) {
-        artistId = track.album.artistId;
-    } else {
-        const artist = await prisma.artist.findUnique({
-            where: { id },
-            select: { id: true },
-        });
-        if (artist) {
-            artistId = artist.id;
-        }
-    }
-
-    if (!artistId) {
-        return subsonicOk(req, res, { similarSongs2: {} });
-    }
-
-    const similarArtists = await prisma.similarArtist.findMany({
-        where: { fromArtistId: artistId },
-        orderBy: { weight: "desc" },
-        take: 15,
-        select: { toArtistId: true },
-    });
-
-    if (similarArtists.length === 0) {
-        return subsonicOk(req, res, { similarSongs2: {} });
-    }
-
-    const similarArtistIds = similarArtists.map((sa) => sa.toArtistId);
-    const overFetch = count * 3;
-
-    const candidates = await prisma.track.findMany({
-        where: {
-            corrupt: false,
-            album: {
-                location: "LIBRARY",
-                artistId: { in: similarArtistIds },
-            },
-        },
-        take: overFetch,
-        include: {
-            album: {
-                include: {
-                    artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
-                },
-            },
-        },
-    });
-
-    // Shuffle using Fisher-Yates
-    for (let i = candidates.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
-    }
-
-    const selected = candidates.slice(0, count);
-    const songs = selected.map((t) => {
-        const effectiveName = t.album.artist.displayName || t.album.artist.name;
-        const genre = firstArtistGenre(t.album.artist.genres, t.album.artist.userGenres);
-        return mapSong(t, t.album, effectiveName, t.album.artist.id, genre);
-    });
-
-    const responseKey = req.path.includes("getSimilarSongs2") ? "similarSongs2" : "similarSongs";
-    subsonicOk(req, res, { [responseKey]: songs.length > 0 ? { song: songs } : {} });
-}));

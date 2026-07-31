@@ -7,17 +7,11 @@ export const compatRouter = Router();
 
 // Stubs for endpoints not yet fully implemented.
 // Return valid empty responses so strict clients (e.g. Symfonium) don't error.
-compatRouter.all("/getBookmarks.view", (req: Request, res: Response) => {
-    subsonicOk(req, res, { bookmarks: {} });
-});
-
-compatRouter.all("/createBookmark.view", (req: Request, res: Response) => {
-    subsonicOk(req, res);
-});
-
-compatRouter.all("/deleteBookmark.view", (req: Request, res: Response) => {
-    subsonicOk(req, res);
-});
+//
+// Bookmarks are NOT stubbed here. compatRouter mounts before playbackRouter, so
+// stubs at these paths won the route match and the real implementation in
+// playback.ts was unreachable -- clients saw "ok" for every createBookmark and
+// an empty list back, silently discarding resume positions.
 
 compatRouter.all("/getInternetRadioStations.view", (req: Request, res: Response) => {
     subsonicOk(req, res, { internetRadioStations: {} });

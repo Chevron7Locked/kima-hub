@@ -36,6 +36,61 @@ function mapQueueEntry(item: QueueTrack) {
     };
 }
 
+/**
+ * Turn a list of track ids into the queue-item shape the rest of the app stores.
+ *
+ * PlaybackState.queue is shared with the web player, which writes full
+ * {id,title,duration,artist,album} objects and renders straight from them. This
+ * used to persist `ids.map(id => ({ id }))`, so a Subsonic client saving its
+ * queue blanked the web player's queue to a list of "Unknown" titles. Hydrate
+ * once on write instead, keeping the stored shape identical for both writers.
+ *
+ * Order follows the ids argument, and unknown ids are dropped.
+ */
+async function hydrateQueue(ids: string[]): Promise<QueueTrack[]> {
+    if (ids.length === 0) return [];
+
+    const tracks = await prisma.track.findMany({
+        where: { id: { in: ids } },
+        select: {
+            id: true,
+            title: true,
+            duration: true,
+            album: {
+                select: {
+                    id: true,
+                    title: true,
+                    coverUrl: true,
+                    artist: { select: { id: true, name: true, displayName: true } },
+                },
+            },
+        },
+    });
+
+    const byId = new Map(tracks.map((t) => [t.id, t]));
+    return ids
+        .map((id) => byId.get(id))
+        .filter((t): t is NonNullable<typeof t> => t != null)
+        .map((t) => ({
+            id: t.id,
+            title: t.title,
+            duration: t.duration ?? undefined,
+            artist: t.album?.artist
+                ? {
+                      id: t.album.artist.id,
+                      name: t.album.artist.displayName || t.album.artist.name,
+                  }
+                : null,
+            album: t.album
+                ? {
+                      id: t.album.id,
+                      title: t.album.title,
+                      coverArt: t.album.coverUrl,
+                  }
+                : null,
+        }));
+}
+
 queueRouter.all("/getPlayQueue.view", wrap(async (req, res) => {
     const userId = req.user!.id;
     const state = await prisma.playbackState.findUnique({ where: { userId } });
@@ -108,7 +163,7 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
         );
     }
 
-    const queueItems: QueueTrack[] = ids.map((id) => ({ id }));
+    const queueItems = await hydrateQueue(ids);
     const currentIndex =
         current && ids.length > 0
             ? Math.max(0, ids.indexOf(current))
@@ -189,7 +244,7 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
         );
     }
 
-    const queueItems: QueueTrack[] = ids.map((queueId) => ({ id: queueId }));
+    const queueItems = await hydrateQueue(ids);
     const currentTrackId = ids.length > 0 ? ids[parsedIndex] : null;
 
     await prisma.playbackState.upsert({

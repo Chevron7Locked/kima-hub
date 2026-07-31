@@ -369,9 +369,37 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
 
     const count = clamp(parseIntParam(req.query.count as string | undefined, 50), 1, 500);
 
+    // Subsonic's `id` here is "the artist, album or song ID", and clients send a
+    // SONG id in the common case (similar-to-what-is-playing). This looked the
+    // value up directly as fromArtistId, so a song id matched no SimilarArtist
+    // row and the endpoint returned an empty list for exactly the request it
+    // exists to serve.
+    let artistId: string | null = null;
+    const track = await prisma.track.findUnique({
+        where: { id },
+        select: { album: { select: { artistId: true } } },
+    });
+    if (track) {
+        artistId = track.album.artistId;
+    } else {
+        const album = await prisma.album.findUnique({
+            where: { id },
+            select: { artistId: true },
+        });
+        artistId =
+            album?.artistId ??
+            (await prisma.artist.findUnique({ where: { id }, select: { id: true } }))?.id ??
+            null;
+    }
+
+    if (!artistId) {
+        const emptyKey = req.path.startsWith("/getSimilarSongs2") ? "similarSongs2" : "similarSongs";
+        return subsonicOk(req, res, { [emptyKey]: {} });
+    }
+
     const similarArtists = await prisma.similarArtist.findMany({
         where: {
-            fromArtistId: id,
+            fromArtistId: artistId,
             toArtist: { libraryAlbumCount: { gt: 0 } },
         },
         orderBy: { weight: "desc" },
@@ -379,7 +407,9 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
         select: { toArtistId: true },
     });
 
-    const artistIds = Array.from(new Set([id, ...similarArtists.map((item) => item.toArtistId)]));
+    const artistIds = Array.from(
+        new Set([artistId, ...similarArtists.map((item) => item.toArtistId)])
+    );
 
     if (artistIds.length === 0) {
         const emptyKey = req.path.startsWith("/getSimilarSongs2") ? "similarSongs2" : "similarSongs";

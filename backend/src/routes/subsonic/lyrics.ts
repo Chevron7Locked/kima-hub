@@ -88,57 +88,13 @@ lyricsRouter.all("/getLyricsBySongId.view", wrap(async (req, res) => {
         lyricsList: structuredLyrics.length > 0 ? { structuredLyrics } : {},
     });
 }));
-
-lyricsRouter.all("/getLyrics.view", wrap(async (req, res) => {
-    const title = req.query.title as string | undefined;
-    const artist = req.query.artist as string | undefined;
-
-    if (!title && !artist) {
-        return subsonicOk(req, res, { lyrics: {} });
-    }
-
-    const track = await prisma.track.findFirst({
-        where: {
-            ...(title ? { title: { contains: title, mode: "insensitive" } } : {}),
-            ...(artist
-                ? {
-                      album: {
-                          artist: {
-                              OR: [
-                                  { name: { contains: artist, mode: "insensitive" } },
-                                  { displayName: { contains: artist, mode: "insensitive" } },
-                              ],
-                          },
-                      },
-                  }
-                : {}),
-        },
-        include: {
-            album: {
-                include: {
-                    artist: { select: { name: true, displayName: true } },
-                },
-            },
-        },
-    });
-
-    if (!track) {
-        return subsonicOk(req, res, { lyrics: {} });
-    }
-
-    const lyrics = await prisma.trackLyrics.findUnique({ where: { track_id: track.id } });
-    if (!lyrics || (!lyrics.plain_lyrics && !lyrics.synced_lyrics)) {
-        return subsonicOk(req, res, { lyrics: {} });
-    }
-
-    const displayArtist = track.album.artist.displayName || track.album.artist.name;
-    const value = lyrics.plain_lyrics || lyrics.synced_lyrics || "";
-
-    return subsonicOk(req, res, {
-        lyrics: {
-            artist: displayArtist,
-            title: track.title,
-            value,
-        },
-    });
-}));
+// getLyrics.view lives in playback.ts.
+//
+// It was registered here too, but playbackRouter mounts first so this copy was
+// dead. playback.ts is also the correct one: Subsonic returns
+// <lyrics artist=".." title="..">text</lyrics>, i.e. ATTRIBUTES plus text
+// content, which is what its @_artist / @_title / #text shape produces. This
+// version emitted artist/title/value as child ELEMENTS, which an XML client
+// would not read as the spec describes.
+//
+// getLyricsBySongId.view above is unique to this file and stays.

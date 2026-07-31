@@ -327,71 +327,18 @@ playbackRouter.all("/scrobble.view", wrap(async (req, res) => {
 
     return subsonicOk(req, res);
 }));
+// savePlayQueue.view / getPlayQueue.view live in queue.ts.
+//
+// They were registered here too and playbackRouter mounts first, so these won
+// -- and they used a DIFFERENT store: the SubsonicPlayQueue table, while
+// queue.ts's by-index variants (getPlayQueueByIndex / savePlayQueueByIndex,
+// unique paths, so always live) use PlaybackState.queue. getOpenSubsonicExtensions
+// advertises indexBasedQueue, so a client uses both: it saved by index into one
+// table and read by id out of the other, getting back a different queue.
+//
+// One store now: PlaybackState.queue, which the web player and getNowPlaying
+// already read. The SubsonicPlayQueue model is left unreferenced by this change.
 
-// ===================== LYRICS =====================
-
-// ===================== PLAY QUEUE =====================
-
-playbackRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
-    const userId = req.user!.id;
-    const ids = [req.query.id].flat().filter(Boolean) as string[];
-    const current = (req.query.current as string) || null;
-    const position = parseInt((req.query.position as string) || "0", 10) || 0;
-    const changedBy = (req.query.c as string) || "";
-
-    await prisma.subsonicPlayQueue.upsert({
-        where: { userId },
-        create: { userId, trackIds: ids, current, position, changedBy, changed: new Date() },
-        update: { trackIds: ids, current, position, changedBy, changed: new Date() },
-    });
-
-    return subsonicOk(req, res);
-}));
-
-playbackRouter.all("/getPlayQueue.view", wrap(async (req, res) => {
-    const userId = req.user!.id;
-    const queue = await prisma.subsonicPlayQueue.findUnique({ where: { userId } });
-
-    if (!queue) {
-        return subsonicOk(req, res, { playQueue: {} });
-    }
-
-    const trackIds = queue.trackIds as string[];
-    if (trackIds.length === 0) {
-        return subsonicOk(req, res, { playQueue: {} });
-    }
-
-    const tracks = await prisma.track.findMany({
-        where: { id: { in: trackIds } },
-        include: { album: { include: { artist: true } } },
-    });
-
-    const trackMap = new Map(tracks.map((t) => [t.id, t]));
-    const orderedEntries = trackIds
-        .map((id) => trackMap.get(id))
-        .filter(Boolean)
-        .map((t) => {
-            const artist = t!.album.artist;
-            return mapSong(
-                t!,
-                t!.album,
-                artist.displayName || artist.name,
-                artist.id,
-                firstArtistGenre(artist.genres, artist.userGenres),
-            );
-        });
-
-    return subsonicOk(req, res, {
-        playQueue: {
-            "@_current": queue.current || undefined,
-            "@_position": queue.position,
-            "@_username": req.user!.username,
-            "@_changed": queue.changed.toISOString(),
-            "@_changedBy": queue.changedBy || undefined,
-            entry: orderedEntries,
-        },
-    });
-}));
 
 // ===================== BOOKMARKS =====================
 
@@ -494,7 +441,8 @@ playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
 
     const lyricsText = track.trackLyrics.plain_lyrics || track.trackLyrics.synced_lyrics || undefined;
     const result: Record<string, unknown> = {
-        "@_artist": track.album.artist.name,
+        // Prefer the user-facing name, matching every other Subsonic mapper.
+        "@_artist": track.album.artist.displayName || track.album.artist.name,
         "@_title": track.title,
     };
     if (lyricsText) {
