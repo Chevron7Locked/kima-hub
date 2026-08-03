@@ -1,6 +1,7 @@
 import axios, { AxiosInstance } from "axios";
 import pLimit from "p-limit";
 import { logger } from "../utils/logger";
+import { albumIdentityKey } from "./albumIdentity";
 import { config } from "../config";
 import { getSystemSettings } from "../utils/systemSettings";
 import { stripAlbumEdition } from "../utils/artistNormalization";
@@ -2702,16 +2703,25 @@ class LidarrService {
                 return true;
             }
 
-            // Strategy 3: Partial title match (handles edition differences)
+            // Strategy 3: edition differences — "Dangerous Days" against a
+            // held "Dangerous Days (Deluxe Edition)".
+            //
+            // Compared on identity keys, which strip editions and remaster
+            // suffixes for exactly this purpose. The previous version tested
+            // raw substring containment in BOTH directions, so any held album
+            // whose title merely appeared inside the requested one counted as
+            // a match: asking for "Trust In Trance" and owning "Trance" said
+            // yes. That marks a download complete for an album we do not have,
+            // which then reads as ACQUIRED and leaves retention deleting
+            // something that was never there.
             const normalizedArtist = artistName.toLowerCase().trim();
-            const normalizedAlbum = albumTitle.toLowerCase().trim();
-            for (const [titleKey, info] of snapshot.albumsByTitle) {
-                const [keyArtist, keyAlbum] = titleKey.split("|");
-                if (
-                    keyArtist === normalizedArtist &&
-                    (keyAlbum.includes(normalizedAlbum) || normalizedAlbum.includes(keyAlbum))
-                ) {
-                    return true;
+            const wantKey = albumIdentityKey(albumTitle);
+            if (wantKey) {
+                for (const [titleKey] of snapshot.albumsByTitle) {
+                    const [keyArtist, keyAlbum] = titleKey.split("|");
+                    if (keyArtist === normalizedArtist && albumIdentityKey(keyAlbum) === wantKey) {
+                        return true;
+                    }
                 }
             }
         }
