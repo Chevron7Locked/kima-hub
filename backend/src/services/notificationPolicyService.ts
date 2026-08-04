@@ -24,6 +24,14 @@ interface NotificationDecision {
 // Configuration constants
 const DEFAULT_RETRY_WINDOW_MINUTES = 30;
 const SUPPRESS_TRANSIENT_FAILURES = true;
+// How many of the user's most recent terminal jobs hasAlreadyNotified()
+// scans for a duplicate. A duplicate job for the same album is created
+// close in time to the original (retry-driven), so recency is what
+// matters; bounding it keeps the cost independent of lifetime history.
+// A match older than this window is missed -- the user gets one extra
+// notification, not data loss. Matches notificationService.ts's per-user
+// history bound (same domain, same shape).
+const DUPLICATE_CHECK_WINDOW = 100;
 
 // Failure classification patterns
 const TRANSIENT_PATTERNS = [
@@ -326,16 +334,28 @@ class NotificationPolicyService {
             return false;
         }
 
-        // Find all other terminal jobs for this user, then check metadata
-        // for matching artist+album with a notification already sent.
-        // We must use findMany because Prisma cannot filter on JSON fields
+        // Find the user's most recent terminal jobs, then check metadata for
+        // matching artist+album with a notification already sent. We must
+        // use findMany because Prisma cannot filter on JSON fields
         // portably, and findFirst only checked the first row.
+        //
+        // Bounded to DUPLICATE_CHECK_WINDOW rows, ordered by completedAt --
+        // see the constant's comment for why. completedAt is nullable
+        // (endJob() sets it on every terminal transition, but rows written
+        // before endJob() existed, or by a terminal write that bypasses it,
+        // can still have it null), and Postgres sorts NULLS FIRST on a bare
+        // DESC order -- without `nulls: "last"` the null rows would fill the
+        // window ahead of every dated one, silently defeating the bound.
+        // Select only the columns the loop below actually reads.
         const otherJobs = await prisma.downloadJob.findMany({
             where: {
                 id: { not: job.id },
                 userId: job.userId,
                 status: { in: ["completed", "failed", "exhausted"] },
             },
+            select: { id: true, metadata: true },
+            orderBy: { completedAt: { sort: "desc", nulls: "last" } },
+            take: DUPLICATE_CHECK_WINDOW,
         });
 
         for (const otherJob of otherJobs) {

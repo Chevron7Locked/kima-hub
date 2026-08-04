@@ -1018,17 +1018,6 @@ class ApiClient {
         });
     }
 
-    async retryUnavailableAlbums() {
-        return this.request<{
-            success: boolean;
-            queued: number;
-            batchId?: string;
-            message: string;
-        }>("/discover/retry-unavailable", {
-            method: "POST",
-        });
-    }
-
     async likeDiscoverAlbum(albumId: string) {
         return this.request<{ success: boolean }>("/discover/like", {
             method: "POST",
