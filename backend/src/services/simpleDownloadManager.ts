@@ -598,10 +598,20 @@ class SimpleDownloadManager {
                 logger.debug(`   No duplicates found, creating tracking job`);
 
                 // Find user from recent artist download
+                // Attribute this to whoever most recently asked for something.
+                //
+                // This looked for the most recent `type: "artist"` job, and
+                // NOTHING in the codebase creates one — the artist route calls
+                // processArtistDownload, which writes album rows only. So the
+                // lookup was always null and this branch returned matched:false
+                // every time, meaning an unmatched Lidarr download was never
+                // tracked at all.
                 const recentJob = await tx.downloadJob.findFirst({
                     where: {
-                        type: "artist",
                         status: { in: ["pending", "processing", "completed"] },
+                        ...(artistName
+                            ? { subject: { startsWith: artistName, mode: "insensitive" as const } }
+                            : {}),
                     },
                     orderBy: { createdAt: "desc" },
                 });

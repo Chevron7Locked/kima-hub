@@ -248,10 +248,13 @@ export async function processScan(
             const { prisma } = await import("../../utils/db");
 
             if (artistMbid) {
+                // No type filter: nothing creates `type: "artist"` rows, so
+                // filtering on it made this sweep a no-op. An artist download
+                // is fanned out into album rows, and those are what a scan for
+                // that artist should settle.
                 await prisma.downloadJob.updateMany({
                     where: {
                         targetMbid: artistMbid,
-                        type: "artist",
                         status: { in: ["pending", "processing"] },
                     },
                     data: {
