@@ -337,7 +337,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
         case "alphabeticalByName":
             albums = await prisma.album.findMany({
                 where: { location: "LIBRARY", tracks: { some: {} } },
-                orderBy: { title: "asc" },
+                orderBy: { sortName: "asc" },
                 take: size,
                 skip: offset,
                 include: albumInclude,
@@ -400,7 +400,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
                     ) g WHERE g ILIKE '%' || ${genre} || '%'
                 )
                   AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id)
-                ORDER BY a.title ASC
+                ORDER BY a."sortName" ASC
                 LIMIT ${size} OFFSET ${offset}
             `;
             albums = rows;
@@ -417,7 +417,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
                         },
                     },
                 },
-                orderBy: { title: "asc" },
+                orderBy: { sortName: "asc" },
                 take: size,
                 skip: offset,
                 include: albumInclude,

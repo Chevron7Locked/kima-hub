@@ -12,9 +12,15 @@ import fs from "fs";
 import pLimit from "p-limit";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
 
+// Alphabetical ordering reads `sortName`, not `title`: the article-stripped,
+// unaccented, lowercased value written wherever an album's title or
+// displayTitle is written (albumIdentity.ts, routes/enrichment.ts), mirroring
+// the same fix already applied to Artist. Unlike routes/library/artists.ts,
+// there is no raw-SQL branch here to bypass this map -- checked; sortBy=name
+// and name-desc both go straight through `orderBy` below.
 const ALBUM_SORT_MAP: Record<string, any> = {
-  name: { title: "asc" as const },
-  "name-desc": { title: "desc" as const },
+  name: { sortName: "asc" as const },
+  "name-desc": { sortName: "desc" as const },
   recent: { year: "desc" as const },
 };
 
@@ -38,7 +44,7 @@ router.get("/albums", async (req, res) => {
     const offset = parseInt(offsetParam as string, 10) || 0;
 
     const orderBy = ALBUM_SORT_MAP[sortBy as string] ?? {
-      title: "asc" as const,
+      sortName: "asc" as const,
     };
 
     let where: any = {

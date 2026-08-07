@@ -766,6 +766,25 @@ router.put("/albums/:id/metadata", requireAdmin, async (req, res) => {
       if (title !== undefined) {
         updateData.displayTitle = title;
         hasOverrides = true;
+
+        // sortName means "where this album files alphabetically" -- same
+        // reasoning as the artist fix (23a2283): it has to move with
+        // displayTitle, not stay derived from the canonical title alone, or
+        // an override files under the title it was meant to replace.
+        // artistSortName is text-generic despite the name (fold/lower/
+        // collapse/strip-article only, nothing artist-specific), the same
+        // way kima_sort_name is on the SQL side -- reused here rather than
+        // duplicated.
+        const effectiveTitle =
+          typeof title === "string" && title.trim() !== ""
+            ? title
+            : ((
+                await prisma.album.findUnique({
+                  where: { id: req.params.id },
+                  select: { title: true },
+                })
+              )?.title ?? "");
+        updateData.sortName = artistSortName(effectiveTitle);
       }
       if (year !== undefined) {
         updateData.displayYear = parseInt(year);
@@ -954,7 +973,7 @@ router.post("/albums/:id/reset", async (req, res) => {
     // Check if album exists first
     const existingAlbum = await prisma.album.findUnique({
       where: { id: req.params.id },
-      select: { id: true },
+      select: { id: true, title: true },
     });
 
     if (!existingAlbum) {
@@ -972,6 +991,10 @@ router.post("/albums/:id/reset", async (req, res) => {
         userCoverUrl: null,
         userGenres: [],
         hasUserOverrides: false,
+        // A reset clears displayTitle, so sortName has to file back under
+        // the canonical title too -- same reason the PUT handler recomputes
+        // it on clear.
+        sortName: artistSortName(existingAlbum.title),
       },
       include: {
         artist: {

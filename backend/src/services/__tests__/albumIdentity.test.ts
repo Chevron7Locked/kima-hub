@@ -10,7 +10,7 @@
  *    artist's 1995 "Greatest Hits" absorbed another's.
  */
 
-import { albumIdentityKey, isGenericAlbumTitle } from "../albumIdentity";
+import { albumIdentityKey, isGenericAlbumTitle, resolveAlbum } from "../albumIdentity";
 
 describe("albumIdentityKey — editions collapse to one release group", () => {
     it("unifies the pressings of one album", () => {
@@ -104,5 +104,56 @@ describe("isGenericAlbumTitle — gates cross-artist matching", () => {
 
     it("treats null as generic rather than throwing", () => {
         expect(isGenericAlbumTitle(null)).toBe(true);
+    });
+});
+
+describe("resolveAlbum — sortName is written on creation", () => {
+    // No displayTitle can exist yet on a row that does not exist yet, so this
+    // is always the canonical title alone -- a later override keeps sortName
+    // in sync itself (routes/enrichment.ts's PUT/reset handlers).
+    function fakeDb(overrides: Partial<Record<"findUnique" | "findFirst" | "create", jest.Mock>> = {}) {
+        return {
+            album: {
+                findUnique: overrides.findUnique ?? jest.fn().mockResolvedValue(null),
+                findFirst: overrides.findFirst ?? jest.fn().mockResolvedValue(null),
+                create: overrides.create ?? jest.fn().mockResolvedValue({ id: "new-album" }),
+            },
+        } as any;
+    }
+
+    it("computes sortName from the canonical title, article-stripped, on a fresh row", async () => {
+        const create = jest.fn().mockResolvedValue({ id: "new-album" });
+        const db = fakeDb({ create });
+
+        await resolveAlbum(db, { artistId: "artist-1", title: "The Dark Side of the Moon" });
+
+        expect(create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                title: "The Dark Side of the Moon",
+                sortName: "dark side of the moon",
+            }),
+        }));
+    });
+
+    it("does not edition-strip sortName the way identityKey does -- title order for filing, not dedup", async () => {
+        const create = jest.fn().mockResolvedValue({ id: "new-album" });
+        const db = fakeDb({ create });
+
+        await resolveAlbum(db, { artistId: "artist-1", title: "Abbey Road (2019 Remaster)" });
+
+        const call = create.mock.calls[0][0];
+        expect(call.data.identityKey).toBe("abbeyroad");
+        expect(call.data.sortName).toBe("abbey road (2019 remaster)");
+    });
+
+    it("does not write sortName when an existing row is returned instead of created", async () => {
+        const existing = { id: "existing-album", sortName: "already set" };
+        const db = fakeDb({ findUnique: jest.fn().mockResolvedValue(existing) });
+        const create = db.album.create;
+
+        const result = await resolveAlbum(db, { artistId: "artist-1", title: "Anything" });
+
+        expect(result).toBe(existing);
+        expect(create).not.toHaveBeenCalled();
     });
 });

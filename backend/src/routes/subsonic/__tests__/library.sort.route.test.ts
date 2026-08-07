@@ -1,22 +1,25 @@
 /**
- * Subsonic artist ordering + index bucketing.
+ * Subsonic artist ordering + index bucketing, and album ordering.
  *
  * These endpoints had no coverage at all. Written to pin the ordering
  * behaviour BEFORE it changed, including the defect: `getArtists` bucketed
  * artists into A-Z indexes using an article-stripped key but ordered the
  * underlying query by the raw `name`, so "The Beatles" landed in the "B"
  * bucket and then sorted to the BOTTOM of it, after every genuine B artist.
+ * `getAlbumList`'s `alphabeticalByName`, `byGenre`, and `starred` types had
+ * the same shape of defect on `Album.title` -- see 20260807190000_album_sort_name.
  *
- * `Artist.sortName` is the canonical article-stripped value -- populated on
- * write by `artistSortName`, backfilled by the `artist_identity` migration,
- * NOT NULL, and indexed. It is what both the ordering and the bucketing now
- * use, so the two cannot disagree again.
+ * `Artist.sortName` / `Album.sortName` are the canonical article-stripped
+ * values -- populated on write, backfilled by migration, NOT NULL, and
+ * indexed. They are what both the ordering and the bucketing now use, so the
+ * two cannot disagree again.
  */
 
 jest.mock('../../../utils/db', () => ({
     prisma: {
         artist: { findMany: jest.fn() },
         album: { findMany: jest.fn() },
+        $queryRaw: jest.fn(),
     },
 }));
 
@@ -158,5 +161,48 @@ describe('subsonic getAlbumList alphabeticalByArtist', () => {
         expect(prisma.album.findMany).toHaveBeenCalledWith(
             expect.objectContaining({ orderBy: { artist: { sortName: 'asc' } } }),
         );
+    });
+});
+
+describe('subsonic getAlbumList alphabeticalByName', () => {
+    it('orders on the album\'s own sortName, not title', async () => {
+        (prisma.album.findMany as jest.Mock).mockResolvedValue([]);
+
+        await request(makeApp())
+            .get('/getAlbumList.view?type=alphabeticalByName')
+            .expect(200);
+
+        expect(prisma.album.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({ orderBy: { sortName: 'asc' } }),
+        );
+    });
+});
+
+describe('subsonic getAlbumList starred', () => {
+    it('orders starred albums on sortName, not title', async () => {
+        (prisma.album.findMany as jest.Mock).mockResolvedValue([]);
+
+        await request(makeApp())
+            .get('/getAlbumList.view?type=starred')
+            .expect(200);
+
+        expect(prisma.album.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({ orderBy: { sortName: 'asc' } }),
+        );
+    });
+});
+
+describe('subsonic getAlbumList byGenre', () => {
+    it('orders the raw-SQL genre query by sortName, not title', async () => {
+        (prisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+
+        await request(makeApp())
+            .get('/getAlbumList.view?type=byGenre&genre=rock')
+            .expect(200);
+
+        const call = (prisma.$queryRaw as jest.Mock).mock.calls[0];
+        const sql = call[0].join('');
+        expect(sql).toContain('a."sortName" ASC');
+        expect(sql).not.toContain('a.title ASC');
     });
 });

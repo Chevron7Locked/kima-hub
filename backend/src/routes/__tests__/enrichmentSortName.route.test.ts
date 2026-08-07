@@ -1,16 +1,20 @@
 /**
- * PUT /enrichment/artists/:id/metadata and POST /enrichment/artists/:id/reset --
- * sortName write-time sync.
+ * sortName write-time sync, for both artist and album overrides:
+ * PUT/POST /enrichment/artists/:id/{metadata,reset} and the same pair for
+ * /albums.
  *
- * `Artist.sortName` means "where this artist files alphabetically", and every
- * artist listing in the codebase now reads it directly (see
+ * `sortName` means "where this row files alphabetically", and every listing
+ * in the codebase now reads it directly (see
  * routes/subsonic/__tests__/library.sort.route.test.ts and
- * routes/library/__tests__/artists.sort.route.test.ts). But `sortName` is
- * computed from `name` alone -- an admin override to `displayName` used to
- * leave it untouched, so an artist renamed via this endpoint would keep
- * filing under the name the override was meant to replace, in every listing
- * at once. These two endpoints are the only writers of `displayName`, so
- * they are the only places that can keep `sortName` in sync with it.
+ * routes/library/__tests__/{artists,albums}.sort.route.test.ts). But it is
+ * computed from the canonical field alone (`name` / `title`) -- an admin
+ * override to `displayName` / `displayTitle` used to leave it untouched, so
+ * a renamed row would keep filing under the name the override was meant to
+ * replace, in every listing at once. These four handlers are the only
+ * writers of `displayName`/`displayTitle`, so they are the only places that
+ * can keep `sortName` in sync with them. The album half repeats the exact
+ * defect shipped for artists in be01529 and fixed in 23a2283 -- see that
+ * commit and routes/enrichment.ts's own comments at each site for why.
  */
 
 jest.mock('../../middleware/auth', () => ({
@@ -60,6 +64,7 @@ jest.mock('../../services/mbidReassign', () => ({
 jest.mock('../../utils/db', () => ({
     prisma: {
         artist: { findUnique: jest.fn(), update: jest.fn() },
+        album: { findUnique: jest.fn(), update: jest.fn() },
     },
 }));
 
@@ -81,6 +86,12 @@ beforeEach(() => {
         id: 'artist-1',
         ...data,
         albums: [],
+    }));
+    (prisma.album.update as jest.Mock).mockImplementation(async ({ data }: any) => ({
+        id: 'album-1',
+        ...data,
+        artist: { id: 'artist-1', name: 'Some Artist' },
+        tracks: [],
     }));
 });
 
@@ -173,5 +184,96 @@ describe('POST /enrichment/artists/:id/reset -- sortName follows the cleared ove
             .expect(404);
 
         expect(prisma.artist.update).not.toHaveBeenCalled();
+    });
+});
+
+describe('PUT /enrichment/albums/:id/metadata -- sortName follows displayTitle', () => {
+    it('sets sortName from the override, article-stripped, not from the canonical title', async () => {
+        await request(makeApp())
+            .put('/enrichment/albums/album-1/metadata')
+            .send({ title: 'The Dark Side of the Moon' })
+            .expect(200);
+
+        expect(prisma.album.update).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                displayTitle: 'The Dark Side of the Moon',
+                sortName: 'dark side of the moon',
+            }),
+        }));
+        expect(prisma.album.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('reverts sortName to the canonical title when the override is cleared to an empty string', async () => {
+        (prisma.album.findUnique as jest.Mock).mockResolvedValue({ title: 'Los Angeles' });
+
+        await request(makeApp())
+            .put('/enrichment/albums/album-1/metadata')
+            .send({ title: '' })
+            .expect(200);
+
+        expect(prisma.album.findUnique).toHaveBeenCalledWith({
+            where: { id: 'album-1' },
+            select: { title: true },
+        });
+        expect(prisma.album.update).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                displayTitle: '',
+                sortName: 'angeles',
+            }),
+        }));
+    });
+
+    it('reverts sortName to the canonical title when the override is cleared to null', async () => {
+        (prisma.album.findUnique as jest.Mock).mockResolvedValue({ title: 'Le Bootleg' });
+
+        await request(makeApp())
+            .put('/enrichment/albums/album-1/metadata')
+            .send({ title: null })
+            .expect(200);
+
+        expect(prisma.album.update).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                displayTitle: null,
+                sortName: 'bootleg',
+            }),
+        }));
+    });
+
+    it('does not touch sortName at all when title is not part of the request', async () => {
+        await request(makeApp())
+            .put('/enrichment/albums/album-1/metadata')
+            .send({ year: '1973' })
+            .expect(200);
+
+        const call = (prisma.album.update as jest.Mock).mock.calls[0][0];
+        expect(call.data).not.toHaveProperty('sortName');
+        expect(call.data).not.toHaveProperty('displayTitle');
+    });
+});
+
+describe('POST /enrichment/albums/:id/reset -- sortName follows the cleared override', () => {
+    it('resets sortName to the canonical title alongside displayTitle', async () => {
+        (prisma.album.findUnique as jest.Mock).mockResolvedValue({ id: 'album-1', title: 'The Dark Side of the Moon' });
+
+        await request(makeApp())
+            .post('/enrichment/albums/album-1/reset')
+            .expect(200);
+
+        expect(prisma.album.update).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                displayTitle: null,
+                sortName: 'dark side of the moon',
+            }),
+        }));
+    });
+
+    it('404s without touching sortName when the album does not exist', async () => {
+        (prisma.album.findUnique as jest.Mock).mockResolvedValue(null);
+
+        await request(makeApp())
+            .post('/enrichment/albums/missing/reset')
+            .expect(404);
+
+        expect(prisma.album.update).not.toHaveBeenCalled();
     });
 });

@@ -13,6 +13,7 @@ model Album {
   artistId         String
   title            String
   identityKey      String                   @default("")
+  sortName         String                   @default("")
   year             Int?
   coverUrl         String?
   primaryType      String
@@ -32,6 +33,7 @@ model Album {
 
   @@unique([artistId, identityKey])
   @@index([title])
+  @@index([sortName])
   @@index([artistId])
   @@index([artistId, location])
   @@index([hasUserOverrides])

@@ -33,7 +33,7 @@
 
 import { Prisma } from "@prisma/client";
 import { stripAlbumEdition } from "../utils/artistNormalization";
-import { foldIdentityText } from "./artistIdentity";
+import { foldIdentityText, artistSortName } from "./artistIdentity";
 import { pgCollapseSpace, pgLower, pgTrim, stripNonAlnum } from "./pgTextRules";
 
 /**
@@ -190,6 +190,14 @@ export async function resolveAlbum(
                 artistId: input.artistId,
                 title,
                 identityKey,
+                // No displayTitle exists yet at creation time -- this is the
+                // canonical title only, same as identityKey above. A later
+                // override keeps sortName in sync itself (routes/enrichment.ts).
+                // artistSortName is text-generic (fold/lower/collapse/strip
+                // leading article), not artist-specific despite the name --
+                // reused here rather than duplicated, same as kima_sort_name
+                // is shared on the SQL side.
+                sortName: artistSortName(title),
                 rgMbid,
                 year: input.year ?? null,
             },
