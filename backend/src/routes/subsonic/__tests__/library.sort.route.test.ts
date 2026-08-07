@@ -95,6 +95,29 @@ describe('subsonic getArtists / getIndexes ordering', () => {
         expect(res.text).not.toContain('<index name="L">');
     });
 
+    // sortName is kept in sync with displayName at WRITE time (see
+    // routes/__tests__/enrichmentArtistSortName.route.test.ts), so this
+    // endpoint needs no override-aware logic of its own -- it just has to
+    // trust the stored column unconditionally, including when it disagrees
+    // with what the canonical `name` alone would produce.
+    it('buckets and displays an artist under its displayName override, not its canonical name', async () => {
+        (prisma.artist.findMany as jest.Mock).mockResolvedValue([
+            {
+                id: 'a4', name: 'Prince', displayName: 'The Artist Formerly Known As Prince',
+                heroUrl: null, libraryAlbumCount: 3,
+                // What the write-time fix computes for this override:
+                // artistSortName('The Artist Formerly Known As Prince').
+                sortName: 'artist formerly known as prince',
+            },
+        ]);
+
+        const res = await request(makeApp()).get('/getArtists.view').expect(200);
+
+        expect(res.text).toContain('<index name="A">');
+        expect(res.text).not.toContain('<index name="P">');
+        expect(res.text).toContain('name="The Artist Formerly Known As Prince"');
+    });
+
     it('advertises ignoredArticles covering every article it actually strips', async () => {
         (prisma.artist.findMany as jest.Mock).mockResolvedValue([]);
 

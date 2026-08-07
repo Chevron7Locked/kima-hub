@@ -27,6 +27,7 @@ import {
   reassignAlbumRgMbid,
   reassignArtistMbid,
 } from "../services/mbidReassign";
+import { artistSortName } from "../services/artistIdentity";
 
 const router = Router();
 
@@ -669,6 +670,24 @@ router.put("/artists/:id/metadata", requireAdmin, async (req, res) => {
       if (name !== undefined) {
         updateData.displayName = name;
         hasOverrides = true;
+
+        // sortName means "where this artist files alphabetically" -- an
+        // override changes that, so it has to move with displayName rather
+        // than staying derived from the canonical name alone. Clearing the
+        // override (empty/null) files it back under the canonical name,
+        // which this handler doesn't otherwise read, so fetch it only for
+        // that branch -- the common case (setting a real override) needs
+        // no extra query.
+        const effectiveName =
+          typeof name === "string" && name.trim() !== ""
+            ? name
+            : ((
+                await prisma.artist.findUnique({
+                  where: { id: req.params.id },
+                  select: { name: true },
+                })
+              )?.name ?? "");
+        updateData.sortName = artistSortName(effectiveName);
       }
       if (bio !== undefined) {
         updateData.userSummary = bio;
@@ -869,7 +888,7 @@ router.post("/artists/:id/reset", async (req, res) => {
     // Check if artist exists first
     const existingArtist = await prisma.artist.findUnique({
       where: { id: req.params.id },
-      select: { id: true },
+      select: { id: true, name: true },
     });
 
     if (!existingArtist) {
@@ -887,6 +906,10 @@ router.post("/artists/:id/reset", async (req, res) => {
         userHeroUrl: null,
         userGenres: [],
         hasUserOverrides: false,
+        // A reset clears displayName, so sortName has to file back under
+        // the canonical name too -- same reason the PUT handler recomputes
+        // it on clear.
+        sortName: artistSortName(existingArtist.name),
       },
       include: {
         albums: {
