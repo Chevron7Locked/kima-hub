@@ -1764,9 +1764,45 @@ export function pgCollapseSpace(value: string): string {
     return value.replace(PG_SPACE_RUN, " ");
 }
 
+/**
+ * The leading articles stripped from sort values, lowercase.
+ *
+ * This array is the SINGLE definition. `PG_LEADING_ARTICLE` below is built
+ * from it, the `kima_sort_name` SQL function mirrors it, and the Subsonic
+ * `ignoredArticles` advertisement is rendered from it. It used to exist only
+ * inside the regex, which let a second English-only copy grow in the Subsonic
+ * router and a third as a hardcoded advertisement string -- three definitions
+ * of one concept, none agreeing.
+ *
+ * A FOURTH copy lives in SQL, inside `kima_sort_name` -- unavoidable, since a
+ * Postgres function cannot import a TypeScript constant. `pgIdentityParity.test.ts`
+ * guards it by comparing this side against a golden fixture generated from the
+ * real functions in the shipped Postgres image.
+ *
+ * That guard is PARTIAL, and knowing where it stops matters more than knowing
+ * it exists. The fixture exercises five of the eleven articles below -- "the",
+ * "a", "an", "los", "die" ("The The", "A Perfect Circle", "An Horse", "Los
+ * Campesinos!", "Die Antwoord"). Nothing covers "le", "la", "les", "las",
+ * "der" or "das", so removing one of those six from this array would NOT fail
+ * the parity test; it would quietly change every affected sort value on the
+ * next backfill. Add a fixture row before trusting a change to those.
+ *
+ * So changing this list means all three of: this array, a new migration doing
+ * `CREATE OR REPLACE FUNCTION kima_sort_name` plus
+ * `UPDATE "Artist" SET "sortName" = kima_sort_name(name)` to re-derive stored
+ * values, and `npm run gen:pg-text-rules` to regenerate the fixture -- in that
+ * order, and only then.
+ */
+export const LEADING_ARTICLES = [
+    "the", "a", "an",
+    "le", "la", "les",
+    "los", "las",
+    "die", "der", "das",
+] as const;
+
 /** Leading-article prefix, using the Postgres whitespace class. */
 export const PG_LEADING_ARTICLE = new RegExp(
-    `^(?:the|a|an|le|la|les|los|las|die|der|das)[${PG_SPACE}]+`,
+    `^(?:${LEADING_ARTICLES.join("|")})[${PG_SPACE}]+`,
     "i"
 );
 

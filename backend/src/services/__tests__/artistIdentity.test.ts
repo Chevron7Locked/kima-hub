@@ -148,6 +148,40 @@ describe("artistSortName", () => {
         expect(artistSortName("Theatre of Tragedy")).toBe("theatre of tragedy");
         expect(artistSortName("Andrew Bird")).toBe("andrew bird");
     });
+
+    // A reviewer read the alternation in PG_LEADING_ARTICLE -- "the|a|an|..."
+    // -- and reported that "a" preceding "an" must break "An Horse", since
+    // regex alternation prefers the earlier branch. It does prefer it, but the
+    // branch alone is not a match: the pattern demands whitespace after the
+    // article, "An Horse" offers "n", so the engine backtracks into "an" and
+    // succeeds. The behaviour is correct and the reasoning against it is
+    // plausible, which is exactly why it is pinned here rather than argued
+    // about. Reordering the array to put "an" first must keep these passing.
+    it.each([
+        ["An Horse", "horse"],
+        ["An Emotional Fish", "emotional fish"],
+        ["A Band", "band"],
+        ["A Perfect Circle", "perfect circle"],
+        ["Ash", "ash"],
+        ["Anne Clark", "anne clark"],
+        ["Association", "association"],
+    ])("strips the article in %s only when a space follows it", (input, expected) => {
+        expect(artistSortName(input)).toBe(expected);
+    });
+
+    // The six articles the parity fixture does not cover. These pin the TS
+    // side only -- see the note on LEADING_ARTICLES about the SQL twin being
+    // unguarded for exactly these.
+    it.each([
+        ["La Roux", "roux"],
+        ["Le Tigre", "tigre"],
+        ["Les Rita Mitsouko", "rita mitsouko"],
+        ["Las Ketchup", "ketchup"],
+        ["Der Weg einer Freiheit", "weg einer freiheit"],
+        ["Das Racist", "racist"],
+    ])("strips the non-English article in %s", (input, expected) => {
+        expect(artistSortName(input)).toBe(expected);
+    });
 });
 
 describe("normalizeArtistName", () => {

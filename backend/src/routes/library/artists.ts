@@ -24,9 +24,20 @@ import pLimit from "p-limit";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
 import { resolveWithinMusicRoot } from "./trackPath";
 
+// Alphabetical ordering reads `sortName`, not `name`: the article-stripped,
+// unaccented, lowercased value written by `artistSortName` and backfilled by
+// the artist_identity migration. Sorting on the raw name files "The Beatles"
+// under T and orders "Bjork" away from "Björk". The column is indexed, so this
+// is not a cost.
+//
+// NOTE: `name`/`name-desc` do not reach this map -- they take the raw-SQL
+// branch below, which orders on the same `sortName` column. This map covers
+// the remaining keys and the fallback. Both paths must keep agreeing; they did
+// not before, and the raw-SQL side stripped only "the" while the rest of the
+// system stripped eleven articles across four languages.
 const ARTIST_SORT_MAP: Record<string, any> = {
-  name: { name: "asc" as const },
-  "name-desc": { name: "desc" as const },
+  name: { sortName: "asc" as const },
+  "name-desc": { sortName: "desc" as const },
   tracks: { totalTrackCount: "desc" as const },
 };
 
@@ -77,7 +88,7 @@ router.get("/artists", async (req, res) => {
     const offset = parseInt(offsetParam as string, 10) || 0;
 
     const orderBy = ARTIST_SORT_MAP[sortBy as string] ?? {
-      name: "asc" as const,
+      sortName: "asc" as const,
     };
 
     let where: any = {};
@@ -133,8 +144,7 @@ router.get("/artists", async (req, res) => {
             FROM "Artist" a
             ${whereSql}
             ORDER BY
-              LOWER(REGEXP_REPLACE(TRIM(a.name), '^the\\s+', '', 'i')) ${direction},
-              LOWER(TRIM(a.name)) ${direction},
+              a."sortName" ${direction},
               a.id ASC
             LIMIT ${limit}
             OFFSET ${offset}

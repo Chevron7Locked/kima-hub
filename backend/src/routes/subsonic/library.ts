@@ -3,18 +3,23 @@ import { Router } from "express";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { mapArtist, mapAlbum, mapSong, firstArtistGenre, wrap } from "./mappers";
+import { LEADING_ARTICLES } from "../../services/pgTextRules";
 
 export const libraryRouter = Router();
 
-const IGNORED_ARTICLES = ["the ", "a ", "an "];
-
-function artistSortKey(name: string): string {
-    const lower = name.toLowerCase();
-    for (const article of IGNORED_ARTICLES) {
-        if (lower.startsWith(article)) return name.slice(article.length);
-    }
-    return name;
-}
+// Rendered from the ONE canonical article list, which is also what
+// `artistSortName` -- and its `kima_sort_name` SQL twin -- strip when writing
+// `Artist.sortName`. This file used to carry a private English-only stripper
+// AND a separately hardcoded "The A An" advertisement, so the server stripped
+// eleven articles across four languages while telling clients it stripped
+// three. Clients use this list to sort and render locally, so a client that
+// disagrees with the server files the same artist in two different places.
+//
+// Space-separated and capitalized is what the protocol's own reference
+// implementations advertise (Navidrome ships "The El La Los Las Le Les ...").
+const IGNORED_ARTICLES = LEADING_ARTICLES
+    .map((a) => a.charAt(0).toUpperCase() + a.slice(1))
+    .join(" ");
 
 // ===================== ARTISTS =====================
 
@@ -22,20 +27,25 @@ function artistSortKey(name: string): string {
 libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res) => {
     const artists = await prisma.artist.findMany({
         where: { libraryAlbumCount: { gt: 0 } },
-        orderBy: { name: "asc" },
+        // Ordered by the same stored value the buckets below are keyed on.
+        // These used to disagree -- ordering read the raw `name` while
+        // bucketing stripped articles -- so "The Beatles" filed correctly
+        // under B and then sorted to the BOTTOM of it, behind every genuine
+        // B artist, on every client.
+        orderBy: { sortName: "asc" },
         select: {
             id: true,
             name: true,
             displayName: true,
             heroUrl: true,
             libraryAlbumCount: true,
+            sortName: true,
         },
     });
 
     const buckets: Record<string, ReturnType<typeof mapArtist>[]> = {};
     for (const a of artists) {
-        const effective = artistSortKey(a.displayName || a.name);
-        const first = effective[0]?.toUpperCase() ?? "#";
+        const first = a.sortName[0]?.toUpperCase() ?? "#";
         const key = /[A-Z]/.test(first) ? first : "#";
         if (!buckets[key]) buckets[key] = [];
         buckets[key].push(mapArtist({ ...a, albumCount: a.libraryAlbumCount }));
@@ -51,7 +61,7 @@ libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res
     const responseKey = req.path.includes("getIndexes") ? "indexes" : "artists";
     subsonicOk(req, res, {
         [responseKey]: {
-            "@_ignoredArticles": "The A An",
+            "@_ignoredArticles": IGNORED_ARTICLES,
             index: indexes,
         },
     });
@@ -104,7 +114,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
     if (id === "1") {
         const artists = await prisma.artist.findMany({
             where: { libraryAlbumCount: { gt: 0 } },
-            orderBy: { name: "asc" },
+            orderBy: { sortName: "asc" },
             select: { id: true, name: true, displayName: true },
         });
 
@@ -337,7 +347,9 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
         case "alphabeticalByArtist":
             albums = await prisma.album.findMany({
                 where: { location: "LIBRARY", tracks: { some: {} } },
-                orderBy: { artist: { name: "asc" } },
+                // "alphabeticalByArtist" means alphabetical to the user, and a
+                // user does not file The Beatles under T.
+                orderBy: { artist: { sortName: "asc" } },
                 take: size,
                 skip: offset,
                 include: albumInclude,

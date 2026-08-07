@@ -22,14 +22,6 @@ import { ArtistsGrid } from "@/features/library/components/ArtistsGrid";
 import { AlbumsGrid } from "@/features/library/components/AlbumsGrid";
 import { TracksList } from "@/features/library/components/TracksList";
 
-function getArtistSortKey(name: string): string {
-    const trimmed = name.trim();
-    const withoutArticle = trimmed.replace(/^the\s+/i, "");
-    const key = withoutArticle.length > 0 ? withoutArticle : trimmed;
-
-    return key.toLocaleLowerCase();
-}
-
 export default function LibraryPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -86,36 +78,22 @@ export default function LibraryPage() {
         enabled: activeTab === "tracks",
     });
 
-    // Get data based on active tab
+    // Get data based on active tab.
+    //
+    // The server returns this list already ordered, by the article-stripped
+    // `Artist.sortName` it also indexes and buckets on. There used to be a
+    // client-side re-sort here with its own `^the\s+` stripper -- a fifth copy
+    // of that rule, and the weakest: it knew one English article where the
+    // server knows eleven across four languages, and it could only reorder the
+    // page in hand, since the list is paginated server-side. Re-sorting a
+    // correctly-ordered page by a worse rule can only make it wrong.
     const artists = useMemo(() => {
         if (activeTab !== "artists") {
             return [];
         }
 
-        const artistList = artistsQuery.data?.artists ?? [];
-
-        if (sortBy !== "name" && sortBy !== "name-desc") {
-            return artistList;
-        }
-
-        const sorted = [...artistList].sort((a, b) => {
-            const aKey = getArtistSortKey(a.name || "");
-            const bKey = getArtistSortKey(b.name || "");
-            const byKey = aKey.localeCompare(bKey, undefined, { sensitivity: "base" });
-
-            if (byKey !== 0) {
-                return sortBy === "name-desc" ? -byKey : byKey;
-            }
-
-            const byName = (a.name || "").localeCompare(b.name || "", undefined, {
-                sensitivity: "base",
-            });
-
-            return sortBy === "name-desc" ? -byName : byName;
-        });
-
-        return sorted;
-    }, [activeTab, artistsQuery.data?.artists, sortBy]);
+        return artistsQuery.data?.artists ?? [];
+    }, [activeTab, artistsQuery.data?.artists]);
 
 
 
