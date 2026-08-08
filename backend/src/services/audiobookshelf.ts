@@ -4,6 +4,7 @@ import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { buildSections, resolveMetaTags } from "./audiobookSections";
+import { artistSortName } from "./artistIdentity";
 
 const TRACK_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -477,8 +478,14 @@ class AudiobookshelfService {
                         firstMeta,
                     );
 
+                    const title = metadata.title || "Untitled";
                     const sharedData = {
-                        title: metadata.title || "Untitled",
+                        title,
+                        // One shared object for both the create and update
+                        // branches below, so this refreshes on every sync the
+                        // same way `title` does -- see audiobookCache.ts's
+                        // upsert for the same reasoning spelled out in full.
+                        sortName: artistSortName(title),
                         author: metadata.authorName || metadata.author || null,
                         narrator: resolvedNarrator,
                         description: metadata.description || null,

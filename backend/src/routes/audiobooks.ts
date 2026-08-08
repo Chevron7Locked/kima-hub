@@ -12,6 +12,7 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { notificationService } from "../services/notificationService";
 import { config } from "../config";
 import { resolveWithinMusicRoot } from "./library/trackPath";
+import { artistSortName } from "../services/artistIdentity";
 
 /**
  * Resolve the Access-Control-Allow-Origin value for a cover/stream response,
@@ -253,9 +254,12 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
             });
         }
 
-        // Read from cached database instead of hitting Audiobookshelf API
+        // Read from cached database instead of hitting Audiobookshelf API.
+        // sortName, not title -- kept in sync at write time in both
+        // audiobookCache.ts and audiobookshelf.ts -- so "The Hobbit" files
+        // under H, not T.
         const audiobooks = await prisma.audiobook.findMany({
-            orderBy: { title: "asc" },
+            orderBy: { sortName: "asc" },
         });
 
         const audiobookIds = audiobooks.map((book) => book.id);
@@ -283,6 +287,14 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
             return {
                 id: book.id,
                 title: book.title,
+                // The article-stripped title this list is already ordered by.
+                // Exposed because the client re-sorts in some modes -- the
+                // series view sorts by series, then sequence, then title --
+                // and it cannot derive this itself: the article rules live in
+                // Postgres (`kima_sort_name`) and in `artistSortName`, neither
+                // reachable from the browser. Without it a client-side title
+                // comparison silently puts "The Hobbit" back under T.
+                sortName: book.sortName,
                 author: book.author || "Unknown Author",
                 narrator: book.narrator,
                 description: book.description,
@@ -294,6 +306,13 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
                 series: book.series
                     ? {
                           name: book.series,
+                          // Article-stripped, for the same reason `sortName`
+                          // exists above: the series view sorts by series NAME
+                          // client-side, and a raw comparison files "The Lord
+                          // of the Rings" under T. Computed per response rather
+                          // than stored, because nothing orders by it in SQL --
+                          // only the browser does.
+                          sortName: artistSortName(book.series),
                           sequence: book.seriesSequence || "1",
                       }
                     : null,
@@ -385,6 +404,13 @@ router.get(
                     series: book.series
                         ? {
                               name: book.series,
+                              // Same shape as the list endpoint above. Nothing
+                              // sorts this response today -- it arrives in
+                              // seriesSequence order and is rendered as-is --
+                              // but one logical object returning two different
+                              // shapes from two routes is how a client ends up
+                              // reading a field that is only sometimes there.
+                              sortName: artistSortName(book.series),
                               sequence: book.seriesSequence || "1",
                           }
                         : null,

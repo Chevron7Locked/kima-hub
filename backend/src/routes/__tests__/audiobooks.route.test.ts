@@ -104,6 +104,7 @@ const sectionsFixture = [
 const bookRow = {
     id: "abs-book-1",
     title: "The Fellowship",
+    sortName: "fellowship",
     author: "Tolkien",
     narrator: "Andy Serkis",
     description: "desc",
@@ -136,6 +137,51 @@ describe("GET /audiobooks", () => {
     beforeEach(() => {
         (getSystemSettings as jest.Mock).mockResolvedValue(enabledSettings);
         (prisma.audiobookProgress.findMany as jest.Mock).mockResolvedValue([]);
+    });
+
+    // sortName, not title -- "The Hobbit" used to file under T. Kept in sync
+    // at write time in audiobookCache.ts and audiobookshelf.ts, same as
+    // Artist.sortName and Album.sortName.
+    it("orders the list on sortName, not title", async () => {
+        (prisma.audiobook.findMany as jest.Mock).mockResolvedValue([]);
+
+        await request(app).get("/audiobooks");
+
+        expect(prisma.audiobook.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({ orderBy: { sortName: "asc" } }),
+        );
+    });
+
+    // The query being ordered on sortName (above) proves nothing about the
+    // response body -- the DTO is a hand-built object literal, not a spread,
+    // so a field the query fetches is not automatically one the client
+    // receives. The client-side series-mode fallback (see
+    // useAudiobookLibrary.test.tsx) depends on this actually being present.
+    it("includes sortName in the response body", async () => {
+        (prisma.audiobook.findMany as jest.Mock).mockResolvedValue([bookRow]);
+
+        const res = await request(app).get("/audiobooks");
+
+        expect(res.body[0].sortName).toBe("fellowship");
+    });
+
+    // The series NAME is sorted client-side too, and has no stored column --
+    // it is computed per response by the same `artistSortName` the write path
+    // uses. Without it the series view files "The Lord of the Rings" under T
+    // while the same library sorts "The Fellowship" under F one tab over.
+    it("includes an article-stripped sortName on the series object", async () => {
+        (prisma.audiobook.findMany as jest.Mock).mockResolvedValue([
+            { ...bookRow, series: "The Lord of the Rings" },
+        ]);
+
+        const res = await request(app).get("/audiobooks");
+
+        expect(res.body[0].series).toEqual(
+            expect.objectContaining({
+                name: "The Lord of the Rings",
+                sortName: "lord of the rings",
+            }),
+        );
     });
 
     it("includes tracks and trackCount for a row with tracksJson", async () => {

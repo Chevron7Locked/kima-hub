@@ -1,5 +1,6 @@
 import { audiobookshelfService } from "./audiobookshelf";
 import { buildSections, resolveMetaTags } from "./audiobookSections";
+import { artistSortName } from "./artistIdentity";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import fs from "fs/promises";
@@ -257,6 +258,12 @@ class AudiobookCacheService {
             create: {
                 id: book.id,
                 title,
+                // Recomputed on every sync, same as `title` itself already is
+                // (both branches set it unconditionally, not just on create) --
+                // a sort key derived from a field that keeps refreshing has to
+                // refresh with it, or it silently goes stale the first time
+                // this book's title changes upstream.
+                sortName: artistSortName(title),
                 author,
                 narrator: resolvedNarrator,
                 description,
@@ -282,6 +289,7 @@ class AudiobookCacheService {
             },
             update: {
                 title,
+                sortName: artistSortName(title),
                 author,
                 narrator: resolvedNarrator,
                 description,

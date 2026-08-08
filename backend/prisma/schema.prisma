@@ -103,6 +103,7 @@ model Artist {
 model Audiobook {
   id             String                   @id @default(cuid())
   title          String
+  sortName       String                   @default("")
   author         String?
   narrator       String?
   description    String?
@@ -134,6 +135,7 @@ model Audiobook {
   @@index([searchVector], type: Gin)
   @@index([series])
   @@index([title])
+  @@index([sortName])
 }
 
 model AudiobookProgress {

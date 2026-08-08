@@ -350,3 +350,52 @@ describe("syncAudiobooksToCache expanded fetch", () => {
         expect(expandSpy).toHaveBeenCalledTimes(8);
     });
 });
+
+// ── syncAudiobooksToCache: sortName kept in sync with title ────────────────────
+
+describe("syncAudiobooksToCache sortName", () => {
+    const { prisma } = require("../../utils/db");
+
+    beforeEach(() => {
+        jest.spyOn(audiobookshelfService as any, "ensureInitialized").mockResolvedValue(undefined);
+        jest.spyOn(audiobookshelfService as any, "getAudiobook").mockResolvedValue({ media: {} });
+        prisma.audiobook.findMany.mockResolvedValue([]);
+        prisma.audiobook.upsert.mockResolvedValue({});
+    });
+
+    // `sharedData` is one object reused for both the `create` and `update`
+    // branches of the upsert, so a single call proves both at once -- unlike
+    // audiobookCache.ts's upsert, which has two separate object literals and
+    // needs both checked independently (see audiobookCache.test.ts).
+    it("derives sortName from title, article-stripped, for both upsert branches", async () => {
+        jest.spyOn(audiobookshelfService as any, "getAllAudiobooks").mockResolvedValue([
+            {
+                id: "book-article",
+                libraryId: "lib1",
+                media: { metadata: { title: "The Great Book", authorName: "Author" }, numTracks: 0 },
+            },
+        ]);
+
+        await audiobookshelfService.syncAudiobooksToCache();
+
+        const upsertCall = prisma.audiobook.upsert.mock.calls[0][0];
+        expect(upsertCall.update).toMatchObject({ title: "The Great Book", sortName: "great book" });
+        expect(upsertCall.create).toMatchObject({ title: "The Great Book", sortName: "great book" });
+    });
+
+    it("leaves a title with no leading article unchanged", async () => {
+        jest.spyOn(audiobookshelfService as any, "getAllAudiobooks").mockResolvedValue([
+            {
+                id: "book-noarticle",
+                libraryId: "lib1",
+                media: { metadata: { title: "Dune", authorName: "Author" }, numTracks: 0 },
+            },
+        ]);
+
+        await audiobookshelfService.syncAudiobooksToCache();
+
+        const upsertCall = prisma.audiobook.upsert.mock.calls[0][0];
+        expect(upsertCall.update.sortName).toBe("dune");
+        expect(upsertCall.create.sortName).toBe("dune");
+    });
+});
