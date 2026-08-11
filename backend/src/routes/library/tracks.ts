@@ -11,7 +11,7 @@ import {
   getDecadeFromYear,
 } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
-import { LIBRARY_TRACK_WHERE } from "../../services/libraryFilters";
+import { LIBRARY_TRACK_WHERE, LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
 import { config } from "../../config";
 import { resolveWithinMusicRoot } from "./trackPath";
@@ -362,9 +362,12 @@ router.get("/tracks/shuffle", async (req, res) => {
       });
       tracksData = shuffleArray(tracksData);
     } else {
+      // Interpolates the shared constant rather than repeating the string, so a
+      // change to what "owned" means reaches this raw-SQL path too. A Prisma
+      // where-object cannot be used here -- this draws random ids in SQL.
       const randomIds = await prisma.$queryRaw<{ id: string }[]>`
                 SELECT id FROM "Track"
-                WHERE EXISTS (SELECT 1 FROM "Album" a WHERE a.id = "Track"."albumId" AND a.location = 'LIBRARY')
+                WHERE EXISTS (SELECT 1 FROM "Album" a WHERE a.id = "Track"."albumId" AND a.location = ${LIBRARY_LOCATION})
                 ORDER BY RANDOM()
                 LIMIT ${limit}
             `;

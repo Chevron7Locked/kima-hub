@@ -11,12 +11,22 @@
 
 import { Prisma } from "@prisma/client";
 
+/**
+ * The `Album.location` value meaning "the user owns this".
+ *
+ * Exported separately because one query cannot use the where-clauses below:
+ * `shuffleTracks` draws random ids in raw SQL, where a Prisma filter object is
+ * not available. That query interpolates THIS constant rather than repeating
+ * the string, so a change here reaches the raw-SQL path too.
+ */
+export const LIBRARY_LOCATION = "LIBRARY";
+
 /** Spread into an `Album` where-clause to scope it to owned-library albums. */
 export const LIBRARY_ALBUM_WHERE: Prisma.AlbumWhereInput = {
-    location: "LIBRARY",
+    location: LIBRARY_LOCATION,
 };
 
 /** Spread into a `Track` where-clause (via the album relation) to scope it to owned-library tracks. */
 export const LIBRARY_TRACK_WHERE: Prisma.TrackWhereInput = {
-    album: { location: "LIBRARY" },
+    album: { location: LIBRARY_LOCATION },
 };
