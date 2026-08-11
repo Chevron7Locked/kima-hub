@@ -10,6 +10,21 @@ export function errorHandler(
     res: Response,
     next: NextFunction
 ) {
+    // Once a byte is on the wire there is no status left to set. This is not a
+    // hypothetical: an audio stream that dies mid-transfer -- client hangs up,
+    // ffmpeg exits, the cache file is evicted -- rejects long after the headers
+    // and the 200 went out. Trying to answer anyway throws ERR_HTTP_HEADERS_SENT
+    // from inside the error handler, which is a worse failure than the original.
+    //
+    // Express's own default handler is the right thing here: given an error with
+    // the response already started, it closes the connection, which is the only
+    // honest signal left. Delegating to it requires passing the error on rather
+    // than handling it.
+    if (res.headersSent) {
+        logger.error(`Error after response started (${req.method} ${req.path}):`, err.message);
+        return next(err);
+    }
+
     // Handle AppError with proper categorization
     if (err instanceof AppError) {
         // Map error category to HTTP status code

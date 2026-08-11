@@ -36,6 +36,7 @@ jest.mock("../../config", () => ({
 import { errorHandler } from "../errorHandler";
 import { asyncHandler } from "../asyncHandler";
 import { AppError, ErrorCategory, ErrorCode, UserFacingError } from "../../utils/errors";
+import { logger } from "../../utils/logger";
 
 /** An app whose single route throws whatever the test hands it. */
 function appThrowing(err: Error) {
@@ -103,6 +104,47 @@ describe("UserFacingError carries its own status to the client", () => {
 
         expect(res.body.error).toBe("Album not found");
         expect(res.body.error).not.toBe("Internal server error");
+    });
+});
+
+describe("an error after the response started cannot be answered", () => {
+    it("does not throw ERR_HTTP_HEADERS_SENT trying to set a status", async () => {
+        // The streaming routes' real failure mode: a 200 and some bytes are
+        // already out when the underlying read dies.
+        const app = express();
+        app.get(
+            "/half-sent",
+            asyncHandler(async (_req, res) => {
+                res.status(200);
+                res.write("first chunk");
+                throw new Error("stream died mid-transfer");
+            })
+        );
+        app.use(errorHandler);
+
+        const spy = jest.spyOn(logger, "error").mockImplementation(() => {});
+
+        // Express's default handler closes the connection, so supertest sees the
+        // socket hang up rather than a body. Either outcome is acceptable; what
+        // must NOT happen is errorHandler throwing while trying to set a status.
+        await request(app)
+            .get("/half-sent")
+            .catch(() => undefined);
+
+        expect(spy).toHaveBeenCalledWith(
+            expect.stringContaining("Error after response started"),
+            "stream died mid-transfer"
+        );
+
+        spy.mockRestore();
+    });
+
+    it("still answers normally when nothing has been written yet", async () => {
+        const res = await request(appThrowing(new UserFacingError("Track not found", 404))).get(
+            "/boom"
+        );
+
+        expect(res.status).toBe(404);
     });
 });
 
