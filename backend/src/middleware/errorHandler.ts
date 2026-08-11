@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { ZodError } from "zod";
 import { logger } from "../utils/logger";
 import { AppError, ErrorCategory, UserFacingError } from "../utils/errors";
 import { config } from "../config";
@@ -63,6 +64,32 @@ export function errorHandler(
         return res.status(err.statusCode).json({
             error: err.message,
             ...(err.code && { code: err.code }),
+        });
+    }
+
+    // A failed `schema.parse()` is the client sending the wrong thing, which is
+    // a 400 -- but ZodError is not an AppError, so without this branch it fell
+    // through to the generic case and became a 500. That is why every route
+    // using Zod hand-catches it:
+    //
+    //     if (error instanceof z.ZodError) {
+    //         return res.status(400).json({ error: "Invalid request", details: error.errors });
+    //     }
+    //
+    // repeated in plays, settings, systemSettings, listeningState, offline and
+    // playlistImport. The sweep's instruction to "validate input with Zod" is
+    // only safe once this exists; validating and letting it throw would have
+    // answered 500 to a bad query string.
+    //
+    // This is deliberately ADDITIVE. The existing hand-catches still run first
+    // and keep their own wording ("Invalid settings"), so no current response
+    // changes. They become deletable as each route is rewritten, not before.
+    if (err instanceof ZodError) {
+        logger.warn(`[ZodError] ${req.method} ${req.path}: ${err.errors.length} issue(s)`);
+
+        return res.status(400).json({
+            error: "Invalid request",
+            details: err.errors,
         });
     }
 

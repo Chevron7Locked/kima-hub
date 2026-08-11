@@ -13,6 +13,10 @@
  * `statusCode` field and was never consulted here; wiring it in is what makes
  * those sites rewritable.
  *
+ * The same held for `ZodError`, which is why six route files hand-catch it to
+ * turn it into a 400. The sweep's other instruction -- "validate input with
+ * Zod" -- was unsafe for exactly the same reason as the first one.
+ *
  * `config` is mocked rather than driven through the real env loader, which
  * validates DATABASE_URL/REDIS_URL/MUSIC_PATH on import and would make this a
  * test of the environment instead of a test of the handler.
@@ -20,6 +24,7 @@
 
 import express from "express";
 import request from "supertest";
+import { z } from "zod";
 
 const mockConfig = { nodeEnv: "production" as string };
 jest.mock("../../config", () => ({
@@ -98,6 +103,44 @@ describe("UserFacingError carries its own status to the client", () => {
 
         expect(res.body.error).toBe("Album not found");
         expect(res.body.error).not.toBe("Internal server error");
+    });
+});
+
+describe("a failed Zod parse is the client's fault, not the server's", () => {
+    const schema = z.object({ trackId: z.string(), ms: z.number().int() });
+
+    it("answers 400 with the issues, rather than 500 with them hidden", async () => {
+        let thrown: Error;
+        try {
+            schema.parse({ trackId: 123, ms: "nope" });
+            throw new Error("schema should have rejected this");
+        } catch (e) {
+            thrown = e as Error;
+        }
+
+        const res = await request(appThrowing(thrown!)).get("/boom");
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe("Invalid request");
+        expect(res.body.details).toHaveLength(2);
+        expect(res.body.details[0]).toMatchObject({ path: ["trackId"] });
+    });
+
+    it("says so in production too -- which field was wrong is not a server secret", async () => {
+        mockConfig.nodeEnv = "production";
+
+        let thrown: Error;
+        try {
+            schema.parse({});
+            throw new Error("schema should have rejected this");
+        } catch (e) {
+            thrown = e as Error;
+        }
+
+        const res = await request(appThrowing(thrown!)).get("/boom");
+
+        expect(res.status).toBe(400);
+        expect(res.body.details.length).toBeGreaterThan(0);
     });
 });
 
