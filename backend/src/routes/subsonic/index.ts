@@ -5,6 +5,8 @@ import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicRe
 import { prisma } from "../../utils/db";
 import { scanQueue } from "../../workers/queues";
 import { config } from "../../config";
+import { requireSubsonicAdmin } from "./userHelpers";
+import { hashApiKey } from "../../services/users/apiKeyStore";
 
 import { compatRouter } from "./compat";
 import { libraryRouter } from "./library";
@@ -47,7 +49,7 @@ subsonicRouter.all("/tokenInfo.view", async (req: Request, res: Response) => {
     }
 
     const keyRecord = await prisma.apiKey.findUnique({
-        where: { key: apiKey },
+        where: { keyHash: hashApiKey(apiKey) },
         select: {
             id: true,
             user: { select: { username: true } },
@@ -122,6 +124,13 @@ subsonicRouter.all("/getScanStatus.view", async (req: Request, res: Response) =>
 });
 
 subsonicRouter.all("/startScan.view", async (req: Request, res: Response) => {
+    // The REST equivalent (routes/library/scan.ts) is admin-gated via
+    // requireAdmin; this one had no check at all -- any authenticated
+    // Subsonic user, including a plain non-admin account, could trigger a
+    // full library scan. Uses the shared helper (userHelpers.ts) rather than
+    // a seventh inline copy of the check that produced that gap in the first
+    // place.
+    if (!requireSubsonicAdmin(req, res)) return;
     if (!config.music.musicPath) {
         return subsonicError(req, res, SubsonicError.GENERIC, "Music path not configured");
     }

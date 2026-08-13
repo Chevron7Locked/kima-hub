@@ -2,7 +2,7 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
-import crypto from "crypto";
+import { createApiKey } from "../services/users/apiKeyStore";
 
 const router = Router();
 
@@ -23,16 +23,10 @@ router.post("/", async (req, res) => {
             return res.status(401).json({ error: "Not authenticated" });
         }
 
-        // Generate a secure random API key (32 bytes = 64 hex chars)
-        const apiKeyValue = crypto.randomBytes(32).toString("hex");
-
-        const apiKey = await prisma.apiKey.create({
-            data: {
-                userId,
-                name: deviceName.trim(),
-                key: apiKeyValue,
-            },
-        });
+        // The plaintext key is returned once, in the response below, and is
+        // never stored -- the row keeps only a SHA-256 digest. createApiKey owns
+        // both halves so the hashing cannot be forgotten at a call site.
+        const apiKey = await createApiKey(userId, deviceName.trim());
 
         logger.debug(`API key created for user ${userId}: ${deviceName}`);
 

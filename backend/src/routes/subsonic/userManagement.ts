@@ -4,14 +4,12 @@ import bcrypt from "bcrypt";
 import { prisma } from "../../utils/db";
 import { subsonicError, subsonicOk, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap } from "./mappers";
-import { decodeSubsonicPassword, mapSubsonicUser } from "./userHelpers";
+import { decodeSubsonicPassword, mapSubsonicUser, requireSubsonicAdmin } from "./userHelpers";
 
 export const userManagementRouter = Router();
 
 userManagementRouter.all("/getUsers.view", wrap(async (req, res) => {
-    if (req.user!.role !== "admin") {
-        return subsonicError(req, res, SubsonicError.NOT_AUTHORIZED, "Admin privileges required");
-    }
+    if (!requireSubsonicAdmin(req, res)) return;
 
     const users = await prisma.user.findMany({
         select: {
@@ -38,8 +36,30 @@ userManagementRouter.all("/changePassword.view", wrap(async (req, res) => {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: password");
     }
 
-    if (username !== req.user!.username && req.user!.role !== "admin") {
-        return subsonicError(req, res, SubsonicError.NOT_AUTHORIZED, "Access denied");
+    if (username !== req.user!.username && !requireSubsonicAdmin(req, res)) {
+        return;
+    }
+
+    // A SELF-change made with an API key is refused, even though the same
+    // credential is otherwise treated as a full, valid Subsonic session
+    // (streaming, browsing, everything above this route works identically
+    // either way). This is the same shape as the 2FA fix on the password
+    // path itself (see subsonicAuth.ts): an app credential that can change
+    // the account's LOGIN PASSWORD isn't a lesser door than the password
+    // itself, it's the same door, wide open for anyone holding a leaked key
+    // -- exactly the gap 2FA exists to close, reopened one route later. A
+    // legacy-password session changing its OWN password is unaffected
+    // (`subsonicAuthMethod === "password"` here); an admin changing SOMEONE
+    // ELSE's is unaffected regardless of the admin's own auth method, since
+    // this check only fires when `username === req.user!.username` --
+    // that's the branch above, already passed by the time this runs.
+    if (username === req.user!.username && req.subsonicAuthMethod === "apiKey") {
+        return subsonicError(
+            req,
+            res,
+            SubsonicError.NOT_AUTHORIZED,
+            "Change your password on the web, not with an app key.",
+        );
     }
 
     const user = await prisma.user.findUnique({
@@ -68,9 +88,7 @@ userManagementRouter.all("/changePassword.view", wrap(async (req, res) => {
 }));
 
 userManagementRouter.all("/createUser.view", wrap(async (req, res) => {
-    if (req.user!.role !== "admin") {
-        return subsonicError(req, res, SubsonicError.NOT_AUTHORIZED, "Admin privileges required");
-    }
+    if (!requireSubsonicAdmin(req, res)) return;
 
     const username = req.query.username as string | undefined;
     const passwordRaw = req.query.password as string | undefined;
@@ -117,9 +135,7 @@ userManagementRouter.all("/createUser.view", wrap(async (req, res) => {
 }));
 
 userManagementRouter.all("/updateUser.view", wrap(async (req, res) => {
-    if (req.user!.role !== "admin") {
-        return subsonicError(req, res, SubsonicError.NOT_AUTHORIZED, "Admin privileges required");
-    }
+    if (!requireSubsonicAdmin(req, res)) return;
 
     const username = req.query.username as string | undefined;
     if (!username) {
@@ -168,9 +184,7 @@ userManagementRouter.all("/updateUser.view", wrap(async (req, res) => {
 }));
 
 userManagementRouter.all("/deleteUser.view", wrap(async (req, res) => {
-    if (req.user!.role !== "admin") {
-        return subsonicError(req, res, SubsonicError.NOT_AUTHORIZED, "Admin privileges required");
-    }
+    if (!requireSubsonicAdmin(req, res)) return;
 
     const username = req.query.username as string | undefined;
     if (!username) {

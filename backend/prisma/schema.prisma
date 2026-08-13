@@ -42,13 +42,17 @@ model Album {
 model ApiKey {
   id        String   @id @default(cuid())
   userId    String
-  key       String   @unique
+  /// SHA-256 hex digest of the key, never the plaintext -- see
+  /// apiKeyStore.ts's `hashApiKey`/`createApiKey` for why a deterministic
+  /// hash (not bcrypt) is the right primitive for a high-entropy generated
+  /// token, and for the ONE place the plaintext value is ever handed back.
+  keyHash   String   @unique
   name      String
   lastUsed  DateTime @default(now())
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([key])
+  @@index([keyHash])
   @@index([lastUsed])
   @@index([userId])
 }

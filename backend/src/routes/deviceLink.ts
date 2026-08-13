@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import crypto from "crypto";
+import { createApiKey } from "../services/users/apiKeyStore";
 
 const router = Router();
 
@@ -17,10 +18,6 @@ function generateLinkCode(): string {
 }
 
 // Generate API key
-function generateApiKey(): string {
-    return crypto.randomBytes(32).toString("hex");
-}
-
 // POST /device-link/generate - Generate a new device link code (requires auth)
 router.post("/generate", requireAuthOrToken, async (req, res) => {
     try {
@@ -97,15 +94,14 @@ router.post("/verify", async (req, res) => {
             return res.status(400).json({ error: "Code expired" });
         }
 
-        // Generate API key for this device
-        const apiKey = generateApiKey();
-        const createdApiKey = await prisma.apiKey.create({
-            data: {
-                userId: linkCode.userId,
-                key: apiKey,
-                name: deviceName || "Mobile Device",
-            },
-        });
+        // Generate an API key for this device. The plaintext value goes back to
+        // the device in the response below and is never stored -- the row keeps
+        // only a SHA-256 digest.
+        const createdApiKey = await createApiKey(
+            linkCode.userId,
+            deviceName || "Mobile Device"
+        );
+        const apiKey = createdApiKey.key;
 
         // Mark the link code as used
         await prisma.deviceLinkCode.update({

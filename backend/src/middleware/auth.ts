@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import jwt from "jsonwebtoken";
+import { hashApiKey } from "../services/users/apiKeyStore";
 
 // JWT_SECRET is required - SESSION_SECRET is used as fallback since docker-entrypoint.sh generates it
 const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET;
@@ -197,7 +198,7 @@ async function authenticateRequest(
     if (apiKey) {
         try {
             const apiKeyRecord = await prisma.apiKey.findUnique({
-                where: { key: apiKey },
+                where: { keyHash: hashApiKey(apiKey) },
                 include: {
                     user: { select: { id: true, username: true, role: true } },
                 },

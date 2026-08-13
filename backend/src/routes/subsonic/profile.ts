@@ -2,14 +2,14 @@ import { Router } from "express";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap } from "./mappers";
-import { mapSubsonicUser } from "./userHelpers";
+import { mapSubsonicUser, requireSubsonicAdmin } from "./userHelpers";
 
 export const profileRouter = Router();
 
 profileRouter.all("/getUser.view", wrap(async (req, res) => {
     const requested = req.query.username as string | undefined;
-    if (requested && requested !== req.user!.username && req.user!.role !== "admin") {
-        return subsonicError(req, res, SubsonicError.NOT_AUTHORIZED, "Access denied");
+    if (requested && requested !== req.user!.username && !requireSubsonicAdmin(req, res)) {
+        return;
     }
 
     const target = requested
