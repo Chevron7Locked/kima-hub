@@ -11,6 +11,10 @@ module.exports = {
     preset: 'ts-jest',
     testEnvironment: 'node',
     setupFiles: ['<rootDir>/src/__mocks__/test-env.cjs'],
+    // Runs ONCE, in a separate process, before any worker/test file starts --
+    // see test-global-setup.cjs for why the vibe-schema bootstrap has to live
+    // here rather than in one test file's own beforeAll.
+    globalSetup: '<rootDir>/src/__mocks__/test-global-setup.cjs',
     roots: ['<rootDir>/src'],
     testMatch: ['**/__tests__/**/*.test.ts'],
     moduleFileExtensions: ['ts', 'js', 'json'],

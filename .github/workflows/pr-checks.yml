@@ -59,6 +59,28 @@ jobs:
     unit-tests:
         name: Backend Unit Tests
         runs-on: ubuntu-latest
+        # The social integration suite (vibeProfile/social/socialProfile) needs a
+        # real Postgres with pgvector -- not stock postgres, `vibe.fused_track`'s
+        # v3 column is a vector type. DATABASE_URL below is the same
+        # test/test@localhost:5433/test that backend/src/__mocks__/test-env.cjs
+        # falls back to for local dev (see test-db-defaults.cjs), so this job
+        # doesn't need its own separate credentials to keep in sync.
+        services:
+            postgres:
+                image: pgvector/pgvector:pg16
+                env:
+                    POSTGRES_USER: test
+                    POSTGRES_PASSWORD: test
+                    POSTGRES_DB: test
+                ports:
+                    - 5433:5432
+                options: >-
+                    --health-cmd "pg_isready -U test -d test"
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
+        env:
+            DATABASE_URL: postgresql://test:test@localhost:5433/test
         steps:
             - uses: actions/checkout@v4
 
@@ -72,10 +94,20 @@ jobs:
               working-directory: backend
               run: npm ci
 
+            - name: Apply database migrations
+              working-directory: backend
+              run: npx prisma migrate deploy
+
             - name: Run Jest
               working-directory: backend
               # Exclude webhookEventStore -- it is an integration test requiring
               # a live PostgreSQL database. It runs in integration.yml instead.
+              # (Unrelated to the Postgres service above, which now covers the
+              # vibeProfile/social/socialProfile integration suite instead --
+              # see backend/src/__mocks__/test-global-setup.cjs for the one
+              # thing a fresh database here still doesn't have: the vibe-engine's
+              # OWN tables, not owned by these migrations. It bootstraps a
+              # minimal stand-in; see that file's comment for the real boundary.)
               run: npm test -- --passWithNoTests --testPathIgnorePatterns="webhookEventStore"
 
     build-docker:
