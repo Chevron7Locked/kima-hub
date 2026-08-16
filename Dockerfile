@@ -2,7 +2,7 @@
 # Contains: Backend, Frontend, PostgreSQL, Redis, Audio Analyzer (Essentia AI)
 # Usage: docker run -d -p 3030:3030 -v /path/to/music:/music kima/kima
 
-FROM node:22-slim
+FROM node:24-slim
 
 # Add PostgreSQL 16 repository (Debian Bookworm only has PG15 by default)
 RUN apt-get update && apt-get install -y --no-install-recommends \
