@@ -222,6 +222,10 @@ async function authenticateRequest(
                     tokenParam,
                     JWT_SECRET_VALIDATED
                 ) as unknown as JWTPayload;
+                // See the Bearer branch below for why `type` is checked.
+                if (decoded.type === "refresh") {
+                    return null;
+                }
                 // Stream-scoped tickets are only valid on /stream paths.
                 // Unscoped tokens (web client cover-art / legacy usage) are accepted everywhere.
                 // endsWith (not includes) so "/stream" must be the FINAL path segment: all stream
@@ -260,6 +264,21 @@ async function authenticateRequest(
     if (token) {
         try {
             const decoded = jwt.verify(token, JWT_SECRET_VALIDATED) as unknown as JWTPayload;
+            // A refresh token is not a credential. It is signed with the same
+            // secret and carries the same `userId`/`tokenVersion`, so it
+            // verifies here and passes every check below -- it simply has no
+            // `scope`, which made `isStreamScoped` false and waved it through.
+            // `POST /auth/refresh` already enforces the opposite direction
+            // (`decoded.type !== "refresh"` is rejected there); this is the
+            // missing half. Without it the 30-day token meant only to be
+            // exchanged for a 24-hour one authenticated everywhere the short
+            // one does, including admin routes, and -- because it is a JWT --
+            // it satisfied `requireSessionAuth` on the device-bound DM routes
+            // too, which is the one gate that exists to keep the
+            // end-to-end-encrypted surface on a real signed-in session.
+            if (decoded.type === "refresh") {
+                return null;
+            }
             // Stream-scoped tickets are leak-prone URL tokens; they must NOT act as a
             // full-privilege Bearer credential off the /stream paths. Mirror the
             // query-param branch above — otherwise the scope restriction is trivially

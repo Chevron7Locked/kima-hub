@@ -598,6 +598,16 @@ router.delete("/account", requireAuth, async (req, res) => {
             { isolationLevel: "Serializable" }
         );
 
+        // Same reason as the admin delete route above, which carries the
+        // measurement: the auth layer caches the user row for 30s and
+        // `loadUser` never re-checks existence, so without this the token of
+        // the account just deleted keeps authenticating until the TTL expires.
+        // Deliberately after the transaction commits, not inside it -- an
+        // invalidation issued inside a transaction that then rolls back would
+        // evict a row that still exists, which is harmless, but it would also
+        // NOT run on the path that matters if the commit is what fails.
+        invalidateUserCache(req.user!.id);
+
         return res.json({ deleted: true });
     } catch (error: any) {
         if (error?.message === "LAST_ADMIN_GUARD") {

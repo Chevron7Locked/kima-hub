@@ -325,3 +325,69 @@ describe('Admin-only routes', () => {
         expect(prisma.user.create).not.toHaveBeenCalled();
     });
 });
+
+// ── DELETE /auth/account ──────────────────────────────────────────────────────
+
+describe('DELETE /auth/account', () => {
+    let app: express.Application;
+
+    function tokenFor(role: string, tokenVersion = 1): string {
+        return jwt.sign(
+            { userId: BASE_USER.id, username: BASE_USER.username, role, tokenVersion },
+            TEST_SECRET,
+            { expiresIn: '24h' }
+        );
+    }
+
+    beforeAll(() => { app = createTestApp(); });
+    beforeEach(() => {
+        jest.clearAllMocks();
+        (prisma.user.findUnique as jest.Mock).mockReset();
+        (prisma.user.delete as jest.Mock).mockReset();
+        clearUserCache();
+    });
+
+    it('stops the deleted account authenticating immediately, not 30 seconds later', async () => {
+        // The defect this pins: `loadUser` caches the user row for 30s and never
+        // re-checks existence, so deleting the row is not enough -- the token of
+        // the account just deleted keeps working until the TTL lapses. The admin
+        // delete route fixes it by invalidating the cache and says so in a
+        // comment; the self-delete route added below it did not.
+        //
+        // Written as a sequence rather than a spy because the observable that
+        // matters is "does this token still work", not "was a function called".
+        const token = tokenFor('user');
+        (prisma.user.findUnique as jest.Mock).mockResolvedValue(BASE_USER);
+        (prisma.user.delete as jest.Mock).mockResolvedValue({});
+        (prisma as unknown as { $transaction: jest.Mock }).$transaction = jest.fn(
+            async (fn: (tx: unknown) => Promise<unknown>) =>
+                fn({
+                    user: { count: jest.fn().mockResolvedValue(2), delete: prisma.user.delete },
+                    // v1 still has UserMoodMix and DiscoveryBatch, and the route
+                    // clears both by hand before deleting the user because
+                    // neither declares a cascading relation. Upstream's version
+                    // of this test omits them because upstream removed both
+                    // tables with the mood-mix and discovery tear-outs.
+                    userMoodMix: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+                    discoveryBatch: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+                })
+        );
+
+        // Authenticate once so the row is in the cache, exactly as the delete
+        // request itself does.
+        const before = await request(app).get('/auth/me').set('Authorization', `Bearer ${token}`);
+        expect(before.status).toBe(200);
+
+        const deleted = await request(app)
+            .delete('/auth/account')
+            .set('Authorization', `Bearer ${token}`);
+        expect(deleted.status).toBe(200);
+        expect(prisma.user.delete).toHaveBeenCalled();
+
+        // The row is gone now.
+        (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+
+        const after = await request(app).get('/auth/me').set('Authorization', `Bearer ${token}`);
+        expect(after.status).toBe(401);
+    });
+});
