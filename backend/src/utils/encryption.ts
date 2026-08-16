@@ -1,7 +1,49 @@
+/**
+ * At-rest encryption for stored credentials: the nine `SystemSettings` API-key
+ * columns, `User.twoFactorSecret` and `User.twoFactorRecoveryCodes`.
+ *
+ * Two things changed here, and the second is the one that matters.
+ *
+ * **The cipher is now XChaCha20-Poly1305.** It was AES-256-CBC, which is
+ * unauthenticated: nothing about a CBC ciphertext says whether it is the one
+ * this server wrote. Anyone able to write the database could substitute a
+ * blob and, at worst, get a decrypt error; at best for them, flip bits in a
+ * plaintext they could guess. Poly1305 makes that a hard failure. The 24-byte
+ * nonce is why XChaCha rather than the IETF ChaCha20-Poly1305 that Node ships
+ * natively: at 24 bytes a random nonce per encryption has no practical
+ * collision risk, so there is no counter to persist and nothing to get wrong.
+ *
+ * **`decrypt` fails closed.** It used to return its input verbatim when the
+ * value did not look encrypted, and again on any error that was not OpenSSL's
+ * bad-decrypt. That is a passthrough: write plaintext into
+ * `SystemSettings.lidarrUrl`'s neighbours and it was read back as a
+ * credential, no key required -- which is precisely the capability encrypting
+ * them was meant to remove. Every path out of `decrypt` is now either a
+ * verified plaintext or a throw.
+ *
+ * Callers already expect that. `utils/systemSettings.ts` wraps every field in
+ * `safeDecrypt`, which turns a throw into `null` and logs once per field, so a
+ * single unreadable credential disables one integration instead of taking the
+ * settings load with it.
+ *
+ * **Existing AES-256-CBC values still read.** They are live in production and
+ * cannot be converted without the key and a running server, so `decrypt`
+ * recognises the old `ivHex:ciphertextHex` shape and handles it, including the
+ * pre-SHA-256 key derivation that predates it. Nothing writes that format any
+ * more: a settings field migrates the next time it is saved. `twoFactorSecret`
+ * is never rewritten, so the AES path cannot be deleted until something
+ * migrates those rows -- see docs/social/ENCRYPTION.md §6.
+ */
 import crypto from "crypto";
+import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { logger } from "./logger";
 
-const ALGORITHM = "aes-256-cbc";
+const LEGACY_ALGORITHM = "aes-256-cbc";
+
+/** Tag on the new format. Anything without it is read as legacy, or refused. */
+const V2_PREFIX = "xc1.";
+const V2_INFO = Buffer.from("kima-settings/xc1", "utf8");
+const NONCE_BYTES = 24;
 
 // Insecure default that must not be used in production
 const INSECURE_DEFAULT = "default-encryption-key-change-me";
@@ -40,6 +82,16 @@ function getEncryptionKey(): Buffer {
 // Validate encryption key on module load to fail fast
 const ENCRYPTION_KEY = getEncryptionKey();
 
+/**
+ * The XChaCha key is a separate derivation from the same secret, not the same
+ * 32 bytes reused. One key, one cipher: an AES key and an AEAD key that happen
+ * to be equal is the kind of coincidence that becomes a cross-protocol bug the
+ * moment anything else starts using either.
+ */
+const V2_KEY = Buffer.from(
+    crypto.hkdfSync("sha256", ENCRYPTION_KEY, Buffer.alloc(0), V2_INFO, 32)
+);
+
 // Legacy key derivation for backward compatibility with data encrypted before SHA-256 normalization
 function getLegacyEncryptionKey(): Buffer | null {
     const key = process.env.SETTINGS_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
@@ -48,63 +100,102 @@ function getLegacyEncryptionKey(): Buffer | null {
 }
 const LEGACY_KEY = getLegacyEncryptionKey();
 
-/**
- * Encrypt a string using AES-256-CBC
- * Returns empty string for empty/null input
- */
-export function encrypt(text: string): string {
-    if (!text) return "";
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
-    let encrypted = cipher.update(text);
-    encrypted = Buffer.concat([encrypted, cipher.final()]);
-    return iv.toString("hex") + ":" + encrypted.toString("hex");
+/** `ivHex:ciphertextHex` -- the shape every AES-256-CBC value already stored has. */
+const LEGACY_SHAPE = /^[0-9a-f]{32}:[0-9a-f]+$/i;
+
+function toBase64Url(bytes: Uint8Array): string {
+    return Buffer.from(bytes).toString("base64url");
 }
 
 /**
- * Decrypt a string that was encrypted with the encrypt function
- * Returns empty string for empty/null input
- * Returns original text if decryption fails (for backwards compatibility with unencrypted data)
+ * Encrypt a string with XChaCha20-Poly1305.
+ * Returns empty string for empty/null input.
+ */
+export function encrypt(text: string): string {
+    if (!text) return "";
+    const nonce = crypto.randomBytes(NONCE_BYTES);
+    const sealed = xchacha20poly1305(V2_KEY, nonce, V2_INFO).encrypt(
+        Buffer.from(text, "utf8")
+    );
+    return V2_PREFIX + toBase64Url(Buffer.concat([nonce, Buffer.from(sealed)]));
+}
+
+/**
+ * Decrypt a value written by `encrypt`, or by the AES-256-CBC version that
+ * preceded it.
+ *
+ * Throws on anything else -- a tampered or truncated ciphertext, a value
+ * encrypted under a different key, and a value that is in no recognised format
+ * at all. That last case is the important one: it used to be returned to the
+ * caller as though it were the decrypted plaintext.
  */
 export function decrypt(text: string): string {
     if (!text) return "";
-    try {
-        const parts = text.split(":");
-        if (parts.length < 2) {
-            // Not in expected format, return as-is (might be unencrypted)
-            return text;
+
+    if (text.startsWith(V2_PREFIX)) {
+        const blob = Buffer.from(text.slice(V2_PREFIX.length), "base64url");
+        if (blob.length <= NONCE_BYTES) {
+            throw new Error("Decryption failed: ciphertext is too short to be valid");
         }
-        const iv = Buffer.from(parts[0], "hex");
-        const encryptedText = Buffer.from(parts.slice(1).join(":"), "hex");
-        const decipher = crypto.createDecipheriv(
-            ALGORITHM,
-            ENCRYPTION_KEY,
-            iv
-        );
-        let decrypted = decipher.update(encryptedText);
-        decrypted = Buffer.concat([decrypted, decipher.final()]);
-        return decrypted.toString();
-    } catch (error: any) {
-        if (error.code === 'ERR_OSSL_BAD_DECRYPT' && LEGACY_KEY) {
-            // Try legacy key derivation (pre-SHA256 normalization)
+        // Poly1305 verification happens inside decrypt(); a modified byte
+        // anywhere in nonce, ciphertext or tag throws rather than returning
+        // plausible-looking bytes.
+        const opened = xchacha20poly1305(
+            V2_KEY,
+            blob.subarray(0, NONCE_BYTES),
+            V2_INFO
+        ).decrypt(blob.subarray(NONCE_BYTES));
+        return Buffer.from(opened).toString("utf8");
+    }
+
+    if (LEGACY_SHAPE.test(text)) {
+        return decryptLegacy(text);
+    }
+
+    // No recognised format. Previously returned as-is on the theory that it
+    // might be unencrypted data from before this module existed; that made the
+    // column readable-and-writable by anyone with database access and no key.
+    throw new Error(
+        "Decryption failed: value is not in a recognised encrypted format. " +
+        "If this is a credential stored before encryption existed, re-enter it in Settings."
+    );
+}
+
+/** AES-256-CBC, both key derivations, for values written before `xc1.`. */
+function decryptLegacy(text: string): string {
+    const parts = text.split(":");
+    const iv = Buffer.from(parts[0], "hex");
+    const encryptedText = Buffer.from(parts.slice(1).join(":"), "hex");
+
+    const attempt = (key: Buffer): string => {
+        const decipher = crypto.createDecipheriv(LEGACY_ALGORITHM, key, iv);
+        return Buffer.concat([decipher.update(encryptedText), decipher.final()]).toString();
+    };
+
+    try {
+        return attempt(ENCRYPTION_KEY);
+    } catch (error) {
+        if (LEGACY_KEY) {
+            // Pre-SHA-256 normalization: the first 32 bytes of the raw env var.
             try {
-                const parts = text.split(":");
-                const iv = Buffer.from(parts[0], "hex");
-                const encryptedText = Buffer.from(parts.slice(1).join(":"), "hex");
-                const decipher = crypto.createDecipheriv(ALGORITHM, LEGACY_KEY, iv);
-                let decrypted = decipher.update(encryptedText);
-                decrypted = Buffer.concat([decrypted, decipher.final()]);
-                return decrypted.toString();
+                return attempt(LEGACY_KEY);
             } catch {
                 throw error;
             }
         }
-        if (error.code === 'ERR_OSSL_BAD_DECRYPT') {
-            throw error;
-        }
-        logger.error("Decryption error:", error);
-        return text;
+        throw error;
     }
+}
+
+/**
+ * Whether a stored value is still in the old AES-256-CBC format.
+ *
+ * Exported for the migration that has to exist before the legacy branch above
+ * can go: settings fields re-encrypt whenever they are saved, but nothing ever
+ * rewrites `User.twoFactorSecret`.
+ */
+export function isLegacyCiphertext(value: string | null | undefined): boolean {
+    return Boolean(value) && LEGACY_SHAPE.test(value as string);
 }
 
 /**
@@ -115,6 +206,3 @@ export function encryptField(value: string | null | undefined): string | null {
     if (!value || value.trim() === "") return null;
     return encrypt(value);
 }
-
-
-

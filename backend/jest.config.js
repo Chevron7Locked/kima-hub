@@ -20,9 +20,22 @@ module.exports = {
     moduleFileExtensions: ['ts', 'js', 'json'],
     clearMocks: true,
     collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
+    // `@noble/ciphers` is pure ESM with no CJS build, and `utils/encryption.ts`
+    // imports it synchronously. Node 24 requires it fine -- `require(esm)` is on
+    // by default there, which is what makes the compiled CJS server work -- but
+    // Jest resolves modules through its own registry, not Node's, so it needs
+    // the package transformed to CJS on the way in. Mocking it the way p-queue
+    // is mocked is not an option: the whole point of the encryption suite is
+    // that it exercises the real cipher.
     transformIgnorePatterns: [
-        'node_modules/(?!(p-queue|eventemitter3)/)',
+        'node_modules/(?!(p-queue|eventemitter3|@noble)/)',
     ],
+    // The ts-jest preset only claims .ts/.tsx; the second entry is what actually
+    // transforms the ESM above. Scoped to .js/.mjs so nothing else changes.
+    transform: {
+        '^.+\\.tsx?$': ['ts-jest', {}],
+        '^.+\\.m?js$': ['ts-jest', { tsconfig: { allowJs: true, module: 'commonjs' } }],
+    },
     moduleNameMapper: {
         // p-queue is pure ESM and cannot be required() by Jest's CJS runner.
         // Map it to a minimal CJS mock that executes functions immediately.
