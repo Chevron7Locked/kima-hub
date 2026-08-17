@@ -9,6 +9,7 @@ import axios from "axios";
 import fs from "fs";
 import path from "path";
 import { config } from "../config";
+import { resolveWithinMusicRoot } from "./library/trackPath";
 
 // Static imports for performance
 import { discoverQueue, scanQueue } from "../workers/queues";
@@ -1540,23 +1541,36 @@ router.delete("/clear", async (req, res) => {
                     // FALLBACK: Direct filesystem deletion (in case Lidarr's deleteFiles didn't work)
                     // Try to delete files directly from the discovery folder
                     try {
-                        const discoveryPath = path.join(
-                            config.music.musicPath,
-                            "discovery"
-                        );
+                        // artistName and albumTitle are NOT paths the scanner
+                        // produced. They come from Spotify-imported playlist and
+                        // track names and from file tags, so a name of "../.."
+                        // is something a caller can arrange. path.join silently
+                        // normalises those segments away, and the result is
+                        // handed to rmSync(recursive, force) below.
+                        //
+                        // Containment is checked against the DISCOVERY folder,
+                        // not merely the music root: a name of "../Radiohead"
+                        // resolves to a path that IS inside the music root and
+                        // is still entirely the wrong directory to delete.
+                        const discoveryRoot = resolveWithinMusicRoot("discovery");
+                        const withinDiscovery = (p: string | null): p is string =>
+                            !!p &&
+                            !!discoveryRoot &&
+                            p.startsWith(discoveryRoot + path.sep);
+
                         // Try common folder structures: /discovery/Artist/Album or /discovery/Artist - Album
                         const possiblePaths = [
-                            path.join(
-                                discoveryPath,
+                            resolveWithinMusicRoot(
+                                "discovery",
                                 album.artistName,
                                 album.albumTitle
                             ),
-                            path.join(discoveryPath, album.artistName),
-                            path.join(
-                                discoveryPath,
+                            resolveWithinMusicRoot("discovery", album.artistName),
+                            resolveWithinMusicRoot(
+                                "discovery",
                                 `${album.artistName} - ${album.albumTitle}`
                             ),
-                        ];
+                        ].filter(withinDiscovery);
 
                         for (const albumPath of possiblePaths) {
                             if (fs.existsSync(albumPath)) {
