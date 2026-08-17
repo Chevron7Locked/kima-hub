@@ -21,6 +21,7 @@ import { safeError } from "../../utils/errors";
 import { hasRealMbid } from "../../services/artistIdentity";
 import pLimit from "p-limit";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
+import { resolveWithinMusicRoot } from "./trackPath";
 
 const ARTIST_SORT_MAP: Record<string, any> = {
   name: { name: "asc" as const },
@@ -925,31 +926,32 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
       for (const track of album.tracks) {
         if (track.filePath) {
           try {
-            const absolutePath = path.join(
-              config.music.musicPath,
-              track.filePath,
-            );
+            const absolutePath = resolveWithinMusicRoot(track.filePath);
+            if (!absolutePath) {
+              logger.warn(
+                `[DELETE] Refused out-of-root track path: ${track.filePath}`,
+              );
+              continue;
+            }
 
             if (fs.existsSync(absolutePath)) {
               fs.unlinkSync(absolutePath);
               deletedFiles++;
 
               const pathParts = track.filePath.split(path.sep);
-              if (pathParts.length >= 2) {
-                const actualArtistFolder =
-                  pathParts[0].toLowerCase() === "soulseek"
-                    ? path.join(
-                        config.music.musicPath,
-                        pathParts[0],
-                        pathParts[1],
-                      )
-                    : path.join(config.music.musicPath, pathParts[0]);
-                artistFoldersToDelete.add(actualArtistFolder);
-              } else if (pathParts.length === 1) {
-                const actualArtistFolder = path.join(
-                  config.music.musicPath,
-                  pathParts[0],
-                );
+              // Everything added to this set is handed to rmSync(recursive,
+              // force) below, so the segments are resolved rather than joined --
+              // the same rule the file path above follows. A refused folder is
+              // simply not queued.
+              const actualArtistFolder =
+                pathParts.length >= 2
+                  ? pathParts[0].toLowerCase() === "soulseek"
+                    ? resolveWithinMusicRoot(pathParts[0], pathParts[1])
+                    : resolveWithinMusicRoot(pathParts[0])
+                  : pathParts.length === 1
+                    ? resolveWithinMusicRoot(pathParts[0])
+                    : null;
+              if (actualArtistFolder) {
                 artistFoldersToDelete.add(actualArtistFolder);
               }
             }
@@ -1014,11 +1016,15 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
       }
     }
 
+    // artist.name is a tag value, not a path segment the scanner produced -- an
+    // artist tagged "../../tmp" would otherwise reach rmSync(recursive, force)
+    // just below. A refused path drops out of the list rather than throwing:
+    // an artist with one bad row must still be deletable.
     const commonPaths = [
-      path.join(config.music.musicPath, artist.name),
-      path.join(config.music.musicPath, "Soulseek", artist.name),
-      path.join(config.music.musicPath, "discovery", artist.name),
-    ];
+      resolveWithinMusicRoot(artist.name),
+      resolveWithinMusicRoot("Soulseek", artist.name),
+      resolveWithinMusicRoot("discovery", artist.name),
+    ].filter((p): p is string => p !== null);
 
     for (const commonPath of commonPaths) {
       if (fs.existsSync(commonPath) && !artistFoldersToDelete.has(commonPath)) {

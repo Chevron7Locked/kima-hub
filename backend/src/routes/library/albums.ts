@@ -6,6 +6,7 @@ import { deezerService } from "../../services/deezer";
 import { lidarrService } from "../../services/lidarr";
 import { safeError } from "../../utils/errors";
 import { config } from "../../config";
+import { resolveWithinMusicRoot } from "./trackPath";
 import path from "path";
 import fs from "fs";
 import pLimit from "p-limit";
@@ -215,10 +216,13 @@ router.delete("/albums/:id", requireAdmin, async (req, res) => {
     for (const track of album.tracks) {
       if (track.filePath) {
         try {
-          const absolutePath = path.join(
-            config.music.musicPath,
-            track.filePath,
-          );
+          const absolutePath = resolveWithinMusicRoot(track.filePath);
+          if (!absolutePath) {
+            logger.warn(
+              `[DELETE] Refused out-of-root track path for ${track.id}: ${track.filePath}`,
+            );
+            continue;
+          }
 
           if (fs.existsSync(absolutePath)) {
             fs.unlinkSync(absolutePath);
@@ -232,13 +236,16 @@ router.delete("/albums/:id", requireAdmin, async (req, res) => {
 
     try {
       const artistName = album.artist.name;
-      const albumFolder = path.join(
-        config.music.musicPath,
-        artistName,
-        album.title,
-      );
+      // artist.name and album.title are tag values, not paths the scanner
+      // produced -- see resolveWithinMusicRoot for why they are resolved
+      // rather than joined.
+      const albumFolder = resolveWithinMusicRoot(artistName, album.title);
 
-      if (fs.existsSync(albumFolder)) {
+      if (!albumFolder) {
+        logger.warn(
+          `[DELETE] Refused out-of-root album folder for ${artistName}/${album.title}`,
+        );
+      } else if (fs.existsSync(albumFolder)) {
         const files = fs.readdirSync(albumFolder);
         if (files.length === 0) {
           fs.rmdirSync(albumFolder);

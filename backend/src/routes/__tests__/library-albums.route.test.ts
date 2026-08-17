@@ -331,4 +331,36 @@ describe('DELETE /albums/:id', () => {
         expect(res.body.deletedFiles).toBe(2);
         expect(fs.unlinkSync).toHaveBeenCalledTimes(2);
     });
+
+    it('refuses a track path and an album title that escape the music root', async () => {
+        // Artist.name and Album.title are ID3 tag values, so a file added to
+        // the watched folder chooses them. Before the guard, the album folder
+        // here resolved to /tmp/x and was handed to a recursive delete, and the
+        // track path resolved to /etc/passwd and was handed to unlinkSync.
+        const albumToDelete = {
+            ...BASE_ALBUM,
+            title: '../../../../tmp/x',
+            artist: { ...BASE_ARTIST },
+            tracks: [
+                { id: 'track-1', title: 'Airbag', filePath: '../../../../etc/passwd', album: BASE_ALBUM },
+            ],
+        };
+        (prisma.album.findUnique as jest.Mock).mockResolvedValue(albumToDelete);
+        (prisma.album.delete as jest.Mock).mockResolvedValue(albumToDelete);
+        // Say yes to every existence check: if the guard were missing, the
+        // route would go ahead and act on both paths.
+        (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+        const res = await request(app).delete('/albums/album-1');
+
+        expect(res.status).toBe(200);
+        // Nothing outside the root was touched, and nothing was counted.
+        expect(fs.unlinkSync).not.toHaveBeenCalled();
+        expect(fs.readdirSync).not.toHaveBeenCalled();
+        expect(fs.rmdirSync).not.toHaveBeenCalled();
+        expect(res.body.deletedFiles).toBe(0);
+        // The row still goes: a poisoned tag must not make an album
+        // undeletable, which is why a refused path is skipped, not thrown.
+        expect(prisma.album.delete).toHaveBeenCalled();
+    });
 });

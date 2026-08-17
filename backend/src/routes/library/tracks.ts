@@ -14,6 +14,7 @@ import { shuffleArray } from "../../utils/shuffle";
 import { LIBRARY_TRACK_WHERE } from "../../services/libraryFilters";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
 import { config } from "../../config";
+import { resolveWithinMusicRoot } from "./trackPath";
 import path from "path";
 import fs from "fs";
 
@@ -602,9 +603,13 @@ const track = await prisma.track.findUnique({
 
     if (track.filePath) {
       try {
-        const absolutePath = path.join(config.music.musicPath, track.filePath);
+        const absolutePath = resolveWithinMusicRoot(track.filePath);
 
-        if (fs.existsSync(absolutePath)) {
+        if (!absolutePath) {
+          logger.warn(
+            `[DELETE] Refused out-of-root track path for ${track.id}: ${track.filePath}`,
+          );
+        } else if (fs.existsSync(absolutePath)) {
           fs.unlinkSync(absolutePath);
           logger.debug(`[DELETE] Deleted file: ${absolutePath}`);
         }
