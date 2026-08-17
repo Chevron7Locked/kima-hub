@@ -10,6 +10,7 @@ import {
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { MOOD_MIX_LIMIT, validateSaveTrackIds } from "./mixesValidation";
+import { rankForPosition } from "../utils/lexoRank";
 
 const router = Router();
 
@@ -556,12 +557,21 @@ router.post("/:id/save", async (req, res) => {
             },
         });
 
-        // Add all tracks to the playlist
+        // Add all tracks to the playlist.
+        //
+        // `rank` is the authoritative order and is UNIQUE per playlist with an
+        // empty-string default, so writing only `sort` left every row at "" and
+        // the unique index rejected all but the first -- silently, because
+        // createMany's default skipDuplicates behaviour swallows it. A saved mix
+        // would report its full track count while storing one track. The
+        // playlist is created empty immediately above, so positional ranks are
+        // correct here without consulting an existing maximum.
         const playlistItems = mix.trackIds.map(
             (trackId: string, index: number) => ({
                 playlistId: playlist.id,
                 trackId,
                 sort: index,
+                rank: rankForPosition(index),
             })
         );
 

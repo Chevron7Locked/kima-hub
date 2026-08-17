@@ -480,10 +480,10 @@ router.post("/:id/items/batch", async (req, res) => {
         }
         const { trackIds } = parsed.data;
 
-        // Ownership check + current max sort (mirrors the single-item add).
+        // Ownership check -- the service deliberately does not do this.
         const playlist = await prisma.playlist.findUnique({
             where: { id: req.params.id },
-            include: { items: { orderBy: { sort: "desc" }, take: 1 } },
+            select: { id: true, userId: true },
         });
         if (!playlist) {
             return res.status(404).json({ error: "Playlist not found" });
@@ -492,78 +492,38 @@ router.post("/:id/items/batch", async (req, res) => {
             return res.status(403).json({ error: "Access denied" });
         }
 
-        // De-dup the submitted list, preserving first-occurrence order.
-        const requested = [...new Set(trackIds)];
-
-        // Keep only tracks that exist AND aren't already in the playlist.
-        const [existingTracks, alreadyIn] = await Promise.all([
-            prisma.track.findMany({
-                where: { id: { in: requested } },
-                select: { id: true },
-            }),
-            prisma.playlistItem.findMany({
-                where: { playlistId: req.params.id, trackId: { in: requested } },
-                select: { trackId: true },
-            }),
-        ]);
-        const validIds = new Set(existingTracks.map((t) => t.id));
-        const alreadyInIds = new Set(alreadyIn.map((i) => i.trackId));
-
-        // Preserve the caller's submitted order for the append.
-        const toAdd = requested.filter(
-            (id) => validIds.has(id) && !alreadyInIds.has(id)
-        );
-        const skippedExisting = requested.filter((id) =>
-            alreadyInIds.has(id)
-        ).length;
-        const skippedInvalid = requested.filter((id) => !validIds.has(id)).length;
-
-        if (toAdd.length === 0) {
-            return res.json({ added: 0, skippedExisting, skippedInvalid, items: [] });
-        }
-
-        // Append in order inside a Serializable txn: re-read the max sort and insert
-        // maxSort+1, +2, … atomically, so a concurrent batch can't hand two tracks the
-        // same sort value (the ordering guarantee this endpoint exists to provide).
-        // NOTE: the single-item add (`POST /:id/items`) is a bare create and shares this
-        // read-then-write race with itself; fully closing the cross-endpoint race needs
-        // the same treatment there (tracked as a repo-wide follow-up).
-        const { count } = await withSerializableRetry(() =>
-            prisma.$transaction(
-                async (tx) => {
-                    const top = await tx.playlistItem.findFirst({
-                        where: { playlistId: req.params.id },
-                        orderBy: { sort: "desc" },
-                        select: { sort: true },
-                    });
-                    const baseSort = top?.sort || 0;
-                    return tx.playlistItem.createMany({
-                        data: toAdd.map((trackId, i) => ({
-                            playlistId: req.params.id,
-                            trackId,
-                            sort: baseSort + 1 + i,
-                        })),
-                        skipDuplicates: true,
-                    });
-                },
-                { isolationLevel: "Serializable" }
-            )
-        );
+        // Insert through the shared allocator rather than here. Every write to
+        // PlaylistItem must assign `rank`: the column is UNIQUE per playlist
+        // with an empty-string default, so an insert that omits it takes the
+        // single '' slot and createMany({ skipDuplicates: true }) silently
+        // drops every row after the first. This endpoint used to set only
+        // `sort`, which meant a 50-track request answered `added: 1` while
+        // storing one track, and every later batch into that playlist stored
+        // nothing at all. addTracks holds the advisory lock and chains ranks
+        // off the current maximum -- the one place that logic lives.
+        //
+        // This also scopes the add to LIBRARY tracks, matching the
+        // DISCOVER-location filter the other write paths already enforce: a
+        // track sitting in the discovery pile is not something a playlist
+        // should be able to reference. Such ids now come back under
+        // skippedInvalid instead of being added.
+        const result = await playlistService.addTracks(req.params.id, trackIds);
 
         const items = await prisma.playlistItem.findMany({
-            where: { playlistId: req.params.id, trackId: { in: toAdd } },
+            where: {
+                playlistId: req.params.id,
+                trackId: { in: [...new Set(trackIds)] },
+            },
             include: {
                 track: { include: { album: { include: { artist: true } } } },
             },
-            orderBy: { sort: "asc" },
+            orderBy: { rank: "asc" },
         });
 
-        // `count` is createMany's actual insert count (skipDuplicates may drop a row
-        // under a concurrent add), not the intended toAdd.length.
         return res.json({
-            added: count,
-            skippedExisting,
-            skippedInvalid,
+            added: result.added,
+            skippedExisting: result.duplicates,
+            skippedInvalid: result.rejected.length,
             items,
         });
     } catch (error) {
