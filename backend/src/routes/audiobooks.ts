@@ -11,6 +11,7 @@ import { apiLimiter } from "../middleware/rateLimiter";
 import { getSystemSettings } from "../utils/systemSettings";
 import { notificationService } from "../services/notificationService";
 import { config } from "../config";
+import { resolveWithinMusicRoot } from "./library/trackPath";
 
 /**
  * Resolve the Access-Control-Allow-Origin value for a cover/stream response,
@@ -447,13 +448,20 @@ router.get("/:id/cover", async (req, res) => {
 
         // Fallback: check if cover exists on disk even if DB path is empty
         if (!coverPath) {
-            const fallbackPath = path.join(
-                config.music.musicPath,
+            // `id` arrives from the URL, and Express decodes %2F in a route
+            // param AFTER matching -- so an id of "..%2F..%2F..%2Fetc%2Fx"
+            // becomes real traversal by the time it reaches here. This route
+            // carries no auth: auth in this file is applied per-route and this
+            // is not one of them, and nothing authenticates ahead of the
+            // /api/audiobooks mount in index.ts. An unresolved join is
+            // therefore an UNAUTHENTICATED read of any .jpg the process can
+            // reach, on software people expose to the internet.
+            const fallbackPath = resolveWithinMusicRoot(
                 "cover-cache",
                 "audiobooks",
                 `${id}.jpg`
             );
-            if (fs.existsSync(fallbackPath)) {
+            if (fallbackPath && fs.existsSync(fallbackPath)) {
                 coverPath = fallbackPath;
                 // Update database with the correct path
                 await prisma.audiobook
@@ -465,8 +473,15 @@ router.get("/:id/cover", async (req, res) => {
             }
         }
 
-        // If local cover exists, serve it
-        if (coverPath && fs.existsSync(coverPath)) {
+        // If local cover exists, serve it. The stored localCoverPath is
+        // resolved too rather than trusted: it is a database value, and a row
+        // written before this guard existed can still hold a path outside the
+        // music root. Absolute paths survive the resolve unchanged when they
+        // are already inside it.
+        const resolvedCover = coverPath
+            ? resolveWithinMusicRoot(coverPath)
+            : null;
+        if (resolvedCover && fs.existsSync(resolvedCover)) {
             const origin = resolveCorsOrigin(req.headers.origin, "http://localhost:3030");
             res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
             if (origin) {
@@ -474,7 +489,7 @@ router.get("/:id/cover", async (req, res) => {
                 res.setHeader("Access-Control-Allow-Credentials", "true");
             }
             res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-            return res.sendFile(coverPath);
+            return res.sendFile(resolvedCover);
         }
 
         // Fallback: proxy from Audiobookshelf if coverUrl is available
