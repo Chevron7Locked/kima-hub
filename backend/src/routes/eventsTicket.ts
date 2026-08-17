@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { asyncHandler } from "../middleware/asyncHandler";
 import { randomUUID } from "crypto";
 import { redisClient } from "../utils/redis";
 import { requireAuthOrToken } from "../middleware/auth";
@@ -7,7 +8,7 @@ const router = Router();
 
 router.use(requireAuthOrToken);
 
-router.post("/", async (req, res) => {
+router.post("/", asyncHandler(async (req, res) => {
   const userId = req.user?.id;
   if (!userId) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -17,6 +18,6 @@ router.post("/", async (req, res) => {
   await redisClient.setex(`sse:ticket:${ticket}`, 30, userId);
 
   res.json({ ticket });
-});
+}));
 
 export default router;

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { asyncHandler } from "../middleware/asyncHandler";
 import { logger } from "../utils/logger";
 import { requireAuthOrToken, requireAdmin } from "../middleware/auth";
 import { programmaticPlaylistService } from "../services/programmaticPlaylists";
@@ -144,7 +145,7 @@ router.post("/mood", async (req, res) => {
 /**
  * Available mood presets for the UI
  */
-router.get("/mood/presets", async (req, res) => {
+router.get("/mood/presets", asyncHandler(async (req, res) => {
     // Presets use ML mood predictions for more accurate matching
     // These mirror the logic used in programmatic mixes (Chill Mix, Party Mix, etc.)
     const presets = [
@@ -273,7 +274,7 @@ router.get("/mood/presets", async (req, res) => {
     ];
 
     res.json(presets);
-});
+}));
 
 /**
  * Save user's mood mix preferences

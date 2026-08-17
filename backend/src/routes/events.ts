@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { asyncHandler } from "../middleware/asyncHandler";
 import { eventBus, SSEEvent, SSESubscriber } from "../services/eventBus";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
@@ -29,7 +30,14 @@ const MAX_CONNECTIONS_PER_USER = 5;
  * SSE endpoint for real-time event streaming.
  * Auth via short-lived, one-time-use ticket obtained from POST /api/events/ticket.
  */
-router.get("/", async (req: Request, res: Response) => {
+// The ticket lookup below is an `await` that runs BEFORE res.writeHead, so if
+// Redis is unreachable this handler rejects with no response written at all and
+// the client waits forever for a stream that never opens. asyncHandler bridges
+// that to errorHandler, which answers a 500. Anything that rejects AFTER the
+// headers go out is handled too: errorHandler checks headersSent and delegates
+// to Express's default, which closes the connection rather than throwing
+// ERR_HTTP_HEADERS_SENT from inside the error handler.
+router.get("/", asyncHandler(async (req: Request, res: Response) => {
     const ticket = req.query.ticket as string | undefined;
     if (!ticket) {
         res.status(401).json({ error: "Unauthorized" });
@@ -130,6 +138,6 @@ router.get("/", async (req: Request, res: Response) => {
 
     req.on("close", teardown);
     res.on("error", teardown);
-});
+}));
 
 export default router;
