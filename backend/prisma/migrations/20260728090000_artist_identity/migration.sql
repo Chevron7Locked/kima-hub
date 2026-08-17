@@ -16,13 +16,25 @@ ALTER TABLE "Artist"
   ADD COLUMN IF NOT EXISTS "identityKey" TEXT,
   ADD COLUMN IF NOT EXISTS "sortName" TEXT;
 
--- 2. Backfill. Mirrors artistIdentity.ts: lower + unaccent + drop everything
---    that is not a letter or a digit. `unaccent` needs the extension; the
---    regexp fallback below handles the common Latin-1 range if it is absent.
+-- 2. Backfill. Mirrors artistIdentity.ts, INCLUDING its ampersand step: the
+--    TypeScript replaces `&` with " and " BEFORE stripping non-alphanumerics
+--    (normalizeArtistName), so "Simon & Garfunkel" keys as "simonandgarfunkel",
+--    not "simongarfunkel". Dropping the ampersand here instead would write a key
+--    the application never computes: resolveArtist would miss the row it just
+--    backfilled and insert a duplicate -- exactly what this migration exists to
+--    make impossible, and ampersands in band names are common.
+--
+--    Measured, not assumed. Postgres and the TypeScript were run over the same
+--    names; without the inner regexp_replace below, AC&DC, Simon & Garfunkel,
+--    Earth, Wind & Fire and Hall & Oates all disagreed, while every accent and
+--    ligature case already matched. `unaccent` needs the extension.
 CREATE EXTENSION IF NOT EXISTS unaccent;
 
 UPDATE "Artist"
-SET "identityKey" = regexp_replace(lower(unaccent(name)), '[^[:alnum:]]', '', 'g'),
+SET "identityKey" = regexp_replace(
+                          regexp_replace(lower(unaccent(name)), '\s*&\s*', ' and ', 'g'),
+                          '[^[:alnum:]]', '', 'g'
+                      ),
     "sortName"    = regexp_replace(
                         regexp_replace(lower(unaccent(name)), '\s+', ' ', 'g'),
                         '^(the|a|an|le|la|les|los|las|die|der|das)\s+', '', 'i'
