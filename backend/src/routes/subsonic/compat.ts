@@ -1,8 +1,9 @@
 import { Router, Request, Response } from "express";
 import { prisma } from "../../utils/db";
 import { subsonicError, subsonicOk, SubsonicError } from "../../utils/subsonicResponse";
-import { parseRepeatedQueryParam } from "./mappers";
+import { parseRepeatedQueryParam, wrap } from "./mappers";
 import { createShareLink, ShareError } from "../../services/shareService";
+import { logger } from "../../utils/logger";
 
 export const compatRouter = Router();
 
@@ -30,7 +31,10 @@ compatRouter.all("/deleteInternetRadioStation.view", (req: Request, res: Respons
     subsonicOk(req, res);
 });
 
-compatRouter.all("/getAvatar.view", async (req: Request, res: Response) => {
+// Wrapped for the same reason as createShare below: the user lookup can reject
+// (a dropped connection, a pool timeout), and an unwrapped rejection in
+// Express 4 answers nothing at all.
+compatRouter.all("/getAvatar.view", wrap(async (req: Request, res: Response) => {
     const username = req.query.username as string | undefined;
     if (!username) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: username");
@@ -54,7 +58,7 @@ compatRouter.all("/getAvatar.view", async (req: Request, res: Response) => {
     res.set("Content-Type", "image/png");
     res.set("Cache-Control", "public, max-age=3600");
     return res.send(transparentPng);
-});
+}));
 
 compatRouter.all("/getShares.view", (req: Request, res: Response) => {
     subsonicOk(req, res, { shares: {} });
@@ -65,7 +69,11 @@ compatRouter.all("/getShares.view", (req: Request, res: Response) => {
 // This used to fabricate one: a synthetic `kima-<timestamp>` id and a URL
 // pointing at `/share/unsupported`, a path that does not exist. A client handed
 // the user a link that was dead on arrival, which is worse than refusing.
-compatRouter.all("/createShare.view", async (req: Request, res: Response) => {
+// wrap() is load-bearing, not decoration: the three lookups below run OUTSIDE
+// the try, and in Express 4 a rejected handler promise produces no response at
+// all -- the client waits until it times out. Every sibling subsonic router
+// wraps for this reason; this file was left bare.
+compatRouter.all("/createShare.view", wrap(async (req: Request, res: Response) => {
     const ids = parseRepeatedQueryParam(req.query.id);
     if (ids.length === 0) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
@@ -110,9 +118,19 @@ compatRouter.all("/createShare.view", async (req: Request, res: Response) => {
                 : SubsonicError.GENERIC;
             return subsonicError(req, res, code, error.message);
         }
-        throw error;
+        // Anything that is not a ShareError is ours, not the caller's. Answer
+        // with the protocol's generic code and a fixed string rather than
+        // rethrowing: a Prisma failure's message names tables and columns, and
+        // this text goes to the client. The detail goes to the log as a stack,
+        // which carries no `config` or query payload with it.
+        logger.error(
+            `[Subsonic] createShare failed: ${
+                error instanceof Error ? error.stack : String(error)
+            }`
+        );
+        return subsonicError(req, res, SubsonicError.GENERIC, "Failed to create share");
     }
-});
+}));
 
 compatRouter.all("/updateShare.view", (req: Request, res: Response) => {
     const id = req.query.id as string | undefined;

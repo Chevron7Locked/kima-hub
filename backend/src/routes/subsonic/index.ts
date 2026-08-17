@@ -7,6 +7,11 @@ import { scanQueue } from "../../workers/queues";
 import { config } from "../../config";
 import { requireSubsonicAdmin } from "./userHelpers";
 import { hashApiKey } from "../../services/users/apiKeyStore";
+// Every async handler here goes through wrap(): in Express 4 a rejected handler
+// promise produces NO response, so an unwrapped await that throws leaves the
+// client waiting until it times out. getScanStatus and startScan both talk to
+// Redis, which being unreachable is ordinary traffic rather than an edge case.
+import { wrap } from "./mappers";
 
 import { compatRouter } from "./compat";
 import { libraryRouter } from "./library";
@@ -42,7 +47,7 @@ subsonicRouter.use((req: Request, res: Response, next) => {
 });
 
 // OpenSubsonic tokenInfo is API key based and does not require Subsonic user auth.
-subsonicRouter.all("/tokenInfo.view", async (req: Request, res: Response) => {
+subsonicRouter.all("/tokenInfo.view", wrap(async (req: Request, res: Response) => {
     const apiKey = req.query.apiKey as string | undefined;
     if (!apiKey) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: apiKey");
@@ -69,7 +74,7 @@ subsonicRouter.all("/tokenInfo.view", async (req: Request, res: Response) => {
             username: keyRecord.user.username,
         },
     });
-});
+}));
 
 // All routes require Subsonic auth (applied after rate limit)
 subsonicRouter.use(subsonicAuth);
@@ -112,7 +117,7 @@ subsonicRouter.all("/getOpenSubsonicExtensions.view", (req: Request, res: Respon
     });
 });
 
-subsonicRouter.all("/getScanStatus.view", async (req: Request, res: Response) => {
+subsonicRouter.all("/getScanStatus.view", wrap(async (req: Request, res: Response) => {
     const counts = await scanQueue.getJobCounts("active", "waiting", "delayed");
     const queued = (counts.active || 0) + (counts.waiting || 0) + (counts.delayed || 0);
     subsonicOk(req, res, {
@@ -121,9 +126,9 @@ subsonicRouter.all("/getScanStatus.view", async (req: Request, res: Response) =>
             count: queued,
         },
     });
-});
+}));
 
-subsonicRouter.all("/startScan.view", async (req: Request, res: Response) => {
+subsonicRouter.all("/startScan.view", wrap(async (req: Request, res: Response) => {
     // The REST equivalent (routes/library/scan.ts) is admin-gated via
     // requireAdmin; this one had no check at all -- any authenticated
     // Subsonic user, including a plain non-admin account, could trigger a
@@ -149,7 +154,7 @@ subsonicRouter.all("/startScan.view", async (req: Request, res: Response) => {
             count: queued,
         },
     });
-});
+}));
 
 subsonicRouter.all(["/getAlbumInfo.view", "/getAlbumInfo2.view"], (req: Request, res: Response) => {
     subsonicOk(req, res, { albumInfo: {} });
