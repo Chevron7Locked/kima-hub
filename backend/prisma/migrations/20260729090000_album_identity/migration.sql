@@ -103,6 +103,25 @@ DELETE FROM "OwnedAlbum" o
 USING album_merge_map m
 WHERE o."rgMbid" = m.loser_rgmbid;
 
+-- DiscoveryAlbum is keyed (userId, weekStartDate, rgMbid), so the repoint needs
+-- the same collapse OwnedAlbum got above -- for a subtler reason.
+--
+-- The NOT EXISTS below only sees the statement's SNAPSHOT. Two loser rows in
+-- ONE user's week that map to the SAME winner therefore both pass it: neither
+-- can see the other being repointed by this same statement. Both then land on
+-- (user, week, winner) and the unique index rejects the whole statement with
+-- "duplicate key value violates unique constraint". That is not a corner case
+-- -- two editions of one album turning up in a single discovery week is
+-- precisely the duplication this migration exists to collapse.
+--
+-- Reproduced on Postgres 16 before fixing, and the fixture below re-verified
+-- after: one user with two losers in one week, plus a second user, plus a row
+-- whose winner already exists in a DIFFERENT week.
+--
+-- The ctid clause picks exactly ONE row per (user, week, winner) to carry the
+-- rename. The siblings fall through to the DELETE immediately below, which
+-- removes every remaining loser row anyway -- so nothing is lost that the
+-- migration was not already discarding.
 UPDATE "DiscoveryAlbum" d
 SET "rgMbid" = m.winner_rgmbid
 FROM album_merge_map m
@@ -112,6 +131,16 @@ WHERE d."rgMbid" = m.loser_rgmbid
       WHERE x."userId" = d."userId"
         AND x."weekStartDate" = d."weekStartDate"
         AND x."rgMbid" = m.winner_rgmbid
+  )
+  AND d.ctid = (
+      SELECT d2.ctid
+      FROM "DiscoveryAlbum" d2
+      JOIN album_merge_map m2 ON d2."rgMbid" = m2.loser_rgmbid
+      WHERE d2."userId" = d."userId"
+        AND d2."weekStartDate" = d."weekStartDate"
+        AND m2.winner_rgmbid = m.winner_rgmbid
+      ORDER BY d2.ctid
+      LIMIT 1
   );
 
 DELETE FROM "DiscoveryAlbum" d
