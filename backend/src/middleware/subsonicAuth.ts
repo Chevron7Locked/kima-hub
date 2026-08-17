@@ -50,8 +50,29 @@ export async function subsonicAuth(
         // ApiKey.keyHash never holds anything reversible, deliberately, so a
         // DB or backup leak no longer hands over live credentials), there is
         // no secret left anywhere on this server that could reproduce
-        // md5(secret+salt). No implementation choice papers over that; it is
-        // the direct, unavoidable cost of the fix. `TOKEN_AUTH_NOT_SUPPORTED`
+        // md5(secret+salt). No HASHING scheme recovers that -- but hashing was
+        // a choice, not the only one, and this is the price it carries. Say so
+        // plainly here, because the alternative is not hypothetical and it is
+        // sitting in this repo.
+        //
+        // The alternative: store the key ENCRYPTED at rest rather than hashed
+        // -- reversible, under a key held outside the database. utils/encryption.ts
+        // already provides exactly that (XChaCha20-Poly1305 under
+        // SETTINGS_ENCRYPTION_KEY) and already protects the stored service
+        // credentials and the 2FA secrets. Encrypted, the server could still
+        // recover the key to answer the challenge, so `t=`/`s=` would keep
+        // working, and a stolen dump would still be useless WITHOUT the
+        // environment key.
+        //
+        // Hashing was chosen anyway, deliberately. Against the threat actually
+        // named -- a database read or a leaked backup -- it is strictly
+        // stronger, because it does not depend on the environment key having
+        // stayed out of that same backup, which is exactly the assumption that
+        // fails when someone tars up a whole deployment directory. The cost is
+        // that token auth dies and a client moves to `apiKey=` or the password
+        // field. That is the trade. It is not a law of physics, and nobody
+        // reading this later should conclude there was never another option.
+        // `TOKEN_AUTH_NOT_SUPPORTED`
         // is a real Subsonic protocol error code (41), so a client sending
         // `t=`/`s=` gets a clear, spec-defined "this method isn't available"
         // rather than a "wrong password" that would send a legitimate user
