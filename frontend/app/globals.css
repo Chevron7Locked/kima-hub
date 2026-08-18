@@ -186,8 +186,16 @@ code {
      * phone-sized on a 27" display and simply added columns -- fifteen of them
      * at 2560px. Growing the floor spends the extra width on bigger artwork
      * instead, which is what the space is for. 152px is the hard minimum: it
-     * is what still fits two cards across a 388px phone. */
-    --card-min: clamp(9.5rem, 12vw, 12rem);
+     * is what still fits two cards across a 388px phone.
+     *
+     * The 14vw coefficient was measured, not guessed. The grid does not get the
+     * whole viewport -- the sidebar and the activity rail take about 400px of
+     * it -- so at a 1261px window the cards live in an 849px column. At 12vw
+     * that gave five 154px cards and eighteen truncated titles in the first two
+     * rows; at 14vw it gives four 197px cards and thirteen. Podcast names are
+     * long enough that some clipping is unavoidable, but the card is the thing
+     * you read the title off, so it wins the width. */
+    --card-min: clamp(9.5rem, 14vw, 12rem);
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
     gap: clamp(0.75rem, 1.6vw, 1.25rem);
