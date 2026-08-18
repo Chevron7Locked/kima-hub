@@ -1147,7 +1147,20 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         if (!ctrl) return;
 
         const handleEnded = () => {
-            if (Date.now() - lastManualAdvanceAtRef.current <= 1000) return;
+            // Shortly after a manual/gapless advance, an 'ended' can still arrive
+            // from the OUTGOING track, which would double-advance past the just-
+            // loaded one. Distinguish it from a genuine end by POSITION rather
+            // than a blanket time window: a stale/transition 'ended' leaves the
+            // (now-current) media near its start, while a real end -- even of a
+            // sub-second track -- leaves it at its duration. Only suppress the
+            // stale case, so a short track that legitimately finishes within ~1s
+            // of the advance still advances (fixes the sub-second stall).
+            if (Date.now() - lastManualAdvanceAtRef.current <= 1000) {
+                const pos = ctrl.getCurrentTime();
+                const dur = ctrl.getDuration();
+                const reachedEnd = dur > 0 && pos >= dur - 1.5;
+                if (!reachedEnd) return;
+            }
             iosAudioLog("ended:queue-advance", "audio-controls-context", null, { currentIndex: currentIndexRef.current, queueLength: queueRef.current.length });
             if (playbackTypeRef.current === "audiobook") {
                 const audiobook = currentAudiobookRef.current;

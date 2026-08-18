@@ -694,7 +694,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 !enrichmentProgress.isFullyComplete && (
                                     <span className="text-[10px] font-mono text-purple-400 flex items-center gap-1 uppercase tracking-wider">
                                         <Loader2 className="w-3 h-3 animate-spin" />
-                                        {enrichmentProgress.audioAnalysis.pending > 0 || enrichmentProgress.audioAnalysis.processing > 0
+                                        {(enrichmentProgress.audioAnalysis?.pending ?? 0) > 0 || (enrichmentProgress.audioAnalysis?.processing ?? 0) > 0
                                             ? "Audio analysis running"
                                             : "Vibe embeddings running"}
                                     </span>
@@ -758,7 +758,11 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             </div>
 
                             {/* Audio Analysis */}
-                            {!featuresLoading && musicCNN ? (
+                            {/* audioAnalysis is absent from the progress payload
+                                when the analyzer has never run. Reading through it
+                                crashed the whole Cache page rather than hiding one
+                                stage. */}
+                            {!featuresLoading && musicCNN && enrichmentProgress.audioAnalysis ? (
                                 <div className="flex items-start gap-2">
                                     <div className="flex-1">
                                         <EnrichmentStage
