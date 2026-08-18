@@ -599,9 +599,43 @@ router.post("/refresh-all", requireAuth, async (req, res) => {
  * Get a specific podcast with full details and episodes
  * Requires user to be subscribed
  */
+/**
+ * Episodes returned with a podcast, and per page of the episode endpoint.
+ *
+ * The detail response used to carry the show's ENTIRE back catalogue: this
+ * query had an orderBy and no take, while the subscription list beside it was
+ * already bounded. Measured upstream against a real feed -- The Daily returned
+ * 2,944 episodes and 6.27 MB in one response, every time the screen opened.
+ * The payload grew with the show's AGE rather than with what anyone reads, and
+ * a daily show adds ~365 a year forever.
+ */
+const EPISODE_PAGE_SIZE = 50;
+const EPISODE_PAGE_MAX = 200;
+
+/**
+ * limit/offset from the query string, clamped rather than rejected, matching
+ * how the other paged lists here behave. A nonsense value falls back to the
+ * default instead of 400-ing a client that guessed.
+ */
+function parseEpisodePage(query: Record<string, unknown>): {
+    limit: number;
+    offset: number;
+} {
+    const rawLimit = Number(query.limit);
+    const rawOffset = Number(query.offset);
+    const limit =
+        Number.isFinite(rawLimit) && rawLimit > 0
+            ? Math.min(Math.floor(rawLimit), EPISODE_PAGE_MAX)
+            : EPISODE_PAGE_SIZE;
+    const offset =
+        Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
+    return { limit, offset };
+}
+
 router.get("/:id", requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
+        const { limit, offset } = parseEpisodePage(req.query);
 
         // Check if user is subscribed
         const subscription = await prisma.podcastSubscription.findUnique({
@@ -624,6 +658,8 @@ router.get("/:id", requireAuth, async (req, res) => {
             include: {
                 episodes: {
                     orderBy: { publishedAt: "desc" },
+                    take: limit,
+                    skip: offset,
                     include: {
                         progress: {
                             where: { userId: req.user!.id },
@@ -639,6 +675,10 @@ router.get("/:id", requireAuth, async (req, res) => {
         if (!podcast) {
             return res.status(404).json({ error: "Podcast not found" });
         }
+
+        const episodeTotal = await prisma.podcastEpisode.count({
+            where: { podcastId: id },
+        });
 
         const episodesWithProgress = podcast.episodes.map((episode) => ({
             id: episode.id,
@@ -674,11 +714,97 @@ router.get("/:id", requireAuth, async (req, res) => {
             feedUrl: podcast.feedUrl,
             genres: [], // Podcast genres not yet stored in database
             autoDownloadEpisodes: false,
+            // `episodes` keeps its name and stays newest-first, so a client
+            // that predates paging still renders -- it sees the first page
+            // instead of a decade of back catalogue. episodeTotal is what tells
+            // it there is more, and GET /:id/episodes is how it asks.
             episodes: episodesWithProgress,
+            episodeTotal,
+            episodeOffset: offset,
+            episodeLimit: limit,
             isSubscribed: true,
         });
     } catch (error) {
         safeError(res, "Error fetching podcast", error);
+    }
+});
+
+/**
+ * GET /podcasts/:id/episodes
+ * A page of one podcast's episodes, newest first.
+ *
+ * Split from the detail response because the two halves have different
+ * lifetimes: a show's title and artwork barely change, its episode list changes
+ * constantly and grows without bound, so bundling them meant the stable part
+ * could never be cached.
+ *
+ * Offset-based rather than cursor-based, to match the other paged lists here.
+ * The tradeoff is worth stating: episodes are appended at the HEAD, so an
+ * episode arriving between two page fetches shifts everything down by one and
+ * the reader sees a duplicate. For a daily show that is a once-a-day window.
+ */
+router.get("/:id/episodes", requireAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { limit, offset } = parseEpisodePage(req.query);
+
+        const subscription = await prisma.podcastSubscription.findUnique({
+            where: {
+                userId_podcastId: { userId: req.user!.id, podcastId: id },
+            },
+        });
+
+        if (!subscription) {
+            return res
+                .status(404)
+                .json({ error: "Podcast not found or not subscribed" });
+        }
+
+        const [episodes, total] = await Promise.all([
+            prisma.podcastEpisode.findMany({
+                where: { podcastId: id },
+                orderBy: { publishedAt: "desc" },
+                take: limit,
+                skip: offset,
+                include: {
+                    progress: { where: { userId: req.user!.id } },
+                    downloads: { where: { userId: req.user!.id } },
+                },
+            }),
+            prisma.podcastEpisode.count({ where: { podcastId: id } }),
+        ]);
+
+        res.json({
+            episodes: episodes.map((episode) => ({
+                id: episode.id,
+                title: episode.title,
+                description: episode.description,
+                duration: episode.duration,
+                publishedAt: episode.publishedAt,
+                episodeNumber: episode.episodeNumber,
+                season: episode.season,
+                imageUrl: episode.imageUrl,
+                isDownloaded: episode.downloads.length > 0,
+                progress: episode.progress[0]
+                    ? {
+                          currentTime: episode.progress[0].currentTime,
+                          progress:
+                              episode.progress[0].duration > 0
+                                  ? (episode.progress[0].currentTime /
+                                        episode.progress[0].duration) *
+                                    100
+                                  : 0,
+                          isFinished: episode.progress[0].isFinished,
+                          lastPlayedAt: episode.progress[0].lastPlayedAt,
+                      }
+                    : null,
+            })),
+            total,
+            offset,
+            limit,
+        });
+    } catch (error) {
+        safeError(res, "Error fetching podcast episodes", error);
     }
 });
 
