@@ -81,7 +81,7 @@ const AlbumCardItem = memo(
                         {/* Play button */}
                         <button
                             onClick={handlePlay}
-                            className="absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#22c55e] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 hover:bg-[#16a34a]"
+                            className="touch-reveal absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#22c55e] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 hover:bg-[#16a34a]"
                         >
                             <Play className="w-5 h-5 fill-current ml-0.5 text-black" />
                         </button>

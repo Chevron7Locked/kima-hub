@@ -206,6 +206,37 @@ code {
     --card-min: clamp(11rem, 15vw, 14rem);
 }
 
+/* ── Hover-revealed controls on a device that cannot hover ────────────────
+ *
+ * Twenty-one components reveal a control on hover, and none of them guarded
+ * for touch. `opacity: 0` hides a control from the eye but not from the
+ * finger: it stays visible to hit-testing, keeps `pointer-events: auto`, and
+ * happily receives the tap.
+ *
+ * So the bottom-right corner of every album, artist and playlist tile held an
+ * invisible 44px button. Tapping there to open the album started playing it
+ * instead, with nothing on screen to explain why. Measured on the tablet:
+ * opacity 0, pointer-events auto, and document.elementFromPoint at the
+ * button's centre returning the button.
+ * ─────────────────────────────────────────────────────────────────────── */
+@media (hover: none) {
+    .group-hover\:opacity-100 {
+        pointer-events: none;
+    }
+
+    /* The play button is the exception, because it is the one action a card
+     * is actually for. On a touch screen it stops hiding and simply stays.
+     *
+     * Destructive controls deliberately do NOT get this. A delete button
+     * permanently parked on the corner of every tile, one stray tap from the
+     * artwork, is a worse trade than having no delete on the grid at all --
+     * it remains available from the item's own page. */
+    .touch-reveal {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
 /* The vertical beat between the top-level sections of a page.
  *
  * Four pages each picked their own value -- 32px, 40px, 48px -- so the same

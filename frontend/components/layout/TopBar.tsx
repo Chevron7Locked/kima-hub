@@ -220,7 +220,7 @@ export function TopBar() {
                                 new CustomEvent("toggle-mobile-menu")
                             );
                         }}
-                        className="w-10 h-10 flex items-center justify-center bg-[var(--bg-secondary)] border border-[var(--border-interactive)] rounded-md text-white hover:bg-[var(--bg-tertiary)] transition-colors mr-2 flex-shrink-0"
+                        className="w-11 h-11 flex items-center justify-center bg-[var(--bg-secondary)] border border-[var(--border-interactive)] rounded-md text-white hover:bg-[var(--bg-tertiary)] transition-colors mr-2 flex-shrink-0"
                         aria-label="Open menu"
                     >
                         <Menu className="w-5 h-5" />
@@ -230,7 +230,7 @@ export function TopBar() {
                     <Link
                         href="/"
                         className={cn(
-                            "w-10 h-10 rounded-full flex items-center justify-center transition-all flex-shrink-0 mr-2",
+                            "w-11 h-11 rounded-full flex items-center justify-center transition-all flex-shrink-0 mr-2",
                             pathname === "/"
                                 ? "bg-white text-black"
                                 : "bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-white"
@@ -257,7 +257,7 @@ export function TopBar() {
                                 autoCapitalize="none"
                                 autoCorrect="off"
                                 tabIndex={0}
-                                className="w-full h-10 pl-10 pr-3 bg-[var(--bg-hover)] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
+                                className="w-full h-11 pl-10 pr-3 bg-[var(--bg-hover)] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
                             />
                         </div>
                     </form>
@@ -271,7 +271,7 @@ export function TopBar() {
                         }}
                         aria-expanded={isActivityPanelOpen}
                         aria-controls="activity-panel-mobile"
-                        className="w-10 h-10 flex items-center justify-center text-[var(--text-secondary)] hover:text-white transition-colors ml-2 flex-shrink-0 relative"
+                        className="w-11 h-11 flex items-center justify-center text-[var(--text-secondary)] hover:text-white transition-colors ml-2 flex-shrink-0 relative"
                         aria-label="Notifications"
                         title="Notifications"
                     >
