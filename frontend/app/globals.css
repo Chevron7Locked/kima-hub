@@ -18,6 +18,36 @@
     --color-brand-hover: #e69200;
     --color-brand-light: #fcb84d;
     --color-brand-dark: #d48c00;
+
+    /* ── Motion ───────────────────────────────────────────────────────────
+     *
+     * The app had 540 transitions and seven uses of an easing curve. Every
+     * other one ran on the CSS default, `ease`, which is symmetric: it
+     * accelerates and decelerates by the same amount. Nothing in the physical
+     * world moves like that, which is why the interface felt mechanical
+     * rather than responsive -- each state change arrived on a ramp instead
+     * of settling.
+     *
+     * Setting the default here re-times every one of those transitions at
+     * once. ease-out-quart leaves fast and settles slowly, which is how a
+     * real object behaves when something stops pushing it.
+     *
+     * No bounce or elastic curve is offered. They overshoot, which draws
+     * attention to the animation rather than to the thing that changed.
+     * ─────────────────────────────────────────────────────────────────── */
+    --default-transition-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
+    --default-transition-duration: 200ms;
+
+    --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1); /* smooth, refined */
+    --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1); /* snappier */
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1); /* decisive */
+
+    /* Durations by what the motion is for, not by number.
+     * Exits run at roughly three quarters of their entrance. */
+    --duration-feedback: 120ms; /* a press, a toggle: acknowledge and go */
+    --duration-state: 200ms; /* hover, a menu opening */
+    --duration-layout: 320ms; /* an accordion, a modal */
+    --duration-entrance: 480ms; /* a page or section arriving */
 }
 
 :root {
@@ -222,6 +252,25 @@ code {
 @media (hover: none) {
     .group-hover\:opacity-100 {
         pointer-events: none;
+    }
+
+    /* Press feedback, because on a touch screen there is nothing else.
+     *
+     * The app has 888 hover states and 23 press states. A pointer gets told
+     * something happened 888 times; a finger gets told 23 times, because
+     * `hover:` never fires for touch. Every other control accepts the tap and
+     * shows nothing at all until the next screen arrives -- which, on a slow
+     * request, reads as "it didn't work" and invites a second tap.
+     *
+     * The dip is instant on the way down and eased on the way back up, which
+     * is how a physical button behaves: it gives immediately, then returns.
+     * Opacity rather than transform, so it never fights the scale and
+     * translate already on many of these controls. */
+    button:not(:disabled):active,
+    a:not([aria-disabled="true"]):active,
+    [role="button"]:not([aria-disabled="true"]):active {
+        opacity: 0.6;
+        transition-duration: 0ms;
     }
 
     /* The play button is the exception, because it is the one action a card
@@ -529,14 +578,44 @@ button:disabled {
    Accessibility - Reduced Motion Support
    ===================================================== */
 
-/* Respect user's motion preferences */
+/* Respect the reader's motion preference.
+ *
+ * The previous version zeroed duration but left DELAY alone, which is the
+ * half that actually hurts. A staggered reveal sets `animation-delay:
+ * ${i * 0.1}s` on each row; with the animation made instant but the delay
+ * intact, someone who asked for less motion got a blank list that popped in
+ * one row at a time on a timer. Strictly worse than either extreme.
+ *
+ * Smooth scrolling is motion too, and a scripted scroll-to-top is one of the
+ * more nauseating kinds for a vestibular disorder, so it is turned off here
+ * rather than left running.
+ *
+ * `--motion-ok` is the same preference expressed as a number, so JavaScript
+ * animation can read it from CSS instead of each caller re-deriving it. See
+ * useReducedMotion, which the three requestAnimationFrame loops consume --
+ * a media query cannot reach those on its own. */
+:root {
+    --motion-ok: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
+    :root {
+        --motion-ok: 0;
+    }
+
+    html {
+        scroll-behavior: auto !important;
+    }
+
     *,
     *::before,
     *::after {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
+        animation-delay: 0ms !important;
         transition-duration: 0.01ms !important;
+        transition-delay: 0ms !important;
+        scroll-behavior: auto !important;
     }
 }
 

@@ -27,6 +27,16 @@ export function useMediaQuery(query: string): boolean {
     return matches;
 }
 
+/**
+ * True when the reader has asked their system for reduced motion.
+ *
+ * The CSS block in globals.css cannot help animation driven from JavaScript:
+ * a requestAnimationFrame loop moving something frame by frame is invisible
+ * to `prefers-reduced-motion`, because no CSS animation or transition is
+ * involved. Those callers have to ask, and this is how they ask.
+ */
+export const useReducedMotion = () => useMediaQuery("(prefers-reduced-motion: reduce)");
+
 // Common breakpoints
 export const useIsMobile = () => useMediaQuery("(max-width: 768px)");
 
