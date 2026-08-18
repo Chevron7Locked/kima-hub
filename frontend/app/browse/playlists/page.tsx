@@ -372,7 +372,7 @@ export default function BrowsePlaylistsPage() {
                                 onClick={() => setActiveTab("playlists")}
                                 className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
                                     activeTab === "playlists" ?
-                                        "bg-[#a855f7] text-white"
+                                        "bg-[#9333ea] text-white"
                                     :   "bg-white/5 text-[var(--text-secondary)] hover:bg-white/10 hover:text-white border border-white/10 hover:border-white/20"
                                 }`}
                             >
@@ -382,7 +382,7 @@ export default function BrowsePlaylistsPage() {
                                 onClick={() => setActiveTab("genres")}
                                 className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
                                     activeTab === "genres" ?
-                                        "bg-[#a855f7] text-white"
+                                        "bg-[#9333ea] text-white"
                                     :   "bg-white/5 text-[var(--text-secondary)] hover:bg-white/10 hover:text-white border border-white/10 hover:border-white/20"
                                 }`}
                             >
@@ -427,7 +427,7 @@ export default function BrowsePlaylistsPage() {
                             </p>
                             <button
                                 onClick={fetchAllContent}
-                                className="px-6 py-2.5 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] text-white text-xs font-semibold transition-all hover:scale-[1.02] active:scale-[0.98]"
+                                className="px-6 py-2.5 rounded-lg bg-[#9333ea] hover:bg-[#7e22ce] text-white text-xs font-semibold transition-all hover:scale-[1.02] active:scale-[0.98]"
                             >
                                 Try again
                             </button>
@@ -455,7 +455,7 @@ export default function BrowsePlaylistsPage() {
                                     </p>
                                     <button
                                         onClick={() => setShowUrlModal(true)}
-                                        className="px-6 py-2.5 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] text-white text-xs font-semibold transition-all"
+                                        className="px-6 py-2.5 rounded-lg bg-[#9333ea] hover:bg-[#7e22ce] text-white text-xs font-semibold transition-all"
                                     >
                                         Import by URL
                                     </button>
@@ -663,7 +663,7 @@ export default function BrowsePlaylistsPage() {
                             <button
                                 onClick={handleUrlSubmit}
                                 disabled={isParsing || !urlInput.trim()}
-                                className="flex-1 py-3 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                                className="flex-1 py-3 rounded-lg bg-[#9333ea] hover:bg-[#7e22ce] text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
                             >
                                 {isParsing ?
                                     <>

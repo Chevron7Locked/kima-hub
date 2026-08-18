@@ -310,7 +310,11 @@ export default function AudiobooksPage() {
                                 key={step.num}
                                 className="rounded-lg border border-white/10 bg-[var(--bg-primary)] p-6 hover:border-[#f59e0b]/30 transition-all"
                             >
-                                <div className="text-3xl font-bold text-[#f59e0b]/20 mb-3 tracking-tight">
+                                {/* 20% opacity put this at 1.4:1, and it is the
+                                    only thing on the card saying which step
+                                    comes first. 60% clears the 3:1 that text
+                                    this size needs. */}
+                                <div className="text-3xl font-bold text-[#f59e0b]/60 mb-3 tracking-tight">
                                     {step.num}
                                 </div>
                                 <h3 className="text-sm font-bold text-white tracking-tight mb-2">

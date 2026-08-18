@@ -386,7 +386,7 @@ export function Sidebar() {
                                     disabled={
                                         !newPlaylistName.trim() || isCreating
                                     }
-                                    className="mt-2 w-full py-1.5 bg-[#a855f7] hover:bg-[#9333ea] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded transition-colors"
+                                    className="mt-2 w-full py-1.5 bg-[#9333ea] hover:bg-[#7e22ce] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded transition-colors"
                                 >
                                     {isCreating ? "Creating..." : "Create"}
                                 </button>

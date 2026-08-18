@@ -228,7 +228,7 @@ export default function DeezerPlaylistDetailPage() {
                             </p>
                             <button
                                 onClick={() => router.push("/browse/playlists")}
-                                className="px-6 py-2.5 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] text-white text-xs font-semibold transition-all"
+                                className="px-6 py-2.5 rounded-lg bg-[#9333ea] hover:bg-[#7e22ce] text-white text-xs font-semibold transition-all"
                             >
                                 Browse playlists
                             </button>
@@ -334,7 +334,7 @@ export default function DeezerPlaylistDetailPage() {
                             <button
                                 onClick={handleImport}
                                 disabled={isImporting}
-                                className="h-10 px-5 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] transition-all flex items-center gap-2 font-bold text-sm text-white disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+                                className="h-10 px-5 rounded-lg bg-[#9333ea] hover:bg-[#7e22ce] transition-all flex items-center gap-2 font-bold text-sm text-white disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
                             >
                                 {isImporting ? (
                                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -508,7 +508,7 @@ export default function DeezerPlaylistDetailPage() {
 
             {/* Preview indicator */}
             {playingTrackId && (
-                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 bg-[#a855f7] rounded-lg text-white text-xs font-semibold flex items-center gap-2 z-(--z-toast-inline)">
+                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 bg-[#9333ea] rounded-lg text-white text-xs font-semibold flex items-center gap-2 z-(--z-toast-inline)">
                     <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                     Playing 30s preview
                 </div>
