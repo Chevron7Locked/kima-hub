@@ -50,7 +50,7 @@ export function ContinueListening({
         <section>
             <div className="flex items-center gap-3 mb-6">
                 <span className="w-1 h-8 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full shrink-0" />
-                <h2 className="text-2xl font-black tracking-tighter uppercase">Continue Listening</h2>
+                <h2 className="text-2xl font-bold tracking-tight uppercase">Continue Listening</h2>
                 <span className="flex-1 border-t border-white/10" />
             </div>
 
@@ -65,10 +65,10 @@ export function ContinueListening({
                             <Play className="w-3 h-3 text-white/50" />
                         </div>
                         <div className="flex-1 min-w-0">
-                            <h3 className="font-black text-white/80 truncate text-sm tracking-tight">
+                            <h3 className="font-bold text-white/80 truncate text-sm tracking-tight">
                                 {previousEpisode.title}
                             </h3>
-                            <p className="text-[10px] font-mono text-white/30 uppercase tracking-wider">Previous episode</p>
+                            <p className="text-micro font-mono text-white/30 uppercase tracking-wider">Previous episode</p>
                         </div>
                     </div>
                 )}
@@ -92,10 +92,10 @@ export function ContinueListening({
                         )}
                     </button>
                     <div className="flex-1 min-w-0">
-                        <h3 className="font-black text-white truncate tracking-tight">
+                        <h3 className="font-bold text-white truncate tracking-tight">
                             {recentEpisode.title}
                         </h3>
-                        <div className="flex items-center gap-3 mt-1 text-[10px] font-mono text-white/40 uppercase tracking-wider">
+                        <div className="flex items-center gap-3 mt-1 text-micro font-mono text-white/40 uppercase tracking-wider">
                             <span>{formatDuration(recentEpisode.duration)}</span>
                             <span className="text-white/20">|</span>
                             <span>{formatDate(recentEpisode.publishedAt)}</span>
@@ -112,7 +112,7 @@ export function ContinueListening({
                                             }}
                                         />
                                     </div>
-                                    <span className="text-[10px] font-mono text-[#3b82f6]">
+                                    <span className="text-micro font-mono text-[#3b82f6]">
                                         {Math.floor(recentEpisode.progress.progress)}%
                                     </span>
                                 </div>
@@ -131,10 +131,10 @@ export function ContinueListening({
                             <Play className="w-3 h-3 text-white/50" />
                         </div>
                         <div className="flex-1 min-w-0">
-                            <h3 className="font-black text-white/80 truncate text-sm tracking-tight">
+                            <h3 className="font-bold text-white/80 truncate text-sm tracking-tight">
                                 {nextEpisode.title}
                             </h3>
-                            <p className="text-[10px] font-mono text-white/30 uppercase tracking-wider">Next episode</p>
+                            <p className="text-micro font-mono text-white/30 uppercase tracking-wider">Next episode</p>
                         </div>
                     </div>
                 )}

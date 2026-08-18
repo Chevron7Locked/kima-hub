@@ -42,7 +42,7 @@ export function LyricsPanel({ onBack }: LyricsPanelProps) {
                 >
                     <ArrowLeft className="w-4 h-4 text-white/60" />
                 </button>
-                <h3 className="text-sm font-black uppercase tracking-wider text-white">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-white">
                     Lyrics
                 </h3>
             </div>

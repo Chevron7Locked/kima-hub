@@ -55,7 +55,7 @@ function SectionHeader({
     return (
         <div className="flex items-center gap-3 mb-6">
             <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full shrink-0" />
-            <h2 className="text-2xl font-black tracking-tighter uppercase">
+            <h2 className="text-2xl font-bold tracking-tight uppercase">
                 {title}
             </h2>
             {count !== undefined && (
@@ -227,10 +227,10 @@ export default function BrowsePlaylistsPage() {
                 {/* Hover accent line */}
                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#a855f7] to-[#c026d3] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150 origin-center" />
             </div>
-            <h3 className="text-sm font-black text-white truncate tracking-tight">
+            <h3 className="text-sm font-bold text-white truncate tracking-tight">
                 {item.title}
             </h3>
-            <p className="text-[11px] font-mono text-white/40 truncate uppercase tracking-wider mt-0.5">
+            <p className="text-micro font-mono text-white/40 truncate uppercase tracking-wider mt-0.5">
                 {item.trackCount} songs -- {item.creator}
             </p>
         </button>
@@ -255,7 +255,7 @@ export default function BrowsePlaylistsPage() {
             }
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
             <div className="absolute bottom-3 left-3 right-3">
-                <h3 className="text-sm font-black text-white uppercase tracking-tight">
+                <h3 className="text-sm font-bold text-white uppercase tracking-tight">
                     {genre.name}
                 </h3>
             </div>
@@ -291,7 +291,7 @@ export default function BrowsePlaylistsPage() {
                             Deezer Discovery
                         </span>
                     </div>
-                    <h1 className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tighter text-white leading-none mb-2">
+                    <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-2">
                         BROWSE
                         <br />
                         <span className="text-[#a855f7]">PLAYLISTS</span>
@@ -312,7 +312,7 @@ export default function BrowsePlaylistsPage() {
                         <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-[#a855f7]/5 border border-[#a855f7]/20">
                             <Info className="w-4 h-4 text-[#a855f7] shrink-0 mt-0.5" />
                             <p className="text-xs font-mono text-white/50 leading-relaxed">
-                                <span className="font-black text-[#a855f7] uppercase tracking-wider">
+                                <span className="font-bold text-[#a855f7] uppercase tracking-wider">
                                     Beta
                                 </span>{" "}
                                 -- Importing from Spotify and Deezer relies on
@@ -355,7 +355,7 @@ export default function BrowsePlaylistsPage() {
 
                         <button
                             onClick={() => setShowUrlModal(true)}
-                            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-xs font-black uppercase tracking-wider text-white/50 hover:text-white transition-all"
+                            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-xs font-bold uppercase tracking-wider text-white/50 hover:text-white transition-all"
                         >
                             <Link2 className="w-3.5 h-3.5" />
                             <span className="hidden sm:inline">Import URL</span>
@@ -370,7 +370,7 @@ export default function BrowsePlaylistsPage() {
                         >
                             <button
                                 onClick={() => setActiveTab("playlists")}
-                                className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all ${
+                                className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
                                     activeTab === "playlists" ?
                                         "bg-[#a855f7] text-white"
                                     :   "bg-white/5 text-white/50 hover:bg-white/10 hover:text-white border border-white/10 hover:border-white/20"
@@ -380,7 +380,7 @@ export default function BrowsePlaylistsPage() {
                             </button>
                             <button
                                 onClick={() => setActiveTab("genres")}
-                                className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all ${
+                                className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
                                     activeTab === "genres" ?
                                         "bg-[#a855f7] text-white"
                                     :   "bg-white/5 text-white/50 hover:bg-white/10 hover:text-white border border-white/10 hover:border-white/20"
@@ -402,7 +402,7 @@ export default function BrowsePlaylistsPage() {
                                 Genres
                             </button>
                             <ChevronRight className="w-3.5 h-3.5 text-white/20" />
-                            <span className="text-xs font-black text-white uppercase tracking-tight">
+                            <span className="text-xs font-bold text-white uppercase tracking-tight">
                                 {selectedGenre.name}
                             </span>
                         </div>
@@ -419,7 +419,7 @@ export default function BrowsePlaylistsPage() {
                     {loadError && !isLoading && (
                         <div className="flex flex-col items-center justify-center py-20 text-center">
                             <Music2 className="w-12 h-12 text-white/10 mb-4" />
-                            <h3 className="text-lg font-black text-white mb-2 tracking-tight">
+                            <h3 className="text-lg font-bold text-white mb-2 tracking-tight">
                                 Couldn&apos;t load content
                             </h3>
                             <p className="text-xs font-mono text-white/40 mb-6 max-w-sm uppercase tracking-wider">
@@ -427,7 +427,7 @@ export default function BrowsePlaylistsPage() {
                             </p>
                             <button
                                 onClick={fetchAllContent}
-                                className="px-6 py-2.5 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] text-white text-xs font-black uppercase tracking-wider transition-all hover:scale-[1.02] active:scale-[0.98]"
+                                className="px-6 py-2.5 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] text-white text-xs font-bold uppercase tracking-wider transition-all hover:scale-[1.02] active:scale-[0.98]"
                             >
                                 Try again
                             </button>
@@ -446,7 +446,7 @@ export default function BrowsePlaylistsPage() {
                             />
                             {playlists.length === 0 ?
                                 <div className="flex flex-col items-center justify-center py-20 text-center">
-                                    <h3 className="text-lg font-black text-white mb-2 tracking-tight">
+                                    <h3 className="text-lg font-bold text-white mb-2 tracking-tight">
                                         No playlists found
                                     </h3>
                                     <p className="text-xs font-mono text-white/40 mb-4 uppercase tracking-wider">
@@ -455,7 +455,7 @@ export default function BrowsePlaylistsPage() {
                                     </p>
                                     <button
                                         onClick={() => setShowUrlModal(true)}
-                                        className="px-6 py-2.5 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] text-white text-xs font-black uppercase tracking-wider transition-all"
+                                        className="px-6 py-2.5 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] text-white text-xs font-bold uppercase tracking-wider transition-all"
                                     >
                                         Import by URL
                                     </button>
@@ -519,7 +519,7 @@ export default function BrowsePlaylistsPage() {
                                             )}
                                         </div>
                                         {playlists.length >= 20 && (
-                                            <p className="text-center text-[10px] font-mono text-white/20 mt-8 uppercase tracking-wider">
+                                            <p className="text-center text-micro font-mono text-white/20 mt-8 uppercase tracking-wider">
                                                 Showing {playlists.length}{" "}
                                                 playlists -- Search for more or
                                                 import by URL
@@ -573,7 +573,7 @@ export default function BrowsePlaylistsPage() {
                                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#a855f7] to-[#c026d3] flex items-center justify-center">
                                     <Link2 className="w-4 h-4 text-white" />
                                 </div>
-                                <h3 className="text-lg font-black text-white tracking-tight">
+                                <h3 className="text-lg font-bold text-white tracking-tight">
                                     Import Playlist
                                 </h3>
                             </div>
@@ -593,13 +593,13 @@ export default function BrowsePlaylistsPage() {
                                     >
                                         <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
                                     </svg>
-                                    <span className="text-[10px] font-black text-[#1DB954] uppercase tracking-wider">
+                                    <span className="text-micro font-bold text-[#1DB954] uppercase tracking-wider">
                                         Spotify
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-2 px-2.5 py-1 bg-[#a855f7]/10 rounded border border-[#a855f7]/20">
                                     <DeezerIcon className="w-3.5 h-3.5 text-[#a855f7]" />
-                                    <span className="text-[10px] font-black text-[#a855f7] uppercase tracking-wider">
+                                    <span className="text-micro font-bold text-[#a855f7] uppercase tracking-wider">
                                         Deezer
                                     </span>
                                 </div>
@@ -607,16 +607,16 @@ export default function BrowsePlaylistsPage() {
                                     <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-[#FF0000]" fill="currentColor">
                                         <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
                                     </svg>
-                                    <span className="text-[10px] font-black text-[#FF0000] uppercase tracking-wider">
+                                    <span className="text-micro font-bold text-[#FF0000] uppercase tracking-wider">
                                         YouTube
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-2 px-2.5 py-1 bg-[#FF5500]/10 rounded border border-[#FF5500]/20">
-                                    <span className="text-[10px] font-black text-[#FF5500] uppercase tracking-wider">
+                                    <span className="text-micro font-bold text-[#FF5500] uppercase tracking-wider">
                                         SC
                                     </span>
                                 </div>
-                                <span className="text-[10px] font-mono text-white/20 ml-auto uppercase tracking-wider">
+                                <span className="text-micro font-mono text-white/20 ml-auto uppercase tracking-wider">
                                     +more
                                 </span>
                             </div>
@@ -647,7 +647,7 @@ export default function BrowsePlaylistsPage() {
                                     </button>
                                 )}
                             </div>
-                            <p className="text-[10px] font-mono text-white/20 mt-2 ml-1 uppercase tracking-wider">
+                            <p className="text-micro font-mono text-white/20 mt-2 ml-1 uppercase tracking-wider">
                                 Spotify, Deezer, YouTube, SoundCloud, Bandcamp, Mixcloud
                             </p>
                         </div>
@@ -656,14 +656,14 @@ export default function BrowsePlaylistsPage() {
                         <div className="px-6 pb-6 flex gap-3">
                             <button
                                 onClick={() => setShowUrlModal(false)}
-                                className="flex-1 py-3 rounded-lg bg-white/5 border border-white/10 text-xs font-black uppercase tracking-wider text-white/50 hover:bg-white/10 hover:text-white transition-all"
+                                className="flex-1 py-3 rounded-lg bg-white/5 border border-white/10 text-xs font-bold uppercase tracking-wider text-white/50 hover:bg-white/10 hover:text-white transition-all"
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={handleUrlSubmit}
                                 disabled={isParsing || !urlInput.trim()}
-                                className="flex-1 py-3 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                                className="flex-1 py-3 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] text-white text-xs font-bold uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
                             >
                                 {isParsing ?
                                     <>

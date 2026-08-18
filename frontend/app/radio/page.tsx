@@ -47,12 +47,12 @@ function RadioStationCard({
             <div className="absolute inset-0 p-4 flex flex-col justify-between">
                 <div className="flex items-center gap-1.5">
                     <Radio className="w-3.5 h-3.5 text-white/50" />
-                    <span className="text-[9px] font-mono text-white/50 uppercase tracking-wider">
+                    <span className="text-micro font-mono text-white/50 uppercase tracking-wider">
                         Radio
                     </span>
                 </div>
                 <div>
-                    <h3 className="text-base font-black text-white truncate tracking-tight leading-tight mb-1">
+                    <h3 className="text-base font-bold text-white truncate tracking-tight leading-tight mb-1">
                         {station.name}
                     </h3>
                     <p className="text-xs font-mono text-gray-500 uppercase tracking-wider truncate">
@@ -140,7 +140,7 @@ export default function RadioPage() {
 
                         <div className="flex items-baseline justify-between flex-wrap gap-4">
                             <div>
-                                <h1 className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tighter text-white leading-none mb-3">
+                                <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-3">
                                     LIBRARY<br />
                                     <span className="text-brand">RADIO</span>
                                 </h1>
@@ -154,7 +154,7 @@ export default function RadioPage() {
                                 {!isLoading && (
                                     <>
                                         <div className="border-2 border-white/10 bg-[var(--bg-primary)] px-4 py-3 rounded">
-                                            <span className="text-3xl font-black font-mono text-brand">
+                                            <span className="text-3xl font-bold font-mono text-brand">
                                                 {STATIC_STATIONS.length + genreStations.length + decadeStations.length}
                                             </span>
                                             <span className="text-xs font-mono text-gray-500 uppercase ml-2">
@@ -173,9 +173,9 @@ export default function RadioPage() {
                     <div className="space-y-12">
                         {/* Quick Start */}
                         <section>
-                            <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                            <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                 <span className="w-1 h-8 bg-gradient-to-b from-brand to-[#f97316] rounded-full" />
-                                <span className="uppercase tracking-tighter">Quick Start</span>
+                                <span className="uppercase tracking-tight">Quick Start</span>
                                 <span className="flex-1 border-t border-white/10" />
                             </h2>
                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -193,9 +193,9 @@ export default function RadioPage() {
                         {/* Genres */}
                         {(isLoading || genresError || genreStations.length > 0) && (
                             <section>
-                                <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                     <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full" />
-                                    <span className="uppercase tracking-tighter">By Genre</span>
+                                    <span className="uppercase tracking-tight">By Genre</span>
                                     <span className="flex-1 border-t border-white/10" />
                                     {!isLoading && !genresError && (
                                         <span className="text-xs font-mono text-[#a855f7]">
@@ -236,9 +236,9 @@ export default function RadioPage() {
                         {/* Decades */}
                         {(isLoading || decadesError || decadeStations.length > 0) && (
                             <section>
-                                <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                     <span className="w-1 h-8 bg-gradient-to-b from-[#22c55e] to-[#16a34a] rounded-full" />
-                                    <span className="uppercase tracking-tighter">By Decade</span>
+                                    <span className="uppercase tracking-tight">By Decade</span>
                                     <span className="flex-1 border-t border-white/10" />
                                     {!isLoading && !decadesError && (
                                         <span className="text-xs font-mono text-[#22c55e]">
@@ -286,7 +286,7 @@ export default function RadioPage() {
                                         How It Works
                                     </span>
                                 </div>
-                                <h3 className="text-xl font-black tracking-tighter text-white mb-3">
+                                <h3 className="text-xl font-bold tracking-tight text-white mb-3">
                                     PERSONALIZED RADIO
                                 </h3>
                                 <p className="text-sm font-mono text-gray-500 leading-relaxed max-w-2xl">

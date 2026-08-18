@@ -125,7 +125,7 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
                         )}
                     </div>
                     <div className="p-3 bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]">
-                        <h3 className="text-sm font-black text-white truncate tracking-tight">
+                        <h3 className="text-sm font-bold text-white truncate tracking-tight">
                             {item.name}
                         </h3>
                         <p className="text-xs font-mono text-gray-500 uppercase tracking-wider truncate mt-0.5">

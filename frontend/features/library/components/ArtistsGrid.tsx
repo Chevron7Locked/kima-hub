@@ -106,7 +106,7 @@ const ArtistCardItem = memo(
 
                     {/* Info section with monospace data */}
                     <div className="p-3 bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]">
-                        <h3 className="text-sm font-black text-white truncate mb-1 tracking-tight">
+                        <h3 className="text-sm font-bold text-white truncate mb-1 tracking-tight">
                             {artist.name}
                         </h3>
                         <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">

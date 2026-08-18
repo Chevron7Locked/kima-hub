@@ -82,7 +82,7 @@ export function SleepTimer({ size = "md" }: SleepTimerProps) {
             >
                 <Timer className={iconSize} />
                 {isActive && remainingSeconds !== null && (
-                    <span className="text-[10px] font-mono font-medium tabular-nums text-brand">
+                    <span className="text-micro font-mono font-medium tabular-nums text-brand">
                         {displayRemaining}
                     </span>
                 )}

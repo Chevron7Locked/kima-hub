@@ -177,7 +177,7 @@ export function Sidebar() {
                             className="flex-shrink-0"
                         />
                         <div className="flex-1 min-w-0">
-                            <h2 className="text-2xl font-black text-white tracking-tight">
+                            <h2 className="text-2xl font-bold text-white tracking-tight">
                                 Kima
                             </h2>
                             {(
@@ -264,7 +264,7 @@ export function Sidebar() {
             >
                 <div className="mb-3 flex items-center gap-2 px-2">
                     <div className="w-1.5 h-1.5 bg-[#22c55e] rounded-full" />
-                    <span className="text-[10px] font-mono font-black text-gray-600 uppercase tracking-wider">
+                    <span className="text-micro font-mono font-bold text-gray-600 uppercase tracking-wider">
                         Navigation Index
                     </span>
                 </div>
@@ -312,7 +312,7 @@ export function Sidebar() {
                                 {/* Label */}
                                 <span
                                     className={cn(
-                                        "font-black text-sm uppercase tracking-tight",
+                                        "font-bold text-sm uppercase tracking-tight",
                                         isActive ? "text-white" : (
                                             "group-hover:text-white"
                                         ),
@@ -344,7 +344,7 @@ export function Sidebar() {
                             prefetch={false}
                             className="group/link"
                         >
-                            <span className="text-[10px] font-mono font-black text-gray-600 uppercase tracking-wider group-hover/link:text-[#a855f7] transition-colors">
+                            <span className="text-micro font-mono font-bold text-gray-600 uppercase tracking-wider group-hover/link:text-[#a855f7] transition-colors">
                                 Playlist Stack
                             </span>
                         </Link>
@@ -434,7 +434,7 @@ export function Sidebar() {
                                         {/* Stack index */}
                                         <span
                                             className={cn(
-                                                "w-5 text-[10px] font-mono font-bold text-center shrink-0",
+                                                "w-5 text-micro font-mono font-bold text-center shrink-0",
                                                 isActive ? "text-[#a855f7]" : (
                                                     "text-gray-700 group-hover:text-gray-500"
                                                 ),
@@ -468,7 +468,7 @@ export function Sidebar() {
                                             </div>
                                             <div
                                                 className={cn(
-                                                    "text-[10px] font-mono truncate mt-0.5",
+                                                    "text-micro font-mono truncate mt-0.5",
                                                     isActive ? "text-gray-600"
                                                     :   "text-gray-700 group-hover:text-gray-500",
                                                 )}
@@ -485,7 +485,7 @@ export function Sidebar() {
                             <div className="text-xs font-mono text-gray-700 mb-1 uppercase">
                                 Empty Stack
                             </div>
-                            <div className="text-[10px] font-mono text-gray-800">
+                            <div className="text-micro font-mono text-gray-800">
                                 Create first entry
                             </div>
                         </div>
@@ -507,7 +507,7 @@ export function Sidebar() {
 
             {/* Desktop Sidebar */}
             {!isMobileOrTablet && (
-                <aside className="w-72 bg-[var(--bg-primary)] flex flex-col overflow-hidden relative z-10 rounded-lg">
+                <aside className="w-64 bg-[var(--bg-primary)] flex flex-col overflow-hidden relative z-10 rounded-lg">
                     {sidebarContent}
                 </aside>
             )}

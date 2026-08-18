@@ -107,7 +107,7 @@ export function AlbumHero({
                             Album
                         </p>
                         <div className="flex items-center gap-2 group mb-2">
-                            <h1 className="text-2xl md:text-4xl lg:text-5xl font-black tracking-tighter text-white leading-tight line-clamp-2">
+                            <h1 className="text-2xl md:text-4xl lg:text-5xl font-bold tracking-tight text-white leading-tight line-clamp-2">
                                 {displayData.title}
                             </h1>
                             {displayData.hasUserOverrides && (

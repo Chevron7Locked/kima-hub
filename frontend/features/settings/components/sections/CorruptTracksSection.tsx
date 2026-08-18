@@ -76,10 +76,10 @@ export function CorruptTracksSection() {
                                             <p className="text-xs font-medium text-white/50 truncate">
                                                 {track.title}
                                             </p>
-                                            <p className="text-[10px] font-mono text-white/25 truncate uppercase tracking-wider">
+                                            <p className="text-micro font-mono text-white/25 truncate uppercase tracking-wider">
                                                 {track.artist} -- {track.album}
                                             </p>
-                                            <p className="text-[10px] font-mono text-white/15 truncate mt-0.5">
+                                            <p className="text-micro font-mono text-white/15 truncate mt-0.5">
                                                 {track.filePath}
                                             </p>
                                         </div>

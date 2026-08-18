@@ -39,7 +39,7 @@ export function DiscoverHero({ playlist, config, onOpenSettings }: DiscoverHeroP
                 <div className="flex items-end gap-8">
                     {/* Info - Bottom Aligned */}
                     <div className="flex-1 min-w-0 pb-2">
-                        <h1 className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tighter text-white leading-none mb-6">
+                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-6">
                             DISCOVER<br/>
                             <span className="text-brand">WEEKLY</span>
                         </h1>

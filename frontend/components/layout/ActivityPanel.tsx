@@ -207,7 +207,7 @@ export function ActivityPanel({
                 <div className="flex items-center justify-between px-4 py-4 border-b-2 border-white/10">
                     <div className="flex items-center gap-2">
                         <div className="w-1.5 h-1.5 bg-[#22c55e] rounded-full" />
-                        <h2 className="text-xs font-mono font-black text-gray-600 uppercase tracking-wider whitespace-nowrap">
+                        <h2 className="text-xs font-mono font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">
                             Activity Feed
                         </h2>
                     </div>
@@ -245,7 +245,7 @@ export function ActivityPanel({
                                 <Icon className="w-3.5 h-3.5" />
                                 <span className="hidden lg:inline">{tab.label}</span>
                                 {badge && (
-                                    <span className="text-[10px] font-mono text-[#eab308]">
+                                    <span className="text-micro font-mono text-[#eab308]">
                                         {badge > 99 ? "99" : badge}
                                     </span>
                                 )}

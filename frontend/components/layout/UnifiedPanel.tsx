@@ -108,7 +108,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                     <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
                         <div className="flex items-center gap-2">
                             <div className="w-1.5 h-1.5 bg-[#22c55e] rounded-full" />
-                            <span className="text-[10px] font-mono font-black text-gray-600 uppercase tracking-wider">
+                            <span className="text-micro font-mono font-bold text-gray-600 uppercase tracking-wider">
                                 Feed
                             </span>
                         </div>

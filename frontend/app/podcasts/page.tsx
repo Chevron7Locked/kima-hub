@@ -65,10 +65,10 @@ function PodcastCard({
                 )}
             </div>
             <div className="p-3">
-                <h3 className="text-sm font-black text-white truncate tracking-tight">
+                <h3 className="text-sm font-bold text-white truncate tracking-tight">
                     {podcast.title}
                 </h3>
-                <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider truncate mt-0.5">
+                <p className="text-micro font-mono text-gray-500 uppercase tracking-wider truncate mt-0.5">
                     {podcast.author}
                 </p>
             </div>
@@ -90,9 +90,9 @@ function SectionHeader({
     rightAction?: React.ReactNode;
 }) {
     return (
-        <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+        <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
             <span className="w-1 h-8 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full shrink-0" />
-            <span className="uppercase tracking-tighter">{title}</span>
+            <span className="uppercase tracking-tight">{title}</span>
             {count !== undefined && (
                 <span className="text-xs font-mono text-[#3b82f6]">
                     {count}
@@ -290,7 +290,7 @@ export default function PodcastsPage() {
 
                         <div className="flex items-end justify-between flex-wrap gap-4">
                             <div>
-                                <h1 className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tighter text-white leading-none mb-3">
+                                <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-3">
                                     POD<br />
                                     <span className="text-[#3b82f6]">CASTS</span>
                                 </h1>
@@ -347,7 +347,7 @@ export default function PodcastsPage() {
                             <div className="flex items-center gap-4">
                                 {podcasts.length > 0 && (
                                     <div className="border-2 border-white/10 bg-[var(--bg-primary)] px-4 py-3 rounded hidden sm:block">
-                                        <span className="text-3xl font-black font-mono text-[#3b82f6]">
+                                        <span className="text-3xl font-bold font-mono text-[#3b82f6]">
                                             {podcasts.length}
                                         </span>
                                         <span className="text-xs font-mono text-gray-500 uppercase ml-2">
@@ -415,10 +415,10 @@ export default function PodcastsPage() {
                                                             )}
                                                         </div>
                                                         <div className="flex-1 min-w-0">
-                                                            <h3 className="text-sm font-black text-white truncate tracking-tight">
+                                                            <h3 className="text-sm font-bold text-white truncate tracking-tight">
                                                                 {result.name}
                                                             </h3>
-                                                            <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider truncate">
+                                                            <p className="text-micro font-mono text-gray-500 uppercase tracking-wider truncate">
                                                                 {result.artist}
                                                             </p>
                                                         </div>
@@ -536,7 +536,7 @@ export default function PodcastsPage() {
                                             <ChevronLeft className="w-4 h-4" />
                                         </button>
                                         <span className="px-4 py-2 text-xs font-mono text-white">
-                                            <span className="text-[#3b82f6] font-black">{currentPage}</span>
+                                            <span className="text-[#3b82f6] font-bold">{currentPage}</span>
                                             <span className="text-gray-500 mx-1">/</span>
                                             <span className="text-gray-500">{totalPages}</span>
                                         </span>
@@ -631,7 +631,7 @@ export default function PodcastsPage() {
                                     <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-[#3b82f6] to-[#2563eb]" />
                                     <div className="flex flex-col items-center text-center">
                                         <Mic2 className="w-16 h-16 text-gray-700 mb-6" />
-                                        <h2 className="text-2xl font-black tracking-tighter text-white mb-2 uppercase">
+                                        <h2 className="text-2xl font-bold tracking-tight text-white mb-2 uppercase">
                                             Discover Podcasts
                                         </h2>
                                         <p className="text-sm font-mono text-gray-500 max-w-md">

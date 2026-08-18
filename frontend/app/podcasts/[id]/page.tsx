@@ -209,7 +209,7 @@ export default function PodcastDetailPage() {
                             <section>
                                 <div className="flex items-center gap-3 mb-4">
                                     <span className="w-1 h-6 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full shrink-0" />
-                                    <h2 className="text-xl font-black tracking-tighter uppercase">About</h2>
+                                    <h2 className="text-xl font-bold tracking-tight uppercase">About</h2>
                                     <span className="flex-1 border-t border-white/10" />
                                 </div>
                                 <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[var(--bg-primary)] p-5">

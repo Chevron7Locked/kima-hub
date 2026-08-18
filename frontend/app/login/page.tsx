@@ -153,7 +153,7 @@ export default function LoginPage() {
                                     className="relative z-10 drop-shadow-2xl"
                                 />
                             </div>
-                            <span className="text-3xl font-bold bg-gradient-to-r from-white via-white to-gray-200 bg-clip-text text-transparent drop-shadow-2xl">
+                            <span className="text-3xl font-bold text-white">
                                 Kima
                             </span>
                         </div>

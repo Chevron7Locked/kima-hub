@@ -17,7 +17,7 @@ export function LibraryHeader({ totalItems, activeTab }: LibraryHeaderProps) {
       {/* Title + Live Stats */}
       <div className="flex items-baseline justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-5xl md:text-6xl font-black tracking-tighter text-white leading-none mb-3">
+          <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-3">
             COLLECTION
           </h1>
           <p className="text-sm font-mono text-gray-500">
@@ -27,7 +27,7 @@ export function LibraryHeader({ totalItems, activeTab }: LibraryHeaderProps) {
 
         {/* Live counter */}
         <div className="flex items-baseline gap-2 border-2 border-white/10 bg-[var(--bg-primary)] px-4 py-3 rounded">
-          <span className="text-4xl font-black font-mono text-[#eab308]">
+          <span className="text-4xl font-bold font-mono text-[#eab308]">
             {totalItems.toLocaleString()}
           </span>
           <span className="text-xs font-mono text-gray-500 uppercase">

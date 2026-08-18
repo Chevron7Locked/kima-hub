@@ -202,7 +202,7 @@ export default function SyncPage() {
                                     className="relative z-10 drop-shadow-2xl"
                                 />
                             </div>
-                            <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-white to-gray-200 bg-clip-text text-transparent drop-shadow-2xl">
+                            <h1 className="text-4xl font-bold text-white">
                                 Kima Hub
                             </h1>
                         </div>

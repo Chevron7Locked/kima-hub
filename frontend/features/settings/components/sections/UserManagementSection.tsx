@@ -131,7 +131,7 @@ export function UserManagementSection() {
                             <button
                                 onClick={handleCreate}
                                 disabled={creating || !newUsername.trim() || newPassword.length < 6}
-                                className="px-4 py-1.5 text-xs font-black bg-brand text-black rounded-lg uppercase tracking-wider
+                                className="px-4 py-1.5 text-xs font-bold bg-brand text-black rounded-lg uppercase tracking-wider
                                     hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 {creating ? "Creating..." : "Create"}
@@ -158,17 +158,17 @@ export function UserManagementSection() {
                                 className="flex items-center justify-between py-3 px-3 rounded-lg hover:bg-white/[0.03] border border-transparent hover:border-white/5 transition-all"
                             >
                                 <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-xs font-black text-brand">
+                                    <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-xs font-bold text-brand">
                                         {user.username[0].toUpperCase()}
                                     </div>
                                     <div>
                                         <div className="text-sm font-medium text-white">
                                             {user.username}
                                             {currentUser?.id === user.id && (
-                                                <span className="text-[10px] font-mono text-white/30 ml-2 uppercase tracking-wider">(you)</span>
+                                                <span className="text-micro font-mono text-white/30 ml-2 uppercase tracking-wider">(you)</span>
                                             )}
                                         </div>
-                                        <div className="text-[10px] font-mono text-white/30 uppercase tracking-wider">
+                                        <div className="text-micro font-mono text-white/30 uppercase tracking-wider">
                                             {user.role === "admin" ? "Admin" : "User"}
                                         </div>
                                     </div>
@@ -212,7 +212,7 @@ export function UserManagementSection() {
                         </button>
                         <button
                             onClick={() => confirmDelete && handleDelete(confirmDelete)}
-                            className="px-4 py-2 text-xs font-black bg-red-500 text-white rounded-lg uppercase tracking-wider hover:bg-red-600 transition-colors"
+                            className="px-4 py-2 text-xs font-bold bg-red-500 text-white rounded-lg uppercase tracking-wider hover:bg-red-600 transition-colors"
                         >
                             Delete
                         </button>

@@ -94,7 +94,7 @@ export default function SearchPage() {
                                 Discovery Engine
                             </span>
                         </div>
-                        <h1 className="text-6xl md:text-7xl font-black mb-4 bg-gradient-to-br from-white via-white to-gray-500 bg-clip-text text-transparent leading-tight">
+                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4 text-white leading-tight">
                             Find Your Sound
                         </h1>
                         <p className="text-lg text-gray-400 max-w-2xl mx-auto">
@@ -109,7 +109,7 @@ export default function SearchPage() {
                     <div className="mb-8">
                         <div className="flex items-center justify-between mb-6">
                             <div>
-                                <h1 className="text-4xl font-black mb-2 tracking-tight">
+                                <h1 className="text-4xl font-bold mb-2 tracking-tight">
                                     {query}
                                 </h1>
                                 {isLoading && (
@@ -183,7 +183,7 @@ export default function SearchPage() {
                             <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.5fr] gap-8">
                                 {/* Featured Result - Larger card */}
                                 <div className="space-y-4">
-                                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-3">
+                                    <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3">
                                         <span className="w-1 h-8 bg-gradient-to-b from-[#eab308] to-[#f59e0b] rounded-full" />
                                         Top Match
                                     </h2>
@@ -197,7 +197,7 @@ export default function SearchPage() {
 
                                 {/* Songs list - More prominent */}
                                 <div className="space-y-4">
-                                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-3">
+                                    <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3">
                                         <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full" />
                                         Tracks
                                     </h2>
@@ -224,7 +224,7 @@ export default function SearchPage() {
                                     (showDiscover || showLibrary) &&
                                     hasTopResult && (
                                         <section>
-                                            <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                            <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                                 <span className="w-1 h-8 bg-gradient-to-b from-[#eab308] to-[#f59e0b] rounded-full" />
                                                 Top Match
                                             </h2>
@@ -239,7 +239,7 @@ export default function SearchPage() {
 
                                 {hasSearched && hasTracks && (
                                     <section>
-                                        <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                        <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                             <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full" />
                                             Tracks
                                         </h2>
@@ -273,7 +273,7 @@ export default function SearchPage() {
                             showLibrary &&
                             (libraryResults?.albums?.length ?? 0) > 0 && (
                                 <section>
-                                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                    <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                         <span className="w-1 h-8 bg-gradient-to-b from-[#22c55e] to-[#16a34a] rounded-full" />
                                         Albums
                                     </h2>
@@ -288,7 +288,7 @@ export default function SearchPage() {
                             showLibrary &&
                             (libraryResults?.podcasts?.length ?? 0) > 0 && (
                                 <section>
-                                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                    <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                         <span className="w-1 h-8 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full" />
                                         Podcasts
                                     </h2>
@@ -303,7 +303,7 @@ export default function SearchPage() {
                             showLibrary &&
                             (libraryResults?.audiobooks?.length ?? 0) > 0 && (
                                 <section>
-                                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                    <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                         <span className="w-1 h-8 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full" />
                                         Audiobooks
                                     </h2>
@@ -318,7 +318,7 @@ export default function SearchPage() {
                             showDiscover &&
                             similarArtists.length > 0 && (
                                 <section>
-                                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+                                    <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                         <span className="w-1 h-8 bg-gradient-to-b from-[#ec4899] to-[#db2777] rounded-full" />
                                         Related Artists
                                     </h2>

@@ -21,7 +21,7 @@ export function SectionList({
         <section>
             <div className="flex items-center gap-3 mb-6">
                 <span className="w-1 h-8 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full shrink-0" />
-                <h2 className="text-2xl font-black tracking-tighter uppercase">Chapters</h2>
+                <h2 className="text-2xl font-bold tracking-tight uppercase">Chapters</h2>
                 <span className="text-xs font-mono text-[#f59e0b]">
                     {sections.length}
                 </span>
@@ -39,10 +39,10 @@ export function SectionList({
                             <span className="text-xs font-mono text-white/30 w-6 text-right shrink-0">
                                 {index + 1}
                             </span>
-                            <span className="text-sm font-black text-white group-hover:text-[#f59e0b] transition-colors truncate tracking-tight">
+                            <span className="text-sm font-bold text-white group-hover:text-[#f59e0b] transition-colors truncate tracking-tight">
                                 {section.title}
                             </span>
-                            <span className="ml-auto text-[10px] font-mono text-white/30 uppercase tracking-wider shrink-0">
+                            <span className="ml-auto text-micro font-mono text-white/30 uppercase tracking-wider shrink-0">
                                 {formatTime(section.start)}
                             </span>
                         </button>

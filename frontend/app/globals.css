@@ -1,6 +1,19 @@
 @import "tailwindcss";
 
 @theme {
+    /* Type scale.
+     *
+     * Tailwind's named scale stops at text-xs (12px), so everything smaller was
+     * written as an arbitrary value: 111 uses of text-[10px], plus strays at 8,
+     * 9 and 11px. They were all the same role -- the mono, uppercase,
+     * letter-spaced micro label used for eyebrows, counts and status chips --
+     * so it gets a name instead of four near-identical magic numbers.
+     *
+     * 10px is the floor. 8px and 9px were below comfortable reading size and
+     * folded up rather than preserved. */
+    --text-micro: 0.625rem;      /* 10px */
+    --text-micro--line-height: 1.4;
+
     --color-brand: #fca200;
     --color-brand-hover: #e69200;
     --color-brand-light: #fcb84d;

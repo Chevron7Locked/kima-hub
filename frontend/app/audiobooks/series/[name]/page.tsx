@@ -168,13 +168,13 @@ export default function SeriesDetailPage() {
 
                             {/* Info */}
                             <div className="flex-1 min-w-0 pb-1">
-                                <h1 className="text-2xl md:text-4xl lg:text-5xl font-black text-white leading-tight line-clamp-2 mb-2 tracking-tighter">
+                                <h1 className="text-2xl md:text-4xl lg:text-5xl font-bold text-white leading-tight line-clamp-2 mb-2 tracking-tight">
                                     {seriesName}
                                 </h1>
 
                                 {/* Metadata row */}
                                 <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-white/50 uppercase tracking-wider">
-                                    <span className="font-black text-white normal-case tracking-tight text-sm">
+                                    <span className="font-bold text-white normal-case tracking-tight text-sm">
                                         {author}
                                     </span>
                                     <span className="text-white/20">|</span>
@@ -191,7 +191,7 @@ export default function SeriesDetailPage() {
                                         {genres.slice(0, 5).map((genre) => (
                                             <span
                                                 key={genre}
-                                                className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] font-mono text-white/60 uppercase tracking-wider"
+                                                className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-micro font-mono text-white/60 uppercase tracking-wider"
                                             >
                                                 {genre}
                                             </span>
@@ -210,7 +210,7 @@ export default function SeriesDetailPage() {
                     <div>
                         <div className="flex items-center gap-3 mb-6">
                             <span className="w-1 h-8 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full shrink-0" />
-                            <h2 className="text-2xl font-black tracking-tighter uppercase">Books in Series</h2>
+                            <h2 className="text-2xl font-bold tracking-tight uppercase">Books in Series</h2>
                             <span className="text-xs font-mono text-[#f59e0b]">
                                 {books.length}
                             </span>
@@ -257,7 +257,7 @@ export default function SeriesDetailPage() {
                                                 ) : (
                                                     <>
                                                         <span className={`text-xs font-mono ${
-                                                            isCurrentBook ? "text-[#f59e0b] font-black hidden" : "text-white/30 group-hover:hidden"
+                                                            isCurrentBook ? "text-[#f59e0b] font-bold hidden" : "text-white/30 group-hover:hidden"
                                                         }`}>
                                                             {book.series?.sequence || index + 1}
                                                         </span>
@@ -304,29 +304,29 @@ export default function SeriesDetailPage() {
                                                 href={`/audiobooks/${book.id}`}
                                                 className="flex-1 min-w-0"
                                             >
-                                                <h3 className={`font-black truncate text-sm tracking-tight ${
+                                                <h3 className={`font-bold truncate text-sm tracking-tight ${
                                                     isCurrentBook ? "text-[#f59e0b]" : "text-white"
                                                 }`}>
                                                     {book.title}
                                                 </h3>
-                                                <p className="text-[10px] font-mono text-white/40 truncate uppercase tracking-wider mt-0.5">
+                                                <p className="text-micro font-mono text-white/40 truncate uppercase tracking-wider mt-0.5">
                                                     {book.narrator || book.author}
                                                 </p>
                                             </Link>
 
                                             {/* Progress */}
                                             {book.progress?.isFinished ? (
-                                                <span className="text-[10px] font-mono text-green-400 uppercase tracking-wider shrink-0">
+                                                <span className="text-micro font-mono text-green-400 uppercase tracking-wider shrink-0">
                                                     Finished
                                                 </span>
                                             ) : book.progress && book.progress.progress > 0 ? (
-                                                <span className="text-[10px] font-mono text-[#f59e0b] uppercase tracking-wider shrink-0">
+                                                <span className="text-micro font-mono text-[#f59e0b] uppercase tracking-wider shrink-0">
                                                     {Math.round(book.progress.progress)}%
                                                 </span>
                                             ) : null}
 
                                             {/* Duration */}
-                                            <span className="text-[10px] font-mono text-white/30 shrink-0 uppercase tracking-wider">
+                                            <span className="text-micro font-mono text-white/30 shrink-0 uppercase tracking-wider">
                                                 {formatDuration(book.duration)}
                                             </span>
                                         </div>

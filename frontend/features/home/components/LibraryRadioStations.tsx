@@ -110,15 +110,15 @@ export function LibraryRadioStations() {
             <div className="absolute inset-0 p-3 flex flex-col justify-between">
                 <div className="flex items-center gap-1.5">
                     <Radio className="w-3 h-3 text-white/50" />
-                    <span className="text-[8px] font-mono text-white/50 uppercase tracking-wider">
+                    <span className="text-micro font-mono text-white/50 uppercase tracking-wider">
                         Radio
                     </span>
                 </div>
                 <div>
-                    <h3 className="text-sm font-black text-white truncate tracking-tight leading-tight">
+                    <h3 className="text-sm font-bold text-white truncate tracking-tight leading-tight">
                         {station.name}
                     </h3>
-                    <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider truncate">
+                    <p className="text-micro font-mono text-gray-500 uppercase tracking-wider truncate">
                         {station.description}
                     </p>
                 </div>

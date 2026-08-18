@@ -133,7 +133,7 @@ export default function GenrePage() {
                             </span>
                         </div>
 
-                        <h1 className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tighter text-white leading-none mb-3 uppercase">
+                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-3 uppercase">
                             {genre.name}
                         </h1>
                         <p className="text-sm font-mono text-gray-500">
@@ -168,10 +168,10 @@ export default function GenrePage() {
                                     )}
                                 </div>
                                 <div className="p-3">
-                                    <h3 className="text-sm font-black text-white truncate tracking-tight">
+                                    <h3 className="text-sm font-bold text-white truncate tracking-tight">
                                         {podcast.title}
                                     </h3>
-                                    <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider truncate mt-0.5">
+                                    <p className="text-micro font-mono text-gray-500 uppercase tracking-wider truncate mt-0.5">
                                         {podcast.author}
                                     </p>
                                 </div>

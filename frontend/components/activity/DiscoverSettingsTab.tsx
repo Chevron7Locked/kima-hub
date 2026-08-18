@@ -103,7 +103,7 @@ export function DiscoverSettingsTab({
                 >
                     <ArrowLeft className="w-4 h-4 text-white/60" />
                 </button>
-                <h3 className="text-sm font-black uppercase tracking-wider text-white">Settings</h3>
+                <h3 className="text-sm font-bold uppercase tracking-wider text-white">Settings</h3>
             </div>
 
             {/* Scrollable Content */}
@@ -115,7 +115,7 @@ export function DiscoverSettingsTab({
                     </label>
                     <div className="border border-white/10 p-4 mb-3">
                         <div className="flex items-baseline justify-between">
-                            <span className="text-4xl font-black text-[#a855f7] font-mono">
+                            <span className="text-4xl font-bold text-[#a855f7] font-mono">
                                 {config?.playlistSize || 10}
                             </span>
                             <span className="text-xs font-mono text-gray-500 uppercase">
@@ -146,7 +146,7 @@ export function DiscoverSettingsTab({
                     </label>
                     <div className="border border-white/10 p-4 mb-3">
                         <div className="flex items-baseline justify-between">
-                            <span className="text-4xl font-black text-[#a855f7] font-mono">
+                            <span className="text-4xl font-bold text-[#a855f7] font-mono">
                                 {((config?.downloadRatio ?? 1.3) * 100 - 100).toFixed(0)}%
                             </span>
                             <span className="text-xs font-mono text-gray-500 uppercase">
@@ -177,7 +177,7 @@ export function DiscoverSettingsTab({
                     </label>
                     <div className="border border-white/10 p-4 mb-3">
                         <div className="flex items-baseline justify-between">
-                            <span className="text-4xl font-black text-[#a855f7] font-mono">
+                            <span className="text-4xl font-bold text-[#a855f7] font-mono">
                                 {(config?.exclusionMonths ?? 6) === 0
                                     ? "--"
                                     : config?.exclusionMonths ?? 6}
@@ -216,7 +216,7 @@ export function DiscoverSettingsTab({
                     <button
                         onClick={handleClearPlaylist}
                         disabled={isClearing}
-                        className="w-full flex items-center justify-center gap-3 px-4 py-3 border-2 border-red-500/30 hover:border-red-500 hover:bg-red-500/10 text-red-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-black text-xs uppercase tracking-wider"
+                        className="w-full flex items-center justify-center gap-3 px-4 py-3 border-2 border-red-500/30 hover:border-red-500 hover:bg-red-500/10 text-red-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-bold text-xs uppercase tracking-wider"
                     >
                         {isClearing ? (
                             <>

@@ -112,7 +112,7 @@ export default function ReleasesPage() {
                             Release Radar
                         </span>
                     </div>
-                    <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
+                    <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-2">
                         New & Upcoming
                     </h1>
                     <p className="text-white/60 text-sm md:text-base max-w-xl">

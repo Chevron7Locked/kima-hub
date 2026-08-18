@@ -55,7 +55,7 @@ const PodcastCard = memo(
                             <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#3b82f6] to-[#2563eb] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150" />
                         </div>
                         <div className="p-3 bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]">
-                            <h3 className="text-sm font-black text-white truncate tracking-tight">
+                            <h3 className="text-sm font-bold text-white truncate tracking-tight">
                                 {podcast.title}
                             </h3>
                             <p className="text-xs font-mono text-gray-500 uppercase tracking-wider truncate mt-0.5">

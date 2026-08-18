@@ -23,7 +23,7 @@ export function PreviewEpisodes({
         <section>
             <div className="flex items-center gap-3 mb-6">
                 <span className="w-1 h-8 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full shrink-0" />
-                <h2 className="text-2xl font-black tracking-tighter uppercase">Latest Episodes</h2>
+                <h2 className="text-2xl font-bold tracking-tight uppercase">Latest Episodes</h2>
                 <span className="flex-1 border-t border-white/10" />
             </div>
 
@@ -43,10 +43,10 @@ export function PreviewEpisodes({
                                         </span>
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <h3 className="font-black truncate text-sm text-white tracking-tight">
+                                        <h3 className="font-bold truncate text-sm text-white tracking-tight">
                                             {episode.title}
                                         </h3>
-                                        <div className="flex items-center gap-2 text-[10px] font-mono text-white/40 uppercase tracking-wider">
+                                        <div className="flex items-center gap-2 text-micro font-mono text-white/40 uppercase tracking-wider">
                                             <span>{formatDate(episode.publishedAt)}</span>
                                             {episode.duration > 0 && (
                                                 <>
@@ -65,7 +65,7 @@ export function PreviewEpisodes({
                             <button
                                 onClick={onSubscribe}
                                 disabled={isSubscribing}
-                                className="flex items-center gap-2 pointer-events-auto h-10 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] transition-all font-black text-sm text-white uppercase tracking-wider disabled:opacity-50 shadow-xl hover:scale-[1.02] active:scale-[0.98]"
+                                className="flex items-center gap-2 pointer-events-auto h-10 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] transition-all font-bold text-sm text-white uppercase tracking-wider disabled:opacity-50 shadow-xl hover:scale-[1.02] active:scale-[0.98]"
                             >
                                 {isSubscribing ? (
                                     <>
@@ -90,7 +90,7 @@ export function PreviewEpisodes({
                         <button
                             onClick={onSubscribe}
                             disabled={isSubscribing}
-                            className="flex items-center gap-2 mx-auto h-10 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] transition-all font-black text-sm text-white uppercase tracking-wider disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+                            className="flex items-center gap-2 mx-auto h-10 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] transition-all font-bold text-sm text-white uppercase tracking-wider disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
                         >
                             {isSubscribing ? (
                                 <>
@@ -113,7 +113,7 @@ export function PreviewEpisodes({
                 <div className="mt-8">
                     <div className="flex items-center gap-3 mb-4">
                         <span className="w-1 h-6 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full shrink-0" />
-                        <h2 className="text-xl font-black tracking-tighter uppercase">About</h2>
+                        <h2 className="text-xl font-bold tracking-tight uppercase">About</h2>
                         <span className="flex-1 border-t border-white/10" />
                     </div>
                     <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[var(--bg-primary)] p-4">

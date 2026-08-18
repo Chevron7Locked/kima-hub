@@ -144,7 +144,7 @@ export function ImportsTab() {
                 <div className="flex items-center justify-between px-3 py-2 border-b-2 border-white/10">
                     <div className="flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                        <span className="text-[10px] font-mono font-bold text-gray-600 uppercase tracking-wider">
+                        <span className="text-micro font-mono font-bold text-gray-600 uppercase tracking-wider">
                             {String(activeImports.length).padStart(2, "0")}{" "}
                             ACTIVE
                         </span>
@@ -166,7 +166,7 @@ export function ImportsTab() {
 
                 {pastImports.length > 0 && activeImports.length > 0 && (
                     <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5">
-                        <span className="text-[10px] font-mono font-bold text-gray-700 uppercase tracking-wider">
+                        <span className="text-micro font-mono font-bold text-gray-700 uppercase tracking-wider">
                             Previous
                         </span>
                         <span className="flex-1 border-t border-white/5" />
@@ -217,7 +217,7 @@ function ImportJobCard({
             <div className="flex items-start gap-3">
                 {/* Index */}
                 <div className="flex-shrink-0 w-6 mt-0.5">
-                    <span className="text-[10px] font-mono font-bold text-gray-700">
+                    <span className="text-micro font-mono font-bold text-gray-700">
                         {String(index + 1).padStart(2, "0")}
                     </span>
                 </div>
@@ -239,7 +239,7 @@ function ImportJobCard({
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
-                    <p className="text-xs font-black tracking-tight text-white truncate uppercase mb-1">
+                    <p className="text-xs font-bold tracking-tight text-white truncate uppercase mb-1">
                         {job.playlistName}
                     </p>
 
@@ -247,7 +247,7 @@ function ImportJobCard({
                     <div className="flex items-center gap-2 flex-wrap">
                         <span
                             className={cn(
-                                "text-[9px] font-mono font-bold uppercase tracking-wider",
+                                "text-micro font-mono font-bold uppercase tracking-wider",
                                 statusColor(job.status),
                             )}
                         >
@@ -256,10 +256,10 @@ function ImportJobCard({
 
                         {isActive && job.albumsTotal > 0 && (
                             <>
-                                <span className="text-[9px] font-mono text-gray-700">
+                                <span className="text-micro font-mono text-gray-700">
                                     --
                                 </span>
-                                <span className="text-[9px] font-mono text-gray-600 uppercase tracking-wider">
+                                <span className="text-micro font-mono text-gray-600 uppercase tracking-wider">
                                     {job.albumsCompleted}/{job.albumsTotal}{" "}
                                     albums
                                 </span>
@@ -268,19 +268,19 @@ function ImportJobCard({
 
                         {job.tracksMatched > 0 && (
                             <>
-                                <span className="text-[9px] font-mono text-gray-700">
+                                <span className="text-micro font-mono text-gray-700">
                                     --
                                 </span>
-                                <span className="text-[9px] font-mono text-gray-600 uppercase tracking-wider">
+                                <span className="text-micro font-mono text-gray-600 uppercase tracking-wider">
                                     {job.tracksMatched} tracks matched
                                 </span>
                             </>
                         )}
 
-                        <span className="text-[9px] font-mono text-gray-700">
+                        <span className="text-micro font-mono text-gray-700">
                             --
                         </span>
-                        <span className="text-[9px] font-mono text-gray-700 uppercase tracking-wider">
+                        <span className="text-micro font-mono text-gray-700 uppercase tracking-wider">
                             {formatAge(job.createdAt)}
                         </span>
                     </div>
@@ -299,7 +299,7 @@ function ImportJobCard({
 
                     {/* Error message */}
                     {job.status === "failed" && job.error && (
-                        <p className="text-[9px] font-mono text-red-400/70 mt-1 truncate">
+                        <p className="text-micro font-mono text-red-400/70 mt-1 truncate">
                             {job.error}
                         </p>
                     )}
@@ -308,7 +308,7 @@ function ImportJobCard({
                     {job.status === "completed" && job.createdPlaylistId && (
                         <Link
                             href={`/playlist/${job.createdPlaylistId}`}
-                            className="inline-flex items-center gap-1 mt-1.5 text-[9px] font-mono font-bold text-[#22c55e] hover:text-[#4ade80] uppercase tracking-wider transition-colors"
+                            className="inline-flex items-center gap-1 mt-1.5 text-micro font-mono font-bold text-[#22c55e] hover:text-[#4ade80] uppercase tracking-wider transition-colors"
                         >
                             <ExternalLink className="w-3 h-3" />
                             View Playlist

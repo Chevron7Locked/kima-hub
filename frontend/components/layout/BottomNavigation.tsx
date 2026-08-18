@@ -84,7 +84,7 @@ export function BottomNavigation() {
                             />
                             <span 
                                 className={cn(
-                                    "text-[10px] tracking-wide",
+                                    "text-micro tracking-wide",
                                     isActive ? "font-semibold" : "font-medium"
                                 )}
                             >

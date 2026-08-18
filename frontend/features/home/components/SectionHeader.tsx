@@ -33,9 +33,9 @@ const SectionHeader = memo(function SectionHeader({
     const gradient = GRADIENT_MAP[color];
 
     return (
-        <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-6">
+        <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
             <span className={`w-1 h-8 bg-gradient-to-b ${gradient} rounded-full shrink-0`} />
-            <span className="uppercase tracking-tighter">{title}</span>
+            <span className="uppercase tracking-tight">{title}</span>
             {badge && <Badge variant="ai">{badge}</Badge>}
             <span className="flex-1 border-t border-white/10" />
             {rightAction ? (

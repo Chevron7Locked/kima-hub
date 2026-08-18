@@ -41,7 +41,7 @@ export function SettingsSidebar({ items, activeSection, onSectionClick, isAdmin 
                 {adminItems.length > 0 && (
                     <>
                         <div className="pt-4 pb-2 px-3">
-                            <span className="text-[10px] font-mono text-white/30 uppercase tracking-wider">
+                            <span className="text-micro font-mono text-white/30 uppercase tracking-wider">
                                 Admin
                             </span>
                         </div>

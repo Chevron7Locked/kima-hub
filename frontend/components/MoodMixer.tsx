@@ -290,7 +290,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                                         </span>
 
                                         {/* Track count badge */}
-                                        <span className="absolute top-2 right-2 text-[10px] font-medium text-white/70 bg-black/30 px-1.5 py-0.5 rounded-full">
+                                        <span className="absolute top-2 right-2 text-micro font-medium text-white/70 bg-black/30 px-1.5 py-0.5 rounded-full">
                                             {trackCount}
                                         </span>
 

@@ -402,7 +402,7 @@ export default function LibraryPage() {
                             Prev
                         </button>
                         <div className="px-6 py-2 bg-[var(--bg-primary)] border-2 border-white/20 rounded">
-                            <span className="text-sm font-mono font-black text-white">
+                            <span className="text-sm font-mono font-bold text-white">
                                 {currentPage}
                             </span>
                             <span className="text-xs font-mono text-gray-500 mx-1">/</span>

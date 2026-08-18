@@ -123,7 +123,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                 >
                     {/* Quick Links Section */}
                     <div className="px-3 mb-6">
-                        <div className="text-[10px] font-semibold text-gray-600 uppercase tracking-widest px-3 mb-2">
+                        <div className="text-micro font-semibold text-gray-600 uppercase tracking-widest px-3 mb-2">
                             Quick Links
                         </div>
 
@@ -141,7 +141,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             )}
                         >
                             <Compass className="w-5 h-5" />
-                            <span className="text-[15px] font-medium">
+                            <span className="text-sm font-medium">
                                 Discover
                             </span>
                         </Link>
@@ -160,7 +160,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             )}
                         >
                             <Radio className="w-5 h-5" />
-                            <span className="text-[15px] font-medium">
+                            <span className="text-sm font-medium">
                                 Radio
                             </span>
                         </Link>
@@ -168,7 +168,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
 
                     {/* Actions Section */}
                     <div className="px-3">
-                        <div className="text-[10px] font-semibold text-gray-600 uppercase tracking-widest px-3 mb-2">
+                        <div className="text-micro font-semibold text-gray-600 uppercase tracking-widest px-3 mb-2">
                             Actions
                         </div>
 
@@ -188,7 +188,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                                     isSyncing && "animate-spin",
                                 )}
                             />
-                            <span className="text-[15px] font-medium">
+                            <span className="text-sm font-medium">
                                 {isSyncing ? "Syncing..." : "Sync Library"}
                             </span>
                         </button>
@@ -206,7 +206,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             )}
                         >
                             <Settings className="w-5 h-5" />
-                            <span className="text-[15px] font-medium">
+                            <span className="text-sm font-medium">
                                 Settings
                             </span>
                         </Link>
@@ -220,7 +220,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                         className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
                     >
                         <LogOut className="w-5 h-5" />
-                        <span className="text-[15px] font-medium">Logout</span>
+                        <span className="text-sm font-medium">Logout</span>
                     </button>
                 </div>
             </div>

@@ -446,7 +446,7 @@ export default function VibePage() {
                     />
                 )}
 
-                <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-[max(0.75rem,env(safe-area-inset-left))] z-10 text-white/15 text-[10px] tracking-widest uppercase font-medium">
+                <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-[max(0.75rem,env(safe-area-inset-left))] z-10 text-white/15 text-micro tracking-widest uppercase font-medium">
                     {mapData.trackCount} tracks
                 </div>
 

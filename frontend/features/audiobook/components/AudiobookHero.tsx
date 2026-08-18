@@ -118,7 +118,7 @@ export function AudiobookHero({
 
                         {/* Info */}
                         <div className="flex-1 min-w-0 pb-1">
-                            <h1 className="text-2xl md:text-4xl lg:text-5xl font-black text-white leading-tight line-clamp-2 mb-2 tracking-tighter">
+                            <h1 className="text-2xl md:text-4xl lg:text-5xl font-bold text-white leading-tight line-clamp-2 mb-2 tracking-tight">
                                 {audiobook.title}
                             </h1>
 
@@ -130,7 +130,7 @@ export function AudiobookHero({
 
                             {/* Metadata row */}
                             <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-white/50 uppercase tracking-wider">
-                                <span className="font-black text-white normal-case tracking-tight text-sm">
+                                <span className="font-bold text-white normal-case tracking-tight text-sm">
                                     {audiobook.author}
                                 </span>
                                 {metadata?.narrator && (
@@ -151,14 +151,14 @@ export function AudiobookHero({
                             {(audiobook.series || (audiobook.genres && audiobook.genres.length > 0)) && (
                                 <div className="hidden md:flex flex-wrap gap-1.5 mt-3">
                                     {audiobook.series && (
-                                        <span className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] font-mono text-[#f59e0b] uppercase tracking-wider">
+                                        <span className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-micro font-mono text-[#f59e0b] uppercase tracking-wider">
                                             {audiobook.series.name} #{audiobook.series.sequence}
                                         </span>
                                     )}
                                     {audiobook.genres?.slice(0, 3).map((genre: string) => (
                                         <span
                                             key={genre}
-                                            className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] font-mono text-white/60 uppercase tracking-wider"
+                                            className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-micro font-mono text-white/60 uppercase tracking-wider"
                                         >
                                             {genre}
                                         </span>

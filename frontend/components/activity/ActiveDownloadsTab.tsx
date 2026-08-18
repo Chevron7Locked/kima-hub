@@ -81,13 +81,13 @@ export function ActiveDownloadsTab() {
             <div className="flex items-center justify-between px-3 py-2 border-b-2 border-white/10">
                 <div className="flex items-center gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e] animate-pulse" />
-                    <span className="text-[10px] font-mono font-bold text-gray-600 uppercase tracking-wider">
+                    <span className="text-micro font-mono font-bold text-gray-600 uppercase tracking-wider">
                         {String(downloads.length).padStart(2, "0")} ACTIVE
                     </span>
                 </div>
                 <button
                     onClick={handleCancelAll}
-                    className="text-[10px] font-mono font-bold text-gray-600 hover:text-red-400 uppercase tracking-wider transition-colors"
+                    className="text-micro font-mono font-bold text-gray-600 hover:text-red-400 uppercase tracking-wider transition-colors"
                     title="Cancel all downloads"
                 >
                     CANCEL
@@ -104,7 +104,7 @@ export function ActiveDownloadsTab() {
                         <div className="flex items-start gap-3">
                             {/* Index number */}
                             <div className="flex-shrink-0 w-6 mt-0.5">
-                                <span className="text-[10px] font-mono font-bold text-gray-700">
+                                <span className="text-micro font-mono font-bold text-gray-700">
                                     {String(index + 1).padStart(2, "0")}
                                 </span>
                             </div>
@@ -120,13 +120,13 @@ export function ActiveDownloadsTab() {
 
                             {/* Content */}
                             <div className="flex-1 min-w-0">
-                                <p className="text-xs font-black tracking-tight text-white truncate uppercase mb-1">
+                                <p className="text-xs font-bold tracking-tight text-white truncate uppercase mb-1">
                                     {download.subject}
                                 </p>
                                 <div className="flex items-center gap-2 flex-wrap">
                                     <span
                                         className={cn(
-                                            "text-[9px] font-mono font-bold uppercase tracking-wider",
+                                            "text-micro font-mono font-bold uppercase tracking-wider",
                                             download.status === "processing"
                                                 ? "text-blue-400"
                                                 : "text-[#eab308]"
@@ -136,12 +136,12 @@ export function ActiveDownloadsTab() {
                                     </span>
                                     {download.metadata?.statusText && (
                                         <>
-                                            <span className="text-[9px] font-mono text-gray-700">
+                                            <span className="text-micro font-mono text-gray-700">
                                                 •
                                             </span>
                                             <span
                                                 className={cn(
-                                                    "text-[9px] font-mono font-bold uppercase tracking-wider",
+                                                    "text-micro font-mono font-bold uppercase tracking-wider",
                                                     download.metadata
                                                         .currentSource ===
                                                         "lidarr"
@@ -153,10 +153,10 @@ export function ActiveDownloadsTab() {
                                             </span>
                                         </>
                                     )}
-                                    <span className="text-[9px] font-mono text-gray-700">
+                                    <span className="text-micro font-mono text-gray-700">
                                         •
                                     </span>
-                                    <span className="text-[9px] font-mono text-gray-600 uppercase tracking-wider flex items-center gap-1">
+                                    <span className="text-micro font-mono text-gray-600 uppercase tracking-wider flex items-center gap-1">
                                         {download.type === "album" ? (
                                             <Disc className="w-2.5 h-2.5" />
                                         ) : (
@@ -164,10 +164,10 @@ export function ActiveDownloadsTab() {
                                         )}
                                         {download.type}
                                     </span>
-                                    <span className="text-[9px] font-mono text-gray-700">
+                                    <span className="text-micro font-mono text-gray-700">
                                         •
                                     </span>
-                                    <span className="text-[9px] font-mono text-gray-700 uppercase tracking-wider">
+                                    <span className="text-micro font-mono text-gray-700 uppercase tracking-wider">
                                         {formatTime(download.createdAt)}
                                     </span>
                                 </div>

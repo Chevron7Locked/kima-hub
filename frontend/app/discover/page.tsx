@@ -173,7 +173,7 @@ export default function DiscoverWeeklyPage() {
                 <p className="text-sm font-mono text-gray-500">Could not load discovery data.</p>
                 <button
                     onClick={reloadData}
-                    className="flex items-center gap-2 px-4 py-2 border border-white/10 rounded-lg text-sm font-black uppercase tracking-wider text-white/60 hover:border-[var(--color-brand)] hover:text-white transition-all duration-300 min-h-[44px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2"
+                    className="flex items-center gap-2 px-4 py-2 border border-white/10 rounded-lg text-sm font-bold uppercase tracking-wider text-white/60 hover:border-[var(--color-brand)] hover:text-white transition-all duration-300 min-h-[44px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2"
                 >
                     <RefreshCw className="w-4 h-4" />
                     Retry
@@ -211,9 +211,9 @@ export default function DiscoverWeeklyPage() {
                             <div className="space-y-8">
                                 {/* Section header */}
                                 <section>
-                                    <h2 className="text-2xl font-black tracking-tight flex items-center gap-3 mb-4">
+                                    <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-4">
                                         <span className="w-1 h-8 bg-gradient-to-b from-[#eab308] to-[#f59e0b] rounded-full" />
-                                        <span className="uppercase tracking-tighter">Playlist</span>
+                                        <span className="uppercase tracking-tight">Playlist</span>
                                         <span className="flex-1 border-t border-white/10" />
                                         <span className="text-xs font-mono text-[#a855f7]">
                                             {playlist?.totalCount || 0} tracks
@@ -257,7 +257,7 @@ export default function DiscoverWeeklyPage() {
                                         </span>
                                     </div>
 
-                                    <h3 className="text-4xl md:text-5xl font-black tracking-tighter text-white mb-4 leading-none">
+                                    <h3 className="text-4xl md:text-5xl font-bold tracking-tight text-white mb-4 leading-none">
                                         THIS WEEK&apos;S<br/>
                                         <span className="text-[var(--color-brand)]">PLAYLIST</span>
                                     </h3>
@@ -286,15 +286,15 @@ export default function DiscoverWeeklyPage() {
                                     {/* Placeholder stats */}
                                     <div className="grid grid-cols-3 gap-4 mb-8">
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                                            <div className="text-2xl font-black text-purple-500 mb-1">--</div>
+                                            <div className="text-2xl font-bold text-purple-500 mb-1">--</div>
                                             <div className="text-xs font-mono text-gray-500 uppercase">Tracks</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                                            <div className="text-2xl font-black text-purple-500 mb-1">--</div>
+                                            <div className="text-2xl font-bold text-purple-500 mb-1">--</div>
                                             <div className="text-xs font-mono text-gray-500 uppercase">Duration</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                                            <div className="text-2xl font-black text-purple-500 mb-1">--</div>
+                                            <div className="text-2xl font-bold text-purple-500 mb-1">--</div>
                                             <div className="text-xs font-mono text-gray-500 uppercase">Artists</div>
                                         </div>
                                     </div>
@@ -304,7 +304,7 @@ export default function DiscoverWeeklyPage() {
                                         disabled={isGenerating}
                                         aria-label={isGenerating ? "Playlist generation in progress" : "Build this week's playlist"}
                                         className={cn(
-                                            "w-full py-4 px-6 border-2 rounded-lg font-black text-sm tracking-wider uppercase transition-all duration-300 min-h-[52px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2",
+                                            "w-full py-4 px-6 border-2 rounded-lg font-bold text-sm tracking-wider uppercase transition-all duration-300 min-h-[52px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2",
                                             isGenerating
                                                 ? "border-white/20 bg-white/5 text-white/30 cursor-not-allowed"
                                                 : "border-[var(--color-brand)] bg-[var(--color-brand)] text-black hover:bg-[var(--color-brand-hover)] hover:border-[var(--color-brand-hover)] hover:scale-[1.02] hover:shadow-lg hover:shadow-[var(--color-brand)]/20"

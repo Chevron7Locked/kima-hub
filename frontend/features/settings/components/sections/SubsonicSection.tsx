@@ -142,7 +142,7 @@ export function SubsonicSection() {
                         <button
                             onClick={handleGenerate}
                             disabled={generating}
-                            className="px-4 py-2 bg-brand text-black text-xs font-black rounded-lg uppercase tracking-wider
+                            className="px-4 py-2 bg-brand text-black text-xs font-bold rounded-lg uppercase tracking-wider
                                 hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                             {generating ? "Generating..." : "Generate Token"}
@@ -204,7 +204,7 @@ export function SubsonicSection() {
                             >
                                 <div className="min-w-0">
                                     <p className="text-xs font-mono text-white truncate">{key.name}</p>
-                                    <p className="text-[10px] font-mono text-white/30 uppercase tracking-wider">
+                                    <p className="text-micro font-mono text-white/30 uppercase tracking-wider">
                                         Created {formatDate(key.createdAt)}
                                         {key.lastUsed && ` · Last used ${formatDate(key.lastUsed)}`}
                                     </p>

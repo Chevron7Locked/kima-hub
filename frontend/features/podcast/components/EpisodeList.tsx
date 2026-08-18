@@ -101,7 +101,7 @@ function EpisodeRow({
                                         ? "hidden"
                                         : "group-hover:hidden",
                                     isCurrentEpisode
-                                        ? "text-[#3b82f6] font-black"
+                                        ? "text-[#3b82f6] font-bold"
                                         : "text-white/30"
                                 )}
                             >
@@ -137,7 +137,7 @@ function EpisodeRow({
                 <div className="flex-1 min-w-0">
                     <h3
                         className={cn(
-                            "font-black truncate text-sm tracking-tight",
+                            "font-bold truncate text-sm tracking-tight",
                             isCurrentEpisode
                                 ? "text-[#3b82f6]"
                                 : "text-white"
@@ -145,7 +145,7 @@ function EpisodeRow({
                     >
                         {episode.title}
                     </h3>
-                    <div className="flex items-center gap-2 text-[10px] font-mono text-white/40 uppercase tracking-wider mt-0.5">
+                    <div className="flex items-center gap-2 text-micro font-mono text-white/40 uppercase tracking-wider mt-0.5">
                         <span>{formatDate(episode.publishedAt)}</span>
                         {episode.season && (
                             <>
@@ -177,7 +177,7 @@ function EpisodeRow({
                 </div>
 
                 {/* Duration */}
-                <span className="text-[10px] font-mono text-white/30 shrink-0 uppercase tracking-wider">
+                <span className="text-micro font-mono text-white/30 shrink-0 uppercase tracking-wider">
                     {formatDuration(episode.duration)}
                 </span>
 
@@ -243,7 +243,7 @@ export function EpisodeList({
         <section>
             <div className="flex items-center gap-3 mb-6">
                 <span className="w-1 h-8 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full shrink-0" />
-                <h2 className="text-2xl font-black tracking-tighter uppercase">All Episodes</h2>
+                <h2 className="text-2xl font-bold tracking-tight uppercase">All Episodes</h2>
                 <span className="text-xs font-mono text-[#3b82f6]">
                     {episodes.length}
                 </span>

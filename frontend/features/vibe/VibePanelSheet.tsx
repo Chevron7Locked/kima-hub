@@ -122,7 +122,7 @@ export function VibePanelSheet({
                             className="flex-1 flex flex-col items-center gap-1 min-h-[52px] py-2 px-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 hover:border-purple-500/40 text-purple-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/60"
                         >
                             <Sparkles className="w-4 h-4 shrink-0" />
-                            <span className="text-[10px] font-medium leading-tight text-center">Match Vibe</span>
+                            <span className="text-micro font-medium leading-tight text-center">Match Vibe</span>
                         </button>
                         <button
                             onClick={() => onTrackOperation("similar")}
@@ -130,7 +130,7 @@ export function VibePanelSheet({
                             className="flex-1 flex flex-col items-center gap-1 min-h-[52px] py-2 px-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 hover:border-purple-500/40 text-purple-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/60"
                         >
                             <AudioWaveform className="w-4 h-4 shrink-0" />
-                            <span className="text-[10px] font-medium leading-tight text-center">Similar</span>
+                            <span className="text-micro font-medium leading-tight text-center">Similar</span>
                         </button>
                         <button
                             onClick={onStartSongPath}
@@ -138,11 +138,11 @@ export function VibePanelSheet({
                             className="flex-1 flex flex-col items-center gap-1 min-h-[52px] py-2 px-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 hover:border-purple-500/40 text-purple-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/60"
                         >
                             <Waypoints className="w-4 h-4 shrink-0" />
-                            <span className="text-[10px] font-medium leading-tight text-center">Song Path</span>
+                            <span className="text-micro font-medium leading-tight text-center">Song Path</span>
                         </button>
                     </div>
                     {songPathActive && (
-                        <p className="text-[10px] text-purple-500/70 text-center mt-2 animate-pulse">
+                        <p className="text-micro text-purple-500/70 text-center mt-2 animate-pulse">
                             Tap another track to complete the song path
                         </p>
                     )}

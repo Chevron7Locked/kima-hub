@@ -296,7 +296,7 @@ export function TopBar() {
                                 className="group-hover:scale-105 transition-transform"
                             />
                         </Link>
-                        <span className="ml-2 px-1.5 py-0.5 text-[8px] font-medium text-white/40 bg-white/5 rounded border border-white/10 -mt-3">
+                        <span className="ml-2 px-1.5 py-0.5 text-micro font-medium text-white/40 bg-white/5 rounded border border-white/10 -mt-3">
                             v{APP_VERSION}
                         </span>
                     </div>

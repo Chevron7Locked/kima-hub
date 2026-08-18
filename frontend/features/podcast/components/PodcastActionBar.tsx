@@ -67,7 +67,7 @@ export function PodcastActionBar({
                 <button
                     onClick={onSubscribe}
                     disabled={isSubscribing}
-                    className="h-10 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] transition-all flex items-center gap-2 font-black text-sm text-white uppercase tracking-wider disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+                    className="h-10 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] transition-all flex items-center gap-2 font-bold text-sm text-white uppercase tracking-wider disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
                 >
                     {isSubscribing ? (
                         <>
@@ -116,7 +116,7 @@ export function PodcastActionBar({
                             </span>
                             <button
                                 onClick={onRemove}
-                                className="px-3 py-2 rounded-lg text-xs font-black uppercase tracking-wider bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20 transition-all"
+                                className="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20 transition-all"
                             >
                                 Confirm
                             </button>

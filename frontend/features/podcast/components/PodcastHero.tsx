@@ -116,7 +116,7 @@ export function PodcastHero({
 
                         {/* Info */}
                         <div className="flex-1 min-w-0 pb-1">
-                            <h1 className="text-2xl md:text-4xl lg:text-5xl font-black text-white leading-tight line-clamp-2 mb-2 tracking-tighter">
+                            <h1 className="text-2xl md:text-4xl lg:text-5xl font-bold text-white leading-tight line-clamp-2 mb-2 tracking-tight">
                                 {title}
                             </h1>
 
@@ -128,7 +128,7 @@ export function PodcastHero({
 
                             {/* Metadata row */}
                             <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-white/50 uppercase tracking-wider">
-                                <span className="font-black text-white normal-case tracking-tight text-sm">
+                                <span className="font-bold text-white normal-case tracking-tight text-sm">
                                     {author}
                                 </span>
                                 <span className="text-white/20">|</span>
@@ -151,7 +151,7 @@ export function PodcastHero({
                                     {genres.slice(0, 4).map((genre: string) => (
                                         <span
                                             key={genre}
-                                            className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] font-mono text-white/60 uppercase tracking-wider"
+                                            className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-micro font-mono text-white/60 uppercase tracking-wider"
                                         >
                                             {genre}
                                         </span>

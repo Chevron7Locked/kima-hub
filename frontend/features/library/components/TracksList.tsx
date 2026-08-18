@@ -228,10 +228,10 @@ export function TracksList({
         <>
             {/* Header row - terminal style */}
             <div className="grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_1fr_auto] items-center gap-3 px-4 py-3 bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg mb-2">
-                <div className="w-8 text-center text-xs font-mono font-black text-[#a855f7] uppercase">#</div>
-                <div className="text-xs font-mono font-black text-[#a855f7] uppercase tracking-wider">Title</div>
-                <div className="hidden md:block text-xs font-mono font-black text-[#a855f7] uppercase tracking-wider">Album</div>
-                <div className="w-[140px] text-right pr-2 text-xs font-mono font-black text-[#a855f7] uppercase tracking-wider">Duration</div>
+                <div className="w-8 text-center text-xs font-mono font-bold text-[#a855f7] uppercase">#</div>
+                <div className="text-xs font-mono font-bold text-[#a855f7] uppercase tracking-wider">Title</div>
+                <div className="hidden md:block text-xs font-mono font-bold text-[#a855f7] uppercase tracking-wider">Album</div>
+                <div className="w-[140px] text-right pr-2 text-xs font-mono font-bold text-[#a855f7] uppercase tracking-wider">Duration</div>
             </div>
 
             <div data-tv-section="library-tracks" className="space-y-1">

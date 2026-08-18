@@ -187,7 +187,7 @@ export function FullPlayer() {
                             {activeOperation.type !== 'idle' && vibeMatchScore !== null && (
                                 <span
                                     className={cn(
-                                        "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded mt-1",
+                                        "inline-flex items-center gap-1 text-micro font-bold px-1.5 py-0.5 rounded mt-1",
                                         vibeMatchScore >= 80
                                             ? "bg-green-500/20 text-green-400"
                                             : vibeMatchScore >= 60
@@ -238,7 +238,7 @@ export function FullPlayer() {
                                 title="Rewind 30 seconds"
                             >
                                 <RotateCcw className="w-4 h-4" />
-                                <span className="absolute text-[8px] font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                                <span className="absolute text-micro font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                                     30
                                 </span>
                             </button>
@@ -323,7 +323,7 @@ export function FullPlayer() {
                                 title="Forward 30 seconds"
                             >
                                 <RotateCw className="w-4 h-4" />
-                                <span className="absolute text-[8px] font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                                <span className="absolute text-micro font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                                     30
                                 </span>
                             </button>

@@ -104,13 +104,13 @@ export function HistoryTab() {
             <div className="flex items-center justify-between px-3 py-2 border-b-2 border-white/10">
                 <div className="flex items-center gap-3">
                     {completed.length > 0 && (
-                        <span className="flex items-center gap-1.5 text-[10px] font-mono font-bold text-green-400 uppercase tracking-wider">
+                        <span className="flex items-center gap-1.5 text-micro font-mono font-bold text-green-400 uppercase tracking-wider">
                             <CheckCircle className="w-3 h-3" />
                             {String(completed.length).padStart(2, "0")}
                         </span>
                     )}
                     {failed.length > 0 && (
-                        <span className="flex items-center gap-1.5 text-[10px] font-mono font-bold text-red-400 uppercase tracking-wider">
+                        <span className="flex items-center gap-1.5 text-micro font-mono font-bold text-red-400 uppercase tracking-wider">
                             <XCircle className="w-3 h-3" />
                             {String(failed.length).padStart(2, "0")}
                         </span>
@@ -118,7 +118,7 @@ export function HistoryTab() {
                 </div>
                 <button
                     onClick={handleClearAll}
-                    className="text-[10px] font-mono font-bold text-gray-600 hover:text-white uppercase tracking-wider transition-colors"
+                    className="text-micro font-mono font-bold text-gray-600 hover:text-white uppercase tracking-wider transition-colors"
                 >
                     CLEAR
                 </button>
@@ -130,7 +130,7 @@ export function HistoryTab() {
                 {failed.length > 0 && (
                     <div>
                         <div className="px-3 py-2 border-b-2 border-red-400/20 bg-red-400/5">
-                            <span className="text-[10px] font-mono font-black text-red-400 uppercase tracking-wider">
+                            <span className="text-micro font-mono font-bold text-red-400 uppercase tracking-wider">
                                 FAILED ({String(failed.length).padStart(2, "0")})
                             </span>
                         </div>
@@ -151,7 +151,7 @@ export function HistoryTab() {
                 {completed.length > 0 && (
                     <div>
                         <div className="px-3 py-2 border-b-2 border-green-400/20 bg-green-400/5">
-                            <span className="text-[10px] font-mono font-black text-green-400 uppercase tracking-wider">
+                            <span className="text-micro font-mono font-bold text-green-400 uppercase tracking-wider">
                                 COMPLETED ({String(completed.length).padStart(2, "0")})
                             </span>
                         </div>
@@ -206,7 +206,7 @@ function HistoryItem({
             <div className="flex items-start gap-3">
                 {/* Index number */}
                 <div className="flex-shrink-0 w-6 mt-0.5">
-                    <span className="text-[10px] font-mono font-bold text-gray-700">
+                    <span className="text-micro font-mono font-bold text-gray-700">
                         {String(index + 1).padStart(2, "0")}
                     </span>
                 </div>
@@ -222,11 +222,11 @@ function HistoryItem({
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
-                    <p className="text-xs font-black tracking-tight text-white truncate uppercase mb-1">
+                    <p className="text-xs font-bold tracking-tight text-white truncate uppercase mb-1">
                         {item.subject}
                     </p>
                     <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[9px] font-mono text-gray-600 uppercase tracking-wider flex items-center gap-1">
+                        <span className="text-micro font-mono text-gray-600 uppercase tracking-wider flex items-center gap-1">
                             {item.type === "album" ? (
                                 <Disc className="w-2.5 h-2.5" />
                             ) : (
@@ -234,13 +234,13 @@ function HistoryItem({
                             )}
                             {item.type}
                         </span>
-                        <span className="text-[9px] font-mono text-gray-700">•</span>
-                        <span className="text-[9px] font-mono text-gray-700 uppercase tracking-wider">
+                        <span className="text-micro font-mono text-gray-700">•</span>
+                        <span className="text-micro font-mono text-gray-700 uppercase tracking-wider">
                             {formatTime(item.completedAt || item.createdAt)}
                         </span>
                     </div>
                     {item.error && (
-                        <p className="text-[10px] font-mono text-red-400/70 mt-1 line-clamp-2">
+                        <p className="text-micro font-mono text-red-400/70 mt-1 line-clamp-2">
                             {item.error}
                         </p>
                     )}

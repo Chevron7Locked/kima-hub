@@ -25,7 +25,7 @@ export function HomeHero() {
                 {/* Title */}
                 <div className="flex items-baseline justify-between flex-wrap gap-4">
                     <div>
-                        <h1 className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tighter text-white leading-none mb-3">
+                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-3">
                             {line1}<br />
                             <span className="text-brand">{line2}</span>
                         </h1>

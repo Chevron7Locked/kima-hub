@@ -80,7 +80,7 @@ export function AudiobookCard({
 
                         {/* Series badge */}
                         {seriesBadge && (
-                            <div className="absolute top-2 right-2 bg-[#f59e0b] text-black rounded px-2 py-0.5 text-[10px] font-black uppercase tracking-wider shadow-lg">
+                            <div className="absolute top-2 right-2 bg-[#f59e0b] text-black rounded px-2 py-0.5 text-micro font-bold uppercase tracking-wider shadow-lg">
                                 {seriesBadge}
                             </div>
                         )}
@@ -91,10 +91,10 @@ export function AudiobookCard({
                 </div>
 
                 <div className="mt-2.5 px-0.5 h-14 flex flex-col justify-start">
-                    <h3 className="text-sm font-black text-white line-clamp-2 leading-tight tracking-tight">
+                    <h3 className="text-sm font-bold text-white line-clamp-2 leading-tight tracking-tight">
                         {title}
                     </h3>
-                    <p className="text-[11px] font-mono text-white/40 line-clamp-1 mt-0.5 uppercase tracking-wider">
+                    <p className="text-micro font-mono text-white/40 line-clamp-1 mt-0.5 uppercase tracking-wider">
                         {author}
                     </p>
                 </div>

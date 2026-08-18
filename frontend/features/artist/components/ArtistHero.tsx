@@ -103,7 +103,7 @@ export function ArtistHero({
                             Artist
                         </p>
                         <div className="flex items-center gap-3 group mb-2">
-                            <h1 className="text-2xl md:text-4xl lg:text-5xl font-black tracking-tighter text-white leading-tight line-clamp-2">
+                            <h1 className="text-2xl md:text-4xl lg:text-5xl font-bold tracking-tight text-white leading-tight line-clamp-2">
                                 {displayData.name}
                             </h1>
                             {displayData.hasUserOverrides && (

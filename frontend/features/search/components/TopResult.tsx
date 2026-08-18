@@ -79,7 +79,7 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
                                 {isLibrary ? "Your Library" : "Discover"}
                             </span>
                         </div>
-                        <h3 className="text-4xl font-black text-white mb-2 leading-tight truncate group-hover:text-[#eab308] transition-colors duration-300">
+                        <h3 className="text-4xl font-bold text-white mb-2 leading-tight truncate group-hover:text-[#eab308] transition-colors duration-300">
                             {name}
                         </h3>
                         <div className="flex items-center gap-2 text-gray-400 group-hover:text-gray-300 transition-colors">

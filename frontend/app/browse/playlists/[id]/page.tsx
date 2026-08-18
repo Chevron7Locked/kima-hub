@@ -220,7 +220,7 @@ export default function DeezerPlaylistDetailPage() {
                         </button>
                         <div className="flex flex-col items-center justify-center py-20 text-center">
                             <Music2 className="w-12 h-12 text-white/10 mb-4" />
-                            <h3 className="text-lg font-black text-white mb-2 tracking-tight">
+                            <h3 className="text-lg font-bold text-white mb-2 tracking-tight">
                                 Playlist not found
                             </h3>
                             <p className="text-xs font-mono text-white/40 mb-6 max-w-sm uppercase tracking-wider">
@@ -228,7 +228,7 @@ export default function DeezerPlaylistDetailPage() {
                             </p>
                             <button
                                 onClick={() => router.push("/browse/playlists")}
-                                className="px-6 py-2.5 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] text-white text-xs font-black uppercase tracking-wider transition-all"
+                                className="px-6 py-2.5 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] text-white text-xs font-bold uppercase tracking-wider transition-all"
                             >
                                 Browse playlists
                             </button>
@@ -300,7 +300,7 @@ export default function DeezerPlaylistDetailPage() {
 
                             {/* Info */}
                             <div className="flex-1 min-w-0 pb-1">
-                                <h1 className="text-2xl md:text-4xl lg:text-5xl font-black text-white leading-tight line-clamp-2 mb-2 tracking-tighter">
+                                <h1 className="text-2xl md:text-4xl lg:text-5xl font-bold text-white leading-tight line-clamp-2 mb-2 tracking-tight">
                                     {playlist.title}
                                 </h1>
                                 {playlist.description && (
@@ -309,7 +309,7 @@ export default function DeezerPlaylistDetailPage() {
                                     </p>
                                 )}
                                 <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-white/50 uppercase tracking-wider">
-                                    <span className="font-black text-white normal-case tracking-tight text-sm">
+                                    <span className="font-bold text-white normal-case tracking-tight text-sm">
                                         {playlist.creator}
                                     </span>
                                     <span className="text-white/20">|</span>
@@ -334,7 +334,7 @@ export default function DeezerPlaylistDetailPage() {
                             <button
                                 onClick={handleImport}
                                 disabled={isImporting}
-                                className="h-10 px-5 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] transition-all flex items-center gap-2 font-black text-sm text-white uppercase tracking-wider disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+                                className="h-10 px-5 rounded-lg bg-[#a855f7] hover:bg-[#9333ea] transition-all flex items-center gap-2 font-bold text-sm text-white uppercase tracking-wider disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
                             >
                                 {isImporting ? (
                                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -386,7 +386,7 @@ export default function DeezerPlaylistDetailPage() {
                         <div>
                             <div className="flex items-center gap-3 mb-6">
                                 <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full shrink-0" />
-                                <h2 className="text-2xl font-black tracking-tighter uppercase">Tracks</h2>
+                                <h2 className="text-2xl font-bold tracking-tight uppercase">Tracks</h2>
                                 <span className="text-xs font-mono text-[#a855f7]">
                                     {playlist.trackCount}
                                 </span>
@@ -394,7 +394,7 @@ export default function DeezerPlaylistDetailPage() {
                             </div>
 
                             {/* Table Header */}
-                            <div className="hidden md:grid grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-3 py-2 text-[10px] font-mono text-white/30 uppercase tracking-wider border-b border-white/10 mb-1">
+                            <div className="hidden md:grid grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-3 py-2 text-micro font-mono text-white/30 uppercase tracking-wider border-b border-white/10 mb-1">
                                 <span className="text-center">#</span>
                                 <span>Title</span>
                                 <span>Album</span>
@@ -465,12 +465,12 @@ export default function DeezerPlaylistDetailPage() {
                                                 </div>
                                                 <div className="min-w-0">
                                                     <p className={cn(
-                                                        "text-sm font-black truncate tracking-tight",
+                                                        "text-sm font-bold truncate tracking-tight",
                                                         isCurrentlyPlaying ? "text-[#a855f7]" : "text-white"
                                                     )}>
                                                         {track.title}
                                                     </p>
-                                                    <p className="text-[10px] font-mono text-white/40 truncate uppercase tracking-wider">
+                                                    <p className="text-micro font-mono text-white/40 truncate uppercase tracking-wider">
                                                         {track.artist}
                                                     </p>
                                                 </div>
@@ -483,7 +483,7 @@ export default function DeezerPlaylistDetailPage() {
 
                                             {/* Duration */}
                                             <div className="flex items-center justify-end">
-                                                <span className="text-[10px] font-mono text-white/30 uppercase tracking-wider">
+                                                <span className="text-micro font-mono text-white/30 uppercase tracking-wider">
                                                     {formatTime(Math.round(track.durationMs / 1000))}
                                                 </span>
                                             </div>
@@ -495,7 +495,7 @@ export default function DeezerPlaylistDetailPage() {
                     ) : (
                         <div className="flex flex-col items-center justify-center py-24 text-center">
                             <Music2 className="w-12 h-12 text-white/10 mb-4" />
-                            <h3 className="text-lg font-black text-white mb-2 tracking-tight">
+                            <h3 className="text-lg font-bold text-white mb-2 tracking-tight">
                                 No tracks found
                             </h3>
                             <p className="text-xs font-mono text-white/40 uppercase tracking-wider">
@@ -508,7 +508,7 @@ export default function DeezerPlaylistDetailPage() {
 
             {/* Preview indicator */}
             {playingTrackId && (
-                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 bg-[#a855f7] rounded-lg text-white text-xs font-black uppercase tracking-wider shadow-lg shadow-[#a855f7]/20 flex items-center gap-2 z-[55]">
+                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 bg-[#a855f7] rounded-lg text-white text-xs font-bold uppercase tracking-wider shadow-lg shadow-[#a855f7]/20 flex items-center gap-2 z-[55]">
                     <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                     Playing 30s preview
                 </div>

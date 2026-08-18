@@ -163,12 +163,12 @@ const TrackRow = memo(
                             {track.displayTitle ?? track.title}
                         </span>
                         {isMissingTrack && (
-                            <span className="shrink-0 text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/30 font-medium">
+                            <span className="shrink-0 text-micro bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/30 font-medium">
                                 MISSING
                             </span>
                         )}
                         {isPreviewOnly && (
-                            <span className="shrink-0 text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30 font-medium">
+                            <span className="shrink-0 text-micro bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30 font-medium">
                                 PREVIEW
                             </span>
                         )}

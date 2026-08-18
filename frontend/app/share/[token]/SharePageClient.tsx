@@ -254,7 +254,7 @@ export default function SharePageClient() {
             <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3">
                     <div className="w-8 h-8 border-2 border-brand/30 border-t-[#fca200] rounded-full animate-spin" />
-                    <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest">
+                    <p className="text-micro font-mono text-white/30 uppercase tracking-widest">
                         Loading
                     </p>
                 </div>
@@ -357,7 +357,7 @@ export default function SharePageClient() {
                                 />
                             </div>
 
-                            <div className="flex justify-between text-[10px] font-mono text-white/20 mb-5 tabular-nums">
+                            <div className="flex justify-between text-micro font-mono text-white/20 mb-5 tabular-nums">
                                 <span>{formatTime(progress)}</span>
                                 <span>{formatTime(duration)}</span>
                             </div>
@@ -424,7 +424,7 @@ export default function SharePageClient() {
 
                             {/* Now playing indicator */}
                             {currentTrack && tracks.length > 1 && (
-                                <p className="text-[10px] text-white/25 text-center mt-3 truncate">
+                                <p className="text-micro text-white/25 text-center mt-3 truncate">
                                     {currentTrack.title}
                                 </p>
                             )}
@@ -465,7 +465,7 @@ export default function SharePageClient() {
                                                     <span className="w-[2px] h-2 bg-brand rounded-full animate-pulse [animation-delay:300ms]" />
                                                 </div>
                                             ) : (
-                                                <span className={`text-[11px] font-mono ${
+                                                <span className={`text-micro font-mono ${
                                                     isActive ? "text-brand" : "text-white/15"
                                                 }`}>
                                                     {trackLabel}
@@ -492,13 +492,13 @@ export default function SharePageClient() {
                                                 {track.title}
                                             </p>
                                             {track.album?.artist?.name && (
-                                                <p className="text-[11px] text-white/25 truncate">
+                                                <p className="text-micro text-white/25 truncate">
                                                     {track.album.artist.name}
                                                 </p>
                                             )}
                                         </div>
 
-                                        <span className="text-[11px] font-mono text-white/15 flex-shrink-0 tabular-nums">
+                                        <span className="text-micro font-mono text-white/15 flex-shrink-0 tabular-nums">
                                             {track.duration ? formatTime(track.duration) : ""}
                                         </span>
                                     </button>
@@ -512,7 +512,7 @@ export default function SharePageClient() {
             {/* Footer */}
             <div className="px-4 py-6">
                 <div className="max-w-lg mx-auto flex items-center justify-center gap-3">
-                    <span className="text-[10px] font-mono text-white/10 uppercase tracking-widest">
+                    <span className="text-micro font-mono text-white/10 uppercase tracking-widest">
                         Powered by Kima
                     </span>
                     <span className="text-white/[0.06]">|</span>
@@ -520,7 +520,7 @@ export default function SharePageClient() {
                         href="https://github.com/Chevron7Locked/kima-hub"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-[10px] font-mono text-white/10 hover:text-white/25 uppercase tracking-widest transition-colors"
+                        className="flex items-center gap-1 text-micro font-mono text-white/10 hover:text-white/25 uppercase tracking-widest transition-colors"
                     >
                         <Github className="w-3 h-3" />
                         GitHub

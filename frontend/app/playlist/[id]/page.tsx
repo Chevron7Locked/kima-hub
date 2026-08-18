@@ -556,7 +556,7 @@ export default function PlaylistDetailPage() {
                                 <p className="text-sm font-medium truncate text-white/40">
                                     {pending.title}
                                 </p>
-                                <p className="text-[10px] font-mono text-white/20 truncate uppercase tracking-wider">
+                                <p className="text-micro font-mono text-white/20 truncate uppercase tracking-wider">
                                     {pending.artist}
                                 </p>
                             </div>
@@ -568,7 +568,7 @@ export default function PlaylistDetailPage() {
 
                         <div className="flex items-center justify-end gap-1">
                             <span className={cn(
-                                "text-[10px] font-mono mr-2 hidden sm:inline uppercase tracking-wider",
+                                "text-micro font-mono mr-2 hidden sm:inline uppercase tracking-wider",
                                 isMissing ? "text-amber-400" : "text-red-400"
                             )}>
                                 {isMissing ? "Missing from disk" : "Failed"}
@@ -648,7 +648,7 @@ export default function PlaylistDetailPage() {
                                 className={cn(
                                     "text-xs font-mono group-hover:hidden",
                                     isCurrentlyPlaying
-                                        ? "text-brand font-black"
+                                        ? "text-brand font-bold"
                                         : "text-white/30"
                                 )}
                             >
@@ -686,7 +686,7 @@ export default function PlaylistDetailPage() {
                         <div className="min-w-0">
                             <p
                                 className={cn(
-                                    "text-sm font-black truncate tracking-tight",
+                                    "text-sm font-bold truncate tracking-tight",
                                     isCurrentlyPlaying
                                         ? "text-brand"
                                         : "text-white"
@@ -701,7 +701,7 @@ export default function PlaylistDetailPage() {
                                     trackFormat,
                                 )}
                             </p>
-                            <p className="text-[10px] font-mono text-white/40 truncate uppercase tracking-wider">
+                            <p className="text-micro font-mono text-white/40 truncate uppercase tracking-wider">
                                 {playlistItem.track.album.artist.name}
                             </p>
                         </div>
@@ -724,7 +724,7 @@ export default function PlaylistDetailPage() {
                         >
                             <ListPlus className="w-4 h-4" />
                         </button>
-                        <span className="text-[10px] font-mono text-white/30 w-12 text-right uppercase tracking-wider">
+                        <span className="text-micro font-mono text-white/30 w-12 text-right uppercase tracking-wider">
                             {formatTime(playlistItem.track.duration)}
                         </span>
                         {playlist?.isOwner && (
@@ -888,11 +888,11 @@ export default function PlaylistDetailPage() {
                                             }
                                         }}
                                         autoFocus
-                                        className="text-2xl md:text-4xl lg:text-5xl font-black text-white leading-tight tracking-tighter bg-transparent border-b border-white/30 outline-none w-full"
+                                        className="text-2xl md:text-4xl lg:text-5xl font-bold text-white leading-tight tracking-tight bg-transparent border-b border-white/30 outline-none w-full"
                                     />
                                 ) : (
                                     <h1
-                                        className={`text-2xl md:text-4xl lg:text-5xl font-black text-white leading-tight line-clamp-2 mb-2 tracking-tighter ${playlist.isOwner ? "cursor-text hover:underline hover:decoration-white/20 decoration-2 underline-offset-4" : ""}`}
+                                        className={`text-2xl md:text-4xl lg:text-5xl font-bold text-white leading-tight line-clamp-2 mb-2 tracking-tight ${playlist.isOwner ? "cursor-text hover:underline hover:decoration-white/20 decoration-2 underline-offset-4" : ""}`}
                                         onClick={() => {
                                             if (playlist.isOwner) {
                                                 setEditName(playlist.name);
@@ -907,7 +907,7 @@ export default function PlaylistDetailPage() {
                                 <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-white/50 uppercase tracking-wider">
                                     {isShared && playlist.user?.username && (
                                         <>
-                                            <span className="font-black text-white normal-case tracking-tight text-sm">
+                                            <span className="font-bold text-white normal-case tracking-tight text-sm">
                                                 {playlist.user.username}
                                             </span>
                                             <span className="text-white/20">|</span>
@@ -1048,7 +1048,7 @@ export default function PlaylistDetailPage() {
                                                 toast.error("Failed to revoke share link");
                                             }
                                         }}
-                                        className="text-[10px] font-mono text-white/25 hover:text-red-400/70 transition-colors mt-1"
+                                        className="text-micro font-mono text-white/25 hover:text-red-400/70 transition-colors mt-1"
                                     >
                                         Revoke link
                                     </button>
@@ -1142,7 +1142,7 @@ export default function PlaylistDetailPage() {
                             {/* Section header */}
                             <div className="flex items-center gap-3 mb-6">
                                 <span className="w-1 h-8 bg-gradient-to-b from-brand to-[#f97316] rounded-full shrink-0" />
-                                <h2 className="text-2xl font-black tracking-tighter uppercase">Tracks</h2>
+                                <h2 className="text-2xl font-bold tracking-tight uppercase">Tracks</h2>
                                 <span className="text-xs font-mono text-brand">
                                     {playlist.items?.length || 0}
                                 </span>
@@ -1150,7 +1150,7 @@ export default function PlaylistDetailPage() {
                             </div>
 
                             {/* Table Header */}
-                            <div className="hidden md:grid grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 text-[10px] font-mono text-white/30 uppercase tracking-wider border-b border-white/10 mb-2">
+                            <div className="hidden md:grid grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 text-micro font-mono text-white/30 uppercase tracking-wider border-b border-white/10 mb-2">
                                 <span className="text-center">#</span>
                                 <span>Title</span>
                                 <span>Album</span>
@@ -1199,7 +1199,7 @@ export default function PlaylistDetailPage() {
                                     <div className="w-16 h-16 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center mb-6">
                                         <ListMusic className="w-8 h-8 text-white/10" />
                                     </div>
-                                    <h3 className="text-2xl font-black tracking-tighter text-white mb-2 uppercase">
+                                    <h3 className="text-2xl font-bold tracking-tight text-white mb-2 uppercase">
                                         No tracks yet
                                     </h3>
                                     <p className="text-xs font-mono text-white/30 uppercase tracking-wider">

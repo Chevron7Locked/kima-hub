@@ -527,7 +527,7 @@ export function MiniPlayer() {
                             title="Rewind 30 seconds"
                         >
                             <RotateCcw className="w-3.5 h-3.5" />
-                            <span className="absolute text-[8px] font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                            <span className="absolute text-micro font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                                 30
                             </span>
                         </button>
@@ -610,7 +610,7 @@ export function MiniPlayer() {
                             title="Forward 30 seconds"
                         >
                             <RotateCw className="w-3.5 h-3.5" />
-                            <span className="absolute text-[8px] font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                            <span className="absolute text-micro font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                                 30
                             </span>
                         </button>

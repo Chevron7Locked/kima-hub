@@ -103,7 +103,7 @@ export default function AudiobookDetailPage() {
                             <section>
                                 <div className="flex items-center gap-3 mb-4">
                                     <span className="w-1 h-6 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full shrink-0" />
-                                    <h2 className="text-xl font-black tracking-tighter uppercase">About</h2>
+                                    <h2 className="text-xl font-bold tracking-tight uppercase">About</h2>
                                     <span className="flex-1 border-t border-white/10" />
                                 </div>
                                 <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[var(--bg-primary)] p-5">
@@ -124,11 +124,11 @@ export default function AudiobookDetailPage() {
                             <section>
                                 <div className="flex items-center gap-3 mb-4">
                                     <span className="w-1 h-6 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full shrink-0" />
-                                    <h2 className="text-xl font-black tracking-tighter uppercase">Series</h2>
+                                    <h2 className="text-xl font-bold tracking-tight uppercase">Series</h2>
                                     <span className="flex-1 border-t border-white/10" />
                                 </div>
                                 <div className="flex items-center gap-3 text-sm">
-                                    <span className="text-[#f59e0b] font-black tracking-tight">
+                                    <span className="text-[#f59e0b] font-bold tracking-tight">
                                         {audiobook.series.name}
                                     </span>
                                     <span className="text-white/20">|</span>
@@ -142,7 +142,7 @@ export default function AudiobookDetailPage() {
 
                     {/* Playback hint */}
                     <div>
-                        <p className="text-[10px] font-mono text-white/20 uppercase tracking-wider pt-4">
+                        <p className="text-micro font-mono text-white/20 uppercase tracking-wider pt-4">
                             Use the player controls in the bottom bar for playback speed, seeking, and volume.
                         </p>
                     </div>

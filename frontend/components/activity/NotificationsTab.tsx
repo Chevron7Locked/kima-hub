@@ -202,13 +202,13 @@ export function NotificationsTab() {
             {/* Header with clear all - monospace terminal style */}
             {notifications.length > 0 && (
                 <div className="flex items-center justify-between px-3 py-2 border-b-2 border-white/10">
-                    <span className="text-[10px] font-mono font-bold text-gray-600 uppercase tracking-wider">
+                    <span className="text-micro font-mono font-bold text-gray-600 uppercase tracking-wider">
                         {String(notifications.length).padStart(2, "0")} ITEM
                         {notifications.length !== 1 ? "S" : ""}
                     </span>
                     <button
                         onClick={handleClearAll}
-                        className="text-[10px] font-mono font-bold text-gray-600 hover:text-white uppercase tracking-wider transition-colors"
+                        className="text-micro font-mono font-bold text-gray-600 hover:text-white uppercase tracking-wider transition-colors"
                     >
                         CLEAR
                     </button>
@@ -232,7 +232,7 @@ export function NotificationsTab() {
                             <div className="flex items-start gap-3">
                                 {/* Index number */}
                                 <div className="flex-shrink-0 w-6 mt-0.5">
-                                    <span className="text-[10px] font-mono font-bold text-gray-700">
+                                    <span className="text-micro font-mono font-bold text-gray-700">
                                         {String(index + 1).padStart(2, "0")}
                                     </span>
                                 </div>
@@ -247,7 +247,7 @@ export function NotificationsTab() {
                                     <div className="flex items-center gap-2 mb-1">
                                         <p
                                             className={cn(
-                                                "text-xs font-black tracking-tight truncate uppercase",
+                                                "text-xs font-bold tracking-tight truncate uppercase",
                                                 notification.read
                                                     ? "text-gray-500"
                                                     : "text-white"
@@ -257,18 +257,18 @@ export function NotificationsTab() {
                                         </p>
                                     </div>
                                     {notification.message && (
-                                        <p className="text-[10px] text-gray-600 mt-0.5 line-clamp-2 font-mono">
+                                        <p className="text-micro text-gray-600 mt-0.5 line-clamp-2 font-mono">
                                             {notification.message}
                                         </p>
                                     )}
                                     <div className="flex items-center gap-2 mt-1.5">
-                                        <span className="text-[9px] font-mono text-gray-700 uppercase tracking-wider">
+                                        <span className="text-micro font-mono text-gray-700 uppercase tracking-wider">
                                             {formatTime(notification.createdAt)}
                                         </span>
                                         {link && (
                                             <Link
                                                 href={link}
-                                                className="text-[9px] font-mono font-bold text-[#eab308] hover:underline flex items-center gap-1 uppercase tracking-wider"
+                                                className="text-micro font-mono font-bold text-[#eab308] hover:underline flex items-center gap-1 uppercase tracking-wider"
                                             >
                                                 VIEW
                                                 <ExternalLink className="w-2.5 h-2.5" />

@@ -182,7 +182,7 @@ export default function DeviceLinkPage() {
             <div className="relative max-w-4xl mx-auto px-6 md:px-8 py-8">
                 {/* Title */}
                 <div className="mb-8">
-                    <h1 className="text-3xl md:text-4xl font-black text-white mb-2">
+                    <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-2">
                         Link Mobile Device
                     </h1>
                     <p className="text-gray-400">

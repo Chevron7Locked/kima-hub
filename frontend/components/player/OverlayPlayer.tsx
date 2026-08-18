@@ -273,7 +273,7 @@ export function OverlayPlayer() {
                                 title="Rewind 30 seconds"
                             >
                                 <RotateCcw className="w-7 h-7" />
-                                <span className="absolute text-[9px] font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                                <span className="absolute text-micro font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                                     30
                                 </span>
                             </button>
@@ -344,7 +344,7 @@ export function OverlayPlayer() {
                                 title="Forward 30 seconds"
                             >
                                 <RotateCw className="w-7 h-7" />
-                                <span className="absolute text-[9px] font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                                <span className="absolute text-micro font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                                     30
                                 </span>
                             </button>
