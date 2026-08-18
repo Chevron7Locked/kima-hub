@@ -312,7 +312,7 @@ export function Sidebar() {
                                 {/* Label */}
                                 <span
                                     className={cn(
-                                        "font-bold text-sm uppercase tracking-tight",
+                                        "font-bold text-sm tracking-tight",
                                         isActive ? "text-white" : (
                                             "group-hover:text-white"
                                         ),
