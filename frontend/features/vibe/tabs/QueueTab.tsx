@@ -41,10 +41,10 @@ export function QueueTab() {
             {/* Operation header */}
             {opStyle && (
                 <div
-                    className="bg-white/5 border-l-2 px-3 py-2 text-xs text-white/70 shrink-0"
+                    className="bg-white/5 border-l-2 px-3 py-2 text-xs text-[var(--text-secondary)] shrink-0"
                     style={{ borderColor: opStyle.borderColor }}
                 >
-                    <span className="font-medium text-white/90">{opStyle.label}</span>
+                    <span className="font-medium text-[var(--text-primary)]">{opStyle.label}</span>
                     {" -- "}
                     {trackCount} track{trackCount !== 1 ? "s" : ""}
                 </div>
@@ -74,16 +74,16 @@ export function QueueTab() {
                     </div>
                     <div className="flex-1 min-w-0">
                         <p className="text-sm text-white truncate">{currentTrack.title}</p>
-                        <p className="text-xs text-white/40 truncate">
+                        <p className="text-xs text-[var(--text-muted)] truncate">
                             {currentTrack.artist?.name}
                         </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                         <div className="w-2 h-2 rounded-full bg-[#1db954] animate-pulse" />
                         {isPlaying ? (
-                            <Pause className="w-3.5 h-3.5 text-white/40" />
+                            <Pause className="w-3.5 h-3.5 text-[var(--text-muted)]" />
                         ) : (
-                            <Play className="w-3.5 h-3.5 text-white/40" />
+                            <Play className="w-3.5 h-3.5 text-[var(--text-muted)]" />
                         )}
                     </div>
                 </button>
@@ -93,7 +93,7 @@ export function QueueTab() {
             <div className="flex-1 overflow-y-auto">
                 {queue.length === 0 && (
                     <div className="flex items-center justify-center py-12 text-center">
-                        <p className="text-sm text-white/30">Queue is empty</p>
+                        <p className="text-sm text-[var(--text-muted)]">Queue is empty</p>
                     </div>
                 )}
                 {queue.map((track, index) => {
@@ -128,12 +128,12 @@ export function QueueTab() {
                                 )}
                             </div>
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm text-white/90 truncate">{track.title}</p>
-                                <p className="text-xs text-white/40 truncate">
+                                <p className="text-sm text-[var(--text-primary)] truncate">{track.title}</p>
+                                <p className="text-xs text-[var(--text-muted)] truncate">
                                     {track.artist?.name}
                                 </p>
                             </div>
-                            <span className="text-xs text-white/25 tabular-nums shrink-0">
+                            <span className="text-xs text-[var(--text-muted)] tabular-nums shrink-0">
                                 {formatTime(track.duration)}
                             </span>
                         </button>

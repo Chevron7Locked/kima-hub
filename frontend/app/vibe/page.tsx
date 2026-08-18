@@ -42,11 +42,11 @@ class VibeMapErrorBoundary extends React.Component<
             return (
                 <div className="w-full h-full vibe-map-bg flex items-center justify-center">
                     <div className="text-center">
-                        <p className="text-white/40 text-sm">Map rendering failed</p>
-                        <p className="text-white/20 text-xs mt-1">{this.state.error}</p>
+                        <p className="text-[var(--text-muted)] text-sm">Map rendering failed</p>
+                        <p className="text-[var(--text-muted)] text-xs mt-1">{this.state.error}</p>
                         <button
                             onClick={() => this.setState({ hasError: false, error: null })}
-                            className="mt-3 px-4 py-1.5 bg-white/10 hover:bg-white/15 rounded text-xs text-white/60 hover:text-white"
+                            className="mt-3 px-4 py-1.5 bg-white/10 hover:bg-white/15 rounded text-xs text-[var(--text-secondary)] hover:text-white"
                         >
                             Retry
                         </button>
@@ -286,7 +286,7 @@ export default function VibePage() {
             <div className="w-full h-full vibe-map-bg flex items-center justify-center">
                 <div className="text-center">
                     <Loader2 className="w-6 h-6 text-purple-500 animate-spin mx-auto mb-3 opacity-60" />
-                    <p className="text-white/40 text-sm tracking-wide">Computing music map</p>
+                    <p className="text-[var(--text-muted)] text-sm tracking-wide">Computing music map</p>
                 </div>
             </div>
         );
@@ -296,11 +296,11 @@ export default function VibePage() {
         return (
             <div className="w-full h-full vibe-map-bg flex items-center justify-center">
                 <div className="text-center">
-                    <p className="text-white/40 text-sm">Failed to load music map</p>
-                    <p className="text-white/20 text-xs mt-1">{error instanceof Error ? error.message : "Unknown error"}</p>
+                    <p className="text-[var(--text-muted)] text-sm">Failed to load music map</p>
+                    <p className="text-[var(--text-muted)] text-xs mt-1">{error instanceof Error ? error.message : "Unknown error"}</p>
                     <button
                         onClick={() => refetch()}
-                        className="mt-3 px-4 py-1.5 bg-white/10 hover:bg-white/15 rounded text-xs text-white/60 hover:text-white"
+                        className="mt-3 px-4 py-1.5 bg-white/10 hover:bg-white/15 rounded text-xs text-[var(--text-secondary)] hover:text-white"
                     >
                         Retry
                     </button>
@@ -313,8 +313,8 @@ export default function VibePage() {
         return (
             <div className="w-full h-full vibe-map-bg flex items-center justify-center">
                 <div className="text-center">
-                    <p className="text-white/40 text-sm">No tracks with vibe analysis yet</p>
-                    <p className="text-white/20 text-xs mt-1">Run enrichment to generate embeddings</p>
+                    <p className="text-[var(--text-muted)] text-sm">No tracks with vibe analysis yet</p>
+                    <p className="text-[var(--text-muted)] text-xs mt-1">Run enrichment to generate embeddings</p>
                 </div>
             </div>
         );
@@ -356,12 +356,12 @@ export default function VibePage() {
                             />
                             {/* Desktop/Galaxy song-path banner -- desktop only; mobile gets the sheet hint */}
                             {driftSourceId && !isMobile && !isTablet && (
-                                <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 bg-black/80 text-white/70 px-4 py-2 rounded-lg text-sm backdrop-blur-sm border border-[var(--color-brand)]/20 flex items-center gap-3">
+                                <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 bg-black/80 text-[var(--text-secondary)] px-4 py-2 rounded-lg text-sm backdrop-blur-sm border border-[var(--color-brand)]/20 flex items-center gap-3">
                                     <span className="w-2 h-2 rounded-full bg-[var(--color-brand)]/60 animate-pulse" />
                                     Click destination to begin song path
                                     <button
                                         onClick={() => setDriftSourceId(null)}
-                                        className="text-white/30 hover:text-white ml-1 text-xs"
+                                        className="text-[var(--text-muted)] hover:text-white ml-1 text-xs"
                                     >
                                         Cancel
                                     </button>
@@ -373,12 +373,12 @@ export default function VibePage() {
 
                 {/* Desktop map-view song-path banner (galaxy view has its own inline) */}
                 {driftSourceId && effectiveView === "map" && !isMobile && !isTablet && (
-                    <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 bg-black/80 text-white/70 px-4 py-2 rounded-lg text-sm backdrop-blur-sm border border-[var(--color-brand)]/20 flex items-center gap-3">
+                    <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 bg-black/80 text-[var(--text-secondary)] px-4 py-2 rounded-lg text-sm backdrop-blur-sm border border-[var(--color-brand)]/20 flex items-center gap-3">
                         <span className="w-2 h-2 rounded-full bg-[var(--color-brand)]/60 animate-pulse" />
                         Click destination to begin song path
                         <button
                             onClick={() => setDriftSourceId(null)}
-                            className="text-white/30 hover:text-white ml-1 text-xs"
+                            className="text-[var(--text-muted)] hover:text-white ml-1 text-xs"
                         >
                             Cancel
                         </button>
@@ -399,8 +399,8 @@ export default function VibePage() {
                             onClick={() => handleViewChange("map")}
                             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                                 effectiveView === "map"
-                                    ? "bg-white/10 text-white/70"
-                                    : "text-white/30 hover:text-white/50"
+                                    ? "bg-white/10 text-[var(--text-secondary)]"
+                                    : "text-[var(--text-muted)] hover:text-white/50"
                             }`}
                         >
                             Map
@@ -410,8 +410,8 @@ export default function VibePage() {
                                 onClick={() => handleViewChange("galaxy")}
                                 className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                                     effectiveView === "galaxy"
-                                        ? "bg-white/10 text-white/70"
-                                        : "text-white/30 hover:text-white/50"
+                                        ? "bg-white/10 text-[var(--text-secondary)]"
+                                        : "text-[var(--text-muted)] hover:text-white/50"
                                 }`}
                             >
                                 Galaxy
@@ -422,8 +422,8 @@ export default function VibePage() {
                             onClick={handleToggleLabels}
                             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                                 showLabels
-                                    ? "bg-white/10 text-white/70"
-                                    : "text-white/30 hover:text-white/50"
+                                    ? "bg-white/10 text-[var(--text-secondary)]"
+                                    : "text-[var(--text-muted)] hover:text-white/50"
                             }`}
                             title={showLabels ? "Hide labels" : "Show labels"}
                         >
@@ -446,7 +446,7 @@ export default function VibePage() {
                     />
                 )}
 
-                <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-[max(0.75rem,env(safe-area-inset-left))] z-10 text-white/15 text-micro tracking-widest uppercase font-medium">
+                <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-[max(0.75rem,env(safe-area-inset-left))] z-10 text-[var(--text-muted)] text-xs font-medium">
                     {mapData.trackCount} tracks
                 </div>
 
@@ -455,11 +455,11 @@ export default function VibePage() {
                         <div className="rounded-xl border border-white/10 bg-black/75 backdrop-blur-md px-4 py-3 flex items-start gap-3 shadow-lg">
                             <div className="flex-1 min-w-0">
                                 {!(isMobile || isTablet) && (
-                                    <p className="text-white/90 text-xs font-semibold mb-0.5 tracking-wide">
+                                    <p className="text-[var(--text-primary)] text-xs font-semibold mb-0.5 tracking-wide">
                                         This is your music, mapped by sound.
                                     </p>
                                 )}
-                                <p className="text-white/55 text-xs leading-relaxed">
+                                <p className="text-[var(--text-secondary)] text-xs leading-relaxed">
                                     {isMobile || isTablet
                                         ? "Each dot is a track -- nearby dots sound alike. Tap a dot to play it."
                                         : "Each dot is a track -- nearby dots sound alike. Click a dot to play it, or use Song Path and Blend above to discover new mixes."}
@@ -468,7 +468,7 @@ export default function VibePage() {
                             <button
                                 onClick={dismissOnboarding}
                                 aria-label="Dismiss"
-                                className="shrink-0 text-white/30 hover:text-white/70 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded"
+                                className="shrink-0 text-[var(--text-muted)] hover:text-white/70 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded"
                             >
                                 <X className="w-4 h-4" />
                             </button>

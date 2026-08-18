@@ -46,8 +46,8 @@ function RadioStationCard({
             {/* Content */}
             <div className="absolute inset-0 p-4 flex flex-col justify-between">
                 <div className="flex items-center gap-1.5">
-                    <Radio className="w-3.5 h-3.5 text-white/50" />
-                    <span className="text-micro font-mono text-white/50 uppercase tracking-wider">
+                    <Radio className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+                    <span className="text-xs text-[var(--text-secondary)]">
                         Radio
                     </span>
                 </div>
@@ -55,7 +55,7 @@ function RadioStationCard({
                     <h3 className="text-base font-bold text-white truncate tracking-tight leading-tight mb-1">
                         {station.name}
                     </h3>
-                    <p className="text-xs font-mono text-gray-500 uppercase tracking-wider truncate">
+                    <p className="text-xs tabular-nums text-[var(--text-muted)] truncate">
                         {station.description}
                     </p>
                 </div>
@@ -133,7 +133,7 @@ export default function RadioPage() {
                         {/* System status */}
                         <div className="flex items-center gap-2 mb-6">
                             <div className="w-1.5 h-1.5 bg-brand rounded-full" />
-                            <span className="text-xs font-mono text-gray-500 uppercase tracking-wider">
+                            <span className="t-eyebrow">
                                 Radio Active
                             </span>
                         </div>
@@ -144,7 +144,7 @@ export default function RadioPage() {
                                     Library<br />
                                     <span className="text-brand">Radio</span>
                                 </h1>
-                                <p className="text-sm font-mono text-gray-500">
+                                <p className="text-sm text-[var(--text-muted)]">
                                     Continuous shuffle from your personal archive
                                 </p>
                             </div>
@@ -154,10 +154,10 @@ export default function RadioPage() {
                                 {!isLoading && (
                                     <>
                                         <div className="border-2 border-white/10 bg-[var(--bg-primary)] px-4 py-3 rounded">
-                                            <span className="text-3xl font-bold font-mono text-brand">
+                                            <span className="text-3xl font-bold tabular-nums text-brand">
                                                 {STATIC_STATIONS.length + genreStations.length + decadeStations.length}
                                             </span>
-                                            <span className="text-xs font-mono text-gray-500 uppercase ml-2">
+                                            <span className="text-xs text-[var(--text-muted)] ml-2">
                                                 stations
                                             </span>
                                         </div>
@@ -175,7 +175,7 @@ export default function RadioPage() {
                         <section>
                             <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                 <span className="w-1 h-8 bg-gradient-to-b from-brand to-[#f97316] rounded-full" />
-                                <span className="uppercase tracking-tight">Quick Start</span>
+                                <span className="tracking-tight">Quick Start</span>
                                 <span className="flex-1 border-t border-white/10" />
                             </h2>
                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -195,10 +195,10 @@ export default function RadioPage() {
                             <section>
                                 <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                     <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full" />
-                                    <span className="uppercase tracking-tight">By Genre</span>
+                                    <span className="tracking-tight">By Genre</span>
                                     <span className="flex-1 border-t border-white/10" />
                                     {!isLoading && !genresError && (
-                                        <span className="text-xs font-mono text-[#a855f7]">
+                                        <span className="text-xs tabular-nums text-[#a855f7]">
                                             {genreStations.length} genres
                                         </span>
                                     )}
@@ -207,13 +207,13 @@ export default function RadioPage() {
                                     <SectionSkeleton />
                                 ) : genresError ? (
                                     <div className="flex items-center gap-3 py-4">
-                                        <p className="text-sm font-mono text-gray-400">
+                                        <p className="text-sm text-[var(--text-secondary)]">
                                             Could not load genre stations.
                                         </p>
                                         <button
                                             onClick={() => refetchGenres()}
                                             aria-label="Retry loading genre stations"
-                                            className="min-h-[44px] px-4 py-2 text-sm font-mono border border-[var(--color-brand)] text-[var(--color-brand)] rounded hover:bg-[var(--color-brand)]/10 transition-colors focus-visible:outline-2 focus-visible:outline-[var(--color-brand)]"
+                                            className="min-h-[44px] px-4 py-2 text-sm border border-[var(--color-brand)] text-[var(--color-brand)] rounded hover:bg-[var(--color-brand)]/10 transition-colors focus-visible:outline-2 focus-visible:outline-[var(--color-brand)]"
                                         >
                                             Retry
                                         </button>
@@ -238,10 +238,10 @@ export default function RadioPage() {
                             <section>
                                 <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                     <span className="w-1 h-8 bg-gradient-to-b from-[#22c55e] to-[#16a34a] rounded-full" />
-                                    <span className="uppercase tracking-tight">By Decade</span>
+                                    <span className="tracking-tight">By Decade</span>
                                     <span className="flex-1 border-t border-white/10" />
                                     {!isLoading && !decadesError && (
-                                        <span className="text-xs font-mono text-[#22c55e]">
+                                        <span className="text-xs tabular-nums text-[#22c55e]">
                                             {decadeStations.length} decades
                                         </span>
                                     )}
@@ -250,13 +250,13 @@ export default function RadioPage() {
                                     <SectionSkeleton />
                                 ) : decadesError ? (
                                     <div className="flex items-center gap-3 py-4">
-                                        <p className="text-sm font-mono text-gray-400">
+                                        <p className="text-sm text-[var(--text-secondary)]">
                                             Could not load decade stations.
                                         </p>
                                         <button
                                             onClick={() => refetchDecades()}
                                             aria-label="Retry loading decade stations"
-                                            className="min-h-[44px] px-4 py-2 text-sm font-mono border border-[var(--color-brand)] text-[var(--color-brand)] rounded hover:bg-[var(--color-brand)]/10 transition-colors focus-visible:outline-2 focus-visible:outline-[var(--color-brand)]"
+                                            className="min-h-[44px] px-4 py-2 text-sm border border-[var(--color-brand)] text-[var(--color-brand)] rounded hover:bg-[var(--color-brand)]/10 transition-colors focus-visible:outline-2 focus-visible:outline-[var(--color-brand)]"
                                         >
                                             Retry
                                         </button>
@@ -282,14 +282,14 @@ export default function RadioPage() {
                                 <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-brand to-[#f97316]" />
                                 <div className="flex items-center gap-3 mb-4 pb-3 border-b border-white/10">
                                     <div className="w-2 h-2 bg-brand" />
-                                    <span className="text-xs font-mono text-white/60 uppercase tracking-wider">
+                                    <span className="text-xs text-[var(--text-secondary)]">
                                         How It Works
                                     </span>
                                 </div>
                                 <h3 className="text-xl font-bold tracking-tight text-white mb-3">
                                     PERSONALIZED RADIO
                                 </h3>
-                                <p className="text-sm font-mono text-gray-500 leading-relaxed max-w-2xl">
+                                <p className="text-sm text-[var(--text-muted)] leading-relaxed max-w-2xl">
                                     Radio stations are generated from your personal music library. As you add more music,
                                     new genre and decade stations will automatically appear. Each station requires a minimum
                                     number of tracks to ensure a good listening experience.

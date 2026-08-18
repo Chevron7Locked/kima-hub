@@ -90,7 +90,7 @@ export default function ReleasesPage() {
 
     if (error) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-screen text-white/60">
+            <div className="flex flex-col items-center justify-center min-h-screen text-[var(--text-secondary)]">
                 <Music2 className="w-12 h-12 mb-4 opacity-40" />
                 <p>Failed to load releases</p>
                 <p className="text-sm">{error}</p>
@@ -108,14 +108,14 @@ export default function ReleasesPage() {
                 <div className="relative h-full flex flex-col justify-end p-6 md:p-8">
                     <div className="flex items-center gap-3 mb-2">
                         <Calendar className="w-6 h-6 text-amber-400" />
-                        <span className="text-amber-400 text-sm font-medium uppercase tracking-wider">
+                        <span className="text-amber-400 text-sm font-medium">
                             Release Radar
                         </span>
                     </div>
                     <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-2">
                         New & Upcoming
                     </h1>
-                    <p className="text-white/60 text-sm md:text-base max-w-xl">
+                    <p className="text-[var(--text-secondary)] text-sm md:text-base max-w-xl">
                         {data?.monitoredArtistCount || 0} monitored artists • 
                         {data?.upcoming.length || 0} upcoming • 
                         {data?.recent.length || 0} recent releases
@@ -130,7 +130,7 @@ export default function ReleasesPage() {
                         <div className="flex items-center gap-3 mb-6">
                             <Clock className="w-5 h-5 text-amber-400" />
                             <h2 className="text-xl font-semibold text-white">Coming Soon</h2>
-                            <span className="text-white/40 text-sm">({data.upcoming.length})</span>
+                            <span className="text-[var(--text-muted)] text-sm">({data.upcoming.length})</span>
                         </div>
                         
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -153,7 +153,7 @@ export default function ReleasesPage() {
                         <div className="flex items-center gap-3 mb-6">
                             <Disc className="w-5 h-5 text-emerald-400" />
                             <h2 className="text-xl font-semibold text-white">Just Dropped</h2>
-                            <span className="text-white/40 text-sm">({data.recent.length})</span>
+                            <span className="text-[var(--text-muted)] text-sm">({data.recent.length})</span>
                         </div>
                         
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -173,9 +173,9 @@ export default function ReleasesPage() {
                 {/* Empty State */}
                 {(!data?.upcoming?.length && !data?.recent?.length) && (
                     <div className="flex flex-col items-center justify-center py-20 text-center">
-                        <Calendar className="w-16 h-16 text-white/20 mb-6" />
+                        <Calendar className="w-16 h-16 text-[var(--text-muted)] mb-6" />
                         <h3 className="text-xl font-medium text-white mb-2">No releases found</h3>
-                        <p className="text-white/50 max-w-md mb-6">
+                        <p className="text-[var(--text-secondary)] max-w-md mb-6">
                             Add artists to Lidarr and enable monitoring to see their upcoming and recent releases here.
                         </p>
                         <Link
@@ -221,7 +221,7 @@ function ReleaseCard({
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center">
-                        <Disc className="w-12 h-12 text-white/20" />
+                        <Disc className="w-12 h-12 text-[var(--text-muted)]" />
                     </div>
                 )}
 
@@ -267,7 +267,7 @@ function ReleaseCard({
                 <h3 className="text-sm font-medium text-white truncate" title={release.title}>
                     {release.title}
                 </h3>
-                <p className="text-xs text-white/50 truncate" title={release.artistName}>
+                <p className="text-xs text-[var(--text-secondary)] truncate" title={release.artistName}>
                     {release.artistName}
                 </p>
                 {isUpcoming && (

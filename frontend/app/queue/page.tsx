@@ -94,7 +94,7 @@ export default function QueuePage() {
                                     Queue
                                 </h1>
                             </div>
-                            <p className="text-gray-400">
+                            <p className="text-[var(--text-secondary)]">
                                 {queue.length} track
                                 {queue.length !== 1 ? "s" : ""} in queue
                             </p>
@@ -147,7 +147,7 @@ export default function QueuePage() {
                                         />
                                     ) : (
                                         <div className="w-16 h-16 bg-[var(--bg-primary)] rounded-sm flex items-center justify-center">
-                                            <Music className="w-6 h-6 text-gray-600" />
+                                            <Music className="w-6 h-6 text-[var(--text-muted)]" />
                                         </div>
                                     )}
                                     <div className="absolute inset-0 flex items-center justify-center">
@@ -159,14 +159,14 @@ export default function QueuePage() {
                                         {currentTrack.displayTitle ??
                                             currentTrack.title}
                                     </h3>
-                                    <p className="text-sm text-gray-400 truncate">
+                                    <p className="text-sm text-[var(--text-secondary)] truncate">
                                         {currentTrack.artist?.name}
                                     </p>
-                                    <p className="text-xs text-gray-500 truncate">
+                                    <p className="text-xs text-[var(--text-muted)] truncate">
                                         {currentTrack.album?.title}
                                     </p>
                                 </div>
-                                <div className="text-sm text-gray-500">
+                                <div className="text-sm text-[var(--text-muted)]">
                                     {currentTrack.duration
                                         ? `${Math.floor(
                                               currentTrack.duration / 60
@@ -212,7 +212,7 @@ export default function QueuePage() {
                                                     />
                                                 ) : (
                                                     <div className="w-12 h-12 bg-[var(--bg-primary)] rounded-sm flex items-center justify-center">
-                                                        <Music className="w-5 h-5 text-gray-600" />
+                                                        <Music className="w-5 h-5 text-[var(--text-muted)]" />
                                                     </div>
                                                 )}
                                             </div>
@@ -223,13 +223,13 @@ export default function QueuePage() {
                                                     {track.displayTitle ??
                                                         track.title}
                                                 </h3>
-                                                <p className="text-sm text-gray-400 truncate">
+                                                <p className="text-sm text-[var(--text-secondary)] truncate">
                                                     {track.artist?.name}
                                                 </p>
                                             </div>
 
                                             {/* Duration */}
-                                            <div className="text-sm text-gray-500">
+                                            <div className="text-sm text-[var(--text-muted)]">
                                                 {track.duration
                                                     ? `${Math.floor(
                                                           track.duration / 60
@@ -329,7 +329,7 @@ export default function QueuePage() {
                                                 />
                                             ) : (
                                                 <div className="w-12 h-12 bg-[var(--bg-primary)] rounded-sm flex items-center justify-center">
-                                                    <Music className="w-5 h-5 text-gray-600" />
+                                                    <Music className="w-5 h-5 text-[var(--text-muted)]" />
                                                 </div>
                                             )}
                                         </div>
@@ -339,13 +339,13 @@ export default function QueuePage() {
                                             <h3 className="text-sm font-medium text-white truncate">
                                                 {track.title}
                                             </h3>
-                                            <p className="text-sm text-gray-400 truncate">
+                                            <p className="text-sm text-[var(--text-secondary)] truncate">
                                                 {track.artist?.name}
                                             </p>
                                         </div>
 
                                         {/* Duration */}
-                                        <div className="text-sm text-gray-500">
+                                        <div className="text-sm text-[var(--text-muted)]">
                                             {track.duration
                                                 ? `${Math.floor(
                                                       track.duration / 60

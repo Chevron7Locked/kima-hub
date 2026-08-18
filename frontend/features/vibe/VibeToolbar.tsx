@@ -36,7 +36,7 @@ export function VibeToolbar({ mode, onSearch, onPathMode, onAlchemyMode, onReset
     return (
         <div className="absolute top-[max(1rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-10 flex items-center gap-2">
             <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
                 <input
                     ref={inputRef}
                     type="text"
@@ -47,7 +47,7 @@ export function VibeToolbar({ mode, onSearch, onPathMode, onAlchemyMode, onReset
                     aria-label="Search tracks or artists"
                 />
                 {query && (
-                    <button type="button" onClick={handleClear} className="absolute right-2 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70" aria-label="Clear search">
+                    <button type="button" onClick={handleClear} className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-white/70" aria-label="Clear search">
                         <X className="w-4 h-4" />
                     </button>
                 )}
@@ -58,7 +58,7 @@ export function VibeToolbar({ mode, onSearch, onPathMode, onAlchemyMode, onReset
                 className={`p-2 rounded-lg backdrop-blur-md border text-sm flex items-center gap-1.5 transition-colors ${
                     mode === "path-picking" || mode === "path-result"
                         ? "bg-white/20 border-white/30 text-white"
-                        : "bg-white/10 border-white/10 text-white/60 hover:text-white hover:bg-white/15"
+                        : "bg-white/10 border-white/10 text-[var(--text-secondary)] hover:text-white hover:bg-white/15"
                 }`}
                 title="Song Path -- build a queue that glides from one track to another"
                 aria-label="Song Path -- build a queue that glides from one track to another"
@@ -72,7 +72,7 @@ export function VibeToolbar({ mode, onSearch, onPathMode, onAlchemyMode, onReset
                 className={`p-2 rounded-lg backdrop-blur-md border text-sm flex items-center gap-1.5 transition-colors ${
                     mode === "alchemy"
                         ? "bg-white/20 border-white/30 text-white"
-                        : "bg-white/10 border-white/10 text-white/60 hover:text-white hover:bg-white/15"
+                        : "bg-white/10 border-white/10 text-[var(--text-secondary)] hover:text-white hover:bg-white/15"
                 }`}
                 title="Blend -- combine tracks into a new playlist of similar vibes"
                 aria-label="Blend -- combine tracks into a new playlist of similar vibes"
@@ -84,7 +84,7 @@ export function VibeToolbar({ mode, onSearch, onPathMode, onAlchemyMode, onReset
             {mode !== "idle" && (
                 <button
                     onClick={onReset}
-                    className="p-2 rounded-lg bg-white/10 backdrop-blur-md border border-white/10 text-white/60 hover:text-white hover:bg-white/15 text-sm"
+                    className="p-2 rounded-lg bg-white/10 backdrop-blur-md border border-white/10 text-[var(--text-secondary)] hover:text-white hover:bg-white/15 text-sm"
                     title="Reset"
                 >
                     <X className="w-4 h-4" />

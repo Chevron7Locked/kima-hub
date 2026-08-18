@@ -170,10 +170,10 @@ export default function DiscoverWeeklyPage() {
     if (loadError) {
         return (
             <div className="flex flex-col items-center justify-center min-h-screen gap-4">
-                <p className="text-sm font-mono text-gray-500">Could not load discovery data.</p>
+                <p className="text-sm text-[var(--text-muted)]">Could not load discovery data.</p>
                 <button
                     onClick={reloadData}
-                    className="flex items-center gap-2 px-4 py-2 border border-white/10 rounded-lg text-sm font-bold uppercase tracking-wider text-white/60 hover:border-[var(--color-brand)] hover:text-white transition-all duration-300 min-h-[44px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2"
+                    className="flex items-center gap-2 px-4 py-2 border border-white/10 rounded-lg text-sm font-bold text-[var(--text-secondary)] hover:border-[var(--color-brand)] hover:text-white transition-all duration-300 min-h-[44px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2"
                 >
                     <RefreshCw className="w-4 h-4" />
                     Retry
@@ -213,9 +213,9 @@ export default function DiscoverWeeklyPage() {
                                 <section>
                                     <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-4">
                                         <span className="w-1 h-8 bg-gradient-to-b from-[#eab308] to-[#f59e0b] rounded-full" />
-                                        <span className="uppercase tracking-tight">Playlist</span>
+                                        <span className="tracking-tight">Playlist</span>
                                         <span className="flex-1 border-t border-white/10" />
-                                        <span className="text-xs font-mono text-[#a855f7]">
+                                        <span className="text-xs tabular-nums text-[#a855f7]">
                                             {playlist?.totalCount || 0} tracks
                                         </span>
                                     </h2>
@@ -252,17 +252,17 @@ export default function DiscoverWeeklyPage() {
                                     {/* Status badge */}
                                     <div className="flex items-center gap-3 mb-8 pb-4 border-b border-white/10">
                                         <div className="w-2 h-2 bg-[var(--color-brand)]" />
-                                        <span className="text-xs font-mono text-white/60 uppercase tracking-wider">
+                                        <span className="text-xs tabular-nums text-[var(--text-secondary)]">
                                             {isGenerating ? "Generating" : "Ready"}
                                         </span>
                                     </div>
 
                                     <h3 className="text-4xl md:text-5xl font-bold tracking-tight text-white mb-4 leading-none">
-                                        THIS WEEK&apos;S<br/>
-                                        <span className="text-[var(--color-brand)]">PLAYLIST</span>
+                                        This week&apos;s<br/>
+                                        <span className="text-[var(--color-brand)]">playlist</span>
                                     </h3>
 
-                                    <p className="text-sm font-mono text-gray-500 mb-6 leading-relaxed">
+                                    <p className="text-sm text-[var(--text-muted)] mb-6 leading-relaxed">
                                         Kima finds artists similar to ones you already love, picks a representative track
                                         from each, then builds your weekly playlist.
                                     </p>
@@ -270,16 +270,16 @@ export default function DiscoverWeeklyPage() {
                                     {/* What this does -- disk disclosure, visible before generating */}
                                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
-                                            <div className="text-xs font-mono text-purple-500 uppercase mb-1">Finds</div>
-                                            <div className="text-xs text-gray-400 leading-snug">Similar artists via Last.fm, grouped by similarity tier</div>
+                                            <div className="text-xs text-purple-500 mb-1">Finds</div>
+                                            <div className="text-xs text-[var(--text-secondary)] leading-snug">Similar artists via Last.fm, grouped by similarity tier</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
-                                            <div className="text-xs font-mono text-purple-500 uppercase mb-1">Downloads</div>
-                                            <div className="text-xs text-gray-400 leading-snug">Full albums to <span className="font-mono text-white/40">/music/discovery</span> on your server</div>
+                                            <div className="text-xs text-purple-500 mb-1">Downloads</div>
+                                            <div className="text-xs text-[var(--text-secondary)] leading-snug">Full albums to <span className="text-[var(--text-muted)]">/music/discovery</span> on your server</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
-                                            <div className="text-xs font-mono text-purple-500 uppercase mb-1">Cleans up</div>
-                                            <div className="text-xs text-gray-400 leading-snug">Unliked albums are removed at week&apos;s end -- liked ones stay forever</div>
+                                            <div className="text-xs text-purple-500 mb-1">Cleans up</div>
+                                            <div className="text-xs text-[var(--text-secondary)] leading-snug">Unliked albums are removed at week&apos;s end -- liked ones stay forever</div>
                                         </div>
                                     </div>
 
@@ -287,15 +287,15 @@ export default function DiscoverWeeklyPage() {
                                     <div className="grid grid-cols-3 gap-4 mb-8">
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
                                             <div className="text-2xl font-bold text-purple-500 mb-1">--</div>
-                                            <div className="text-xs font-mono text-gray-500 uppercase">Tracks</div>
+                                            <div className="text-xs text-[var(--text-muted)]">Tracks</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
                                             <div className="text-2xl font-bold text-purple-500 mb-1">--</div>
-                                            <div className="text-xs font-mono text-gray-500 uppercase">Duration</div>
+                                            <div className="text-xs text-[var(--text-muted)]">Duration</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
                                             <div className="text-2xl font-bold text-purple-500 mb-1">--</div>
-                                            <div className="text-xs font-mono text-gray-500 uppercase">Artists</div>
+                                            <div className="text-xs text-[var(--text-muted)]">Artists</div>
                                         </div>
                                     </div>
 
@@ -304,9 +304,9 @@ export default function DiscoverWeeklyPage() {
                                         disabled={isGenerating}
                                         aria-label={isGenerating ? "Playlist generation in progress" : "Build this week's playlist"}
                                         className={cn(
-                                            "w-full py-4 px-6 border-2 rounded-lg font-bold text-sm tracking-wider uppercase transition-all duration-300 min-h-[52px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2",
+                                            "w-full py-4 px-6 border-2 rounded-lg font-bold text-sm transition-all duration-300 min-h-[52px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2",
                                             isGenerating
-                                                ? "border-white/20 bg-white/5 text-white/30 cursor-not-allowed"
+                                                ? "border-white/20 bg-white/5 text-[var(--text-muted)] cursor-not-allowed"
                                                 : "border-[var(--color-brand)] bg-[var(--color-brand)] text-black hover:bg-[var(--color-brand-hover)] hover:border-[var(--color-brand-hover)] hover:scale-[1.02] hover:shadow-lg hover:shadow-[var(--color-brand)]/20"
                                         )}
                                     >

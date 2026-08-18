@@ -54,13 +54,13 @@ const MixCard = memo(
                                             key={`empty-${idx}`}
                                             className="relative bg-[#181818] flex items-center justify-center"
                                         >
-                                            <Music className="w-6 h-6 text-gray-700" />
+                                            <Music className="w-6 h-6 text-[var(--text-muted)]" />
                                         </div>
                                     ))}
                                 </div>
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center">
-                                    <Music className="w-10 h-10 text-gray-700" />
+                                    <Music className="w-10 h-10 text-[var(--text-muted)]" />
                                 </div>
                             )}
                         </div>
@@ -70,7 +70,7 @@ const MixCard = memo(
                         <h3 className="text-sm font-bold text-white truncate tracking-tight">
                             {mix.name}
                         </h3>
-                        <p className="text-xs font-mono text-gray-500 line-clamp-1 mt-0.5 uppercase tracking-wider">
+                        <p className="text-xs tabular-nums text-[var(--text-muted)] line-clamp-1 mt-0.5">
                             {mix.trackCount} tracks
                         </p>
                     </div>

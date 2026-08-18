@@ -138,7 +138,7 @@ export function SoulseekSection({ settings, onUpdate, onTest, isTesting }: Souls
                     <button
                         onClick={handleTest}
                         disabled={isTesting || !canTest}
-                        className="px-4 py-1.5 text-xs font-mono bg-white/5 border border-white/10 text-white/70 rounded-lg uppercase tracking-wider
+                        className="px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg 
                             hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                     >
                         {testStatus === "loading" ? "Connecting..." : "Test Connection"}
@@ -149,7 +149,7 @@ export function SoulseekSection({ settings, onUpdate, onTest, isTesting }: Souls
                         onClear={() => setTestStatus("idle")}
                     />
                 </div>
-                <p className="text-xs text-white/40">
+                <p className="text-xs text-[var(--text-muted)]">
                     Downloads will be saved to your Singles folder automatically
                 </p>
             </div>

@@ -24,7 +24,7 @@ export function SettingsSection({
                     <span className="flex-1 border-t border-white/10" />
                 </div>
                 {description && (
-                    <p className="text-xs font-mono text-white/40 mt-1 ml-[calc(0.25rem+0.75rem+4px)] uppercase tracking-wider">{description}</p>
+                    <p className="text-xs tabular-nums text-[var(--text-muted)] mt-1 ml-[calc(0.25rem+0.75rem+4px)]">{description}</p>
                 )}
             </div>
 

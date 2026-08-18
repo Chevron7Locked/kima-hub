@@ -148,12 +148,12 @@ export function PlaylistSelector({
                         onClick={onClose}
                         className="p-2 hover:bg-white/10 rounded-full transition-colors"
                     >
-                        <X className="w-5 h-5 text-gray-400" />
+                        <X className="w-5 h-5 text-[var(--text-secondary)]" />
                     </button>
                 </div>
 
                 {isSaving && (
-                    <div className="px-6 py-3 flex items-center gap-3 bg-black/30 border-b border-white/10 text-sm text-gray-300">
+                    <div className="px-6 py-3 flex items-center gap-3 bg-black/30 border-b border-white/10 text-sm text-[var(--text-primary)]">
                         <GradientSpinner size="sm" />
                         <span>{loadingMessage || "Adding..."}</span>
                     </div>
@@ -166,9 +166,9 @@ export function PlaylistSelector({
                         </div>
                     ) : playlists.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-12 text-center">
-                            <Music2 className="w-12 h-12 text-gray-600 mb-3" />
-                            <p className="text-gray-400">No playlists yet</p>
-                            <p className="text-gray-500 text-sm mt-1">
+                            <Music2 className="w-12 h-12 text-[var(--text-muted)] mb-3" />
+                            <p className="text-[var(--text-secondary)]">No playlists yet</p>
+                            <p className="text-[var(--text-muted)] text-sm mt-1">
                                 Create one below to get started
                             </p>
                         </div>
@@ -208,7 +208,7 @@ export function PlaylistSelector({
                                             }`}>
                                                 {playlist.name}
                                             </p>
-                                            <p className="text-xs text-gray-400 mt-1">
+                                            <p className="text-xs text-[var(--text-secondary)] mt-1">
                                                 {playlist.trackCount || 0}{" "}
                                                 {playlist.trackCount === 1
                                                     ? "track"
@@ -216,7 +216,7 @@ export function PlaylistSelector({
                                             </p>
                                         </div>
                                         {!isMulti && (
-                                            <Plus className="w-5 h-5 text-gray-400 group-hover:text-brand transition-colors ml-2 shrink-0" />
+                                            <Plus className="w-5 h-5 text-[var(--text-secondary)] group-hover:text-brand transition-colors ml-2 shrink-0" />
                                         )}
                                     </div>
                                 </button>
@@ -244,7 +244,7 @@ export function PlaylistSelector({
                 )}
 
                 <div className="p-6 border-t border-white/10 bg-[var(--bg-primary)]/50">
-                    <p className="text-sm text-gray-400 mb-3 font-medium">
+                    <p className="text-sm text-[var(--text-secondary)] mb-3 font-medium">
                         Create New Playlist
                     </p>
                     <div className="flex gap-2 mb-3">
@@ -282,7 +282,7 @@ export function PlaylistSelector({
                             <div className="w-10 h-5 bg-white/10 rounded-full peer-checked:bg-brand transition-colors" />
                             <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5" />
                         </div>
-                        <span className="text-sm text-gray-400 group-hover:text-gray-300 transition-colors">
+                        <span className="text-sm text-[var(--text-secondary)] group-hover:text-gray-300 transition-colors">
                             Share with other users
                         </span>
                     </label>

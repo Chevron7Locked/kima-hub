@@ -185,7 +185,7 @@ export default function DeviceLinkPage() {
                     <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-2">
                         Link Mobile Device
                     </h1>
-                    <p className="text-gray-400">
+                    <p className="text-[var(--text-secondary)]">
                         Scan the QR code or enter the code in the Kima app to link your device
                     </p>
                 </div>
@@ -207,7 +207,7 @@ export default function DeviceLinkPage() {
 
                         {!linkCode && !isGenerating && (
                             <div className="text-center py-8">
-                                <p className="text-gray-400 mb-4">
+                                <p className="text-[var(--text-secondary)] mb-4">
                                     Generate a one-time code to link your mobile device
                                 </p>
                                 <button
@@ -235,7 +235,7 @@ export default function DeviceLinkPage() {
                                         <h3 className="text-xl font-bold text-white mb-2">
                                             Device Linked!
                                         </h3>
-                                        <p className="text-gray-400 mb-4">
+                                        <p className="text-[var(--text-secondary)] mb-4">
                                             Your device has been successfully connected
                                         </p>
                                         <button
@@ -253,7 +253,7 @@ export default function DeviceLinkPage() {
                                         <h3 className="text-xl font-bold text-white mb-2">
                                             Code Expired
                                         </h3>
-                                        <p className="text-gray-400 mb-4">
+                                        <p className="text-[var(--text-secondary)] mb-4">
                                             Generate a new code to continue
                                         </p>
                                         <button
@@ -278,7 +278,7 @@ export default function DeviceLinkPage() {
 
                                         {/* Code Display */}
                                         <div className="mb-4" aria-live="polite">
-                                            <p className="text-gray-400 text-sm mb-2">
+                                            <p className="text-[var(--text-secondary)] text-sm mb-2">
                                                 Or enter this code manually:
                                             </p>
                                             <div className="flex items-center justify-center gap-2">
@@ -291,7 +291,7 @@ export default function DeviceLinkPage() {
                                                         "p-2 min-h-[44px] min-w-[44px] rounded-lg transition-all flex items-center justify-center",
                                                         copied
                                                             ? "bg-green-500/20 text-green-400"
-                                                            : "bg-white/10 hover:bg-white/20 text-gray-400"
+                                                            : "bg-white/10 hover:bg-white/20 text-[var(--text-secondary)]"
                                                     )}
                                                     aria-label={copied ? "Code copied" : "Copy code"}
                                                 >
@@ -305,7 +305,7 @@ export default function DeviceLinkPage() {
                                         </div>
 
                                         {/* Timer */}
-                                        <div className="flex items-center justify-center gap-2 text-gray-400">
+                                        <div className="flex items-center justify-center gap-2 text-[var(--text-secondary)]">
                                             <Clock className="w-4 h-4" />
                                             <span>
                                                 Expires in {formatTime(timeRemaining)}
@@ -328,7 +328,7 @@ export default function DeviceLinkPage() {
                                 <GradientSpinner size="sm" />
                             </div>
                         ) : devices.length === 0 ? (
-                            <div className="text-center py-8 text-gray-400">
+                            <div className="text-center py-8 text-[var(--text-secondary)]">
                                 <Smartphone className="w-12 h-12 mx-auto mb-4 opacity-50" />
                                 <p>No devices linked yet</p>
                             </div>
@@ -347,7 +347,7 @@ export default function DeviceLinkPage() {
                                                 <p className="text-white font-medium">
                                                     {device.name}
                                                 </p>
-                                                <p className="text-gray-500 text-sm">
+                                                <p className="text-[var(--text-muted)] text-sm">
                                                     Last used:{" "}
                                                     {new Date(device.lastUsed).toLocaleDateString()}
                                                 </p>
@@ -355,7 +355,7 @@ export default function DeviceLinkPage() {
                                         </div>
                                         <button
                                             onClick={() => revokeDevice(device.id)}
-                                            className="p-2 min-h-[44px] min-w-[44px] text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all flex items-center justify-center"
+                                            className="p-2 min-h-[44px] min-w-[44px] text-[var(--text-secondary)] hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all flex items-center justify-center"
                                             aria-label={`Revoke ${device.name}`}
                                         >
                                             <Trash2 className="w-4 h-4" />
@@ -372,7 +372,7 @@ export default function DeviceLinkPage() {
                     <h2 className="text-xl font-bold text-white mb-4">
                         How to Link Your Device
                     </h2>
-                    <ol className="space-y-3 text-gray-400">
+                    <ol className="space-y-3 text-[var(--text-secondary)]">
                         <li className="flex gap-3">
                             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[var(--color-brand)]/20 text-brand text-sm font-bold flex items-center justify-center">
                                 1

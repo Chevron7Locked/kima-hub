@@ -13,8 +13,8 @@ export function LibraryPodcastsGrid({ podcasts }: LibraryPodcastsGridProps) {
             {podcasts.slice(0, 6).map((podcast, index) => {
                 const subtitle =
                     podcast.episodeCount && podcast.episodeCount > 0
-                        ? `${podcast.author || "PODCAST"} • ${podcast.episodeCount} EP`
-                        : podcast.author || "PODCAST";
+                        ? `${podcast.author || "Podcast"} • ${podcast.episodeCount} ${podcast.episodeCount === 1 ? "episode" : "episodes"}`
+                        : podcast.author || "Podcast";
 
                 return (
                     <MediaCard

@@ -20,7 +20,7 @@ export function LibraryAudiobooksGrid({
                     key={audiobook.id}
                     href={`/audiobooks/${audiobook.id}`}
                     title={audiobook.title}
-                    subtitle={audiobook.author || "UNKNOWN"}
+                    subtitle={audiobook.author || "Unknown author"}
                     imageUrl={
                         audiobook.coverUrl
                             ? api.getCoverArtUrl(audiobook.coverUrl, 200)

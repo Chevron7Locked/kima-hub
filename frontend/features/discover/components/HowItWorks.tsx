@@ -9,7 +9,7 @@ export function HowItWorks() {
             <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white">
                 How It Works
             </h3>
-            <div className="space-y-3 text-sm text-gray-400">
+            <div className="space-y-3 text-sm text-[var(--text-secondary)]">
                 <div className="flex items-start gap-3">
                     <ChevronRight className="w-4 h-4 mt-0.5 text-purple-500/60 shrink-0" />
                     <p>
@@ -28,7 +28,7 @@ export function HowItWorks() {
                     <ChevronRight className="w-4 h-4 mt-0.5 text-purple-500/60 shrink-0" />
                     <p>
                         Selecting one song from an album downloads the full album
-                        to <span className="font-mono text-white/50">/music/discovery</span>
+                        to <span className="text-[var(--text-secondary)]">/music/discovery</span>
                     </p>
                 </div>
                 <div className="flex items-start gap-3">

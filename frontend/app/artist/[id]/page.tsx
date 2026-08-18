@@ -159,7 +159,7 @@ export default function ArtistPage() {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="text-center space-y-4">
-                    <div className="text-6xl text-white/20">♪</div>
+                    <div className="text-6xl text-[var(--text-muted)]">♪</div>
                     <h1 className="text-2xl font-semibold text-white">
                         Artist Not Found
                     </h1>

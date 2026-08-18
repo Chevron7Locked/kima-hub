@@ -73,7 +73,7 @@ export function SleepTimer({ size = "md" }: SleepTimerProps) {
                     "transition-all duration-200 hover:scale-110 flex items-center gap-1",
                     isActive
                         ? "text-brand hover:text-brand-hover"
-                        : "text-gray-400 hover:text-white"
+                        : "text-[var(--text-secondary)] hover:text-white"
                 )}
                 aria-label={isActive ? `Sleep timer: ${displayRemaining} remaining` : "Sleep timer"}
                 aria-expanded={isOpen}
@@ -82,7 +82,7 @@ export function SleepTimer({ size = "md" }: SleepTimerProps) {
             >
                 <Timer className={iconSize} />
                 {isActive && remainingSeconds !== null && (
-                    <span className="text-micro font-mono font-medium tabular-nums text-brand">
+                    <span className="text-micro tabular-nums font-medium tabular-nums text-brand">
                         {displayRemaining}
                     </span>
                 )}
@@ -96,7 +96,7 @@ export function SleepTimer({ size = "md" }: SleepTimerProps) {
                     className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-[var(--bg-hover)] border border-white/10 rounded-lg shadow-2xl overflow-hidden z-50"
                 >
                     <div className="px-3 py-2 border-b border-white/[0.06]">
-                        <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">Sleep Timer</span>
+                        <span className="text-xs text-[var(--text-secondary)] font-medium">Sleep Timer</span>
                     </div>
 
                     <div className="p-1.5">
@@ -104,7 +104,7 @@ export function SleepTimer({ size = "md" }: SleepTimerProps) {
                             <button
                                 key={mins}
                                 onClick={() => handlePreset(mins)}
-                                className="w-full text-left px-3 py-1.5 rounded text-sm transition-colors text-gray-300 hover:bg-white/[0.06] hover:text-white"
+                                className="w-full text-left px-3 py-1.5 rounded text-sm transition-colors text-[var(--text-primary)] hover:bg-white/[0.06] hover:text-white"
                             >
                                 {formatPreset(mins)}
                             </button>
@@ -126,7 +126,7 @@ export function SleepTimer({ size = "md" }: SleepTimerProps) {
                                 aria-label="Custom minutes"
                                 className="flex-1 bg-white/[0.06] border border-white/10 rounded px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-brand/50 w-0"
                             />
-                            <span className="text-xs text-gray-500">min</span>
+                            <span className="text-xs text-[var(--text-muted)]">min</span>
                         </div>
                     </div>
 

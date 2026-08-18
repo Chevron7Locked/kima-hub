@@ -101,24 +101,24 @@ export function DiscoverSettingsTab({
                     className="border border-white/20 p-2 hover:border-[#a855f7] hover:bg-white/5 transition-colors"
                     title="Back to activity"
                 >
-                    <ArrowLeft className="w-4 h-4 text-white/60" />
+                    <ArrowLeft className="w-4 h-4 text-[var(--text-secondary)]" />
                 </button>
-                <h3 className="text-sm font-bold uppercase tracking-wider text-white">Settings</h3>
+                <h3 className="text-sm font-bold text-white">Settings</h3>
             </div>
 
             {/* Scrollable Content */}
             <div className="flex-1 overflow-y-auto p-5 space-y-8">
                 {/* Playlist Size */}
                 <div>
-                    <label className="block text-xs font-mono text-gray-500 uppercase tracking-wider mb-4">
+                    <label className="block text-xs text-[var(--text-muted)] mb-4">
                         Playlist Size
                     </label>
                     <div className="border border-white/10 p-4 mb-3">
                         <div className="flex items-baseline justify-between">
-                            <span className="text-4xl font-bold text-[#a855f7] font-mono">
+                            <span className="text-4xl font-bold text-[#a855f7] tabular-nums">
                                 {config?.playlistSize || 10}
                             </span>
-                            <span className="text-xs font-mono text-gray-500 uppercase">
+                            <span className="text-xs text-[var(--text-muted)]">
                                 tracks
                             </span>
                         </div>
@@ -134,22 +134,22 @@ export function DiscoverSettingsTab({
                         }
                         className="w-full h-1 bg-white/10 appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#a855f7] [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-white/20 hover:[&::-webkit-slider-thumb]:bg-white"
                     />
-                    <p className="text-xs font-mono text-gray-500 mt-3">
+                    <p className="text-xs text-[var(--text-muted)] mt-3">
                         One track per album / Larger = more discovery
                     </p>
                 </div>
 
                 {/* Download Buffer */}
                 <div>
-                    <label className="block text-xs font-mono text-gray-500 uppercase tracking-wider mb-4">
+                    <label className="block text-xs text-[var(--text-muted)] mb-4">
                         Download Buffer
                     </label>
                     <div className="border border-white/10 p-4 mb-3">
                         <div className="flex items-baseline justify-between">
-                            <span className="text-4xl font-bold text-[#a855f7] font-mono">
+                            <span className="text-4xl font-bold text-[#a855f7] tabular-nums">
                                 {((config?.downloadRatio ?? 1.3) * 100 - 100).toFixed(0)}%
                             </span>
-                            <span className="text-xs font-mono text-gray-500 uppercase">
+                            <span className="text-xs text-[var(--text-muted)]">
                                 extra
                             </span>
                         </div>
@@ -165,25 +165,25 @@ export function DiscoverSettingsTab({
                         }
                         className="w-full h-1 bg-white/10 appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#a855f7] [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-white/20 hover:[&::-webkit-slider-thumb]:bg-white"
                     />
-                    <p className="text-xs font-mono text-gray-500 mt-3">
+                    <p className="text-xs text-[var(--text-muted)] mt-3">
                         Redundancy for failed downloads / Higher = more reliable
                     </p>
                 </div>
 
                 {/* Album Exclusion */}
                 <div>
-                    <label className="block text-xs font-mono text-gray-500 uppercase tracking-wider mb-4">
+                    <label className="block text-xs text-[var(--text-muted)] mb-4">
                         Album Exclusion
                     </label>
                     <div className="border border-white/10 p-4 mb-3">
                         <div className="flex items-baseline justify-between">
-                            <span className="text-4xl font-bold text-[#a855f7] font-mono">
+                            <span className="text-4xl font-bold text-[#a855f7] tabular-nums">
                                 {(config?.exclusionMonths ?? 6) === 0
                                     ? "--"
                                     : config?.exclusionMonths ?? 6}
                             </span>
                             {(config?.exclusionMonths ?? 6) !== 0 && (
-                                <span className="text-xs font-mono text-gray-500 uppercase">
+                                <span className="text-xs text-[var(--text-muted)]">
                                     months
                                 </span>
                             )}
@@ -200,23 +200,23 @@ export function DiscoverSettingsTab({
                         }
                         className="w-full h-1 bg-white/10 appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#a855f7] [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-white/20 hover:[&::-webkit-slider-thumb]:bg-white"
                     />
-                    <p className="text-xs font-mono text-gray-500 mt-3">
+                    <p className="text-xs tabular-nums text-[var(--text-muted)] mt-3">
                         Cooldown period for repeat recommendations / 0 = disabled
                     </p>
                 </div>
 
                 {/* Clear Playlist */}
                 <div className="pt-6 border-t-2 border-white/20">
-                    <label className="block text-xs font-mono text-gray-500 uppercase tracking-wider mb-4">
+                    <label className="block text-xs text-[var(--text-muted)] mb-4">
                         Danger Zone
                     </label>
-                    <p className="text-xs font-mono text-gray-500 mb-4 leading-relaxed">
+                    <p className="text-xs text-[var(--text-muted)] mb-4 leading-relaxed">
                         Remove current playlist / Liked albums → library / Others → deleted
                     </p>
                     <button
                         onClick={handleClearPlaylist}
                         disabled={isClearing}
-                        className="w-full flex items-center justify-center gap-3 px-4 py-3 border-2 border-red-500/30 hover:border-red-500 hover:bg-red-500/10 text-red-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-bold text-xs uppercase tracking-wider"
+                        className="w-full flex items-center justify-center gap-3 px-4 py-3 border-2 border-red-500/30 hover:border-red-500 hover:bg-red-500/10 text-red-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-xs"
                     >
                         {isClearing ? (
                             <>

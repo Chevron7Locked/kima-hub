@@ -185,11 +185,11 @@ export function Sidebar() {
                                 !currentAudiobook &&
                                 !currentPodcast
                             ) ?
-                                <p className="text-sm text-gray-400 font-medium">
+                                <p className="text-sm text-[var(--text-secondary)] font-medium">
                                     Stream Your Way
                                 </p>
-                            :   <div className="text-xs text-gray-400 truncate">
-                                    <span className="text-gray-500">
+                            :   <div className="text-xs text-[var(--text-secondary)] truncate">
+                                    <span className="text-[var(--text-muted)]">
                                         Listening to:{" "}
                                     </span>
                                     <span className="text-white font-medium">
@@ -245,7 +245,7 @@ export function Sidebar() {
                                 "w-10 h-10 flex items-center justify-center rounded-full transition-all",
                                 pathname === "/settings" ?
                                     "bg-white text-black"
-                                :   "bg-white/10 text-gray-400 hover:text-white hover:bg-white/15 active:scale-95",
+                                :   "bg-white/10 text-[var(--text-secondary)] hover:text-white hover:bg-white/15 active:scale-95",
                             )}
                             aria-label="Settings"
                             title="Settings"
@@ -264,7 +264,7 @@ export function Sidebar() {
             >
                 <div className="mb-3 flex items-center gap-2 px-2">
                     <div className="w-1.5 h-1.5 bg-[#22c55e] rounded-full" />
-                    <span className="text-micro font-mono font-bold text-gray-600 uppercase tracking-wider">
+                    <span className="t-eyebrow">
                         Navigation Index
                     </span>
                 </div>
@@ -284,15 +284,15 @@ export function Sidebar() {
                                     "flex items-center gap-3 py-2.5 px-2 border-l-2 transition-all duration-200 group relative",
                                     isActive ?
                                         "bg-[var(--bg-primary)] border-[#eab308] text-white"
-                                    :   "border-transparent text-gray-500 hover:text-white hover:bg-white/5 hover:border-white/20",
+                                    :   "border-transparent text-[var(--text-muted)] hover:text-white hover:bg-white/5 hover:border-white/20",
                                 )}
                             >
                                 {/* Command index number */}
                                 <span
                                     className={cn(
-                                        "w-6 text-xs font-mono font-bold text-center shrink-0",
+                                        "w-6 text-xs tabular-nums font-semibold text-center shrink-0",
                                         isActive ? "text-[#eab308]" : (
-                                            "text-gray-700 group-hover:text-gray-500"
+                                            "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]"
                                         ),
                                     )}
                                 >
@@ -344,7 +344,7 @@ export function Sidebar() {
                             prefetch={false}
                             className="group/link"
                         >
-                            <span className="text-micro font-mono font-bold text-gray-600 uppercase tracking-wider group-hover/link:text-[#a855f7] transition-colors">
+                            <span className="text-xs font-medium text-[var(--text-muted)] group-hover/link:text-[#a855f7] transition-colors">
                                 Playlist Stack
                             </span>
                         </Link>
@@ -355,7 +355,7 @@ export function Sidebar() {
                                 setShowCreatePlaylist((v) => !v);
                                 setNewPlaylistName("");
                             }}
-                            className="w-6 h-6 flex items-center justify-center bg-[var(--bg-primary)] border-2 border-white/10 text-gray-500 hover:text-[#a855f7] hover:border-[#a855f7]/50 hover:bg-[#a855f7]/5 transition-all"
+                            className="w-6 h-6 flex items-center justify-center bg-[var(--bg-primary)] border-2 border-white/10 text-[var(--text-muted)] hover:text-[#a855f7] hover:border-[#a855f7]/50 hover:bg-[#a855f7]/5 transition-all"
                             aria-label="Create playlist"
                             title="Create Playlist"
                         >
@@ -386,7 +386,7 @@ export function Sidebar() {
                                     disabled={
                                         !newPlaylistName.trim() || isCreating
                                     }
-                                    className="mt-2 w-full py-1.5 bg-[#a855f7] hover:bg-[#9333ea] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold uppercase tracking-wider rounded transition-colors"
+                                    className="mt-2 w-full py-1.5 bg-[#a855f7] hover:bg-[#9333ea] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded transition-colors"
                                 >
                                     {isCreating ? "Creating..." : "Create"}
                                 </button>
@@ -428,15 +428,15 @@ export function Sidebar() {
                                             "flex items-center gap-3 py-2 px-2 border-l-2 transition-all group",
                                             isActive ?
                                                 "bg-[var(--bg-primary)] border-[#a855f7] text-white"
-                                            :   "border-transparent text-gray-600 hover:text-white hover:bg-white/5 hover:border-white/20",
+                                            :   "border-transparent text-[var(--text-muted)] hover:text-white hover:bg-white/5 hover:border-white/20",
                                         )}
                                     >
                                         {/* Stack index */}
                                         <span
                                             className={cn(
-                                                "w-5 text-micro font-mono font-bold text-center shrink-0",
+                                                "w-5 text-micro tabular-nums font-semibold text-center shrink-0",
                                                 isActive ? "text-[#a855f7]" : (
-                                                    "text-gray-700 group-hover:text-gray-500"
+                                                    "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]"
                                                 ),
                                             )}
                                         >
@@ -448,7 +448,7 @@ export function Sidebar() {
                                             <div className="flex items-center gap-1.5">
                                                 <div
                                                     className={cn(
-                                                        "text-xs font-bold uppercase tracking-tight truncate",
+                                                        "text-xs font-semibold tracking-tight truncate",
                                                         isActive ? "text-white"
                                                         :   "group-hover:text-white",
                                                     )}
@@ -468,24 +468,25 @@ export function Sidebar() {
                                             </div>
                                             <div
                                                 className={cn(
-                                                    "text-micro font-mono truncate mt-0.5",
-                                                    isActive ? "text-gray-600"
-                                                    :   "text-gray-700 group-hover:text-gray-500",
+                                                    "text-micro tabular-nums truncate mt-0.5",
+                                                    isActive ? "text-[var(--text-muted)]"
+                                                    :   "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]",
                                                 )}
                                             >
-                                                {playlist.trackCount} TRK
+                                                {playlist.trackCount}{" "}
+                                                {playlist.trackCount === 1 ? "track" : "tracks"}
                                                 {isShared &&
-                                                    ` • ${playlist.user?.username || "SHARED"}`}
+                                                    ` • ${playlist.user?.username || "Shared"}`}
                                             </div>
                                         </div>
                                     </Link>
                                 );
                             })
                     :   <div className="px-2 py-6 border-l-2 border-transparent">
-                            <div className="text-xs font-mono text-gray-700 mb-1 uppercase">
+                            <div className="text-xs text-[var(--text-muted)] mb-1">
                                 Empty Stack
                             </div>
-                            <div className="text-micro font-mono text-gray-800">
+                            <div className="text-micro text-[var(--text-muted)]">
                                 Create first entry
                             </div>
                         </div>

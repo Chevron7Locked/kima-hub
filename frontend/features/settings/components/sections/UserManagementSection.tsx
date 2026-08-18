@@ -102,7 +102,7 @@ export function UserManagementSection() {
             >
                 {/* Create User Form */}
                 <div className="py-4 px-4 bg-white/5 rounded-lg border border-white/10 mb-4">
-                    <h3 className="text-xs font-mono text-white/50 mb-3 uppercase tracking-wider">Create New User</h3>
+                    <h3 className="text-xs text-[var(--text-secondary)] mb-3">Create New User</h3>
                     <div className="space-y-3">
                         <div className="flex gap-3">
                             <SettingsInput
@@ -131,7 +131,7 @@ export function UserManagementSection() {
                             <button
                                 onClick={handleCreate}
                                 disabled={creating || !newUsername.trim() || newPassword.length < 6}
-                                className="px-4 py-1.5 text-xs font-bold bg-brand text-black rounded-lg uppercase tracking-wider
+                                className="px-4 py-1.5 text-xs font-semibold bg-brand text-black rounded-lg 
                                     hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 {creating ? "Creating..." : "Create"}
@@ -148,9 +148,9 @@ export function UserManagementSection() {
                 {/* Users List */}
                 <div className="space-y-1">
                     {loading ? (
-                        <div className="py-4 text-xs font-mono text-white/30 uppercase tracking-wider">Loading users...</div>
+                        <div className="py-4 text-xs text-[var(--text-muted)]">Loading users...</div>
                     ) : users.length === 0 ? (
-                        <div className="py-4 text-xs font-mono text-white/30 uppercase tracking-wider">No users found</div>
+                        <div className="py-4 text-xs text-[var(--text-muted)]">No users found</div>
                     ) : (
                         users.map((user) => (
                             <div
@@ -158,17 +158,17 @@ export function UserManagementSection() {
                                 className="flex items-center justify-between py-3 px-3 rounded-lg hover:bg-white/[0.03] border border-transparent hover:border-white/5 transition-all"
                             >
                                 <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-xs font-bold text-brand">
+                                    <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-xs font-semibold text-brand">
                                         {user.username[0].toUpperCase()}
                                     </div>
                                     <div>
                                         <div className="text-sm font-medium text-white">
                                             {user.username}
                                             {currentUser?.id === user.id && (
-                                                <span className="text-micro font-mono text-white/30 ml-2 uppercase tracking-wider">(you)</span>
+                                                <span className="text-xs text-[var(--text-muted)] ml-2">(you)</span>
                                             )}
                                         </div>
-                                        <div className="text-micro font-mono text-white/30 uppercase tracking-wider">
+                                        <div className="text-xs tabular-nums text-[var(--text-muted)]">
                                             {user.role === "admin" ? "Admin" : "User"}
                                         </div>
                                     </div>
@@ -177,7 +177,7 @@ export function UserManagementSection() {
                                 {currentUser?.id !== user.id && (
                                     <button
                                         onClick={() => setConfirmDelete(user.id)}
-                                        className="p-2 text-white/20 hover:text-red-400 transition-colors"
+                                        className="p-2 text-[var(--text-muted)] hover:text-red-400 transition-colors"
                                     >
                                         <Trash2 className="w-4 h-4" />
                                     </button>
@@ -195,7 +195,7 @@ export function UserManagementSection() {
                 title="Delete User"
             >
                 <div className="space-y-4">
-                    <p className="text-xs font-mono text-white/50 uppercase tracking-wider">
+                    <p className="text-xs text-[var(--text-secondary)]">
                         Are you sure you want to delete this user? This action cannot be undone.
                     </p>
                     <div className="flex gap-2 justify-end items-center">
@@ -206,13 +206,13 @@ export function UserManagementSection() {
                         />
                         <button
                             onClick={() => setConfirmDelete(null)}
-                            className="px-4 py-2 text-xs font-mono text-white/40 hover:text-white/70 uppercase tracking-wider transition-colors"
+                            className="px-4 py-2 text-xs text-[var(--text-muted)] hover:text-white/70 transition-colors"
                         >
                             Cancel
                         </button>
                         <button
                             onClick={() => confirmDelete && handleDelete(confirmDelete)}
-                            className="px-4 py-2 text-xs font-bold bg-red-500 text-white rounded-lg uppercase tracking-wider hover:bg-red-600 transition-colors"
+                            className="px-4 py-2 text-xs font-semibold bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
                         >
                             Delete
                         </button>

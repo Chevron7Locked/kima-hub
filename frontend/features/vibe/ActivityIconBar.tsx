@@ -33,13 +33,13 @@ export function ActivityIconBar({ expandedActivity, onToggleActivity }: Activity
                         "relative p-2 rounded-md transition-colors",
                         expandedActivity === type
                             ? "bg-white/10 text-white"
-                            : "text-white/40 hover:text-white/70 hover:bg-white/5",
+                            : "text-[var(--text-muted)] hover:text-white/70 hover:bg-white/5",
                     )}
                     title={type.charAt(0).toUpperCase() + type.slice(1)}
                 >
                     <Icon className="w-4 h-4" />
                     {badge > 0 && (
-                        <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 flex items-center justify-center bg-[#e35656] text-white text-micro font-bold rounded-full">
+                        <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 flex items-center justify-center bg-[#e35656] text-white text-micro font-semibold rounded-full">
                             {badge > 99 ? "99+" : badge}
                         </span>
                     )}

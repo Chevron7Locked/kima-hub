@@ -116,12 +116,16 @@ export function RefinePanel({
                 aria-label="Refine: filter, sort, and per-page options"
                 onClick={() => setOpen((prev) => !prev)}
                 className={cn(
-                    "relative flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg border-2 transition-all min-h-[44px] select-none",
+                    // Matches the segmented control beside it: sentence case,
+                    // medium weight, a hairline border. It was set in the
+                    // 12px bold-caps-tracked micro-label style, which is for
+                    // metadata, not for a control you press.
+                    "relative flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border transition-colors min-h-[44px] select-none",
                     open
                         ? "border-[var(--color-brand)] bg-[var(--color-brand)]/10 text-[var(--color-brand)]"
                         : hasRefinements
                           ? "border-[var(--color-brand)]/50 bg-white/5 text-[var(--color-brand)] hover:border-[var(--color-brand)] hover:bg-[var(--color-brand)]/10"
-                          : "border-white/10 bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 hover:border-white/20",
+                          : "border-white/10 bg-white/5 text-[var(--text-secondary)] hover:text-white hover:bg-white/10 hover:border-white/20",
                 )}
             >
                 <SlidersHorizontal className="w-3.5 h-3.5 flex-shrink-0" />
@@ -142,13 +146,15 @@ export function RefinePanel({
                     ref={panelRef}
                     role="dialog"
                     aria-label="Refine options"
-                    className="absolute right-0 top-full mt-2 z-50 w-72 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] shadow-xl shadow-black/50 p-4 flex flex-col gap-5"
+                    // Anchored to the button's LEFT edge, not its right. The
+                    // trigger is the first thing in the toolbar at every
+                    // width, so right-0 hung the panel off the start of the
+                    // page: at 388px, 162px of its 288px was unreachable.
+                    className="absolute left-0 top-full mt-2 z-50 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] shadow-xl shadow-black/50 p-4 flex flex-col gap-5"
                 >
                     {/* Panel header */}
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold uppercase tracking-wider text-gray-400">
-                            Refine
-                        </span>
+                        <span className="text-sm font-medium text-white">Refine</span>
                         <button
                             type="button"
                             aria-label="Close refine panel"
@@ -165,7 +171,7 @@ export function RefinePanel({
                     {/* Filter section -- hidden for Tracks tab */}
                     {showFilterSection && (
                         <fieldset className="flex flex-col gap-1.5">
-                            <legend className="text-xs font-mono text-[var(--text-muted)] uppercase tracking-wider mb-2">
+                            <legend className="text-xs font-medium text-[var(--text-muted)] mb-2">
                                 Show
                             </legend>
                             {FILTER_OPTIONS.map((opt) => {
@@ -177,7 +183,7 @@ export function RefinePanel({
                                         aria-pressed={isActive}
                                         onClick={() => onFilterChange(opt.value)}
                                         className={cn(
-                                            "flex flex-col items-start px-3 py-2.5 rounded-lg border text-left transition-all",
+                                            "flex flex-col items-start px-3 py-2.5 rounded-lg border text-left transition-colors",
                                             isActive
                                                 ? "border-[var(--color-brand)]/50 bg-[var(--color-brand)]/10"
                                                 : "border-white/5 bg-white/3 hover:bg-white/8 hover:border-white/15",
@@ -185,13 +191,13 @@ export function RefinePanel({
                                     >
                                         <span
                                             className={cn(
-                                                "text-xs font-bold uppercase tracking-wider",
+                                                "text-sm font-medium",
                                                 isActive ? "text-[var(--color-brand)]" : "text-white",
                                             )}
                                         >
                                             {opt.label}
                                         </span>
-                                        <span className="text-micro font-mono text-[var(--text-muted)] mt-0.5">
+                                        <span className="text-xs text-[var(--text-muted)] mt-0.5">
                                             {opt.description}
                                         </span>
                                     </button>
@@ -202,7 +208,7 @@ export function RefinePanel({
 
                     {/* Sort section */}
                     <fieldset className="flex flex-col gap-1">
-                        <legend className="text-xs font-mono text-[var(--text-muted)] uppercase tracking-wider mb-2">
+                        <legend className="text-xs font-medium text-[var(--text-muted)] mb-2">
                             Sort by
                         </legend>
                         <div className="grid grid-cols-2 gap-1.5">
@@ -213,10 +219,10 @@ export function RefinePanel({
                                     aria-pressed={sortBy === opt.value}
                                     onClick={() => onSortChange(opt.value)}
                                     className={cn(
-                                        "px-3 py-2 min-h-[44px] text-xs font-bold uppercase tracking-wider rounded-lg border transition-all",
+                                        "px-3 py-2 min-h-[44px] text-sm font-medium rounded-lg border transition-colors",
                                         sortBy === opt.value
                                             ? "border-[var(--color-brand)]/50 bg-[var(--color-brand)]/10 text-[var(--color-brand)]"
-                                            : "border-white/5 bg-white/3 text-gray-400 hover:bg-white/8 hover:border-white/15 hover:text-white",
+                                            : "border-white/5 bg-white/3 text-[var(--text-secondary)] hover:bg-white/8 hover:border-white/15 hover:text-white",
                                     )}
                                 >
                                     {opt.label}
@@ -227,7 +233,7 @@ export function RefinePanel({
 
                     {/* Per-page section */}
                     <fieldset className="flex flex-col gap-1">
-                        <legend className="text-xs font-mono text-[var(--text-muted)] uppercase tracking-wider mb-2">
+                        <legend className="text-xs font-medium text-[var(--text-muted)] mb-2">
                             Items per page
                         </legend>
                         <div className="grid grid-cols-4 gap-1.5">
@@ -238,10 +244,10 @@ export function RefinePanel({
                                     aria-pressed={itemsPerPage === n}
                                     onClick={() => onItemsPerPageChange(n)}
                                     className={cn(
-                                        "py-2 min-h-[44px] text-xs font-bold font-mono rounded-lg border transition-all",
+                                        "py-2 min-h-[44px] text-sm font-medium tabular-nums rounded-lg border transition-colors",
                                         itemsPerPage === n
                                             ? "border-[var(--color-brand)]/50 bg-[var(--color-brand)]/10 text-[var(--color-brand)]"
-                                            : "border-white/5 bg-white/3 text-gray-400 hover:bg-white/8 hover:border-white/15 hover:text-white",
+                                            : "border-white/5 bg-white/3 text-[var(--text-secondary)] hover:bg-white/8 hover:border-white/15 hover:text-white",
                                     )}
                                 >
                                     {n}

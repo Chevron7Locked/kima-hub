@@ -199,8 +199,8 @@ export function SoulseekBrowser({
     if (results.length === 0 && !isActive) {
         return (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-                <Music className="w-12 h-12 text-gray-600 mb-3" />
-                <p className="text-gray-400">No Soulseek results found</p>
+                <Music className="w-12 h-12 text-[var(--text-muted)] mb-3" />
+                <p className="text-[var(--text-secondary)]">No Soulseek results found</p>
             </div>
         );
     }
@@ -212,12 +212,12 @@ export function SoulseekBrowser({
                 {isActive ? (
                     <>
                         <GradientSpinner size="sm" />
-                        <span className="text-sm text-gray-300">
+                        <span className="text-sm text-[var(--text-primary)]">
                             Searching... {results.length} results from {uniqueUserCount} users
                         </span>
                     </>
                 ) : (
-                    <span className="text-sm text-gray-400">
+                    <span className="text-sm text-[var(--text-secondary)]">
                         Search complete &mdash; {results.length} results from {uniqueUserCount} users
                     </span>
                 )}
@@ -235,7 +235,7 @@ export function SoulseekBrowser({
                                 "px-3 py-1.5 text-xs font-semibold rounded-full transition-colors",
                                 formatFilters.has(pill.value)
                                     ? "bg-[var(--color-brand)]/20 text-brand"
-                                    : "bg-[#282828] text-gray-400 hover:text-white hover:bg-[#333]",
+                                    : "bg-[#282828] text-[var(--text-secondary)] hover:text-white hover:bg-[#333]",
                             )}
                         >
                             {pill.label}
@@ -247,7 +247,7 @@ export function SoulseekBrowser({
                 <select
                     value={sortField}
                     onChange={(e) => setSortField(e.target.value as SoulseekSortField)}
-                    className="bg-[#282828] text-sm text-gray-300 rounded-md px-3 py-1.5 border border-white/10 focus:outline-none focus:border-[var(--color-brand)]/50"
+                    className="bg-[#282828] text-sm text-[var(--text-primary)] rounded-md px-3 py-1.5 border border-white/10 focus:outline-none focus:border-[var(--color-brand)]/50"
                 >
                     {SORT_OPTIONS.map((opt) => (
                         <option key={opt.value} value={opt.value}>
@@ -262,7 +262,7 @@ export function SoulseekBrowser({
                         onClick={() => setViewMode("flat")}
                         className={cn(
                             "p-1.5 rounded transition-colors",
-                            viewMode === "flat" ? "bg-white/10 text-white" : "text-gray-500 hover:text-gray-300",
+                            viewMode === "flat" ? "bg-white/10 text-white" : "text-[var(--text-muted)] hover:text-gray-300",
                         )}
                         title="Flat list"
                     >
@@ -272,7 +272,7 @@ export function SoulseekBrowser({
                         onClick={() => setViewMode("grouped")}
                         className={cn(
                             "p-1.5 rounded transition-colors",
-                            viewMode === "grouped" ? "bg-white/10 text-white" : "text-gray-500 hover:text-gray-300",
+                            viewMode === "grouped" ? "bg-white/10 text-white" : "text-[var(--text-muted)] hover:text-gray-300",
                         )}
                         title="Group by user"
                     >
@@ -317,7 +317,7 @@ export function SoulseekBrowser({
             {/* Infinite scroll sentinel */}
             {viewMode === "flat" && hasMore && (
                 <div ref={sentinelRef} className="flex items-center justify-center py-4">
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-[var(--text-muted)]">
                         Showing {displayResults.length} of {sorted.length} results
                     </span>
                 </div>
@@ -350,7 +350,7 @@ function FlatView({
     return (
         <div>
             {/* Header row */}
-            <div className="grid grid-cols-[32px_1fr_minmax(80px,120px)_80px_80px_80px_44px] md:grid-cols-[32px_1fr_minmax(80px,120px)_80px_80px_80px_44px] gap-2 px-3 py-2 text-xs text-gray-500 border-b border-white/5">
+            <div className="grid grid-cols-[32px_1fr_minmax(80px,120px)_80px_80px_80px_44px] md:grid-cols-[32px_1fr_minmax(80px,120px)_80px_80px_80px_44px] gap-2 px-3 py-2 text-xs text-[var(--text-muted)] border-b border-white/5">
                 <div className="flex items-center justify-center">
                     <input
                         type="checkbox"
@@ -362,8 +362,8 @@ function FlatView({
                 <div>Title</div>
                 <div>User</div>
                 <div className="hidden md:block">Format</div>
-                <div className="hidden md:block text-right font-mono">Bitrate</div>
-                <div className="hidden md:block text-right font-mono">Size</div>
+                <div className="hidden md:block text-right">Bitrate</div>
+                <div className="hidden md:block text-right">Size</div>
                 <div />
             </div>
 
@@ -429,18 +429,18 @@ function ResultRow({
 
             <div className="min-w-0">
                 <p className="text-sm text-white truncate">{parsed.title}</p>
-                <p className="text-xs text-gray-500 truncate">{parsed.artist}</p>
+                <p className="text-xs text-[var(--text-muted)] truncate">{parsed.artist}</p>
             </div>
 
-            <div className="text-xs text-gray-400 truncate">{result.username}</div>
+            <div className="text-xs text-[var(--text-secondary)] truncate">{result.username}</div>
 
             <div className="hidden md:block">{getQualityBadge(result)}</div>
 
-            <div className="hidden md:block text-xs text-gray-400 text-right font-mono">
+            <div className="hidden md:block text-xs text-[var(--text-secondary)] text-right tabular-nums">
                 {result.bitrate}k
             </div>
 
-            <div className="hidden md:block text-xs text-gray-400 text-right font-mono">
+            <div className="hidden md:block text-xs text-[var(--text-secondary)] text-right tabular-nums">
                 {formatFileSize(result.size)}
             </div>
 
@@ -499,12 +499,12 @@ function GroupedView({
                             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors"
                         >
                             {isExpanded ? (
-                                <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                                <ChevronDown className="w-4 h-4 text-[var(--text-secondary)] flex-shrink-0" />
                             ) : (
-                                <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                                <ChevronRight className="w-4 h-4 text-[var(--text-secondary)] flex-shrink-0" />
                             )}
                             <span className="text-sm font-medium text-white">{username}</span>
-                            <span className="text-xs text-gray-500">
+                            <span className="text-xs text-[var(--text-muted)]">
                                 ({userResults.length} {userResults.length === 1 ? "file" : "files"})
                             </span>
                         </button>

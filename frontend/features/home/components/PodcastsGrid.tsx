@@ -49,7 +49,7 @@ const PodcastCard = memo(
                                         unoptimized
                                     />
                                 ) : (
-                                    <Disc className="w-10 h-10 text-gray-700" />
+                                    <Disc className="w-10 h-10 text-[var(--text-muted)]" />
                                 )}
                             </div>
                             <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#3b82f6] to-[#2563eb] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150" />
@@ -58,7 +58,7 @@ const PodcastCard = memo(
                             <h3 className="text-sm font-bold text-white truncate tracking-tight">
                                 {podcast.title}
                             </h3>
-                            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider truncate mt-0.5">
+                            <p className="text-xs tabular-nums text-[var(--text-muted)] truncate mt-0.5">
                                 {podcast.author || "Podcast"}
                             </p>
                         </div>

@@ -119,12 +119,12 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
     return (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 w-[calc(100vw-2rem)] sm:w-[480px] max-h-[70vh] bg-black/90 backdrop-blur-lg border border-white/10 rounded-xl flex flex-col overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-                <h3 className="text-sm font-medium text-white/90 flex items-center gap-2">
+                <h3 className="text-sm font-medium text-[var(--text-primary)] flex items-center gap-2">
                     <FlaskConical className="w-4 h-4" /> Blend
                 </h3>
                 <button
                     onClick={onClose}
-                    className="text-white/40 hover:text-white"
+                    className="text-[var(--text-muted)] hover:text-white"
                     aria-label="Close alchemy"
                 >
                     <X className="w-4 h-4" />
@@ -136,7 +136,7 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
                     <div>
                         <button
                             onClick={() => setAddingTo("add")}
-                            className={`text-xs mb-2 flex items-center gap-1 ${addingTo === "add" ? "text-emerald-400" : "text-white/40"}`}
+                            className={`text-xs mb-2 flex items-center gap-1 ${addingTo === "add" ? "text-emerald-400" : "text-[var(--text-muted)]"}`}
                             aria-pressed={addingTo === "add"}
                         >
                             <Plus className="w-3 h-3" /> More Like
@@ -146,12 +146,12 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
                                 key={t.id}
                                 className="flex items-center gap-1 mb-1"
                             >
-                                <span className="text-xs text-white/70 truncate flex-1">
+                                <span className="text-xs text-[var(--text-secondary)] truncate flex-1">
                                     {t.title}
                                 </span>
                                 <button
                                     onClick={() => removeTrack(t.id, "add")}
-                                    className="text-white/30 hover:text-white"
+                                    className="text-[var(--text-muted)] hover:text-white"
                                     aria-label={`Remove ${t.title}`}
                                 >
                                     <X className="w-3 h-3" />
@@ -162,7 +162,7 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
                     <div>
                         <button
                             onClick={() => setAddingTo("subtract")}
-                            className={`text-xs mb-2 flex items-center gap-1 ${addingTo === "subtract" ? "text-rose-400" : "text-white/40"}`}
+                            className={`text-xs mb-2 flex items-center gap-1 ${addingTo === "subtract" ? "text-rose-400" : "text-[var(--text-muted)]"}`}
                             aria-pressed={addingTo === "subtract"}
                         >
                             <Minus className="w-3 h-3" /> Less Like
@@ -172,14 +172,14 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
                                 key={t.id}
                                 className="flex items-center gap-1 mb-1"
                             >
-                                <span className="text-xs text-white/70 truncate flex-1">
+                                <span className="text-xs text-[var(--text-secondary)] truncate flex-1">
                                     {t.title}
                                 </span>
                                 <button
                                     onClick={() =>
                                         removeTrack(t.id, "subtract")
                                     }
-                                    className="text-white/30 hover:text-white"
+                                    className="text-[var(--text-muted)] hover:text-white"
                                     aria-label={`Remove ${t.title}`}
                                 >
                                     <X className="w-3 h-3" />
@@ -191,7 +191,7 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
 
                 <div className="relative">
                     <label htmlFor="alchemy-search" className="sr-only">Search tracks for alchemy</label>
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />
                     <input
                         id="alchemy-search"
                         type="text"
@@ -212,10 +212,10 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
                                     onClick={() => addToColumn(track)}
                                     className="w-full px-3 py-2 hover:bg-white/10 text-left"
                                 >
-                                    <p className="text-sm text-white/90 truncate">
+                                    <p className="text-sm text-[var(--text-primary)] truncate">
                                         {track.title}
                                     </p>
-                                    <p className="text-xs text-white/40 truncate">
+                                    <p className="text-xs text-[var(--text-muted)] truncate">
                                         {track.artist.name}
                                     </p>
                                 </button>
@@ -226,7 +226,7 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
                 <button
                     onClick={() => mutation.mutate()}
                     disabled={addTracks.length === 0 || mutation.isPending}
-                    className="w-full px-3 py-2 bg-white/10 hover:bg-white/15 disabled:opacity-30 rounded-lg text-sm text-white/80 hover:text-white flex items-center justify-center gap-2"
+                    className="w-full px-3 py-2 bg-white/10 hover:bg-white/15 disabled:opacity-30 rounded-lg text-sm text-[var(--text-primary)] hover:text-white flex items-center justify-center gap-2"
                 >
                     <FlaskConical className="w-4 h-4" />{" "}
                     {mutation.isPending ? "Computing..." : "Blend"}
@@ -239,7 +239,7 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
                     <div className="px-4 py-2">
                         <button
                             onClick={handlePlayResults}
-                            className="w-full px-3 py-2 bg-white/10 hover:bg-white/15 rounded-lg text-sm text-white/80 hover:text-white flex items-center justify-center gap-2"
+                            className="w-full px-3 py-2 bg-white/10 hover:bg-white/15 rounded-lg text-sm text-[var(--text-primary)] hover:text-white flex items-center justify-center gap-2"
                         >
                             <Play className="w-4 h-4" /> Play Result (
                             {results.length})
@@ -251,18 +251,18 @@ export function VibeAlchemy({ onHighlight, onClose }: VibeAlchemyProps) {
                                 key={track.id}
                                 className="px-4 py-2 hover:bg-white/5 flex items-center gap-3"
                             >
-                                <span className="text-white/30 text-xs w-5 text-right">
+                                <span className="text-[var(--text-muted)] text-xs w-5 text-right">
                                     {i + 1}
                                 </span>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-sm text-white/90 truncate">
+                                    <p className="text-sm text-[var(--text-primary)] truncate">
                                         {track.title}
                                     </p>
-                                    <p className="text-xs text-white/40 truncate">
+                                    <p className="text-xs text-[var(--text-muted)] truncate">
                                         {track.artist.name}
                                     </p>
                                 </div>
-                                <span className="text-xs text-white/30">
+                                <span className="text-xs text-[var(--text-muted)]">
                                     {Math.round(track.similarity * 100)}%
                                 </span>
                             </div>

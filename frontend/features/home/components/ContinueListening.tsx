@@ -43,9 +43,9 @@ const getDescriptionLabel = (item: ListenedItem) => {
 
 const TYPE_COLORS: Record<string, { border: string; accent: string; gradient: string }> = {
     artist: {
-        border: "hover:border-[#ec4899]/40",
-        accent: "from-[#ec4899] to-[#db2777]",
-        gradient: "hover:shadow-[#ec4899]/10",
+        border: "hover:border-[#fca200]/40",
+        accent: "from-[#fca200] to-[#d48c00]",
+        gradient: "hover:shadow-[#fca200]/10",
     },
     podcast: {
         border: "hover:border-[#3b82f6]/40",
@@ -105,11 +105,11 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
                                     unoptimized
                                 />
                             ) : isPodcast ? (
-                                <Disc className="w-10 h-10 text-gray-700" />
+                                <Disc className="w-10 h-10 text-[var(--text-muted)]" />
                             ) : isAudiobook ? (
-                                <BookOpen className="w-10 h-10 text-gray-700" />
+                                <BookOpen className="w-10 h-10 text-[var(--text-muted)]" />
                             ) : (
-                                <Music className="w-10 h-10 text-gray-700" />
+                                <Music className="w-10 h-10 text-[var(--text-muted)]" />
                             )}
                         </div>
                         {hasProgress && (
@@ -128,7 +128,7 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
                         <h3 className="text-sm font-bold text-white truncate tracking-tight">
                             {item.name}
                         </h3>
-                        <p className="text-xs font-mono text-gray-500 uppercase tracking-wider truncate mt-0.5">
+                        <p className="text-xs tabular-nums text-[var(--text-muted)] truncate mt-0.5">
                             {getDescriptionLabel(item)}
                         </p>
                     </div>

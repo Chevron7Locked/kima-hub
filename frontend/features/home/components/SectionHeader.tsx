@@ -11,7 +11,7 @@ const GRADIENT_MAP: Record<ContentColor, string> = {
     albums: "from-[#22c55e] to-[#16a34a]",
     podcasts: "from-[#3b82f6] to-[#2563eb]",
     audiobooks: "from-[#f59e0b] to-[#d97706]",
-    artists: "from-[#ec4899] to-[#db2777]",
+    artists: "from-[#fca200] to-[#d48c00]",
     discover: "from-[#a855f7] to-[#c026d3]",
 };
 
@@ -43,7 +43,7 @@ const SectionHeader = memo(function SectionHeader({
             ) : showAllHref ? (
                 <Link
                     href={showAllHref}
-                    className="flex items-center gap-1 text-xs font-mono text-gray-500 hover:text-white transition-colors uppercase tracking-wider group shrink-0"
+                    className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-white transition-colors group shrink-0"
                 >
                     Show all
                     <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />

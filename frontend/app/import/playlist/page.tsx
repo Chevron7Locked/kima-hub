@@ -450,13 +450,13 @@ function ImportPlaylistPageContent() {
                         className="p-2 hover:bg-white/5 rounded-full transition-colors"
                         aria-label="Back"
                     >
-                        <ArrowLeft className="w-5 h-5 text-gray-400" />
+                        <ArrowLeft className="w-5 h-5 text-[var(--text-secondary)]" />
                     </button>
                     <div>
                         <h1 className="text-2xl font-bold text-white">
                             Import Playlist
                         </h1>
-                        <p className="text-sm text-gray-400">
+                        <p className="text-sm text-[var(--text-secondary)]">
                             Import from Spotify or Deezer
                         </p>
                     </div>
@@ -465,7 +465,7 @@ function ImportPlaylistPageContent() {
                 {/* Browse Link */}
                 {step === "input" && (
                     <div className="mb-6 p-4 bg-white/5 rounded-lg border border-white/10">
-                        <p className="text-sm text-gray-300">
+                        <p className="text-sm text-[var(--text-primary)]">
                             Looking for playlists to import?{" "}
                             <Link
                                 href="/browse/playlists"
@@ -481,7 +481,7 @@ function ImportPlaylistPageContent() {
                 {step === "input" && (
                     <div className="space-y-4">
                         <div>
-                            <label htmlFor="playlist-url" className="block text-sm font-medium text-gray-300 mb-2">
+                            <label htmlFor="playlist-url" className="block text-sm font-medium text-[var(--text-primary)] mb-2">
                                 Playlist URL
                             </label>
                             <input
@@ -490,12 +490,12 @@ function ImportPlaylistPageContent() {
                                 value={url}
                                 onChange={handleUrlChange}
                                 placeholder="https://www.deezer.com/playlist/... or https://open.spotify.com/playlist/..."
-                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]/50 focus:border-[var(--color-brand)] transition-colors"
+                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]/50 focus:border-[var(--color-brand)] transition-colors"
                                 onKeyDown={(e) =>
                                     e.key === "Enter" && handleFetchPreview()
                                 }
                             />
-                            <p className="text-xs text-gray-500 mt-2">
+                            <p className="text-xs text-[var(--text-muted)] mt-2">
                                 Paste a public{" "}
                                 <span className="text-[#AD47FF]">Deezer</span>{" "}
                                 or{" "}
@@ -544,7 +544,7 @@ function ImportPlaylistPageContent() {
                     <div className="text-center py-12">
                         <Loader2 className="w-10 h-10 text-[#1DB954] animate-spin mx-auto mb-4" />
                         <h2 className="text-lg font-bold text-white mb-1">Analysing Playlist</h2>
-                        <p className="text-gray-400 text-sm">
+                        <p className="text-[var(--text-secondary)] text-sm">
                             {ssePreviewStatus?.message || "Matching tracks to your library..."}
                         </p>
                     </div>
@@ -580,12 +580,12 @@ function ImportPlaylistPageContent() {
                                 <h2 className="text-lg font-bold text-white truncate">
                                     {preview.playlist.name}
                                 </h2>
-                                <p className="text-sm text-gray-400">
+                                <p className="text-sm text-[var(--text-secondary)]">
                                     {preview.playlist.owner} ·{" "}
                                     {preview.playlist.trackCount} songs
                                 </p>
                                 {preview.playlist.description && (
-                                    <p className="text-sm text-gray-500 mt-1 line-clamp-1">
+                                    <p className="text-sm text-[var(--text-muted)] mt-1 line-clamp-1">
                                         {preview.playlist.description}
                                     </p>
                                 )}
@@ -597,7 +597,7 @@ function ImportPlaylistPageContent() {
                                 }
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-gray-400 hover:text-[#1DB954] transition-colors"
+                                className="text-[var(--text-secondary)] hover:text-[#1DB954] transition-colors"
                             >
                                 <ExternalLink className="w-4 h-4" />
                             </a>
@@ -609,7 +609,7 @@ function ImportPlaylistPageContent() {
                                 <div className="text-xl font-bold text-white">
                                     {preview.summary.total}
                                 </div>
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-[var(--text-muted)]">
                                     Total
                                 </div>
                             </div>
@@ -617,7 +617,7 @@ function ImportPlaylistPageContent() {
                                 <div className="text-xl font-bold text-green-400">
                                     {preview.summary.inLibrary}
                                 </div>
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-[var(--text-muted)]">
                                     In Library
                                 </div>
                             </div>
@@ -625,7 +625,7 @@ function ImportPlaylistPageContent() {
                                 <div className="text-xl font-bold text-[#1DB954]">
                                     {preview.summary.downloadable}
                                 </div>
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-[var(--text-muted)]">
                                     To Download
                                 </div>
                             </div>
@@ -634,7 +634,7 @@ function ImportPlaylistPageContent() {
                                     <div className="text-xl font-bold text-red-400">
                                         {preview.summary.notFound}
                                     </div>
-                                    <div className="text-xs text-gray-500">
+                                    <div className="text-xs text-[var(--text-muted)]">
                                         Not Found
                                     </div>
                                 </div>
@@ -643,7 +643,7 @@ function ImportPlaylistPageContent() {
                                     <div className="text-xl font-bold text-green-400">
                                         ✓
                                     </div>
-                                    <div className="text-xs text-gray-500">
+                                    <div className="text-xs text-[var(--text-muted)]">
                                         All Matched
                                     </div>
                                 </div>
@@ -671,9 +671,9 @@ function ImportPlaylistPageContent() {
                                         </span>
                                     </div>
                                     {expandedSection === "matched" ? (
-                                        <ChevronUp className="w-4 h-4 text-gray-500" />
+                                        <ChevronUp className="w-4 h-4 text-[var(--text-muted)]" />
                                     ) : (
-                                        <ChevronDown className="w-4 h-4 text-gray-500" />
+                                        <ChevronDown className="w-4 h-4 text-[var(--text-muted)]" />
                                     )}
                                 </button>
                                 {expandedSection === "matched" && (
@@ -688,7 +688,7 @@ function ImportPlaylistPageContent() {
                                                     }
                                                     className="flex items-center gap-3 px-4 py-2 hover:bg-white/5"
                                                 >
-                                                    <span className="text-xs text-gray-600 w-5 text-right">
+                                                    <span className="text-xs text-[var(--text-muted)] w-5 text-right">
                                                         {i + 1}
                                                     </span>
                                                     <div className="flex-1 min-w-0">
@@ -699,7 +699,7 @@ function ImportPlaylistPageContent() {
                                                                     .spotifyTrack
                                                                     .title}
                                                         </div>
-                                                        <div className="text-xs text-gray-500 truncate">
+                                                        <div className="text-xs text-[var(--text-muted)] truncate">
                                                             {match.localTrack
                                                                 ?.artistName ||
                                                                 match
@@ -707,7 +707,7 @@ function ImportPlaylistPageContent() {
                                                                     .artist}
                                                         </div>
                                                     </div>
-                                                    <span className="text-xs text-gray-600">
+                                                    <span className="text-xs text-[var(--text-muted)]">
                                                         {formatTime(
                                                             Math.round(match.spotifyTrack
                                                                 .durationMs / 1000)
@@ -749,9 +749,9 @@ function ImportPlaylistPageContent() {
                                         </span>
                                     </div>
                                     {expandedSection === "download" ? (
-                                        <ChevronUp className="w-4 h-4 text-gray-500" />
+                                        <ChevronUp className="w-4 h-4 text-[var(--text-muted)]" />
                                     ) : (
-                                        <ChevronDown className="w-4 h-4 text-gray-500" />
+                                        <ChevronDown className="w-4 h-4 text-[var(--text-muted)]" />
                                     )}
                                 </button>
                                 {expandedSection === "download" && (
@@ -766,7 +766,7 @@ function ImportPlaylistPageContent() {
                                                     ? "Deselect All"
                                                     : "Select All"}
                                             </button>
-                                            <span className="text-xs text-gray-500">
+                                            <span className="text-xs text-[var(--text-muted)]">
                                                 {selectedAlbums.size} selected
                                             </span>
                                         </div>
@@ -810,7 +810,7 @@ function ImportPlaylistPageContent() {
                                                                         album.albumName
                                                                     }
                                                                 </div>
-                                                                <div className="text-xs text-gray-500 truncate">
+                                                                <div className="text-xs text-[var(--text-muted)] truncate">
                                                                     {
                                                                         album.artistName
                                                                     }{" "}
@@ -852,9 +852,9 @@ function ImportPlaylistPageContent() {
                                         </span>
                                     </div>
                                     {expandedSection === "notfound" ? (
-                                        <ChevronUp className="w-4 h-4 text-gray-500" />
+                                        <ChevronUp className="w-4 h-4 text-[var(--text-muted)]" />
                                     ) : (
-                                        <ChevronDown className="w-4 h-4 text-gray-500" />
+                                        <ChevronDown className="w-4 h-4 text-[var(--text-muted)]" />
                                     )}
                                 </button>
                                 {expandedSection === "notfound" && (
@@ -875,10 +875,10 @@ function ImportPlaylistPageContent() {
                                                     className="flex items-center gap-3 px-4 py-2 hover:bg-white/5"
                                                 >
                                                     <div className="flex-1 min-w-0">
-                                                        <div className="text-sm text-gray-400 truncate">
+                                                        <div className="text-sm text-[var(--text-secondary)] truncate">
                                                             {track.title}
                                                         </div>
-                                                        <div className="text-xs text-gray-600 truncate">
+                                                        <div className="text-xs text-[var(--text-muted)] truncate">
                                                             {track.artist} ·{" "}
                                                             {track.album}
                                                         </div>
@@ -892,7 +892,7 @@ function ImportPlaylistPageContent() {
 
                         {/* Playlist name input */}
                         <div>
-                            <label htmlFor="playlist-name" className="block text-sm font-medium text-gray-300 mb-2">
+                            <label htmlFor="playlist-name" className="block text-sm font-medium text-[var(--text-primary)] mb-2">
                                 Playlist Name
                             </label>
                             <input
@@ -903,7 +903,7 @@ function ImportPlaylistPageContent() {
                                     setPlaylistName(e.target.value)
                                 }
                                 placeholder="Enter playlist name"
-                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1DB954]/50 focus:border-[#1DB954] transition-colors"
+                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[#1DB954]/50 focus:border-[#1DB954] transition-colors"
                             />
                         </div>
 
@@ -914,7 +914,7 @@ function ImportPlaylistPageContent() {
                                     setStep("input");
                                     setPreview(null);
                                 }}
-                                className="px-6 py-3 rounded-full text-sm font-medium text-gray-300 hover:text-white hover:bg-white/5 transition-colors"
+                                className="px-6 py-3 rounded-full text-sm font-medium text-[var(--text-primary)] hover:text-white hover:bg-white/5 transition-colors"
                             >
                                 Back
                             </button>
@@ -965,7 +965,7 @@ function ImportPlaylistPageContent() {
                                 ? "Starting Import"
                                 : "Starting Import"}
                         </h2>
-                        <p className="text-sm text-gray-400 mb-6">
+                        <p className="text-sm text-[var(--text-secondary)] mb-6">
                             {importJob.status === "fetching" && (
                                 <>Fetching tracks and matching to your library...</>
                             )}
@@ -996,7 +996,7 @@ function ImportPlaylistPageContent() {
                                 style={{ width: `${importJob.progress}%` }}
                             />
                         </div>
-                        <p className="text-xs text-gray-500 mt-3">
+                        <p className="text-xs text-[var(--text-muted)] mt-3">
                             {importJob.progress}% complete • downloads continue
                             in the background
                         </p>
@@ -1004,7 +1004,7 @@ function ImportPlaylistPageContent() {
                         <button
                             onClick={handleCancelImport}
                             disabled={isCancelling}
-                            className="mt-6 px-5 py-2 rounded-full text-sm font-medium text-gray-400 hover:text-white hover:bg-white/10 border border-white/10 transition-colors disabled:opacity-50"
+                            className="mt-6 px-5 py-2 rounded-full text-sm font-medium text-[var(--text-secondary)] hover:text-white hover:bg-white/10 border border-white/10 transition-colors disabled:opacity-50"
                         >
                             {isCancelling ? (
                                 <>
@@ -1015,7 +1015,7 @@ function ImportPlaylistPageContent() {
                                 "Cancel Import"
                             )}
                         </button>
-                        <p className="text-xs text-gray-600 mt-2">
+                        <p className="text-xs text-[var(--text-muted)] mt-2">
                             Playlist will be created with tracks downloaded so
                             far
                         </p>
@@ -1051,19 +1051,19 @@ function ImportPlaylistPageContent() {
                         </h2>
 
                         {importJob.status === "failed" ? (
-                            <p className="text-sm text-gray-400">
+                            <p className="text-sm text-[var(--text-secondary)]">
                                 {importJob.error ||
                                     "Something went wrong while importing."}
                             </p>
                         ) : importJob.status === "cancelled" ? (
-                            <p className="text-sm text-gray-400">
+                            <p className="text-sm text-[var(--text-secondary)]">
                                 {importJob.createdPlaylistId
                                     ? `Import cancelled. A playlist was created with ${importJob.tracksMatched} matched track${importJob.tracksMatched === 1 ? "" : "s"}.`
                                     : "Import cancelled. No tracks had been matched yet."}
                             </p>
                         ) : (
                             <>
-                                <p className="text-sm text-gray-400">
+                                <p className="text-sm text-[var(--text-secondary)]">
                                     {importJob.tracksMatched > 0
                                         ? `Added ${importJob.tracksMatched} songs to your playlist`
                                         : "Playlist created (songs still downloading)"}
@@ -1086,7 +1086,7 @@ function ImportPlaylistPageContent() {
                                     setImportJob(null);
                                     setRefreshStatusMessage(null);
                                 }}
-                                className="px-5 py-2.5 rounded-full text-sm font-medium text-gray-300 hover:text-white hover:bg-white/5 transition-colors"
+                                className="px-5 py-2.5 rounded-full text-sm font-medium text-[var(--text-primary)] hover:text-white hover:bg-white/5 transition-colors"
                             >
                                 Import Another
                             </button>
@@ -1140,7 +1140,7 @@ function ImportPlaylistPageContent() {
                                     </button>
                                 )}
                             {refreshStatusMessage && (
-                                <p className="text-xs text-gray-500 mt-3">
+                                <p className="text-xs text-[var(--text-muted)] mt-3">
                                     {refreshStatusMessage}
                                 </p>
                             )}

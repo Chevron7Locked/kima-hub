@@ -64,7 +64,7 @@ const ArtistCardItem = memo(
                 tabIndex={0}
                 className="group block"
             >
-                <div className="relative bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg overflow-hidden hover:border-[#ec4899]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#ec4899]/10" style={{ transform: "translateZ(0)" }}>
+                <div className="relative bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg overflow-hidden hover:border-[#fca200]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#fca200]/10" style={{ transform: "translateZ(0)" }}>
                     <div className="relative aspect-square">
                         <div className="w-full h-full bg-[#181818] flex items-center justify-center overflow-hidden" style={{ contain: "content" }}>
                             {coverArtUrl ? (
@@ -76,7 +76,7 @@ const ArtistCardItem = memo(
                                     sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 16vw"
                                 />
                             ) : (
-                                <Music className="w-12 h-12 text-gray-700" />
+                                <Music className="w-12 h-12 text-[var(--text-muted)]" />
                             )}
                         </div>
 
@@ -86,7 +86,7 @@ const ArtistCardItem = memo(
                         {/* Play button */}
                         <button
                             onClick={handlePlay}
-                            className="absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#ec4899] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 hover:bg-[#db2777]"
+                            className="absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#fca200] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 hover:bg-[#d48c00]"
                         >
                             <Play className="w-5 h-5 fill-current ml-0.5 text-white" />
                         </button>
@@ -101,7 +101,7 @@ const ArtistCardItem = memo(
                         </button>
 
                         {/* Color accent bar */}
-                        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-[#ec4899] to-[#db2777] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150" />
+                        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-[#fca200] to-[#d48c00] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150" />
                     </div>
 
                     {/* Info section with monospace data */}
@@ -109,7 +109,7 @@ const ArtistCardItem = memo(
                         <h3 className="text-sm font-bold text-white truncate mb-1 tracking-tight">
                             {artist.name}
                         </h3>
-                        <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">
+                        <p className="text-xs tabular-nums text-[var(--text-muted)]">
                             {artist.albumCount || 0} albums
                         </p>
                     </div>

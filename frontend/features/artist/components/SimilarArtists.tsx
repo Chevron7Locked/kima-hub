@@ -68,7 +68,7 @@ export function SimilarArtists({
                                     />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center">
-                                        <Music className="w-12 h-12 text-gray-600" />
+                                        <Music className="w-12 h-12 text-[var(--text-muted)]" />
                                     </div>
                                 )}
                                 {/* Library indicator badge */}
@@ -88,7 +88,7 @@ export function SimilarArtists({
                             </h3>
 
                             {/* Album Count - show owned count if in library */}
-                            <p className="text-xs text-gray-400 truncate">
+                            <p className="text-xs text-[var(--text-secondary)] truncate">
                                 {artist.ownedAlbumCount &&
                                 artist.ownedAlbumCount > 0
                                     ? `${artist.ownedAlbumCount} album${

@@ -36,10 +36,10 @@ export function SimilarArtistsGrid({
                             imageUrl={imageUrl}
                             fallbackIcon={Music}
                             accentColor={{
-                                border: "hover:border-[#ec4899]/50",
-                                gradient: "bg-gradient-to-r from-[#ec4899] to-[#db2777]",
-                                button: "bg-[#ec4899] text-white",
-                                shadow: "hover:shadow-[#ec4899]/10",
+                                border: "hover:border-[#fca200]/50",
+                                gradient: "bg-gradient-to-r from-[#fca200] to-[#d48c00]",
+                                button: "bg-[#fca200] text-white",
+                                shadow: "hover:shadow-[#fca200]/10",
                             }}
                             index={index}
                         />

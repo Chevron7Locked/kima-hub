@@ -92,14 +92,14 @@ export function ArtistHero({
                             />
                         ) : (
                             <div className="w-full h-full flex items-center justify-center">
-                                <Music className="w-16 h-16 text-gray-600" />
+                                <Music className="w-16 h-16 text-[var(--text-muted)]" />
                             </div>
                         )}
                     </div>
 
                     {/* Artist Info - Bottom Aligned */}
                     <div className="flex-1 min-w-0 pb-1">
-                        <p className="text-xs font-mono font-medium text-white/70 uppercase tracking-wider mb-1">
+                        <p className="text-xs font-medium text-[var(--text-secondary)] mb-1">
                             Artist
                         </p>
                         <div className="flex items-center gap-3 group mb-2">
@@ -140,7 +140,7 @@ export function ArtistHero({
                                 </Suspense>
                             )}
                         </div>
-                        <div className="flex flex-wrap items-center gap-1 text-sm text-white/70">
+                        <div className="flex flex-wrap items-center gap-1 text-sm text-[var(--text-secondary)]">
                             {artist.listeners && artist.listeners > 0 && (
                                 <>
                                     <span>

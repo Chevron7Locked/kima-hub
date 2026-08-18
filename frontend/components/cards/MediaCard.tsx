@@ -62,7 +62,7 @@ export function MediaCard({
                                 unoptimized
                             />
                         ) : (
-                            <FallbackIcon className="w-12 h-12 text-gray-700" />
+                            <FallbackIcon className="w-12 h-12 text-[var(--text-muted)]" />
                         )}
                     </div>
 
@@ -93,7 +93,7 @@ export function MediaCard({
                     <h3 className="text-sm font-bold text-white truncate mb-1 tracking-tight">
                         {title}
                     </h3>
-                    <p className="text-xs font-mono text-gray-500 uppercase tracking-wider truncate">
+                    <p className="text-xs tabular-nums text-[var(--text-muted)] truncate">
                         {subtitle}
                     </p>
                 </div>

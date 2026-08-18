@@ -34,20 +34,20 @@ export function UnavailableAlbums({
                     className="flex items-center gap-2 hover:bg-[var(--bg-hover)] transition-colors rounded-lg flex-1"
                 >
                     <Music className="w-5 h-5 text-orange-400" />
-                    <span className="text-sm font-medium text-gray-400">
+                    <span className="text-sm font-medium text-[var(--text-secondary)]">
                         {unavailable.length} album{unavailable.length !== 1 ? "s" : ""} unavailable
                     </span>
                     {isExpanded ? (
-                        <ChevronUp className="w-4 h-4 text-gray-500" />
+                        <ChevronUp className="w-4 h-4 text-[var(--text-muted)]" />
                     ) : (
-                        <ChevronDown className="w-4 h-4 text-gray-500" />
+                        <ChevronDown className="w-4 h-4 text-[var(--text-muted)]" />
                     )}
                 </button>
                 {onRetryAll && (
                     <button
                         onClick={(e) => { e.stopPropagation(); onRetryAll(); }}
                         disabled={isRetrying}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase tracking-wider text-orange-400 hover:text-orange-300 hover:bg-orange-500/10 rounded transition-colors disabled:opacity-50"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs tabular-nums text-orange-400 hover:text-orange-300 hover:bg-orange-500/10 rounded transition-colors disabled:opacity-50"
                     >
                         <RefreshCw className={cn("w-3 h-3", isRetrying && "animate-spin")} />
                         Retry All
@@ -57,7 +57,7 @@ export function UnavailableAlbums({
             {isExpanded && (
                 <>
                     <div className="px-6 pb-4">
-                        <p className="text-sm text-gray-400">
+                        <p className="text-sm text-[var(--text-secondary)]">
                             These albums were recommended but couldn&apos;t be found by your indexers.
                             Listen to 30-second previews below!
                         </p>
@@ -98,19 +98,19 @@ export function UnavailableAlbums({
                                         )}
                                     </button>
                                 ) : (
-                                    <Music className="w-4 h-4 text-gray-600" />
+                                    <Music className="w-4 h-4 text-[var(--text-muted)]" />
                                 )}
                             </div>
 
                             <div className="w-12 h-12 bg-[#181818] rounded flex items-center justify-center shrink-0">
-                                <Music className="w-6 h-6 text-gray-600" />
+                                <Music className="w-6 h-6 text-[var(--text-muted)]" />
                             </div>
 
                             <div className="flex-1 min-w-0">
                                 <h3 className="text-sm font-medium text-white truncate">
                                     {album.album}
                                 </h3>
-                                <div className="flex items-center gap-2 text-xs text-gray-400 truncate">
+                                <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)] truncate">
                                     <span>{album.artist}</span>
                                     {album.previewUrl && (
                                         <>

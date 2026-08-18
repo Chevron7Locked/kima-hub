@@ -109,8 +109,8 @@ export function LibraryRadioStations() {
             {/* Content */}
             <div className="absolute inset-0 p-3 flex flex-col justify-between">
                 <div className="flex items-center gap-1.5">
-                    <Radio className="w-3 h-3 text-white/50" />
-                    <span className="text-micro font-mono text-white/50 uppercase tracking-wider">
+                    <Radio className="w-3 h-3 text-[var(--text-secondary)]" />
+                    <span className="text-xs text-[var(--text-secondary)]">
                         Radio
                     </span>
                 </div>
@@ -118,7 +118,10 @@ export function LibraryRadioStations() {
                     <h3 className="text-sm font-bold text-white truncate tracking-tight leading-tight">
                         {station.name}
                     </h3>
-                    <p className="text-micro font-mono text-gray-500 uppercase tracking-wider truncate">
+                    {/* The description is a sentence, not a label. In caps it
+                        ran ~15% wider and truncated mid-word on a phone --
+                        "Lesser-played gems" arrived as "LESSER-PLAY...". */}
+                    <p className="text-xs text-[var(--text-muted)] truncate">
                         {station.description}
                     </p>
                 </div>
@@ -197,7 +200,7 @@ export function LibraryRadioStations() {
                 {stationPages.map((page, pageIndex) => (
                     <div
                         key={pageIndex}
-                        className="flex-shrink-0 snap-start w-full grid grid-cols-3 grid-rows-2 gap-2"
+                        className="flex-shrink-0 snap-start w-full grid grid-cols-2 grid-rows-3 sm:grid-cols-3 sm:grid-rows-2 gap-2"
                     >
                         {page.map((station) => renderCard(station, false))}
                         {page.length < 6 &&
@@ -207,7 +210,7 @@ export function LibraryRadioStations() {
                     </div>
                 ))}
                 {isLoading && (
-                    <div className="flex-shrink-0 snap-start w-full grid grid-cols-3 grid-rows-2 gap-2">
+                    <div className="flex-shrink-0 snap-start w-full grid grid-cols-2 grid-rows-3 sm:grid-cols-3 sm:grid-rows-2 gap-2">
                         {Array.from({ length: 6 }).map((_, i) => (
                             <div key={i} className="aspect-[5/3] rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse" />
                         ))}

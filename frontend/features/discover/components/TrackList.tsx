@@ -29,7 +29,7 @@ export function TrackList({
     return (
         <div className="w-full">
             {/* Table Header */}
-            <div className="hidden md:grid grid-cols-[40px_minmax(200px,4fr)_minmax(100px,2fr)_80px_80px] gap-4 px-4 py-2 text-xs text-gray-400 uppercase tracking-wider border-b border-white/10 mb-2">
+            <div className="hidden md:grid grid-cols-[40px_minmax(200px,4fr)_minmax(100px,2fr)_80px_80px] gap-4 px-4 py-2 text-xs text-[var(--text-secondary)] border-b border-white/10 mb-2">
                 <span className="text-center">#</span>
                 <span>Title</span>
                 <span>Album</span>
@@ -91,7 +91,7 @@ export function TrackList({
                                             "group-hover:hidden text-sm",
                                             isTrackPlaying
                                                 ? "text-brand"
-                                                : "text-gray-400"
+                                                : "text-[var(--text-secondary)]"
                                         )}
                                     >
                                         {isTrackPlaying && isPlaying ? (
@@ -121,7 +121,7 @@ export function TrackList({
                                         />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center">
-                                            <Music className="w-5 h-5 text-gray-600" />
+                                            <Music className="w-5 h-5 text-[var(--text-muted)]" />
                                         </div>
                                     )}
                                 </div>
@@ -136,14 +136,14 @@ export function TrackList({
                                     >
                                         {track.title}
                                     </p>
-                                    <p className="text-xs text-gray-400 truncate">
+                                    <p className="text-xs text-[var(--text-secondary)] truncate">
                                         {track.artist}
                                     </p>
                                 </div>
                             </div>
 
                             {/* Album (hidden on mobile) */}
-                            <p className="hidden md:flex items-center text-sm text-gray-400 truncate">
+                            <p className="hidden md:flex items-center text-sm text-[var(--text-secondary)] truncate">
                                 {track.album}
                             </p>
 
@@ -170,7 +170,7 @@ export function TrackList({
                                         "p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all",
                                         track.isLiked
                                             ? "text-[#a855f7] hover:text-[#9333ea]"
-                                            : "text-gray-400 hover:text-white"
+                                            : "text-[var(--text-secondary)] hover:text-white"
                                     )}
                                     title={
                                         track.isLiked
@@ -185,7 +185,7 @@ export function TrackList({
                                         )}
                                     />
                                 </button>
-                                <span className="text-sm text-gray-400 w-10 text-right">
+                                <span className="text-sm text-[var(--text-secondary)] w-10 text-right">
                                     {formatTime(track.duration)}
                                 </span>
                             </div>

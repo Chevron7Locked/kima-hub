@@ -51,7 +51,7 @@ function ProgressBar({
                 />
             </div>
             {showPercentage && (
-                <span className="text-micro font-mono text-white/30 w-10 text-right uppercase tracking-wider">
+                <span className="text-xs tabular-nums text-[var(--text-muted)] w-10 text-right">
                     {progress}%
                 </span>
             )}
@@ -99,7 +99,7 @@ function EnrichmentStage({
                 ) : hasActivity ? (
                     <Loader2 className="w-4 h-4 text-brand animate-spin" />
                 ) : (
-                    <Icon className="w-4 h-4 text-white/40" />
+                    <Icon className="w-4 h-4 text-[var(--text-muted)]" />
                 )}
             </div>
             <div className="flex-1 min-w-0">
@@ -108,12 +108,12 @@ function EnrichmentStage({
                         {label}
                     </span>
                     {isBackground && !isComplete && (
-                        <span className="text-micro font-mono px-1.5 py-0.5 rounded-lg bg-white/5 border border-white/10 text-white/40 uppercase tracking-wider">
+                        <span className="text-xs px-1.5 py-0.5 rounded-lg bg-white/5 border border-white/10 text-[var(--text-muted)]">
                             background
                         </span>
                     )}
                 </div>
-                <p className="text-micro font-mono text-white/30 mt-0.5 uppercase tracking-wider">{description}</p>
+                <p className="text-xs tabular-nums text-[var(--text-muted)] mt-0.5">{description}</p>
                 <div className="flex items-center gap-2 mt-2">
                     <ProgressBar
                         progress={progress}
@@ -126,7 +126,7 @@ function EnrichmentStage({
                         }
                     />
                 </div>
-                <div className="flex items-center gap-3 mt-1 text-micro font-mono text-white/20 uppercase tracking-wider">
+                <div className="flex items-center gap-3 mt-1 text-xs tabular-nums text-[var(--text-muted)]">
                     <span>
                         {completed} / {total}
                     </span>
@@ -159,7 +159,7 @@ const sliderClass = `w-32 h-1.5 bg-white/5 rounded-lg appearance-none cursor-poi
     [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-[#fca208]/20
     hover:[&::-webkit-slider-thumb]:scale-110 [&::-webkit-slider-thumb]:transition-transform`;
 
-const secondaryBtnClass = `px-4 py-1.5 text-xs font-mono bg-white/5 border border-white/10 text-white/70 rounded-lg uppercase tracking-wider
+const secondaryBtnClass =`px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg 
     hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all w-fit`;
 
 function EnrichmentFailuresList() {
@@ -169,18 +169,18 @@ function EnrichmentFailuresList() {
         refetchInterval: 15000,
     });
 
-    if (isLoading) return <div className="py-2 text-xs font-mono text-white/20 uppercase tracking-wider">Loading...</div>;
-    if (!data?.failures?.length) return <div className="py-2 text-xs font-mono text-white/20 uppercase tracking-wider">No active failures</div>;
+    if (isLoading) return <div className="py-2 text-xs text-[var(--text-muted)]">Loading...</div>;
+    if (!data?.failures?.length) return <div className="py-2 text-xs text-[var(--text-muted)]">No active failures</div>;
 
     return (
         <div className="mt-2 max-h-48 overflow-y-auto space-y-1">
             {data.failures.map((f: EnrichmentFailure) => (
-                <div key={f.id} className="flex items-center justify-between py-1 px-2 bg-white/[0.02] rounded text-xs font-mono">
+                <div key={f.id} className="flex items-center justify-between py-1 px-2 bg-white/[0.02] rounded text-xs tabular-nums">
                     <div className="flex-1 min-w-0">
-                        <span className="text-white/60 truncate block">{f.entityName || f.entityId}</span>
+                        <span className="text-[var(--text-secondary)] truncate block">{f.entityName || f.entityId}</span>
                         <span className="text-red-400/50 text-micro">{f.errorMessage || "Unknown error"}</span>
                     </div>
-                    <span className="text-white/20 text-micro ml-2 shrink-0">{f.errorCode}</span>
+                    <span className="text-[var(--text-muted)] text-micro ml-2 shrink-0">{f.errorCode}</span>
                 </div>
             ))}
         </div>
@@ -671,15 +671,15 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                 {/* Enrichment Progress */}
                 {isProgressPending ? (
                     <div className="mb-6 p-4 bg-white/5 rounded-lg border border-white/10 flex items-center gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin text-white/40" />
-                        <span className="text-xs font-mono text-white/30 uppercase tracking-wider">Loading enrichment status...</span>
+                        <Loader2 className="w-4 h-4 animate-spin text-[var(--text-muted)]" />
+                        <span className="text-xs text-[var(--text-muted)]">Loading enrichment status...</span>
                     </div>
                 ) : isProgressError && !enrichmentProgress ? (
                     <div className="mb-6 p-4 bg-white/5 rounded-lg border border-red-500/20 flex items-center justify-between">
-                        <span className="text-xs font-mono text-red-400 uppercase tracking-wider">Failed to load enrichment status</span>
+                        <span className="text-xs text-red-400">Failed to load enrichment status</span>
                         <button
                             onClick={() => refetchProgress()}
-                            className="px-3 py-2.5 min-h-[44px] text-micro font-mono bg-white/5 border border-white/10 text-white/50 rounded-lg hover:bg-white/10 transition-colors uppercase tracking-wider"
+                            className="px-3 py-2.5 min-h-[44px] text-micro bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg hover:bg-white/10 transition-colors"
                         >
                             Retry
                         </button>
@@ -692,7 +692,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             </h3>
                             {enrichmentProgress.coreComplete &&
                                 !enrichmentProgress.isFullyComplete && (
-                                    <span className="text-micro font-mono text-purple-400 flex items-center gap-1 uppercase tracking-wider">
+                                    <span className="text-xs tabular-nums text-purple-400 flex items-center gap-1">
                                         <Loader2 className="w-3 h-3 animate-spin" />
                                         {(enrichmentProgress.audioAnalysis?.pending ?? 0) > 0 || (enrichmentProgress.audioAnalysis?.processing ?? 0) > 0
                                             ? "Audio analysis running"
@@ -700,7 +700,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     </span>
                                 )}
                             {enrichmentProgress.isFullyComplete && (
-                                <span className="text-micro font-mono text-green-400 flex items-center gap-1 uppercase tracking-wider">
+                                <span className="text-xs tabular-nums text-green-400 flex items-center gap-1">
                                     <CheckCircle className="w-3 h-3" />
                                     Complete
                                 </span>
@@ -725,8 +725,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     onClick={() => setConfirmTarget("artists")}
                                     disabled={resettingArtists || syncing || reEnriching || isEnrichmentActive}
                                     aria-label="Reset and re-run artist metadata enrichment"
-                                    className="mt-1 px-3 py-2.5 min-h-[44px] text-micro font-mono bg-white/5 border border-white/10 text-white/40 rounded-lg
-                                        hover:bg-white/10 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap uppercase tracking-wider"
+                                    className="mt-1 px-3 py-2.5 min-h-[44px] text-micro tabular-nums bg-white/5 border border-white/10 text-[var(--text-muted)] rounded-lg
+                                    hover:bg-white/10 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap"
                                 >
                                     {resettingArtists ? "Resetting..." : "Re-run"}
                                 </button>
@@ -750,8 +750,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     onClick={() => setConfirmTarget("moodTags")}
                                     disabled={resettingMoodTags || syncing || reEnriching || isEnrichmentActive}
                                     aria-label="Reset and re-run mood tag enrichment"
-                                    className="mt-1 px-3 py-2.5 min-h-[44px] text-micro font-mono bg-white/5 border border-white/10 text-white/40 rounded-lg
-                                        hover:bg-white/10 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap uppercase tracking-wider"
+                                    className="mt-1 px-3 py-2.5 min-h-[44px] text-micro tabular-nums bg-white/5 border border-white/10 text-[var(--text-muted)] rounded-lg
+                                    hover:bg-white/10 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap"
                                 >
                                     {resettingMoodTags ? "Resetting..." : "Re-run"}
                                 </button>
@@ -789,17 +789,17 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                         onClick={() => setConfirmTarget("audioAnalysis")}
                                         disabled={resettingAudio || syncing || reEnriching || isEnrichmentActive}
                                         aria-label="Reset and re-run audio analysis"
-                                        className="mt-1 px-3 py-2.5 min-h-[44px] text-micro font-mono bg-white/5 border border-white/10 text-white/40 rounded-lg
-                                            hover:bg-white/10 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap uppercase tracking-wider"
+                                        className="mt-1 px-3 py-2.5 min-h-[44px] text-micro tabular-nums bg-white/5 border border-white/10 text-[var(--text-muted)] rounded-lg
+                                        hover:bg-white/10 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap"
                                     >
                                         {resettingAudio ? "Resetting..." : "Re-run"}
                                     </button>
                                 </div>
                             ) : !featuresLoading ? (
                                 <div className="opacity-50 py-2">
-                                    <h4 className="text-sm font-medium text-white/50">Audio Analysis</h4>
-                                    <p className="text-xs font-mono text-white/30 uppercase tracking-wider">Not available (lite mode)</p>
-                                    <p className="text-micro font-mono text-white/20 mt-1 uppercase tracking-wider">
+                                    <h4 className="text-sm font-medium text-[var(--text-secondary)]">Audio Analysis</h4>
+                                    <p className="text-xs text-[var(--text-muted)]">Not available (lite mode)</p>
+                                    <p className="text-xs text-[var(--text-muted)] mt-1">
                                         Service not detected -- check setup documentation
                                     </p>
                                 </div>
@@ -826,8 +826,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                             onClick={() => setConfirmTarget("vibeEmbeddings")}
                                             disabled={resettingVibe || syncing || reEnriching || isEnrichmentActive}
                                             aria-label="Reset and re-run vibe embedding generation"
-                                            className="mt-1 px-3 py-2.5 min-h-[44px] text-micro font-mono bg-white/5 border border-white/10 text-white/40 rounded-lg
-                                                hover:bg-white/10 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap uppercase tracking-wider"
+                                            className="mt-1 px-3 py-2.5 min-h-[44px] text-micro tabular-nums bg-white/5 border border-white/10 text-[var(--text-muted)] rounded-lg
+                                            hover:bg-white/10 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap"
                                         >
                                             {resettingVibe ? "Resetting..." : "Re-run"}
                                         </button>
@@ -835,9 +835,9 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 )
                             ) : !featuresLoading ? (
                                 <div className="opacity-50 py-2">
-                                    <h4 className="text-sm font-medium text-white/50">Vibe Similarity</h4>
-                                    <p className="text-xs font-mono text-white/30 uppercase tracking-wider">Not available (lite mode)</p>
-                                    <p className="text-micro font-mono text-white/20 mt-1 uppercase tracking-wider">
+                                    <h4 className="text-sm font-medium text-[var(--text-secondary)]">Vibe Similarity</h4>
+                                    <p className="text-xs text-[var(--text-muted)]">Not available (lite mode)</p>
+                                    <p className="text-xs text-[var(--text-muted)] mt-1">
                                         Service not detected -- check setup documentation
                                     </p>
                                 </div>
@@ -851,7 +851,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 disabled={
                                     syncing || reEnriching || isEnrichmentActive
                                 }
-                                className="px-3 py-2.5 min-h-[44px] text-xs font-bold bg-brand text-black rounded-lg uppercase tracking-wider
+                                className="px-3 py-2.5 min-h-[44px] text-xs font-semibold bg-brand text-black rounded-lg 
                                 hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 {syncing ? "Syncing..." : "Sync New"}
@@ -861,7 +861,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 disabled={
                                     syncing || reEnriching || isEnrichmentActive
                                 }
-                                className="px-3 py-2.5 min-h-[44px] text-xs font-mono bg-white/5 border border-white/10 text-white/70 rounded-lg uppercase tracking-wider
+                                className="px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg 
                                 hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                             >
                                 {reEnriching ? "Starting..." : "Re-enrich All"}
@@ -872,7 +872,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     {enrichmentState?.status === "running" ? (
                                         <button
                                             onClick={handlePause}
-                                            className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-mono bg-yellow-600/20 border border-yellow-600/30 text-yellow-400 rounded-lg uppercase tracking-wider
+                                            className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-yellow-600/20 border border-yellow-600/30 text-yellow-400 rounded-lg 
                                             hover:bg-yellow-600/30 transition-colors"
                                         >
                                             <Pause className="w-3 h-3" />
@@ -881,7 +881,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     ) : (
                                         <button
                                             onClick={handleResume}
-                                            className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-mono bg-green-600/20 border border-green-600/30 text-green-400 rounded-lg uppercase tracking-wider
+                                            className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-green-600/20 border border-green-600/30 text-green-400 rounded-lg 
                                             hover:bg-green-600/30 transition-colors"
                                         >
                                             <Play className="w-3 h-3" />
@@ -890,7 +890,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     )}
                                     <button
                                         onClick={handleStop}
-                                        className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-mono bg-red-600/20 border border-red-600/30 text-red-400 rounded-lg uppercase tracking-wider
+                                        className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-red-600/20 border border-red-600/30 text-red-400 rounded-lg 
                                         hover:bg-red-600/30 transition-colors"
                                     >
                                         <StopCircle className="w-3 h-3" />
@@ -904,7 +904,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             <div className="mt-4 pt-3 border-t border-white/10">
                                 <button
                                     onClick={() => setShowInlineFailures(!showInlineFailures)}
-                                    className="flex items-center gap-2 text-xs font-mono text-red-400/70 uppercase tracking-wider hover:text-red-400 transition-colors"
+                                    className="flex items-center gap-2 text-xs tabular-nums text-red-400/70 hover:text-red-400 transition-colors"
                                 >
                                     <AlertTriangle className="w-3 h-3" />
                                     {showInlineFailures ? "Hide" : "Show"} Failures ({totalFailures})
@@ -932,7 +932,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                                 "stopping" && (
                                                 <StopCircle className="w-3 h-3 text-red-400 animate-pulse" />
                                             )}
-                                            <span className="text-white/50 font-mono">
+                                            <span className="text-[var(--text-secondary)] tabular-nums">
                                                 {enrichmentState.status ===
                                                     "running" &&
                                                     `Processing ${enrichmentState.currentPhase}...`}
@@ -951,7 +951,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                             enrichmentState.currentPhase ===
                                                 "artists" &&
                                             enrichmentState.artists?.current && (
-                                                <div className="mt-1 text-white/30 font-mono truncate">
+                                                <div className="mt-1 text-[var(--text-muted)] tabular-nums truncate">
                                                     Current:{" "}
                                                     {
                                                         enrichmentState.artists
@@ -963,7 +963,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                             enrichmentState.currentPhase ===
                                                 "tracks" &&
                                             enrichmentState.tracks?.current && (
-                                                <div className="mt-1 text-white/30 font-mono truncate">
+                                                <div className="mt-1 text-[var(--text-muted)] tabular-nums truncate">
                                                     Current:{" "}
                                                     {enrichmentState.tracks.current}
                                                 </div>
@@ -994,7 +994,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             }
                             className={sliderClass}
                         />
-                        <span className="text-xs font-mono text-white/50 w-16 text-right">
+                        <span className="text-xs tabular-nums text-[var(--text-secondary)] w-16 text-right">
                             {(settings.maxCacheSizeMb / 1024).toFixed(1)} GB
                         </span>
                     </div>
@@ -1020,7 +1020,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             }
                             className={sliderClass}
                         />
-                        <span className="text-xs font-mono text-white/50 w-16 text-right">
+                        <span className="text-xs tabular-nums text-[var(--text-secondary)] w-16 text-right">
                             {settings.transcodeCacheMaxGb} GB
                         </span>
                     </div>
@@ -1075,12 +1075,12 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             />
                             <div className="flex flex-col items-end gap-0.5">
                                 {isConcurrencyLoading ? (
-                                    <span className="text-xs font-mono text-white/30 w-24 text-right uppercase tracking-wider">
+                                    <span className="text-xs text-[var(--text-muted)] w-24 text-right">
                                         Loading...
                                     </span>
                                 ) : (
                                     <>
-                                        <span className="text-xs font-mono text-white/50 w-24 text-right">
+                                        <span className="text-xs tabular-nums text-[var(--text-secondary)] w-24 text-right">
                                             {enrichmentSpeed === 1
                                                 ? "Conservative"
                                                 : enrichmentSpeed === 2
@@ -1092,7 +1092,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                                 : "Maximum"}
                                         </span>
                                         {concurrencyConfig && (
-                                            <span className="text-micro font-mono text-white/30 w-24 text-right uppercase tracking-wider">
+                                            <span className="text-xs tabular-nums text-[var(--text-muted)] w-24 text-right">
                                                 ~
                                                 {
                                                     concurrencyConfig.artistsPerMin
@@ -1128,17 +1128,17 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             />
                             <div className="flex flex-col items-end gap-0.5">
                                 {isWorkersLoading ? (
-                                    <span className="text-xs font-mono text-white/30 w-24 text-right uppercase tracking-wider">
+                                    <span className="text-xs text-[var(--text-muted)] w-24 text-right">
                                         Loading...
                                     </span>
                                 ) : (
                                     <>
-                                        <span className="text-xs font-mono text-white/50 w-24 text-right">
+                                        <span className="text-xs tabular-nums text-[var(--text-secondary)] w-24 text-right">
                                             {workersConfig?.workers ?? 2}{" "}
                                             workers
                                         </span>
                                         {workersConfig && (
-                                            <span className="text-micro font-mono text-white/30 w-24 text-right uppercase tracking-wider">
+                                            <span className="text-xs tabular-nums text-[var(--text-muted)] w-24 text-right">
                                                 {workersConfig.cpuCores} cores
                                                 available
                                             </span>
@@ -1171,17 +1171,17 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             />
                             <div className="flex flex-col items-end gap-0.5">
                                 {isClapWorkersLoading ? (
-                                    <span className="text-xs font-mono text-white/30 w-24 text-right uppercase tracking-wider">
+                                    <span className="text-xs text-[var(--text-muted)] w-24 text-right">
                                         Loading...
                                     </span>
                                 ) : (
                                     <>
-                                        <span className="text-xs font-mono text-white/50 w-24 text-right">
+                                        <span className="text-xs tabular-nums text-[var(--text-secondary)] w-24 text-right">
                                             {clapWorkersConfig?.workers ?? 2}{" "}
                                             workers
                                         </span>
                                         {clapWorkersConfig && (
-                                            <span className="text-micro font-mono text-white/30 w-24 text-right uppercase tracking-wider">
+                                            <span className="text-xs tabular-nums text-[var(--text-muted)] w-24 text-right">
                                                 {clapWorkersConfig.cpuCores} cores
                                                 available
                                             </span>
@@ -1201,15 +1201,15 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                         className="w-full flex items-center justify-between px-4 py-3 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-left"
                     >
                         <div>
-                            <span className="text-xs font-mono text-white/60 uppercase tracking-wider">
+                            <span className="text-xs text-[var(--text-secondary)]">
                                 Maintenance Operations
                             </span>
-                            <p className="text-micro font-mono text-white/25 uppercase tracking-wider mt-0.5">
+                            <p className="text-xs text-[var(--text-muted)] mt-0.5">
                                 Destructive actions -- cache clearing, job cleanup, full resets
                             </p>
                         </div>
                         <ChevronDown
-                            className={`w-4 h-4 text-white/30 transition-transform shrink-0 ${maintenanceOpen ? "rotate-180" : ""}`}
+                            className={`w-4 h-4 text-[var(--text-muted)] transition-transform shrink-0 ${maintenanceOpen ? "rotate-180" : ""}`}
                         />
                     </button>
 
@@ -1250,24 +1250,24 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     <button
                                         onClick={() => setConfirmTarget("allEnrichment")}
                                         disabled={resettingEnrichment || isEnrichmentActive}
-                                        className="px-3 py-2.5 min-h-[44px] text-xs font-bold bg-red-600/80 text-white rounded-lg uppercase tracking-wider
+                                        className="px-3 py-2.5 min-h-[44px] text-xs font-semibold bg-red-600/80 text-white rounded-lg 
                                             hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                     >
                                         {resettingEnrichment ? "Resetting..." : "Reset All Enrichment Data"}
                                     </button>
-                                    <p className="mt-1.5 text-micro font-mono text-white/25 uppercase tracking-wider">
+                                    <p className="mt-1.5 text-xs text-[var(--text-muted)]">
                                         Wipes artists, audio analysis, vibe embeddings, and mood tags
                                     </p>
                                 </div>
                             )}
 
                             {retryResult && (
-                                <p className="text-xs font-mono text-green-400 uppercase tracking-wider">
+                                <p className="text-xs tabular-nums text-green-400">
                                     Reset {retryResult.reset} failed tracks to pending
                                 </p>
                             )}
                             {cleanupResult && cleanupResult.totalCleaned > 0 && (
-                                <p className="text-xs font-mono text-green-400 uppercase tracking-wider">
+                                <p className="text-xs tabular-nums text-green-400">
                                     Cleaned:{" "}
                                     {cleanupResult.cleaned.discoveryBatches.cleaned}{" "}
                                     batches,{" "}
@@ -1279,11 +1279,11 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 </p>
                             )}
                             {cleanupResult && cleanupResult.totalCleaned === 0 && (
-                                <p className="text-xs font-mono text-white/30 uppercase tracking-wider">
+                                <p className="text-xs text-[var(--text-muted)]">
                                     No stale jobs found
                                 </p>
                             )}
-                            {error && <p className="text-xs font-mono text-red-400 uppercase tracking-wider">{error}</p>}
+                            {error && <p className="text-xs tabular-nums text-red-400">{error}</p>}
                         </div>
                     )}
                 </div>

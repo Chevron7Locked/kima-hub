@@ -48,11 +48,11 @@ export function AudiobookActionBar({
             {/* Progress indicator */}
             {hasProgress && !isFinished && (
                 <div className="hidden sm:flex items-center gap-3">
-                    <div className="text-xs font-mono text-white/50 uppercase tracking-wider">
+                    <div className="text-xs tabular-nums text-[var(--text-secondary)]">
                         <span>
                             {formatTime(isThisBookPlaying ? currentTime : audiobook.progress!.currentTime)}
                         </span>
-                        <span className="text-white/20 mx-1">/</span>
+                        <span className="text-[var(--text-muted)] mx-1">/</span>
                         <span>{formatTime(audiobook.duration)}</span>
                     </div>
                     <div className="w-24 h-1 bg-white/10 rounded-full overflow-hidden">
@@ -74,7 +74,7 @@ export function AudiobookActionBar({
                     <>
                         <button
                             onClick={onResetProgress}
-                            className="p-2 rounded-lg text-white/40 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all"
+                            className="p-2 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all"
                             title="Reset progress"
                         >
                             <RotateCcw className="w-4 h-4" />
@@ -92,7 +92,7 @@ export function AudiobookActionBar({
                 {isFinished && (
                     <button
                         onClick={onResetProgress}
-                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono uppercase tracking-wider bg-white/5 text-white/50 hover:bg-white/10 hover:text-white border border-white/10 hover:border-white/20 transition-all"
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs bg-white/5 text-[var(--text-secondary)] hover:bg-white/10 hover:text-white border border-white/10 hover:border-white/20 transition-all"
                         title="Listen again"
                     >
                         <RotateCcw className="w-3.5 h-3.5" />

@@ -51,7 +51,7 @@ export function PlaybackSection({ value, onChange }: PlaybackSectionProps) {
                         placeholder="[%artist% - ]$if2(%title%,$filepart(%filename%))"
                     />
                     {format && (
-                        <p className="text-micro text-white/30 font-mono truncate">
+                        <p className="text-micro text-[var(--text-muted)] tabular-nums truncate">
                             Preview: {preview}
                         </p>
                     )}

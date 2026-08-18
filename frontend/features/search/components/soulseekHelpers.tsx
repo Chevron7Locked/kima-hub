@@ -29,7 +29,7 @@ export const getQualityBadge = (result: SoulseekResult) => {
         );
     }
     return (
-        <span className="px-2 py-1 text-xs font-semibold bg-gray-600/20 text-gray-400 rounded">
+        <span className="px-2 py-1 text-xs font-semibold bg-gray-600/20 text-[var(--text-secondary)] rounded">
             {result.bitrate} kbps
         </span>
     );

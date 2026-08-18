@@ -108,8 +108,8 @@ export function VibePanelSheet({
             {selectedTrackId && onTrackOperation && onStartSongPath && (
                 <div className="shrink-0 px-3 pb-2 border-b border-white/5">
                     {(selectedTrackTitle || selectedTrackArtist) && (
-                        <p className="text-xs text-white/40 truncate mb-2 mt-0.5">
-                            <span className="text-white/70">{selectedTrackTitle}</span>
+                        <p className="text-xs text-[var(--text-muted)] truncate mb-2 mt-0.5">
+                            <span className="text-[var(--text-secondary)]">{selectedTrackTitle}</span>
                             {selectedTrackArtist && (
                                 <> &middot; {selectedTrackArtist}</>
                             )}

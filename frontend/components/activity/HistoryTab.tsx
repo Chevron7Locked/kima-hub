@@ -91,9 +91,9 @@ export function HistoryTab() {
     if (history.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-                <History className="w-8 h-8 text-white/20 mb-3" />
-                <p className="text-sm text-white/40">No download history</p>
-                <p className="text-xs text-white/30 mt-1">Completed downloads will appear here</p>
+                <History className="w-8 h-8 text-[var(--text-muted)] mb-3" />
+                <p className="text-sm text-[var(--text-muted)]">No download history</p>
+                <p className="text-xs text-[var(--text-muted)] mt-1">Completed downloads will appear here</p>
             </div>
         );
     }
@@ -104,13 +104,13 @@ export function HistoryTab() {
             <div className="flex items-center justify-between px-3 py-2 border-b-2 border-white/10">
                 <div className="flex items-center gap-3">
                     {completed.length > 0 && (
-                        <span className="flex items-center gap-1.5 text-micro font-mono font-bold text-green-400 uppercase tracking-wider">
+                        <span className="flex items-center gap-1.5 text-xs tabular-nums font-semibold text-green-400">
                             <CheckCircle className="w-3 h-3" />
                             {String(completed.length).padStart(2, "0")}
                         </span>
                     )}
                     {failed.length > 0 && (
-                        <span className="flex items-center gap-1.5 text-micro font-mono font-bold text-red-400 uppercase tracking-wider">
+                        <span className="flex items-center gap-1.5 text-xs tabular-nums font-semibold text-red-400">
                             <XCircle className="w-3 h-3" />
                             {String(failed.length).padStart(2, "0")}
                         </span>
@@ -118,7 +118,7 @@ export function HistoryTab() {
                 </div>
                 <button
                     onClick={handleClearAll}
-                    className="text-micro font-mono font-bold text-gray-600 hover:text-white uppercase tracking-wider transition-colors"
+                    className="text-micro font-semibold text-[var(--text-muted)] hover:text-white transition-colors"
                 >
                     CLEAR
                 </button>
@@ -130,7 +130,7 @@ export function HistoryTab() {
                 {failed.length > 0 && (
                     <div>
                         <div className="px-3 py-2 border-b-2 border-red-400/20 bg-red-400/5">
-                            <span className="text-micro font-mono font-bold text-red-400 uppercase tracking-wider">
+                            <span className="text-xs tabular-nums font-semibold text-red-400">
                                 FAILED ({String(failed.length).padStart(2, "0")})
                             </span>
                         </div>
@@ -151,7 +151,7 @@ export function HistoryTab() {
                 {completed.length > 0 && (
                     <div>
                         <div className="px-3 py-2 border-b-2 border-green-400/20 bg-green-400/5">
-                            <span className="text-micro font-mono font-bold text-green-400 uppercase tracking-wider">
+                            <span className="text-xs tabular-nums font-semibold text-green-400">
                                 COMPLETED ({String(completed.length).padStart(2, "0")})
                             </span>
                         </div>
@@ -206,7 +206,7 @@ function HistoryItem({
             <div className="flex items-start gap-3">
                 {/* Index number */}
                 <div className="flex-shrink-0 w-6 mt-0.5">
-                    <span className="text-micro font-mono font-bold text-gray-700">
+                    <span className="text-micro tabular-nums font-semibold text-[var(--text-muted)]">
                         {String(index + 1).padStart(2, "0")}
                     </span>
                 </div>
@@ -222,11 +222,11 @@ function HistoryItem({
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold tracking-tight text-white truncate uppercase mb-1">
+                    <p className="text-xs font-semibold tracking-tight text-white truncate mb-1">
                         {item.subject}
                     </p>
                     <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-micro font-mono text-gray-600 uppercase tracking-wider flex items-center gap-1">
+                        <span className="text-xs tabular-nums text-[var(--text-muted)] flex items-center gap-1">
                             {item.type === "album" ? (
                                 <Disc className="w-2.5 h-2.5" />
                             ) : (
@@ -234,13 +234,13 @@ function HistoryItem({
                             )}
                             {item.type}
                         </span>
-                        <span className="text-micro font-mono text-gray-700">•</span>
-                        <span className="text-micro font-mono text-gray-700 uppercase tracking-wider">
+                        <span className="text-micro text-[var(--text-muted)]">•</span>
+                        <span className="text-xs tabular-nums text-[var(--text-muted)]">
                             {formatTime(item.completedAt || item.createdAt)}
                         </span>
                     </div>
                     {item.error && (
-                        <p className="text-micro font-mono text-red-400/70 mt-1 line-clamp-2">
+                        <p className="text-micro tabular-nums text-red-400/70 mt-1 line-clamp-2">
                             {item.error}
                         </p>
                     )}
@@ -259,7 +259,7 @@ function HistoryItem({
                             title="Retry download"
                         >
                             <RotateCcw className={cn(
-                                "w-3 h-3 text-gray-700 hover:text-[#eab308]",
+                                "w-3 h-3 text-[var(--text-muted)] hover:text-[#eab308]",
                                 isRetrying && "animate-spin"
                             )} />
                         </button>
@@ -269,7 +269,7 @@ function HistoryItem({
                         className="p-1 hover:bg-white/10 transition-colors"
                         title="Remove from history"
                     >
-                        <Trash2 className="w-3 h-3 text-gray-700 hover:text-red-400" />
+                        <Trash2 className="w-3 h-3 text-[var(--text-muted)] hover:text-red-400" />
                     </button>
                 </div>
             </div>

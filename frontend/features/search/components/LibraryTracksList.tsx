@@ -83,7 +83,7 @@ export function LibraryTracksList({ tracks }: LibraryTracksListProps) {
                                 <Play className="w-4 h-4 text-brand ml-0.5" />
                             ) : (
                                 <>
-                                    <span className="text-sm text-gray-400 group-hover:hidden">
+                                    <span className="text-sm text-[var(--text-secondary)] group-hover:hidden">
                                         {index + 1}
                                     </span>
                                     <Play className="w-4 h-4 text-white hidden group-hover:block ml-0.5" />
@@ -104,7 +104,7 @@ export function LibraryTracksList({ tracks }: LibraryTracksListProps) {
                                 />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center">
-                                    <span className="text-gray-500 text-xs">
+                                    <span className="text-[var(--text-muted)] text-xs">
                                         ♪
                                     </span>
                                 </div>
@@ -123,7 +123,7 @@ export function LibraryTracksList({ tracks }: LibraryTracksListProps) {
                             >
                                 {track.title}
                             </p>
-                            <p className="text-xs text-gray-400 truncate">
+                            <p className="text-xs text-[var(--text-secondary)] truncate">
                                 <Link
                                     href={`/artist/${
                                         track.album.artist.mbid ||
@@ -146,7 +146,7 @@ export function LibraryTracksList({ tracks }: LibraryTracksListProps) {
                         </div>
 
                         {/* Duration */}
-                        <span className="text-sm text-gray-400 flex-shrink-0">
+                        <span className="text-sm text-[var(--text-secondary)] flex-shrink-0">
                             {formatTime(track.duration)}
                         </span>
                     </div>

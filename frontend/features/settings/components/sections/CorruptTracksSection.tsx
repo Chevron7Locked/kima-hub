@@ -40,9 +40,9 @@ export function CorruptTracksSection() {
             >
                 <div className="flex items-center gap-3">
                     {isLoading ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-white/30" />
+                        <Loader2 className="w-4 h-4 animate-spin text-[var(--text-muted)]" />
                     ) : (
-                        <span className={`text-sm font-mono ${count > 0 ? "text-amber-400" : "text-white/40"}`}>
+                        <span className={`text-sm tabular-nums ${count > 0 ?"text-amber-400":"text-[var(--text-muted)]"}`}>
                             {count} file{count !== 1 ? "s" : ""}
                         </span>
                     )}
@@ -54,7 +54,7 @@ export function CorruptTracksSection() {
                     <div className="px-4 py-2">
                         <button
                             onClick={() => setExpanded(!expanded)}
-                            className="flex items-center gap-2 text-xs font-mono text-white/40 hover:text-white/60 uppercase tracking-wider transition-colors"
+                            className="flex items-center gap-2 text-xs tabular-nums text-[var(--text-muted)] hover:text-white/60 transition-colors"
                         >
                             {expanded ? (
                                 <ChevronUp className="w-3 h-3" />
@@ -73,13 +73,13 @@ export function CorruptTracksSection() {
                                     >
                                         <AlertTriangle className="w-3.5 h-3.5 text-amber-400/60 mt-0.5 shrink-0" />
                                         <div className="min-w-0 flex-1">
-                                            <p className="text-xs font-medium text-white/50 truncate">
+                                            <p className="text-xs font-medium text-[var(--text-secondary)] truncate">
                                                 {track.title}
                                             </p>
-                                            <p className="text-micro font-mono text-white/25 truncate uppercase tracking-wider">
+                                            <p className="text-xs tabular-nums text-[var(--text-muted)] truncate">
                                                 {track.artist} -- {track.album}
                                             </p>
-                                            <p className="text-micro font-mono text-white/15 truncate mt-0.5">
+                                            <p className="text-micro tabular-nums text-[var(--text-muted)] truncate mt-0.5">
                                                 {track.filePath}
                                             </p>
                                         </div>
@@ -93,7 +93,7 @@ export function CorruptTracksSection() {
                         <button
                             onClick={() => setShowConfirm(true)}
                             disabled={deleteMutation.isPending}
-                            className="flex items-center gap-2 px-4 py-2 text-xs font-mono uppercase tracking-wider text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg transition-colors disabled:opacity-50"
+                            className="flex items-center gap-2 px-4 py-2 text-xs tabular-nums text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg transition-colors disabled:opacity-50"
                         >
                             {deleteMutation.isPending ? (
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />

@@ -189,7 +189,7 @@ function PlaylistCard({
                                 "opacity-0 group-hover:opacity-100",
                                 playlist.isHidden
                                     ? "text-green-400"
-                                    : "text-white/40",
+                                    : "text-[var(--text-muted)]",
                                 isHiding && "opacity-50 cursor-not-allowed"
                             )}
                             title={
@@ -229,12 +229,12 @@ function PlaylistCard({
                 <h3
                     className={cn(
                         "text-sm font-bold truncate tracking-tight",
-                        isHiddenView ? "text-white/40" : "text-white"
+                        isHiddenView ? "text-[var(--text-muted)]" : "text-white"
                     )}
                 >
                     {playlist.name}
                 </h3>
-                <p className="text-micro font-mono text-white/30 mt-0.5 truncate uppercase tracking-wider">
+                <p className="text-xs tabular-nums text-[var(--text-muted)] mt-0.5 truncate">
                     {isShared && playlist.user?.username ? (
                         <span>
                             {playlist.user.username} | {" "}
@@ -291,17 +291,17 @@ function CreatePanel({ onClose }: { onClose: () => void }) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Playlist name..."
-                className="flex-1 min-w-[180px] px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/30"
+                className="flex-1 min-w-[180px] px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/30"
                 disabled={isSubmitting}
             />
             <button
                 type="button"
                 onClick={() => setIsPublic(!isPublic)}
                 className={cn(
-                    "px-3 py-2 rounded-lg text-xs font-mono uppercase tracking-wider border transition-colors",
+                    "px-3 py-2 rounded-lg text-xs tabular-nums border transition-colors",
                     isPublic
                         ? "bg-brand/10 border-brand/30 text-brand"
-                        : "bg-white/5 border-white/10 text-white/40 hover:text-white/60"
+                        : "bg-white/5 border-white/10 text-[var(--text-muted)] hover:text-white/60"
                 )}
             >
                 {isPublic ? "Public" : "Private"}
@@ -309,7 +309,7 @@ function CreatePanel({ onClose }: { onClose: () => void }) {
             <button
                 type="submit"
                 disabled={!name.trim() || isSubmitting}
-                className="px-4 py-2 rounded-lg text-xs font-bold bg-brand text-black hover:bg-[#f97316] transition-colors uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-brand text-black hover:bg-[#f97316] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
             >
                 {isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                 Create
@@ -317,12 +317,12 @@ function CreatePanel({ onClose }: { onClose: () => void }) {
             <button
                 type="button"
                 onClick={onClose}
-                className="px-3 py-2 rounded-lg text-xs font-mono text-white/40 hover:text-white/70 transition-colors"
+                className="px-3 py-2 rounded-lg text-xs tabular-nums text-[var(--text-muted)] hover:text-white/70 transition-colors"
             >
                 <X className="w-4 h-4" />
             </button>
             {error && (
-                <p className="w-full text-xs font-mono text-red-400 mt-1">{error}</p>
+                <p className="w-full text-xs tabular-nums text-red-400 mt-1">{error}</p>
             )}
         </form>
     );
@@ -379,13 +379,13 @@ function ImportUrlPanel({ onClose }: { onClose: () => void }) {
                 value={url}
                 onChange={(e) => { setUrl(e.target.value); setError(null); }}
                 placeholder="Paste a playlist URL (Spotify, YouTube, SoundCloud...)"
-                className="flex-1 min-w-[220px] px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/30"
+                className="flex-1 min-w-[220px] px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/30"
                 disabled={isSubmitting}
             />
             <button
                 type="submit"
                 disabled={!url.trim() || isSubmitting}
-                className="px-4 py-2 rounded-lg text-xs font-bold bg-brand text-black hover:bg-[#f97316] transition-colors uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-brand text-black hover:bg-[#f97316] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
             >
                 {isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
                 Import
@@ -394,12 +394,12 @@ function ImportUrlPanel({ onClose }: { onClose: () => void }) {
                 type="button"
                 onClick={onClose}
                 disabled={isSubmitting}
-                className="px-3 py-2 rounded-lg text-xs font-mono text-white/40 hover:text-white/70 transition-colors"
+                className="px-3 py-2 rounded-lg text-xs tabular-nums text-[var(--text-muted)] hover:text-white/70 transition-colors"
             >
                 <X className="w-4 h-4" />
             </button>
             {error && (
-                <p className="w-full text-xs font-mono text-red-400 mt-1">{error}</p>
+                <p className="w-full text-xs tabular-nums text-red-400 mt-1">{error}</p>
             )}
         </form>
     );
@@ -463,14 +463,14 @@ function ImportM3UPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 <Link
                     href={`/playlist/${result.playlistId}`}
-                    className="px-4 py-2 rounded-lg text-xs font-bold bg-brand text-black hover:bg-[#f97316] transition-colors uppercase tracking-wider"
+                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-brand text-black hover:bg-[#f97316] transition-colors"
                 >
                     View Playlist
                 </Link>
                 <button
                     type="button"
                     onClick={onClose}
-                    className="px-3 py-2 rounded-lg text-xs font-mono text-white/40 hover:text-white/70 transition-colors"
+                    className="px-3 py-2 rounded-lg text-xs tabular-nums text-[var(--text-muted)] hover:text-white/70 transition-colors"
                 >
                     <X className="w-4 h-4" />
                 </button>
@@ -489,7 +489,7 @@ function ImportM3UPanel({ onClose }: { onClose: () => void }) {
             />
             {file && (
                 <form onSubmit={handleSubmit} className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-xs font-mono text-white/60 shrink-0">
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-xs tabular-nums text-[var(--text-secondary)] shrink-0">
                         <FileMusic className="w-3.5 h-3.5 text-brand" />
                         {file.name}
                     </div>
@@ -499,13 +499,13 @@ function ImportM3UPanel({ onClose }: { onClose: () => void }) {
                         value={playlistName}
                         onChange={(e) => setPlaylistName(e.target.value)}
                         placeholder="Playlist name..."
-                        className="flex-1 min-w-[180px] px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/30"
+                        className="flex-1 min-w-[180px] px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/30"
                         disabled={isSubmitting}
                     />
                     <button
                         type="submit"
                         disabled={!playlistName.trim() || isSubmitting}
-                        className="px-4 py-2 rounded-lg text-xs font-bold bg-brand text-black hover:bg-[#f97316] transition-colors uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-brand text-black hover:bg-[#f97316] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
                     >
                         {isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                         Create Playlist
@@ -513,12 +513,12 @@ function ImportM3UPanel({ onClose }: { onClose: () => void }) {
                     <button
                         type="button"
                         onClick={onClose}
-                        className="px-3 py-2 rounded-lg text-xs font-mono text-white/40 hover:text-white/70 transition-colors"
+                        className="px-3 py-2 rounded-lg text-xs tabular-nums text-[var(--text-muted)] hover:text-white/70 transition-colors"
                     >
                         <X className="w-4 h-4" />
                     </button>
                     {error && (
-                        <p className="w-full text-xs font-mono text-red-400 mt-1">{error}</p>
+                        <p className="w-full text-xs tabular-nums text-red-400 mt-1">{error}</p>
                     )}
                 </form>
             )}
@@ -545,14 +545,14 @@ function ActionButton({
         <button
             onClick={onClick}
             className={cn(
-                "flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
+                "flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all",
                 primary
                     ? active
                         ? "bg-brand text-black ring-2 ring-brand/40"
                         : "bg-brand text-black hover:bg-[#f97316]"
                     : active
                         ? "bg-white/10 text-white border border-white/20"
-                        : "text-white/50 hover:bg-white/5 border border-white/10 hover:text-white/70 hover:border-white/20"
+                        : "text-[var(--text-secondary)] hover:bg-white/5 border border-white/10 hover:text-white/70 hover:border-white/20"
             )}
         >
             <Icon className="w-4 h-4" />
@@ -578,7 +578,7 @@ function EmptyState({
                 <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-brand to-[#f97316]" />
                 <div className="flex items-center gap-3 mb-8 pb-4 border-b border-white/10">
                     <div className="w-2 h-2 bg-brand" />
-                    <span className="text-xs font-mono text-white/60 uppercase tracking-wider">
+                    <span className="text-xs text-[var(--text-secondary)]">
                         No Hidden Playlists
                     </span>
                 </div>
@@ -589,7 +589,7 @@ function EmptyState({
                     <h2 className="text-2xl font-bold tracking-tight text-white mb-2">
                         No hidden playlists
                     </h2>
-                    <p className="text-xs font-mono text-white/30 max-w-sm uppercase tracking-wider leading-relaxed">
+                    <p className="text-xs text-[var(--text-muted)] max-w-sm leading-relaxed">
                         You haven&apos;t hidden any playlists
                     </p>
                 </div>
@@ -603,7 +603,7 @@ function EmptyState({
 
             <div className="flex items-center gap-3 mb-8 pb-4 border-b border-white/10">
                 <div className="w-2 h-2 bg-brand" />
-                <span className="text-xs font-mono text-white/60 uppercase tracking-wider">
+                <span className="text-xs text-[var(--text-secondary)]">
                     Getting Started
                 </span>
             </div>
@@ -620,7 +620,7 @@ function EmptyState({
                         </div>
                         <div>
                             <h3 className="text-sm font-bold tracking-tight text-white">Create your first playlist</h3>
-                            <p className="text-xs font-mono text-white/30 uppercase tracking-wider">Start from scratch</p>
+                            <p className="text-xs text-[var(--text-muted)]">Start from scratch</p>
                         </div>
                     </button>
                     {activeAction === "create" && (
@@ -637,11 +637,11 @@ function EmptyState({
                         className="flex items-center gap-3 text-left group"
                     >
                         <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0 group-hover:bg-white/10 transition-colors">
-                            <Link2 className="w-5 h-5 text-white/40" />
+                            <Link2 className="w-5 h-5 text-[var(--text-muted)]" />
                         </div>
                         <div>
                             <h3 className="text-sm font-bold tracking-tight text-white">Import from Spotify or Deezer</h3>
-                            <p className="text-xs font-mono text-white/30 uppercase tracking-wider">Paste a playlist URL</p>
+                            <p className="text-xs text-[var(--text-muted)]">Paste a playlist URL</p>
                         </div>
                     </button>
                     {activeAction === "importUrl" && (
@@ -658,11 +658,11 @@ function EmptyState({
                         className="flex items-center gap-3 text-left group"
                     >
                         <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0 group-hover:bg-white/10 transition-colors">
-                            <FileMusic className="w-5 h-5 text-white/40" />
+                            <FileMusic className="w-5 h-5 text-[var(--text-muted)]" />
                         </div>
                         <div>
                             <h3 className="text-sm font-bold tracking-tight text-white">Import from M3U file</h3>
-                            <p className="text-xs font-mono text-white/30 uppercase tracking-wider">Upload .m3u or .m3u8</p>
+                            <p className="text-xs tabular-nums text-[var(--text-muted)]">Upload .m3u or .m3u8</p>
                         </div>
                     </button>
                     {activeAction === "importFile" && (
@@ -679,11 +679,11 @@ function EmptyState({
                         className="flex items-center gap-3 text-left group"
                     >
                         <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0 group-hover:bg-white/10 transition-colors">
-                            <Compass className="w-5 h-5 text-white/40" />
+                            <Compass className="w-5 h-5 text-[var(--text-muted)]" />
                         </div>
                         <div>
                             <h3 className="text-sm font-bold tracking-tight text-white">Browse public playlists</h3>
-                            <p className="text-xs font-mono text-white/30 uppercase tracking-wider">Discover shared music</p>
+                            <p className="text-xs text-[var(--text-muted)]">Discover shared music</p>
                         </div>
                     </Link>
                 </div>
@@ -797,7 +797,7 @@ export default function PlaylistsPage() {
                     {/* System status */}
                     <div className="flex items-center gap-2 mb-4">
                         <div className="w-1.5 h-1.5 bg-brand rounded-full" />
-                        <span className="text-xs font-mono text-white/50 uppercase tracking-wider">
+                        <span className="t-eyebrow">
                             Your Library
                         </span>
                     </div>
@@ -808,13 +808,13 @@ export default function PlaylistsPage() {
                                 Play<br />
                                 <span className="text-brand">lists</span>
                             </h1>
-                            <div className="flex items-center gap-3 mt-3 text-xs font-mono text-white/40 uppercase tracking-wider">
+                            <div className="flex items-center gap-3 mt-3 text-xs tabular-nums text-[var(--text-muted)]">
                                 <span className="font-bold text-white text-sm normal-case tracking-tight">
                                     {visiblePlaylists.length} {visiblePlaylists.length === 1 ? "playlist" : "playlists"}
                                 </span>
                                 {hiddenPlaylists.length > 0 && (
                                     <>
-                                        <span className="text-white/20">|</span>
+                                        <span className="text-[var(--text-muted)]">|</span>
                                         <span>{hiddenPlaylists.length} hidden</span>
                                     </>
                                 )}
@@ -826,10 +826,10 @@ export default function PlaylistsPage() {
                                 <button
                                     onClick={() => setShowHiddenTab(!showHiddenTab)}
                                     className={cn(
-                                        "px-4 py-2 rounded-lg text-xs font-mono transition-all uppercase tracking-wider",
+                                        "px-4 py-2 rounded-lg text-xs tabular-nums transition-all",
                                         showHiddenTab
                                             ? "bg-white/10 text-white border border-white/20"
-                                            : "bg-white/5 border border-white/10 text-white/40 hover:text-white/70 hover:border-white/20"
+                                            : "bg-white/5 border border-white/10 text-[var(--text-muted)] hover:text-white/70 hover:border-white/20"
                                     )}
                                 >
                                     {showHiddenTab
@@ -863,7 +863,7 @@ export default function PlaylistsPage() {
                         />
                         <Link
                             href="/browse/playlists"
-                            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider text-white/50 hover:bg-white/5 border border-white/10 hover:text-white/70 hover:border-white/20 transition-all"
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-[var(--text-secondary)] hover:bg-white/5 border border-white/10 hover:text-white/70 hover:border-white/20 transition-all"
                         >
                             <Compass className="w-4 h-4" />
                             <span className="hidden sm:inline">Browse</span>
@@ -893,7 +893,7 @@ export default function PlaylistsPage() {
                     {/* Hidden playlists notice */}
                     {showHiddenTab && (
                         <div className="mb-6 px-4 py-3 bg-white/5 rounded-lg border border-white/10">
-                            <p className="text-xs font-mono text-white/40 uppercase tracking-wider">
+                            <p className="text-xs text-[var(--text-muted)]">
                                 Hidden playlists won&apos;t appear in your library. Hover
                                 and click the eye icon to restore.
                             </p>
@@ -908,7 +908,7 @@ export default function PlaylistsPage() {
                                 <h2 className="text-2xl font-bold tracking-tight">
                                     {showHiddenTab ? "Hidden" : "All Playlists"}
                                 </h2>
-                                <span className="text-xs font-mono text-brand">
+                                <span className="text-xs tabular-nums text-brand">
                                     {displayedPlaylists.length}
                                 </span>
                                 <span className="flex-1 border-t border-white/10" />

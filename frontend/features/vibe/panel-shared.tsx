@@ -44,14 +44,14 @@ export function ActivityHeader({
 }) {
     return (
         <div className="flex items-center justify-between px-3 py-2 border-b border-white/5 shrink-0">
-            <span className="text-xs font-medium text-white/70 uppercase tracking-wider">
+            <span className="text-xs font-medium text-[var(--text-secondary)]">
                 {ACTIVITY_LABELS[type]}
             </span>
             <button
                 onClick={onClose}
                 className="p-1 rounded hover:bg-white/10 transition-colors"
             >
-                <X className="w-3.5 h-3.5 text-white/40" />
+                <X className="w-3.5 h-3.5 text-[var(--text-muted)]" />
             </button>
         </div>
     );
@@ -74,7 +74,7 @@ export function TabBar({
                         "flex-1 px-3 py-2.5 text-xs font-medium transition-colors",
                         activeTab === tab.key
                             ? "text-white border-b-2 border-[var(--color-brand)]"
-                            : "text-white/50 hover:text-white/70",
+                            : "text-[var(--text-secondary)] hover:text-white/70",
                     )}
                 >
                     {tab.label}

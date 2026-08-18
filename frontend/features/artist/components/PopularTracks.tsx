@@ -104,7 +104,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                             "text-sm group-hover:hidden",
                                             isPlaying
                                                 ? "text-brand"
-                                                : "text-gray-400"
+                                                : "text-[var(--text-secondary)]"
                                         )}
                                     >
                                         {isPlaying ? (
@@ -131,7 +131,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                         />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center">
-                                            <Music className="w-5 h-5 text-gray-600" />
+                                            <Music className="w-5 h-5 text-[var(--text-muted)]" />
                                         </div>
                                     )}
                                 </div>
@@ -149,18 +149,18 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                         </span>
                                         {isUnowned && (
                                             <span className="shrink-0 text-micro bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-medium">
-                                                PREVIEW
+                                                Preview
                                             </span>
                                         )}
                                     </div>
-                                    <p className="text-xs text-gray-400 truncate">
+                                    <p className="text-xs text-[var(--text-secondary)] truncate">
                                         {artist.name}
                                     </p>
                                 </div>
                             </div>
 
                             {/* Play Count (hidden on mobile) */}
-                            <div className="hidden md:flex items-center text-sm text-gray-400">
+                            <div className="hidden md:flex items-center text-sm text-[var(--text-secondary)]">
                                 {track.playCount !== undefined &&
                                     track.playCount > 0 && (
                                         <span className="flex items-center gap-1">
@@ -178,7 +178,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                             e.stopPropagation();
                                             onPreview(track, e);
                                         }}
-                                        className="p-1.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-white/10 text-gray-400 hover:text-white transition-all"
+                                        className="p-1.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-white/10 text-[var(--text-secondary)] hover:text-white transition-all"
                                     >
                                         {isPreviewPlaying ? (
                                             <Pause className="w-4 h-4" />
@@ -188,7 +188,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                     </button>
                                 )}
                                 {track.duration && (
-                                    <span className="text-sm text-gray-400 w-10 text-right font-mono tabular-nums">
+                                    <span className="text-sm text-[var(--text-secondary)] w-10 text-right tabular-nums tabular-nums">
                                         {formatTime(track.duration)}
                                     </span>
                                 )}

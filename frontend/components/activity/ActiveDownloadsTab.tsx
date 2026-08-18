@@ -66,9 +66,9 @@ export function ActiveDownloadsTab() {
     if (downloads.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-                <Download className="w-8 h-8 text-white/20 mb-3" />
-                <p className="text-sm text-white/40">No active downloads</p>
-                <p className="text-xs text-white/30 mt-1">
+                <Download className="w-8 h-8 text-[var(--text-muted)] mb-3" />
+                <p className="text-sm text-[var(--text-muted)]">No active downloads</p>
+                <p className="text-xs text-[var(--text-muted)] mt-1">
                     Downloads will appear here
                 </p>
             </div>
@@ -81,13 +81,13 @@ export function ActiveDownloadsTab() {
             <div className="flex items-center justify-between px-3 py-2 border-b-2 border-white/10">
                 <div className="flex items-center gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e] animate-pulse" />
-                    <span className="text-micro font-mono font-bold text-gray-600 uppercase tracking-wider">
+                    <span className="t-eyebrow">
                         {String(downloads.length).padStart(2, "0")} ACTIVE
                     </span>
                 </div>
                 <button
                     onClick={handleCancelAll}
-                    className="text-micro font-mono font-bold text-gray-600 hover:text-red-400 uppercase tracking-wider transition-colors"
+                    className="text-micro font-semibold text-[var(--text-muted)] hover:text-red-400 transition-colors"
                     title="Cancel all downloads"
                 >
                     CANCEL
@@ -104,7 +104,7 @@ export function ActiveDownloadsTab() {
                         <div className="flex items-start gap-3">
                             {/* Index number */}
                             <div className="flex-shrink-0 w-6 mt-0.5">
-                                <span className="text-micro font-mono font-bold text-gray-700">
+                                <span className="text-micro tabular-nums font-semibold text-[var(--text-muted)]">
                                     {String(index + 1).padStart(2, "0")}
                                 </span>
                             </div>
@@ -112,7 +112,7 @@ export function ActiveDownloadsTab() {
                             {/* Status spinner */}
                             <div className="mt-0.5 shrink-0">
                                 {cancelling.has(download.id) ? (
-                                    <Loader2 className="w-4 h-4 text-gray-600 animate-spin" />
+                                    <Loader2 className="w-4 h-4 text-[var(--text-muted)] animate-spin" />
                                 ) : (
                                     <GradientSpinner size="sm" />
                                 )}
@@ -120,13 +120,13 @@ export function ActiveDownloadsTab() {
 
                             {/* Content */}
                             <div className="flex-1 min-w-0">
-                                <p className="text-xs font-bold tracking-tight text-white truncate uppercase mb-1">
+                                <p className="text-xs font-semibold tracking-tight text-white truncate mb-1">
                                     {download.subject}
                                 </p>
                                 <div className="flex items-center gap-2 flex-wrap">
                                     <span
                                         className={cn(
-                                            "text-micro font-mono font-bold uppercase tracking-wider",
+                                            "text-xs tabular-nums font-semibold",
                                             download.status === "processing"
                                                 ? "text-blue-400"
                                                 : "text-[#eab308]"
@@ -136,12 +136,12 @@ export function ActiveDownloadsTab() {
                                     </span>
                                     {download.metadata?.statusText && (
                                         <>
-                                            <span className="text-micro font-mono text-gray-700">
+                                            <span className="text-micro text-[var(--text-muted)]">
                                                 •
                                             </span>
                                             <span
                                                 className={cn(
-                                                    "text-micro font-mono font-bold uppercase tracking-wider",
+                                                    "text-xs font-semibold",
                                                     download.metadata
                                                         .currentSource ===
                                                         "lidarr"
@@ -153,10 +153,10 @@ export function ActiveDownloadsTab() {
                                             </span>
                                         </>
                                     )}
-                                    <span className="text-micro font-mono text-gray-700">
+                                    <span className="text-micro text-[var(--text-muted)]">
                                         •
                                     </span>
-                                    <span className="text-micro font-mono text-gray-600 uppercase tracking-wider flex items-center gap-1">
+                                    <span className="text-xs tabular-nums text-[var(--text-muted)] flex items-center gap-1">
                                         {download.type === "album" ? (
                                             <Disc className="w-2.5 h-2.5" />
                                         ) : (
@@ -164,10 +164,10 @@ export function ActiveDownloadsTab() {
                                         )}
                                         {download.type}
                                     </span>
-                                    <span className="text-micro font-mono text-gray-700">
+                                    <span className="text-micro text-[var(--text-muted)]">
                                         •
                                     </span>
-                                    <span className="text-micro font-mono text-gray-700 uppercase tracking-wider">
+                                    <span className="text-xs tabular-nums text-[var(--text-muted)]">
                                         {formatTime(download.createdAt)}
                                     </span>
                                 </div>
@@ -180,7 +180,7 @@ export function ActiveDownloadsTab() {
                                 className="p-1 hover:bg-white/10 transition-colors shrink-0"
                                 title="Cancel download"
                             >
-                                <X className="w-3 h-3 text-gray-700 hover:text-red-400" />
+                                <X className="w-3 h-3 text-[var(--text-muted)] hover:text-red-400" />
                             </button>
                         </div>
                     </div>

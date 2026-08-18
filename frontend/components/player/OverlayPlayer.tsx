@@ -126,13 +126,13 @@ export function OverlayPlayer() {
                         e.stopPropagation();
                         returnToPreviousMode();
                     }}
-                    className="text-gray-400 hover:text-white transition-colors p-2 -ml-2 rounded-full hover:bg-white/10"
+                    className="text-[var(--text-secondary)] hover:text-white transition-colors p-2 -ml-2 rounded-full hover:bg-white/10"
                     title="Close"
                 >
                     <ChevronDown className="w-7 h-7" />
                 </button>
                 {/* Now Playing indicator */}
-                <span className="text-xs text-gray-500 uppercase tracking-widest font-mono font-medium">
+                <span className="text-xs text-[var(--text-muted)] font-medium">
                     Now Playing
                 </span>
                 <div className="w-11" /> {/* Spacer for centering */}
@@ -178,7 +178,7 @@ export function OverlayPlayer() {
                                 />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center">
-                                    <MusicIcon className="w-24 h-24 text-gray-600" />
+                                    <MusicIcon className="w-24 h-24 text-[var(--text-muted)]" />
                                 </div>
                             )}
                         </div>
@@ -189,7 +189,7 @@ export function OverlayPlayer() {
                             Math.abs(swipeOffset) > 20 && (
                                 <div
                                     className={cn(
-                                        "absolute top-1/2 -translate-y-1/2 text-white/60",
+                                        "absolute top-1/2 -translate-y-1/2 text-[var(--text-secondary)]",
                                         swipeOffset > 0 ? "-left-8" : "-right-8"
                                     )}
                                 >
@@ -228,12 +228,12 @@ export function OverlayPlayer() {
                                 onClick={returnToPreviousMode}
                                 className="block hover:underline"
                             >
-                                <p className="text-base text-gray-400 truncate">
+                                <p className="text-base text-[var(--text-secondary)] truncate">
                                     {subtitle}
                                 </p>
                             </Link>
                         ) : (
-                            <p className="text-base text-gray-400 truncate">
+                            <p className="text-base text-[var(--text-secondary)] truncate">
                                 {subtitle}
                             </p>
                         )}
@@ -253,7 +253,7 @@ export function OverlayPlayer() {
                             showHandle={false}
                             className="mb-2"
                         />
-                        <div className="flex justify-between text-xs text-gray-500 font-mono font-medium tabular-nums">
+                        <div className="flex justify-between text-xs text-[var(--text-muted)] tabular-nums font-medium tabular-nums">
                             <span>{formatTime(displayTime)}</span>
                             <span>
                                 {playbackType === "podcast" || playbackType === "audiobook"
@@ -269,11 +269,11 @@ export function OverlayPlayer() {
                         {!canSkip && (
                             <button
                                 onClick={() => skipBackward(30)}
-                                className="text-white/80 hover:text-white transition-all hover:scale-110 relative"
+                                className="text-[var(--text-primary)] hover:text-white transition-all hover:scale-110 relative"
                                 title="Rewind 30 seconds"
                             >
                                 <RotateCcw className="w-7 h-7" />
-                                <span className="absolute text-micro font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                                <span className="absolute text-micro font-semibold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                                     30
                                 </span>
                             </button>
@@ -282,7 +282,7 @@ export function OverlayPlayer() {
                         <button
                             onClick={previous}
                             className={cn(
-                                "text-white/80 hover:text-white transition-all hover:scale-110",
+                                "text-[var(--text-primary)] hover:text-white transition-all hover:scale-110",
                                 !canSkip &&
                                     "opacity-30 cursor-not-allowed hover:scale-100"
                             )}
@@ -326,7 +326,7 @@ export function OverlayPlayer() {
                         <button
                             onClick={next}
                             className={cn(
-                                "text-white/80 hover:text-white transition-all hover:scale-110",
+                                "text-[var(--text-primary)] hover:text-white transition-all hover:scale-110",
                                 !canSkip &&
                                     "opacity-30 cursor-not-allowed hover:scale-100"
                             )}
@@ -340,11 +340,11 @@ export function OverlayPlayer() {
                         {!canSkip && (
                             <button
                                 onClick={() => skipForward(30)}
-                                className="text-white/80 hover:text-white transition-all hover:scale-110 relative"
+                                className="text-[var(--text-primary)] hover:text-white transition-all hover:scale-110 relative"
                                 title="Forward 30 seconds"
                             >
                                 <RotateCw className="w-7 h-7" />
-                                <span className="absolute text-micro font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                                <span className="absolute text-micro font-semibold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                                     30
                                 </span>
                             </button>
@@ -361,10 +361,10 @@ export function OverlayPlayer() {
                             className={cn(
                                 "transition-colors",
                                 !canSkip
-                                    ? "text-gray-700 cursor-not-allowed"
+                                    ? "text-[var(--text-muted)] cursor-not-allowed"
                                     : isShuffle
                                     ? "text-[#a855f7]"
-                                    : "text-gray-500 hover:text-white"
+                                    : "text-[var(--text-muted)] hover:text-white"
                             )}
                             title="Shuffle"
                         >
@@ -377,10 +377,10 @@ export function OverlayPlayer() {
                             className={cn(
                                 "transition-colors",
                                 !canSkip
-                                    ? "text-gray-700 cursor-not-allowed"
+                                    ? "text-[var(--text-muted)] cursor-not-allowed"
                                     : repeatMode !== "off"
                                     ? "text-[#a855f7]"
-                                    : "text-gray-500 hover:text-white"
+                                    : "text-[var(--text-muted)] hover:text-white"
                             )}
                             title={
                                 repeatMode === "one"
@@ -405,10 +405,10 @@ export function OverlayPlayer() {
                                 className={cn(
                                     "transition-colors",
                                     !canSkip
-                                        ? "text-gray-700 cursor-not-allowed"
+                                        ? "text-[var(--text-muted)] cursor-not-allowed"
                                         : activeOperation.type !== 'idle'
                                         ? "text-brand"
-                                        : "text-gray-500 hover:text-brand"
+                                        : "text-[var(--text-muted)] hover:text-brand"
                                 )}
                                 title={
                                     activeOperation.type !== 'idle'
@@ -431,10 +431,10 @@ export function OverlayPlayer() {
                                 className={cn(
                                     "transition-colors",
                                     !hasMedia
-                                        ? "text-gray-700 cursor-not-allowed"
+                                        ? "text-[var(--text-muted)] cursor-not-allowed"
                                         : isLyricsActive
                                         ? "text-brand"
-                                        : "text-gray-500 hover:text-brand"
+                                        : "text-[var(--text-muted)] hover:text-brand"
                                 )}
                                 disabled={!hasMedia}
                                 aria-label="Toggle lyrics"

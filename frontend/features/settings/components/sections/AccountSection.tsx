@@ -119,7 +119,7 @@ export function AccountSection() {
             <SettingsSection id="account" title="Account">
                 {/* Username Display */}
                 <SettingsRow label="Username" description={`Logged in as ${user?.username}`}>
-                    <span className="text-xs font-mono text-white/40 uppercase tracking-wider">{user?.role}</span>
+                    <span className="text-xs tabular-nums text-[var(--text-muted)]">{user?.role}</span>
                 </SettingsRow>
 
                 {/* Change Password */}
@@ -130,14 +130,14 @@ export function AccountSection() {
                     {!showPasswordForm ? (
                         <button
                             onClick={() => setShowPasswordForm(true)}
-                            className="text-xs font-mono text-brand hover:text-[#f97316] uppercase tracking-wider transition-colors"
+                            className="text-xs text-brand hover:text-[#f97316] transition-colors"
                         >
                             Change
                         </button>
                     ) : (
                         <button
                             onClick={() => setShowPasswordForm(false)}
-                            className="text-xs font-mono text-white/40 hover:text-white/70 uppercase tracking-wider transition-colors"
+                            className="text-xs text-[var(--text-muted)] hover:text-white/70 transition-colors"
                         >
                             Cancel
                         </button>
@@ -168,7 +168,7 @@ export function AccountSection() {
                             <button
                                 onClick={handleChangePassword}
                                 disabled={changingPassword || !currentPassword || !newPassword || newPassword !== confirmPassword}
-                                className="px-4 py-2 bg-brand text-black text-xs font-bold rounded-lg uppercase tracking-wider
+                                className="px-4 py-2 bg-brand text-black text-xs font-semibold rounded-lg 
                                     hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 {changingPassword ? "Changing..." : "Change Password"}
@@ -191,14 +191,14 @@ export function AccountSection() {
                         twoFactorEnabled ? (
                             <button
                                 onClick={() => setShowDisableFlow(true)}
-                                className="text-xs font-mono text-red-400 hover:text-red-300 uppercase tracking-wider transition-colors"
+                                className="text-xs text-red-400 hover:text-red-300 transition-colors"
                             >
                                 Disable
                             </button>
                         ) : (
                             <button
                                 onClick={setup2FA}
-                                className="text-xs font-mono text-brand hover:text-[#f97316] uppercase tracking-wider transition-colors"
+                            className="text-xs text-brand hover:text-[#f97316] transition-colors"
                             >
                                 Enable
                             </button>
@@ -209,7 +209,7 @@ export function AccountSection() {
                 {/* 2FA Setup Flow */}
                 {settingUpTwoFactor && (
                     <div className="py-4 space-y-4 border-t border-b border-white/5">
-                        <p className="text-xs font-mono text-white/40 uppercase tracking-wider">
+                        <p className="text-xs text-[var(--text-muted)]">
                             Scan the QR code with your authenticator app, then enter the code below.
                         </p>
 
@@ -223,7 +223,7 @@ export function AccountSection() {
 
                         {twoFactorSecret && (
                             <div className="text-center">
-                                <p className="text-micro font-mono text-white/30 mb-1 uppercase tracking-wider">Manual entry code</p>
+                                <p className="text-xs text-[var(--text-muted)] mb-1">Manual entry code</p>
                                 <code className="text-sm text-white bg-white/5 border border-white/10 px-3 py-1 rounded-lg font-mono">
                                     {twoFactorSecret}
                                 </code>
@@ -241,14 +241,14 @@ export function AccountSection() {
                             <button
                                 onClick={handleVerify2FA}
                                 disabled={twoFactorToken.length !== 6}
-                                className="px-4 py-2 bg-brand text-black text-xs font-bold rounded-lg uppercase tracking-wider
+                                className="px-4 py-2 bg-brand text-black text-xs font-semibold rounded-lg 
                                     hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 Verify
                             </button>
                             <button
                                 onClick={() => { cancel2FASetup(); setTwoFactorToken(""); }}
-                                className="px-4 py-2 text-xs font-mono text-white/40 hover:text-white/70 uppercase tracking-wider transition-colors"
+                                className="px-4 py-2 text-xs text-[var(--text-muted)] hover:text-white/70 transition-colors"
                             >
                                 Cancel
                             </button>
@@ -264,7 +264,7 @@ export function AccountSection() {
                 {/* 2FA Disable Flow */}
                 {showDisableFlow && (
                     <div className="py-4 space-y-3 border-t border-b border-white/5">
-                        <p className="text-xs font-mono text-[#f59e0b] uppercase tracking-wider">
+                        <p className="text-xs tabular-nums text-[#f59e0b]">
                             Enter your password and current code to disable 2FA.
                         </p>
                         <SettingsInput
@@ -283,14 +283,14 @@ export function AccountSection() {
                             <button
                                 onClick={handleDisable2FA}
                                 disabled={!disablePassword || disableToken.length !== 6}
-                                className="px-4 py-2 bg-red-500 text-white text-xs font-bold rounded-lg uppercase tracking-wider
+                                className="px-4 py-2 bg-red-500 text-white text-xs font-semibold rounded-lg 
                                     hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 Disable 2FA
                             </button>
                             <button
                                 onClick={() => { setShowDisableFlow(false); setDisablePassword(""); setDisableToken(""); }}
-                                className="px-4 py-2 text-xs font-mono text-white/40 hover:text-white/70 uppercase tracking-wider transition-colors"
+                                className="px-4 py-2 text-xs text-[var(--text-muted)] hover:text-white/70 transition-colors"
                             >
                                 Cancel
                             </button>
@@ -308,7 +308,7 @@ export function AccountSection() {
             <Modal isOpen={showRecoveryCodes} onClose={closeRecoveryCodes} title="Recovery Codes">
                 <div className="space-y-4">
                     <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-                        <p className="text-xs font-mono text-red-300 uppercase tracking-wider">
+                        <p className="text-xs text-red-300">
                             Save these codes! You&apos;ll need them if you lose your authenticator.
                         </p>
                     </div>
@@ -322,13 +322,13 @@ export function AccountSection() {
                     <div className="flex gap-2">
                         <button
                             onClick={() => navigator.clipboard.writeText(recoveryCodes.join("\n"))}
-                            className="px-4 py-2 bg-white/5 border border-white/10 text-white text-xs font-mono rounded-lg hover:bg-white/10 transition-colors uppercase tracking-wider"
+                            className="px-4 py-2 bg-white/5 border border-white/10 text-white text-xs rounded-lg hover:bg-white/10 transition-colors"
                         >
                             Copy
                         </button>
                         <button
                             onClick={closeRecoveryCodes}
-                            className="px-4 py-2 bg-brand text-black text-xs font-bold rounded-lg hover:bg-[#f97316] transition-colors uppercase tracking-wider"
+                            className="px-4 py-2 bg-brand text-black text-xs font-semibold rounded-lg hover:bg-[#f97316] transition-colors"
                         >
                             Done
                         </button>

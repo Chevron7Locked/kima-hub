@@ -21,6 +21,7 @@ import { LibraryToolbar } from "@/features/library/components/LibraryToolbar";
 import { ArtistsGrid } from "@/features/library/components/ArtistsGrid";
 import { AlbumsGrid } from "@/features/library/components/AlbumsGrid";
 import { TracksList } from "@/features/library/components/TracksList";
+import { Pagination } from "@/components/ui/Pagination";
 
 export default function LibraryPage() {
     const router = useRouter();
@@ -382,54 +383,17 @@ export default function LibraryPage() {
                     />
                 )}
 
-                {/* Pagination */}
-                {totalPages > 1 && (
-                    <div className="flex items-center justify-center gap-2 mt-12 pt-6 border-t-2 border-white/10">
-                        <button
-                            onClick={() => updatePage(1)}
-                            disabled={currentPage === 1 || isLoading}
-                            className="px-4 py-2 text-xs font-mono uppercase tracking-wider text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed bg-white/5 hover:bg-white/10 rounded transition-colors border border-white/10 hover:border-white/20"
-                        >
-                            First
-                        </button>
-                        <button
-                            onClick={() =>
-                                updatePage(Math.max(1, currentPage - 1))
-                            }
-                            disabled={currentPage === 1 || isLoading}
-                            className="px-4 py-2 text-xs font-mono uppercase tracking-wider text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed bg-white/5 hover:bg-white/10 rounded transition-colors border border-white/10 hover:border-white/20"
-                        >
-                            Prev
-                        </button>
-                        <div className="px-6 py-2 bg-[var(--bg-primary)] border-2 border-white/20 rounded">
-                            <span className="text-sm font-mono font-bold text-white">
-                                {currentPage}
-                            </span>
-                            <span className="text-xs font-mono text-gray-500 mx-1">/</span>
-                            <span className="text-sm font-mono text-gray-400">
-                                {totalPages}
-                            </span>
-                        </div>
-                        <button
-                            onClick={() =>
-                                updatePage(
-                                    Math.min(totalPages, currentPage + 1),
-                                )
-                            }
-                            disabled={currentPage === totalPages || isLoading}
-                            className="px-4 py-2 text-xs font-mono uppercase tracking-wider text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed bg-white/5 hover:bg-white/10 rounded transition-colors border border-white/10 hover:border-white/20"
-                        >
-                            Next
-                        </button>
-                        <button
-                            onClick={() => updatePage(totalPages)}
-                            disabled={currentPage === totalPages || isLoading}
-                            className="px-4 py-2 text-xs font-mono uppercase tracking-wider text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed bg-white/5 hover:bg-white/10 rounded transition-colors border border-white/10 hover:border-white/20"
-                        >
-                            Last
-                        </button>
-                    </div>
-                )}
+                <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={updatePage}
+                    disabled={isLoading}
+                    label={
+                        activeTab === "artists" ? "Artists"
+                        : activeTab === "albums" ? "Albums"
+                        : "Tracks"
+                    }
+                />
 
                 <ConfirmDialog
                     isOpen={deleteConfirm.isOpen}

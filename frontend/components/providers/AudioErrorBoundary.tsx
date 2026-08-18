@@ -39,7 +39,7 @@ export class AudioErrorBoundary extends Component<Props, State> {
             return (
                 this.props.fallback ?? (
                     <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
-                        <p className="text-white/70">Playback system error</p>
+                        <p className="text-[var(--text-secondary)]">Playback system error</p>
                         <button
                             onClick={() => window.location.reload()}
                             className="px-4 py-2 rounded-lg bg-brand hover:bg-[#d4a000] text-black font-semibold transition-all"

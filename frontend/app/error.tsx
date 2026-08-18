@@ -20,7 +20,7 @@ export default function Error({
         <h2 className="text-2xl font-bold text-white mb-4">
           Something went wrong
         </h2>
-        <p className="text-gray-400 mb-6">
+        <p className="text-[var(--text-secondary)] mb-6">
           An unexpected error occurred. Please try again.
         </p>
         <Button onClick={reset}>Try again</Button>

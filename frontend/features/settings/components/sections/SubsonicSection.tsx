@@ -103,12 +103,12 @@ export function SubsonicSection() {
                 description="Enter this in your Subsonic-compatible client. Admins can set a persistent URL in Storage settings."
             >
                 <div className="flex items-center gap-2">
-                    <span className="text-sm text-white bg-white/5 border border-white/10 px-3 py-2 rounded-lg font-mono break-all flex-1 min-w-0">
+                    <span className="text-sm text-white bg-white/5 border border-white/10 px-3 py-2 rounded-lg tabular-nums break-all flex-1 min-w-0">
                         {serverUrl}
                     </span>
                     <button
                         onClick={() => copyToClipboard(serverUrl)}
-                        className="text-xs font-mono text-brand hover:text-[#f97316] uppercase tracking-wider transition-colors shrink-0"
+                        className="text-xs text-brand hover:text-[#f97316] transition-colors shrink-0"
                     >
                         Copy
                     </button>
@@ -119,7 +119,7 @@ export function SubsonicSection() {
                 label="Username"
                 description="Use your Kima username in the client"
             >
-                <span className="text-xs font-mono text-white/40 uppercase tracking-wider">
+                <span className="text-xs tabular-nums text-[var(--text-muted)]">
                     {user?.username}
                 </span>
             </SettingsRow>
@@ -135,14 +135,14 @@ export function SubsonicSection() {
                         value={deviceName}
                         onChange={(e) => setDeviceName(e.target.value)}
                         placeholder="Client name (e.g. Amperfy, Symfonium, DSub)"
-                        className="text-sm text-white bg-white/5 border border-white/10 px-3 py-2 rounded-lg font-mono
-                            placeholder:text-white/20 focus:outline-none focus:border-white/20 w-full"
+                        className="text-sm text-white bg-white/5 border border-white/10 px-3 py-2 rounded-lg tabular-nums
+                            placeholder:text-[var(--text-muted)] focus:outline-none focus:border-white/20 w-full"
                     />
                     <div className="inline-flex items-center gap-3">
                         <button
                             onClick={handleGenerate}
                             disabled={generating}
-                            className="px-4 py-2 bg-brand text-black text-xs font-bold rounded-lg uppercase tracking-wider
+                            className="px-4 py-2 bg-brand text-black text-xs font-semibold rounded-lg 
                                 hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                             {generating ? "Generating..." : "Generate Token"}
@@ -159,7 +159,7 @@ export function SubsonicSection() {
             {/* Newly generated token display */}
             {newToken && (
                 <div className="py-4 space-y-3 border-t border-b border-white/5">
-                    <p className="text-xs font-mono text-[#f59e0b] uppercase tracking-wider">
+                    <p className="text-xs text-[#f59e0b]">
                         Save this key — it won&apos;t be shown again.
                     </p>
                     <div className="flex items-start gap-2 min-w-0 overflow-hidden">
@@ -168,7 +168,7 @@ export function SubsonicSection() {
                         </code>
                         <button
                             onClick={() => copyToClipboard(newToken)}
-                            className="text-xs font-mono text-brand hover:text-[#f97316] uppercase tracking-wider transition-colors shrink-0 pt-2"
+                            className="text-xs text-brand hover:text-[#f97316] transition-colors shrink-0 pt-2"
                         >
                             Copy
                         </button>
@@ -182,7 +182,7 @@ export function SubsonicSection() {
                     label="Setup Guide"
                     description="How to connect your client"
                 >
-                    <div className="space-y-1 text-xs font-mono text-white/40 uppercase tracking-wider">
+                    <div className="space-y-1 text-xs tabular-nums text-[var(--text-muted)]">
                         <p>1. Server URL — paste the URL above</p>
                         <p>2. Username — your Kima username</p>
                         <p>3. Password / API key — paste the token above</p>
@@ -203,8 +203,8 @@ export function SubsonicSection() {
                                 className="flex items-center justify-between gap-4 bg-white/5 border border-white/10 px-3 py-2 rounded-lg"
                             >
                                 <div className="min-w-0">
-                                    <p className="text-xs font-mono text-white truncate">{key.name}</p>
-                                    <p className="text-micro font-mono text-white/30 uppercase tracking-wider">
+                                    <p className="text-xs tabular-nums text-white truncate">{key.name}</p>
+                                    <p className="text-xs tabular-nums text-[var(--text-muted)]">
                                         Created {formatDate(key.createdAt)}
                                         {key.lastUsed && ` · Last used ${formatDate(key.lastUsed)}`}
                                     </p>
@@ -212,7 +212,7 @@ export function SubsonicSection() {
                                 <button
                                     onClick={() => handleRevoke(key.id)}
                                     disabled={revoking === key.id}
-                                    className="text-xs font-mono text-red-400 hover:text-red-300 uppercase tracking-wider transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="text-xs tabular-nums text-red-400 hover:text-red-300 transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {revoking === key.id ? "Revoking..." : "Revoke"}
                                 </button>

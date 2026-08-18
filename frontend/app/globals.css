@@ -35,12 +35,106 @@
     --border-interactive: #262626; /* Interactive elements */
     --border-focus: #333333; /* Focus, selected states */
 
-    /* Text Colors */
-    --text-muted: #7d7d7d; /* Timestamps, meta -- WCAG-offset, keep as custom */
+    /* Text Colors.
+     *
+     * Three tones, measured against the #0a0a0a ground. They replace nineteen
+     * near-identical greys -- text-white/15 through /90, text-gray-300 through
+     * -800 -- that were used interchangeably for the same job. Ten of those
+     * nineteen fell below the WCAG AA minimum of 4.5:1 for small text, so the
+     * quiet half of the interface was quiet to the point of unreadable: the
+     * search placeholder sat at 1.43:1 and "No releases found" at 1.80:1. */
+    --text-primary: #e5e5e5; /* 16.4:1 -- titles, values, emphasis */
+    --text-secondary: #a3a3a3; /* 8.6:1  -- sentences, descriptions, help text */
+    /* 5.4:1 on the page ground, and still 4.7:1 on the lightest card surface
+     * (#1a1a1a) -- the previous #7d7d7d cleared AA on the page but fell to
+     * 4.46:1 inside a card, which is where most labels actually live. */
+    --text-muted: #858585; /* labels, meta, timestamps */
 }
 
 * {
     box-sizing: border-box;
+}
+
+/* ── Type roles ───────────────────────────────────────────────────────────
+ *
+ * Six roles cover every piece of text in the app.
+ *
+ * They replace a system where hierarchy was carried by stamping rather than
+ * by scale: 246 elements set in capitals, 399 lines set in a monospace face
+ * that appears nowhere else in the product, and bold on 246 of 320 weighted
+ * elements -- nearly all of it at 10px or 12px. When everything small is
+ * equally loud, nothing reads as more important than anything else, and the
+ * whole interface reads as shouting.
+ *
+ * Here, size, weight and colour carry the hierarchy, and the two stamps are
+ * rationed to the one job each actually does well:
+ *
+ *   - CAPITALS survive only on .t-eyebrow, the short status kicker above a
+ *     page title. Capitals are a poor fit for a sentence -- they run about
+ *     15% wider and lose the word-shape the eye reads by -- which is how
+ *     "Lesser-played gems" was arriving on a phone as "LESSER-PLAY...".
+ *
+ *   - MONOSPACE survives only on real machine strings: pairing codes, API
+ *     tokens, server URLs. Track numbers, durations and counts want their
+ *     digits to line up, and that is what tabular figures are for; it does
+ *     not require a second typeface.
+ * ───────────────────────────────────────────────────────────────────────── */
+@layer components {
+    /* The short status kicker above a page title. The only capitals left. */
+    .t-eyebrow {
+        font-size: var(--text-micro);
+        line-height: 1.4;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--text-muted);
+    }
+
+    /* Names a group, a column or a field. Never a sentence. */
+    .t-label {
+        font-size: 0.75rem;
+        line-height: 1.4;
+        font-weight: 500;
+        color: var(--text-muted);
+    }
+
+    /* Counts, durations, track numbers, dates, file sizes. Digits align. */
+    .t-meta {
+        font-size: 0.75rem;
+        line-height: 1.4;
+        font-variant-numeric: tabular-nums;
+        color: var(--text-muted);
+    }
+
+    /* Sentences: descriptions, help text, empty-state copy. */
+    .t-body {
+        font-size: 0.875rem;
+        line-height: 1.55;
+        color: var(--text-secondary);
+    }
+
+    /* Anything you press: buttons, tabs, links. */
+    .t-control {
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+        font-weight: 500;
+    }
+
+    /* Machine strings only. <code> gets this for free, below. */
+    .t-data {
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+            "Liberation Mono", monospace;
+        font-size: 0.75rem;
+        font-variant-numeric: tabular-nums;
+    }
+}
+
+/* A machine string is monospace because it is a machine string, not because
+ * someone remembered to add a class. */
+code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+        "Liberation Mono", monospace;
+    font-variant-numeric: tabular-nums;
 }
 
 body {

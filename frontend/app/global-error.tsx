@@ -21,7 +21,7 @@ export default function GlobalError({
             <h2 className="text-2xl font-bold text-white mb-4">
               Application Error
             </h2>
-            <p className="text-gray-400 mb-6">
+            <p className="text-[var(--text-secondary)] mb-6">
               A critical error occurred. Please reload the page.
             </p>
             <button

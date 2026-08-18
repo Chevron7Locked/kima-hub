@@ -62,7 +62,7 @@ export function OperationConfirmToast({
                     : "translate-y-4 opacity-0",
             )}
         >
-            <span className="text-sm text-white/80 whitespace-nowrap">
+            <span className="text-sm text-[var(--text-primary)] whitespace-nowrap">
                 Replace {getOperationName(currentOpName)} with{" "}
                 {getOperationName(newOpName)}?
             </span>
@@ -74,7 +74,7 @@ export function OperationConfirmToast({
             </button>
             <button
                 onClick={onCancel}
-                className="px-3 py-1 text-white/60 text-sm hover:text-white transition-colors"
+                className="px-3 py-1 text-[var(--text-secondary)] text-sm hover:text-white transition-colors"
             >
                 Cancel
             </button>

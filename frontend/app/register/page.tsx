@@ -47,7 +47,7 @@ export default function RegisterPage() {
             <Music className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-2xl font-bold text-white mb-1">Create Account</h1>
-          <p className="text-sm text-gray-500">Join Kima today</p>
+          <p className="text-sm text-[var(--text-muted)]">Join Kima today</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -58,7 +58,7 @@ export default function RegisterPage() {
           )}
 
           <div>
-            <label htmlFor="username" className="block text-sm font-medium text-gray-400 mb-1">
+            <label htmlFor="username" className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
               Username
             </label>
             <Input
@@ -73,7 +73,7 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-400 mb-1">
+            <label htmlFor="email" className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
               Email (optional)
             </label>
             <Input
@@ -86,7 +86,7 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-400 mb-1">
+            <label htmlFor="password" className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
               Password
             </label>
             <Input
@@ -100,7 +100,7 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-400 mb-1">
+            <label htmlFor="confirmPassword" className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
               Confirm Password
             </label>
             <Input
@@ -119,7 +119,7 @@ export default function RegisterPage() {
         </form>
 
         <div className="mt-6 text-center">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-[var(--text-muted)]">
             Already have an account?{" "}
             <Link href="/login" className="text-[#1db954] hover:text-purple-300 transition-colors">
               Sign in

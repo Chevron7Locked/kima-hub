@@ -63,10 +63,10 @@ export function VibeSongPath({ onStartPath, onClose }: VibeSongPathProps) {
     return (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 w-[calc(100vw-2rem)] sm:w-96 bg-black/90 backdrop-blur-lg border border-white/10 rounded-xl p-4">
             <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-white/90 flex items-center gap-2">
+                <h3 className="text-sm font-medium text-[var(--text-primary)] flex items-center gap-2">
                     <Route className="w-4 h-4" /> Song Path
                 </h3>
-                <button onClick={onClose} className="text-white/40 hover:text-white" aria-label="Close song path">
+                <button onClick={onClose} className="text-[var(--text-muted)] hover:text-white" aria-label="Close song path">
                     <X className="w-4 h-4" />
                 </button>
             </div>
@@ -74,7 +74,7 @@ export function VibeSongPath({ onStartPath, onClose }: VibeSongPathProps) {
             <div className="space-y-2">
                 <div className="relative">
                     <label htmlFor="path-start" className="sr-only">Start track</label>
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />
                     <input
                         id="path-start"
                         type="text"
@@ -87,12 +87,12 @@ export function VibeSongPath({ onStartPath, onClose }: VibeSongPathProps) {
                 </div>
 
                 <div className="flex justify-center" aria-hidden="true">
-                    <ArrowRight className="w-4 h-4 text-white/20" />
+                    <ArrowRight className="w-4 h-4 text-[var(--text-muted)]" />
                 </div>
 
                 <div className="relative">
                     <label htmlFor="path-end" className="sr-only">End track</label>
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />
                     <input
                         id="path-end"
                         type="text"
@@ -113,8 +113,8 @@ export function VibeSongPath({ onStartPath, onClose }: VibeSongPathProps) {
                             onClick={() => selectTrack(track)}
                             className="w-full px-3 py-2 hover:bg-white/10 text-left"
                         >
-                            <p className="text-sm text-white/90 truncate">{track.title}</p>
-                            <p className="text-xs text-white/40 truncate">{track.artist.name}</p>
+                            <p className="text-sm text-[var(--text-primary)] truncate">{track.title}</p>
+                            <p className="text-xs text-[var(--text-muted)] truncate">{track.artist.name}</p>
                         </button>
                     ))}
                 </div>
@@ -123,7 +123,7 @@ export function VibeSongPath({ onStartPath, onClose }: VibeSongPathProps) {
             <button
                 onClick={handleSubmit}
                 disabled={!startTrackId || !endTrackId}
-                className="w-full mt-3 px-3 py-2 bg-white/10 hover:bg-white/15 disabled:opacity-30 disabled:hover:bg-white/10 rounded-lg text-sm text-white/80 hover:text-white flex items-center justify-center gap-2 transition-colors"
+                className="w-full mt-3 px-3 py-2 bg-white/10 hover:bg-white/15 disabled:opacity-30 disabled:hover:bg-white/10 rounded-lg text-sm text-[var(--text-primary)] hover:text-white flex items-center justify-center gap-2 transition-colors"
             >
                 <Route className="w-4 h-4" /> Generate Path
             </button>

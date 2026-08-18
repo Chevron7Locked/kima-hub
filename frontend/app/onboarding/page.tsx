@@ -225,7 +225,7 @@ export default function OnboardingPage() {
                 <div className="relative z-10 min-h-screen flex items-center justify-center">
                     <div className="text-center">
                         <GradientSpinner size="lg" />
-                        <p className="text-white/60 mt-4">Loading...</p>
+                        <p className="text-[var(--text-secondary)] mt-4">Loading...</p>
                     </div>
                 </div>
             :   <div className="relative z-10 min-h-screen flex items-center justify-center p-6">
@@ -247,7 +247,7 @@ export default function OnboardingPage() {
                                     Kima Hub
                                 </h1>
                             </div>
-                            <p className="text-white/60 text-lg">
+                            <p className="text-[var(--text-secondary)] text-lg">
                                 Welcome to your personal music streaming
                                 platform
                             </p>
@@ -266,8 +266,8 @@ export default function OnboardingPage() {
                                                 s.num === step ?
                                                     "bg-brand text-black shadow-lg shadow-[#fca200]/20 scale-110"
                                                 : s.num < step ?
-                                                    "bg-white/5 text-white/80 border border-white/10"
-                                                :   "bg-white/5 text-white/40 border border-white/10"
+                                                    "bg-white/5 text-[var(--text-primary)] border border-white/10"
+                                                :   "bg-white/5 text-[var(--text-muted)] border border-white/10"
                                             }`}
                                         >
                                             {s.num}
@@ -276,7 +276,7 @@ export default function OnboardingPage() {
                                             className={`text-xs mt-2 transition-all ${
                                                 s.num === step ?
                                                     "text-brand font-medium"
-                                                :   "text-white/40"
+                                                :   "text-[var(--text-muted)]"
                                             }`}
                                         >
                                             {s.label}
@@ -304,7 +304,7 @@ export default function OnboardingPage() {
                                             <h2 className="text-2xl font-bold text-white mb-1">
                                                 Create Your Admin Account
                                             </h2>
-                                            <p className="text-white/60">
+                                            <p className="text-[var(--text-secondary)]">
                                                 This is the owner account for your Kima server. You&apos;ll manage users, integrations, and settings from here.
                                             </p>
                                         </div>
@@ -316,7 +316,7 @@ export default function OnboardingPage() {
                                             <div>
                                                 <label
                                                     htmlFor="username"
-                                                    className="block text-sm font-medium text-white/90 mb-1.5"
+                                                    className="block text-sm font-medium text-[var(--text-primary)] mb-1.5"
                                                 >
                                                     Username
                                                 </label>
@@ -329,7 +329,7 @@ export default function OnboardingPage() {
                                                             e.target.value,
                                                         )
                                                     }
-                                                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
+                                                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                                                     placeholder="Choose a username"
                                                     required
                                                     minLength={3}
@@ -339,7 +339,7 @@ export default function OnboardingPage() {
                                             <div>
                                                 <label
                                                     htmlFor="password"
-                                                    className="block text-sm font-medium text-white/90 mb-1.5"
+                                                    className="block text-sm font-medium text-[var(--text-primary)] mb-1.5"
                                                 >
                                                     Password
                                                 </label>
@@ -352,7 +352,7 @@ export default function OnboardingPage() {
                                                             e.target.value,
                                                         )
                                                     }
-                                                    className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
+                                                    className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
                                                         showPasswordTooShort ?
                                                             "border-red-500/50"
                                                         :   "border-white/10"
@@ -366,7 +366,7 @@ export default function OnboardingPage() {
                                             <div>
                                                 <label
                                                     htmlFor="confirmPassword"
-                                                    className="block text-sm font-medium text-white/90 mb-1.5"
+                                                    className="block text-sm font-medium text-[var(--text-primary)] mb-1.5"
                                                 >
                                                     Confirm Password
                                                 </label>
@@ -379,7 +379,7 @@ export default function OnboardingPage() {
                                                             e.target.value,
                                                         )
                                                     }
-                                                    className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
+                                                    className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
                                                         showPasswordMismatch ?
                                                             "border-red-500/50"
                                                         :   "border-white/10"
@@ -419,7 +419,7 @@ export default function OnboardingPage() {
                                             <h2 className="text-2xl font-bold text-white mb-1">
                                                 Connect Your Services
                                             </h2>
-                                            <p className="text-white/60">
+                                            <p className="text-[var(--text-secondary)]">
                                                 All integrations are optional -- you can enable or change them later in Settings.
                                             </p>
                                         </div>
@@ -566,7 +566,7 @@ export default function OnboardingPage() {
                                         )}
 
                                         {/* What happens next */}
-                                        <p className="text-sm text-white/40 border-t border-white/10 pt-4">
+                                        <p className="text-sm text-[var(--text-muted)] border-t border-white/10 pt-4">
                                             After finishing, Kima will scan your music library and start enrichment in the background. This may take a few minutes for large collections.
                                         </p>
 
@@ -589,7 +589,7 @@ export default function OnboardingPage() {
                                                 }}
                                                 disabled={submitting}
                                                 tabIndex={0}
-                                                className="flex-1 bg-white/5 border border-white/10 text-white/70 font-medium py-3.5 rounded-lg hover:bg-white/10 transition-all disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand/30"
+                                                className="flex-1 bg-white/5 border border-white/10 text-[var(--text-secondary)] font-medium py-3.5 rounded-lg hover:bg-white/10 transition-all disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand/30"
                                             >
                                                 Finish without integrations
                                             </button>
@@ -620,7 +620,7 @@ export default function OnboardingPage() {
                         </div>
 
                         {/* Footer */}
-                        <p className="text-center text-white/40 text-sm mt-6">
+                        <p className="text-center text-[var(--text-muted)] text-sm mt-6">
                             &copy; 2025 Kima. Your music, your way.
                         </p>
                     </div>
@@ -686,14 +686,14 @@ function IntegrationCard({
                             className={`w-9 h-9 rounded-lg flex items-center justify-center ${
                                 enabled ?
                                     "bg-brand/10 border border-brand/20 text-brand"
-                                :   "bg-white/5 border border-white/10 text-white/40"
+                                :   "bg-white/5 border border-white/10 text-[var(--text-muted)]"
                             }`}
                         >
                             {icon}
                         </div>
                         <div>
                             <h3 className="text-white font-bold">{title}</h3>
-                            <p className="text-sm text-white/50">
+                            <p className="text-sm text-[var(--text-secondary)]">
                                 {description}
                             </p>
                         </div>
@@ -725,7 +725,7 @@ function IntegrationCard({
                             placeholder={`Server URL (e.g., http://${
                                 localPort || "localhost:PORT"
                             })`}
-                            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
+                            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                         />
                         {useSoulseekCreds ?
                             <>
@@ -736,7 +736,7 @@ function IntegrationCard({
                                         onUsernameChange?.(e.target.value)
                                     }
                                     placeholder="Soulseek Username"
-                                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
+                                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                                 />
                                 <input
                                     type="password"
@@ -745,9 +745,9 @@ function IntegrationCard({
                                         onPasswordChange?.(e.target.value)
                                     }
                                     placeholder="Soulseek Password"
-                                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
+                                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                                 />
-                                <p className="text-xs text-white/50 mt-2">
+                                <p className="text-xs text-[var(--text-secondary)] mt-2">
                                     These are your Soulseek network credentials,
                                     not your Slskd login
                                 </p>
@@ -759,7 +759,7 @@ function IntegrationCard({
                                     onApiKeyChange?.(e.target.value)
                                 }
                                 placeholder="API Key"
-                                className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
+                                className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                             />
                         }
                         {result && (
@@ -843,7 +843,7 @@ function SoulseekCard({
                             className={`w-9 h-9 rounded-lg flex items-center justify-center ${
                                 enabled ?
                                     "bg-brand/10 border border-brand/20 text-brand"
-                                :   "bg-white/5 border border-white/10 text-white/40"
+                                :   "bg-white/5 border border-white/10 text-[var(--text-muted)]"
                             }`}
                         >
                             <svg
@@ -862,7 +862,7 @@ function SoulseekCard({
                         </div>
                         <div>
                             <h3 className="text-white font-bold">Soulseek</h3>
-                            <p className="text-sm text-white/50">
+                            <p className="text-sm text-[var(--text-secondary)]">
                                 Peer-to-peer search to fill in tracks you don&apos;t own.
                             </p>
                         </div>
@@ -892,16 +892,16 @@ function SoulseekCard({
                             value={username}
                             onChange={(e) => onUsernameChange(e.target.value)}
                             placeholder="Soulseek Username"
-                            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
+                            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                         />
                         <input
                             type="password"
                             value={password}
                             onChange={(e) => onPasswordChange(e.target.value)}
                             placeholder="Soulseek Password"
-                            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
+                            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
                         />
-                        <p className="text-xs text-white/50">
+                        <p className="text-xs text-[var(--text-secondary)]">
                             Create an account at{" "}
                             <a
                                 href="https://www.slsknet.org/news/node/1"

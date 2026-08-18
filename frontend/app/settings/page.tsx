@@ -215,7 +215,7 @@ export default function SettingsPage() {
                         <button
                             onClick={handleSaveAll}
                             disabled={isSaving}
-                            className="w-full bg-brand text-black font-bold py-3 px-4 rounded-lg uppercase tracking-wider
+                            className="w-full bg-brand text-black font-bold py-3 px-4 rounded-lg 
                                 hover:bg-[#f97316] active:scale-[0.98] transition-all
                                 disabled:opacity-50 disabled:cursor-not-allowed"
                         >

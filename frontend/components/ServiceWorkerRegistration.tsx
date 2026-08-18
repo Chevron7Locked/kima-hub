@@ -49,7 +49,7 @@ export function ServiceWorkerRegistration() {
 
     return (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[200] bg-[var(--bg-hover)] border border-white/10 rounded-lg px-4 py-3 flex items-center gap-3 shadow-xl text-sm whitespace-nowrap">
-            <span className="text-white/60">New version available</span>
+            <span className="text-[var(--text-secondary)]">New version available</span>
             <button
                 onClick={handleReload}
                 className="px-3 py-1 bg-white text-black rounded-md text-xs font-medium hover:bg-white/90 transition-colors"
@@ -58,7 +58,7 @@ export function ServiceWorkerRegistration() {
             </button>
             <button
                 onClick={() => setUpdateAvailable(false)}
-                className="text-white/30 hover:text-white/60 text-xs transition-colors"
+                className="text-[var(--text-muted)] hover:text-white/60 text-xs transition-colors"
             >
                 Later
             </button>

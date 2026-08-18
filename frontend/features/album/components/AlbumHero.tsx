@@ -96,14 +96,14 @@ export function AlbumHero({
                             />
                         ) : (
                             <div className="w-full h-full flex items-center justify-center">
-                                <Disc3 className="w-16 h-16 text-gray-600" />
+                                <Disc3 className="w-16 h-16 text-[var(--text-muted)]" />
                             </div>
                         )}
                     </div>
 
                     {/* Album Info - Bottom Aligned */}
                     <div className="flex-1 min-w-0 pb-1">
-                        <p className="text-xs font-mono font-medium text-white/70 uppercase tracking-wider mb-1">
+                        <p className="text-xs font-medium text-[var(--text-secondary)] mb-1">
                             Album
                         </p>
                         <div className="flex items-center gap-2 group mb-2">
@@ -140,7 +140,7 @@ export function AlbumHero({
                                 </Suspense>
                             )}
                         </div>
-                        <div className="flex flex-wrap items-center gap-1 text-sm text-white/70 mb-1">
+                        <div className="flex flex-wrap items-center gap-1 text-sm text-[var(--text-secondary)] mb-1">
                             {album.artist && (
                                 <Link
                                     href={`/artist/${album.artist.id}`}
@@ -164,7 +164,7 @@ export function AlbumHero({
                             {totalDuration && <span>, {totalDuration}</span>}
                         </div>
                         {album.genre && (
-                            <span className="inline-block px-2 py-0.5 bg-white/10 rounded-full text-xs text-white/70">
+                            <span className="inline-block px-2 py-0.5 bg-white/10 rounded-full text-xs text-[var(--text-secondary)]">
                                 {album.genre}
                             </span>
                         )}

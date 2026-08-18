@@ -29,7 +29,7 @@ export function MobileLyricsView() {
     if (isLoading) {
         return (
             <div className="w-full h-full flex items-center justify-center">
-                <Loader2 className="w-6 h-6 animate-spin text-white/30" />
+                <Loader2 className="w-6 h-6 animate-spin text-[var(--text-muted)]" />
             </div>
         );
     }
@@ -37,7 +37,7 @@ export function MobileLyricsView() {
     if (!hasLyrics) {
         return (
             <div className="w-full h-full flex items-center justify-center">
-                <p className="text-xs text-white/20 font-mono uppercase tracking-wider">
+                <p className="text-xs text-[var(--text-muted)]">
                     No lyrics available
                 </p>
             </div>

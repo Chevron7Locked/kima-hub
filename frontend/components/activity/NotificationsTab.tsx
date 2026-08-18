@@ -149,7 +149,7 @@ export function NotificationsTab() {
                 return <ListMusic className="w-4 h-4 text-brand" />;
             case "system":
             default:
-                return <Bell className="w-4 h-4 text-white/60" />;
+                return <Bell className="w-4 h-4 text-[var(--text-secondary)]" />;
         }
     };
 
@@ -188,9 +188,9 @@ export function NotificationsTab() {
     if (notifications.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-                <Bell className="w-8 h-8 text-white/20 mb-3" />
-                <p className="text-sm text-white/40">No notifications</p>
-                <p className="text-xs text-white/30 mt-1">
+                <Bell className="w-8 h-8 text-[var(--text-muted)] mb-3" />
+                <p className="text-sm text-[var(--text-muted)]">No notifications</p>
+                <p className="text-xs text-[var(--text-muted)] mt-1">
                     You&apos;re all caught up!
                 </p>
             </div>
@@ -202,13 +202,13 @@ export function NotificationsTab() {
             {/* Header with clear all - monospace terminal style */}
             {notifications.length > 0 && (
                 <div className="flex items-center justify-between px-3 py-2 border-b-2 border-white/10">
-                    <span className="text-micro font-mono font-bold text-gray-600 uppercase tracking-wider">
+                    <span className="text-xs tabular-nums font-semibold text-[var(--text-muted)]">
                         {String(notifications.length).padStart(2, "0")} ITEM
                         {notifications.length !== 1 ? "S" : ""}
                     </span>
                     <button
                         onClick={handleClearAll}
-                        className="text-micro font-mono font-bold text-gray-600 hover:text-white uppercase tracking-wider transition-colors"
+                        className="text-micro font-semibold text-[var(--text-muted)] hover:text-white transition-colors"
                     >
                         CLEAR
                     </button>
@@ -232,7 +232,7 @@ export function NotificationsTab() {
                             <div className="flex items-start gap-3">
                                 {/* Index number */}
                                 <div className="flex-shrink-0 w-6 mt-0.5">
-                                    <span className="text-micro font-mono font-bold text-gray-700">
+                                    <span className="text-micro tabular-nums font-semibold text-[var(--text-muted)]">
                                         {String(index + 1).padStart(2, "0")}
                                     </span>
                                 </div>
@@ -247,9 +247,9 @@ export function NotificationsTab() {
                                     <div className="flex items-center gap-2 mb-1">
                                         <p
                                             className={cn(
-                                                "text-xs font-bold tracking-tight truncate uppercase",
+                                                "text-xs font-semibold tracking-tight truncate",
                                                 notification.read
-                                                    ? "text-gray-500"
+                                                    ? "text-[var(--text-muted)]"
                                                     : "text-white"
                                             )}
                                         >
@@ -257,18 +257,18 @@ export function NotificationsTab() {
                                         </p>
                                     </div>
                                     {notification.message && (
-                                        <p className="text-micro text-gray-600 mt-0.5 line-clamp-2 font-mono">
+                                        <p className="text-micro text-[var(--text-muted)] mt-0.5 line-clamp-2 tabular-nums">
                                             {notification.message}
                                         </p>
                                     )}
                                     <div className="flex items-center gap-2 mt-1.5">
-                                        <span className="text-micro font-mono text-gray-700 uppercase tracking-wider">
+                                        <span className="text-xs tabular-nums text-[var(--text-muted)]">
                                             {formatTime(notification.createdAt)}
                                         </span>
                                         {link && (
                                             <Link
                                                 href={link}
-                                                className="text-micro font-mono font-bold text-[#eab308] hover:underline flex items-center gap-1 uppercase tracking-wider"
+                                                className="text-micro font-semibold text-[#eab308] hover:underline flex items-center gap-1"
                                             >
                                                 VIEW
                                                 <ExternalLink className="w-2.5 h-2.5" />
@@ -289,7 +289,7 @@ export function NotificationsTab() {
                                             className="p-1 hover:bg-white/10 transition-colors"
                                             title="Mark as read"
                                         >
-                                            <Check className="w-3 h-3 text-gray-700 hover:text-white" />
+                                            <Check className="w-3 h-3 text-[var(--text-muted)] hover:text-white" />
                                         </button>
                                     )}
                                     <button
@@ -299,7 +299,7 @@ export function NotificationsTab() {
                                         className="p-1 hover:bg-white/10 transition-colors"
                                         title="Dismiss"
                                     >
-                                        <Trash2 className="w-3 h-3 text-gray-700 hover:text-red-400" />
+                                        <Trash2 className="w-3 h-3 text-[var(--text-muted)] hover:text-red-400" />
                                     </button>
                                 </div>
                             </div>

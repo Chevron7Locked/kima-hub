@@ -17,7 +17,7 @@ export function HomeHero() {
                 {/* System status indicator */}
                 <div className="flex items-center gap-2 mb-6">
                     <div className="w-1.5 h-1.5 bg-brand rounded-full" />
-                    <span className="text-xs font-mono text-gray-500 uppercase tracking-wider">
+                    <span className="t-eyebrow">
                         System Online
                     </span>
                 </div>
@@ -29,7 +29,7 @@ export function HomeHero() {
                             {line1}<br />
                             <span className="text-brand">{line2}</span>
                         </h1>
-                        <p className="text-sm font-mono text-gray-500">
+                        <p className="text-sm text-[var(--text-muted)]">
                             Personal streaming hub / Your library at a glance
                         </p>
                     </div>

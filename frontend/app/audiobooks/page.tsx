@@ -15,12 +15,11 @@ import {
     Book,
     ListTree,
     Shuffle,
-    ChevronLeft,
-    ChevronRight,
     ArrowUpDown,
     RefreshCw,
 } from "lucide-react";
 import { shuffleArray } from "@/utils/shuffle";
+import { Pagination } from "@/components/ui/Pagination";
 
 interface Audiobook {
     id: string;
@@ -53,7 +52,7 @@ function SectionHeader({ title, count, children }: { title: string; count?: numb
             <span className="w-1 h-8 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full shrink-0" />
             <h2 className="text-2xl font-bold tracking-tight">{title}</h2>
             {count !== undefined && (
-                <span className="text-xs font-mono text-[#f59e0b]">{count}</span>
+                <span className="text-xs tabular-nums text-[#f59e0b]">{count}</span>
             )}
             <span className="flex-1 border-t border-white/10" />
             {children}
@@ -287,7 +286,7 @@ export default function AudiobooksPage() {
                     <div className="mb-16">
                         <div className="flex items-center gap-2 mb-4">
                             <div className="w-1.5 h-1.5 bg-[#f59e0b] rounded-full" />
-                            <span className="text-xs font-mono text-white/50 uppercase tracking-wider">
+                            <span className="t-eyebrow">
                                 Not Configured
                             </span>
                         </div>
@@ -295,7 +294,7 @@ export default function AudiobooksPage() {
                             Audio<br />
                             <span className="text-[#f59e0b]">books</span>
                         </h1>
-                        <p className="text-sm font-mono text-white/40 uppercase tracking-wider max-w-xl">
+                        <p className="text-sm text-[var(--text-muted)] max-w-xl">
                             Connect Audiobookshelf to unlock your audiobook library
                         </p>
                     </div>
@@ -314,10 +313,10 @@ export default function AudiobooksPage() {
                                 <div className="text-3xl font-bold text-[#f59e0b]/20 mb-3 tracking-tight">
                                     {step.num}
                                 </div>
-                                <h3 className="text-sm font-bold text-white uppercase tracking-tight mb-2">
+                                <h3 className="text-sm font-bold text-white tracking-tight mb-2">
                                     {step.title}
                                 </h3>
-                                <p className="text-xs font-mono text-white/40 leading-relaxed">
+                                <p className="text-xs tabular-nums text-[var(--text-muted)] leading-relaxed">
                                     {step.desc}
                                 </p>
                             </div>
@@ -328,13 +327,13 @@ export default function AudiobooksPage() {
                     <div className="flex flex-col sm:flex-row gap-3 max-w-xl">
                         <button
                             onClick={() => router.push("/settings#audiobookshelf")}
-                            className="flex-1 h-12 px-6 rounded-lg bg-[#f59e0b] hover:bg-[#d97706] transition-all font-bold text-sm text-black uppercase tracking-wider hover:scale-[1.02] active:scale-[0.98]"
+                            className="flex-1 h-12 px-6 rounded-lg bg-[#f59e0b] hover:bg-[#d97706] transition-all font-bold text-sm text-black hover:scale-[1.02] active:scale-[0.98]"
                         >
                             Configure Audiobookshelf
                         </button>
                         <button
                             onClick={() => window.open("https://hub.docker.com/r/advplyr/audiobookshelf", "_blank")}
-                            className="flex-1 h-12 px-6 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 transition-all font-bold text-sm text-white uppercase tracking-wider"
+                            className="flex-1 h-12 px-6 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 transition-all font-bold text-sm text-white"
                         >
                             Install via Docker
                         </button>
@@ -345,7 +344,7 @@ export default function AudiobooksPage() {
                             href="https://github.com/advplyr/audiobookshelf"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-xs font-mono text-white/30 hover:text-white/60 transition-colors uppercase tracking-wider"
+                            className="text-xs text-[var(--text-muted)] hover:text-white/60 transition-colors"
                         >
                             View Documentation
                         </a>
@@ -367,7 +366,7 @@ export default function AudiobooksPage() {
                 <div className="max-w-[1800px] mx-auto">
                     <div className="flex items-center gap-2 mb-4">
                         <div className="w-1.5 h-1.5 bg-[#f59e0b] rounded-full" />
-                        <span className="text-xs font-mono text-white/50 uppercase tracking-wider">
+                        <span className="t-eyebrow">
                             Library
                         </span>
                     </div>
@@ -375,7 +374,7 @@ export default function AudiobooksPage() {
                         AUDIO<br />
                         <span className="text-[#f59e0b]">books</span>
                     </h1>
-                    <p className="text-sm font-mono text-white/40 uppercase tracking-wider">
+                    <p className="text-sm tabular-nums text-[var(--text-muted)]">
                         {audiobooks.length} {audiobooks.length === 1 ? "book" : "books"} in library
                     </p>
                 </div>
@@ -391,10 +390,10 @@ export default function AudiobooksPage() {
                                 <button
                                     key={f}
                                     onClick={() => setFilter(f)}
-                                    className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
+                                    className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
                                         filter === f
                                             ? "bg-[#f59e0b] text-black"
-                                            : "bg-white/5 text-white/50 hover:bg-white/10 hover:text-white border border-white/10 hover:border-white/20"
+                                            : "bg-white/5 text-[var(--text-secondary)] hover:bg-white/10 hover:text-white border border-white/10 hover:border-white/20"
                                     }`}
                                 >
                                     {f === "all" ? "All Books" : f === "listening" ? "In Progress" : "Finished"}
@@ -403,7 +402,7 @@ export default function AudiobooksPage() {
 
                             <button
                                 onClick={handleShuffleAudiobooks}
-                                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#f59e0b] hover:bg-[#d97706] text-black font-bold text-xs uppercase tracking-wider transition-all hover:scale-[1.02] active:scale-[0.98]"
+                                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#f59e0b] hover:bg-[#d97706] text-black font-semibold text-xs transition-all hover:scale-[1.02] active:scale-[0.98]"
                             >
                                 <Shuffle className="w-3.5 h-3.5" />
                                 <span className="hidden sm:inline">Random</span>
@@ -412,14 +411,14 @@ export default function AudiobooksPage() {
                             <button
                                 onClick={handleSync}
                                 disabled={isSyncing}
-                                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 text-white/50 hover:bg-white/10 hover:text-white border border-white/10 hover:border-white/20 font-bold text-xs uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 text-[var(--text-secondary)] hover:bg-white/10 hover:text-white border border-white/10 hover:border-white/20 font-semibold text-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                 title="Sync audiobooks from Audiobookshelf"
                             >
                                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
                                 <span className="hidden sm:inline">{isSyncing ? "Syncing..." : "Sync"}</span>
                             </button>
 
-                            <span className="hidden md:inline text-xs font-mono text-white/30 ml-auto uppercase tracking-wider">
+                            <span className="hidden md:inline text-xs tabular-nums text-[var(--text-muted)] ml-auto">
                                 {filteredBooks.length} {filteredBooks.length === 1 ? "book" : "books"}
                             </span>
                         </div>
@@ -427,11 +426,11 @@ export default function AudiobooksPage() {
                         {/* Second Row: Sort, Series View, Genre */}
                         <div className="flex flex-wrap items-center gap-2">
                             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10">
-                                <ArrowUpDown className="w-3.5 h-3.5 text-white/40" />
+                                <ArrowUpDown className="w-3.5 h-3.5 text-[var(--text-muted)]" />
                                 <select
                                     value={sortBy}
                                     onChange={(e) => setSortBy(e.target.value as SortType)}
-                                    className="bg-transparent text-xs font-mono text-white/70 uppercase tracking-wider focus:outline-none cursor-pointer [&>option]:bg-[var(--bg-primary)] [&>option]:text-white"
+                                    className="bg-transparent text-xs text-[var(--text-secondary)] focus:outline-none cursor-pointer [&>option]:bg-[var(--bg-primary)] [&>option]:text-white"
                                 >
                                     <option value="title">Title</option>
                                     <option value="author">Author</option>
@@ -442,10 +441,10 @@ export default function AudiobooksPage() {
 
                             <button
                                 onClick={() => setGroupBySeries(!groupBySeries)}
-                                className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 ${
+                                className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 ${
                                     groupBySeries
                                         ? "bg-[#f59e0b] text-black"
-                                        : "bg-white/5 text-white/50 hover:bg-white/10 hover:text-white border border-white/10 hover:border-white/20"
+                                        : "bg-white/5 text-[var(--text-secondary)] hover:bg-white/10 hover:text-white border border-white/10 hover:border-white/20"
                                 }`}
                                 title="Show series as single cards"
                             >
@@ -458,7 +457,7 @@ export default function AudiobooksPage() {
                                     <select
                                         value={selectedGenre || ""}
                                         onChange={(e) => setSelectedGenre(e.target.value || null)}
-                                        className="bg-transparent text-xs font-mono text-white/70 uppercase tracking-wider focus:outline-none cursor-pointer min-w-0 max-w-[140px] truncate [&>option]:bg-[var(--bg-primary)] [&>option]:text-white"
+                                        className="bg-transparent text-xs text-[var(--text-secondary)] focus:outline-none cursor-pointer min-w-0 max-w-[140px] truncate [&>option]:bg-[var(--bg-primary)] [&>option]:text-white"
                                     >
                                         <option value="">All Genres</option>
                                         {allGenres.map((genre) => (
@@ -477,7 +476,7 @@ export default function AudiobooksPage() {
                                         setItemsPerPage(Number(e.target.value));
                                         setCurrentPage(1);
                                     }}
-                                    className="bg-transparent text-xs font-mono text-white/70 uppercase tracking-wider focus:outline-none cursor-pointer [&>option]:bg-[var(--bg-primary)] [&>option]:text-white"
+                                    className="bg-transparent text-xs tabular-nums text-[var(--text-secondary)] focus:outline-none cursor-pointer [&>option]:bg-[var(--bg-primary)] [&>option]:text-white"
                                 >
                                     <option value={25}>25 per page</option>
                                     <option value={50}>50 per page</option>
@@ -488,7 +487,7 @@ export default function AudiobooksPage() {
                         </div>
 
                         {/* Mobile count */}
-                        <div className="md:hidden text-xs font-mono text-white/30 uppercase tracking-wider">
+                        <div className="md:hidden text-xs tabular-nums text-[var(--text-muted)]">
                             {filteredBooks.length} {filteredBooks.length === 1 ? "book" : "books"}
                         </div>
                     </div>
@@ -612,28 +611,13 @@ export default function AudiobooksPage() {
                             />
                         )}
 
-                        {/* Pagination */}
-                        {totalPages > 1 && (
-                            <div className="flex items-center justify-center gap-3 pt-8 border-t border-white/10">
-                                <button
-                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                    disabled={currentPage === 1}
-                                    className="p-2 rounded-lg text-white/40 hover:text-white hover:bg-white/5 border border-white/10 hover:border-white/20 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                                >
-                                    <ChevronLeft className="w-4 h-4" />
-                                </button>
-                                <span className="text-xs font-mono text-white/50 uppercase tracking-wider">
-                                    Page {currentPage} of {totalPages}
-                                </span>
-                                <button
-                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                    disabled={currentPage === totalPages}
-                                    className="p-2 rounded-lg text-white/40 hover:text-white hover:bg-white/5 border border-white/10 hover:border-white/20 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                                >
-                                    <ChevronRight className="w-4 h-4" />
-                                </button>
-                            </div>
-                        )}
+                        <Pagination
+                            currentPage={currentPage}
+                            totalPages={totalPages}
+                            onPageChange={setCurrentPage}
+                            label="Audiobooks"
+                            className="mt-0"
+                        />
                     </div>
                 </div>
             </div>

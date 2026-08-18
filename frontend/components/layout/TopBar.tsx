@@ -233,7 +233,7 @@ export function TopBar() {
                             "w-10 h-10 rounded-full flex items-center justify-center transition-all flex-shrink-0 mr-2",
                             pathname === "/"
                                 ? "bg-white text-black"
-                                : "bg-[var(--bg-primary)] text-gray-400 hover:bg-[var(--bg-hover)] hover:text-white"
+                                : "bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-white"
                         )}
                         aria-label="Home"
                         title="Home"
@@ -247,7 +247,7 @@ export function TopBar() {
                             className="relative"
                             data-tv-section="search-input"
                         >
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)]" />
                             <input
                                 type="text"
                                 value={searchQuery}
@@ -271,7 +271,7 @@ export function TopBar() {
                         }}
                         aria-expanded={isActivityPanelOpen}
                         aria-controls="activity-panel-mobile"
-                        className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-white transition-colors ml-2 flex-shrink-0 relative"
+                        className="w-10 h-10 flex items-center justify-center text-[var(--text-secondary)] hover:text-white transition-colors ml-2 flex-shrink-0 relative"
                         aria-label="Notifications"
                         title="Notifications"
                     >
@@ -296,7 +296,7 @@ export function TopBar() {
                                 className="group-hover:scale-105 transition-transform"
                             />
                         </Link>
-                        <span className="ml-2 px-1.5 py-0.5 text-micro font-medium text-white/40 bg-white/5 rounded border border-white/10 -mt-3">
+                        <span className="ml-2 px-1.5 py-0.5 text-micro font-medium text-[var(--text-muted)] bg-white/5 rounded border border-white/10 -mt-3">
                             v{APP_VERSION}
                         </span>
                     </div>
@@ -309,7 +309,7 @@ export function TopBar() {
                                 "w-12 h-12 rounded-full flex items-center justify-center transition-all flex-shrink-0",
                                 pathname === "/"
                                     ? "bg-white text-black"
-                                    : "bg-[var(--bg-primary)] text-gray-400 hover:bg-[var(--bg-hover)] hover:text-white hover:scale-105"
+                                    : "bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-white hover:scale-105"
                             )}
                             aria-label="Home"
                             title="Home"
@@ -325,7 +325,7 @@ export function TopBar() {
                                 className="relative"
                                 data-tv-section="search-input"
                             >
-                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--text-secondary)]" />
                                 <input
                                     ref={searchInputRef}
                                     type="text"
@@ -363,7 +363,7 @@ export function TopBar() {
                             className={cn(
                                 "flex items-center gap-2 px-3 h-10 rounded-full transition-all text-sm font-medium",
                                 isPolling
-                                    ? "bg-white/10 text-gray-500 cursor-not-allowed"
+                                    ? "bg-white/10 text-[var(--text-muted)] cursor-not-allowed"
                                     : hasActiveDownloads
                                     ? " text-green-400 "
                                     : hasFailedDownloads
@@ -397,7 +397,7 @@ export function TopBar() {
                                 "w-10 h-10 rounded-full flex items-center justify-center transition-all",
                                 pathname === "/settings"
                                     ? "bg-white text-black"
-                                    : "text-white/60 hover:text-white"
+                                    : "text-[var(--text-secondary)] hover:text-white"
                             )}
                             aria-label="Settings"
                             title="Settings"

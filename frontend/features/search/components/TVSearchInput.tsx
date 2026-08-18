@@ -49,7 +49,7 @@ export function TVSearchInput({ initialQuery = "", onSearch }: TVSearchInputProp
         <div className="mb-8" data-tv-section="tv-search">
             <form onSubmit={handleSubmit}>
                 <div className="relative max-w-2xl">
-                    <SearchIcon className="absolute left-5 top-1/2 -translate-y-1/2 w-6 h-6 text-gray-400" />
+                    <SearchIcon className="absolute left-5 top-1/2 -translate-y-1/2 w-6 h-6 text-[var(--text-secondary)]" />
                     <input
                         ref={inputRef}
                         type="text"
@@ -81,7 +81,7 @@ export function TVSearchInput({ initialQuery = "", onSearch }: TVSearchInputProp
                         `}
                     />
                     {query && (
-                        <div className="absolute right-5 top-1/2 -translate-y-1/2 text-sm text-gray-500">
+                        <div className="absolute right-5 top-1/2 -translate-y-1/2 text-sm text-[var(--text-muted)]">
                             Press Enter to search
                         </div>
                     )}

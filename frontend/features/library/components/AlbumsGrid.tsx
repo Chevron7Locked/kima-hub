@@ -71,7 +71,7 @@ const AlbumCardItem = memo(
                                     sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 16vw"
                                 />
                             ) : (
-                                <Disc3 className="w-12 h-12 text-gray-700" />
+                                <Disc3 className="w-12 h-12 text-[var(--text-muted)]" />
                             )}
                         </div>
 
@@ -104,7 +104,7 @@ const AlbumCardItem = memo(
                         <h3 className="text-sm font-bold text-white truncate mb-1 tracking-tight">
                             {album.title}
                         </h3>
-                        <p className="text-xs font-mono text-gray-500 uppercase tracking-wider truncate">
+                        <p className="text-xs tabular-nums text-[var(--text-muted)] truncate">
                             {album.artist?.name}
                         </p>
                     </div>

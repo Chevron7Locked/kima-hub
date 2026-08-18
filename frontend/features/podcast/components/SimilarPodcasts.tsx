@@ -28,7 +28,7 @@ export function SimilarPodcasts({ podcasts }: SimilarPodcastsProps) {
             <div className="flex items-center gap-3 mb-6">
                 <span className="w-1 h-8 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full shrink-0" />
                 <h2 className="text-2xl font-bold tracking-tight">Fans Also Like</h2>
-                <span className="text-xs font-mono text-[#3b82f6]">
+                <span className="text-xs tabular-nums text-[#3b82f6]">
                     {podcasts.length}
                 </span>
                 <span className="flex-1 border-t border-white/10" />
@@ -54,7 +54,7 @@ export function SimilarPodcasts({ podcasts }: SimilarPodcastsProps) {
                                     />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center">
-                                        <Mic2 className="w-10 h-10 text-gray-700" />
+                                        <Mic2 className="w-10 h-10 text-[var(--text-muted)]" />
                                     </div>
                                 )}
                             </div>
@@ -62,7 +62,7 @@ export function SimilarPodcasts({ podcasts }: SimilarPodcastsProps) {
                                 <h3 className="text-sm font-bold text-white truncate tracking-tight">
                                     {podcast.title}
                                 </h3>
-                                <p className="text-micro font-mono text-gray-500 uppercase tracking-wider truncate mt-0.5">
+                                <p className="text-xs tabular-nums text-[var(--text-muted)] truncate mt-0.5">
                                     {podcast.author}
                                 </p>
                             </div>

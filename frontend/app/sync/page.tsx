@@ -216,7 +216,7 @@ export default function SyncPage() {
                                 <h2 className="text-2xl font-bold text-white mb-1">
                                     {syncing ? "Setting Things Up" : "Ready to Go!"}
                                 </h2>
-                                <p className="text-white/60">
+                                <p className="text-[var(--text-secondary)]">
                                     {error || message}
                                 </p>
                             </div>
@@ -230,7 +230,7 @@ export default function SyncPage() {
                                             style={{ width: `${progress}%` }}
                                         />
                                     </div>
-                                    <p className="text-xs text-white/40 text-center">
+                                    <p className="text-xs text-[var(--text-muted)] text-center">
                                         {progress}% complete
                                     </p>
                                 </div>
@@ -280,8 +280,8 @@ export default function SyncPage() {
                                             <span
                                                 className={
                                                     isComplete
-                                                        ? "text-white/70 font-medium"
-                                                        : "text-white/40"
+                                                        ? "text-[var(--text-secondary)] font-medium"
+                                                        : "text-[var(--text-muted)]"
                                                 }
                                             >
                                                 {step.label}
@@ -297,14 +297,14 @@ export default function SyncPage() {
                     <div className="flex justify-end mt-4">
                         <button
                             onClick={handleSkip}
-                            className="px-4 py-2 text-sm text-white/50 hover:text-white/70 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/30 rounded"
+                            className="px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-white/70 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/30 rounded"
                         >
                             Skip for now
                         </button>
                     </div>
 
                     {/* Footer note */}
-                    <p className="text-center text-white/40 text-xs mt-6">
+                    <p className="text-center text-[var(--text-muted)] text-xs mt-6">
                         Enrichment and metadata analysis will continue in the background once you&apos;re in.
                     </p>
                 </div>

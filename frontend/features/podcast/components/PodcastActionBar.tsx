@@ -55,7 +55,7 @@ export function PodcastActionBar({
                 <button
                     onClick={onRefresh}
                     disabled={isRefreshing}
-                    className="p-2.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all disabled:opacity-50"
+                    className="p-2.5 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all disabled:opacity-50"
                     title="Check for new episodes"
                 >
                     <RefreshCw className={cn("w-4 h-4", isRefreshing && "animate-spin")} />
@@ -67,7 +67,7 @@ export function PodcastActionBar({
                 <button
                     onClick={onSubscribe}
                     disabled={isSubscribing}
-                    className="h-10 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] transition-all flex items-center gap-2 font-bold text-sm text-white uppercase tracking-wider disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+                    className="h-10 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] transition-all flex items-center gap-2 font-bold text-sm text-white disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
                 >
                     {isSubscribing ? (
                         <>
@@ -89,7 +89,7 @@ export function PodcastActionBar({
                     href={feedUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-2.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all"
+                    className="p-2.5 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all"
                     title="RSS Feed"
                 >
                     <ExternalLink className="w-4 h-4" />
@@ -104,25 +104,25 @@ export function PodcastActionBar({
                     {!showDeleteConfirm ? (
                         <button
                             onClick={() => onShowDeleteConfirm(true)}
-                            className="flex items-center gap-2 px-3 py-2 rounded-lg text-red-400/60 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all text-xs font-mono uppercase tracking-wider"
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg text-red-400/60 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all text-xs tabular-nums"
                         >
                             <Trash2 className="w-3.5 h-3.5" />
                             <span className="hidden md:inline">Remove</span>
                         </button>
                     ) : (
                         <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono text-white/40 hidden md:inline uppercase tracking-wider">
+                            <span className="text-xs text-[var(--text-muted)] hidden md:inline">
                                 Remove podcast?
                             </span>
                             <button
                                 onClick={onRemove}
-                                className="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20 transition-all"
+                                className="px-3 py-2 rounded-lg text-xs font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20 transition-all"
                             >
                                 Confirm
                             </button>
                             <button
                                 onClick={() => onShowDeleteConfirm(false)}
-                                className="px-3 py-2 rounded-lg text-xs font-mono uppercase tracking-wider bg-white/5 text-white/50 hover:bg-white/10 border border-white/10 transition-all"
+                                className="px-3 py-2 rounded-lg text-xs bg-white/5 text-[var(--text-secondary)] hover:bg-white/10 border border-white/10 transition-all"
                             >
                                 Cancel
                             </button>

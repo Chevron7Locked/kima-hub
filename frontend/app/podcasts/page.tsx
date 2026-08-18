@@ -6,8 +6,9 @@ import { api } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
-import { Mic2, Search, Plus, ChevronLeft, ChevronRight, RefreshCw, Rss, X, Loader2 } from "lucide-react";
+import { Mic2, Search, Plus, RefreshCw, Rss, X, Loader2 } from "lucide-react";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
+import { Pagination } from "@/components/ui/Pagination";
 import { usePodcastsQuery, useTopPodcastsQuery, queryKeys } from "@/hooks/useQueries";
 import Image from "next/image";
 import { cn } from "@/utils/cn";
@@ -60,7 +61,7 @@ function PodcastCard({
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center">
-                        <Mic2 className="w-12 h-12 text-gray-700" />
+                        <Mic2 className="w-12 h-12 text-[var(--text-muted)]" />
                     </div>
                 )}
             </div>
@@ -68,7 +69,7 @@ function PodcastCard({
                 <h3 className="text-sm font-bold text-white truncate tracking-tight">
                     {podcast.title}
                 </h3>
-                <p className="text-micro font-mono text-gray-500 uppercase tracking-wider truncate mt-0.5">
+                <p className="text-xs tabular-nums text-[var(--text-muted)] truncate mt-0.5">
                     {podcast.author}
                 </p>
             </div>
@@ -92,9 +93,9 @@ function SectionHeader({
     return (
         <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
             <span className="w-1 h-8 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full shrink-0" />
-            <span className="uppercase tracking-tight">{title}</span>
+            <span className="tracking-tight">{title}</span>
             {count !== undefined && (
-                <span className="text-xs font-mono text-[#3b82f6]">
+                <span className="text-xs tabular-nums text-[#3b82f6]">
                     {count}
                 </span>
             )}
@@ -283,7 +284,7 @@ export default function PodcastsPage() {
                         {/* System status */}
                         <div className="flex items-center gap-2 mb-6">
                             <div className="w-1.5 h-1.5 bg-[#3b82f6] rounded-full" />
-                            <span className="text-xs font-mono text-gray-500 uppercase tracking-wider">
+                            <span className="t-eyebrow">
                                 Podcast Library
                             </span>
                         </div>
@@ -294,7 +295,7 @@ export default function PodcastsPage() {
                                     Pod<br />
                                     <span className="text-[#3b82f6]">casts</span>
                                 </h1>
-                                <p className="text-sm font-mono text-gray-500">
+                                <p className="text-sm text-[var(--text-muted)]">
                                     Subscribe, discover, and listen
                                 </p>
                                 <div className="mt-3">
@@ -322,7 +323,7 @@ export default function PodcastsPage() {
                                                     <button
                                                         onClick={() => { setShowRssInput(false); setRssUrl(""); setRssError(null); }}
                                                         aria-label="Cancel RSS input"
-                                                        className="p-2.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 transition-all"
+                                                        className="p-2.5 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 transition-all"
                                                     >
                                                         <X className="w-4 h-4" />
                                                     </button>
@@ -333,7 +334,7 @@ export default function PodcastsPage() {
                                     ) : (
                                         <button
                                             onClick={() => setShowRssInput(true)}
-                                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all text-xs font-mono uppercase tracking-wider"
+                                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all text-xs"
                                             title="Add podcast by RSS feed URL"
                                         >
                                             <Rss className="w-3.5 h-3.5" />
@@ -347,10 +348,10 @@ export default function PodcastsPage() {
                             <div className="flex items-center gap-4">
                                 {podcasts.length > 0 && (
                                     <div className="border-2 border-white/10 bg-[var(--bg-primary)] px-4 py-3 rounded hidden sm:block">
-                                        <span className="text-3xl font-bold font-mono text-[#3b82f6]">
+                                        <span className="text-3xl font-bold tabular-nums text-[#3b82f6]">
                                             {podcasts.length}
                                         </span>
-                                        <span className="text-xs font-mono text-gray-500 uppercase ml-2">
+                                        <span className="text-xs text-[var(--text-muted)] ml-2">
                                             subscribed
                                         </span>
                                     </div>
@@ -358,7 +359,7 @@ export default function PodcastsPage() {
 
                                 {/* Search */}
                                 <div className="relative w-64 md:w-80" ref={dropdownRef}>
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 z-10" />
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] z-10" />
                                     <input
                                         type="text"
                                         value={searchQuery}
@@ -369,7 +370,7 @@ export default function PodcastsPage() {
                                         aria-controls="podcast-search-listbox"
                                         aria-label="Search podcasts to subscribe"
                                         aria-autocomplete="list"
-                                        className="w-full pl-10 pr-4 py-2.5 bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#3b82f6]/50 transition-all text-sm font-mono"
+                                        className="w-full pl-10 pr-4 py-2.5 bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#3b82f6]/50 transition-all text-sm tabular-nums"
                                     />
                                     {isSearching && (
                                         <div className="absolute right-3 top-1/2 -translate-y-1/2 z-10">
@@ -410,7 +411,7 @@ export default function PodcastsPage() {
                                                                 />
                                                             ) : (
                                                                 <div className="w-full h-full flex items-center justify-center">
-                                                                    <Mic2 className="w-4 h-4 text-gray-600" />
+                                                                    <Mic2 className="w-4 h-4 text-[var(--text-muted)]" />
                                                                 </div>
                                                             )}
                                                         </div>
@@ -418,7 +419,7 @@ export default function PodcastsPage() {
                                                             <h3 className="text-sm font-bold text-white truncate tracking-tight">
                                                                 {result.name}
                                                             </h3>
-                                                            <p className="text-micro font-mono text-gray-500 uppercase tracking-wider truncate">
+                                                            <p className="text-xs tabular-nums text-[var(--text-muted)] truncate">
                                                                 {result.artist}
                                                             </p>
                                                         </div>
@@ -446,7 +447,7 @@ export default function PodcastsPage() {
                                         !isSearching &&
                                         searchQuery.length >= 2 && (
                                             <div className="absolute top-full left-0 mt-2 w-full bg-[var(--bg-secondary)] border-2 border-white/10 rounded-lg shadow-2xl p-4 z-50">
-                                                <p className="text-xs font-mono text-gray-500 text-center uppercase tracking-wider">
+                                                <p className="text-xs text-[var(--text-muted)] text-center">
                                                     No podcasts found
                                                 </p>
                                             </div>
@@ -471,7 +472,7 @@ export default function PodcastsPage() {
                                             <button
                                                 onClick={handleRefreshAll}
                                                 disabled={isRefreshingAll}
-                                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all text-xs font-mono uppercase tracking-wider disabled:opacity-50"
+                                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all text-xs disabled:opacity-50"
                                                 title="Check all podcasts for new episodes"
                                             >
                                                 <RefreshCw className={cn("w-3.5 h-3.5", isRefreshingAll && "animate-spin")} />
@@ -481,7 +482,7 @@ export default function PodcastsPage() {
                                                 value={sortBy}
                                                 onChange={(e) => setSortBy(e.target.value as SortOption)}
                                                 aria-label="Sort podcasts"
-                                                className="px-3 py-1.5 bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-[#3b82f6]/50 [&>option]:bg-[var(--bg-primary)] [&>option]:text-white cursor-pointer"
+                                                className="px-3 py-1.5 bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg text-white text-xs focus:outline-none focus:border-[#3b82f6]/50 [&>option]:bg-[var(--bg-primary)] [&>option]:text-white cursor-pointer"
                                             >
                                                 <option value="title">Title</option>
                                                 <option value="author">Author</option>
@@ -494,7 +495,7 @@ export default function PodcastsPage() {
                                                     setCurrentPage(1);
                                                 }}
                                                 aria-label="Podcasts per page"
-                                                className="px-3 py-1.5 bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-[#3b82f6]/50 [&>option]:bg-[var(--bg-primary)] [&>option]:text-white cursor-pointer"
+                                                className="px-3 py-1.5 bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg text-white text-xs tabular-nums focus:outline-none focus:border-[#3b82f6]/50 [&>option]:bg-[var(--bg-primary)] [&>option]:text-white cursor-pointer"
                                             >
                                                 <option value={25}>25</option>
                                                 <option value={50}>50</option>
@@ -518,44 +519,13 @@ export default function PodcastsPage() {
                                     ))}
                                 </div>
 
-                                {/* Pagination */}
-                                {totalPages > 1 && (
-                                    <div className="flex items-center justify-center gap-1 mt-8 pt-4 border-t border-white/10">
-                                        <button
-                                            onClick={() => setCurrentPage(1)}
-                                            disabled={currentPage === 1}
-                                            className="px-3 py-2 text-xs font-mono uppercase tracking-wider text-gray-500 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                        >
-                                            First
-                                        </button>
-                                        <button
-                                            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                                            disabled={currentPage === 1}
-                                            className="p-2 text-gray-500 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                        >
-                                            <ChevronLeft className="w-4 h-4" />
-                                        </button>
-                                        <span className="px-4 py-2 text-xs font-mono text-white">
-                                            <span className="text-[#3b82f6] font-bold">{currentPage}</span>
-                                            <span className="text-gray-500 mx-1">/</span>
-                                            <span className="text-gray-500">{totalPages}</span>
-                                        </span>
-                                        <button
-                                            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                                            disabled={currentPage === totalPages}
-                                            className="p-2 text-gray-500 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                        >
-                                            <ChevronRight className="w-4 h-4" />
-                                        </button>
-                                        <button
-                                            onClick={() => setCurrentPage(totalPages)}
-                                            disabled={currentPage === totalPages}
-                                            className="px-3 py-2 text-xs font-mono uppercase tracking-wider text-gray-500 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                        >
-                                            Last
-                                        </button>
-                                    </div>
-                                )}
+                                <Pagination
+                                    currentPage={currentPage}
+                                    totalPages={totalPages}
+                                    onPageChange={setCurrentPage}
+                                    label="My podcasts"
+                                    className="mt-8"
+                                />
                             </section>
                         )}
 
@@ -601,7 +571,7 @@ export default function PodcastsPage() {
                                         rightAction={
                                             <button
                                                 onClick={() => router.push(`/podcasts/genre/${genreId}`)}
-                                                className="text-xs font-mono uppercase tracking-wider text-gray-500 hover:text-[#3b82f6] transition-colors"
+                                                className="text-xs text-[var(--text-muted)] hover:text-[#3b82f6] transition-colors"
                                             >
                                                 View All
                                             </button>
@@ -630,11 +600,11 @@ export default function PodcastsPage() {
                                 <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-12">
                                     <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-[#3b82f6] to-[#2563eb]" />
                                     <div className="flex flex-col items-center text-center">
-                                        <Mic2 className="w-16 h-16 text-gray-700 mb-6" />
+                                        <Mic2 className="w-16 h-16 text-[var(--text-muted)] mb-6" />
                                         <h2 className="text-2xl font-bold tracking-tight text-white mb-2">
                                             Discover Podcasts
                                         </h2>
-                                        <p className="text-sm font-mono text-gray-500 max-w-md">
+                                        <p className="text-sm text-[var(--text-muted)] max-w-md">
                                             Search for podcasts above to subscribe and start listening
                                         </p>
                                     </div>

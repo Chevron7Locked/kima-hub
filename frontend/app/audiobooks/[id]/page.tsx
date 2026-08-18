@@ -39,7 +39,7 @@ export default function AudiobookDetailPage() {
     if (!audiobook) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
-                <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">
+                <p className="text-xs text-[var(--text-muted)]">
                     Audiobook not found
                 </p>
             </div>
@@ -108,7 +108,7 @@ export default function AudiobookDetailPage() {
                                 </div>
                                 <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[var(--bg-primary)] p-5">
                                     <div
-                                        className="prose prose-invert prose-sm max-w-none text-white/50 [&_a]:text-[#f59e0b] [&_a]:no-underline [&_a:hover]:underline text-sm leading-relaxed"
+                                        className="prose prose-invert prose-sm max-w-none text-[var(--text-secondary)] [&_a]:text-[#f59e0b] [&_a]:no-underline [&_a:hover]:underline text-sm leading-relaxed"
                                         dangerouslySetInnerHTML={{
                                             __html: DOMPurify.sanitize(audiobook.description || ""),
                                         }}
@@ -131,8 +131,8 @@ export default function AudiobookDetailPage() {
                                     <span className="text-[#f59e0b] font-bold tracking-tight">
                                         {audiobook.series.name}
                                     </span>
-                                    <span className="text-white/20">|</span>
-                                    <span className="text-xs font-mono text-white/50 uppercase tracking-wider">
+                                    <span className="text-[var(--text-muted)]">|</span>
+                                    <span className="text-xs tabular-nums text-[var(--text-secondary)]">
                                         Book {audiobook.series.sequence}
                                     </span>
                                 </div>
@@ -142,7 +142,7 @@ export default function AudiobookDetailPage() {
 
                     {/* Playback hint */}
                     <div>
-                        <p className="text-micro font-mono text-white/20 uppercase tracking-wider pt-4">
+                        <p className="text-xs text-[var(--text-muted)] pt-4">
                             Use the player controls in the bottom bar for playback speed, seeking, and volume.
                         </p>
                     </div>

@@ -102,7 +102,7 @@ export function ActivityPanel({
                             className="p-2 hover:bg-white/10 rounded-full transition-colors"
                             title="Close"
                         >
-                            <X className="w-5 h-5 text-white/60" />
+                            <X className="w-5 h-5 text-[var(--text-secondary)]" />
                         </button>
                     </div>
 
@@ -125,7 +125,7 @@ export function ActivityPanel({
                                         "flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors relative",
                                         resolvedActiveTab === tab.id
                                             ? "text-white border-b-2 border-[#f5c518]"
-                                            : "text-white/50 hover:text-white/70"
+                                            : "text-[var(--text-secondary)] hover:text-white/70"
                                     )}
                                 >
                                     <Icon className="w-4 h-4" />
@@ -133,7 +133,7 @@ export function ActivityPanel({
                                     {badge && (
                                         <span
                                             className={cn(
-                                                "min-w-[18px] h-[18px] px-1 rounded-full text-xs font-bold flex items-center justify-center ml-1",
+                                                "min-w-[18px] h-[18px] px-1 rounded-full text-xs font-semibold flex items-center justify-center ml-1",
                                                 tab.id === "active"
                                                     ? "bg-blue-500 text-white"
                                                     : "bg-[#f5c518] text-black"
@@ -188,7 +188,7 @@ export function ActivityPanel({
                     )}
                     title="Open activity panel"
                 >
-                    <ChevronLeft className="w-5 h-5 text-white/40" />
+                    <ChevronLeft className="w-5 h-5 text-[var(--text-muted)]" />
 
                     {/* Activity badge - status indicator */}
                     {hasActivity && (
@@ -207,7 +207,7 @@ export function ActivityPanel({
                 <div className="flex items-center justify-between px-4 py-4 border-b-2 border-white/10">
                     <div className="flex items-center gap-2">
                         <div className="w-1.5 h-1.5 bg-[#22c55e] rounded-full" />
-                        <h2 className="text-xs font-mono font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">
+                        <h2 className="text-xs tabular-nums font-semibold text-[var(--text-muted)] whitespace-nowrap">
                             Activity Feed
                         </h2>
                     </div>
@@ -216,7 +216,7 @@ export function ActivityPanel({
                         className="p-1 hover:bg-white/10 transition-colors"
                         title="Close panel"
                     >
-                        <ChevronRight className="w-4 h-4 text-gray-600" />
+                        <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
                     </button>
                 </div>
 
@@ -236,16 +236,16 @@ export function ActivityPanel({
                                 key={tab.id}
                                 onClick={() => handleTabClick(tab.id)}
                                 className={cn(
-                                    "flex-1 flex items-center justify-center gap-2 py-2.5 px-2 text-xs font-mono font-bold uppercase tracking-wider transition-all relative whitespace-nowrap border-l-2",
+                                    "flex-1 flex items-center justify-center gap-2 py-2.5 px-2 text-xs tabular-nums font-semibold transition-all relative whitespace-nowrap border-l-2",
                                     resolvedActiveTab === tab.id
                                         ? "bg-[var(--bg-secondary)] border-[#eab308] text-white"
-                                        : "border-transparent text-gray-600 hover:text-white hover:bg-white/5"
+                                        : "border-transparent text-[var(--text-muted)] hover:text-white hover:bg-white/5"
                                 )}
                             >
                                 <Icon className="w-3.5 h-3.5" />
                                 <span className="hidden lg:inline">{tab.label}</span>
                                 {badge && (
-                                    <span className="text-micro font-mono text-[#eab308]">
+                                    <span className="text-micro tabular-nums text-[#eab308]">
                                         {badge > 99 ? "99" : badge}
                                     </span>
                                 )}
@@ -312,7 +312,7 @@ export function ActivityPanelToggle() {
             aria-controls="activity-panel"
             className={cn(
                 "relative p-2 rounded-full transition-all",
-                "text-white/60 hover:text-white"
+                "text-[var(--text-secondary)] hover:text-white"
             )}
             title="Toggle activity panel"
             aria-label="Toggle activity panel"

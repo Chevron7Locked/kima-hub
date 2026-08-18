@@ -21,7 +21,7 @@ export function SettingsRow({ label, description, children, htmlFor }: SettingsR
                     {label}
                 </label>
                 {description && (
-                    <p className="text-xs font-mono text-white/30 mt-0.5 uppercase tracking-wider">{description}</p>
+                    <p className="text-xs tabular-nums text-[var(--text-muted)] mt-0.5">{description}</p>
                 )}
             </div>
             <div className="w-full sm:w-auto sm:shrink-0">

@@ -24,7 +24,7 @@ export function KeyboardShortcutsTooltip() {
                 onMouseEnter={() => setIsVisible(true)}
                 onMouseLeave={() => setIsVisible(false)}
                 onClick={() => setIsVisible(!isVisible)}
-                className="p-1.5 rounded transition-colors text-gray-400 hover:text-white"
+                className="p-1.5 rounded transition-colors text-[var(--text-secondary)] hover:text-white"
                 title="Keyboard shortcuts"
             >
                 <Info className="w-3.5 h-3.5" />
@@ -46,10 +46,10 @@ export function KeyboardShortcutsTooltip() {
                                 key={shortcut.key}
                                 className="flex items-center justify-between text-xs"
                             >
-                                <span className="text-gray-400">
+                                <span className="text-[var(--text-secondary)]">
                                     {shortcut.action}
                                 </span>
-                                <kbd className="px-2 py-1 bg-white/5 border border-white/10 rounded text-white font-mono text-xs min-w-[40px] text-center">
+                                <kbd className="px-2 py-1 bg-white/5 border border-white/10 rounded text-white tabular-nums text-xs min-w-[40px] text-center">
                                     {shortcut.key}
                                 </kbd>
                             </div>
@@ -57,7 +57,7 @@ export function KeyboardShortcutsTooltip() {
                     </div>
 
                     <div className="mt-3 pt-3 border-t border-white/10">
-                        <p className="text-micro text-gray-500 leading-relaxed">
+                        <p className="text-micro text-[var(--text-muted)] leading-relaxed">
                             Shortcuts work anywhere except when typing in text fields.
                         </p>
                     </div>

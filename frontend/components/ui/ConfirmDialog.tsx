@@ -123,12 +123,12 @@ export function ConfirmDialog({
                         <h2 id="confirm-dialog-title" className="text-xl font-bold text-white mb-2">
                             {title}
                         </h2>
-                        <p id="confirm-dialog-message" className="text-sm text-gray-400">{message}</p>
+                        <p id="confirm-dialog-message" className="text-sm text-[var(--text-secondary)]">{message}</p>
                     </div>
                     <button
                         onClick={onClose}
                         aria-label="Close dialog"
-                        className="p-1 hover:bg-white/10 rounded-full transition-colors text-gray-400 hover:text-white flex-shrink-0"
+                        className="p-1 hover:bg-white/10 rounded-full transition-colors text-[var(--text-secondary)] hover:text-white flex-shrink-0"
                     >
                         <X className="w-5 h-5" />
                     </button>

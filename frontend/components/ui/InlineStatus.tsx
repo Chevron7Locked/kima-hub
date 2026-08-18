@@ -57,7 +57,7 @@ export function InlineStatus({
                 "inline-flex items-center gap-1.5 text-sm",
                 status === "success" && "text-emerald-400",
                 status === "error" && "text-red-400",
-                status === "loading" && "text-white/60",
+                status === "loading" && "text-[var(--text-secondary)]",
                 className
             )}
             aria-live="polite"
@@ -153,7 +153,7 @@ export function ConnectionTestButton({
                 disabled={disabled || status === "loading"}
                 className={cn(
                     "px-3 py-1.5 text-sm rounded-md transition-colors",
-                    "bg-white/10 hover:bg-white/15 text-white/70 hover:text-white",
+                    "bg-white/10 hover:bg-white/15 text-[var(--text-secondary)] hover:text-white",
                     "disabled:opacity-50 disabled:cursor-not-allowed",
                     className
                 )}

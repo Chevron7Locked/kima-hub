@@ -108,7 +108,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                     </Link>
                     <button
                         onClick={onClose}
-                        className="w-9 h-9 flex items-center justify-center text-gray-500 hover:text-white transition-colors rounded-full hover:bg-white/10"
+                        className="w-9 h-9 flex items-center justify-center text-[var(--text-muted)] hover:text-white transition-colors rounded-full hover:bg-white/10"
                         aria-label="Close menu"
                     >
                         <X className="w-5 h-5" />
@@ -123,7 +123,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                 >
                     {/* Quick Links Section */}
                     <div className="px-3 mb-6">
-                        <div className="text-micro font-semibold text-gray-600 uppercase tracking-widest px-3 mb-2">
+                        <div className="text-xs font-semibold text-[var(--text-muted)] px-3 mb-2">
                             Quick Links
                         </div>
 
@@ -137,7 +137,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                                 "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors",
                                 pathname === "/discover" ?
                                     "bg-white/10 text-white"
-                                :   "text-gray-400 hover:text-white hover:bg-white/5",
+                                :   "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
                             )}
                         >
                             <Compass className="w-5 h-5" />
@@ -156,7 +156,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                                 "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors",
                                 pathname === "/radio" ?
                                     "bg-white/10 text-white"
-                                :   "text-gray-400 hover:text-white hover:bg-white/5",
+                                :   "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
                             )}
                         >
                             <Radio className="w-5 h-5" />
@@ -168,7 +168,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
 
                     {/* Actions Section */}
                     <div className="px-3">
-                        <div className="text-micro font-semibold text-gray-600 uppercase tracking-widest px-3 mb-2">
+                        <div className="text-xs font-semibold text-[var(--text-muted)] px-3 mb-2">
                             Actions
                         </div>
 
@@ -178,7 +178,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             className={cn(
                                 "w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-colors text-left",
                                 isSyncing ? "text-green-400" : (
-                                    "text-gray-400 hover:text-white hover:bg-white/5"
+                                    "text-[var(--text-secondary)] hover:text-white hover:bg-white/5"
                                 ),
                             )}
                         >
@@ -202,7 +202,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                                 "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors",
                                 pathname === "/settings" ?
                                     "bg-white/10 text-white"
-                                :   "text-gray-400 hover:text-white hover:bg-white/5",
+                                :   "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
                             )}
                         >
                             <Settings className="w-5 h-5" />

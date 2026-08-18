@@ -56,12 +56,12 @@ export default function PodcastDetailPage() {
         return (
             <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
                 <div className="flex flex-col items-center gap-3 text-center">
-                    <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">
+                    <p className="text-xs tabular-nums text-[var(--text-muted)]">
                         {previewError || "Could not load podcast"}
                     </p>
                     <button
                         onClick={() => router.back()}
-                        className="text-xs font-mono text-gray-600 uppercase tracking-wider underline underline-offset-2 hover:text-gray-400 transition-colors"
+                        className="text-xs text-[var(--text-muted)] underline underline-offset-2 hover:text-gray-400 transition-colors"
                     >
                         Go back
                     </button>
@@ -81,7 +81,7 @@ export default function PodcastDetailPage() {
     if (!podcast && !previewData) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
-                <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">Podcast not found</p>
+                <p className="text-xs text-[var(--text-muted)]">Podcast not found</p>
             </div>
         );
     }
@@ -214,7 +214,7 @@ export default function PodcastDetailPage() {
                                 </div>
                                 <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[var(--bg-primary)] p-5">
                                     <div
-                                        className="prose prose-invert prose-sm max-w-none text-white/50 [&_a]:text-[#3b82f6] [&_a]:no-underline [&_a:hover]:underline text-sm leading-relaxed"
+                                        className="prose prose-invert prose-sm max-w-none text-[var(--text-secondary)] [&_a]:text-[#3b82f6] [&_a]:no-underline [&_a:hover]:underline text-sm leading-relaxed"
                                         dangerouslySetInnerHTML={{
                                             __html: DOMPurify.sanitize(podcast.description || ""),
                                         }}

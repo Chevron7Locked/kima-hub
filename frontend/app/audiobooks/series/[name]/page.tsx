@@ -92,7 +92,7 @@ export default function SeriesDetailPage() {
     if (books.length === 0) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-[var(--bg-primary)]">
-                <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">
+                <p className="text-xs text-[var(--text-muted)]">
                     No books found in this series
                 </p>
             </div>
@@ -132,7 +132,7 @@ export default function SeriesDetailPage() {
                         {/* Back navigation */}
                         <button
                             onClick={() => router.push("/audiobooks")}
-                            className="flex items-center gap-2 text-xs font-mono text-white/40 hover:text-white transition-colors mb-6 uppercase tracking-wider"
+                            className="flex items-center gap-2 text-xs tabular-nums text-[var(--text-muted)] hover:text-white transition-colors mb-6"
                         >
                             <ArrowLeft className="w-3.5 h-3.5" />
                             Audiobooks
@@ -141,7 +141,7 @@ export default function SeriesDetailPage() {
                         {/* System status */}
                         <div className="flex items-center gap-2 mb-4">
                             <div className="w-1.5 h-1.5 bg-[#f59e0b] rounded-full" />
-                            <span className="text-xs font-mono text-white/50 uppercase tracking-wider">
+                            <span className="t-eyebrow">
                                 Series
                             </span>
                         </div>
@@ -173,15 +173,15 @@ export default function SeriesDetailPage() {
                                 </h1>
 
                                 {/* Metadata row */}
-                                <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-white/50 uppercase tracking-wider">
+                                <div className="flex flex-wrap items-center gap-3 text-xs tabular-nums text-[var(--text-secondary)]">
                                     <span className="font-bold text-white normal-case tracking-tight text-sm">
                                         {author}
                                     </span>
-                                    <span className="text-white/20">|</span>
+                                    <span className="text-[var(--text-muted)]">|</span>
                                     <span>
                                         {books.length} {books.length === 1 ? "book" : "books"}
                                     </span>
-                                    <span className="text-white/20">|</span>
+                                    <span className="text-[var(--text-muted)]">|</span>
                                     <span>{formatDuration(totalDuration)}</span>
                                 </div>
 
@@ -191,7 +191,7 @@ export default function SeriesDetailPage() {
                                         {genres.slice(0, 5).map((genre) => (
                                             <span
                                                 key={genre}
-                                                className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-micro font-mono text-white/60 uppercase tracking-wider"
+                                                className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-xs tabular-nums text-[var(--text-secondary)]"
                                             >
                                                 {genre}
                                             </span>
@@ -211,7 +211,7 @@ export default function SeriesDetailPage() {
                         <div className="flex items-center gap-3 mb-6">
                             <span className="w-1 h-8 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full shrink-0" />
                             <h2 className="text-2xl font-bold tracking-tight">Books in Series</h2>
-                            <span className="text-xs font-mono text-[#f59e0b]">
+                            <span className="text-xs tabular-nums text-[#f59e0b]">
                                 {books.length}
                             </span>
                             <span className="flex-1 border-t border-white/10" />
@@ -256,8 +256,8 @@ export default function SeriesDetailPage() {
                                                     />
                                                 ) : (
                                                     <>
-                                                        <span className={`text-xs font-mono ${
-                                                            isCurrentBook ? "text-[#f59e0b] font-bold hidden" : "text-white/30 group-hover:hidden"
+                                                        <span className={`text-xs tabular-nums ${
+                                                            isCurrentBook ? "text-[#f59e0b] font-bold hidden" : "text-[var(--text-muted)] group-hover:hidden"
                                                         }`}>
                                                             {book.series?.sequence || index + 1}
                                                         </span>
@@ -309,24 +309,24 @@ export default function SeriesDetailPage() {
                                                 }`}>
                                                     {book.title}
                                                 </h3>
-                                                <p className="text-micro font-mono text-white/40 truncate uppercase tracking-wider mt-0.5">
+                                                <p className="text-xs tabular-nums text-[var(--text-muted)] truncate mt-0.5">
                                                     {book.narrator || book.author}
                                                 </p>
                                             </Link>
 
                                             {/* Progress */}
                                             {book.progress?.isFinished ? (
-                                                <span className="text-micro font-mono text-green-400 uppercase tracking-wider shrink-0">
+                                                <span className="text-xs text-green-400 shrink-0">
                                                     Finished
                                                 </span>
                                             ) : book.progress && book.progress.progress > 0 ? (
-                                                <span className="text-micro font-mono text-[#f59e0b] uppercase tracking-wider shrink-0">
+                                                <span className="text-xs tabular-nums text-[#f59e0b] shrink-0">
                                                     {Math.round(book.progress.progress)}%
                                                 </span>
                                             ) : null}
 
                                             {/* Duration */}
-                                            <span className="text-micro font-mono text-white/30 shrink-0 uppercase tracking-wider">
+                                            <span className="text-xs tabular-nums text-[var(--text-muted)] shrink-0">
                                                 {formatDuration(book.duration)}
                                             </span>
                                         </div>

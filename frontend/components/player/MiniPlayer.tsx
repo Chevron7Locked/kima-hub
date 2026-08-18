@@ -186,7 +186,7 @@ export function MiniPlayer() {
                                         </div>
                                     ) : (
                                         <div className="w-12 h-12 rounded-lg bg-black/30 flex items-center justify-center">
-                                            <MusicIcon className="w-5 h-5 text-gray-400" />
+                                            <MusicIcon className="w-5 h-5 text-[var(--text-secondary)]" />
                                         </div>
                                     )}
                                 </div>
@@ -263,7 +263,7 @@ export function MiniPlayer() {
                                         />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center">
-                                            <MusicIcon className="w-5 h-5 text-gray-400" />
+                                            <MusicIcon className="w-5 h-5 text-[var(--text-secondary)]" />
                                         </div>
                                     )}
                                 </button>
@@ -310,7 +310,7 @@ export function MiniPlayer() {
                                                 "w-10 h-10 flex items-center justify-center rounded-full transition-colors",
                                                 activeOperation.type !== 'idle'
                                                     ? "text-brand"
-                                                    : "text-white/80 hover:text-brand"
+                                                    : "text-[var(--text-primary)] hover:text-brand"
                                             )}
                                             aria-label={
                                                 activeOperation.type !== 'idle'
@@ -429,14 +429,14 @@ export function MiniPlayer() {
                                             unoptimized
                                         />
                                     ) : (
-                                        <MusicIcon className="w-6 h-6 text-gray-500" />
+                                        <MusicIcon className="w-6 h-6 text-[var(--text-muted)]" />
                                     )}
                                 </div>
                             </Link>
                         ) : (
                             <div className="relative flex-shrink-0 w-12 h-12">
                                 <div className="relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center">
-                                    <MusicIcon className="w-6 h-6 text-gray-500" />
+                                    <MusicIcon className="w-6 h-6 text-[var(--text-muted)]" />
                                 </div>
                             </div>
                         )}
@@ -457,7 +457,7 @@ export function MiniPlayer() {
                                     {title}
                                 </p>
                             )}
-                            <p className="text-gray-400 truncate text-xs">
+                            <p className="text-[var(--text-secondary)] truncate text-xs">
                                 {subtitle}
                             </p>
                         </div>
@@ -466,7 +466,7 @@ export function MiniPlayer() {
                         <div className="flex items-center gap-1 flex-shrink-0">
                             <button
                                 onClick={() => setPlayerMode("full")}
-                                className="text-gray-400 hover:text-white transition p-1"
+                                className="text-[var(--text-secondary)] hover:text-white transition p-1"
                                 aria-label="Show bottom player"
                                 title="Show bottom player"
                             >
@@ -477,8 +477,8 @@ export function MiniPlayer() {
                                 className={cn(
                                     "transition p-1",
                                     hasMedia
-                                        ? "text-gray-400 hover:text-white"
-                                        : "text-gray-600 cursor-not-allowed"
+                                        ? "text-[var(--text-secondary)] hover:text-white"
+                                        : "text-[var(--text-muted)] cursor-not-allowed"
                                 )}
                                 disabled={!hasMedia}
                                 aria-label="Expand player"
@@ -503,8 +503,8 @@ export function MiniPlayer() {
                                 hasMedia && canSkip
                                     ? isShuffle
                                         ? "text-[#a855f7] hover:text-[#c084fc]"
-                                        : "text-gray-400 hover:text-white"
-                                    : "text-gray-600 cursor-not-allowed"
+                                        : "text-[var(--text-secondary)] hover:text-white"
+                                    : "text-[var(--text-muted)] cursor-not-allowed"
                             )}
                             aria-label="Shuffle"
                             aria-pressed={isShuffle}
@@ -520,14 +520,14 @@ export function MiniPlayer() {
                             className={cn(
                                 "rounded p-1.5 transition-colors relative",
                                 hasMedia
-                                    ? "text-gray-400 hover:text-white"
-                                    : "text-gray-600 cursor-not-allowed"
+                                    ? "text-[var(--text-secondary)] hover:text-white"
+                                    : "text-[var(--text-muted)] cursor-not-allowed"
                             )}
                             aria-label="Skip backward 30 seconds"
                             title="Rewind 30 seconds"
                         >
                             <RotateCcw className="w-3.5 h-3.5" />
-                            <span className="absolute text-micro font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                            <span className="absolute text-micro font-semibold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                                 30
                             </span>
                         </button>
@@ -539,8 +539,8 @@ export function MiniPlayer() {
                             className={cn(
                                 "rounded p-1.5 transition-colors",
                                 hasMedia && canSkip
-                                    ? "text-gray-400 hover:text-white"
-                                    : "text-gray-600 cursor-not-allowed"
+                                    ? "text-[var(--text-secondary)] hover:text-white"
+                                    : "text-[var(--text-muted)] cursor-not-allowed"
                             )}
                             aria-label="Previous track"
                             title={
@@ -560,7 +560,7 @@ export function MiniPlayer() {
                                     ? isBuffering
                                         ? "bg-brand/80 text-black"
                                         : "bg-brand text-black hover:scale-105"
-                                    : "bg-gray-700 text-gray-500 cursor-not-allowed"
+                                    : "bg-gray-700 text-[var(--text-muted)] cursor-not-allowed"
                             )}
                             aria-label={isPlaying ? "Pause" : "Play"}
                             title={
@@ -587,8 +587,8 @@ export function MiniPlayer() {
                             className={cn(
                                 "rounded p-1.5 transition-colors",
                                 hasMedia && canSkip
-                                    ? "text-gray-400 hover:text-white"
-                                    : "text-gray-600 cursor-not-allowed"
+                                    ? "text-[var(--text-secondary)] hover:text-white"
+                                    : "text-[var(--text-muted)] cursor-not-allowed"
                             )}
                             aria-label="Next track"
                             title={canSkip ? "Next" : "Next (music only)"}
@@ -603,14 +603,14 @@ export function MiniPlayer() {
                             className={cn(
                                 "rounded p-1.5 transition-colors relative",
                                 hasMedia
-                                    ? "text-gray-400 hover:text-white"
-                                    : "text-gray-600 cursor-not-allowed"
+                                    ? "text-[var(--text-secondary)] hover:text-white"
+                                    : "text-[var(--text-muted)] cursor-not-allowed"
                             )}
                             aria-label="Skip forward 30 seconds"
                             title="Forward 30 seconds"
                         >
                             <RotateCw className="w-3.5 h-3.5" />
-                            <span className="absolute text-micro font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                            <span className="absolute text-micro font-semibold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                                 30
                             </span>
                         </button>
@@ -624,8 +624,8 @@ export function MiniPlayer() {
                                 hasMedia && canSkip
                                     ? repeatMode !== "off"
                                         ? "text-[#a855f7] hover:text-[#c084fc]"
-                                        : "text-gray-400 hover:text-white"
-                                    : "text-gray-600 cursor-not-allowed"
+                                        : "text-[var(--text-secondary)] hover:text-white"
+                                    : "text-[var(--text-muted)] cursor-not-allowed"
                             )}
                             aria-label={repeatMode === 'one' ? "Repeat one" : repeatMode === 'all' ? "Repeat all" : "Repeat off"}
                             aria-pressed={repeatMode !== 'off'}
@@ -654,10 +654,10 @@ export function MiniPlayer() {
                                 className={cn(
                                     "rounded p-1.5 transition-colors",
                                     !hasMedia || !canSkip
-                                        ? "text-gray-600 cursor-not-allowed"
+                                        ? "text-[var(--text-muted)] cursor-not-allowed"
                                         : activeOperation.type !== 'idle'
                                         ? "text-brand hover:text-brand-hover"
-                                        : "text-gray-400 hover:text-brand"
+                                        : "text-[var(--text-secondary)] hover:text-brand"
                                 )}
                                 aria-label="Toggle vibe visualization"
                                 aria-pressed={activeOperation.type !== 'idle'}

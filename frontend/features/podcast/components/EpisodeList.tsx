@@ -96,13 +96,13 @@ function EpisodeRow({
                         <>
                             <span
                                 className={cn(
-                                    "text-xs font-mono",
+                                    "text-xs",
                                     isCurrentEpisode && isPlaying
                                         ? "hidden"
                                         : "group-hover:hidden",
                                     isCurrentEpisode
                                         ? "text-[#3b82f6] font-bold"
-                                        : "text-white/30"
+                                        : "text-[var(--text-muted)]"
                                 )}
                             >
                                 {index + 1}
@@ -145,29 +145,29 @@ function EpisodeRow({
                     >
                         {episode.title}
                     </h3>
-                    <div className="flex items-center gap-2 text-micro font-mono text-white/40 uppercase tracking-wider mt-0.5">
+                    <div className="flex items-center gap-2 text-xs tabular-nums text-[var(--text-muted)] mt-0.5">
                         <span>{formatDate(episode.publishedAt)}</span>
                         {episode.season && (
                             <>
-                                <span className="text-white/20">|</span>
+                                <span className="text-[var(--text-muted)]">|</span>
                                 <span>S{episode.season}</span>
                             </>
                         )}
                         {episode.episodeNumber && (
                             <>
-                                <span className="text-white/20">|</span>
+                                <span className="text-[var(--text-muted)]">|</span>
                                 <span>E{episode.episodeNumber}</span>
                             </>
                         )}
                         {episode.progress?.isFinished && (
                             <>
-                                <span className="text-white/20">|</span>
+                                <span className="text-[var(--text-muted)]">|</span>
                                 <span className="text-green-400">Finished</span>
                             </>
                         )}
                         {isInProgress && episode.progress && (
                             <>
-                                <span className="text-white/20">|</span>
+                                <span className="text-[var(--text-muted)]">|</span>
                                 <span className="text-[#3b82f6]">
                                     {Math.floor(episode.progress.progress)}%
                                 </span>
@@ -177,7 +177,7 @@ function EpisodeRow({
                 </div>
 
                 {/* Duration */}
-                <span className="text-micro font-mono text-white/30 shrink-0 uppercase tracking-wider">
+                <span className="text-xs tabular-nums text-[var(--text-muted)] shrink-0">
                     {formatDuration(episode.duration)}
                 </span>
 
@@ -188,7 +188,7 @@ function EpisodeRow({
                             e.stopPropagation();
                             setExpanded(!expanded);
                         }}
-                        className="p-1.5 rounded-lg hover:bg-white/10 text-white/30 hover:text-white/60 transition-all shrink-0"
+                        className="p-1.5 rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-white/60 transition-all shrink-0"
                     >
                         {expanded ? (
                             <ChevronUp className="w-3.5 h-3.5" />
@@ -208,7 +208,7 @@ function EpisodeRow({
                         className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg hover:bg-white/10"
                         title="Mark as complete"
                     >
-                        <CheckCircle className="w-4 h-4 text-white/40 hover:text-green-400 transition-colors" />
+                        <CheckCircle className="w-4 h-4 text-[var(--text-muted)] hover:text-green-400 transition-colors" />
                     </button>
                 )}
             </div>
@@ -217,7 +217,7 @@ function EpisodeRow({
             {expanded && hasDescription && (
                 <div className="px-3 pb-3 pl-[52px]">
                     <div
-                        className="text-xs text-white/40 leading-relaxed max-w-3xl line-clamp-6 [&_a]:text-[#3b82f6] [&_a]:no-underline [&_a:hover]:underline"
+                        className="text-xs text-[var(--text-muted)] leading-relaxed max-w-3xl line-clamp-6 [&_a]:text-[#3b82f6] [&_a]:no-underline [&_a:hover]:underline"
                         dangerouslySetInnerHTML={{
                             __html: DOMPurify.sanitize(episode.description || ""),
                         }}
@@ -244,7 +244,7 @@ export function EpisodeList({
             <div className="flex items-center gap-3 mb-6">
                 <span className="w-1 h-8 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full shrink-0" />
                 <h2 className="text-2xl font-bold tracking-tight">All Episodes</h2>
-                <span className="text-xs font-mono text-[#3b82f6]">
+                <span className="text-xs tabular-nums text-[#3b82f6]">
                     {episodes.length}
                 </span>
                 <span className="flex-1 border-t border-white/10" />
@@ -254,7 +254,7 @@ export function EpisodeList({
                             sortOrder === "newest" ? "oldest" : "newest"
                         )
                     }
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-xs font-mono uppercase tracking-wider text-white/50 hover:text-white transition-all"
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-xs tabular-nums text-[var(--text-secondary)] hover:text-white transition-all"
                 >
                     <ArrowUpDown className="w-3.5 h-3.5" />
                     {sortOrder === "newest" ? "Newest" : "Oldest"}

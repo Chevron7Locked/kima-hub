@@ -9,7 +9,7 @@ export function LibraryHeader({ totalItems, activeTab }: LibraryHeaderProps) {
       {/* System status indicator */}
       <div className="flex items-center gap-2 mb-6">
         <div className="w-1.5 h-1.5 bg-[#22c55e] rounded-full" />
-        <span className="text-xs font-mono text-gray-500 uppercase tracking-wider">
+        <span className="t-eyebrow">
           Archive Online
         </span>
       </div>
@@ -20,17 +20,17 @@ export function LibraryHeader({ totalItems, activeTab }: LibraryHeaderProps) {
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-3">
             Collection
           </h1>
-          <p className="text-sm font-mono text-gray-500">
+          <p className="text-sm text-[var(--text-muted)]">
             Personal audio archive / Full catalog access
           </p>
         </div>
 
         {/* Live counter */}
         <div className="flex items-baseline gap-2 border-2 border-white/10 bg-[var(--bg-primary)] px-4 py-3 rounded">
-          <span className="text-4xl font-bold font-mono text-[#eab308]">
+          <span className="text-4xl font-bold tabular-nums text-[#eab308]">
             {totalItems.toLocaleString()}
           </span>
-          <span className="text-xs font-mono text-gray-500 uppercase">
+          <span className="text-xs tabular-nums text-[var(--text-muted)]">
             {activeTab === "artists" ? "artists" : activeTab === "albums" ? "albums" : "tracks"}
           </span>
         </div>

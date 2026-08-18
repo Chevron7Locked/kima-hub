@@ -62,13 +62,13 @@ export function ContinueListening({
                         onClick={() => onPlayEpisode(previousEpisode)}
                     >
                         <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
-                            <Play className="w-3 h-3 text-white/50" />
+                            <Play className="w-3 h-3 text-[var(--text-secondary)]" />
                         </div>
                         <div className="flex-1 min-w-0">
-                            <h3 className="font-bold text-white/80 truncate text-sm tracking-tight">
+                            <h3 className="font-bold text-[var(--text-primary)] truncate text-sm tracking-tight">
                                 {previousEpisode.title}
                             </h3>
-                            <p className="text-micro font-mono text-white/30 uppercase tracking-wider">Previous episode</p>
+                            <p className="text-xs text-[var(--text-muted)]">Previous episode</p>
                         </div>
                     </div>
                 )}
@@ -95,9 +95,9 @@ export function ContinueListening({
                         <h3 className="font-bold text-white truncate tracking-tight">
                             {recentEpisode.title}
                         </h3>
-                        <div className="flex items-center gap-3 mt-1 text-micro font-mono text-white/40 uppercase tracking-wider">
+                        <div className="flex items-center gap-3 mt-1 text-xs tabular-nums text-[var(--text-muted)]">
                             <span>{formatDuration(recentEpisode.duration)}</span>
-                            <span className="text-white/20">|</span>
+                            <span className="text-[var(--text-muted)]">|</span>
                             <span>{formatDate(recentEpisode.publishedAt)}</span>
                         </div>
                         {/* Progress Bar */}
@@ -112,7 +112,7 @@ export function ContinueListening({
                                             }}
                                         />
                                     </div>
-                                    <span className="text-micro font-mono text-[#3b82f6]">
+                                    <span className="text-micro tabular-nums text-[#3b82f6]">
                                         {Math.floor(recentEpisode.progress.progress)}%
                                     </span>
                                 </div>
@@ -128,13 +128,13 @@ export function ContinueListening({
                         onClick={() => onPlayEpisode(nextEpisode)}
                     >
                         <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
-                            <Play className="w-3 h-3 text-white/50" />
+                            <Play className="w-3 h-3 text-[var(--text-secondary)]" />
                         </div>
                         <div className="flex-1 min-w-0">
-                            <h3 className="font-bold text-white/80 truncate text-sm tracking-tight">
+                            <h3 className="font-bold text-[var(--text-primary)] truncate text-sm tracking-tight">
                                 {nextEpisode.title}
                             </h3>
-                            <p className="text-micro font-mono text-white/30 uppercase tracking-wider">Next episode</p>
+                            <p className="text-xs text-[var(--text-muted)]">Next episode</p>
                         </div>
                     </div>
                 )}

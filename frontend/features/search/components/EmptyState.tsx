@@ -13,9 +13,9 @@ export function EmptyState({ hasSearched, isLoading }: EmptyStateProps) {
 
     return (
         <div className="flex flex-col items-center justify-center py-24 text-center">
-            <SearchIcon className="w-16 h-16 text-gray-700 mb-4" />
+            <SearchIcon className="w-16 h-16 text-[var(--text-muted)] mb-4" />
             <h3 className="text-xl font-bold text-white mb-2">Search your library</h3>
-            <p className="text-gray-400">Use the search bar above to find music, artists, and albums</p>
+            <p className="text-[var(--text-secondary)]">Use the search bar above to find music, artists, and albums</p>
         </div>
     );
 }

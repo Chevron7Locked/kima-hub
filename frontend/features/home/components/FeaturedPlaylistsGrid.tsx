@@ -50,7 +50,7 @@ const PlaylistCard = memo(function PlaylistCard({
                                 />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#a855f7]/20 to-[#a855f7]/5">
-                                    <Music2 className="w-10 h-10 text-gray-700" />
+                                    <Music2 className="w-10 h-10 text-[var(--text-muted)]" />
                                 </div>
                             )}
                         </div>
@@ -66,7 +66,7 @@ const PlaylistCard = memo(function PlaylistCard({
                         <h3 className="text-sm font-bold text-white truncate tracking-tight">
                             {playlist.title}
                         </h3>
-                        <p className="text-xs font-mono text-gray-500 uppercase tracking-wider mt-0.5">
+                        <p className="text-xs tabular-nums text-[var(--text-muted)] mt-0.5">
                             {playlist.trackCount} tracks
                         </p>
                     </div>

@@ -32,7 +32,7 @@ export default function SetupPage() {
             </div>
 
             {/* Loading */}
-            <div className="flex items-center gap-3 text-white/60">
+            <div className="flex items-center gap-3 text-[var(--text-secondary)]">
                                 <Loader2 className="w-5 h-5 animate-spin" />
                 <span>Redirecting to login...</span>
             </div>

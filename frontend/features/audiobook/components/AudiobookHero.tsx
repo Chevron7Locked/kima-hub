@@ -82,7 +82,7 @@ export function AudiobookHero({
                     {/* Back navigation */}
                     <button
                         onClick={() => router.push("/audiobooks")}
-                        className="flex items-center gap-2 text-xs font-mono text-white/40 hover:text-white transition-colors mb-6 uppercase tracking-wider"
+                        className="flex items-center gap-2 text-xs tabular-nums text-[var(--text-muted)] hover:text-white transition-colors mb-6"
                     >
                         <ArrowLeft className="w-3.5 h-3.5" />
                         Audiobooks
@@ -91,7 +91,7 @@ export function AudiobookHero({
                     {/* System status */}
                     <div className="flex items-center gap-2 mb-4">
                         <div className="w-1.5 h-1.5 bg-[#f59e0b] rounded-full" />
-                        <span className="text-xs font-mono text-white/50 uppercase tracking-wider">
+                        <span className="t-eyebrow">
                             Audiobook
                         </span>
                     </div>
@@ -123,25 +123,25 @@ export function AudiobookHero({
                             </h1>
 
                             {metadata?.description && (
-                                <p className="text-sm text-white/40 line-clamp-2 max-w-3xl mb-3 hidden md:block">
+                                <p className="text-sm text-[var(--text-muted)] line-clamp-2 max-w-3xl mb-3 hidden md:block">
                                     {truncateDescription(metadata.description, 200)}
                                 </p>
                             )}
 
                             {/* Metadata row */}
-                            <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-white/50 uppercase tracking-wider">
+                            <div className="flex flex-wrap items-center gap-3 text-xs tabular-nums text-[var(--text-secondary)]">
                                 <span className="font-bold text-white normal-case tracking-tight text-sm">
                                     {audiobook.author}
                                 </span>
                                 {metadata?.narrator && (
                                     <>
-                                        <span className="text-white/20">|</span>
+                                        <span className="text-[var(--text-muted)]">|</span>
                                         <span>{metadata.narrator}</span>
                                     </>
                                 )}
-                                <span className="text-white/20">|</span>
+                                <span className="text-[var(--text-muted)]">|</span>
                                 <span>{formatTime(audiobook.duration)}</span>
-                                <span className="text-white/20">|</span>
+                                <span className="text-[var(--text-muted)]">|</span>
                                 <span className={isFinished ? "text-green-400" : "text-[#f59e0b]"}>
                                     {isFinished ? "Finished" : `${Math.round(progressPercent)}% complete`}
                                 </span>
@@ -151,14 +151,14 @@ export function AudiobookHero({
                             {(audiobook.series || (audiobook.genres && audiobook.genres.length > 0)) && (
                                 <div className="hidden md:flex flex-wrap gap-1.5 mt-3">
                                     {audiobook.series && (
-                                        <span className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-micro font-mono text-[#f59e0b] uppercase tracking-wider">
+                                        <span className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-xs tabular-nums text-[#f59e0b]">
                                             {audiobook.series.name} #{audiobook.series.sequence}
                                         </span>
                                     )}
                                     {audiobook.genres?.slice(0, 3).map((genre: string) => (
                                         <span
                                             key={genre}
-                                            className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-micro font-mono text-white/60 uppercase tracking-wider"
+                                            className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-xs tabular-nums text-[var(--text-secondary)]"
                                         >
                                             {genre}
                                         </span>

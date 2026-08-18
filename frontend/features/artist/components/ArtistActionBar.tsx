@@ -66,7 +66,7 @@ export function ArtistActionBar({
             {/* Shuffle Button */}
             <button
                 onClick={onShuffle}
-                className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-[var(--text-secondary)] hover:text-white transition-all"
                 title="Shuffle play"
             >
                 <Shuffle className="w-5 h-5" />
@@ -76,7 +76,7 @@ export function ArtistActionBar({
             {showRadio && (
                 <button
                     onClick={onStartRadio}
-                    className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                    className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-[var(--text-secondary)] hover:text-white transition-all"
                     title="Start artist radio"
                 >
                     <Radio className="w-5 h-5" />
@@ -91,8 +91,8 @@ export function ArtistActionBar({
                     className={cn(
                         "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all",
                         isPendingDownload
-                            ? "bg-white/5 text-white/50 cursor-not-allowed"
-                            : "bg-white/5 hover:bg-white/10 text-white/80 hover:text-white"
+                            ? "bg-white/5 text-[var(--text-secondary)] cursor-not-allowed"
+                            : "bg-white/5 hover:bg-white/10 text-[var(--text-primary)] hover:text-white"
                     )}
                 >
                     <Download className="w-4 h-4" />

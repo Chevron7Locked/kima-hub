@@ -90,14 +90,14 @@ export default function SearchPage() {
                 {!hasSearched && (
                     <div className="mb-12 text-center animate-fade-in">
                         <div className="inline-flex items-center gap-3 mb-4 text-[#eab308]">
-                            <span className="text-sm font-semibold tracking-wider uppercase">
+                            <span className="text-sm font-semibold">
                                 Discovery Engine
                             </span>
                         </div>
                         <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4 text-white leading-tight">
                             Find Your Sound
                         </h1>
-                        <p className="text-lg text-gray-400 max-w-2xl mx-auto">
+                        <p className="text-lg text-[var(--text-secondary)] max-w-2xl mx-auto">
                             Search your library, discover new artists, or tap
                             into the P2P network for rare tracks
                         </p>
@@ -154,7 +154,7 @@ export default function SearchPage() {
                                 <GradientSpinner size="xl" className="mb-6" />
                                 <div className="absolute inset-0 bg-gradient-to-r from-[#eab308] to-[#a855f7] opacity-20 blur-xl animate-pulse" />
                             </div>
-                            <p className="text-gray-400 text-sm animate-pulse">
+                            <p className="text-[var(--text-secondary)] text-sm animate-pulse">
                                 Scanning library and network...
                             </p>
                         </div>
@@ -319,7 +319,7 @@ export default function SearchPage() {
                             similarArtists.length > 0 && (
                                 <section>
                                     <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
-                                        <span className="w-1 h-8 bg-gradient-to-b from-[#ec4899] to-[#db2777] rounded-full" />
+                                        <span className="w-1 h-8 bg-gradient-to-b from-[#fca200] to-[#d48c00] rounded-full" />
                                         Related Artists
                                     </h2>
                                     <SimilarArtistsGrid
@@ -344,17 +344,17 @@ export default function SearchPage() {
                             !libraryResults.episodes?.length)) && (
                         <div className="flex flex-col items-center justify-center py-32 text-center animate-fade-in">
                             <div className="relative mb-8">
-                                <SearchIcon className="w-20 h-20 text-gray-800" />
+                                <SearchIcon className="w-20 h-20 text-[var(--text-muted)]" />
                                 <div className="absolute inset-0 bg-gradient-to-br from-[#eab308]/20 to-[#a855f7]/20 blur-2xl" />
                             </div>
                             <h3 className="text-2xl font-bold text-white mb-3">
                                 No matches found
                             </h3>
-                            <p className="text-gray-400 mb-2">
+                            <p className="text-[var(--text-secondary)] mb-2">
                                 Try a different search term or check your
                                 spelling
                             </p>
-                            <p className="text-sm text-gray-500">
+                            <p className="text-sm text-[var(--text-muted)]">
                                 Tip: Enable Soulseek to search the P2P network
                             </p>
                         </div>

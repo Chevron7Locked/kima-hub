@@ -63,7 +63,7 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
                                 unoptimized
                             />
                         ) : (
-                            <Music className="w-16 h-16 text-gray-600" />
+                            <Music className="w-16 h-16 text-[var(--text-muted)]" />
                         )}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                     </div>
@@ -71,18 +71,18 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
                     {/* Text Content */}
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-2">
-                            <span className="text-xs font-bold text-[#eab308] uppercase tracking-wider">
+                            <span className="text-xs font-semibold text-[#eab308]">
                                 Artist
                             </span>
                             <span className="w-1 h-1 rounded-full bg-[#eab308]/50" />
-                            <span className="text-xs text-gray-500 uppercase tracking-wider">
+                            <span className="text-xs text-[var(--text-muted)]">
                                 {isLibrary ? "Your Library" : "Discover"}
                             </span>
                         </div>
                         <h3 className="text-4xl font-bold text-white mb-2 leading-tight truncate group-hover:text-[#eab308] transition-colors duration-300">
                             {name}
                         </h3>
-                        <div className="flex items-center gap-2 text-gray-400 group-hover:text-gray-300 transition-colors">
+                        <div className="flex items-center gap-2 text-[var(--text-secondary)] group-hover:text-gray-300 transition-colors">
                             <span className="text-sm font-medium">View Profile</span>
                             <ExternalLink className="w-4 h-4 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform duration-150" />
                         </div>

@@ -17,8 +17,8 @@ export function NowPlayingTab() {
     if (!currentTrack) {
         return (
             <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
-                <Music className="w-10 h-10 text-white/15 mb-4" />
-                <p className="text-sm text-white/30">
+                <Music className="w-10 h-10 text-[var(--text-muted)] mb-4" />
+                <p className="text-sm text-[var(--text-muted)]">
                     Start listening to see what&apos;s playing here
                 </p>
             </div>
@@ -54,10 +54,10 @@ export function NowPlayingTab() {
                     <p className="text-lg font-semibold text-white truncate">
                         {currentTrack.title}
                     </p>
-                    <p className="text-sm text-white/70 truncate">
+                    <p className="text-sm text-[var(--text-secondary)] truncate">
                         {currentTrack.artist?.name || "Unknown Artist"}
                     </p>
-                    <p className="text-xs text-white/50 truncate">
+                    <p className="text-xs text-[var(--text-secondary)] truncate">
                         {currentTrack.album?.title}
                     </p>
                 </div>

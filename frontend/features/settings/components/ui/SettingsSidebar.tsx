@@ -27,10 +27,10 @@ export function SettingsSidebar({ items, activeSection, onSectionClick, isAdmin 
                         key={item.id}
                         onClick={() => onSectionClick(item.id)}
                         className={`
-                            w-full text-left px-3 py-2 rounded-lg text-sm font-mono transition-all
+                            w-full text-left px-3 py-2 rounded-lg text-sm tabular-nums transition-all
                             ${activeSection === item.id
                                 ? 'text-brand bg-brand/10 border border-brand/20'
-                                : 'text-white/40 hover:text-white/70 border border-transparent'
+                                : 'text-[var(--text-muted)] hover:text-white/70 border border-transparent'
                             }
                         `}
                     >
@@ -41,7 +41,7 @@ export function SettingsSidebar({ items, activeSection, onSectionClick, isAdmin 
                 {adminItems.length > 0 && (
                     <>
                         <div className="pt-4 pb-2 px-3">
-                            <span className="text-micro font-mono text-white/30 uppercase tracking-wider">
+                            <span className="text-xs text-[var(--text-muted)]">
                                 Admin
                             </span>
                         </div>
@@ -50,10 +50,10 @@ export function SettingsSidebar({ items, activeSection, onSectionClick, isAdmin 
                                 key={item.id}
                                 onClick={() => onSectionClick(item.id)}
                                 className={`
-                                    w-full text-left px-3 py-2 rounded-lg text-sm font-mono transition-all
+                                    w-full text-left px-3 py-2 rounded-lg text-sm tabular-nums transition-all
                                     ${activeSection === item.id
                                         ? 'text-brand bg-brand/10 border border-brand/20'
-                                        : 'text-white/40 hover:text-white/70 border border-transparent'
+                                        : 'text-[var(--text-muted)] hover:text-white/70 border border-transparent'
                                     }
                                 `}
                             >

@@ -102,7 +102,7 @@ export default function GenrePage() {
     if (!genre) {
         return (
             <div className="flex items-center justify-center h-screen bg-[var(--bg-primary)]">
-                <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">Genre not found</p>
+                <p className="text-xs text-[var(--text-muted)]">Genre not found</p>
             </div>
         );
     }
@@ -120,7 +120,7 @@ export default function GenrePage() {
                     <div className="max-w-[1800px] mx-auto">
                         <button
                             onClick={() => router.push("/podcasts")}
-                            className="flex items-center gap-2 text-xs font-mono text-gray-500 hover:text-white transition-colors mb-6 uppercase tracking-wider"
+                            className="flex items-center gap-2 text-xs tabular-nums text-[var(--text-muted)] hover:text-white transition-colors mb-6"
                         >
                             <ArrowLeft className="w-4 h-4" />
                             Back to Podcasts
@@ -128,7 +128,7 @@ export default function GenrePage() {
 
                         <div className="flex items-center gap-2 mb-4">
                             <div className="w-1.5 h-1.5 bg-[#3b82f6] rounded-full" />
-                            <span className="text-xs font-mono text-gray-500 uppercase tracking-wider">
+                            <span className="t-eyebrow">
                                 Genre
                             </span>
                         </div>
@@ -136,7 +136,7 @@ export default function GenrePage() {
                         <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-3">
                             {genre.name}
                         </h1>
-                        <p className="text-sm font-mono text-gray-500">
+                        <p className="text-sm tabular-nums text-[var(--text-muted)]">
                             {podcasts.length} podcast{podcasts.length !== 1 ? "s" : ""} found
                         </p>
                     </div>
@@ -163,7 +163,7 @@ export default function GenrePage() {
                                         />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center">
-                                            <Mic2 className="w-12 h-12 text-gray-700" />
+                                            <Mic2 className="w-12 h-12 text-[var(--text-muted)]" />
                                         </div>
                                     )}
                                 </div>
@@ -171,7 +171,7 @@ export default function GenrePage() {
                                     <h3 className="text-sm font-bold text-white truncate tracking-tight">
                                         {podcast.title}
                                     </h3>
-                                    <p className="text-micro font-mono text-gray-500 uppercase tracking-wider truncate mt-0.5">
+                                    <p className="text-xs tabular-nums text-[var(--text-muted)] truncate mt-0.5">
                                         {podcast.author}
                                     </p>
                                 </div>
@@ -196,7 +196,7 @@ export default function GenrePage() {
                     {/* End of results */}
                     {!hasMore && podcasts.length > 0 && (
                         <div className="text-center py-8">
-                            <span className="text-xs font-mono text-gray-600 uppercase tracking-wider">
+                            <span className="text-xs text-[var(--text-muted)]">
                                 End of results
                             </span>
                         </div>
@@ -205,8 +205,8 @@ export default function GenrePage() {
                     {/* No results */}
                     {!loading && podcasts.length === 0 && (
                         <div className="text-center py-20">
-                            <Mic2 className="w-16 h-16 text-gray-700 mx-auto mb-4" />
-                            <p className="text-xs font-mono text-gray-500 uppercase tracking-wider">
+                            <Mic2 className="w-16 h-16 text-[var(--text-muted)] mx-auto mb-4" />
+                            <p className="text-xs text-[var(--text-muted)]">
                                 No podcasts found
                             </p>
                         </div>

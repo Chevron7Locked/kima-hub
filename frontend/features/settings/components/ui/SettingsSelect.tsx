@@ -23,7 +23,7 @@ export function SettingsSelect({ id, value, onChange, options, disabled }: Setti
                 onChange={(e) => onChange(e.target.value)}
                 disabled={disabled}
                 className={`
-                    appearance-none bg-white/5 text-white text-sm font-mono
+                    appearance-none bg-white/5 text-white text-sm tabular-nums
                     pl-3 pr-8 py-1.5 rounded-lg
                     border border-white/10 outline-none
                     focus:ring-2 focus:ring-brand/30 focus:border-brand/40
@@ -38,7 +38,7 @@ export function SettingsSelect({ id, value, onChange, options, disabled }: Setti
                     </option>
                 ))}
             </select>
-            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 pointer-events-none" />
+            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] pointer-events-none" />
         </div>
     );
 }

@@ -1174,20 +1174,20 @@ export function GravityGridScene({
                 <button
                     onClick={() => setAnimated(!animated)}
                     className={`px-3 py-1.5 rounded-lg backdrop-blur-md border text-xs font-medium transition-colors bg-black/20 border-white/8 hover:bg-black/30 ${
-                        animated ? "text-white/40 hover:text-white/70" : "text-white/20 hover:text-white/40"
+                        animated ? "text-[var(--text-muted)] hover:text-white/70" : "text-[var(--text-muted)] hover:text-white/40"
                     }`}
                 >
                     {animated ? "Pause" : "Play"}
                 </button>
                 <button
                     onClick={() => recenterRef.current?.()}
-                    className="px-3 py-1.5 rounded-lg backdrop-blur-md border text-xs font-medium transition-colors bg-black/20 border-white/8 text-white/40 hover:text-white/70 hover:bg-black/30"
+                    className="px-3 py-1.5 rounded-lg backdrop-blur-md border text-xs font-medium transition-colors bg-black/20 border-white/8 text-[var(--text-muted)] hover:text-white/70 hover:bg-black/30"
                 >
                     Recenter
                 </button>
                 <button
                     onClick={() => setIs3D(!is3D)}
-                    className="px-3 py-1.5 rounded-lg backdrop-blur-md border text-xs font-medium transition-colors bg-black/20 border-white/8 text-white/40 hover:text-white/70 hover:bg-black/30"
+                    className="px-3 py-1.5 rounded-lg backdrop-blur-md border text-xs font-medium transition-colors bg-black/20 border-white/8 text-[var(--text-muted)] hover:text-white/70 hover:bg-black/30"
                 >
                     {is3D ? "2D" : "3D"}
                 </button>
@@ -1205,7 +1205,7 @@ export function GravityGridScene({
                             return (
                                 <button
                                     key={op}
-                                    className="w-full px-4 py-2.5 text-left text-white/70 hover:text-white hover:bg-white/8 capitalize transition-colors first:pt-3 last:pb-3"
+                                    className="w-full px-4 py-2.5 text-left text-[var(--text-secondary)] hover:text-white hover:bg-white/8 capitalize transition-colors first:pt-3 last:pb-3"
                                     onClick={() => {
                                         onTrackContextMenu?.(contextMenu.trackId, op);
                                         setContextMenu(null);
@@ -1222,8 +1222,8 @@ export function GravityGridScene({
             {is3D && !isLocked && (
                 <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
                     <div className="text-center">
-                        <p className="text-white/30 text-sm mb-1">Click to explore</p>
-                        <p className="text-white/15 text-xs">
+                        <p className="text-[var(--text-muted)] text-sm mb-1">Click to explore</p>
+                        <p className="text-[var(--text-muted)] text-xs">
                             WASD to move -- Mouse to look -- R for boost -- ESC to exit
                         </p>
                     </div>

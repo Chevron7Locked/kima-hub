@@ -140,7 +140,7 @@ const TrackRow = memo(
                                 "group-hover:hidden text-sm",
                                 isPlaying
                                     ? "text-purple-400 font-bold"
-                                    : "text-gray-500"
+                                    : "text-[var(--text-muted)]"
                             )}
                         >
                             {displayTrackNumber}
@@ -169,13 +169,13 @@ const TrackRow = memo(
                         )}
                         {isPreviewOnly && (
                             <span className="shrink-0 text-micro bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30 font-medium">
-                                PREVIEW
+                                Preview
                             </span>
                         )}
                     </div>
                     {track.artist?.name &&
                         track.artist.name !== album.artist?.name && (
-                            <div className="text-xs md:text-sm text-gray-400 truncate">
+                            <div className="text-xs md:text-sm text-[var(--text-secondary)] truncate">
                                 {track.artist.name}
                             </div>
                         )}
@@ -184,7 +184,7 @@ const TrackRow = memo(
                 {isOwned &&
                     track.playCount !== undefined &&
                     track.playCount > 0 && (
-                        <div className="hidden lg:flex items-center gap-1.5 text-xs text-gray-400 bg-[var(--bg-hover)] px-2 py-1 rounded-full">
+                        <div className="hidden lg:flex items-center gap-1.5 text-xs text-[var(--text-secondary)] bg-[var(--bg-hover)] px-2 py-1 rounded-full">
                             <Play className="w-3 h-3" />
                             <span>{formatNumber(track.playCount)}</span>
                         </div>
@@ -194,7 +194,7 @@ const TrackRow = memo(
                     <>
                         <button
                             onClick={handleAddToQueue}
-                            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-2 hover:bg-[#2a2a2a] rounded-full transition-all text-gray-400 hover:text-white"
+                            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-2 hover:bg-[#2a2a2a] rounded-full transition-all text-[var(--text-secondary)] hover:text-white"
                             aria-label="Add to queue"
                             title="Add to queue"
                         >
@@ -202,7 +202,7 @@ const TrackRow = memo(
                         </button>
                         <button
                             onClick={handleAddToPlaylist}
-                            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-2 hover:bg-[#2a2a2a] rounded-full transition-all text-gray-400 hover:text-white"
+                            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-2 hover:bg-[#2a2a2a] rounded-full transition-all text-[var(--text-secondary)] hover:text-white"
                             aria-label="Add to playlist"
                             title="Add to playlist"
                         >
@@ -228,7 +228,7 @@ const TrackRow = memo(
                 ) : null}
 
                 {track.duration && (
-                    <div className="text-xs md:text-sm text-gray-400 w-10 md:w-12 text-right font-mono tabular-nums">
+                    <div className="text-xs md:text-sm text-[var(--text-secondary)] w-10 md:w-12 text-right tabular-nums tabular-nums">
                         {formatTime(track.duration)}
                     </div>
                 )}
@@ -288,7 +288,7 @@ export const TrackList = memo(function TrackList({
                         return (
                             <React.Fragment key={track.id}>
                                 {showDiscHeader && (
-                                    <div className="px-3 md:px-4 py-2 text-xs font-semibold tracking-wide text-gray-400 uppercase bg-[#121212]">
+                                    <div className="px-3 md:px-4 py-2 text-xs font-semibold tracking-wide text-[var(--text-secondary)] bg-[#121212]">
                                         Disc {discNumber}{discLabel ? ` -- ${discLabel}` : ""}
                                     </div>
                                 )}

@@ -46,14 +46,14 @@ export class GlobalErrorBoundary extends Component<Props, State> {
                             <h1 className="text-2xl font-bold">
                                 Something went wrong
                             </h1>
-                            <p className="text-gray-400">
+                            <p className="text-[var(--text-secondary)]">
                                 An unexpected error occurred. Please try
                                 reloading the page.
                             </p>
                         </div>
                         {this.state.error && (
                             <div className="bg-gray-900 p-4 rounded-lg text-left">
-                                <p className="text-sm font-mono text-red-400 break-words">
+                                <p className="text-sm tabular-nums text-red-400 break-words">
                                     {this.state.error.message}
                                 </p>
                             </div>

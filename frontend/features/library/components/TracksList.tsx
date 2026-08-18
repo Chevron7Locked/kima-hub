@@ -80,8 +80,8 @@ const TrackRow = memo(
                     >
                         <span
                             className={cn(
-                                "text-sm font-mono font-bold group-hover:hidden",
-                                isCurrentlyPlaying ? "text-[#a855f7]" : "text-gray-600",
+                                "text-sm tabular-nums font-bold group-hover:hidden",
+                                isCurrentlyPlaying ? "text-[#a855f7]" : "text-[var(--text-muted)]",
                             )}
                         >
                             {isCurrentlyPlaying ?
@@ -106,7 +106,7 @@ const TrackRow = memo(
                                 sizes="40px"
                                 className="object-cover"
                             />
-                        :   <AudioLines className="w-5 h-5 text-gray-700" />}
+                        :   <AudioLines className="w-5 h-5 text-[var(--text-muted)]" />}
                     </div>
                     <div className="min-w-0">
                         <h3
@@ -117,7 +117,7 @@ const TrackRow = memo(
                         >
                             {track.displayTitle ?? track.title}
                         </h3>
-                        <p className="text-xs font-mono text-gray-500 truncate">
+                        <p className="text-xs tabular-nums text-[var(--text-muted)] truncate">
                             {track.album?.artist?.name}
                         </p>
                     </div>
@@ -125,7 +125,7 @@ const TrackRow = memo(
 
                 {/* Album - hidden on mobile */}
                 <div className="hidden md:block min-w-0">
-                    <p className="text-sm font-mono text-gray-500 truncate">
+                    <p className="text-sm tabular-nums text-[var(--text-muted)] truncate">
                         {track.album?.title}
                     </p>
                 </div>
@@ -137,7 +137,7 @@ const TrackRow = memo(
                             e.stopPropagation();
                             onAddToQueue(track);
                         }}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-white/20"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-white/20"
                         title="Add to Queue"
                     >
                         <ListPlus className="w-4 h-4" />
@@ -147,7 +147,7 @@ const TrackRow = memo(
                             e.stopPropagation();
                             onShowAddToPlaylist(track.id);
                         }}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-white/20"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-white/20"
                         title="Add to Playlist"
                     >
                         <Plus className="w-4 h-4" />
@@ -157,12 +157,12 @@ const TrackRow = memo(
                             e.stopPropagation();
                             onDelete(track.id, track.title);
                         }}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-red-500/30"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-red-500/30"
                         title="Delete Track"
                     >
                         <Trash2 className="w-4 h-4" />
                     </button>
-                    <span className="text-sm font-mono font-bold text-gray-600 w-12 text-right">
+                    <span className="text-sm tabular-nums font-bold text-[var(--text-muted)] w-12 text-right">
                         {formatTime(track.duration)}
                     </span>
                 </div>
@@ -228,10 +228,10 @@ export function TracksList({
         <>
             {/* Header row - terminal style */}
             <div className="grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_1fr_auto] items-center gap-3 px-4 py-3 bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg mb-2">
-                <div className="w-8 text-center text-xs font-mono font-bold text-[#a855f7] uppercase">#</div>
-                <div className="text-xs font-mono font-bold text-[#a855f7] uppercase tracking-wider">Title</div>
-                <div className="hidden md:block text-xs font-mono font-bold text-[#a855f7] uppercase tracking-wider">Album</div>
-                <div className="w-[140px] text-right pr-2 text-xs font-mono font-bold text-[#a855f7] uppercase tracking-wider">Duration</div>
+                <div className="w-8 text-center text-xs font-semibold text-[#a855f7]">#</div>
+                <div className="text-xs font-semibold text-[#a855f7]">Title</div>
+                <div className="hidden md:block text-xs font-semibold text-[#a855f7]">Album</div>
+                <div className="w-[140px] text-right pr-2 text-xs font-semibold text-[#a855f7]">Duration</div>
             </div>
 
             <div data-tv-section="library-tracks" className="space-y-1">

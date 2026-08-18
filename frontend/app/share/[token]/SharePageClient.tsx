@@ -254,7 +254,7 @@ export default function SharePageClient() {
             <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3">
                     <div className="w-8 h-8 border-2 border-brand/30 border-t-[#fca200] rounded-full animate-spin" />
-                    <p className="text-micro font-mono text-white/30 uppercase tracking-widest">
+                    <p className="text-xs text-[var(--text-muted)]">
                         Loading
                     </p>
                 </div>
@@ -268,16 +268,16 @@ export default function SharePageClient() {
             <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center px-4">
                 <div className="text-center max-w-sm">
                     <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-white/[0.03] border border-white/[0.06] flex items-center justify-center">
-                        <Music className="w-5 h-5 text-white/15" />
+                        <Music className="w-5 h-5 text-[var(--text-muted)]" />
                     </div>
-                    <p className="text-sm font-medium text-white/70 mb-1">
+                    <p className="text-sm font-medium text-[var(--text-secondary)] mb-1">
                         {error?.includes("expired")
                             ? "Link expired"
                             : error?.includes("limit")
                               ? "Play limit reached"
                               : "Not found"}
                     </p>
-                    <p className="text-xs text-white/30">
+                    <p className="text-xs text-[var(--text-muted)]">
                         {error || "This share link is no longer available."}
                     </p>
                 </div>
@@ -326,10 +326,10 @@ export default function SharePageClient() {
                         <h1 className="text-xl font-bold text-white tracking-tight mb-1 line-clamp-2">
                             {getEntityTitle(data)}
                         </h1>
-                        <p className="text-sm text-white/40">
+                        <p className="text-sm text-[var(--text-muted)]">
                             {getEntitySubtitle(data)}
                             {tracks.length > 1 && totalDuration > 0 && (
-                                <span className="text-white/20"> -- {formatDuration(totalDuration)}</span>
+                                <span className="text-[var(--text-muted)]"> -- {formatDuration(totalDuration)}</span>
                             )}
                         </p>
                     </div>
@@ -357,7 +357,7 @@ export default function SharePageClient() {
                                 />
                             </div>
 
-                            <div className="flex justify-between text-micro font-mono text-white/20 mb-5 tabular-nums">
+                            <div className="flex justify-between text-micro tabular-nums text-[var(--text-muted)] mb-5 tabular-nums">
                                 <span>{formatTime(progress)}</span>
                                 <span>{formatTime(duration)}</span>
                             </div>
@@ -367,7 +367,7 @@ export default function SharePageClient() {
                                 {tracks.length > 1 && (
                                     <button
                                         onClick={prevTrack}
-                                        className="text-white/30 hover:text-white/70 transition-colors"
+                                        className="text-[var(--text-muted)] hover:text-white/70 transition-colors"
                                     >
                                         <SkipBack className="w-5 h-5" />
                                     </button>
@@ -388,7 +388,7 @@ export default function SharePageClient() {
                                     <button
                                         onClick={nextTrack}
                                         disabled={currentTrackIndex >= tracks.length - 1}
-                                        className="text-white/30 hover:text-white/70 transition-colors disabled:opacity-20"
+                                        className="text-[var(--text-muted)] hover:text-white/70 transition-colors disabled:opacity-20"
                                     >
                                         <SkipForward className="w-5 h-5" />
                                     </button>
@@ -399,7 +399,7 @@ export default function SharePageClient() {
                             <div className="flex items-center justify-center gap-2 mt-4">
                                 <button
                                     onClick={toggleMute}
-                                    className="text-white/20 hover:text-white/40 transition-colors"
+                                    className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
                                 >
                                     {isMuted || volume === 0 ? (
                                         <VolumeX className="w-3.5 h-3.5" />
@@ -424,7 +424,7 @@ export default function SharePageClient() {
 
                             {/* Now playing indicator */}
                             {currentTrack && tracks.length > 1 && (
-                                <p className="text-micro text-white/25 text-center mt-3 truncate">
+                                <p className="text-micro text-[var(--text-muted)] text-center mt-3 truncate">
                                     {currentTrack.title}
                                 </p>
                             )}
@@ -465,8 +465,8 @@ export default function SharePageClient() {
                                                     <span className="w-[2px] h-2 bg-brand rounded-full animate-pulse [animation-delay:300ms]" />
                                                 </div>
                                             ) : (
-                                                <span className={`text-micro font-mono ${
-                                                    isActive ? "text-brand" : "text-white/15"
+                                                <span className={`text-micro tabular-nums ${
+                                                    isActive ? "text-brand" : "text-[var(--text-muted)]"
                                                 }`}>
                                                     {trackLabel}
                                                 </span>
@@ -487,18 +487,18 @@ export default function SharePageClient() {
 
                                         <div className="flex-1 min-w-0 text-left">
                                             <p className={`text-sm truncate ${
-                                                isActive ? "text-brand" : "text-white/70"
+                                                isActive ? "text-brand" : "text-[var(--text-secondary)]"
                                             }`}>
                                                 {track.title}
                                             </p>
                                             {track.album?.artist?.name && (
-                                                <p className="text-micro text-white/25 truncate">
+                                                <p className="text-micro text-[var(--text-muted)] truncate">
                                                     {track.album.artist.name}
                                                 </p>
                                             )}
                                         </div>
 
-                                        <span className="text-micro font-mono text-white/15 flex-shrink-0 tabular-nums">
+                                        <span className="text-micro tabular-nums text-[var(--text-muted)] flex-shrink-0 tabular-nums">
                                             {track.duration ? formatTime(track.duration) : ""}
                                         </span>
                                     </button>
@@ -512,7 +512,7 @@ export default function SharePageClient() {
             {/* Footer */}
             <div className="px-4 py-6">
                 <div className="max-w-lg mx-auto flex items-center justify-center gap-3">
-                    <span className="text-micro font-mono text-white/10 uppercase tracking-widest">
+                    <span className="text-xs text-white/10">
                         Powered by Kima
                     </span>
                     <span className="text-white/[0.06]">|</span>
@@ -520,7 +520,7 @@ export default function SharePageClient() {
                         href="https://github.com/Chevron7Locked/kima-hub"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-micro font-mono text-white/10 hover:text-white/25 uppercase tracking-widest transition-colors"
+                        className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
                     >
                         <Github className="w-3 h-3" />
                         GitHub

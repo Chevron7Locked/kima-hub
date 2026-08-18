@@ -29,7 +29,7 @@ export function LyricsTab() {
     if (isLoading) {
         return (
             <div className="flex-1 flex items-center justify-center">
-                <Loader2 className="w-6 h-6 animate-spin text-white/40" />
+                <Loader2 className="w-6 h-6 animate-spin text-[var(--text-muted)]" />
             </div>
         );
     }
@@ -37,7 +37,7 @@ export function LyricsTab() {
     if (!hasLyrics) {
         return (
             <div className="flex-1 flex items-center justify-center">
-                <p className="text-sm text-white/30 font-mono">No lyrics available</p>
+                <p className="text-sm text-[var(--text-muted)]">No lyrics available</p>
             </div>
         );
     }

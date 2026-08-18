@@ -134,14 +134,14 @@ export function FullPlayer() {
                                             unoptimized
                                         />
                                     ) : (
-                                        <MusicIcon className="w-6 h-6 text-gray-500" />
+                                        <MusicIcon className="w-6 h-6 text-[var(--text-muted)]" />
                                     )}
                                 </div>
                             </Link>
                         ) : (
                             <div className="relative w-14 h-14 flex-shrink-0">
                                 <div className="relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center">
-                                    <MusicIcon className="w-6 h-6 text-gray-500" />
+                                    <MusicIcon className="w-6 h-6 text-[var(--text-muted)]" />
                                 </div>
                             </div>
                         )}
@@ -165,7 +165,7 @@ export function FullPlayer() {
                                     href={artistLink}
                                     className="block hover:underline"
                                 >
-                                    <p className="text-xs text-gray-400 truncate">
+                                    <p className="text-xs text-[var(--text-secondary)] truncate">
                                         {subtitle}
                                     </p>
                                 </Link>
@@ -174,12 +174,12 @@ export function FullPlayer() {
                                     href={mediaLink}
                                     className="block hover:underline"
                                 >
-                                    <p className="text-xs text-gray-400 truncate">
+                                    <p className="text-xs text-[var(--text-secondary)] truncate">
                                         {subtitle}
                                     </p>
                                 </Link>
                             ) : (
-                                <p className="text-xs text-gray-400 truncate">
+                                <p className="text-xs text-[var(--text-secondary)] truncate">
                                     {subtitle}
                                 </p>
                             )}
@@ -187,7 +187,7 @@ export function FullPlayer() {
                             {activeOperation.type !== 'idle' && vibeMatchScore !== null && (
                                 <span
                                     className={cn(
-                                        "inline-flex items-center gap-1 text-micro font-bold px-1.5 py-0.5 rounded mt-1",
+                                        "inline-flex items-center gap-1 text-micro font-semibold px-1.5 py-0.5 rounded mt-1",
                                         vibeMatchScore >= 80
                                             ? "bg-green-500/20 text-green-400"
                                             : vibeMatchScore >= 60
@@ -214,7 +214,7 @@ export function FullPlayer() {
                                     "transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                     isShuffle
                                         ? "text-[#a855f7] hover:text-[#c084fc]"
-                                        : "text-gray-400 hover:text-white"
+                                        : "text-[var(--text-secondary)] hover:text-white"
                                 )}
                                 disabled={!hasMedia || playbackType !== "track"}
                                 aria-label="Shuffle"
@@ -230,22 +230,22 @@ export function FullPlayer() {
                                 className={cn(
                                     "transition-all duration-200 hover:scale-110 relative disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                     hasMedia
-                                        ? "text-gray-400 hover:text-white"
-                                        : "text-gray-600"
+                                        ? "text-[var(--text-secondary)] hover:text-white"
+                                        : "text-[var(--text-muted)]"
                                 )}
                                 disabled={!hasMedia}
                                 aria-label="Rewind 30 seconds"
                                 title="Rewind 30 seconds"
                             >
                                 <RotateCcw className="w-4 h-4" />
-                                <span className="absolute text-micro font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                                <span className="absolute text-micro font-semibold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                                     30
                                 </span>
                             </button>
 
                             <button
                                 onClick={previous}
-                                className="text-gray-400 hover:text-white transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
+                                className="text-[var(--text-secondary)] hover:text-white transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
                                 disabled={!hasMedia || playbackType !== "track"}
                                 aria-label="Previous track"
                                 title="Previous track"
@@ -263,7 +263,7 @@ export function FullPlayer() {
                                         ? "bg-brand text-black hover:scale-110 shadow-lg shadow-[#fca200]/20 hover:shadow-[#fca200]/30"
                                         : isBuffering
                                         ? "bg-brand/80 text-black"
-                                        : "bg-gray-700 text-gray-500 cursor-not-allowed"
+                                        : "bg-gray-700 text-[var(--text-muted)] cursor-not-allowed"
                                 )}
                                 disabled={!hasMedia}
                                 aria-label={
@@ -301,7 +301,7 @@ export function FullPlayer() {
 
                             <button
                                 onClick={next}
-                                className="text-gray-400 hover:text-white transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
+                                className="text-[var(--text-secondary)] hover:text-white transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
                                 disabled={!hasMedia || playbackType !== "track"}
                                 aria-label="Next track"
                                 title="Next track"
@@ -315,15 +315,15 @@ export function FullPlayer() {
                                 className={cn(
                                     "transition-all duration-200 hover:scale-110 relative disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                     hasMedia
-                                        ? "text-gray-400 hover:text-white"
-                                        : "text-gray-600"
+                                        ? "text-[var(--text-secondary)] hover:text-white"
+                                        : "text-[var(--text-muted)]"
                                 )}
                                 disabled={!hasMedia}
                                 aria-label="Forward 30 seconds"
                                 title="Forward 30 seconds"
                             >
                                 <RotateCw className="w-4 h-4" />
-                                <span className="absolute text-micro font-bold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                                <span className="absolute text-micro font-semibold top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                                     30
                                 </span>
                             </button>
@@ -335,7 +335,7 @@ export function FullPlayer() {
                                     "transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                     repeatMode !== "off"
                                         ? "text-[#a855f7] hover:text-[#c084fc]"
-                                        : "text-gray-400 hover:text-white"
+                                        : "text-[var(--text-secondary)] hover:text-white"
                                 )}
                                 disabled={!hasMedia || playbackType !== "track"}
                                 aria-label={
@@ -368,10 +368,10 @@ export function FullPlayer() {
                                     className={cn(
                                         "transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                         !hasMedia || playbackType !== "track"
-                                            ? "text-gray-600"
+                                            ? "text-[var(--text-muted)]"
                                             : activeOperation.type !== 'idle'
                                             ? "text-brand hover:text-brand-hover"
-                                            : "text-gray-400 hover:text-brand"
+                                            : "text-[var(--text-secondary)] hover:text-brand"
                                     )}
                                     disabled={
                                         !hasMedia ||
@@ -405,10 +405,10 @@ export function FullPlayer() {
                                     className={cn(
                                         "transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                         !hasMedia
-                                            ? "text-gray-600"
+                                            ? "text-[var(--text-muted)]"
                                             : isLyricsActive
                                             ? "text-brand hover:text-brand-hover"
-                                            : "text-gray-400 hover:text-brand"
+                                            : "text-[var(--text-secondary)] hover:text-brand"
                                     )}
                                     disabled={!hasMedia}
                                     aria-label="Toggle lyrics"
@@ -424,7 +424,7 @@ export function FullPlayer() {
                                 className={`p-1.5 rounded-md transition-colors ${
                                     pathname === "/queue"
                                         ? "text-brand"
-                                        : "text-white/40 hover:text-white/70"
+                                        : "text-[var(--text-muted)] hover:text-white/70"
                                 }`}
                                 aria-label="View play queue"
                                 title="Play queue"
@@ -436,7 +436,7 @@ export function FullPlayer() {
                             {playbackType === "track" && currentTrack && (
                                 <button
                                     onClick={() => setShowPlaylistSelector(true)}
-                                    className="p-1.5 rounded-md transition-colors text-white/40 hover:text-white/70"
+                                    className="p-1.5 rounded-md transition-colors text-[var(--text-muted)] hover:text-white/70"
                                     aria-label="Add to playlist"
                                     title="Add to playlist"
                                 >
@@ -449,10 +449,10 @@ export function FullPlayer() {
                         <div className="w-full flex items-center gap-3">
                             <span
                                 className={cn(
-                                    "text-xs text-right font-mono font-medium tabular-nums",
+                                    "text-xs text-right tabular-nums font-medium tabular-nums",
                                     hasMedia
-                                        ? "text-gray-400"
-                                        : "text-gray-600",
+                                        ? "text-[var(--text-secondary)]"
+                                        : "text-[var(--text-muted)]",
                                     duration >= 3600 ? "w-14" : "w-10"
                                 )}
                             >
@@ -470,10 +470,10 @@ export function FullPlayer() {
                             />
                             <span
                                 className={cn(
-                                    "text-xs font-mono font-medium tabular-nums",
+                                    "text-xs tabular-nums font-medium tabular-nums",
                                     hasMedia
-                                        ? "text-gray-400"
-                                        : "text-gray-600",
+                                        ? "text-[var(--text-secondary)]"
+                                        : "text-[var(--text-muted)]",
                                     duration >= 3600 ? "w-14" : "w-10"
                                 )}
                             >
@@ -491,7 +491,7 @@ export function FullPlayer() {
                     <div className="flex items-center gap-3 w-52 justify-end">
                         <button
                             onClick={toggleMute}
-                            className="text-gray-400 hover:text-white transition-all duration-200 hover:scale-110"
+                            className="text-[var(--text-secondary)] hover:text-white transition-all duration-200 hover:scale-110"
                             aria-label={volume === 0 ? "Unmute" : "Mute"}
                         >
                             {isMuted || volume === 0 ? (
@@ -530,8 +530,8 @@ export function FullPlayer() {
                             className={cn(
                                 "transition-all duration-200 border-l border-white/[0.08] pl-3",
                                 hasMedia
-                                    ? "text-gray-400 hover:text-white hover:scale-110"
-                                    : "text-gray-600 cursor-not-allowed"
+                                    ? "text-[var(--text-secondary)] hover:text-white hover:scale-110"
+                                    : "text-[var(--text-muted)] cursor-not-allowed"
                             )}
                             disabled={!hasMedia}
                             aria-label="Expand player"

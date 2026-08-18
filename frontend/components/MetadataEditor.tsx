@@ -190,7 +190,7 @@ export function MetadataEditor({
                                     currentData._originalName &&
                                     currentData._originalName !==
                                         (formData.name || "") && (
-                                        <p className="mt-1 text-xs text-gray-500">
+                                        <p className="mt-1 text-xs text-[var(--text-muted)]">
                                             Original:{" "}
                                             {currentData._originalName}
                                         </p>
@@ -199,7 +199,7 @@ export function MetadataEditor({
                                     currentData._originalTitle &&
                                     currentData._originalTitle !==
                                         (formData.title || "") && (
-                                        <p className="mt-1 text-xs text-gray-500">
+                                        <p className="mt-1 text-xs text-[var(--text-muted)]">
                                             Original:{" "}
                                             {currentData._originalTitle}
                                         </p>
@@ -223,7 +223,7 @@ export function MetadataEditor({
                                     {currentData._originalBio &&
                                         currentData._originalBio !==
                                             (formData.bio || "") && (
-                                            <p className="mt-1 text-xs text-gray-500">
+                                            <p className="mt-1 text-xs text-[var(--text-muted)]">
                                                 Original:{" "}
                                                 {currentData._originalBio.substring(
                                                     0,
@@ -255,7 +255,7 @@ export function MetadataEditor({
                                     {currentData._originalYear &&
                                         currentData._originalYear !==
                                             (formData.year || null) && (
-                                            <p className="mt-1 text-xs text-gray-500">
+                                            <p className="mt-1 text-xs text-[var(--text-muted)]">
                                                 Original:{" "}
                                                 {currentData._originalYear}
                                             </p>
@@ -267,7 +267,7 @@ export function MetadataEditor({
                             <div>
                                 <label className="block text-sm font-bold text-white mb-2">
                                     Genres
-                                    <span className="text-xs text-gray-400 ml-2">
+                                    <span className="text-xs text-[var(--text-secondary)] ml-2">
                                         (comma-separated)
                                     </span>
                                 </label>
@@ -294,7 +294,7 @@ export function MetadataEditor({
                                         JSON.stringify(
                                             (formData.genres || []).sort()
                                         ) && (
-                                        <p className="mt-1 text-xs text-gray-500">
+                                        <p className="mt-1 text-xs text-[var(--text-muted)]">
                                             Original:{" "}
                                             {currentData._originalGenres.join(
                                                 ", "
@@ -307,7 +307,7 @@ export function MetadataEditor({
                             <div>
                                 <label className="block text-sm font-bold text-white mb-2">
                                     MusicBrainz ID
-                                    <span className="text-xs text-gray-400 ml-2">
+                                    <span className="text-xs text-[var(--text-secondary)] ml-2">
                                         (leave empty to auto-fetch)
                                     </span>
                                 </label>
@@ -331,7 +331,7 @@ export function MetadataEditor({
                                         )
                                     }
                                     placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                                    className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none font-mono text-sm"
+                                    className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none text-sm"
                                 />
                             </div>
 
@@ -341,7 +341,7 @@ export function MetadataEditor({
                                     {type === "artist"
                                         ? "Artist Image URL"
                                         : "Cover Art URL"}
-                                    <span className="text-xs text-gray-400 ml-2">
+                                    <span className="text-xs text-[var(--text-secondary)] ml-2">
                                         (leave empty to auto-fetch)
                                     </span>
                                 </label>
@@ -367,7 +367,7 @@ export function MetadataEditor({
                                     currentData._originalHeroUrl &&
                                     currentData._originalHeroUrl !==
                                         (formData.heroUrl || "") && (
-                                        <p className="mt-1 text-xs text-gray-500 truncate">
+                                        <p className="mt-1 text-xs text-[var(--text-muted)] truncate">
                                             Original:{" "}
                                             {currentData._originalHeroUrl}
                                         </p>
@@ -376,7 +376,7 @@ export function MetadataEditor({
                                     currentData._originalCoverUrl &&
                                     currentData._originalCoverUrl !==
                                         (formData.coverUrl || "") && (
-                                        <p className="mt-1 text-xs text-gray-500 truncate">
+                                        <p className="mt-1 text-xs text-[var(--text-muted)] truncate">
                                             Original:{" "}
                                             {currentData._originalCoverUrl}
                                         </p>

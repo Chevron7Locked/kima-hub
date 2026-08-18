@@ -63,7 +63,7 @@ export function AlbumActionBar({
                     {/* Shuffle Button */}
                     <button
                         onClick={onShuffle}
-                        className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                        className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-[var(--text-secondary)] hover:text-white transition-all"
                         title="Shuffle play"
                     >
                         <Shuffle className="w-5 h-5" />
@@ -72,7 +72,7 @@ export function AlbumActionBar({
                     {/* Add to Playlist Button */}
                     <button
                         onClick={onAddToPlaylist}
-                        className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                        className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-[var(--text-secondary)] hover:text-white transition-all"
                         title="Add to playlist"
                     >
                         <ListPlus className="w-5 h-5" />
@@ -88,7 +88,7 @@ export function AlbumActionBar({
                     className={cn(
                         "flex items-center gap-2 px-5 py-2.5 rounded-full font-medium transition-all",
                         isPendingDownload
-                            ? "bg-white/5 text-white/50 cursor-not-allowed"
+                            ? "bg-white/5 text-[var(--text-secondary)] cursor-not-allowed"
                             : "bg-brand hover:bg-[#e69200] text-black hover:scale-105"
                     )}
                 >

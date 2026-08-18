@@ -43,25 +43,27 @@ const ACTIVE_STATUSES = [
 function statusLabel(status: string): string {
     switch (status) {
         case "pending":
-            return "PENDING";
+            return "Pending";
         case "fetching":
-            return "FETCHING";
+            return "Fetching";
         case "downloading":
-            return "DOWNLOADING";
+            return "Downloading";
         case "scanning":
-            return "SCANNING";
+            return "Scanning";
         case "creating_playlist":
-            return "CREATING";
+            return "Creating";
         case "matching_tracks":
-            return "MATCHING";
+            return "Matching";
         case "completed":
-            return "DONE";
+            return "Done";
         case "failed":
-            return "FAILED";
+            return "Failed";
         case "cancelled":
-            return "CANCELLED";
+            return "Cancelled";
         default:
-            return status.toUpperCase();
+            // An unmapped status from the server, shown as-is rather than
+            // stamped into capitals.
+            return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, " ");
     }
 }
 
@@ -70,7 +72,7 @@ function statusColor(status: string): string {
     if (status === "completed") return "text-[#22c55e]";
     if (status === "failed") return "text-red-400";
     if (status === "cancelled") return "text-[#eab308]";
-    return "text-gray-600";
+    return "text-[var(--text-muted)]";
 }
 
 function formatAge(dateStr: string): string {
@@ -121,9 +123,9 @@ export function ImportsTab() {
     if (imports.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-                <ListMusic className="w-8 h-8 text-white/20 mb-3" />
-                <p className="text-sm text-white/40">No imports yet</p>
-                <p className="text-xs text-white/30 mt-1">
+                <ListMusic className="w-8 h-8 text-[var(--text-muted)] mb-3" />
+                <p className="text-sm text-[var(--text-muted)]">No imports yet</p>
+                <p className="text-xs text-[var(--text-muted)] mt-1">
                     Playlist imports will appear here
                 </p>
             </div>
@@ -144,7 +146,7 @@ export function ImportsTab() {
                 <div className="flex items-center justify-between px-3 py-2 border-b-2 border-white/10">
                     <div className="flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                        <span className="text-micro font-mono font-bold text-gray-600 uppercase tracking-wider">
+                        <span className="t-eyebrow">
                             {String(activeImports.length).padStart(2, "0")}{" "}
                             ACTIVE
                         </span>
@@ -166,7 +168,7 @@ export function ImportsTab() {
 
                 {pastImports.length > 0 && activeImports.length > 0 && (
                     <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5">
-                        <span className="text-micro font-mono font-bold text-gray-700 uppercase tracking-wider">
+                        <span className="text-xs font-semibold text-[var(--text-muted)]">
                             Previous
                         </span>
                         <span className="flex-1 border-t border-white/5" />
@@ -217,7 +219,7 @@ function ImportJobCard({
             <div className="flex items-start gap-3">
                 {/* Index */}
                 <div className="flex-shrink-0 w-6 mt-0.5">
-                    <span className="text-micro font-mono font-bold text-gray-700">
+                    <span className="text-micro tabular-nums font-semibold text-[var(--text-muted)]">
                         {String(index + 1).padStart(2, "0")}
                     </span>
                 </div>
@@ -226,7 +228,7 @@ function ImportJobCard({
                 <div className="mt-0.5 shrink-0">
                     {isActive ? (
                         cancelling ? (
-                            <Loader2 className="w-4 h-4 text-gray-600 animate-spin" />
+                            <Loader2 className="w-4 h-4 text-[var(--text-muted)] animate-spin" />
                         ) : (
                             <GradientSpinner size="sm" />
                         )
@@ -239,7 +241,7 @@ function ImportJobCard({
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold tracking-tight text-white truncate uppercase mb-1">
+                    <p className="text-xs font-semibold tracking-tight text-white truncate mb-1">
                         {job.playlistName}
                     </p>
 
@@ -247,7 +249,7 @@ function ImportJobCard({
                     <div className="flex items-center gap-2 flex-wrap">
                         <span
                             className={cn(
-                                "text-micro font-mono font-bold uppercase tracking-wider",
+                                "text-xs font-semibold",
                                 statusColor(job.status),
                             )}
                         >
@@ -256,10 +258,10 @@ function ImportJobCard({
 
                         {isActive && job.albumsTotal > 0 && (
                             <>
-                                <span className="text-micro font-mono text-gray-700">
+                                <span className="text-micro text-[var(--text-muted)]">
                                     --
                                 </span>
-                                <span className="text-micro font-mono text-gray-600 uppercase tracking-wider">
+                                <span className="text-xs tabular-nums text-[var(--text-muted)]">
                                     {job.albumsCompleted}/{job.albumsTotal}{" "}
                                     albums
                                 </span>
@@ -268,19 +270,19 @@ function ImportJobCard({
 
                         {job.tracksMatched > 0 && (
                             <>
-                                <span className="text-micro font-mono text-gray-700">
+                                <span className="text-micro text-[var(--text-muted)]">
                                     --
                                 </span>
-                                <span className="text-micro font-mono text-gray-600 uppercase tracking-wider">
+                                <span className="text-xs tabular-nums text-[var(--text-muted)]">
                                     {job.tracksMatched} tracks matched
                                 </span>
                             </>
                         )}
 
-                        <span className="text-micro font-mono text-gray-700">
+                        <span className="text-micro text-[var(--text-muted)]">
                             --
                         </span>
-                        <span className="text-micro font-mono text-gray-700 uppercase tracking-wider">
+                        <span className="text-xs tabular-nums text-[var(--text-muted)]">
                             {formatAge(job.createdAt)}
                         </span>
                     </div>
@@ -299,7 +301,7 @@ function ImportJobCard({
 
                     {/* Error message */}
                     {job.status === "failed" && job.error && (
-                        <p className="text-micro font-mono text-red-400/70 mt-1 truncate">
+                        <p className="text-micro tabular-nums text-red-400/70 mt-1 truncate">
                             {job.error}
                         </p>
                     )}
@@ -308,7 +310,7 @@ function ImportJobCard({
                     {job.status === "completed" && job.createdPlaylistId && (
                         <Link
                             href={`/playlist/${job.createdPlaylistId}`}
-                            className="inline-flex items-center gap-1 mt-1.5 text-micro font-mono font-bold text-[#22c55e] hover:text-[#4ade80] uppercase tracking-wider transition-colors"
+                            className="inline-flex items-center gap-1 mt-1.5 text-micro tabular-nums font-semibold text-[#22c55e] hover:text-[#4ade80] transition-colors"
                         >
                             <ExternalLink className="w-3 h-3" />
                             View Playlist
@@ -324,7 +326,7 @@ function ImportJobCard({
                         className="p-1 hover:bg-white/10 transition-colors shrink-0"
                         title="Cancel import"
                     >
-                        <X className="w-3 h-3 text-gray-700 hover:text-red-400" />
+                        <X className="w-3 h-3 text-[var(--text-muted)] hover:text-red-400" />
                     </button>
                 )}
             </div>

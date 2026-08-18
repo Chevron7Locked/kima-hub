@@ -100,7 +100,7 @@ export function LidarrSection({ settings, onUpdate, onTest, isTesting }: LidarrS
                             <button
                                 onClick={handleTest}
                                 disabled={isTesting || !settings.lidarrUrl || !settings.lidarrApiKey}
-                                className="px-4 py-1.5 text-xs font-mono bg-white/5 border border-white/10 text-white/70 rounded-lg uppercase tracking-wider
+                                className="px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg 
                                     hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                             >
                                 {testStatus === "loading" ? "Testing..." : "Test Connection"}

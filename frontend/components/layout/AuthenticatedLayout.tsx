@@ -72,7 +72,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
             <div className="min-h-screen flex items-center justify-center bg-black">
                 <div className="flex flex-col items-center gap-4">
                     <GradientSpinner size="lg" />
-                    <p className="text-white/60 text-sm">Loading...</p>
+                    <p className="text-[var(--text-secondary)] text-sm">Loading...</p>
                 </div>
             </div>
         );
@@ -191,7 +191,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
         <div className="min-h-screen flex items-center justify-center bg-black">
             <div className="flex flex-col items-center gap-4">
                 <GradientSpinner size="lg" />
-                <p className="text-white/60 text-sm">Redirecting...</p>
+                <p className="text-[var(--text-secondary)] text-sm">Redirecting...</p>
             </div>
         </div>
     );

@@ -40,9 +40,9 @@ export function LyricsPanel({ onBack }: LyricsPanelProps) {
                     className="border border-white/20 p-2 hover:border-[#a855f7] hover:bg-white/5 transition-colors"
                     title="Back to activity"
                 >
-                    <ArrowLeft className="w-4 h-4 text-white/60" />
+                    <ArrowLeft className="w-4 h-4 text-[var(--text-secondary)]" />
                 </button>
-                <h3 className="text-sm font-bold uppercase tracking-wider text-white">
+                <h3 className="text-sm font-bold text-white">
                     Lyrics
                 </h3>
             </div>
@@ -51,13 +51,13 @@ export function LyricsPanel({ onBack }: LyricsPanelProps) {
             <div className="flex-1 overflow-y-auto p-5">
                 {isLoading && (
                     <div className="flex items-center justify-center py-20">
-                        <Loader2 className="w-6 h-6 animate-spin text-white/40" />
+                        <Loader2 className="w-6 h-6 animate-spin text-[var(--text-muted)]" />
                     </div>
                 )}
 
                 {!isLoading && !hasLyrics && (
                     <div className="flex items-center justify-center py-20">
-                        <p className="text-sm text-white/30 font-mono">
+                        <p className="text-sm text-[var(--text-muted)]">
                             No lyrics available
                         </p>
                     </div>
