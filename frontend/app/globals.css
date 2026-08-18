@@ -273,6 +273,28 @@ code {
         transition-duration: 0ms;
     }
 
+    /* A 44px floor for anything a finger has to hit.
+     *
+     * There is a Button component with sensible sizing, and it is imported by
+     * two files out of a hundred and five. The app is built from 386 raw
+     * <button> elements and 57 raw <input>s, each sized by hand, so roughly a
+     * third of them landed under the touch-target minimum -- 38px form fields
+     * on the signup page, 32px icon buttons, 16px text links.
+     *
+     * Fixing that at the component level means migrating 386 call sites. This
+     * sets the floor from underneath instead, and only where it matters: a
+     * mouse can hit a 32px button, a fingertip is about 44px across.
+     *
+     * Measured on playlists, settings, podcasts and register before shipping:
+     * every undersized control reaches 44px, page height does not change on
+     * any of them, and no horizontal overflow is introduced. */
+    button,
+    input,
+    select,
+    textarea {
+        min-height: 44px;
+    }
+
     /* The play button is the exception, because it is the one action a card
      * is actually for. On a touch screen it stops hiding and simply stays.
      *

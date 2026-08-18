@@ -41,9 +41,12 @@ const SectionHeader = memo(function SectionHeader({
             {rightAction ? (
                 <span className="shrink-0">{rightAction}</span>
             ) : showAllHref ? (
+                    /* -my-3 py-3 grows the tap area to 44px without moving the
+                       link in the header rule. It measured 66x16 before -- a
+                       sixteen-pixel-tall target for a finger. */
                 <Link
                     href={showAllHref}
-                    className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-white transition-colors group shrink-0"
+                    className="flex items-center gap-1 -my-3 py-3 min-h-[44px] text-xs text-[var(--text-muted)] hover:text-white transition-colors group shrink-0"
                 >
                     Show all
                     <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />

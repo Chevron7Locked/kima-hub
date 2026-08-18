@@ -57,7 +57,7 @@ const PlaylistCard = memo(function PlaylistCard({
                         <div className="absolute top-2 left-2 p-1 bg-black/60 rounded">
                             <DeezerIcon className="w-3.5 h-3.5 text-[#a855f7]" />
                         </div>
-                        <button className="touch-reveal absolute bottom-3 right-3 w-10 h-10 rounded-lg bg-[#9333ea] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 hover:bg-[#7e22ce]">
+                        <button className="touch-reveal absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#9333ea] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 hover:bg-[#7e22ce]">
                             <Play className="w-4 h-4 fill-current ml-0.5 text-white" />
                         </button>
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#a855f7] to-[#c026d3] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150" />

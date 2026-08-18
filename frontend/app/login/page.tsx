@@ -347,7 +347,7 @@ export default function LoginPage() {
 
                     {/* Footer */}
                     <p className="text-center text-[var(--text-muted)] text-sm mt-6">
-                        © 2025 Kima. Your music, your way.
+                        © {new Date().getFullYear()} Kima. Your music, your way.
                     </p>
                 </div>
             </div>

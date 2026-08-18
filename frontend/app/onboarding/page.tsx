@@ -621,7 +621,7 @@ export default function OnboardingPage() {
 
                         {/* Footer */}
                         <p className="text-center text-[var(--text-muted)] text-sm mt-6">
-                            &copy; 2025 Kima. Your music, your way.
+                            &copy; {new Date().getFullYear()} Kima. Your music, your way.
                         </p>
                     </div>
                 </div>

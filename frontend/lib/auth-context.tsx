@@ -33,7 +33,10 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const publicPaths = ["/login", "/register", "/onboarding", "/sync", "/share"];
+// Paths reachable without being signed in. "/setup" is the first-run wizard,
+// which by definition runs before an account exists, so it must not bounce to
+// the login page.
+const publicPaths = ["/login", "/register", "/onboarding", "/setup", "/sync", "/share"];
 
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
