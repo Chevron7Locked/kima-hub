@@ -82,14 +82,14 @@ export function ActivityPanel({
             <>
                 {/* Backdrop */}
                 <div
-                    className="fixed inset-0 bg-black/60 z-[100]"
+                    className="fixed inset-0 bg-black/60 z-(--z-panel)"
                     onClick={onToggle}
                 />
 
                 {/* Panel - slides in from right */}
                 <div
                     id="activity-panel-mobile"
-                    className="fixed inset-y-0 right-0 w-full max-w-md bg-[var(--bg-primary)] z-[101] flex flex-col"
+                    className="fixed inset-y-0 right-0 w-full max-w-md bg-[var(--bg-primary)] z-(--z-panel) flex flex-col"
                     style={{ paddingTop: "var(--standalone-safe-area-top, 0px)" }}
                 >
                     {/* Header */}

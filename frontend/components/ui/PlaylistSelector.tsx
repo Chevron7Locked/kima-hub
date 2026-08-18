@@ -133,7 +133,7 @@ export function PlaylistSelector({
 
     return (
         <div
-            className="fixed inset-0 bg-black/80 flex items-center justify-center z-[80] p-4"
+            className="fixed inset-0 bg-black/80 flex items-center justify-center z-(--z-modal) p-4"
             onClick={onClose}
         >
             <div

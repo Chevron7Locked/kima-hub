@@ -460,7 +460,7 @@ export default function PodcastsPage() {
 
                 {/* Content */}
                 <div className="relative max-w-[1800px] mx-auto px-4 sm:px-6 md:px-8 pb-32 pt-8">
-                    <div className="space-y-12">
+                    <div className="section-stack">
                         {/* My Podcasts */}
                         {podcasts.length > 0 && (
                             <section>
@@ -506,7 +506,7 @@ export default function PodcastsPage() {
                                     }
                                 />
                                 <div
-                                    className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4"
+                                    className="grid-media"
                                     data-tv-section="my-podcasts"
                                 >
                                     {paginatedPodcasts.map((podcast, index) => (
@@ -534,7 +534,7 @@ export default function PodcastsPage() {
                             <section>
                                 <SectionHeader title="Top Podcasts" />
                                 <div
-                                    className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4"
+                                    className="grid-media"
                                     data-tv-section="top-podcasts"
                                 >
                                     {topPodcasts.map((podcast, index) => (
@@ -578,7 +578,7 @@ export default function PodcastsPage() {
                                         }
                                     />
                                     <div
-                                        className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4"
+                                        className="grid-media"
                                         data-tv-section={`genre-${genreId}`}
                                     >
                                         {genrePodcasts.map((podcast: { id: string; title: string; author: string; coverUrl?: string; episodeCount?: number }, index: number) => (

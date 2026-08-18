@@ -122,7 +122,7 @@ export default function OnboardingPage() {
                     return;
                 } catch {
                     setError(
-                        "That username already exists and the password didn't match. If it's your account, sign in instead.",
+"That username already exists and the password didn't match. If it's your account, sign in instead.",
                     );
                 }
             } else {
@@ -206,7 +206,7 @@ export default function OnboardingPage() {
             setError(
                 err instanceof Error ?
                     err.message
-                :   "Failed to save configuration",
+                :"Failed to save configuration",
             );
         } finally {
             setSubmitting(false);
@@ -264,10 +264,10 @@ export default function OnboardingPage() {
                                         <div
                                             className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold text-sm transition-all ${
                                                 s.num === step ?
-                                                    "bg-brand text-black shadow-lg shadow-[#fca200]/20 scale-110"
+"bg-brand text-black scale-110"
                                                 : s.num < step ?
-                                                    "bg-white/5 text-[var(--text-primary)] border border-white/10"
-                                                :   "bg-white/5 text-[var(--text-muted)] border border-white/10"
+"bg-white/5 text-[var(--text-primary)] border border-white/10"
+                                                :"bg-white/5 text-[var(--text-muted)] border border-white/10"
                                             }`}
                                         >
                                             {s.num}
@@ -275,8 +275,8 @@ export default function OnboardingPage() {
                                         <span
                                             className={`text-xs mt-2 transition-all ${
                                                 s.num === step ?
-                                                    "text-brand font-medium"
-                                                :   "text-[var(--text-muted)]"
+"text-brand font-medium"
+                                                :"text-[var(--text-muted)]"
                                             }`}
                                         >
                                             {s.label}
@@ -286,8 +286,8 @@ export default function OnboardingPage() {
                                         <div
                                             className={`w-16 h-0.5 mx-4 mb-6 transition-all ${
                                                 s.num < step ?
-                                                    "bg-brand/25"
-                                                :   "bg-white/10"
+"bg-brand/25"
+                                                :"bg-white/10"
                                             }`}
                                         />
                                     )}
@@ -354,8 +354,8 @@ export default function OnboardingPage() {
                                                     }
                                                     className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
                                                         showPasswordTooShort ?
-                                                            "border-red-500/50"
-                                                        :   "border-white/10"
+"border-red-500/50"
+                                                        :"border-white/10"
                                                     }`}
                                                     placeholder="At least 6 characters"
                                                     required
@@ -381,8 +381,8 @@ export default function OnboardingPage() {
                                                     }
                                                     className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
                                                         showPasswordMismatch ?
-                                                            "border-red-500/50"
-                                                        :   "border-white/10"
+"border-red-500/50"
+                                                        :"border-white/10"
                                                     }`}
                                                     placeholder="Confirm your password"
                                                     required
@@ -406,7 +406,7 @@ export default function OnboardingPage() {
                                                             <GradientSpinner size="sm" />
                                                             Creating Account...
                                                         </>
-                                                    :   "Continue"}
+                                                    :"Continue"}
                                                 </span>
                                             </button>
                                         </form>
@@ -518,7 +518,7 @@ export default function OnboardingPage() {
                                                 }
                                                 onTest={() =>
                                                     testConnection(
-                                                        "audiobookshelf",
+"audiobookshelf",
                                                     )
                                                 }
                                                 testing={testingIntegration === "audiobookshelf"}
@@ -611,7 +611,7 @@ export default function OnboardingPage() {
                                                             Saving...
                                                         </span>
                                                     </>
-                                                :   "Save & Finish"}
+                                                :"Save & Finish"}
                                             </button>
                                         </div>
                                     </div>
@@ -675,8 +675,8 @@ function IntegrationCard({
         <div
             className={`border rounded-lg transition-all ${
                 enabled ?
-                    "bg-[var(--bg-secondary)] border-brand/25"
-                :   "bg-white/5 border-white/10"
+"bg-[var(--bg-secondary)] border-brand/25"
+                :"bg-white/5 border-white/10"
             }`}
         >
             <div className="p-4">
@@ -685,8 +685,8 @@ function IntegrationCard({
                         <div
                             className={`w-9 h-9 rounded-lg flex items-center justify-center ${
                                 enabled ?
-                                    "bg-brand/10 border border-brand/20 text-brand"
-                                :   "bg-white/5 border border-white/10 text-[var(--text-muted)]"
+"bg-brand/10 border border-brand/20 text-brand"
+                                :"bg-white/5 border border-white/10 text-[var(--text-muted)]"
                             }`}
                         >
                             {icon}
@@ -766,8 +766,8 @@ function IntegrationCard({
                             <p
                                 className={`text-xs ${
                                     result.ok ?
-                                        "text-green-400"
-                                    :   "text-red-400"
+"text-green-400"
+                                    :"text-red-400"
                                 }`}
                             >
                                 {result.message}
@@ -796,7 +796,7 @@ function IntegrationCard({
                                     <GradientSpinner size="sm" />
                                     Testing...
                                 </span>
-                            :   "Test Connection"}
+                            :"Test Connection"}
                         </button>
                     </div>
                 )}
@@ -832,8 +832,8 @@ function SoulseekCard({
         <div
             className={`border rounded-lg transition-all ${
                 enabled ?
-                    "bg-[var(--bg-secondary)] border-brand/25"
-                :   "bg-white/5 border-white/10"
+"bg-[var(--bg-secondary)] border-brand/25"
+                :"bg-white/5 border-white/10"
             }`}
         >
             <div className="p-4">
@@ -842,8 +842,8 @@ function SoulseekCard({
                         <div
                             className={`w-9 h-9 rounded-lg flex items-center justify-center ${
                                 enabled ?
-                                    "bg-brand/10 border border-brand/20 text-brand"
-                                :   "bg-white/5 border border-white/10 text-[var(--text-muted)]"
+"bg-brand/10 border border-brand/20 text-brand"
+                                :"bg-white/5 border border-white/10 text-[var(--text-muted)]"
                             }`}
                         >
                             <svg
@@ -916,8 +916,8 @@ function SoulseekCard({
                             <p
                                 className={`text-xs ${
                                     result.ok ?
-                                        "text-green-400"
-                                    :   "text-red-400"
+"text-green-400"
+                                    :"text-red-400"
                                 }`}
                             >
                                 {result.message}
@@ -941,7 +941,7 @@ function SoulseekCard({
                                     <GradientSpinner size="sm" />
                                     Testing...
                                 </span>
-                            :   "Test Connection"}
+                            :"Test Connection"}
                         </button>
                     </div>
                 )}

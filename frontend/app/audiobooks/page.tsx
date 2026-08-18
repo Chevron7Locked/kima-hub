@@ -492,13 +492,13 @@ export default function AudiobooksPage() {
                         </div>
                     </div>
 
-                    <div className="space-y-10">
+                    <div className="section-stack">
                         {/* Continue Listening Section */}
                         {continueListening.length > 0 && filter === "all" && !groupBySeries && (
                             <div>
                                 <SectionHeader title="Continue Listening" count={continueListening.length} />
                                 <div
-                                    className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 3xl:grid-cols-10 gap-6"
+                                    className="grid-media"
                                     data-tv-section="continue-listening"
                                 >
                                     {continueListening.map((book, index) => (
@@ -525,7 +525,7 @@ export default function AudiobooksPage() {
                                         <div>
                                             <SectionHeader title="Series" count={series.length} />
                                             <div
-                                                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 3xl:grid-cols-10 gap-6"
+                                                className="grid-media"
                                                 data-tv-section="series"
                                             >
                                                 {series.map(([seriesName, books], index) => {
@@ -552,7 +552,7 @@ export default function AudiobooksPage() {
                                         <div>
                                             <SectionHeader title="Standalone" count={standalone.length} />
                                             <div
-                                                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 3xl:grid-cols-10 gap-6"
+                                                className="grid-media"
                                                 data-tv-section="standalone"
                                             >
                                                 {standalone.map((book, index) => (
@@ -575,7 +575,7 @@ export default function AudiobooksPage() {
                                 <div>
                                     <SectionHeader title="All Books" count={filteredBooks.length} />
                                     <div
-                                        className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 3xl:grid-cols-10 gap-6"
+                                        className="grid-media"
                                         data-tv-section="audiobooks"
                                     >
                                         {paginatedBooks.map((book, index) => (

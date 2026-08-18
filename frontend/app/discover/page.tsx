@@ -208,7 +208,7 @@ export default function DiscoverWeeklyPage() {
                 {/* Track Listing */}
                 <div className="px-4 md:px-8 pb-32">
                     {playlist && playlist.tracks.length > 0 ? (
-                            <div className="space-y-8">
+                            <div className="section-stack">
                                 {/* Section header */}
                                 <section>
                                     <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-4">

@@ -89,7 +89,7 @@ function PlaylistMosaic({
         return (
             <div
                 className={cn(
-                    "w-full h-full flex items-center justify-center bg-[var(--bg-primary)]",
+"w-full h-full flex items-center justify-center bg-[var(--bg-primary)]",
                     greyed && "opacity-50"
                 )}
             >
@@ -114,7 +114,7 @@ function PlaylistMosaic({
     return (
         <div
             className={cn(
-                "grid grid-cols-2 w-full h-full",
+"grid grid-cols-2 w-full h-full",
                 greyed && "opacity-50 grayscale"
             )}
         >
@@ -165,7 +165,7 @@ function PlaylistCard({
         <Link href={`/playlist/${playlist.id}`}>
             <div
                 className={cn(
-                    "group cursor-pointer p-3 rounded-lg transition-all border border-transparent hover:bg-white/[0.03] hover:border-white/5",
+"group cursor-pointer p-3 rounded-lg transition-all border border-transparent hover:bg-white/[0.03] hover:border-white/5",
                     isHiddenView && "opacity-60 hover:opacity-100"
                 )}
                 data-tv-card
@@ -184,9 +184,9 @@ function PlaylistCard({
                             onClick={handleToggleHide}
                             disabled={isHiding}
                             className={cn(
-                                "absolute top-2 right-2 w-7 h-7 rounded-lg flex items-center justify-center",
-                                "bg-black/60 transition-all duration-200",
-                                "opacity-0 group-hover:opacity-100",
+"absolute top-2 right-2 w-7 h-7 rounded-lg flex items-center justify-center",
+"bg-black/60 transition-all duration-200",
+"opacity-0 group-hover:opacity-100",
                                 playlist.isHidden
                                     ? "text-green-400"
                                     : "text-[var(--text-muted)]",
@@ -213,10 +213,10 @@ function PlaylistCard({
                             onPlay(playlist.id);
                         }}
                         className={cn(
-                            "absolute bottom-2 right-2 w-10 h-10 rounded-lg flex items-center justify-center",
-                            "bg-brand shadow-lg shadow-[#fca208]/20 transition-all duration-200",
-                            "hover:bg-[#f97316] hover:scale-105",
-                            "opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0"
+"absolute bottom-2 right-2 w-10 h-10 rounded-lg flex items-center justify-center",
+"bg-brand transition-all duration-200",
+"hover:bg-[#f97316] hover:scale-105",
+"opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0"
                         )}
                         title="Play playlist"
                     >
@@ -228,7 +228,7 @@ function PlaylistCard({
 
                 <h3
                     className={cn(
-                        "text-sm font-bold truncate tracking-tight",
+"text-sm font-bold truncate tracking-tight",
                         isHiddenView ? "text-[var(--text-muted)]" : "text-white"
                     )}
                 >
@@ -298,7 +298,7 @@ function CreatePanel({ onClose }: { onClose: () => void }) {
                 type="button"
                 onClick={() => setIsPublic(!isPublic)}
                 className={cn(
-                    "px-3 py-2 rounded-lg text-xs tabular-nums border transition-colors",
+"px-3 py-2 rounded-lg text-xs tabular-nums border transition-colors",
                     isPublic
                         ? "bg-brand/10 border-brand/30 text-brand"
                         : "bg-white/5 border-white/10 text-[var(--text-muted)] hover:text-white/60"
@@ -545,7 +545,7 @@ function ActionButton({
         <button
             onClick={onClick}
             className={cn(
-                "flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all",
+"flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all",
                 primary
                     ? active
                         ? "bg-brand text-black ring-2 ring-brand/40"
@@ -826,7 +826,7 @@ export default function PlaylistsPage() {
                                 <button
                                     onClick={() => setShowHiddenTab(!showHiddenTab)}
                                     className={cn(
-                                        "px-4 py-2 rounded-lg text-xs tabular-nums transition-all",
+"px-4 py-2 rounded-lg text-xs tabular-nums transition-all",
                                         showHiddenTab
                                             ? "bg-white/10 text-white border border-white/20"
                                             : "bg-white/5 border border-white/10 text-[var(--text-muted)] hover:text-white/70 hover:border-white/20"
@@ -916,7 +916,7 @@ export default function PlaylistsPage() {
 
                             <div
                                 data-tv-section="playlists"
-                                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-2"
+                                className="grid-media"
                             >
                                 {displayedPlaylists.map(
                                     (playlist: Playlist, index: number) => (

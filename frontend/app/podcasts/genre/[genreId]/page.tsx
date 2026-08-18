@@ -144,7 +144,7 @@ export default function GenrePage() {
 
                 {/* Content */}
                 <div className="relative max-w-[1800px] mx-auto px-4 sm:px-6 md:px-8 pb-32 pt-8">
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                    <div className="grid-media">
                         {podcasts.map((podcast) => (
                             <button
                                 key={podcast.id}

@@ -89,7 +89,7 @@ function RadioStationCard({
 
 function SectionSkeleton() {
     return (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+        <div className="grid-media">
             {Array.from({ length: 6 }).map((_, i) => (
                 <div key={i} className="aspect-[4/3] rounded-lg bg-[var(--bg-primary)] border-2 border-white/10 animate-pulse" />
             ))}
@@ -178,7 +178,7 @@ export default function RadioPage() {
                                 <span className="tracking-tight">Quick Start</span>
                                 <span className="flex-1 border-t border-white/10" />
                             </h2>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                            <div className="grid-media">
                                 {STATIC_STATIONS.map((station) => (
                                     <RadioStationCard
                                         key={station.id}
@@ -219,7 +219,7 @@ export default function RadioPage() {
                                         </button>
                                     </div>
                                 ) : (
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                                    <div className="grid-media">
                                         {genreStations.map((station) => (
                                             <RadioStationCard
                                                 key={station.id}
@@ -262,7 +262,7 @@ export default function RadioPage() {
                                         </button>
                                     </div>
                                 ) : (
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                                    <div className="grid-media">
                                         {decadeStations.map((station) => (
                                             <RadioStationCard
                                                 key={station.id}

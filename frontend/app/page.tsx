@@ -50,7 +50,7 @@ export default function HomePage() {
                 <HomeHero />
 
                 <div className="relative max-w-[1800px] mx-auto px-4 sm:px-6 md:px-8 pb-32 pt-8">
-                    <div className="space-y-12">
+                    <div className="section-stack">
                         {/* Library Radio Stations */}
                         <section>
                             <SectionHeader title="Library Radio" showAllHref="/radio" color="featured" />

@@ -133,7 +133,7 @@ export default function ReleasesPage() {
                             <span className="text-[var(--text-muted)] text-sm">({data.upcoming.length})</span>
                         </div>
                         
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                        <div className="grid-media">
                             {data.upcoming.map((release) => (
                                 <ReleaseCard
                                     key={`${release.albumMbid}-${release.id}`}
@@ -156,7 +156,7 @@ export default function ReleasesPage() {
                             <span className="text-[var(--text-muted)] text-sm">({data.recent.length})</span>
                         </div>
                         
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                        <div className="grid-media">
                             {data.recent.map((release) => (
                                 <ReleaseCard
                                     key={`${release.albumMbid}-${release.id}`}

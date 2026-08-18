@@ -460,7 +460,7 @@ export default function BrowsePlaylistsPage() {
                                         Import by URL
                                     </button>
                                 </div>
-                            :   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-6">
+                            :   <div className="grid-media">
                                     {playlists.map((item, idx) =>
                                         renderCard(item, idx, "search"),
                                     )}
@@ -483,7 +483,7 @@ export default function BrowsePlaylistsPage() {
                                 <p className="text-xs text-[var(--text-muted)]">
                                     No playlists found for this genre
                                 </p>
-                            :   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-6">
+                            :   <div className="grid-media">
                                     {genrePlaylists.map((item, idx) =>
                                         renderCard(item, idx, "genre"),
                                     )}
@@ -509,7 +509,7 @@ export default function BrowsePlaylistsPage() {
                                             title="Featured Playlists"
                                             count={playlists.length}
                                         />
-                                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-6">
+                                        <div className="grid-media">
                                             {playlists.map((item, idx) =>
                                                 renderCard(
                                                     item,
@@ -539,7 +539,7 @@ export default function BrowsePlaylistsPage() {
                                             title="Browse by Genre"
                                             count={genres.length}
                                         />
-                                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                                        <div className="grid-media">
                                             {genres.map(renderGenreCard)}
                                         </div>
                                     </div>
@@ -552,7 +552,7 @@ export default function BrowsePlaylistsPage() {
             {/* URL Import Modal */}
             {showUrlModal && (
                 <div
-                    className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[80] p-4 animate-in fade-in duration-200"
+                    className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-(--z-modal) p-4 animate-in fade-in duration-200"
                     onClick={() => setShowUrlModal(false)}
                 >
                     <div

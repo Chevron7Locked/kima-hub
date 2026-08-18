@@ -110,7 +110,7 @@ export function OverlayPlayer() {
 
     return (
         <div
-            className="fixed inset-0 bg-gradient-to-b from-[#141210] via-[#0a0a0a] to-[#000000] z-[9999] flex flex-col overflow-hidden"
+            className="fixed inset-0 bg-gradient-to-b from-[#141210] via-[#0a0a0a] to-[#000000] z-(--z-overlay) flex flex-col overflow-hidden"
             onTouchStart={isMobileOrTablet ? handleTouchStart : undefined}
             onTouchMove={isMobileOrTablet ? handleTouchMove : undefined}
             onTouchEnd={isMobileOrTablet ? handleTouchEnd : undefined}

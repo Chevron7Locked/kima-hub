@@ -62,9 +62,9 @@ const TrackRow = memo(
                 data-tv-card-index={index}
                 tabIndex={0}
                 className={cn(
-                    "grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_1fr_auto] items-center gap-3 px-4 py-3 rounded-lg border-2 transition-all group cursor-pointer touch-manipulation",
+"grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_1fr_auto] items-center gap-3 px-4 py-3 rounded-lg border-2 transition-all group cursor-pointer touch-manipulation",
                     isCurrentlyPlaying
-                        ? "bg-[#a855f7]/10 border-[#a855f7]/30 shadow-lg shadow-[#a855f7]/10"
+                        ? "bg-[#a855f7]/10 border-[#a855f7]/30 "
                         : "bg-[var(--bg-primary)] border-white/5 hover:border-[#a855f7]/30 hover:bg-[#a855f7]/5",
                 )}
             >
@@ -80,7 +80,7 @@ const TrackRow = memo(
                     >
                         <span
                             className={cn(
-                                "text-sm tabular-nums font-bold group-hover:hidden",
+"text-sm tabular-nums font-bold group-hover:hidden",
                                 isCurrentlyPlaying ? "text-[#a855f7]" : "text-[var(--text-muted)]",
                             )}
                         >
@@ -111,7 +111,7 @@ const TrackRow = memo(
                     <div className="min-w-0">
                         <h3
                             className={cn(
-                                "text-sm font-bold truncate tracking-tight",
+"text-sm font-bold truncate tracking-tight",
                                 isCurrentlyPlaying ? "text-[#a855f7]" : "text-white",
                             )}
                         >

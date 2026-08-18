@@ -24,7 +24,7 @@ export function SimilarArtists({
             <SectionHeader color="artists" title="Fans Also Like" />
             <div
                 data-tv-section="similar-artists"
-                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4"
+                className="grid-media"
             >
                 {similarArtists.map((artist, index) => {
                     const rawImage = artist.coverArt || artist.image;

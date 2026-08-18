@@ -33,7 +33,7 @@ export function SimilarPodcasts({ podcasts }: SimilarPodcastsProps) {
                 </span>
                 <span className="flex-1 border-t border-white/10" />
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            <div className="grid-media">
                 {podcasts.map((podcast) => {
                     const imageUrl = getProxiedImageUrl(podcast.coverUrl);
                     return (

@@ -49,6 +49,35 @@
      * (#1a1a1a) -- the previous #7d7d7d cleared AA on the page but fell to
      * 4.46:1 inside a card, which is where most labels actually live. */
     --text-muted: #858585; /* labels, meta, timestamps */
+
+    /* ── Stacking order ───────────────────────────────────────────────────
+     *
+     * One ladder, named by what sits on each rung. It replaces fifteen
+     * hand-picked numbers that had drifted into an arms race -- z-[45],
+     * z-[55], z-[70], z-[101], z-[200], z-[9999] -- where each new overlay
+     * simply outbid whatever it landed on top of.
+     *
+     * The numbers below preserve the order the app already had. Two oddities
+     * were found and deliberately NOT changed here, because reordering
+     * stacking contexts breaks things silently and belongs in its own pass:
+     *   - the fixed top bar and in-page dropdowns both sat at 50
+     *   - the activity panel (100) sits above modals (80), so a dialog
+     *     opened while the panel is out would render behind it
+     * ─────────────────────────────────────────────────────────────────── */
+    --z-raised: 10; /* overlay inside a component: hover play button, scrim */
+    --z-scene: 20; /* overlays within the vibe canvas */
+    --z-scene-panel: 30; /* the vibe sheet */
+    --z-nav: 40; /* bottom navigation */
+    --z-player: 45; /* mini player -- above the nav it overlaps */
+    --z-header: 50; /* fixed top bar */
+    --z-dropdown: 50; /* menus and popovers anchored to a control */
+    --z-toast-inline: 55; /* transient confirmation over page content */
+    --z-drawer-backdrop: 60;
+    --z-drawer: 70; /* mobile sidebar */
+    --z-modal: 80; /* dialogs */
+    --z-panel: 100; /* activity panel */
+    --z-toast: 200; /* app-level prompts, e.g. "update available" */
+    --z-overlay: 300; /* full-screen player */
 }
 
 * {
@@ -135,6 +164,50 @@ code {
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
         "Liberation Mono", monospace;
     font-variant-numeric: tabular-nums;
+}
+
+/* ── The media grid ───────────────────────────────────────────────────────
+ *
+ * Every wall of album art, podcast covers, artists or playlists is this one
+ * grid. There were thirty copies of it across five different breakpoint
+ * ladders -- some stopped at lg, some ran to 2xl, one reached 3xl -- so the
+ * same wall of cards changed shape depending on which page you were on.
+ *
+ * auto-fill rather than auto-fit: a library with three albums in it should
+ * show three normal-sized cards, not three enormous ones stretched across the
+ * viewport. auto-fit collapses the empty tracks and does exactly that.
+ *
+ * The gap grows with the viewport instead of stepping at breakpoints: 12px on
+ * a phone, where width is the scarce thing, up to 20px on a desktop, where
+ * room to breathe matters more than one extra column.
+ * ─────────────────────────────────────────────────────────────────────── */
+.grid-media {
+    /* The card floor is itself fluid. Held at a fixed 152px it kept the cards
+     * phone-sized on a 27" display and simply added columns -- fifteen of them
+     * at 2560px. Growing the floor spends the extra width on bigger artwork
+     * instead, which is what the space is for. 152px is the hard minimum: it
+     * is what still fits two cards across a 388px phone. */
+    --card-min: clamp(9.5rem, 12vw, 12rem);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+    gap: clamp(0.75rem, 1.6vw, 1.25rem);
+}
+
+/* Wider cards for content whose titles need the room -- playlists, podcasts. */
+.grid-media-wide {
+    --card-min: clamp(11rem, 15vw, 14rem);
+}
+
+/* The vertical beat between the top-level sections of a page.
+ *
+ * Four pages each picked their own value -- 32px, 40px, 48px -- so the same
+ * furniture breathed differently depending on where you had navigated to.
+ *
+ * It holds at 48px on a phone, where vertical space is the scarce thing and
+ * scrolling is cheap, and opens to 72px on a desktop, where there is room for
+ * the separation to actually do its job of saying "this is a different thing". */
+.section-stack > * + * {
+    margin-top: clamp(3rem, 5vw, 4.5rem);
 }
 
 body {

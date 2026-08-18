@@ -568,7 +568,7 @@ export default function PlaylistDetailPage() {
 
                         <div className="flex items-center justify-end gap-1">
                             <span className={cn(
-                                "text-xs tabular-nums mr-2 hidden sm:inline",
+"text-xs tabular-nums mr-2 hidden sm:inline",
                                 isMissing ? "text-amber-400" : "text-red-400"
                             )}>
                                 {isMissing ? "Missing from disk" : "Failed"}
@@ -581,7 +581,7 @@ export default function PlaylistDetailPage() {
                                     }}
                                     disabled={isRetrying}
                                     className={cn(
-                                        "p-1.5 rounded-lg hover:bg-white/10 transition-all",
+"p-1.5 rounded-lg hover:bg-white/10 transition-all",
                                         isRetrying
                                             ? "text-brand"
                                             : "text-[var(--text-muted)] hover:text-white/60"
@@ -630,7 +630,7 @@ export default function PlaylistDetailPage() {
                     onDoubleClick={() => handlePlayTrack(trackIndex)}
                     onTouchEnd={handleRowTouchEnd}
                     className={cn(
-                        "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 rounded-lg hover:bg-white/[0.03] transition-all group cursor-pointer border border-transparent hover:border-white/5 touch-manipulation",
+"grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 rounded-lg hover:bg-white/[0.03] transition-all group cursor-pointer border border-transparent hover:border-white/5 touch-manipulation",
                         isCurrentlyPlaying && "bg-white/5 border-brand/30"
                     )}
                 >
@@ -646,7 +646,7 @@ export default function PlaylistDetailPage() {
                         >
                             <span
                                 className={cn(
-                                    "text-xs group-hover:hidden",
+"text-xs group-hover:hidden",
                                     isCurrentlyPlaying
                                         ? "text-brand font-bold"
                                         : "text-[var(--text-muted)]"
@@ -686,7 +686,7 @@ export default function PlaylistDetailPage() {
                         <div className="min-w-0">
                             <p
                                 className={cn(
-                                    "text-sm font-bold truncate tracking-tight",
+"text-sm font-bold truncate tracking-tight",
                                     isCurrentlyPlaying
                                         ? "text-brand"
                                         : "text-white"
@@ -935,7 +935,7 @@ export default function PlaylistDetailPage() {
                         <button
                             onClick={handlePlayPlaylist}
                             aria-label={isThisPlaylistPlaying && isPlaying ? "Pause" : "Play all"}
-                            className="h-12 w-12 rounded-lg bg-brand hover:bg-[#f97316] hover:scale-105 flex items-center justify-center shadow-lg shadow-[#fca208]/20 transition-all"
+                            className="h-12 w-12 rounded-lg bg-brand hover:bg-[#f97316] hover:scale-105 flex items-center justify-center transition-all"
                         >
                             {isThisPlaylistPlaying && isPlaying ? (
                                 <Pause className="w-5 h-5 fill-current text-black" />
@@ -985,7 +985,7 @@ export default function PlaylistDetailPage() {
                                 onClick={handleShare}
                                 disabled={shareLoading}
                                 className={cn(
-                                    "h-8 w-8 rounded-lg flex items-center justify-center transition-all",
+"h-8 w-8 rounded-lg flex items-center justify-center transition-all",
                                     showSharePopover
                                         ? "text-brand"
                                         : "text-[var(--text-muted)] hover:text-white/60",
@@ -1063,7 +1063,7 @@ export default function PlaylistDetailPage() {
                             onClick={handleTogglePublic}
                             disabled={isUpdatingPlaylist}
                             className={cn(
-                                "h-8 w-8 rounded-lg flex items-center justify-center transition-all",
+"h-8 w-8 rounded-lg flex items-center justify-center transition-all",
                                 playlist.isPublic
                                     ? "text-brand"
                                     : "text-[var(--text-muted)] hover:text-white/60",
@@ -1084,7 +1084,7 @@ export default function PlaylistDetailPage() {
                         onClick={handleToggleHide}
                         disabled={isHiding}
                         className={cn(
-                            "h-8 w-8 rounded-lg flex items-center justify-center transition-all",
+"h-8 w-8 rounded-lg flex items-center justify-center transition-all",
                             playlist.isHidden
                                 ? "text-brand hover:text-[#f97316]"
                                 : "text-[var(--text-muted)] hover:text-white/60",
