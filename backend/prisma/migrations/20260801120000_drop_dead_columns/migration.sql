@@ -1,23 +1,30 @@
 -- Columns with no reader anywhere in the codebase.
 --
 -- DownloadJob.triedReleases / releaseIndex were Soulseek release-cycling state:
--- the client walked a candidate list and remembered where it was. Lidarr picks
--- its own release, so nothing has written or read them since the tear-out.
+-- the client walked a candidate list and remembered where it was. Nothing has
+-- written or read them in a long time, they are absent from schema.prisma, and
+-- grepping this tree finds no consumer. They go.
 --
--- SystemSettings.maxConcurrentDownloads is a tear-out artefact. The migration
--- that renamed soulseekConcurrentDownloads -> concurrentDownloads left it
--- sitting next to a pre-existing near-identical key; `concurrentDownloads` is
--- the live one (acquisitionService, spotifyImport, discoverWeekly and the UI
--- all read it) and this one was only ever echoed back by the settings CRUD.
+-- NOT DROPPED HERE, though upstream's version of this migration drops them:
+-- SystemSettings.maxConcurrentDownloads, downloadRetryAttempts and
+-- audioAnalyzerWorkers. Every reason upstream gives is true only on that line:
 --
--- SystemSettings.downloadRetryAttempts is the same shape: settings CRUD only.
+--   * maxConcurrentDownloads is called "a tear-out artefact" left beside
+--     `concurrentDownloads` after a rename. This line never did that rename --
+--     there is no concurrentDownloads column here, so maxConcurrentDownloads IS
+--     the live key, and services/acquisition reads it.
+--   * audioAnalyzerWorkers is called dead because "the vibe-engine replaced"
+--     the audio-analyzer service. This line still ships the audio analyzer, and
+--     the setting is read by the backend and rendered by two frontend files.
+--   * downloadRetryAttempts has no reader today, but it is still declared in
+--     schema.prisma, and Prisma fails EVERY SystemSettings query when the
+--     schema names a column the database lacks.
 --
--- SystemSettings.audioAnalyzerWorkers configured the audio-analyzer service,
--- which the vibe-engine replaced. It was not even in the backend's settings
--- schema, so the server never accepted it -- the frontend carried a field the
--- API rejected and nothing consumed.
+-- Dropping them here took the whole server down at boot: the enrichment worker
+-- could not read settings at all
+-- ("The column SystemSettings.maxConcurrentDownloads does not exist"). That was
+-- invisible to typecheck and to the test suite, because both halves agreed --
+-- the schema kept the columns and only the SQL removed them. It surfaced the
+-- first time the application was actually started against a migrated database.
 ALTER TABLE "DownloadJob"    DROP COLUMN IF EXISTS "triedReleases";
 ALTER TABLE "DownloadJob"    DROP COLUMN IF EXISTS "releaseIndex";
-ALTER TABLE "SystemSettings" DROP COLUMN IF EXISTS "maxConcurrentDownloads";
-ALTER TABLE "SystemSettings" DROP COLUMN IF EXISTS "downloadRetryAttempts";
-ALTER TABLE "SystemSettings" DROP COLUMN IF EXISTS "audioAnalyzerWorkers";
