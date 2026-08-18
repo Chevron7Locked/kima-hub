@@ -18,7 +18,7 @@ export function LibraryHeader({ totalItems, activeTab }: LibraryHeaderProps) {
       <div className="flex items-baseline justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-3">
-            COLLECTION
+            Collection
           </h1>
           <p className="text-sm font-mono text-gray-500">
             Personal audio archive / Full catalog access

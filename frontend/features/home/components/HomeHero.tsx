@@ -2,9 +2,9 @@
 
 const getGreeting = () => {
     const hour = new Date().getHours();
-    if (hour < 12) return "GOOD\nMORNING";
-    if (hour < 18) return "GOOD\nAFTERNOON";
-    return "GOOD\nEVENING";
+    if (hour < 12) return "Good\nmorning";
+    if (hour < 18) return "Good\nafternoon";
+    return "Good\nevening";
 };
 
 export function HomeHero() {

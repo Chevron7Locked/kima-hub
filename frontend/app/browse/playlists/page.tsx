@@ -292,9 +292,9 @@ export default function BrowsePlaylistsPage() {
                         </span>
                     </div>
                     <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-2">
-                        BROWSE
+                        Browse
                         <br />
-                        <span className="text-[#a855f7]">PLAYLISTS</span>
+                        <span className="text-[#a855f7]">Playlists</span>
                     </h1>
                     <p className="text-sm font-mono text-white/40 uppercase tracking-wider">
                         Discover and import playlists from Deezer

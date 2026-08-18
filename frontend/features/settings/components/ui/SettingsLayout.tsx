@@ -103,7 +103,7 @@ export function SettingsLayout({ children, sidebarItems, isAdmin }: SettingsLayo
                         </div>
                         <div>
                             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none">
-                                SETTINGS
+                                Settings
                             </h1>
                         </div>
                     </div>
