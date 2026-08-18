@@ -985,6 +985,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             min={512}
                             max={20480}
                             step={512}
+                            aria-label="User cache size"
                             value={settings.maxCacheSizeMb}
                             onChange={(e) =>
                                 onUpdate({
@@ -1008,6 +1009,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             type="range"
                             min={1}
                             max={50}
+                            aria-label="Transcode cache size"
                             value={settings.transcodeCacheMaxGb}
                             onChange={(e) =>
                                 onUpdate({
@@ -1062,6 +1064,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 type="range"
                                 min={1}
                                 max={5}
+                                aria-label="Metadata Fetch Speed"
                                 value={enrichmentSpeed}
                                 disabled={isConcurrencyLoading}
                                 onChange={(e) => {
@@ -1115,6 +1118,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 type="range"
                                 min={1}
                                 max={8}
+                                aria-label="Audio Analysis Workers"
                                 value={workersConfig?.workers ?? 2}
                                 disabled={isWorkersLoading}
                                 onChange={(e) => {
@@ -1157,6 +1161,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 type="range"
                                 min={1}
                                 max={8}
+                                aria-label="Vibe Embedding Workers"
                                 value={clapWorkersConfig?.workers ?? 2}
                                 disabled={isClapWorkersLoading}
                                 onChange={(e) => {

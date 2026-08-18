@@ -33,7 +33,9 @@ export function LibraryTabs({ activeTab, onTabChange }: LibraryTabsProps) {
               tabIndex={0}
               onClick={() => onTabChange(tab.id)}
               className={cn(
-                "relative px-6 py-3 text-sm font-black uppercase tracking-wider rounded-xl transition-all duration-300 flex items-center gap-2.5 overflow-hidden group",
+                // Tighter padding and gap below sm: at full desktop padding the labels
+                // clip inside the pill on a phone.
+                "relative px-2.5 py-2.5 sm:px-6 sm:py-3 text-sm font-black uppercase tracking-wider rounded-xl transition-all duration-300 flex items-center gap-2 overflow-hidden group",
                 isActive
                   ? "text-black scale-105 shadow-lg"
                   : "text-gray-400 hover:text-white hover:scale-105 bg-white/5 hover:bg-white/10"
@@ -53,7 +55,7 @@ export function LibraryTabs({ activeTab, onTabChange }: LibraryTabsProps) {
               )}
 
               {/* Content */}
-              <span className="relative z-10 flex items-center gap-2.5">
+              <span className="relative z-10 flex items-center gap-2 sm:gap-2.5">
                 <Icon className="w-4 h-4" />
                 {tab.label}
               </span>

@@ -9,8 +9,11 @@ interface SettingsRowProps {
 
 export function SettingsRow({ label, description, children, htmlFor }: SettingsRowProps) {
     return (
-        <div className="flex items-center justify-between py-3 min-h-[56px]">
-            <div className="flex-1 pr-4">
+        // Mobile: stack the label above the control so wide inputs (Server URL,
+        // paths, API keys) get the full row width instead of squeezing the
+        // description into a cramped column. sm+ restores the two-column row.
+        <div className="flex flex-col gap-1.5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:min-h-[56px]">
+            <div className="sm:flex-1">
                 <label
                     htmlFor={htmlFor}
                     className="text-sm font-medium text-white cursor-pointer"
@@ -21,7 +24,7 @@ export function SettingsRow({ label, description, children, htmlFor }: SettingsR
                     <p className="text-xs font-mono text-white/30 mt-0.5 uppercase tracking-wider">{description}</p>
                 )}
             </div>
-            <div className="shrink-0">
+            <div className="w-full sm:w-auto sm:shrink-0">
                 {children}
             </div>
         </div>
