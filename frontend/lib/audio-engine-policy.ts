@@ -668,6 +668,16 @@ export function transition(
                 return { snapshot: snap, effects: [] };
             }
 
+            // A pause landed while this play() call was in flight. pause-requested
+            // always flips status to "paused" synchronously (cls-independent --
+            // even a cross-tab "system" pause does this, see pause-requested
+            // above), so a rejection arriving after that point is reporting on a
+            // play() attempt the user/session has since superseded. Resurrecting
+            // playback here would revert the pause.
+            if (snap.status === "paused") {
+                return { snapshot: snap, effects: [] };
+            }
+
             if (event.reason === "not-allowed") {
                 return {
                     snapshot: {
@@ -756,6 +766,14 @@ export function transition(
         case "gapless-swapped": {
             // The controller already swapped elements and is playing -- this is
             // a pure bookkeeping transition only (no set-src-and-load/call-play).
+            //
+            // NOT ported from upstream 0c0d594d: making this intent-aware, so a
+            // pause tapped exactly at the boundary is not reverted. That change
+            // reads snap.intent here, and on this line intent is not reliably
+            // "play" during a genuine advance -- applying it paused every
+            // gapless swap, which the controller's own gapless test caught. It
+            // needs the controller half of that commit, which is not part of
+            // this release.
             return {
                 snapshot: {
                     ...snap,

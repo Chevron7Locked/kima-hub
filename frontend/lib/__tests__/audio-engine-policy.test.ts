@@ -1387,3 +1387,62 @@ describe("gapless-swapped", () => {
         expect(snapshot.resumeOnForeground).toBe(false);
     });
 });
+
+// ---------------------------------------------------------------------------
+// play-rejected must not resurrect audio the user already paused
+// ---------------------------------------------------------------------------
+
+describe("play-rejected against an already-paused snapshot", () => {
+    // A pause can land while a play() call is still in flight. pause-requested
+    // flips status to "paused" synchronously, so a rejection arriving after that
+    // is reporting on an attempt the user has already superseded. Acting on it
+    // reverted the pause -- audio came back after an explicit stop.
+    it("is ignored entirely, leaving the pause standing", () => {
+        const base = snap({
+            status: "paused",
+            src: "http://x.com/a.mp3",
+            generation: 3,
+            pauseClass: "user",
+        });
+
+        const { snapshot, effects } = tr(base, {
+            type: "play-rejected",
+            reason: "not-allowed",
+            generation: 3,
+            now: NOW,
+        });
+
+        expect(snapshot.status).toBe("paused");
+        expect(snapshot.pauseClass).toBe("user");
+        expect(effects).toEqual([]);
+    });
+
+    it("is ignored for the abort reason too", () => {
+        const base = snap({ status: "paused", src: "http://x.com/a.mp3", generation: 1 });
+
+        const { snapshot, effects } = tr(base, {
+            type: "play-rejected",
+            reason: "abort",
+            generation: 1,
+            now: NOW,
+        });
+
+        expect(snapshot.status).toBe("paused");
+        expect(effects).toEqual([]);
+    });
+
+    it("still handles a rejection when the user has NOT paused", () => {
+        // The guard must not swallow the real case it was built around: a
+        // not-allowed rejection while the engine believes it is playing.
+        const base = snap({ status: "playing", src: "http://x.com/a.mp3", generation: 2 });
+
+        const { snapshot } = tr(base, {
+            type: "play-rejected",
+            reason: "not-allowed",
+            generation: 2,
+            now: NOW,
+        });
+
+        expect(snapshot.status).toBe("blocked");
+    });
+});
