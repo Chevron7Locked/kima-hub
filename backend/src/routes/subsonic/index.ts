@@ -13,6 +13,34 @@ import { hashApiKey } from "../../services/users/apiKeyStore";
 // Redis, which being unreachable is ordinary traffic rather than an edge case.
 import { wrap } from "./mappers";
 
+/**
+ * Bound a queue call so an unreachable Redis answers instead of hanging.
+ *
+ * wrap() above is not enough on its own, and that distinction cost a real
+ * measurement: when Redis is down, ioredis does NOT reject: it queues the
+ * command and retries the connection, so `getJobCounts` stays PENDING forever.
+ * wrap() can only answer for a promise that settles. Measured against this
+ * server with Redis stopped, the request produced no response at all and the
+ * client gave up after 25 seconds.
+ *
+ * A deadline turns "never settles" into a rejection, which wrap() then turns
+ * into a Subsonic error. Five seconds is far longer than a healthy local queue
+ * read (measured at ~6ms) and far shorter than any client's patience.
+ */
+const QUEUE_DEADLINE_MS = 5_000;
+
+function withQueueDeadline<T>(work: Promise<T>, label: string): Promise<T> {
+    return Promise.race([
+        work,
+        new Promise<never>((_, reject) =>
+            setTimeout(
+                () => reject(new Error(`${label} timed out after ${QUEUE_DEADLINE_MS}ms`)),
+                QUEUE_DEADLINE_MS
+            ).unref()
+        ),
+    ]);
+}
+
 import { compatRouter } from "./compat";
 import { libraryRouter } from "./library";
 import { playbackRouter } from "./playback";
@@ -118,7 +146,7 @@ subsonicRouter.all("/getOpenSubsonicExtensions.view", (req: Request, res: Respon
 });
 
 subsonicRouter.all("/getScanStatus.view", wrap(async (req: Request, res: Response) => {
-    const counts = await scanQueue.getJobCounts("active", "waiting", "delayed");
+    const counts = await withQueueDeadline(scanQueue.getJobCounts("active", "waiting", "delayed"), "getJobCounts");
     const queued = (counts.active || 0) + (counts.waiting || 0) + (counts.delayed || 0);
     subsonicOk(req, res, {
         scanStatus: {
@@ -140,12 +168,15 @@ subsonicRouter.all("/startScan.view", wrap(async (req: Request, res: Response) =
         return subsonicError(req, res, SubsonicError.GENERIC, "Music path not configured");
     }
 
-    await scanQueue.add("scan", {
-        userId: req.user!.id,
-        musicPath: config.music.musicPath,
-    });
+    await withQueueDeadline(
+        scanQueue.add("scan", {
+            userId: req.user!.id,
+            musicPath: config.music.musicPath,
+        }),
+        "scanQueue.add"
+    );
 
-    const counts = await scanQueue.getJobCounts("active", "waiting", "delayed");
+    const counts = await withQueueDeadline(scanQueue.getJobCounts("active", "waiting", "delayed"), "getJobCounts");
     const queued = (counts.active || 0) + (counts.waiting || 0) + (counts.delayed || 0);
 
     subsonicOk(req, res, {
