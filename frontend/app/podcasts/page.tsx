@@ -631,7 +631,7 @@ export default function PodcastsPage() {
                                     <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-[#3b82f6] to-[#2563eb]" />
                                     <div className="flex flex-col items-center text-center">
                                         <Mic2 className="w-16 h-16 text-gray-700 mb-6" />
-                                        <h2 className="text-2xl font-bold tracking-tight text-white mb-2 uppercase">
+                                        <h2 className="text-2xl font-bold tracking-tight text-white mb-2">
                                             Discover Podcasts
                                         </h2>
                                         <p className="text-sm font-mono text-gray-500 max-w-md">

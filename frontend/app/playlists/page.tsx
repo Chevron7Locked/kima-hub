@@ -586,7 +586,7 @@ function EmptyState({
                     <div className="w-16 h-16 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center mb-6">
                         <ListMusic className="w-8 h-8 text-white/10" />
                     </div>
-                    <h2 className="text-2xl font-bold tracking-tight text-white mb-2 uppercase">
+                    <h2 className="text-2xl font-bold tracking-tight text-white mb-2">
                         No hidden playlists
                     </h2>
                     <p className="text-xs font-mono text-white/30 max-w-sm uppercase tracking-wider leading-relaxed">
@@ -905,7 +905,7 @@ export default function PlaylistsPage() {
                             {/* Section header */}
                             <div className="flex items-center gap-3 mb-6">
                                 <span className="w-1 h-8 bg-gradient-to-b from-brand to-[#f97316] rounded-full shrink-0" />
-                                <h2 className="text-2xl font-bold tracking-tight uppercase">
+                                <h2 className="text-2xl font-bold tracking-tight">
                                     {showHiddenTab ? "Hidden" : "All Playlists"}
                                 </h2>
                                 <span className="text-xs font-mono text-brand">

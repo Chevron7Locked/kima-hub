@@ -386,7 +386,7 @@ export default function DeezerPlaylistDetailPage() {
                         <div>
                             <div className="flex items-center gap-3 mb-6">
                                 <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full shrink-0" />
-                                <h2 className="text-2xl font-bold tracking-tight uppercase">Tracks</h2>
+                                <h2 className="text-2xl font-bold tracking-tight">Tracks</h2>
                                 <span className="text-xs font-mono text-[#a855f7]">
                                     {playlist.trackCount}
                                 </span>

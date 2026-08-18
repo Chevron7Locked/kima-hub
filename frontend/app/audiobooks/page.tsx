@@ -51,7 +51,7 @@ function SectionHeader({ title, count, children }: { title: string; count?: numb
     return (
         <div className="flex items-center gap-3 mb-6">
             <span className="w-1 h-8 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full shrink-0" />
-            <h2 className="text-2xl font-bold tracking-tight uppercase">{title}</h2>
+            <h2 className="text-2xl font-bold tracking-tight">{title}</h2>
             {count !== undefined && (
                 <span className="text-xs font-mono text-[#f59e0b]">{count}</span>
             )}

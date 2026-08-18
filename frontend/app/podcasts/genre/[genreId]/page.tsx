@@ -133,7 +133,7 @@ export default function GenrePage() {
                             </span>
                         </div>
 
-                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-3 uppercase">
+                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-3">
                             {genre.name}
                         </h1>
                         <p className="text-sm font-mono text-gray-500">

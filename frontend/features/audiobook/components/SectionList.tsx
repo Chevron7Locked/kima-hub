@@ -21,7 +21,7 @@ export function SectionList({
         <section>
             <div className="flex items-center gap-3 mb-6">
                 <span className="w-1 h-8 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full shrink-0" />
-                <h2 className="text-2xl font-bold tracking-tight uppercase">Chapters</h2>
+                <h2 className="text-2xl font-bold tracking-tight">Chapters</h2>
                 <span className="text-xs font-mono text-[#f59e0b]">
                     {sections.length}
                 </span>

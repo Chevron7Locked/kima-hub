@@ -27,7 +27,7 @@ export function SimilarPodcasts({ podcasts }: SimilarPodcastsProps) {
         <section>
             <div className="flex items-center gap-3 mb-6">
                 <span className="w-1 h-8 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full shrink-0" />
-                <h2 className="text-2xl font-bold tracking-tight uppercase">Fans Also Like</h2>
+                <h2 className="text-2xl font-bold tracking-tight">Fans Also Like</h2>
                 <span className="text-xs font-mono text-[#3b82f6]">
                     {podcasts.length}
                 </span>

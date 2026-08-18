@@ -55,7 +55,7 @@ function SectionHeader({
     return (
         <div className="flex items-center gap-3 mb-6">
             <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full shrink-0" />
-            <h2 className="text-2xl font-bold tracking-tight uppercase">
+            <h2 className="text-2xl font-bold tracking-tight">
                 {title}
             </h2>
             {count !== undefined && (

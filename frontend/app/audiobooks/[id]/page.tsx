@@ -103,7 +103,7 @@ export default function AudiobookDetailPage() {
                             <section>
                                 <div className="flex items-center gap-3 mb-4">
                                     <span className="w-1 h-6 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full shrink-0" />
-                                    <h2 className="text-xl font-bold tracking-tight uppercase">About</h2>
+                                    <h2 className="text-xl font-bold tracking-tight">About</h2>
                                     <span className="flex-1 border-t border-white/10" />
                                 </div>
                                 <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[var(--bg-primary)] p-5">
@@ -124,7 +124,7 @@ export default function AudiobookDetailPage() {
                             <section>
                                 <div className="flex items-center gap-3 mb-4">
                                     <span className="w-1 h-6 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full shrink-0" />
-                                    <h2 className="text-xl font-bold tracking-tight uppercase">Series</h2>
+                                    <h2 className="text-xl font-bold tracking-tight">Series</h2>
                                     <span className="flex-1 border-t border-white/10" />
                                 </div>
                                 <div className="flex items-center gap-3 text-sm">
