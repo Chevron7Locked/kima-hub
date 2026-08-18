@@ -295,6 +295,22 @@ code {
         min-height: 44px;
     }
 
+    /* Width matters as much as height for an icon button. The track rows on an
+     * artist page carried ten 32x44 play buttons and eight at 28x44 -- tall
+     * enough after the rule above, still half a fingertip wide.
+     *
+     * min-width is the riskier of the two, since a row of controls that grows
+     * sideways can push a layout past the viewport. Measured before shipping
+     * on the artist page, the tracks tab of the collection, podcasts and
+     * settings: every narrow control reaches 44px and none of the four gains
+     * any horizontal overflow. textarea is left out -- it is already
+     * full-width wherever it appears. */
+    button,
+    input,
+    select {
+        min-width: 44px;
+    }
+
     /* The play button is the exception, because it is the one action a card
      * is actually for. On a touch screen it stops hiding and simply stays.
      *
