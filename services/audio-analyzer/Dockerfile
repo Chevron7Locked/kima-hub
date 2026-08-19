@@ -43,27 +43,32 @@ RUN mkdir -p /app/models
 
 # Download MusiCNN models from essentia.upf.edu/models/
 # Base embedding model
-RUN curl -L -o /app/models/msd-musicnn-1.pb \
+# Model downloads are retried because essentia.upf.edu is intermittently
+# unreachable: the same URL was observed returning HTTP 200 on one attempt and
+# failing to connect on the next, minutes apart. Nine separate downloads with
+# no retry meant a single blip anywhere in the chain failed the whole image
+# build. -f is there so an HTTP error page is never silently saved as a model.
+RUN curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/msd-musicnn-1.pb \
     "https://essentia.upf.edu/models/autotagging/msd/msd-musicnn-1.pb"
 
 # Mood classification heads (using MusiCNN embeddings)
-RUN curl -L -o /app/models/mood_happy-msd-musicnn-1.pb \
+RUN curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_happy-msd-musicnn-1.pb \
     "https://essentia.upf.edu/models/classification-heads/mood_happy/mood_happy-msd-musicnn-1.pb" && \
-    curl -L -o /app/models/mood_sad-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_sad-msd-musicnn-1.pb \
     "https://essentia.upf.edu/models/classification-heads/mood_sad/mood_sad-msd-musicnn-1.pb" && \
-    curl -L -o /app/models/mood_relaxed-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_relaxed-msd-musicnn-1.pb \
     "https://essentia.upf.edu/models/classification-heads/mood_relaxed/mood_relaxed-msd-musicnn-1.pb" && \
-    curl -L -o /app/models/mood_aggressive-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_aggressive-msd-musicnn-1.pb \
     "https://essentia.upf.edu/models/classification-heads/mood_aggressive/mood_aggressive-msd-musicnn-1.pb" && \
-    curl -L -o /app/models/mood_party-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_party-msd-musicnn-1.pb \
     "https://essentia.upf.edu/models/classification-heads/mood_party/mood_party-msd-musicnn-1.pb" && \
-    curl -L -o /app/models/mood_acoustic-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_acoustic-msd-musicnn-1.pb \
     "https://essentia.upf.edu/models/classification-heads/mood_acoustic/mood_acoustic-msd-musicnn-1.pb" && \
-    curl -L -o /app/models/mood_electronic-msd-musicnn-1.pb \
+    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_electronic-msd-musicnn-1.pb \
     "https://essentia.upf.edu/models/classification-heads/mood_electronic/mood_electronic-msd-musicnn-1.pb"
 
 # Other classification heads
-RUN curl -L -o /app/models/danceability-msd-musicnn-1.pb \
+RUN curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/danceability-msd-musicnn-1.pb \
     "https://essentia.upf.edu/models/classification-heads/danceability/danceability-msd-musicnn-1.pb"
 
 # Verify models downloaded

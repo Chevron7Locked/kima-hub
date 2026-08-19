@@ -2,6 +2,11 @@
 laion-clap>=1.1.4
 torch>=2.0.0
 torchaudio>=2.0.0
+# laion_clap imports torchvision.ops.misc (clap_module/utils.py) but does not
+# declare it, so the image fails to build at the model-verification step with
+# "ModuleNotFoundError: No module named 'torchvision'". Pinned alongside torch
+# because the two must agree on their shared C++ ABI.
+torchvision>=0.15.0
 transformers>=4.30.0
 librosa>=0.10.0
 
