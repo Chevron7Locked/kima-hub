@@ -248,17 +248,65 @@ async function checkPostgresConnection() {
     }
 }
 
-async function checkRedisConnection() {
-    try {
-        // Check if Redis client is actually connected
-        // The redis client has automatic reconnection, so we need to check status first
-        if (redisClient.status !== "ready") {
-            throw new Error(
-                "Redis client is not ready - connection failed or still connecting"
+/**
+ * How long to let Redis finish connecting before giving up on it at boot.
+ *
+ * Ten seconds is generous for a local socket and still short enough that a
+ * genuinely absent Redis fails the container fast rather than hanging a
+ * deployment.
+ */
+const REDIS_READY_TIMEOUT_MS = 10_000;
+
+/**
+ * Wait for the client to reach "ready", rather than asking once and giving up.
+ *
+ * ioredis connects asynchronously. This used to read `redisClient.status` a
+ * single time the instant the process booted and exit(1) if it was anything
+ * but "ready" -- which is a race the backend loses whenever it starts at the
+ * same moment as Redis, exactly what happens on `docker compose up` and on any
+ * restart where Redis has not finished accepting connections yet. The symptom
+ * is a backend that refuses to start against a Redis that is perfectly
+ * healthy and answering PING from the same host.
+ */
+async function waitForRedisReady(): Promise<void> {
+    if (redisClient.status === "ready") return;
+
+    await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+            cleanup();
+            reject(
+                new Error(
+                    `Redis did not become ready within ${REDIS_READY_TIMEOUT_MS}ms ` +
+                        `(last status: ${redisClient.status})`
+                )
             );
+        }, REDIS_READY_TIMEOUT_MS);
+
+        const onReady = () => {
+            cleanup();
+            resolve();
+        };
+        // A connection error is not fatal on its own -- ioredis retries -- so it
+        // is logged and the timeout above remains the decider.
+        const onError = (err: Error) => {
+            logger.debug(`Redis still connecting: ${err.message}`);
+        };
+        function cleanup() {
+            clearTimeout(timer);
+            redisClient.off("ready", onReady);
+            redisClient.off("error", onError);
         }
 
-        // If connected, verify with ping
+        redisClient.on("ready", onReady);
+        redisClient.on("error", onError);
+    });
+}
+
+async function checkRedisConnection() {
+    try {
+        await waitForRedisReady();
+
+        // Ready is necessary but not sufficient: ask for a round trip.
         await redisClient.ping();
         logger.debug("✓ Redis connection verified");
     } catch (error) {
