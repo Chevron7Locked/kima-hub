@@ -356,7 +356,7 @@ export default function VibePage() {
                             />
                             {/* Desktop/Galaxy song-path banner -- desktop only; mobile gets the sheet hint */}
                             {driftSourceId && !isMobile && !isTablet && (
-                                <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 bg-black/80 text-[var(--text-secondary)] px-4 py-2 rounded-lg text-sm backdrop-blur-sm border border-[var(--color-brand)]/20 flex items-center gap-3">
+                                <div className="absolute top-16 left-1/2 -translate-x-1/2 z-(--z-raised) bg-black/80 text-[var(--text-secondary)] px-4 py-2 rounded-lg text-sm backdrop-blur-sm border border-[var(--color-brand)]/20 flex items-center gap-3">
                                     <span className="w-2 h-2 rounded-full bg-[var(--color-brand)]/60 animate-pulse" />
                                     Click destination to begin song path
                                     <button
@@ -373,7 +373,7 @@ export default function VibePage() {
 
                 {/* Desktop map-view song-path banner (galaxy view has its own inline) */}
                 {driftSourceId && effectiveView === "map" && !isMobile && !isTablet && (
-                    <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 bg-black/80 text-[var(--text-secondary)] px-4 py-2 rounded-lg text-sm backdrop-blur-sm border border-[var(--color-brand)]/20 flex items-center gap-3">
+                    <div className="absolute top-16 left-1/2 -translate-x-1/2 z-(--z-raised) bg-black/80 text-[var(--text-secondary)] px-4 py-2 rounded-lg text-sm backdrop-blur-sm border border-[var(--color-brand)]/20 flex items-center gap-3">
                         <span className="w-2 h-2 rounded-full bg-[var(--color-brand)]/60 animate-pulse" />
                         Click destination to begin song path
                         <button
@@ -393,7 +393,7 @@ export default function VibePage() {
                     onReset={handleClose}
                 />
 
-                <div className="absolute top-[max(3.5rem,calc(env(safe-area-inset-top)+3.5rem))] left-[max(0.75rem,env(safe-area-inset-left))] z-10 flex flex-col gap-1">
+                <div className="absolute top-[max(3.5rem,calc(env(safe-area-inset-top)+3.5rem))] left-[max(0.75rem,env(safe-area-inset-left))] z-(--z-raised) flex flex-col gap-1">
                     <div className="flex gap-1 rounded-lg backdrop-blur-md border border-white/8 bg-black/20 p-0.5">
                         <button
                             onClick={() => handleViewChange("map")}
@@ -446,12 +446,12 @@ export default function VibePage() {
                     />
                 )}
 
-                <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-[max(0.75rem,env(safe-area-inset-left))] z-10 text-[var(--text-muted)] text-xs font-medium">
+                <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-[max(0.75rem,env(safe-area-inset-left))] z-(--z-raised) text-[var(--text-muted)] text-xs font-medium">
                     {mapData.trackCount} tracks
                 </div>
 
                 {mode === "idle" && !onboardingDismissed && (
-                    <div className="absolute bottom-[max(2.5rem,calc(env(safe-area-inset-bottom)+2.5rem))] left-1/2 -translate-x-1/2 z-10 w-[calc(100vw-2rem)] max-w-sm animate-hint-in">
+                    <div className="absolute bottom-[max(2.5rem,calc(env(safe-area-inset-bottom)+2.5rem))] left-1/2 -translate-x-1/2 z-(--z-raised) w-[calc(100vw-2rem)] max-w-sm animate-hint-in">
                         <div className="rounded-xl border border-white/10 bg-black/75 backdrop-blur-md px-4 py-3 flex items-start gap-3 shadow-lg">
                             <div className="flex-1 min-w-0">
                                 {!(isMobile || isTablet) && (

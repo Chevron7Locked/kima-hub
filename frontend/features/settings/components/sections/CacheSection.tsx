@@ -158,7 +158,7 @@ const sliderClass = `w-32 h-1.5 bg-white/5 rounded-lg appearance-none cursor-poi
     [&::-webkit-slider-thumb]:from-brand [&::-webkit-slider-thumb]:to-[#f97316]
     [&::-webkit-slider-thumb]:shadow-lg hover:[&::-webkit-slider-thumb]:scale-110 [&::-webkit-slider-thumb]:transition-transform`;
 
-const secondaryBtnClass =`px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg 
+const secondaryBtnClass =`px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg
     hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all w-fit`;
 
 function EnrichmentFailuresList() {
@@ -201,31 +201,31 @@ const confirmMeta: Record<
     artists: {
         title: "Reset Artist Metadata?",
         message:
-"This clears all artist bios, images, and similar-artist data and re-fetches everything from Last.fm. On large libraries this can take a while.",
+        "This clears all artist bios, images, and similar-artist data and re-fetches everything from Last.fm. On large libraries this can take a while.",
         confirmText: "Reset Artists",
     },
     moodTags: {
         title: "Reset Mood Tags?",
         message:
-"This deletes all mood and vibe tags for every track. Re-running Last.fm tagging on a large library takes time.",
+        "This deletes all mood and vibe tags for every track. Re-running Last.fm tagging on a large library takes time.",
         confirmText: "Reset Mood Tags",
     },
     audioAnalysis: {
         title: "Reset Audio Analysis?",
         message:
-"This deletes BPM, key, energy, and danceability results for every track. Re-analysis is CPU-intensive and can take a long time on large libraries.",
+        "This deletes BPM, key, energy, and danceability results for every track. Re-analysis is CPU-intensive and can take a long time on large libraries.",
         confirmText: "Reset Audio Analysis",
     },
     vibeEmbeddings: {
         title: "Reset Vibe Embeddings?",
         message:
-"This deletes all CLAP audio embeddings used for vibe similarity. Re-embedding is CPU-intensive and can take a long time on large libraries.",
+        "This deletes all CLAP audio embeddings used for vibe similarity. Re-embedding is CPU-intensive and can take a long time on large libraries.",
         confirmText: "Reset Vibe Embeddings",
     },
     allEnrichment: {
         title: "Reset All Enrichment Data?",
         message:
-"This wipes everything: artist metadata, audio analysis, vibe embeddings, mood tags, and all failure records. Your entire library will be re-enriched from scratch. This is slow to rebuild on large libraries.",
+        "This wipes everything: artist metadata, audio analysis, vibe embeddings, mood tags, and all failure records. Your entire library will be re-enriched from scratch. This is slow to rebuild on large libraries.",
         confirmText: "Reset Everything",
     },
 };
@@ -313,7 +313,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                 queryKey: ["enrichment-concurrency"],
             });
             const previousConcurrency = queryClient.getQueryData([
-"enrichment-concurrency",
+                "enrichment-concurrency",
             ]);
             queryClient.setQueryData(["enrichment-concurrency"], {
                 concurrency: newConcurrency,
@@ -337,7 +337,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                 queryKey: ["analysis-workers"],
             });
             const previousWorkers = queryClient.getQueryData([
-"analysis-workers",
+                "analysis-workers",
             ]);
             queryClient.setQueryData(["analysis-workers"], {
                 workers: newWorkers,
@@ -371,7 +371,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                 queryKey: ["clap-workers"],
             });
             const previousWorkers = queryClient.getQueryData([
-"clap-workers",
+                "clap-workers",
             ]);
             queryClient.setQueryData(["clap-workers"], {
                 workers: newWorkers,
@@ -850,7 +850,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 disabled={
                                     syncing || reEnriching || isEnrichmentActive
                                 }
-                                className="px-3 py-2.5 min-h-[44px] text-xs font-semibold bg-brand text-black rounded-lg 
+                                className="px-3 py-2.5 min-h-[44px] text-xs font-semibold bg-brand text-black rounded-lg
                                 hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 {syncing ? "Syncing..." : "Sync New"}
@@ -860,7 +860,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 disabled={
                                     syncing || reEnriching || isEnrichmentActive
                                 }
-                                className="px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg 
+                                className="px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg
                                 hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                             >
                                 {reEnriching ? "Starting..." : "Re-enrich All"}
@@ -871,7 +871,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     {enrichmentState?.status === "running" ? (
                                         <button
                                             onClick={handlePause}
-                                            className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-yellow-600/20 border border-yellow-600/30 text-yellow-400 rounded-lg 
+                                            className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-yellow-600/20 border border-yellow-600/30 text-yellow-400 rounded-lg
                                             hover:bg-yellow-600/30 transition-colors"
                                         >
                                             <Pause className="w-3 h-3" />
@@ -880,7 +880,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     ) : (
                                         <button
                                             onClick={handleResume}
-                                            className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-green-600/20 border border-green-600/30 text-green-400 rounded-lg 
+                                            className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-green-600/20 border border-green-600/30 text-green-400 rounded-lg
                                             hover:bg-green-600/30 transition-colors"
                                         >
                                             <Play className="w-3 h-3" />
@@ -889,7 +889,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     )}
                                     <button
                                         onClick={handleStop}
-                                        className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-red-600/20 border border-red-600/30 text-red-400 rounded-lg 
+                                        className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-red-600/20 border border-red-600/30 text-red-400 rounded-lg
                                         hover:bg-red-600/30 transition-colors"
                                     >
                                         <StopCircle className="w-3 h-3" />
@@ -920,35 +920,35 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     <div className="mt-3 p-2 bg-white/[0.02] rounded-lg border border-white/5 text-xs">
                                         <div className="flex items-center gap-2">
                                             {enrichmentState.status ===
-"running" && (
+                                                "running" && (
                                                 <Loader2 className="w-3 h-3 animate-spin text-brand" />
                                             )}
                                             {enrichmentState.status ===
-"paused" && (
+                                                "paused" && (
                                                 <Pause className="w-3 h-3 text-yellow-400" />
                                             )}
                                             {enrichmentState.status ===
-"stopping" && (
+                                                "stopping" && (
                                                 <StopCircle className="w-3 h-3 text-red-400 animate-pulse" />
                                             )}
                                             <span className="text-[var(--text-secondary)] tabular-nums">
                                                 {enrichmentState.status ===
-"running" &&
+                                                    "running" &&
                                                     `Processing ${enrichmentState.currentPhase}...`}
                                                 {enrichmentState.status ===
-"paused" && "Enrichment paused"}
+                                                "paused" && "Enrichment paused"}
                                                 {enrichmentState.status ===
-"stopping" &&
+                                                    "stopping" &&
                                                     `Stopping... finishing ${
                                                         enrichmentState.stoppingInfo
                                                             ?.currentItem ||
-"current item"
+                                                            "current item"
                                                     }`}
                                             </span>
                                         </div>
                                         {enrichmentState.status === "running" &&
                                             enrichmentState.currentPhase ===
-"artists" &&
+                                            "artists" &&
                                             enrichmentState.artists?.current && (
                                                 <div className="mt-1 text-[var(--text-muted)] tabular-nums truncate">
                                                     Current:{" "}
@@ -960,7 +960,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                             )}
                                         {enrichmentState.status === "running" &&
                                             enrichmentState.currentPhase ===
-"tracks" &&
+                                            "tracks" &&
                                             enrichmentState.tracks?.current && (
                                                 <div className="mt-1 text-[var(--text-muted)] tabular-nums truncate">
                                                     Current:{" "}
@@ -1249,7 +1249,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     <button
                                         onClick={() => setConfirmTarget("allEnrichment")}
                                         disabled={resettingEnrichment || isEnrichmentActive}
-                                        className="px-3 py-2.5 min-h-[44px] text-xs font-semibold bg-red-600/80 text-white rounded-lg 
+                                        className="px-3 py-2.5 min-h-[44px] text-xs font-semibold bg-red-600/80 text-white rounded-lg
                                             hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                     >
                                         {resettingEnrichment ? "Resetting..." : "Reset All Enrichment Data"}

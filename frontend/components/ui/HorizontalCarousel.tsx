@@ -75,7 +75,7 @@ export function HorizontalCarousel({
                 <button
                     onClick={() => scroll("left")}
                     className={cn(
-                        "absolute left-0 top-1/2 -translate-y-1/2 z-10",
+                        "absolute left-0 top-1/2 -translate-y-1/2 z-(--z-raised)",
                         "w-10 h-10 rounded-full bg-black/80 ",
                         "flex items-center justify-center",
                         "opacity-0 group-hover/carousel:opacity-100 transition-opacity",
@@ -108,7 +108,7 @@ export function HorizontalCarousel({
                 <button
                     onClick={() => scroll("right")}
                     className={cn(
-                        "absolute right-0 top-1/2 -translate-y-1/2 z-10",
+                        "absolute right-0 top-1/2 -translate-y-1/2 z-(--z-raised)",
                         "w-10 h-10 rounded-full bg-black/80 ",
                         "flex items-center justify-center",
                         "opacity-0 group-hover/carousel:opacity-100 transition-opacity",

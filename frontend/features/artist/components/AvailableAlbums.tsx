@@ -48,7 +48,7 @@ function LazyAlbumCard({
     // Lazy-load cover art if not available
     useEffect(() => {
         if (coverArt || fetchAttempted) return;
-        
+
         const mbid = album.rgMbid || album.mbid;
         if (!mbid || mbid.startsWith("temp-")) return;
 

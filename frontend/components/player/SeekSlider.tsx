@@ -228,7 +228,7 @@ export function SeekSlider({
         <div
             ref={sliderRef}
             className={cn(
-"relative rounded-full transition-all",
+                "relative rounded-full transition-all",
                 styles.container,
                 styles.track,
                 isActive ? "cursor-pointer group" : "cursor-not-allowed",
@@ -244,7 +244,7 @@ export function SeekSlider({
         >
             <div
                 className={cn(
-"h-full rounded-full relative",
+                    "h-full rounded-full relative",
                     !isDragging && "transition-all duration-150",
                     styles.progress
                 )}
@@ -253,7 +253,7 @@ export function SeekSlider({
                 {showHandle && isActive && (
                     <div
                         className={cn(
-"absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-[#eab308] rounded-full transition-opacity ",
+                            "absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-[#eab308] rounded-full transition-opacity ",
                             isDragging
                                 ? "opacity-100 scale-125"
                                 : "opacity-0 group-hover:opacity-100"

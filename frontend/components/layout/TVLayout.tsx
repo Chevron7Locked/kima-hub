@@ -219,7 +219,7 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
 
                 <nav ref={navRef} className="tv-nav-links">
                     {tvNavigation.map((item, index) => {
-                        const isActive = pathname === item.href || 
+                        const isActive = pathname === item.href ||
                             (item.href !== "/" && pathname.startsWith(item.href));
                         const isFocused = isNavFocused && focusedTabIndex === index;
 
@@ -244,7 +244,7 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
                 <div className="flex-1" />
 
                 {/* Sync button */}
-                <button 
+                <button
                     onClick={handleSync}
                     disabled={isSyncing}
                     className="tv-sync-btn"
@@ -264,7 +264,7 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
                         <div className="tv-np-title">{title}</div>
                         <div className="tv-np-artist">{artist}</div>
                     </div>
-                    
+
                     {/* Time counter */}
                     <div className="tv-np-time">
                         {formatTime(clampedCurrentTime)} / {

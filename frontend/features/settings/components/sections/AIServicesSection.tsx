@@ -51,7 +51,7 @@ export function AIServicesSection({ settings, onUpdate, onTest, isTesting }: AIS
             description="Enhance your library with high-quality artwork"
         >
             {/* Fanart.tv */}
-            <SettingsRow 
+            <SettingsRow
                 label="Enable Fanart.tv"
                 description="Enhanced artist and album artwork"
                 htmlFor="fanart-enabled"
@@ -80,7 +80,7 @@ export function AIServicesSection({ settings, onUpdate, onTest, isTesting }: AIS
                             <button
                                 onClick={handleFanartTest}
                                 disabled={isTesting || !settings.fanartApiKey}
-                                className="px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg 
+                                className="px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg
                                     hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                             >
                                 {fanartTestStatus === "loading" ? "Testing..." : "Test Connection"}
@@ -102,7 +102,7 @@ export function AIServicesSection({ settings, onUpdate, onTest, isTesting }: AIS
                         Last.fm is pre-configured with a default key. Add your own for higher rate limits.
                     </p>
                 </div>
-                
+
                 <SettingsRow label="Last.fm API Key (Optional)">
                     <SettingsInput
                         type="password"
@@ -119,7 +119,7 @@ export function AIServicesSection({ settings, onUpdate, onTest, isTesting }: AIS
                             <button
                                 onClick={handleLastfmTest}
                                 disabled={isTesting}
-                                className="px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg 
+                                className="px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg
                                     hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                             >
                                 {lastfmTestStatus === "loading" ? "Testing..." : "Test Connection"}

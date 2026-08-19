@@ -31,7 +31,7 @@ export function KeyboardShortcutsTooltip() {
             </button>
 
             {isVisible && (
-                <div className="absolute bottom-full right-0 mb-2 w-64 bg-[var(--bg-hover)] border border-white/10 rounded-lg shadow-2xl shadow-black/50 p-4 z-50 backdrop-blur-xl">
+                <div className="absolute bottom-full right-0 mb-2 w-64 bg-[var(--bg-hover)] border border-white/10 rounded-lg shadow-2xl shadow-black/50 p-4 z-(--z-dropdown) backdrop-blur-xl">
                     {/* Pointer arrow */}
                     <div className="absolute -bottom-1 right-3 w-2 h-2 bg-[var(--bg-hover)] border-r border-b border-white/10 rotate-45" />
 

@@ -169,7 +169,7 @@ export function MiniPlayer() {
                                         style={{ width: `${progress}%` }}
                                     />
                                 </div>
-                                
+
                                 {/* Content */}
                                 <div className="relative flex items-center gap-2 pl-3 pr-2 py-3">
                                     <ChevronLeft className="w-4 h-4 text-white flex-shrink-0" />

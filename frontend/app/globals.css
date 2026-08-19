@@ -34,20 +34,22 @@
      *
      * No bounce or elastic curve is offered. They overshoot, which draws
      * attention to the animation rather than to the thing that changed.
+     *
+     * There is one curve and one default duration, and no private vocabulary
+     * beyond them. An earlier version added named easings (quint, expo) and
+     * named durations (feedback, state, layout, entrance); six months from now
+     * they would still have had no call sites, because `duration-150` already
+     * says what it means and every Tailwind user can read it. Dead vocabulary
+     * is worse than no vocabulary: it invites the next author to guess which
+     * of two systems is the live one.
+     *
+     * Durations therefore stay on Tailwind's numeric scale. What the app
+     * actually uses: 150ms for artwork zooming under a hover, 200ms as the
+     * default for a state change, 300ms for something structural opening or
+     * closing, 500ms for a section arriving.
      * ─────────────────────────────────────────────────────────────────── */
     --default-transition-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
     --default-transition-duration: 200ms;
-
-    --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1); /* smooth, refined */
-    --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1); /* snappier */
-    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1); /* decisive */
-
-    /* Durations by what the motion is for, not by number.
-     * Exits run at roughly three quarters of their entrance. */
-    --duration-feedback: 120ms; /* a press, a toggle: acknowledge and go */
-    --duration-state: 200ms; /* hover, a menu opening */
-    --duration-layout: 320ms; /* an accordion, a modal */
-    --duration-entrance: 480ms; /* a page or section arriving */
 }
 
 :root {

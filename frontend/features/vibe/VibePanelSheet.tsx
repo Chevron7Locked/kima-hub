@@ -82,7 +82,7 @@ export function VibePanelSheet({
 
     return (
         <motion.div
-            className="fixed bottom-0 left-0 right-0 z-30 bg-[var(--bg-primary)] rounded-t-2xl border-t border-white/10 flex flex-col"
+            className="fixed bottom-0 left-0 right-0 z-(--z-scene-panel) bg-[var(--bg-primary)] rounded-t-2xl border-t border-white/10 flex flex-col"
             style={{ height: sheetHeight }}
             animate={{ y: snapY[snap] }}
             transition={prefersReducedMotion

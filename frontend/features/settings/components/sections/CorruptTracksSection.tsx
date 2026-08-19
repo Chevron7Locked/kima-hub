@@ -42,7 +42,7 @@ export function CorruptTracksSection() {
                     {isLoading ? (
                         <Loader2 className="w-4 h-4 animate-spin text-[var(--text-muted)]" />
                     ) : (
-                        <span className={`text-sm tabular-nums ${count > 0 ?"text-amber-400":"text-[var(--text-muted)]"}`}>
+                        <span className={`text-sm tabular-nums ${count > 0 ? "text-amber-400": "text-[var(--text-muted)]"}`}>
                             {count} file{count !== 1 ? "s" : ""}
                         </span>
                     )}

@@ -1170,7 +1170,7 @@ export function GravityGridScene({
                 </Suspense>
             </Canvas>
 
-            <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] z-10 flex gap-2">
+            <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] z-(--z-raised) flex gap-2">
                 <button
                     onClick={() => setAnimated(!animated)}
                     className={`px-3 py-1.5 rounded-lg backdrop-blur-md border text-xs font-medium transition-colors bg-black/20 border-white/8 hover:bg-black/30 ${
@@ -1195,9 +1195,9 @@ export function GravityGridScene({
 
             {contextMenu && (
                 <>
-                    <div className="fixed inset-0 z-30" onClick={() => setContextMenu(null)} />
+                    <div className="fixed inset-0 z-(--z-scene-panel)" onClick={() => setContextMenu(null)} />
                     <div
-                        className="fixed z-40 bg-black/90 border border-white/10 rounded-xl shadow-2xl backdrop-blur-md overflow-hidden text-sm min-w-[120px]"
+                        className="fixed z-(--z-scene) bg-black/90 border border-white/10 rounded-xl shadow-2xl backdrop-blur-md overflow-hidden text-sm min-w-[120px]"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
                     >
                         {(["vibe", "similar", "drift"] as const).map((op) => {
@@ -1220,7 +1220,7 @@ export function GravityGridScene({
             )}
 
             {is3D && !isLocked && (
-                <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+                <div className="absolute inset-0 flex items-center justify-center z-(--z-scene) pointer-events-none">
                     <div className="text-center">
                         <p className="text-[var(--text-muted)] text-sm mb-1">Click to explore</p>
                         <p className="text-[var(--text-muted)] text-xs">

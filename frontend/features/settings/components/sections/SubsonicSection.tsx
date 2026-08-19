@@ -142,7 +142,7 @@ export function SubsonicSection() {
                         <button
                             onClick={handleGenerate}
                             disabled={generating}
-                            className="px-4 py-2 bg-brand text-black text-xs font-semibold rounded-lg 
+                            className="px-4 py-2 bg-brand text-black text-xs font-semibold rounded-lg
                                 hover:bg-[#f97316] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                             {generating ? "Generating..." : "Generate Token"}

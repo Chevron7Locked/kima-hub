@@ -192,12 +192,12 @@ export default function MixPage() {
     return (
         <div className="min-h-screen">
             {/* Compact Hero - Spotify Style */}
-            <div 
+            <div
                 className="relative pt-16 pb-10 px-4 md:px-8"
-                style={{ 
-                    background: mix.color 
-                        ? `${mix.color}, linear-gradient(to bottom, transparent, #1a1a1a)` 
-                        : 'linear-gradient(to bottom, rgba(88, 28, 135, 0.4), #1a1a1a, transparent)' 
+                style={{
+                    background: mix.color
+                        ? `${mix.color}, linear-gradient(to bottom, transparent, #1a1a1a)`
+                        : 'linear-gradient(to bottom, rgba(88, 28, 135, 0.4), #1a1a1a, transparent)'
                 }}
             >
                 <div className="flex items-end gap-6">

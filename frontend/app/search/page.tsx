@@ -83,7 +83,7 @@ export default function SearchPage() {
     return (
         <div className="min-h-screen relative overflow-hidden">
             {/* Main content */}
-            <div className="relative z-10 px-6 py-8 max-w-[1600px] mx-auto">
+            <div className="relative z-(--z-raised) px-6 py-8 max-w-[1600px] mx-auto">
                 <TVSearchInput initialQuery={query} onSearch={handleTVSearch} />
 
                 {/* Hero Header - Only show when no search */}

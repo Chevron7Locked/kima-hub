@@ -167,7 +167,7 @@ export function ActivityPanel({
     // Desktop: Side panel - uses transform instead of width for GPU-accelerated animation
     return (
         <div
-            className="shrink-0 h-full relative z-10"
+            className="shrink-0 h-full relative z-(--z-raised)"
             style={{ width: isOpen ? 450 : 48 }}
         >
             {/* Panel container - slides via transform (GPU-accelerated, no layout recalc) */}
@@ -183,7 +183,7 @@ export function ActivityPanel({
                 <div
                     onClick={onToggle}
                     className={cn(
-                        "absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center cursor-pointer hover:bg-[var(--bg-tertiary)] transition-colors z-10",
+                        "absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center cursor-pointer hover:bg-[var(--bg-tertiary)] transition-colors z-(--z-raised)",
                         isOpen && "pointer-events-none opacity-0"
                     )}
                     title="Open activity panel"

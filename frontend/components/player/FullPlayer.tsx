@@ -187,7 +187,7 @@ export function FullPlayer() {
                             {activeOperation.type !== 'idle' && vibeMatchScore !== null && (
                                 <span
                                     className={cn(
-"inline-flex items-center gap-1 text-micro font-semibold px-1.5 py-0.5 rounded mt-1",
+                                        "inline-flex items-center gap-1 text-micro font-semibold px-1.5 py-0.5 rounded mt-1",
                                         vibeMatchScore >= 80
                                             ? "bg-green-500/20 text-green-400"
                                             : vibeMatchScore >= 60
@@ -211,7 +211,7 @@ export function FullPlayer() {
                             <button
                                 onClick={toggleShuffle}
                                 className={cn(
-"transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
+                                    "transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                     isShuffle
                                         ? "text-[#a855f7] hover:text-[#c084fc]"
                                         : "text-[var(--text-secondary)] hover:text-white"
@@ -228,7 +228,7 @@ export function FullPlayer() {
                             <button
                                 onClick={() => skipBackward(30)}
                                 className={cn(
-"transition-all duration-200 hover:scale-110 relative disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
+                                    "transition-all duration-200 hover:scale-110 relative disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                     hasMedia
                                         ? "text-[var(--text-secondary)] hover:text-white"
                                         : "text-[var(--text-muted)]"
@@ -256,7 +256,7 @@ export function FullPlayer() {
                             <button
                                 onClick={isPlaying ? pause : resumeWithGesture}
                                 className={cn(
-"w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 relative group",
+                                    "w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 relative group",
                                     audioError
                                         ? "bg-red-500 text-white hover:scale-110 hover:bg-red-400"
                                         : hasMedia && !isBuffering
@@ -289,13 +289,13 @@ export function FullPlayer() {
                                     <div className="absolute inset-0 rounded-full bg-brand blur-md opacity-0 group-hover:opacity-50 transition-opacity duration-200" />
                                 )}
                                 {audioError ? (
-                                    <RefreshCw className="w-5 h-5 relative z-10" />
+                                    <RefreshCw className="w-5 h-5 relative z-(--z-raised)" />
                                 ) : isBuffering ? (
-                                    <Loader2 className="w-5 h-5 animate-spin relative z-10" />
+                                    <Loader2 className="w-5 h-5 animate-spin relative z-(--z-raised)" />
                                 ) : isPlaying ? (
-                                    <Pause className="w-5 h-5 relative z-10" />
+                                    <Pause className="w-5 h-5 relative z-(--z-raised)" />
                                 ) : (
-                                    <Play className="w-5 h-5 ml-0.5 relative z-10" />
+                                    <Play className="w-5 h-5 ml-0.5 relative z-(--z-raised)" />
                                 )}
                             </button>
 
@@ -313,7 +313,7 @@ export function FullPlayer() {
                             <button
                                 onClick={() => skipForward(30)}
                                 className={cn(
-"transition-all duration-200 hover:scale-110 relative disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
+                                    "transition-all duration-200 hover:scale-110 relative disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                     hasMedia
                                         ? "text-[var(--text-secondary)] hover:text-white"
                                         : "text-[var(--text-muted)]"
@@ -332,7 +332,7 @@ export function FullPlayer() {
                             <button
                                 onClick={toggleRepeat}
                                 className={cn(
-"transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
+                                    "transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                     repeatMode !== "off"
                                         ? "text-[#a855f7] hover:text-[#c084fc]"
                                         : "text-[var(--text-secondary)] hover:text-white"
@@ -366,7 +366,7 @@ export function FullPlayer() {
                                 <button
                                     onClick={handleVibeToggle}
                                     className={cn(
-"transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
+                                        "transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                         !hasMedia || playbackType !== "track"
                                             ? "text-[var(--text-muted)]"
                                             : activeOperation.type !== 'idle'
@@ -403,7 +403,7 @@ export function FullPlayer() {
                                 <button
                                     onClick={handleLyricsToggle}
                                     className={cn(
-"transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
+                                        "transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                         !hasMedia
                                             ? "text-[var(--text-muted)]"
                                             : isLyricsActive
@@ -449,7 +449,7 @@ export function FullPlayer() {
                         <div className="w-full flex items-center gap-3">
                             <span
                                 className={cn(
-"text-xs text-right tabular-nums font-medium tabular-nums",
+                                    "text-xs text-right tabular-nums font-medium tabular-nums",
                                     hasMedia
                                         ? "text-[var(--text-secondary)]"
                                         : "text-[var(--text-muted)]",
@@ -470,7 +470,7 @@ export function FullPlayer() {
                             />
                             <span
                                 className={cn(
-"text-xs tabular-nums font-medium tabular-nums",
+                                    "text-xs tabular-nums font-medium tabular-nums",
                                     hasMedia
                                         ? "text-[var(--text-secondary)]"
                                         : "text-[var(--text-muted)]",
@@ -528,7 +528,7 @@ export function FullPlayer() {
                         <button
                             onClick={() => setPlayerMode("overlay")}
                             className={cn(
-"transition-all duration-200 border-l border-white/[0.08] pl-3",
+                                "transition-all duration-200 border-l border-white/[0.08] pl-3",
                                 hasMedia
                                     ? "text-[var(--text-secondary)] hover:text-white hover:scale-110"
                                     : "text-[var(--text-muted)] cursor-not-allowed"

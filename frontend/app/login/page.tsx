@@ -138,7 +138,7 @@ export default function LoginPage() {
             </div>
 
             {/* Login Form - Centered */}
-            <div className="relative z-20 min-h-screen flex items-center justify-center p-4">
+            <div className="relative z-(--z-raised) min-h-screen flex items-center justify-center p-4">
                 <div className="w-full max-w-md">
                     {/* Logo */}
                     <div className="flex items-center justify-center mb-8">
@@ -150,7 +150,7 @@ export default function LoginPage() {
                                     alt="Kima"
                                     width={40}
                                     height={40}
-                                    className="relative z-10 drop-shadow-2xl"
+                                    className="relative z-(--z-raised) drop-shadow-2xl"
                                 />
                             </div>
                             <span className="text-3xl font-bold text-white">

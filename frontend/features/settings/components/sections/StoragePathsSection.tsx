@@ -41,7 +41,7 @@ export function StoragePathsSection({ settings, onUpdate }: StoragePathsSectionP
                 />
             </SettingsRow>
 
-            <SettingsRow 
+            <SettingsRow
                 label="Download path"
                 description="Path for new downloads"
             >

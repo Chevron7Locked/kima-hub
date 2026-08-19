@@ -276,7 +276,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                                         }
                                     >
                                         {/* Icon */}
-                                        <div className="relative z-10">
+                                        <div className="relative z-(--z-raised)">
                                             {isGenerating ? (
                                                 <Loader2 className="w-8 h-8 text-white animate-spin" />
                                             ) : (
@@ -285,7 +285,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                                         </div>
 
                                         {/* Label */}
-                                        <span className="relative z-10 text-sm font-semibold text-white drop-shadow-lg">
+                                        <span className="relative z-(--z-raised) text-sm font-semibold text-white drop-shadow-lg">
                                             {config.label}
                                         </span>
 

@@ -359,7 +359,7 @@ export default function PodcastsPage() {
 
                                 {/* Search */}
                                 <div className="relative w-64 md:w-80" ref={dropdownRef}>
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] z-10" />
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] z-(--z-raised)" />
                                     <input
                                         type="text"
                                         value={searchQuery}
@@ -373,7 +373,7 @@ export default function PodcastsPage() {
                                         className="w-full pl-10 pr-4 py-2.5 bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#3b82f6]/50 transition-all text-sm tabular-nums"
                                     />
                                     {isSearching && (
-                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 z-10">
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 z-(--z-raised)">
                                             <GradientSpinner size="sm" />
                                         </div>
                                     )}
@@ -384,7 +384,7 @@ export default function PodcastsPage() {
                                             id="podcast-search-listbox"
                                             role="listbox"
                                             aria-label="Podcast search results"
-                                            className="absolute top-full left-0 mt-2 w-full bg-[var(--bg-secondary)] border-2 border-white/10 rounded-lg shadow-2xl overflow-hidden z-50 max-h-96 overflow-y-auto"
+                                            className="absolute top-full left-0 mt-2 w-full bg-[var(--bg-secondary)] border-2 border-white/10 rounded-lg shadow-2xl overflow-hidden z-(--z-dropdown) max-h-96 overflow-y-auto"
                                         >
                                             {searchResults.map((result) => {
                                                 const imageUrl = getProxiedImageUrl(result.coverUrl);
@@ -446,7 +446,7 @@ export default function PodcastsPage() {
                                         searchResults.length === 0 &&
                                         !isSearching &&
                                         searchQuery.length >= 2 && (
-                                            <div className="absolute top-full left-0 mt-2 w-full bg-[var(--bg-secondary)] border-2 border-white/10 rounded-lg shadow-2xl p-4 z-50">
+                                            <div className="absolute top-full left-0 mt-2 w-full bg-[var(--bg-secondary)] border-2 border-white/10 rounded-lg shadow-2xl p-4 z-(--z-dropdown)">
                                                 <p className="text-xs text-[var(--text-muted)] text-center">
                                                     No podcasts found
                                                 </p>
@@ -563,8 +563,8 @@ export default function PodcastsPage() {
                             return genrePodcasts.length > 0 ? (
                                 <section
                                     key={genreId}
-                                   
-                                   
+
+
                                 >
                                     <SectionHeader
                                         title={genreName}

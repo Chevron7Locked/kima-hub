@@ -77,7 +77,7 @@ export function SearchFilters({
                                     : "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
                             )}
                         >
-                            <span className="relative z-10 flex items-center gap-2">
+                            <span className="relative z-(--z-raised) flex items-center gap-2">
                                 {filter.icon}
                                 {filter.label}
                                 {filter.count != null && filter.count > 0 && (

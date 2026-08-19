@@ -307,7 +307,7 @@ export default function BrowsePlaylistsPage() {
                     {/* Beta Notice */}
                     <div
                         className="mb-6"
-                       
+
                     >
                         <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-[#a855f7]/5 border border-[#a855f7]/20">
                             <Info className="w-4 h-4 text-[#a855f7] shrink-0 mt-0.5" />
@@ -326,7 +326,7 @@ export default function BrowsePlaylistsPage() {
                     {/* Search Bar & Import URL */}
                     <div
                         className="flex items-center gap-3 mb-6"
-                       
+
                     >
                         <form
                             onSubmit={handleSearch}
@@ -366,7 +366,7 @@ export default function BrowsePlaylistsPage() {
                     {!selectedGenre && !hasSearched && (
                         <div
                             className="flex items-center gap-2 mb-8"
-                           
+
                         >
                             <button
                                 onClick={() => setActiveTab("playlists")}
@@ -437,8 +437,8 @@ export default function BrowsePlaylistsPage() {
                     {/* Search Results */}
                     {!isLoading && !isSearching && hasSearched && (
                         <div
-                           
-                           
+
+
                         >
                             <SectionHeader
                                 title={`Results for "${searchQuery}"`}
@@ -472,8 +472,8 @@ export default function BrowsePlaylistsPage() {
                     {/* Genre Playlists View */}
                     {!isLoading && selectedGenre && (
                         <div
-                           
-                           
+
+
                         >
                             <SectionHeader
                                 title={`${selectedGenre.name} Playlists`}
@@ -500,7 +500,7 @@ export default function BrowsePlaylistsPage() {
                             <>
                                 {activeTab === "playlists" && (
                                     <div
-                                       
+
                                         style={{
                                             animationDelay: `${sectionIndex++ * 0.1}s`,
                                         }}
@@ -530,7 +530,7 @@ export default function BrowsePlaylistsPage() {
 
                                 {activeTab === "genres" && (
                                     <div
-                                       
+
                                         style={{
                                             animationDelay: `${sectionIndex++ * 0.1}s`,
                                         }}

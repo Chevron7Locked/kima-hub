@@ -362,7 +362,7 @@ export function Sidebar() {
                             <Plus className="w-3.5 h-3.5" />
                         </button>
                         {showCreatePlaylist && (
-                            <div className="absolute right-0 top-8 z-50 w-56 bg-[var(--bg-hover)] border border-white/10 rounded-lg shadow-2xl p-3">
+                            <div className="absolute right-0 top-8 z-(--z-dropdown) w-56 bg-[var(--bg-hover)] border border-white/10 rounded-lg shadow-2xl p-3">
                                 <input
                                     type="text"
                                     value={newPlaylistName}
@@ -508,7 +508,7 @@ export function Sidebar() {
 
             {/* Desktop Sidebar */}
             {!isMobileOrTablet && (
-                <aside className="w-64 bg-[var(--bg-primary)] flex flex-col overflow-hidden relative z-10 rounded-lg">
+                <aside className="w-64 bg-[var(--bg-primary)] flex flex-col overflow-hidden relative z-(--z-raised) rounded-lg">
                     {sidebarContent}
                 </aside>
             )}

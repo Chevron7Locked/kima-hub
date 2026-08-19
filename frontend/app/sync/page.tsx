@@ -187,7 +187,7 @@ export default function SyncPage() {
             </div>
 
             {/* Main content */}
-            <div className="relative z-10 min-h-screen flex items-center justify-center p-6">
+            <div className="relative z-(--z-raised) min-h-screen flex items-center justify-center p-6">
                 <div className="w-full max-w-lg">
                     {/* Logo/Brand -- matches onboarding header */}
                     <div className="text-center mb-8">
@@ -199,7 +199,7 @@ export default function SyncPage() {
                                     alt="Kima"
                                     width={48}
                                     height={48}
-                                    className="relative z-10 drop-shadow-2xl"
+                                    className="relative z-(--z-raised) drop-shadow-2xl"
                                 />
                             </div>
                             <h1 className="text-4xl font-bold text-white">

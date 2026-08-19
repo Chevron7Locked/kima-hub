@@ -30,12 +30,12 @@ export function AudiobookshelfSection({ settings, onUpdate, onTest, isTesting }:
     };
 
     return (
-        <SettingsSection 
-            id="audiobookshelf" 
+        <SettingsSection
+            id="audiobookshelf"
             title="Media Servers"
             description="Connect to external media servers for audiobooks and podcasts"
         >
-            <SettingsRow 
+            <SettingsRow
                 label="Enable Audiobookshelf"
                 description="Connect for audiobooks and podcasts"
                 htmlFor="abs-enabled"
@@ -73,13 +73,13 @@ export function AudiobookshelfSection({ settings, onUpdate, onTest, isTesting }:
                             <button
                                 onClick={handleTest}
                                 disabled={isTesting || !settings.audiobookshelfUrl || !settings.audiobookshelfApiKey}
-                                className="px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg 
+                                className="px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg
                                     hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                             >
                                 {testStatus === "loading" ? "Testing..." : "Test Connection"}
                             </button>
-                            <InlineStatus 
-                                status={testStatus} 
+                            <InlineStatus
+                                status={testStatus}
                                 message={testMessage}
                                 onClear={() => setTestStatus("idle")}
                             />

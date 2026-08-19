@@ -33,7 +33,7 @@ export function HistoryTab() {
 
     useEffect(() => {
         fetchHistory();
-        
+
         // Refresh on window focus
         const handleFocus = () => fetchHistory();
         window.addEventListener("focus", handleFocus);

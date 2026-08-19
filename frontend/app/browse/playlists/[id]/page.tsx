@@ -411,7 +411,7 @@ export default function DeezerPlaylistDetailPage() {
                                             key={track.deezerId}
                                             onClick={() => hasPreview && handlePlayPreview(track)}
                                             className={cn(
-"grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-3 py-2 rounded-lg transition-all group",
+                                                "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-3 py-2 rounded-lg transition-all group",
                                                 hasPreview
                                                     ? "hover:bg-white/[0.03] cursor-pointer"
                                                     : "opacity-40 cursor-not-allowed",
@@ -423,7 +423,7 @@ export default function DeezerPlaylistDetailPage() {
                                                 {hasPreview ? (
                                                     <>
                                                         <span className={cn(
-"text-xs tabular-nums group-hover:hidden",
+                                                            "text-xs tabular-nums group-hover:hidden",
                                                             isCurrentlyPlaying ? "hidden" : "text-[var(--text-muted)]"
                                                         )}>
                                                             {isCurrentlyPlaying && isPreviewPlaying ? (
@@ -465,7 +465,7 @@ export default function DeezerPlaylistDetailPage() {
                                                 </div>
                                                 <div className="min-w-0">
                                                     <p className={cn(
-"text-sm font-bold truncate tracking-tight",
+                                                        "text-sm font-bold truncate tracking-tight",
                                                         isCurrentlyPlaying ? "text-[#a855f7]" : "text-white"
                                                     )}>
                                                         {track.title}

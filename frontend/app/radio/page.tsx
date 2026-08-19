@@ -70,7 +70,7 @@ function RadioStationCard({
 
             {/* Loading overlay */}
             {loadingStation === station.id && (
-                <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-10">
+                <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-(--z-raised)">
                     <Loader2 className="w-6 h-6 text-white animate-spin" />
                 </div>
             )}

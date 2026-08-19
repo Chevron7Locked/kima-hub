@@ -76,7 +76,7 @@ export default function DeviceLinkPage() {
         setIsGenerating(true);
         setError(null);
         setCodeUsed(false);
-        
+
         try {
             const response = await api.request<DeviceLinkCode>("/device-link/generate", {
                 method: "POST",
@@ -116,7 +116,7 @@ export default function DeviceLinkPage() {
                 const status = await api.request<{ status: string; deviceName?: string }>(
                     `/device-link/status/${linkCode.code}`
                 );
-                
+
                 if (status.status === "used") {
                     setCodeUsed(true);
                     loadDevices(); // Refresh devices list

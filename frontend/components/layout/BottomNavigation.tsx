@@ -50,7 +50,7 @@ export function BottomNavigation() {
 
     return (
         <nav
-            className="fixed bottom-0 left-0 right-0 z-40 bg-black border-t border-white/10"
+            className="fixed bottom-0 left-0 right-0 z-(--z-nav) bg-black border-t border-white/10"
             role="navigation"
             aria-label="Main navigation"
             style={{
@@ -75,14 +75,14 @@ export function BottomNavigation() {
                             aria-label={item.name}
                             aria-current={isActive ? "page" : undefined}
                         >
-                            <Icon 
+                            <Icon
                                 className={cn(
                                     "w-5 h-5 mb-1",
                                     isActive && "text-white"
-                                )} 
+                                )}
                                 strokeWidth={isActive ? 2.5 : 2}
                             />
-                            <span 
+                            <span
                                 className={cn(
                                     "text-micro tracking-wide",
                                     isActive ? "font-semibold" : "font-medium"

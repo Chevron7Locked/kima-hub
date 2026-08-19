@@ -67,12 +67,12 @@ export default function ReleasesPage() {
         const date = new Date(dateStr);
         const now = new Date();
         const diffDays = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-        
+
         if (diffDays === 0) return "Today";
         if (diffDays === 1) return "Tomorrow";
         if (diffDays > 0 && diffDays <= 7) return `In ${diffDays} days`;
         if (diffDays < 0 && diffDays >= -7) return `${Math.abs(diffDays)} days ago`;
-        
+
         return date.toLocaleDateString("en-US", {
             month: "short",
             day: "numeric",
@@ -104,7 +104,7 @@ export default function ReleasesPage() {
             <div className="relative h-64 md:h-80 overflow-hidden">
                 <div className="absolute inset-0 bg-gradient-to-br from-amber-500/20 via-orange-600/10 to-transparent" />
                 <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A] via-transparent to-transparent" />
-                
+
                 <div className="relative h-full flex flex-col justify-end p-6 md:p-8">
                     <div className="flex items-center gap-3 mb-2">
                         <Calendar className="w-6 h-6 text-amber-400" />
@@ -116,8 +116,8 @@ export default function ReleasesPage() {
                         New & Upcoming
                     </h1>
                     <p className="text-[var(--text-secondary)] text-sm md:text-base max-w-xl">
-                        {data?.monitoredArtistCount || 0} monitored artists • 
-                        {data?.upcoming.length || 0} upcoming • 
+                        {data?.monitoredArtistCount || 0} monitored artists •
+                        {data?.upcoming.length || 0} upcoming •
                         {data?.recent.length || 0} recent releases
                     </p>
                 </div>
@@ -132,7 +132,7 @@ export default function ReleasesPage() {
                             <h2 className="text-xl font-semibold text-white">Coming Soon</h2>
                             <span className="text-[var(--text-muted)] text-sm">({data.upcoming.length})</span>
                         </div>
-                        
+
                         <div className="grid-media">
                             {data.upcoming.map((release) => (
                                 <ReleaseCard
@@ -155,7 +155,7 @@ export default function ReleasesPage() {
                             <h2 className="text-xl font-semibold text-white">Just Dropped</h2>
                             <span className="text-[var(--text-muted)] text-sm">({data.recent.length})</span>
                         </div>
-                        
+
                         <div className="grid-media">
                             {data.recent.map((release) => (
                                 <ReleaseCard
@@ -228,10 +228,10 @@ function ReleaseCard({
                 {/* Status Badge */}
                 <div className={cn(
                     "absolute top-2 left-2 px-2 py-1 rounded text-xs font-medium",
-                    isUpcoming ? "bg-amber-500/90 text-black" : 
+                    isUpcoming ? "bg-amber-500/90 text-black" :
                     hasIt ? "bg-emerald-500/90 text-black" : "bg-white/20 text-white"
                 )}>
-                    {isUpcoming ? formatDate(release.releaseDate) : 
+                    {isUpcoming ? formatDate(release.releaseDate) :
                      hasIt ? "In Library" : "Available"}
                 </div>
 

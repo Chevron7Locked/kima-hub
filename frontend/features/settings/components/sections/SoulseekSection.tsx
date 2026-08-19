@@ -138,7 +138,7 @@ export function SoulseekSection({ settings, onUpdate, onTest, isTesting }: Souls
                     <button
                         onClick={handleTest}
                         disabled={isTesting || !canTest}
-                        className="px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg 
+                        className="px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg
                             hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                     >
                         {testStatus === "loading" ? "Connecting..." : "Test Connection"}

@@ -63,7 +63,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
 
     return (
         <div
-            className="shrink-0 h-full relative z-10"
+            className="shrink-0 h-full relative z-(--z-raised)"
             style={{ width: isOpen ? 380 : 48 }}
         >
             <div
@@ -77,7 +77,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                 <div
                     onClick={handleCollapse}
                     className={cn(
-                        "absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center cursor-pointer hover:bg-[var(--bg-tertiary)] transition-colors z-10",
+                        "absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center cursor-pointer hover:bg-[var(--bg-tertiary)] transition-colors z-(--z-raised)",
                         isOpen && "pointer-events-none opacity-0",
                     )}
                     title="Open panel"
