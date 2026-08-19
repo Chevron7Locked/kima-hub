@@ -96,7 +96,20 @@ export function TopBar() {
             queryClient.invalidateQueries({ queryKey: ["notifications"] });
         } catch (error) {
             console.error("Failed to trigger library scan:", error);
-            // Scan errors will show in the activity panel via notifications
+            // The old comment here claimed these surface in the activity panel
+            // via notifications. They do not: a scan that is refused never
+            // starts, so no notification is ever created, and the only trace
+            // was a console line nobody has open. Pressing the button did
+            // visibly nothing -- which is indistinguishable from a scan that
+            // ran and found no changes.
+            const message =
+                error instanceof Error ? error.message : String(error);
+            const refused = /403|forbidden|admin/i.test(message);
+            toast.error(
+                refused
+                    ? "Only an admin can scan the library"
+                    : "Could not start the library scan"
+            );
         }
     };
 
