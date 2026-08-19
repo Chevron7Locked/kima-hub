@@ -161,11 +161,13 @@ const sliderClass = `w-32 h-1.5 bg-white/5 rounded-lg appearance-none cursor-poi
 const secondaryBtnClass =`px-4 py-1.5 text-xs tabular-nums bg-white/5 border border-white/10 text-[var(--text-secondary)] rounded-lg
     hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all w-fit`;
 
-function EnrichmentFailuresList() {
+function EnrichmentFailuresList({ active = false }: { active?: boolean }) {
     const { data, isLoading } = useQuery({
         queryKey: ["enrichment-failures-inline"],
         queryFn: () => enrichmentApi.getFailures({ limit: 50 }),
-        refetchInterval: 15000,
+        // The list only changes while a run is in flight; when idle it is
+        // fetched once on mount and left alone.
+        refetchInterval: active ? 15000 : false,
     });
 
     if (isLoading) return <div className="py-2 text-xs text-[var(--text-muted)]">Loading...</div>;
@@ -265,6 +267,26 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         }
     }, []);
 
+    // This query is the one that answers "is enrichment doing anything", so it
+    // is the only one that keeps a heartbeat while idle -- and at 30s rather
+    // than 3s, because an idle run does not become busy without the user
+    // starting it or an SSE event arriving.
+    const { data: enrichmentState } = useQuery({
+        queryKey: ["enrichment-status"],
+        queryFn: () => enrichmentApi.getStatus(),
+        refetchInterval: (query) =>
+            query.state.data?.status && query.state.data.status !== "idle"
+                ? 3000
+                : 30000,
+        staleTime: 1000,
+    });
+
+    // Everything below only changes while a run is in flight. Polling them on a
+    // fixed timer meant an open settings page asked the server 42 questions a
+    // minute forever, whether or not enrichment had ever been started.
+    const enrichmentActive =
+        !!enrichmentState?.status && enrichmentState.status !== "idle";
+
     const {
         data: enrichmentProgress,
         refetch: refetchProgress,
@@ -273,23 +295,19 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     } = useQuery({
         queryKey: ["enrichment-progress"],
         queryFn: () => api.getEnrichmentProgress(),
-        refetchInterval: 5000,
+        // useEventSource already invalidates this key on "enrichment:progress",
+        // so while idle the poll is pure duplication.
+        refetchInterval: enrichmentActive ? 5000 : false,
         staleTime: 2000,
         placeholderData: keepPreviousData,
         retry: 3,
     });
 
-    const { data: enrichmentState } = useQuery({
-        queryKey: ["enrichment-status"],
-        queryFn: () => enrichmentApi.getStatus(),
-        refetchInterval: 3000,
-        staleTime: 1000,
-    });
-
     const { data: failureCounts } = useQuery({
         queryKey: ["enrichment-failure-counts"],
         queryFn: () => enrichmentApi.getFailureCounts(),
-        refetchInterval: 10000,
+        // Failures only appear while something is being enriched.
+        refetchInterval: enrichmentActive ? 10000 : false,
     });
 
     const { data: concurrencyConfig, isLoading: isConcurrencyLoading } =
@@ -909,7 +927,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     {showInlineFailures ? "Hide" : "Show"} Failures ({totalFailures})
                                     <ChevronDown className={`w-3 h-3 transition-transform ${showInlineFailures ? "rotate-180" : ""}`} />
                                 </button>
-                                {showInlineFailures && <EnrichmentFailuresList />}
+                                {showInlineFailures && <EnrichmentFailuresList active={enrichmentActive} />}
                             </div>
                         )}
 
