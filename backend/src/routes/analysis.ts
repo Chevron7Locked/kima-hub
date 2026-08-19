@@ -464,9 +464,13 @@ router.put("/workers", requireAuth, requireAdmin, async (req, res) => {
         }
         
         // Update SystemSettings
-        await prisma.systemSettings.update({
+        // upsert, not update: SystemSettings has no row until something writes
+        // one, so on a fresh install `update` threw and the endpoint answered
+        // 500 -- the worker count could never be changed on a new deployment.
+        await prisma.systemSettings.upsert({
             where: { id: "default" },
-            data: { audioAnalyzerWorkers: workers },
+            create: { id: "default", audioAnalyzerWorkers: workers },
+            update: { audioAnalyzerWorkers: workers },
         });
         invalidateSystemSettingsCache();
 
@@ -538,9 +542,13 @@ router.put("/clap-workers", requireAuth, requireAdmin, async (req, res) => {
         }
 
         // Update SystemSettings
-        await prisma.systemSettings.update({
+        // upsert, not update: SystemSettings has no row until something writes
+        // one, so on a fresh install `update` threw and the endpoint answered
+        // 500 -- the worker count could never be changed on a new deployment.
+        await prisma.systemSettings.upsert({
             where: { id: "default" },
-            data: { clapWorkers: workers },
+            create: { id: "default", clapWorkers: workers },
+            update: { clapWorkers: workers },
         });
         invalidateSystemSettingsCache();
 

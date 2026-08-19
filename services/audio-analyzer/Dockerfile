@@ -39,37 +39,46 @@ RUN pip3 install --no-cache-dir essentia-tensorflow
 RUN python3 -c "from essentia.standard import TensorflowPredictMusiCNN, TensorflowPredict2D; print('MusiCNN and TensorflowPredict2D: OK')"
 
 # Create models directory
-RUN mkdir -p /app/models
+# Create models directory and fetch the MusiCNN model plus its classification
+# heads.
+#
+# essentia.upf.edu is intermittently unreachable. Observed from the build host
+# minutes apart: the same URL returning HTTP 200 on one attempt, a connection
+# failure on the next, and an SSL handshake error (curl exit 35) on a third.
+# Nine bare `curl -L` calls with no retry meant a single blip anywhere in the
+# chain failed the whole image, and which file it landed on was luck.
+#
+# The retry is a shell loop rather than curl's own flags, deliberately:
+# --retry-all-errors would cover this but only exists from curl 7.71, and the
+# curl in ubuntu:20.04 is 7.68 -- passing it fails the build instantly with
+# "option is unknown". --retry-connrefused is understood by 7.68 but does not
+# retry the SSL error actually seen here. A loop covers every failure mode
+# regardless of curl version.
+#
+# -f so an HTTP error page is never written to disk as if it were a model, and
+# each file is size-checked afterwards for the same reason.
+RUN mkdir -p /app/models && \
+    fetch() { \
+        name="$1"; url="$2"; \
+        for attempt in 1 2 3 4 5; do \
+            if curl -fL --connect-timeout 20 --max-time 300 -o "/app/models/$name" "$url"; then \
+                if [ -s "/app/models/$name" ]; then return 0; fi; \
+                echo "  $name downloaded empty, retrying"; \
+            fi; \
+            echo "  $name attempt $attempt failed, retrying in 5s"; \
+            rm -f "/app/models/$name"; \
+            sleep 5; \
+        done; \
+        echo "FATAL: could not download $name from $url"; \
+        return 1; \
+    }; \
+    base="https://essentia.upf.edu/models"; \
+    fetch msd-musicnn-1.pb              "$base/autotagging/msd/msd-musicnn-1.pb" && \
+    for m in happy sad relaxed aggressive party acoustic electronic; do \
+        fetch "mood_$m-msd-musicnn-1.pb" "$base/classification-heads/mood_$m/mood_$m-msd-musicnn-1.pb" || exit 1; \
+    done && \
+    fetch danceability-msd-musicnn-1.pb "$base/classification-heads/danceability/danceability-msd-musicnn-1.pb"
 
-# Download MusiCNN models from essentia.upf.edu/models/
-# Base embedding model
-# Model downloads are retried because essentia.upf.edu is intermittently
-# unreachable: the same URL was observed returning HTTP 200 on one attempt and
-# failing to connect on the next, minutes apart. Nine separate downloads with
-# no retry meant a single blip anywhere in the chain failed the whole image
-# build. -f is there so an HTTP error page is never silently saved as a model.
-RUN curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/msd-musicnn-1.pb \
-    "https://essentia.upf.edu/models/autotagging/msd/msd-musicnn-1.pb"
-
-# Mood classification heads (using MusiCNN embeddings)
-RUN curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_happy-msd-musicnn-1.pb \
-    "https://essentia.upf.edu/models/classification-heads/mood_happy/mood_happy-msd-musicnn-1.pb" && \
-    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_sad-msd-musicnn-1.pb \
-    "https://essentia.upf.edu/models/classification-heads/mood_sad/mood_sad-msd-musicnn-1.pb" && \
-    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_relaxed-msd-musicnn-1.pb \
-    "https://essentia.upf.edu/models/classification-heads/mood_relaxed/mood_relaxed-msd-musicnn-1.pb" && \
-    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_aggressive-msd-musicnn-1.pb \
-    "https://essentia.upf.edu/models/classification-heads/mood_aggressive/mood_aggressive-msd-musicnn-1.pb" && \
-    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_party-msd-musicnn-1.pb \
-    "https://essentia.upf.edu/models/classification-heads/mood_party/mood_party-msd-musicnn-1.pb" && \
-    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_acoustic-msd-musicnn-1.pb \
-    "https://essentia.upf.edu/models/classification-heads/mood_acoustic/mood_acoustic-msd-musicnn-1.pb" && \
-    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/mood_electronic-msd-musicnn-1.pb \
-    "https://essentia.upf.edu/models/classification-heads/mood_electronic/mood_electronic-msd-musicnn-1.pb"
-
-# Other classification heads
-RUN curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o /app/models/danceability-msd-musicnn-1.pb \
-    "https://essentia.upf.edu/models/classification-heads/danceability/danceability-msd-musicnn-1.pb"
 
 # Verify models downloaded
 RUN echo "Models downloaded:" && ls -lh /app/models/

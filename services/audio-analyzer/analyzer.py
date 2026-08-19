@@ -87,6 +87,18 @@ import redis
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+# ProcessPoolExecutor gained max_tasks_per_child in Python 3.11. This image is
+# built on Ubuntu 20.04 for essentia-tensorflow compatibility, which ships
+# Python 3.8, so passing it unconditionally raised
+#   TypeError: __init__() got an unexpected keyword argument 'max_tasks_per_child'
+# the first time a scan batch arrived -- killing the worker loop while the
+# container still reported healthy. Worker recycling is a memory-hygiene nicety;
+# not starting at all is not.
+def _pool_recycle_kwargs(limit: int) -> dict:
+    return {"max_tasks_per_child": limit} if sys.version_info >= (3, 11) else {}
+
+
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -1264,7 +1276,7 @@ class AnalysisWorker:
         self.executor = ProcessPoolExecutor(
             max_workers=NUM_WORKERS,
             initializer=_init_worker_process,
-            max_tasks_per_child=50,
+            **_pool_recycle_kwargs(50),
         )
         
         # Gracefully shutdown old pool (wait for in-flight work)
@@ -1310,7 +1322,7 @@ class AnalysisWorker:
         self.executor = ProcessPoolExecutor(
             max_workers=NUM_WORKERS,
             initializer=_init_worker_process,
-            max_tasks_per_child=50,
+            **_pool_recycle_kwargs(50),
         )
         self.pool_active = True
         logger.info(f"Worker pool started ({NUM_WORKERS} workers)")
@@ -1991,7 +2003,7 @@ class AnalysisWorker:
         if self.scan_executor is None:
             self.scan_executor = ProcessPoolExecutor(
                 max_workers=2,
-                max_tasks_per_child=100,
+                **_pool_recycle_kwargs(100),
             )
 
     def process_scan_queue(self):
