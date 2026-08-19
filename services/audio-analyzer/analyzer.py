@@ -1530,9 +1530,18 @@ class AnalysisWorker:
     
     def _run_db_reconciliation(self) -> bool:
         """
-        Check database for pending/queued tracks that may have been missed by Redis queue.
-        Pushes tracks into the Redis queue only -- does NOT pre-mark as 'processing'.
-        _mark_track_processing() atomically claims each track when BRPOP dequeues it.
+        Re-push tracks the backend already handed us but whose queue entry was lost.
+
+        Only 'queued' rows qualify. A 'queued' row is by definition one the backend
+        selected, checked against the corrupt-file gate, and pushed -- so putting it
+        back on the queue is genuine recovery.
+
+        This used to select 'pending' as well, which quietly made this method a second,
+        independent producer that never consulted "scanStatus". The effect was that the
+        file-validation phase gated nothing at all: every batch this analyzer ran came
+        from here rather than from the queue the validated tracks are pushed to, so a
+        corrupt file reached Essentia anyway and stalled a worker for the full decode
+        timeout. Pending tracks are the backend's to hand out, not ours to take.
         """
         if self.is_paused or self._is_gate_closed():
             return False
@@ -1542,7 +1551,7 @@ class AnalysisWorker:
             cursor.execute("""
                 SELECT id, "filePath"
                 FROM "Track"
-                WHERE "analysisStatus" IN ('pending', 'queued')
+                WHERE "analysisStatus" = 'queued'
                 AND COALESCE("analysisRetryCount", 0) < %s
                 ORDER BY "fileModified" DESC
                 LIMIT %s
@@ -1550,7 +1559,7 @@ class AnalysisWorker:
 
             tracks = cursor.fetchall()
             if tracks:
-                logger.info(f"DB reconciliation found {len(tracks)} pending/queued tracks, pushing to queue...")
+                logger.info(f"DB reconciliation found {len(tracks)} queued tracks, pushing to queue...")
                 pipe = self.redis.pipeline()
                 for t in tracks:
                     pipe.rpush(ANALYSIS_QUEUE, json.dumps({
@@ -1751,18 +1760,49 @@ class AnalysisWorker:
         return True
     
     def _mark_track_processing(self, track_id: str) -> bool:
-        """Mark a single track as processing just before its worker starts.
-        Returns True if successfully claimed, False if already claimed or error."""
+        """Claim a single track just before its worker starts.
+
+        The "scanStatus" condition is the corrupt-file gate. Every route into the Redis
+        queue converges on this claim, so this is the one place that can guarantee a
+        file the backend rejected never reaches Essentia. That matters because a corrupt
+        file which gets past it wedges a worker for the full 180-second decode timeout,
+        and then does it twice more before the retry ceiling condemns it.
+
+        Returns True if the track was claimed. A track that is not scan-valid is handed
+        back to the backend as 'pending' rather than silently dropped, so it gets
+        re-validated instead of sitting at 'queued' with nobody willing to take it.
+        """
         cursor = self.db.get_cursor()
         try:
             cursor.execute("""
                 UPDATE "Track"
                 SET "analysisStatus" = 'processing',
                     "analysisStartedAt" = %s
-                WHERE id = %s AND "analysisStatus" IN ('pending', 'queued')
+                WHERE id = %s
+                  AND "analysisStatus" IN ('pending', 'queued')
+                  AND "scanStatus" = 'valid'
             """, (datetime.now(timezone.utc), track_id))
+            claimed = cursor.rowcount > 0
+
+            if not claimed:
+                # Either another worker claimed it first (its status is now 'processing'),
+                # or it never passed validation. Only the second case is ours to correct,
+                # and the status condition below is what tells the two apart.
+                cursor.execute("""
+                    UPDATE "Track"
+                    SET "analysisStatus" = 'pending'
+                    WHERE id = %s
+                      AND "analysisStatus" = 'queued'
+                      AND "scanStatus" <> 'valid'
+                """, (track_id,))
+                if cursor.rowcount > 0:
+                    logger.warning(
+                        f"Track {track_id} reached the analysis queue without passing "
+                        f"file validation; returned to the backend for re-validation"
+                    )
+
             self.db.commit()
-            return cursor.rowcount > 0
+            return claimed
         except Exception as e:
             logger.error(f"Failed to mark track {track_id} as processing: {e}")
             self.db.rollback()

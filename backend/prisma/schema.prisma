@@ -760,6 +760,7 @@ model Track {
   corrupt                     Boolean                  @default(false)
   scanStatus                  String                   @default("pending")
   scanError                   String?
+  scanStartedAt               DateTime?
   discNumber                  Int?
   discSubtitle                String?
   cachedBy                    CachedTrack[]

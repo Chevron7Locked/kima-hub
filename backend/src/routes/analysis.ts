@@ -7,7 +7,10 @@ import { getSystemSettings, invalidateSystemSettingsCache } from "../utils/syste
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { eventBus } from "../services/eventBus";
 import { vibeQueue } from "../workers/enrichmentQueues";
-import { triggerEnrichmentNow } from "../workers/unifiedEnrichment";
+import { triggerEnrichmentNow, markScanInvalid } from "../workers/unifiedEnrichment";
+import { validateAudioHeader } from "../services/audioScanValidator";
+import { config } from "../config";
+import path from "path";
 import { audioAnalysisCleanupService } from "../services/audioAnalysisCleanup";
 import { appendTrackToProjection } from "../services/umapProjection";
 import os from "os";
@@ -154,10 +157,13 @@ router.post("/start", requireAuth, requireAdmin, async (req, res) => {
     try {
         const { limit = 100, priority = "recent" } = req.body;
 
-        // Find pending tracks
+        // Find pending tracks. scanStatus must be "valid": this endpoint feeds the same
+        // Redis list the Essentia analyzer decodes from, so skipping the corrupt-file
+        // check here would put exactly the files that hang a worker back in front of it.
         const tracks = await prisma.track.findMany({
             where: {
                 analysisStatus: "pending",
+                scanStatus: "valid",
             },
             select: {
                 id: true,
@@ -171,9 +177,20 @@ router.post("/start", requireAuth, requireAdmin, async (req, res) => {
         });
 
         if (tracks.length === 0) {
+            // Separate "nothing to do" from "everything is still waiting on the
+            // corrupt-file check", which otherwise look identical from the UI.
+            const awaitingScan = await prisma.track.count({
+                where: {
+                    analysisStatus: "pending",
+                    scanStatus: { not: "valid" },
+                },
+            });
             return res.json({
-                message: "No pending tracks to analyze",
+                message: awaitingScan > 0
+                    ? `No tracks ready to analyze -- ${awaitingScan} still awaiting file validation`
+                    : "No pending tracks to analyze",
                 queued: 0,
+                awaitingScan,
             });
         }
 
@@ -187,6 +204,14 @@ router.post("/start", requireAuth, requireAdmin, async (req, res) => {
             }));
         }
         await pipeline.exec();
+
+        // Claim the rows we just pushed. Without this they stay "pending", so the
+        // background producer re-selects and re-pushes the same tracks on its next
+        // cycle and the analyzer decodes each of them twice.
+        await prisma.track.updateMany({
+            where: { id: { in: tracks.map((t) => t.id) }, analysisStatus: "pending" },
+            data: { analysisStatus: "queued" },
+        });
 
         logger.debug(`Queued ${tracks.length} tracks for audio analysis`);
 
@@ -275,20 +300,64 @@ router.post("/analyze/:trackId", requireAuth, async (req, res) => {
             return res.status(404).json({ error: "Track not found" });
         }
 
-        // Queue for analysis
+        // Don't disturb a track a worker is already decoding.
+        if (track.analysisStatus === "processing") {
+            return res.json({
+                message: "Track is already being analyzed",
+                trackId,
+            });
+        }
+
+        // Check the file before handing it to Essentia. This is the same header check
+        // the background scan phase runs; doing it inline here means a single-track
+        // request gets an answer immediately instead of silently queueing a file that
+        // will stall a worker for three minutes and then be retried twice more.
+        const musicPath = config.music.musicPath;
+        if (!musicPath) {
+            // Without it we cannot resolve the file to check it, and queueing an
+            // unchecked track is exactly what the gate exists to prevent.
+            return res.status(503).json({
+                error: "Music library path is not configured",
+                trackId,
+            });
+        }
+
+        const result = await validateAudioHeader(path.join(musicPath, track.filePath));
+        if (!result.valid) {
+            const reason = result.error ?? "Unknown validation failure";
+            await markScanInvalid(track.id, reason);
+            return res.status(422).json({
+                error: "Track failed file validation",
+                reason,
+                trackId,
+            });
+        }
+        await prisma.track.update({
+            where: { id: trackId },
+            data: { scanStatus: "valid", scanError: null, scanStartedAt: null },
+        });
+
+        // Queue for analysis, then claim the row -- same order as the background
+        // producer. The analyzer flushes this list on worker start, so an entry left
+        // behind by a crash between the two is dropped rather than double-decoded.
         await redisClient.rpush(ANALYSIS_QUEUE, JSON.stringify({
             trackId: track.id,
             filePath: track.filePath,
             duration: track.duration,
         }));
 
-        // Mark as pending if not already
-        if (track.analysisStatus !== "processing") {
-            await prisma.track.update({
-                where: { id: trackId },
-                data: { analysisStatus: "pending" },
-            });
-        }
+        await prisma.track.update({
+            where: { id: trackId },
+            data: {
+                analysisStatus: "queued",
+                // An explicit request to analyze this track is a request to start over.
+                // Left alone, a count already at the ceiling would have the next
+                // enrichment cycle condemn the track to permanently_failed before the
+                // analyzer ever reached it.
+                analysisRetryCount: 0,
+                analysisError: null,
+            },
+        });
 
         res.json({
             message: "Track queued for analysis",

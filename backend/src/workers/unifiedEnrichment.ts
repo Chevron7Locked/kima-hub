@@ -1242,9 +1242,85 @@ export async function executeMoodTagsPhase(): Promise<number> {
 
 const SCAN_BATCH_SIZE = 100;
 
+// How long a track may sit in "validating" before we assume its validation job is
+// gone and hand it back to the scan phase.
+const STALE_SCAN_MS = 10 * 60 * 1000;
+
+// Stop refilling the validation queue once this many jobs are already waiting. The
+// releasing pass above cannot tell "this job was lost" from "the analyzer is down and
+// hasn't got to it yet", so without a ceiling an offline analyzer would have the same
+// tracks pushed onto the list again every ten minutes, forever.
+const SCAN_QUEUE_MAX_DEPTH = 500;
+
+/**
+ * Mark a file as failing validation, and retire its analysis along with it.
+ *
+ * Every producer now refuses a track whose scanStatus is not "valid". Without the
+ * second write, a file we positively identified as unreadable would sit at
+ * analysisStatus "pending" forever -- counted as outstanding work, holding the
+ * completion gate open, and picked up by nobody. The guard on the current analysis
+ * status is what stops a bad header read from throwing away analysis a track
+ * already has.
+ */
+export async function markScanInvalid(trackId: string, reason: string): Promise<void> {
+    await prisma.track.update({
+        where: { id: trackId },
+        data: { scanStatus: "invalid", scanError: reason, scanStartedAt: null },
+    });
+    await prisma.track.updateMany({
+        where: {
+            id: trackId,
+            analysisStatus: { in: ["pending", "queued", "failed"] },
+        },
+        data: {
+            analysisStatus: "permanently_failed",
+            analysisError: reason,
+        },
+    });
+}
+
 async function executeScanPhase(): Promise<number> {
     const musicPath = config.music.musicPath;
     if (!musicPath) return 0;
+
+    // If the analyzer already has more validation work than it can get through, adding
+    // to the pile helps nobody -- and the releasing pass below would otherwise keep
+    // re-pushing the same tracks at an analyzer that is simply behind or offline.
+    const redis = getRedis();
+    const scanBacklog = await redis.llen("audio:scan:queue");
+    if (scanBacklog >= SCAN_QUEUE_MAX_DEPTH) {
+        logger.debug(
+            `[Enrichment] Scan queue holds ${scanBacklog} jobs, skipping validation this cycle`,
+        );
+        return 0;
+    }
+
+    // Hand back rows whose validation job never came home. "validating" used to have
+    // exactly one exit -- the crash-recovery pass that runs once at worker start -- so
+    // a scan queue that got flushed or dropped stranded every row in it until someone
+    // restarted the backend. That was survivable while the Python analyzer pulled work
+    // straight out of Postgres regardless of scan state; now that every producer
+    // genuinely refuses a non-valid track, a stuck row is a track that never gets
+    // analyzed at all.
+    //
+    // Rows written before scanStartedAt existed carry NULL, so fall back to updatedAt
+    // for those only -- they drain once, then the real timestamp takes over.
+    const scanCutoff = new Date(Date.now() - STALE_SCAN_MS);
+    const released = await prisma.track.updateMany({
+        where: {
+            scanStatus: "validating",
+            OR: [
+                { scanStartedAt: { lt: scanCutoff } },
+                { scanStartedAt: null, updatedAt: { lt: scanCutoff } },
+            ],
+        },
+        data: { scanStatus: "pending", scanStartedAt: null },
+    });
+    if (released.count > 0) {
+        logger.warn(
+            `[Enrichment] Released ${released.count} tracks stuck in scan validation for over ${Math.round(STALE_SCAN_MS / 60000)} minutes`,
+        );
+    }
 
     const tracks = await prisma.track.findMany({
         where: {
@@ -1259,7 +1335,6 @@ async function executeScanPhase(): Promise<number> {
     if (tracks.length === 0) return 0;
 
     const { validateAudioHeader } = await import("../services/audioScanValidator");
-    const redis = getRedis();
     let validated = 0;
     let invalid = 0;
 
@@ -1272,7 +1347,7 @@ async function executeScanPhase(): Promise<number> {
         if (result.valid) {
             await prisma.track.update({
                 where: { id: track.id },
-                data: { scanStatus: "validating" },
+                data: { scanStatus: "validating", scanStartedAt: new Date() },
             });
             await redis.rpush(
                 "audio:scan:queue",
@@ -1280,18 +1355,13 @@ async function executeScanPhase(): Promise<number> {
             );
             validated++;
         } else {
-            await prisma.track.update({
-                where: { id: track.id },
-                data: {
-                    scanStatus: "invalid",
-                    scanError: result.error ?? "Unknown validation failure",
-                },
-            });
+            const reason = result.error ?? "Unknown validation failure";
+            await markScanInvalid(track.id, reason);
             await enrichmentFailureService.recordFailure({
                 entityType: "scan",
                 entityId: track.id,
                 entityName: track.title,
-                errorMessage: result.error ?? "Unknown validation failure",
+                errorMessage: reason,
                 errorCode: "SCAN_INVALID",
                 metadata: { filePath: track.filePath },
             });
@@ -1317,13 +1387,7 @@ async function executeScanPhase(): Promise<number> {
         try {
             await fs.promises.access(recheckPath, fs.constants.R_OK);
         } catch {
-            await prisma.track.update({
-                where: { id: track.id },
-                data: {
-                    scanStatus: "invalid",
-                    scanError: "File no longer accessible",
-                },
-            });
+            await markScanInvalid(track.id, "File no longer accessible");
         }
     }
 
@@ -1864,6 +1928,18 @@ export async function triggerEnrichmentNow(): Promise<{
 
      logger.debug(`[Enrichment] Reset ${reset.count} tracks to pending for audio re-analysis`);
 
+     // Send anything that is not currently scan-valid back through validation. The
+     // queue below only takes scan-valid tracks, so a row left at "invalid" or stuck
+     // at "validating" would silently sit out the re-run. Tracks already marked valid
+     // are left alone so they can be queued immediately rather than waiting a cycle.
+     const rescan = await prisma.track.updateMany({
+         where: { scanStatus: { notIn: ["pending", "valid"] } },
+         data: { scanStatus: "pending", scanError: null, scanStartedAt: null },
+     });
+     if (rescan.count > 0) {
+         logger.debug(`[Enrichment] Reset ${rescan.count} tracks for re-validation`);
+     }
+
 
      const queued = await queueAudioAnalysis();
 
@@ -1927,6 +2003,7 @@ export async function resetAllEnrichmentData(): Promise<{
             analyzedAt: null,
             scanStatus: "pending",
             scanError: null,
+            scanStartedAt: null,
             vibeAnalysisStatus: null,
             vibeAnalysisStartedAt: null,
             vibeAnalysisError: null,
