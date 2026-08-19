@@ -77,6 +77,17 @@ export interface AnalysisWorkersConfig {
     cpuCores: number;
     recommended: number;
     description: string;
+    /**
+     * Whether an analyzer is actually running to obey this setting. The
+     * backend derives it from the heartbeat the analyzer writes to Redis every
+     * thirty seconds. Optional so an older backend still typechecks.
+     */
+    analyzerOnline?: boolean;
+    /**
+     * How many subscribers received the change. Redis reports this; zero means
+     * the number was stored but nothing was listening.
+     */
+    delivered?: number;
 }
 
 export const enrichmentApi = {

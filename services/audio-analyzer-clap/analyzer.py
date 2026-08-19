@@ -515,6 +515,41 @@ class DatabaseConnection:
             self.conn = None
 
 
+def load_configured_workers() -> int:
+    """
+    How many jobs to run at once, according to the database.
+
+    The settings screen writes SystemSettings.clapWorkers. Reading it here is
+    what makes a change stick across a restart: previously the count came only
+    from the NUM_WORKERS environment variable, so the slider wrote a column
+    that nothing ever read and the setting had no effect at all.
+
+    Falls back to NUM_WORKERS when the row or the database is unavailable --
+    the analyzer must still start on a fresh install.
+    """
+    if not DATABASE_URL:
+        return NUM_WORKERS
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL, connect_timeout=5)
+        with conn.cursor() as cur:
+            cur.execute('SELECT "clapWorkers" FROM "SystemSettings" WHERE id = %s', ("default",))
+            row = cur.fetchone()
+        if row and row[0]:
+            configured = max(1, min(8, int(row[0])))
+            logger.info(f"Worker concurrency from SystemSettings.clapWorkers: {configured}")
+            return configured
+    except Exception as e:
+        logger.warning(f"Could not read clapWorkers from the database ({e}); using NUM_WORKERS={NUM_WORKERS}")
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return NUM_WORKERS
+
+
 class BullMQVibeWorker:
     """
     BullMQ-based vibe embedding worker.
@@ -532,11 +567,33 @@ class BullMQVibeWorker:
     runs inference).
     """
 
-    def __init__(self, analyzer: CLAPAnalyzer, stop_event: threading.Event):
+    def __init__(self, analyzer: CLAPAnalyzer, stop_event: threading.Event,
+                 concurrency: int = None):
         self.analyzer = analyzer
         self.stop_event = stop_event
         self._redis_client = None
         self._db_pool = None  # psycopg2.pool.ThreadedConnectionPool
+        # Concurrency is live, not frozen at import. The settings screen writes
+        # SystemSettings.clapWorkers and publishes set_workers; this is where
+        # that number lands. Guarded because ControlHandler sets it from a
+        # different thread.
+        self._concurrency_lock = threading.Lock()
+        self._desired_concurrency = (
+            max(1, min(8, int(concurrency))) if concurrency else load_configured_workers()
+        )
+        self._active_concurrency = None
+
+    def set_concurrency(self, count: int) -> int:
+        """Ask the worker to run `count` jobs at once. Applied within seconds."""
+        count = max(1, min(8, int(count)))
+        with self._concurrency_lock:
+            self._desired_concurrency = count
+        return count
+
+    @property
+    def desired_concurrency(self) -> int:
+        with self._concurrency_lock:
+            return self._desired_concurrency
 
     def start(self):
         """Start the BullMQ worker in a dedicated asyncio event loop."""
@@ -556,7 +613,7 @@ class BullMQVibeWorker:
 
         # Thread-safe connection pool — each executor thread gets its own
         # connection so concurrent jobs never share a psycopg2 connection.
-        pool_size = max(NUM_WORKERS * 2, 4)
+        pool_size = max(8, self.desired_concurrency * 2)
         self._db_pool = psycopg2.pool.ThreadedConnectionPool(
             minconn=1,
             maxconn=pool_size,
@@ -565,33 +622,69 @@ class BullMQVibeWorker:
         )
         logger.info(f"Connected to PostgreSQL (pool size: {pool_size})")
 
-        bullmq_worker = BullWorker(
-            VIBE_QUEUE_NAME,
-            self._process_job,
-            {
-                "connection": REDIS_URL,
-                "concurrency": NUM_WORKERS,
-                "lockDuration": 300000,  # 5 min — CLAP inference can take 30–60s
-            },
-        )
-        bullmq_worker.on("failed", lambda job, err: logger.error(
-            f"[BullMQ] Job {job.id if job else '?'} failed: {err}"
-        ))
-        bullmq_worker.on("error", lambda err: logger.error(f"[BullMQ] Worker error: {err}"))
+        def build_worker(concurrency: int):
+            w = BullWorker(
+                VIBE_QUEUE_NAME,
+                self._process_job,
+                {
+                    "connection": REDIS_URL,
+                    "concurrency": concurrency,
+                    "lockDuration": 300000,  # 5 min — CLAP inference can take 30–60s
+                },
+            )
+            w.on("failed", lambda job, err: logger.error(
+                f"[BullMQ] Job {job.id if job else '?'} failed: {err}"
+            ))
+            w.on("error", lambda err: logger.error(f"[BullMQ] Worker error: {err}"))
+            return w
 
+        self._active_concurrency = self.desired_concurrency
+        bullmq_worker = build_worker(self._active_concurrency)
+        logger.info(f"[BullMQ] Worker started with concurrency {self._active_concurrency}")
+
+        last_heartbeat = 0.0
         try:
             while not self.stop_event.is_set():
-                # Publish heartbeat — featureDetection checks this to enable vibe search.
-                # Run in executor to avoid blocking the async event loop.
-                try:
-                    hb_loop = asyncio.get_running_loop()
-                    hb_val = str(int(time.time() * 1000))
-                    await hb_loop.run_in_executor(
-                        None, lambda: self._redis_client.set("clap:worker:heartbeat", hb_val)
+                # A concurrency change is applied by replacing the worker. close()
+                # waits for jobs already running to finish, so nothing is dropped;
+                # the queue simply stops being drained for the moment it takes.
+                target = self.desired_concurrency
+                if target != self._active_concurrency:
+                    logger.info(
+                        f"[BullMQ] Concurrency {self._active_concurrency} -> {target}, replacing worker"
                     )
-                except Exception:
-                    pass
-                await asyncio.sleep(30)
+                    try:
+                        await bullmq_worker.close()
+                    except Exception as e:
+                        logger.error(f"[BullMQ] Error closing worker for resize: {e}")
+                    bullmq_worker = build_worker(target)
+                    self._active_concurrency = target
+                    logger.info(f"[BullMQ] Worker now running with concurrency {target}")
+
+                # Heartbeat — featureDetection and the settings screen both read
+                # this to decide whether an analyzer is actually running. The
+                # effective concurrency rides along so the backend can report
+                # what is in force rather than what was merely requested.
+                now = time.time()
+                if now - last_heartbeat >= 30:
+                    last_heartbeat = now
+                    try:
+                        hb_loop = asyncio.get_running_loop()
+                        hb_val = str(int(now * 1000))
+                        active = self._active_concurrency
+                        await hb_loop.run_in_executor(
+                            None,
+                            lambda: (
+                                self._redis_client.set("clap:worker:heartbeat", hb_val),
+                                self._redis_client.set("clap:worker:concurrency", str(active)),
+                            ),
+                        )
+                    except Exception:
+                        pass
+
+                # Short sleep so a concurrency change lands in seconds, not in
+                # however long is left of a thirty-second heartbeat tick.
+                await asyncio.sleep(2)
         finally:
             await bullmq_worker.close()
             if self._db_pool:
@@ -935,12 +1028,15 @@ class ControlHandler:
     """
     Handles control messages from Redis pub/sub.
 
-    Listens for worker count changes and other control commands.
-    Note: Worker count changes require a container restart to take effect.
+    Listens for worker count changes and other control commands. A worker count
+    change is applied to the running BullMQ worker within a couple of seconds --
+    it used to be logged and discarded, with a note advising a container
+    restart, which meant the settings screen could not change anything.
     """
 
-    def __init__(self, stop_event: threading.Event):
+    def __init__(self, stop_event: threading.Event, worker: "BullMQVibeWorker" = None):
         self.stop_event = stop_event
+        self.worker = worker
         self.redis_client = None
         self.pubsub = None
 
@@ -985,9 +1081,15 @@ class ControlHandler:
             command = control.get('command')
 
             if command == 'set_workers':
-                new_count = control.get('count', NUM_WORKERS)
-                logger.info(f"Received worker count change request: {NUM_WORKERS} -> {new_count}")
-                logger.info("Note: Restart the CLAP analyzer container to apply the new worker count")
+                requested = control.get('count', NUM_WORKERS)
+                if self.worker is None:
+                    logger.warning(
+                        f"set_workers={requested} received but no worker is attached to the control handler"
+                    )
+                else:
+                    previous = self.worker.desired_concurrency
+                    applied = self.worker.set_concurrency(requested)
+                    logger.info(f"Worker concurrency {previous} -> {applied} (applied live)")
             elif command == 'stop':
                 logger.info("Received stop command — signalling worker threads to stop")
                 self.stop_event.set()
@@ -1006,7 +1108,8 @@ def main():
     logger.info("=" * 60)
     logger.info(f"  Model version: {MODEL_VERSION}")
     logger.info(f"  Music path: {MUSIC_PATH}")
-    logger.info(f"  Num workers: {NUM_WORKERS}")
+    configured_workers = load_configured_workers()
+    logger.info(f"  Num workers: {configured_workers} (SystemSettings.clapWorkers, env NUM_WORKERS={NUM_WORKERS})")
     logger.info(f"  Threads per worker: {THREADS_PER_WORKER}")
     logger.info(f"  Sleep interval: {SLEEP_INTERVAL}s")
     logger.info(f"  Model idle timeout: {MODEL_IDLE_TIMEOUT}s")
@@ -1031,7 +1134,7 @@ def main():
     threads = []
 
     # Start BullMQ vibe worker (runs asyncio event loop in its own thread)
-    bullmq_worker = BullMQVibeWorker(analyzer, stop_event)
+    bullmq_worker = BullMQVibeWorker(analyzer, stop_event, concurrency=configured_workers)
     bullmq_thread = threading.Thread(target=bullmq_worker.start, name="BullMQVibeWorker")
     bullmq_thread.daemon = True
     bullmq_thread.start()
@@ -1047,7 +1150,7 @@ def main():
     logger.info("Started text embed handler thread")
 
     # Start control handler thread (listens for worker count changes)
-    control_handler = ControlHandler(stop_event)
+    control_handler = ControlHandler(stop_event, worker=bullmq_worker)
     control_thread = threading.Thread(target=control_handler.start, name="ControlHandler")
     control_thread.daemon = True
     control_thread.start()

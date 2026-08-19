@@ -12,6 +12,80 @@ import { audioAnalysisCleanupService } from "../services/audioAnalysisCleanup";
 import { appendTrackToProjection } from "../services/umapProjection";
 import os from "os";
 
+/**
+ * Is the analyzer that owns this control channel actually running?
+ *
+ * Both Python analyzers write a millisecond timestamp to a Redis key every
+ * thirty seconds while they are alive; featureDetection already reads the same
+ * keys to decide whether a feature is available. Reusing them here is what
+ * lets the settings screen say "the analyzer is offline" instead of accepting
+ * a worker count and reporting success to nobody.
+ *
+ * A stale key counts as offline. The window is generous -- ten heartbeats --
+ * because a busy analyzer running CLAP inference can be slow to loop.
+ */
+const ANALYZER_HEARTBEAT_TTL_MS = 300_000; // 5 minutes
+
+async function analyzerIsOnline(heartbeatKey: string): Promise<boolean> {
+    try {
+        const beat = await redisClient.get(heartbeatKey);
+        if (!beat) return false;
+        const at = parseInt(beat, 10);
+        return !isNaN(at) && Date.now() - at < ANALYZER_HEARTBEAT_TTL_MS;
+    } catch {
+        // Redis being unreachable is not evidence the analyzer is up.
+        return false;
+    }
+}
+
+/**
+ * Send a worker-count change and report honestly what happened to it.
+ *
+ * Redis PUBLISH returns how many subscribers received the message. Every one
+ * of these endpoints used to discard that number and answer 200 regardless, so
+ * an admin moving the slider with no analyzer running was told it had worked.
+ * The count is the only delivery evidence available, so it is passed on.
+ */
+/**
+ * The sentence the settings screen shows under the slider.
+ *
+ * It used to always read "Using N of M available CPU cores" whether or not any
+ * analyzer existed, which is the whole reason the control looked functional
+ * while doing nothing.
+ */
+function describeWorkers(
+    workers: number,
+    cpuCores: number,
+    online: boolean,
+    delivered: number,
+): string {
+    if (delivered > 0) {
+        return `Using ${workers} of ${cpuCores} available CPU cores`;
+    }
+    if (online) {
+        return `Saved. The analyzer is running but did not acknowledge the change; it will use ${workers} core(s) after its next restart.`;
+    }
+    return `Saved, but no analyzer is running. It will use ${workers} of ${cpuCores} core(s) when it starts.`;
+}
+
+async function dispatchWorkerCount(
+    channel: string,
+    heartbeatKey: string,
+    workers: number,
+): Promise<{ online: boolean; delivered: number }> {
+    const delivered = await redisClient.publish(
+        channel,
+        JSON.stringify({ command: "set_workers", count: workers }),
+    );
+    const online = await analyzerIsOnline(heartbeatKey);
+    if (delivered === 0) {
+        logger.warn(
+            `[Analysis] set_workers=${workers} published to ${channel} but no analyzer received it`,
+        );
+    }
+    return { online, delivered };
+}
+
 const router = Router();
 
 // Redis queue key for audio analysis (Essentia uses raw Redis BRPOP, not BullMQ)
@@ -357,15 +431,17 @@ router.get("/workers", requireAuth, requireAdmin, async (req, res) => {
         const settings = await getSystemSettings();
         const cpuCores = os.cpus().length;
         const currentWorkers = settings?.audioAnalyzerWorkers || 2;
-        
+        const online = await analyzerIsOnline("audio:worker:heartbeat");
+
         // Recommended: 50% of CPU cores, min 2, max 8
         const recommended = Math.max(2, Math.min(8, Math.floor(cpuCores / 2)));
-        
+
         res.json({
             workers: currentWorkers,
             cpuCores,
             recommended,
-            description: `Using ${currentWorkers} of ${cpuCores} available CPU cores`,
+            analyzerOnline: online,
+            description: describeWorkers(currentWorkers, cpuCores, online, online ? 1 : 0),
         });
     } catch (error: any) {
         logger.error("Get workers config error:", error);
@@ -394,22 +470,26 @@ router.put("/workers", requireAuth, requireAdmin, async (req, res) => {
         });
         invalidateSystemSettingsCache();
 
-        // Publish control signal to Redis for Python worker to pick up
-        await redisClient.publish(
+        const { online, delivered } = await dispatchWorkerCount(
             "audio:analysis:control",
-            JSON.stringify({ command: "set_workers", count: workers })
+            "audio:worker:heartbeat",
+            workers,
         );
-        
+
         const cpuCores = os.cpus().length;
         const recommended = Math.max(2, Math.min(8, Math.floor(cpuCores / 2)));
-        
-        logger.info(`Audio analyzer workers updated to ${workers}`);
-        
+
+        logger.info(
+            `Audio analyzer workers set to ${workers} (delivered to ${delivered} listener(s))`,
+        );
+
         res.json({
             workers,
             cpuCores,
             recommended,
-            description: `Using ${workers} of ${cpuCores} available CPU cores`,
+            analyzerOnline: online,
+            delivered,
+            description: describeWorkers(workers, cpuCores, online, delivered),
         });
     } catch (error: any) {
         logger.error("Update workers config error:", error);
@@ -426,6 +506,7 @@ router.get("/clap-workers", requireAuth, requireAdmin, async (req, res) => {
         const settings = await getSystemSettings();
         const cpuCores = os.cpus().length;
         const currentWorkers = settings?.clapWorkers || 2;
+        const online = await analyzerIsOnline("clap:worker:heartbeat");
 
         const recommended = Math.max(1, Math.min(8, Math.floor(cpuCores / 2)));
 
@@ -433,7 +514,8 @@ router.get("/clap-workers", requireAuth, requireAdmin, async (req, res) => {
             workers: currentWorkers,
             cpuCores,
             recommended,
-            description: `Using ${currentWorkers} of ${cpuCores} available CPU cores`,
+            analyzerOnline: online,
+            description: describeWorkers(currentWorkers, cpuCores, online, online ? 1 : 0),
         });
     } catch (error: any) {
         logger.error("Get CLAP workers config error:", error);
@@ -462,22 +544,26 @@ router.put("/clap-workers", requireAuth, requireAdmin, async (req, res) => {
         });
         invalidateSystemSettingsCache();
 
-        // Publish control signal to Redis for CLAP analyzer to pick up
-        await redisClient.publish(
+        const { online, delivered } = await dispatchWorkerCount(
             "audio:clap:control",
-            JSON.stringify({ command: "set_workers", count: workers })
+            "clap:worker:heartbeat",
+            workers,
         );
 
         const cpuCores = os.cpus().length;
         const recommended = Math.max(1, Math.min(8, Math.floor(cpuCores / 2)));
 
-        logger.info(`CLAP analyzer workers updated to ${workers}`);
+        logger.info(
+            `CLAP analyzer workers set to ${workers} (delivered to ${delivered} listener(s))`,
+        );
 
         res.json({
             workers,
             cpuCores,
             recommended,
-            description: `Using ${workers} of ${cpuCores} available CPU cores`,
+            analyzerOnline: online,
+            delivered,
+            description: describeWorkers(workers, cpuCores, online, delivered),
         });
     } catch (error: any) {
         logger.error("Update CLAP workers config error:", error);
