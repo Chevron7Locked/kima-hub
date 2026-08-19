@@ -22,15 +22,23 @@ export function useActivityPanel() {
     //
     // These three actions announce themselves on the window, because TopBar and
     // ActivityPanel both listen in order to keep their aria-expanded in step.
-    // That announcement used to happen INSIDE the setIsOpen updater, and a
-    // state updater has to be a pure function of its argument. React's Strict
-    // Mode deliberately runs updaters twice to catch exactly that, so toggle()
-    // computed !prev twice -- false to true, then straight back to false -- and
-    // the panel could not be opened from its button at all. open() and close()
-    // survived only because they ignore prev and return a constant.
+    // That announcement used to happen INSIDE the setIsOpen updater, which is
+    // the bug: a state updater must be a pure function of its argument, and
+    // this one fired a synchronous window event. AuthenticatedLayout listens
+    // for that very event and calls open() or close() in response, so toggle()
+    // re-entered this hook while React was still mid-update.
     //
-    // Reading from a ref instead keeps the updater pure and the announcement
-    // outside it, where a side effect is allowed to live.
+    // The observable symptom was that the panel could not be opened from its
+    // button at all, while dispatching "open-activity-panel" directly did work
+    // -- open() and close() ignore prev and return a constant, so re-entering
+    // them is harmless. That asymmetry is what identified the updater as the
+    // culprit. The precise interleaving that produced a net "stays closed" was
+    // not pinned down, and this comment does not guess at one.
+    //
+    // Reading the current value from a ref keeps the updater pure and moves the
+    // announcement outside it, where a side effect is allowed to live. The
+    // early return in open()/close() is load-bearing, not tidiness: it is what
+    // stops the listener feeding an event straight back into the hook.
     const isOpenRef = useRef(isOpen);
     useEffect(() => {
         isOpenRef.current = isOpen;

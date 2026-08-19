@@ -105,6 +105,11 @@
     --z-drawer-backdrop: 60;
     --z-drawer: 70; /* mobile sidebar */
     --z-modal: 80; /* dialogs */
+    /* The panel's own backdrop sits one rung below it. Both were collapsed onto
+     * --z-panel by the token pass, which left the panel above its scrim only
+     * because it happens to be the later sibling; any reorder would have
+     * dropped it behind a black/60 sheet that swallows every tap. */
+    --z-panel-backdrop: 99;
     --z-panel: 100; /* activity panel */
     --z-toast: 200; /* app-level prompts, e.g. "update available" */
     --z-overlay: 300; /* full-screen player */
@@ -211,29 +216,33 @@ code {
  * a phone, where width is the scarce thing, up to 20px on a desktop, where
  * room to breathe matters more than one extra column.
  * ─────────────────────────────────────────────────────────────────────── */
-.grid-media {
-    /* The card floor is itself fluid. Held at a fixed 152px it kept the cards
-     * phone-sized on a 27" display and simply added columns -- fifteen of them
-     * at 2560px. Growing the floor spends the extra width on bigger artwork
-     * instead, which is what the space is for. 152px is the hard minimum: it
-     * is what still fits two cards across a 388px phone.
-     *
-     * The 14vw coefficient was measured, not guessed. The grid does not get the
-     * whole viewport -- the sidebar and the activity rail take about 400px of
-     * it -- so at a 1261px window the cards live in an 849px column. At 12vw
-     * that gave five 154px cards and eighteen truncated titles in the first two
-     * rows; at 14vw it gives four 197px cards and thirteen. Podcast names are
-     * long enough that some clipping is unavoidable, but the card is the thing
-     * you read the title off, so it wins the width. */
-    --card-min: clamp(9.5rem, 14vw, 12rem);
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
-    gap: clamp(0.75rem, 1.6vw, 1.25rem);
+@layer components {
+    .grid-media {
+        /* The card floor is itself fluid. Held at a fixed 152px it kept the cards
+         * phone-sized on a 27" display and simply added columns -- fifteen of them
+         * at 2560px. Growing the floor spends the extra width on bigger artwork
+         * instead, which is what the space is for. 152px is the hard minimum: it
+         * is what still fits two cards across a 388px phone.
+         *
+         * The 14vw coefficient was measured, not guessed. The grid does not get the
+         * whole viewport -- the sidebar and the activity rail take about 400px of
+         * it -- so at a 1261px window the cards live in an 849px column. At 12vw
+         * that gave five 154px cards and eighteen truncated titles in the first two
+         * rows; at 14vw it gives four 197px cards and thirteen. Podcast names are
+         * long enough that some clipping is unavoidable, but the card is the thing
+         * you read the title off, so it wins the width. */
+        --card-min: clamp(9.5rem, 14vw, 12rem);
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+        gap: clamp(0.75rem, 1.6vw, 1.25rem);
+    }
 }
 
 /* Wider cards for content whose titles need the room -- playlists, podcasts. */
-.grid-media-wide {
-    --card-min: clamp(11rem, 15vw, 14rem);
+@layer components {
+    .grid-media-wide {
+        --card-min: clamp(11rem, 15vw, 14rem);
+    }
 }
 
 /* ── Hover-revealed controls on a device that cannot hover ────────────────
@@ -250,7 +259,27 @@ code {
  * button's centre returning the button.
  * ─────────────────────────────────────────────────────────────────────── */
 @media (hover: none) {
-    .group-hover\:opacity-100 {
+    /* A hover-revealed BUTTON is a real action, and on a touch screen the only
+     * honest thing to do is show it. An earlier version of this rule set
+     * `pointer-events: none` on everything with the class, which fixed the
+     * mis-tap but silently removed eighteen files' worth of functionality:
+     * queue reordering, remove-from-playlist, add-to-queue, hide-playlist and
+     * play-from-grid all became invisible AND unreachable. Only the three
+     * grids carrying `.touch-reveal` kept working.
+     *
+     * Buttons are revealed; everything else with the class is a decorative
+     * scrim -- the full-tile `absolute inset-0` darkening on radio and mood
+     * tiles, where the tile itself is already the control -- and revealing
+     * those would permanently dim the artwork for no gain. They are made
+     * non-interactive instead, so the tap reaches the tile underneath. */
+    button.group-hover\:opacity-100,
+    .group-hover\:opacity-100 button {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    div.group-hover\:opacity-100,
+    span.group-hover\:opacity-100 {
         pointer-events: none;
     }
 
@@ -287,9 +316,17 @@ code {
      *
      * Measured on playlists, settings, podcasts and register before shipping:
      * every undersized control reaches 44px, page height does not change on
-     * any of them, and no horizontal overflow is introduced. */
+     * any of them, and no horizontal overflow is introduced.
+     *
+     * range, checkbox and radio are excluded, and the exclusion is not
+     * cosmetic. A range input IS its own track: the volume control is `h-1`,
+     * four pixels tall by design, and a 44px floor turned it into a solid bar.
+     * Checkboxes sit inside fixed grid columns -- the Soulseek results use
+     * `grid-cols-[32px_1fr...]` -- so forcing them to 44px overflows the
+     * column and drags the row with it. Both keep whatever size their own
+     * classes give them; their tap area comes from the label beside them. */
     button,
-    input,
+    input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
     select,
     textarea {
         min-height: 44px;
@@ -304,20 +341,17 @@ code {
      * on the artist page, the tracks tab of the collection, podcasts and
      * settings: every narrow control reaches 44px and none of the four gains
      * any horizontal overflow. textarea is left out -- it is already
-     * full-width wherever it appears. */
+     * full-width wherever it appears, and range, checkbox and radio are left
+     * out for the same reasons as above. */
     button,
-    input,
+    input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
     select {
         min-width: 44px;
     }
 
-    /* The play button is the exception, because it is the one action a card
-     * is actually for. On a touch screen it stops hiding and simply stays.
-     *
-     * Destructive controls deliberately do NOT get this. A delete button
-     * permanently parked on the corner of every tile, one stray tap from the
-     * artwork, is a worse trade than having no delete on the grid at all --
-     * it remains available from the item's own page. */
+    /* Kept for the three grids that already carry it. The button rule at the
+     * top of this block now covers the same ground, so this is belt and
+     * braces rather than the mechanism. */
     .touch-reveal {
         opacity: 1;
         pointer-events: auto;
@@ -332,8 +366,10 @@ code {
  * It holds at 48px on a phone, where vertical space is the scarce thing and
  * scrolling is cheap, and opens to 72px on a desktop, where there is room for
  * the separation to actually do its job of saying "this is a different thing". */
-.section-stack > * + * {
-    margin-top: clamp(3rem, 5vw, 4.5rem);
+@layer components {
+    .section-stack > * + * {
+        margin-top: clamp(3rem, 5vw, 4.5rem);
+    }
 }
 
 body {
@@ -561,56 +597,11 @@ button:disabled {
     }
 }
 
-@keyframes shimmer {
-    0% {
-        transform: translateX(-100%);
-    }
-    100% {
-        transform: translateX(100%);
-    }
-}
+/* @keyframes shimmer and .animate-shimmer were removed 2026-08-18. Their only
+ * two users were the library tabs and the search filters, where a light sweep
+ * ran across a filter control forever. .impeccable.md lists shimmer as an
+ * anti-reference; leaving the rule here only invites it back. */
 
-@keyframes fadeSlideIn {
-    from {
-        opacity: 0;
-        transform: translateY(4px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-
-@keyframes float {
-    0%, 100% {
-        transform: translate(0, 0);
-    }
-    50% {
-        transform: translate(20px, -20px);
-    }
-}
-
-@keyframes float-delayed {
-    0%, 100% {
-        transform: translate(0, 0);
-    }
-    50% {
-        transform: translate(-20px, 20px);
-    }
-}
-
-.animate-float {
-    animation: float 8s ease-in-out infinite;
-}
-
-.animate-float-delayed {
-    animation: float-delayed 10s ease-in-out infinite;
-}
-
-.animate-shimmer {
-    animation: shimmer 2s ease-in-out infinite;
-}
 
 /* =====================================================
    Accessibility - Reduced Motion Support
@@ -628,10 +619,16 @@ button:disabled {
  * more nauseating kinds for a vestibular disorder, so it is turned off here
  * rather than left running.
  *
- * `--motion-ok` is the same preference expressed as a number, so JavaScript
- * animation can read it from CSS instead of each caller re-deriving it. See
- * useReducedMotion, which the three requestAnimationFrame loops consume --
- * a media query cannot reach those on its own. */
+ * `--motion-ok` is the same preference expressed as a number, and
+ * useReducedMotion is the same thing for JavaScript. Both are provided for
+ * animation a media query cannot reach; neither has a consumer today.
+ *
+ * That is deliberate rather than unfinished. The three requestAnimationFrame
+ * call sites in this app were checked and none is autonomous motion: two are
+ * not animation at all (one defers a state flip by a frame so a CSS
+ * transition can run, the other throttles a scroll handler) and the third
+ * throttles pointer-locked mouse-look, which is direct input and would break
+ * if it were suppressed. The vibe canvas already runs frameloop="demand". */
 :root {
     --motion-ok: 1;
 }

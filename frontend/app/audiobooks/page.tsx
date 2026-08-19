@@ -375,7 +375,7 @@ export default function AudiobooksPage() {
                         </span>
                     </div>
                     <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-2">
-                        AUDIO<br />
+                        Audio<br />
                         <span className="text-[#f59e0b]">books</span>
                     </h1>
                     <p className="text-sm tabular-nums text-[var(--text-muted)]">

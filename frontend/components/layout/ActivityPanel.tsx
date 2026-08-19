@@ -82,7 +82,7 @@ export function ActivityPanel({
             <>
                 {/* Backdrop */}
                 <div
-                    className="fixed inset-0 bg-black/60 z-(--z-panel)"
+                    className="fixed inset-0 bg-black/60 z-(--z-panel-backdrop)"
                     onClick={onToggle}
                 />
 
