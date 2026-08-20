@@ -167,7 +167,10 @@ router.get("/discover/top", requireAuthOrToken, async (req, res) => {
             feedUrl: podcast.feedUrl,
             genres: podcast.genres || [],
             episodeCount: podcast.trackCount || 0,
-            itunesId: podcast.collectionId,
+            // A string, like every other endpoint that returns one and like the column
+            // it ends up in. Handing back the raw number made subscribing to a podcast
+            // straight from discovery fail.
+            itunesId: podcast.collectionId?.toString() ?? null,
             isExternal: true,
         }));
 
@@ -245,7 +248,10 @@ router.get("/discover/genres", async (req, res) => {
                     feedUrl: podcast.feedUrl,
                     genres: podcast.genres || [],
                     episodeCount: podcast.trackCount || 0,
-                    itunesId: podcast.collectionId,
+                    // A string, like every other endpoint that returns one and like the column
+            // it ends up in. Handing back the raw number made subscribing to a podcast
+            // straight from discovery fail.
+            itunesId: podcast.collectionId?.toString() ?? null,
                     isExternal: true,
                 }));
 
@@ -342,7 +348,10 @@ router.get("/discover/genre/:genreId", async (req, res) => {
             feedUrl: podcast.feedUrl,
             genres: podcast.genres || [],
             episodeCount: podcast.trackCount || 0,
-            itunesId: podcast.collectionId,
+            // A string, like every other endpoint that returns one and like the column
+            // it ends up in. Handing back the raw number made subscribing to a podcast
+            // straight from discovery fail.
+            itunesId: podcast.collectionId?.toString() ?? null,
             isExternal: true,
         }));
 
@@ -919,7 +928,18 @@ router.post("/subscribe", requireAuth, async (req, res) => {
 
         // Create podcast in database
         logger.debug(`    Saving podcast to database...`);
-        const finalItunesId = itunesId || podcastData.itunesId;
+        // Coerce to a string: the column is String? but iTunes ids arrive as numbers.
+        //
+        // This endpoint's own sibling hands them over that way -- /podcasts/discover/top
+        // stringifies `id` and leaves `itunesId` as the raw numeric collectionId -- so
+        // taking a podcast from discovery and subscribing to it, which is the obvious
+        // pairing, crashed the create with a type error and answered 500. The caller had
+        // done nothing wrong; two of our own endpoints simply did not compose.
+        const rawItunesId = itunesId ?? podcastData.itunesId;
+        const finalItunesId =
+            rawItunesId === null || rawItunesId === undefined || rawItunesId === ""
+                ? null
+                : String(rawItunesId);
         logger.debug(`   iTunes ID to save: ${finalItunesId || "NONE"}`);
 
         podcast = await prisma.podcast.create({
@@ -1722,7 +1742,7 @@ router.get("/:id/similar", async (req, res) => {
                         coverUrl: rec.artworkUrl600 || rec.artworkUrl100,
                         episodeCount: rec.trackCount || 0,
                         feedUrl: rec.feedUrl,
-                        itunesId: rec.collectionId,
+                        itunesId: rec.collectionId?.toString() ?? null,
                         isExternal: true,
                         score: recommendations.length - index,
                     }))
