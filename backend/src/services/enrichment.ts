@@ -157,7 +157,12 @@ class EnrichmentService {
         });
 
         if (!artist) {
-            throw new Error(`Artist ${artistId} not found`);
+            // Return null, don't throw. The method already returns null for "nothing to
+            // enrich" and the route has a 404 branch waiting for it -- but a throw sailed
+            // past that branch into the catch-all and answered 500, so asking to enrich a
+            // row deleted by a concurrent scan looked like a server fault.
+            logger.debug(`Artist ${artistId} not found; nothing to enrich`);
+            return null;
         }
 
         logger.debug(`Enriching artist: ${artist.name}`);
@@ -284,7 +289,10 @@ class EnrichmentService {
         });
 
         if (!album) {
-            throw new Error(`Album ${albumId} not found`);
+            // Same as enrichArtist above: null reaches the route's existing 404 branch,
+            // a throw did not.
+            logger.debug(`Album ${albumId} not found; nothing to enrich`);
+            return null;
         }
 
         logger.debug(

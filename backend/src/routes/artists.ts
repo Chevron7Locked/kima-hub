@@ -142,10 +142,23 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
             }
         }
 
-        // If we have MBID but no name, get it from MusicBrainz
+        // If we have MBID but no name, get it from MusicBrainz.
+        //
+        // A well-formed id MusicBrainz does not recognise is not a server fault. It is the
+        // common case here rather than a malformed request: the ids reach us from Last.fm's
+        // similar-artist data, which is full of MBIDs for artists that have since been
+        // merged or deleted, and the "Fans Also Like" tiles navigate straight back into this
+        // handler. Letting the throw escape answered 500 for an ordinary click.
         if (mbid && !artistName) {
-            const mbArtist = await musicBrainzService.getArtist(mbid);
-            artistName = mbArtist.name;
+            try {
+                const mbArtist = await musicBrainzService.getArtist(mbid);
+                artistName = mbArtist.name;
+            } catch (error: any) {
+                const upstreamStatus = error.response?.status;
+                if (!(upstreamStatus >= 400 && upstreamStatus < 500)) throw error;
+                // Fall through: artistName stays empty and the 404 below answers.
+                logger.debug(`MusicBrainz does not know artist ${mbid}`);
+            }
         }
 
         if (!artistName) {

@@ -787,7 +787,16 @@ router.put("/albums/:id/metadata", requireAdmin, async (req, res) => {
         updateData.sortName = artistSortName(effectiveTitle);
       }
       if (year !== undefined) {
-        updateData.displayYear = parseInt(year);
+        // Clearing the field in the editor sends null, not undefined: the input does
+        // parseInt("") -> NaN, and JSON.stringify turns NaN into null. That passed the
+        // !== undefined check and put NaN into an Int? column, which Prisma rejects and
+        // the catch below reported as 500 -- for the ordinary act of emptying a field.
+        // Null now means "remove the override", which is what the user asked for.
+        const parsedYear = year === null || year === "" ? null : parseInt(year, 10);
+        if (parsedYear !== null && Number.isNaN(parsedYear)) {
+          return res.status(400).json({ error: "year must be a number" });
+        }
+        updateData.displayYear = parsedYear;
         hasOverrides = true;
       }
       if (coverUrl !== undefined) {
@@ -864,7 +873,13 @@ router.put("/tracks/:id/metadata", requireAdmin, async (req, res) => {
       hasOverrides = true;
     }
     if (trackNo !== undefined) {
-      updateData.displayTrackNo = parseInt(trackNo);
+      // Same as displayYear above: null clears the override, anything unparseable is the
+      // caller's mistake and gets a 400 rather than a 500.
+      const parsedTrackNo = trackNo === null || trackNo === "" ? null : parseInt(trackNo, 10);
+      if (parsedTrackNo !== null && Number.isNaN(parsedTrackNo)) {
+        return res.status(400).json({ error: "trackNo must be a number" });
+      }
+      updateData.displayTrackNo = parsedTrackNo;
       hasOverrides = true;
     }
 
