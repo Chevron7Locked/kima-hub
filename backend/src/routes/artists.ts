@@ -445,6 +445,21 @@ router.get("/album/:mbid", async (req, res) => {
     try {
         const { mbid } = req.params;
 
+        // This identifier goes to MusicBrainz, which only ever issues UUIDs. Anything
+        // else -- a stale link, a typo, a library id pasted into a discovery URL -- is a
+        // request for an album that cannot exist, so answer that directly.
+        //
+        // Without this the id was forwarded upstream anyway, MusicBrainz rejected it with
+        // a 400, the handler below only knew how to recover from a 404, and the rethrow
+        // came out of the bottom of the route as "500 Internal server error" -- telling
+        // the caller that the server broke when in fact the id was simply wrong. It also
+        // spent a rate-limited upstream request to learn nothing.
+        const MBID_PATTERN =
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!MBID_PATTERN.test(mbid)) {
+            return res.status(404).json({ error: "Album not found" });
+        }
+
         // Check Redis cache first for discovery content
         const cacheKey = `discovery:album:${mbid}`;
         try {
@@ -465,12 +480,26 @@ router.get("/album/:mbid", async (req, res) => {
         try {
             releaseGroup = await musicBrainzService.getReleaseGroup(mbid);
         } catch (error: any) {
-            // If 404, try as a release instead
-            if (error.response?.status === 404) {
+            // Any "you asked for something that isn't there" answer means this is not a
+            // release-group, so try it as a release. Only a 404 was handled before, which
+            // left every other client-side rejection to escape as a 500.
+            const upstreamStatus = error.response?.status;
+            if (upstreamStatus >= 400 && upstreamStatus < 500) {
                 logger.debug(
                     `${mbid} is not a release-group, trying as release...`
                 );
-                release = await musicBrainzService.getRelease(mbid);
+                try {
+                    release = await musicBrainzService.getRelease(mbid);
+                } catch (releaseError: any) {
+                    // A well-formed id that MusicBrainz knows nothing about as either a
+                    // release-group or a release is simply an album that does not exist.
+                    // Letting this escape reported it as a server fault.
+                    const releaseStatus = releaseError.response?.status;
+                    if (releaseStatus >= 400 && releaseStatus < 500) {
+                        return res.status(404).json({ error: "Album not found" });
+                    }
+                    throw releaseError;
+                }
                 releaseGroupId = release["release-group"]?.id || mbid;
 
                 // Now get the release group to get the type and first-release-date
