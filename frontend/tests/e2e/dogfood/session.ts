@@ -63,6 +63,11 @@ const IGNORED_CONSOLE = [
     // Narrow on purpose. If the server were genuinely unreachable every other request in
     // the session would fail too, and those are still reported.
     /\[AudioState\] Failed to save to server: TypeError: Failed to fetch/,
+    // Same cause, same reasoning, two more background jobs the player runs while you read
+    // a page: saving episode position, and fetching related podcasts. Navigating away
+    // cancels whichever is in flight.
+    /\[AudioControls\] Failed to save (podcast|audiobook) progress: TypeError: Failed to fetch/,
+    /Failed to load similar podcasts: TypeError: Failed to fetch/,
 ];
 
 /** API calls that are allowed to fail, because a step deliberately provokes them. */

@@ -657,7 +657,20 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const addToQueue = useCallback(
         (track: Track) => {
-            if (state.queue.length === 0 || state.playbackType !== "track") {
+            // Read the queue from the ref, not from `state` captured in this closure.
+            //
+            // This branch REPLACES the whole queue with the one track, so it must only run
+            // when the queue is genuinely empty. Judging that from a stale closure -- or
+            // from a playbackType that has not caught up yet -- turned "add to queue" into
+            // "throw away the queue": measured as an eight-track album collapsing to one
+            // the moment a track was added to it. Intermittent, because it depends on
+            // whether this callback had been rebuilt since the album started.
+            //
+            // playbackType is deliberately not part of the test any more. Adding a track
+            // while a podcast plays should start a track queue, which the branch below
+            // handles correctly once the queue is empty; it is not a reason to discard a
+            // queue that has tracks in it.
+            if (queueRef.current.length === 0) {
                 state.setPlaybackType("track");
                 state.setQueue([track]);
                 state.setCurrentIndex(0);

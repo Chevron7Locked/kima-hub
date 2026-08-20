@@ -264,7 +264,13 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     const lastServerSyncRef = useRef(lastServerSync);
     useEffect(() => { lastServerSyncRef.current = lastServerSync; }, [lastServerSync]);
     const queueRef = useRef(queue);
-    useEffect(() => { queueRef.current = queue; }, [queue]);
+    // When the queue last changed on THIS device. The cross-device poller needs it to tell
+    // "another device changed the queue" from "my own change has not been uploaded yet".
+    const localQueueChangedAtRef = useRef<Date>(new Date(0));
+    useEffect(() => {
+        queueRef.current = queue;
+        localQueueChangedAtRef.current = new Date();
+    }, [queue]);
     const currentIndexRef = useRef(currentIndex);
     useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
     const isShuffleRef = useRef(isShuffle);
@@ -347,7 +353,14 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         }
 
         // Wipe whatever the server told us to restore, when it turns out not to exist.
+        //
+        // These lookups are asynchronous and can land seconds after the page loads -- long
+        // enough for someone to have pressed play in the meantime. Clearing unconditionally
+        // then throws away the album they just started: measured as a queue of 13 tracks
+        // collapsing to 1. So this backs off entirely if anything is queued by the time it
+        // resolves, because a stale restore is worth less than live playback.
         const clearRestoredPlayback = () => {
+            if (queueRef.current.length > 0) return;
             setCurrentTrack(null);
             setCurrentAudiobook(null);
             setCurrentPodcast(null);
@@ -432,9 +445,29 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         });
                 }
 
-                if (serverState.queue) setQueue(serverState.queue);
-                if (serverState.currentIndex !== undefined)
-                    setCurrentIndex(serverState.currentIndex);
+                // Restoring the previous session's queue must not overwrite one the
+                // listener has built in the meantime. This request is asynchronous and can
+                // land seconds after the page is usable, which is easily long enough to
+                // open an album and press play: measured as an eight-track album collapsing
+                // to a single track, because the old one-track queue arrived late and won.
+                //
+                // Shuffle is a preference rather than content, so it is restored either way.
+                // The guard has to read the real current queue, not a ref that trails it.
+                // queueRef is synced by an effect, so between "the listener pressed play"
+                // and "the ref catches up" there is a window where the ref still says empty
+                // and the stale queue wins anyway -- which showed up as this overwrite
+                // happening on some runs and not others. A functional update sees the
+                // actual value at the moment React applies it, with no window at all.
+                if (serverState.queue) {
+                    setQueue((prev) => (prev.length > 0 ? prev : serverState.queue));
+                }
+                if (serverState.currentIndex !== undefined) {
+                    // An index only means anything alongside the queue it came from. If the
+                    // listener's own queue won above, their position stands.
+                    setCurrentIndex((prev) =>
+                        queueRef.current.length === 0 ? serverState.currentIndex! : prev,
+                    );
+                }
                 if (serverState.isShuffle !== undefined)
                     setIsShuffle(serverState.isShuffle);
             })
@@ -679,7 +712,19 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     }
 
                     if (!mounted) return;
+                    // Adopt the server's queue only when it is genuinely newer than the one
+                    // in front of the listener.
+                    //
+                    // "Different from mine" is not the same as "newer than mine". Saving
+                    // playback state is debounced, so for a few seconds after pressing play
+                    // the server still holds the PREVIOUS queue -- which differs, so this
+                    // adopted it and the album that had just started collapsed back to
+                    // yesterday's single track. Intermittent, because it only bites when a
+                    // poll lands inside that window.
+                    const serverIsNewer =
+                        serverUpdatedAt.getTime() > localQueueChangedAtRef.current.getTime();
                     if (
+                        serverIsNewer &&
                         JSON.stringify(serverState.queue) !==
                         JSON.stringify(queueRef.current)
                     ) {

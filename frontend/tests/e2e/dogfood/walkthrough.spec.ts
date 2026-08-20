@@ -261,13 +261,23 @@ test.describe("Dogfood walkthrough", () => {
     test("3. queue: line up more music and confirm every surface agrees", async () => {
         session.setJourney("3. Queue");
 
+        const queueLength = () =>
+            page.evaluate(() => {
+                try {
+                    return JSON.parse(localStorage.getItem("kima_queue") || "[]").length;
+                } catch {
+                    return -1;
+                }
+            });
+
         await session.step("add a track to the queue", async () => {
+            const before = await queueLength();
             const row = page.locator("[data-track-row]").nth(1);
             await row.waitFor({ state: "visible", timeout: 10_000 });
             await row.hover();
             await row.getByLabel("Add to queue").click();
             await page.waitForTimeout(600);
-            return { added: true };
+            return { queueBefore: before, queueAfter: await queueLength() };
         });
 
         // Client-side navigation on purpose: the queue lives in React state, so reloading
@@ -276,15 +286,24 @@ test.describe("Dogfood walkthrough", () => {
             await page.getByTitle("Play queue").click();
             await page.waitForURL(/\/queue/, { timeout: 10_000 });
             await settle(page, 1000);
-            return { url: new URL(page.url()).pathname };
+            return { url: new URL(page.url()).pathname, queueOnArrival: await queueLength() };
         });
 
         await session.step("the queue shows what is playing and what is next", async () => {
             await expect(page.getByRole("heading", { name: "Now Playing" })).toBeVisible({
                 timeout: 10_000,
             });
-            await expect(page.getByText(/Next Up/)).toBeVisible({ timeout: 10_000 });
-            return { nowPlaying: true, nextUp: true };
+            const len = await queueLength();
+            const shown = await page
+                .locator("text=/\\d+ track/")
+                .first()
+                .textContent()
+                .catch(() => "?");
+            await expect(
+                page.getByText(/Next Up/),
+                `queue holds ${len} item(s); the page reads "${shown?.trim()}"`,
+            ).toBeVisible({ timeout: 10_000 });
+            return { nowPlaying: true, nextUp: true, queueLength: len };
         });
 
         // Cross-surface consistency. The player and the queue page render the same state
@@ -735,6 +754,23 @@ test.describe("Dogfood walkthrough", () => {
                 await page.request
                     .delete(`/api/podcasts/${podcastId}/unsubscribe`, {
                         headers: { Authorization: `Bearer ${token}` },
+                    })
+                    .catch(() => {});
+
+                // Also drop every reference to it. Unsubscribing alone leaves the podcast
+                // recorded as "what you were playing" in both localStorage and the server's
+                // playback state, so the next screen -- and the next RUN -- would look it
+                // up, get a 404, and clean up. The app handles that correctly, but it is
+                // this journey's litter, and leaving it makes later journeys report a
+                // problem they did not cause.
+                await page.request
+                    .delete("/api/playback-state", {
+                        headers: { Authorization: `Bearer ${token}` },
+                    })
+                    .catch(() => {});
+                await page
+                    .evaluate(() => {
+                        localStorage.removeItem("kima_current_podcast");
                     })
                     .catch(() => {});
             }

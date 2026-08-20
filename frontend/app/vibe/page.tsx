@@ -76,22 +76,9 @@ export default function VibePage() {
         setHighlightedIds,
     } = useVibeMap();
 
-    // Suppress async WebGL teardown crash on rapid refresh. deck.gl's luma.gl
-    // has a ResizeObserver that can fire after device destruction, accessing
-    // device.limits.maxTextureDimension2D on an undefined object. Error
-    // boundaries can't catch this (async callback). We intercept in the
-    // capture phase with stopImmediatePropagation to prevent Next.js dev
-    // overlay from displaying it -- the error is harmless (old page teardown).
-    useEffect(() => {
-        const handler = (e: ErrorEvent) => {
-            if (e.message?.includes("maxTextureDimension2D")) {
-                e.preventDefault();
-                e.stopImmediatePropagation();
-            }
-        };
-        window.addEventListener("error", handler, true);
-        return () => window.removeEventListener("error", handler, true);
-    }, []);
+    // The luma.gl teardown error this page provokes is suppressed by
+    // GpuTeardownSuppressor, mounted at the root. It cannot live here: the error fires
+    // after this page unmounts, by which point a handler registered here is gone.
 
     const [view, setView] = useState<VibeView>(() => {
         try {

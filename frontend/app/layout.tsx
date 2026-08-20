@@ -7,6 +7,7 @@ import { ToastProvider } from "@/lib/toast-context";
 import { DownloadProvider } from "@/lib/download-context";
 import { DownloadProgressProvider } from "@/lib/download-progress-context";
 import { ConditionalAudioProvider } from "@/components/providers/ConditionalAudioProvider";
+import { GpuTeardownSuppressor } from "@/components/providers/GpuTeardownSuppressor";
 import { AuthenticatedLayout } from "@/components/layout/AuthenticatedLayout";
 import { QueryProvider } from "@/lib/query-client";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
@@ -69,6 +70,7 @@ export default function RootLayout({
             >
                 <GlobalErrorBoundary>
                     <ServiceWorkerRegistration />
+                    <GpuTeardownSuppressor />
                     <AuthProvider>
                         <FeaturesProvider>
                             <QueryProvider>
