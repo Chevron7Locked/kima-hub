@@ -21,7 +21,11 @@ class CoverArtService {
             // Use rate limiter to prevent overwhelming Cover Art Archive
             const response = await rateLimiter.execute("coverart", () =>
                 axios.get(`${this.baseUrl}/release-group/${rgMbid}`, {
-                    timeout: 5000,
+                    // CAA is a slow public mirror -- cold responses from a
+                    // home connection routinely exceed the axios default
+                    // budget, and a timeout null kept every "available"
+                    // album card on artist pages a placeholder forever.
+                    timeout: 15000,
                 })
             );
 
