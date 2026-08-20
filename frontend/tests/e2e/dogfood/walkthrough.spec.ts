@@ -453,8 +453,11 @@ test.describe("Dogfood walkthrough", () => {
         // is a scheduler that hands over a batch, decides it has nothing to do, and sleeps
         // for a minute while the embedder sits idle. That shape took ten minutes to do
         // twenty-six seconds of work.
-        const BUDGET_MS = 6 * 60 * 1000;
+        // The ceiling is the guard; the budget derives from it so a large library is
+        // given as long as the ceiling allows, while a small one keeps the fixed floor.
         const PER_TRACK_CEILING_MS = 4000;
+        const BUDGET_MS = Math.max(6 * 60 * 1000, facts.tracks * PER_TRACK_CEILING_MS);
+        test.setTimeout(BUDGET_MS + 5 * 60 * 1000);
 
         await session.step("the pipeline rebuilds every embedding", async () => {
             const startedAt = Date.now();
