@@ -419,14 +419,24 @@ class AudioAnalyzer:
         worker process via an uncatchable native fault, so we gate on ffmpeg
         first and skip undecodable files rather than feeding them to Essentia.
 
+        Probes the AUDIO STREAMS ONLY (-map 0:a plus -vn/-sn/-dn). Without that,
+        ffmpeg also decodes the embedded cover art, and -xerror then condemns the
+        whole file over a malformed thumbnail. That is not hypothetical: on the
+        production library all twelve tracks of one album were marked corrupt with
+        "[mjpeg] No JPEG data found in image" while their audio decoded perfectly.
+        Analysis never touches the artwork, so the artwork must not get a vote.
+
         Fails OPEN (returns decodable) if ffmpeg is missing or the probe itself
         errors, so analysis is never blocked by a tooling gap. ffmpeg reads no
         stdin (-nostdin) and exits non-zero on the first decode error (-xerror).
+        A file with no audio stream at all fails the map and is rejected, which
+        is the right answer for something the analyzer cannot read.
         """
         try:
             proc = subprocess.run(
                 ['ffmpeg', '-nostdin', '-v', 'error', '-xerror',
-                 '-i', file_path, '-f', 'null', '-'],
+                 '-i', file_path, '-map', '0:a', '-vn', '-sn', '-dn',
+                 '-f', 'null', '-'],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
