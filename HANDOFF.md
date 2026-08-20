@@ -1,6 +1,6 @@
 # Handoff: getting this branch production ready
 
-Branch `port/backend-security`, ~130 commits, **nothing pushed, nothing deployed**.
+Branch `port/backend-security`, **126 commits ahead of `main`, nothing pushed, nothing deployed**.
 
 Your job is to get this to production. Most of the work is not writing features — it is
 finding the remaining bugs of the kinds catalogued below, and closing the gap between "green
@@ -12,9 +12,11 @@ Read section 1 first. It is the part that will change how you work.
 
 ## 1. What this session actually taught, and what to do differently
 
-**Nine bugs were found. Seven were pre-existing, two I introduced while fixing the others.**
-Not one was exotic. Every single one was in an error path, a cleanup path, or a race — the
-code nobody exercises because the happy path works.
+**Around twenty distinct defects were fixed across thirteen commits. Two of them I
+introduced while fixing others.** The count is approximate because several commits bundle
+closely-related fixes — the exact number matters less than the shape: not one was exotic, and
+every single one was in an error path, a cleanup path, or a race. The code nobody exercises,
+because the happy path works.
 
 Three lessons, in order of how much they cost:
 
@@ -45,7 +47,7 @@ someone else. That is not a smaller version of fixing it; it is a different, wor
 you can see it and you can fix it, fix it. The operator's words: *"these arent common or
 uncommon or rare design choices. theyre bugs"*.
 
-The corollary: when you are wrong, say so in one line and move on. Two of the nine were mine.
+The corollary: when you are wrong, say so in one line and move on. Two of those defects were mine.
 Saying that plainly costs nothing and is the only way the record stays worth reading.
 
 ---
@@ -212,6 +214,10 @@ codebase earlier via the activity panel.
    broke" from "the directory was unreachable", but a CI run will be flaky without network.
 7. **The 12 false-positive tracks in production are still marked failed.** The fix does not
    retroactively reset them; they need a re-analysis pass.
+8. **Two fixes in `4b3c6b5c` are unvalidated against any symptom.** The session-restore queue
+   guard and the sync-poller freshness check were both written while chasing the queue bug and
+   neither fixed it. They are correct on their own terms and were kept, but nothing
+   demonstrates they resolve a real failure. Do not treat them as proven.
 
 ---
 
@@ -226,11 +232,12 @@ KIMA_TEST_USERNAME=kima_e2e KIMA_TEST_PASSWORD=dogfood-e2e-pw \
 npx playwright test tests/e2e/dogfood --reporter=list
 ```
 
-**Why it finds what the other 2,612 lines of E2E do not:** every other spec logs in, jumps to
+**Why it finds what the other 2,752 lines of E2E do not:** every other spec logs in, jumps to
 one page, asserts, and throws the browser away. A full reload between actions wipes React
 state, so nothing that needs state to accumulate can happen. This one navigates by clicking,
 keeps one session, and holds the whole thing to "no 5xx, no uncaught exception, no sideways
-scroll, anywhere". Six of the nine bugs were found by it; the rest came from reading its output.
+scroll, anywhere". Roughly half the defects above were found by it or while verifying a fix it
+prompted; the rest came from measuring the enrichment pipeline directly.
 
 Things worth knowing before you change it:
 - It **fails** rather than skips when data is missing. A gate that skips its way to green is
@@ -297,9 +304,12 @@ everything behind them fails.
    stack and watch enrichment for an hour: memory, cycle cadence, and query time on the pool
    that also serves streaming. Item 3 in section 3 is the biggest risk in this branch and it is
    under a change I made.
-4. **Work the taxonomy.** Five audit agents were dispatched against categories A/B, C–H, I/J,
-   L, and K; their findings should be in hand. Treat every report as a lead, not a fact — I was
-   wrong twice diagnosing these from reading code.
+4. **Work the taxonomy.** Five read-only audit agents were dispatched against categories A/B,
+   C–H, I/J, L and K. If their findings are appended to this file as section 8, start there;
+   if section 8 is absent, the run did not complete and the categories are unswept — do them
+   yourself. Treat every report as a LEAD, not a fact. Each was asked to label findings
+   REACHABLE / UNCERTAIN / THEORETICAL, and to trace to specific lines, precisely because I was
+   wrong twice diagnosing this class from reading code. Reproduce before fixing.
 5. **Get the audiobook key** and run that journey.
 6. **Re-analyse the 12 false-positive production tracks** once the artwork fix is deployed.
 7. **Push.**
