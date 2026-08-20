@@ -85,9 +85,12 @@ export function LibraryRadioStations() {
         });
     };
 
-    const renderCard = (station: RadioStation, compact: boolean) => (
+    const renderCard = (station: RadioStation, compact: boolean, idx: number) => (
         <button
             key={station.id}
+            data-tv-card
+            data-tv-card-index={idx}
+            tabIndex={0}
             onClick={() => startRadio(station)}
             disabled={loadingStation !== null}
             className={cn(
@@ -170,7 +173,7 @@ export function LibraryRadioStations() {
                     ref={scrollRef}
                     className="flex overflow-x-auto scrollbar-hide scroll-smooth snap-x snap-mandatory gap-3 px-1"
                 >
-                    {allStations.map((station) => renderCard(station, true))}
+                    {allStations.map((station, i) => renderCard(station, true, i))}
                     {isLoading &&
                         Array.from({ length: 6 }).map((_, i) => (
                             <div key={i} className="flex-shrink-0 w-[180px] h-[80px] rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse" />
@@ -202,7 +205,7 @@ export function LibraryRadioStations() {
                         key={pageIndex}
                         className="flex-shrink-0 snap-start w-full grid grid-cols-2 grid-rows-3 sm:grid-cols-3 sm:grid-rows-2 gap-2"
                     >
-                        {page.map((station) => renderCard(station, false))}
+                        {page.map((station, i) => renderCard(station, false, i))}
                         {page.length < 6 &&
                             Array.from({ length: 6 - page.length }).map((_, i) => (
                                 <div key={`empty-${i}`} className="aspect-[5/3]" />

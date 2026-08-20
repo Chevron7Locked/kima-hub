@@ -52,14 +52,14 @@ export default function HomePage() {
                 <div className="relative max-w-[1800px] mx-auto px-4 sm:px-6 md:px-8 pb-32 pt-8">
                     <div className="section-stack">
                         {/* Library Radio Stations */}
-                        <section>
+                        <section data-tv-section="library-radio">
                             <SectionHeader title="Library Radio" showAllHref="/radio" color="featured" />
                             <LibraryRadioStations />
                         </section>
 
                         {/* Continue Listening */}
                         {recentlyListened.length > 0 && (
-                            <section>
+                            <section data-tv-section="continue-listening">
                                 <SectionHeader title="Continue Listening" showAllHref="/collection?tab=artists" color="featured" />
                                 <ContinueListening items={recentlyListened} />
                             </section>
@@ -67,7 +67,7 @@ export default function HomePage() {
 
                         {/* Recently Added */}
                         {recentlyAdded.length > 0 && (
-                            <section>
+                            <section data-tv-section="recently-added">
                                 <SectionHeader title="Recently Added" showAllHref="/collection?tab=artists" color="artists" />
                                 <ArtistsGrid artists={recentlyAdded} />
                             </section>
@@ -75,7 +75,7 @@ export default function HomePage() {
 
                         {/* Made For You */}
                         {mixes.length > 0 && (
-                            <section>
+                            <section data-tv-section="made-for-you">
                                 <SectionHeader
                                     title="Made For You"
                                     color="discover"
@@ -112,7 +112,7 @@ export default function HomePage() {
 
                         {/* Recommended For You */}
                         {recommended.length > 0 && (
-                            <section>
+                            <section data-tv-section="recommended">
                                 <SectionHeader title="Recommended" showAllHref="/discover" badge="Last.FM" color="artists" />
                                 <ArtistsGrid artists={recommended} />
                             </section>
@@ -120,7 +120,7 @@ export default function HomePage() {
 
                         {/* Popular Artists */}
                         {popularArtists.length > 0 && (
-                            <section>
+                            <section data-tv-section="popular-artists">
                                 <SectionHeader title="Popular Artists" badge="Last.FM" color="artists" />
                                 <PopularArtistsGrid artists={popularArtists} />
                             </section>
@@ -128,7 +128,7 @@ export default function HomePage() {
 
                         {/* Featured Playlists */}
                         {(isBrowseLoading || featuredPlaylists.length > 0) && (
-                            <section>
+                            <section data-tv-section="featured-playlists">
                                 <SectionHeader title="Featured Playlists" showAllHref="/browse/playlists" badge="Deezer" color="tracks" />
                                 {isBrowseLoading && featuredPlaylists.length === 0 ? (
                                     <FeaturedPlaylistsSkeleton />
@@ -140,7 +140,7 @@ export default function HomePage() {
 
                         {/* Popular Podcasts */}
                         {recentPodcasts.length > 0 && (
-                            <section>
+                            <section data-tv-section="popular-podcasts">
                                 <SectionHeader title="Popular Podcasts" showAllHref="/podcasts" color="podcasts" />
                                 <PodcastsGrid podcasts={recentPodcasts} />
                             </section>
@@ -148,7 +148,7 @@ export default function HomePage() {
 
                         {/* Audiobooks */}
                         {recentAudiobooks.length > 0 && (
-                            <section>
+                            <section data-tv-section="audiobooks">
                                 <SectionHeader title="Audiobooks" showAllHref="/audiobooks" color="audiobooks" />
                                 <AudiobooksGrid audiobooks={recentAudiobooks} />
                             </section>
