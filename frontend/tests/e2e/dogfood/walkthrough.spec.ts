@@ -199,41 +199,52 @@ test.describe("Dogfood walkthrough", () => {
             if (!(await firstAlbumCard(page).isVisible().catch(() => false))) {
                 await openAlbumsTab(page);
             }
-            const cards = page.locator('main a[href^="/album/"]');
-            await cards.first().waitFor({ state: "visible", timeout: 10_000 });
             // Journey 3 queues a *second* track from whatever album opens
-            // here, and production data contains single-track albums, so
-            // prefer an album with at least two rows. The search page keeps
-            // its query in component state (the URL is a bare /search), so
-            // going *back* to it restores an empty results list -- collect
-            // candidate hrefs up front and navigate directly to the next
-            // album instead of relying on history.
-            const hrefs = await cards.evaluateAll((els) =>
-                els
-                    .slice(0, 5)
-                    .map((e) => (e as HTMLAnchorElement).getAttribute("href"))
-                    .filter((h): h is string => !!h),
-            );
-            let opened = false;
-            for (let i = 0; i < hrefs.length; i++) {
-                if (i === 0) {
-                    await cards.first().click();
-                } else {
-                    await page.goto(new URL(hrefs[i], page.url()).toString(), {
-                        waitUntil: "domcontentloaded",
-                    });
+            // here, and production data contains single-track releases -- a
+            // classical artist's search results can be nothing but singles
+            // -- so prefer an album with at least two rows. The search page
+            // keeps its query in component state (a bare /search URL), so
+            // back-navigation restores an empty results list: collect the
+            // candidate hrefs while results are on screen and navigate
+            // forward to each candidate instead.
+            const collect = async (): Promise<string[]> => {
+                const cards = page.locator('main a[href^="/album/"]');
+                await cards.first().waitFor({ state: "visible", timeout: 10_000 });
+                const seen = (await cards.evaluateAll((els) =>
+                    els
+                        .slice(0, 5)
+                        .map((e) => (e as HTMLAnchorElement).getAttribute("href")),
+                )) as (string | null)[];
+                return seen.filter((h): h is string => !!h);
+            };
+            const tryPool = async (pool: string[], clickFirst: boolean): Promise<boolean> => {
+                for (let i = 0; i < pool.length; i++) {
+                    if (i === 0 && clickFirst) {
+                        await page.locator('main a[href^="/album/"]').first().click();
+                    } else {
+                        await page.goto(new URL(pool[i], page.url()).toString(), {
+                            waitUntil: "domcontentloaded",
+                        });
+                    }
+                    await page.waitForURL(/\/album\//, { timeout: 10_000 });
+                    await settle(page, 800);
+                    if ((await page.locator("[data-track-row]").count()) >= 2) {
+                        return true;
+                    }
                 }
-                await page.waitForURL(/\/album\//, { timeout: 10_000 });
-                await settle(page, 800);
-                const rows = await page.locator("[data-track-row]").count();
-                if (rows >= 2) {
-                    opened = true;
-                    break;
-                }
+                return false;
+            };
+
+            let opened = await tryPool(await collect(), true);
+            if (!opened) {
+                // The search results held only singles; widen to the
+                // collection's album grid, which spans the whole catalogue.
+                await openAlbumsTab(page);
+                opened = await tryPool(await collect(), true);
             }
             expect(
                 opened,
-                "none of the first five album cards held two or more tracks",
+                "no album with two or more tracks found in search results or the collection grid",
             ).toBe(true);
             await settle(page, 1200);
             return { album: new URL(page.url()).pathname };
