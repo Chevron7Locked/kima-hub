@@ -61,6 +61,7 @@ const PlaylistCard = memo(function PlaylistCard({
                             <Play className="w-4 h-4 fill-current ml-0.5 text-white" />
                         </button>
                     </div>
+                    <div className="h-0.5 bg-gradient-to-r from-[#a855f7] to-[#c026d3] scale-x-0 group-hover:scale-x-100 transition-transform duration-150" />
                     <div className="p-3 bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]">
                         <h3 className="text-sm font-bold text-white truncate tracking-tight">
                             {playlist.title}

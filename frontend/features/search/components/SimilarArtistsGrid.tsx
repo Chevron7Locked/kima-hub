@@ -37,6 +37,7 @@ export function SimilarArtistsGrid({
                             fallbackIcon={Music}
                             accentColor={{
                                 border: "hover:border-[#fca200]/50",
+                                gradient: "bg-gradient-to-r from-[#fca200] to-[#d48c00]",
                                 button: "bg-[#fca200] text-white",
                                 shadow: "hover:shadow-[#fca200]/10",
                             }}

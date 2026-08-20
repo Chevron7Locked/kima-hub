@@ -121,6 +121,9 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
                             </div>
                         )}
                     </div>
+                        {!hasProgress && (
+                            <div className={`h-0.5 bg-gradient-to-r ${colors.accent} scale-x-0 group-hover:scale-x-100 transition-transform duration-150`} />
+                        )}
                     <div className="p-3 bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]">
                         <h3 className="text-sm font-bold text-white truncate tracking-tight">
                             {item.name}
