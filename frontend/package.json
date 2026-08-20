@@ -19,7 +19,9 @@
     "test:predeploy:ui": "playwright test tests/e2e/predeploy --ui",
     "test:predeploy:headed": "playwright test tests/e2e/predeploy --headed",
     "analyze": "ANALYZE=true next build --webpack",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "test:dogfood": "playwright test tests/e2e/dogfood --reporter=list",
+    "test:dogfood:headed": "playwright test tests/e2e/dogfood --headed --reporter=list"
   },
   "dependencies": {
     "@deck.gl/core": "^9.2.11",
