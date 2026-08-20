@@ -196,14 +196,32 @@ test.describe("Dogfood walkthrough", () => {
         });
 
         await session.step("open an album", async () => {
-            const album = firstAlbumCard(page);
-            if (!(await album.isVisible().catch(() => false))) {
+            if (!(await firstAlbumCard(page).isVisible().catch(() => false))) {
                 await openAlbumsTab(page);
             }
-            const target = firstAlbumCard(page);
-            await target.waitFor({ state: "visible", timeout: 10_000 });
-            await target.click();
-            await page.waitForURL(/\/album\//, { timeout: 10_000 });
+            const cards = page.locator('main a[href^="/album/"]');
+            await cards.first().waitFor({ state: "visible", timeout: 10_000 });
+            // Journey 3 queues a *second* track from whatever album opens here.
+            // Production data contains single-track albums (a first card that is
+            // one leaves journey 3 waiting for a row that does not exist), so
+            // prefer an album with at least two rows.
+            let opened = false;
+            for (let i = 0; i < 5; i++) {
+                await cards.nth(i).click();
+                await page.waitForURL(/\/album\//, { timeout: 10_000 });
+                await settle(page, 800);
+                const rows = await page.locator("[data-track-row]").count();
+                if (rows >= 2) {
+                    opened = true;
+                    break;
+                }
+                await page.goBack();
+                await settle(page, 500);
+            }
+            expect(
+                opened,
+                "none of the first five album cards held two or more tracks",
+            ).toBe(true);
             await settle(page, 1200);
             return { album: new URL(page.url()).pathname };
         });
