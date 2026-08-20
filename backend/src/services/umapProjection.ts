@@ -1,3 +1,4 @@
+import fs from "fs";
 import path from "path";
 import { Worker } from "worker_threads";
 import { Prisma } from "@prisma/client";
@@ -85,11 +86,52 @@ function getMoodScores(track: Record<string, unknown>): Record<string, number> {
 const UMAP_TIMEOUT_MS = 15 * 60 * 1000;
 const UMAP_WARN_MS = 5 * 60 * 1000;
 
+/**
+ * Find the UMAP worker file, whichever form this process is running in.
+ *
+ * A built server runs from dist/ and the worker sits next to it as .js. A dev server runs
+ * the TypeScript directly through tsx, where that .js does not exist and never will --
+ * only umapWorker.ts is there. Asking for .js unconditionally meant every dev instance
+ * threw ERR_MODULE_NOT_FOUND the moment anyone opened the vibe map, so the whole feature
+ * was dead outside a production build while looking fine in one.
+ *
+ * A worker thread does NOT inherit the TypeScript loader from its parent. tsx registers it
+ * per-thread, and passing --import through execArgv does not reach the new thread either
+ * (measured: every variant still fails with ERR_UNKNOWN_FILE_EXTENSION). So when only the
+ * .ts exists, the fallback runs the same computation from an inline source string instead.
+ * umap-js is plain JavaScript, so that needs no loader at all.
+ *
+ * KEEP IN STEP with workers/umapWorker.ts -- same options, same message shape. That file is
+ * what production runs; this string only ever runs from an unbuilt checkout.
+ */
+const INLINE_UMAP_WORKER = `
+const { parentPort, workerData } = require("worker_threads");
+const { UMAP } = require(${JSON.stringify(require.resolve("umap-js"))});
+const { embeddings, nNeighbors } = workerData;
+try {
+    const umap = new UMAP({ nComponents: 2, nNeighbors, minDist: 0.1, spread: 1.0 });
+    parentPort.postMessage(umap.fit(embeddings));
+} catch (err) {
+    parentPort.postMessage({ error: err instanceof Error ? err.message : String(err) });
+    process.exit(1);
+}
+`;
+
+function makeUmapWorker(embeddings: number[][], nNeighbors: number): Worker {
+    const workerData = { embeddings, nNeighbors };
+
+    const compiled = path.join(__dirname, "../workers/umapWorker.js");
+    if (fs.existsSync(compiled)) {
+        return new Worker(compiled, { workerData });
+    }
+
+    logger.debug("[VIBE-MAP] No compiled UMAP worker; running the inline source instead");
+    return new Worker(INLINE_UMAP_WORKER, { eval: true, workerData });
+}
+
 function runUmapInWorker(embeddings: number[][], nNeighbors: number): Promise<number[][]> {
     return new Promise((resolve, reject) => {
-        const worker = new Worker(path.join(__dirname, "../workers/umapWorker.js"), {
-            workerData: { embeddings, nNeighbors },
-        });
+        const worker = makeUmapWorker(embeddings, nNeighbors);
 
         let settled = false;
 
