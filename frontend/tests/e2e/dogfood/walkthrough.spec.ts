@@ -45,6 +45,18 @@ function escapeRegExp(s: string): string {
 // instead of reporting eight confusing consequences of one cause.
 test.describe.configure({ mode: "serial" });
 
+// Headless Chromium ships with NO WebGL at all -- measured: both webgl and webgl2 come
+// back null on a default launch. The vibe map draws through deck.gl, so without this it
+// dies on startup with "Cannot read properties of null (reading 'luma')" and the map
+// journey would be testing the absence of a graphics stack rather than the app. These
+// flags turn on software rendering (SwiftShader), which is slower than a real GPU and
+// perfectly sufficient for confirming the map draws.
+test.use({
+    launchOptions: {
+        args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
+    },
+});
+
 test.describe("Dogfood walkthrough", () => {
     let browser: Browser;
     let context: BrowserContext;
@@ -388,37 +400,160 @@ test.describe("Dogfood walkthrough", () => {
     });
 
     // ----------------------------------------------------------------------------------
-    test("5. explore: the enrichment pipeline's output reaches the screen", async () => {
-        session.setJourney("5. Explore");
+    test("5. collect: rebuild the embeddings and watch the data reach the screen", async () => {
+        session.setJourney("5. Collect");
 
         test.skip(
-            !journeys.vibe,
-            `no vibe map on this instance (${facts.embeddedTracks} embedded tracks)`,
+            facts.tracks < 10,
+            `only ${facts.tracks} tracks -- too few to say anything about pipeline throughput`,
         );
 
-        await session.step("open the vibe map", async () => {
-            await navigateByClick(page, "/vibe");
-            await settle(page, 3000);
-            return { url: new URL(page.url()).pathname };
+        // This is the one journey that deliberately destroys state and rebuilds it. Every
+        // other journey observes; this one exercises the data-collection pipeline end to
+        // end, because "the vibe map renders" proves nothing about whether the thing that
+        // FILLS it still works. Reading a map built days ago would pass on a build whose
+        // embedder is completely broken.
+        const before = facts.embeddedTracks;
+        let rebuiltIn = 0;
+
+        await session.step("clear the embeddings so the pipeline has real work", async () => {
+            const res = await page.request.post("/api/analysis/vibe/start", {
+                data: { force: true },
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            expect(res.ok(), `asking for a vibe rebuild returned ${res.status()}`).toBeTruthy();
+            return { hadEmbeddings: before, requestedRebuild: true };
         });
 
-        // This is the user-visible end of the analyzer and embedding work. If the map is
-        // empty while the database holds embeddings, the break is between them.
-        await session.step("the map is drawn from real embeddings", async () => {
+        // The embedder itself costs well under a second per track. What this is really
+        // watching is whether the producer keeps it fed: the failure being guarded against
+        // is a scheduler that hands over a batch, decides it has nothing to do, and sleeps
+        // for a minute while the embedder sits idle. That shape took ten minutes to do
+        // twenty-six seconds of work.
+        const BUDGET_MS = 6 * 60 * 1000;
+        const PER_TRACK_CEILING_MS = 4000;
+
+        await session.step("the pipeline rebuilds every embedding", async () => {
+            const startedAt = Date.now();
+            let completed = 0;
+            let lastSeen = 0;
+            let quietSince = Date.now();
+
+            while (Date.now() - startedAt < BUDGET_MS) {
+                const res = await page.request.get("/api/enrichment/progress", {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (res.ok()) {
+                    const body = await res.json();
+                    completed = body?.clapEmbeddings?.completed ?? 0;
+                    if (completed > lastSeen) {
+                        lastSeen = completed;
+                        quietSince = Date.now();
+                    }
+                }
+                if (completed >= facts.tracks) break;
+
+                // Nothing finishing for two minutes means the pipeline has stalled rather
+                // than merely being slow, and there is no point burning the whole budget.
+                const quietFor = Date.now() - quietSince;
+                if (quietFor > 120_000) {
+                    expect(
+                        quietFor,
+                        `embedding stalled: ${completed}/${facts.tracks} done and nothing ` +
+                            `has finished for ${Math.round(quietFor / 1000)}s`,
+                    ).toBeLessThan(120_000);
+                }
+                await page.waitForTimeout(3000);
+            }
+
+            rebuiltIn = Date.now() - startedAt;
+            expect(
+                completed,
+                `only ${completed} of ${facts.tracks} tracks were embedded within ` +
+                    `${Math.round(BUDGET_MS / 60000)} minutes`,
+            ).toBeGreaterThanOrEqual(facts.tracks);
+
+            return {
+                tracks: facts.tracks,
+                seconds: Math.round(rebuiltIn / 1000),
+                msPerTrack: Math.round(rebuiltIn / facts.tracks),
+            };
+        });
+
+        // A throughput floor, not a benchmark. The number is deliberately loose -- roughly
+        // ten times the measured cost -- so ordinary variation in machine speed passes and
+        // a return to minute-long idle gaps between batches does not.
+        await session.step("the embedder was kept fed, not starved", async () => {
+            const perTrack = rebuiltIn / facts.tracks;
+            expect(
+                perTrack,
+                `${Math.round(perTrack)}ms per track for ${facts.tracks} tracks. Embedding ` +
+                    `costs well under a second each, so this means the pipeline spent most ` +
+                    `of its time idle between batches rather than working.`,
+            ).toBeLessThan(PER_TRACK_CEILING_MS);
+            return { msPerTrack: Math.round(perTrack), ceiling: PER_TRACK_CEILING_MS };
+        });
+
+        await session.step("the analyzer's numbers survived the rebuild", async () => {
+            const res = await page.request.get("/api/library/tracks?limit=50", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            expect(res.ok(), `reading tracks returned ${res.status()}`).toBeTruthy();
+            const body = await res.json();
+            const withBpm = (body.tracks ?? []).filter(
+                (t: { audioFeatures?: { bpm?: number | null } | null }) =>
+                    t.audioFeatures?.bpm != null,
+            ).length;
+            expect(
+                withBpm,
+                "no track in a 50-track sample carries a bpm, so audio analysis produced nothing",
+            ).toBeGreaterThan(0);
+            return { sampled: (body.tracks ?? []).length, withBpm };
+        });
+
+        // The projection is a separate step built on top of the embeddings, and it has its
+        // own ways to fail. Asking for it explicitly is what turns "the embeddings exist"
+        // into "the user can see them".
+        await session.step("the map is built from the new embeddings", async () => {
             const res = await page.request.get("/api/vibe/map", {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            expect(res.ok(), `the vibe map API returned ${res.status()}`).toBeTruthy();
+            expect(
+                res.ok(),
+                `the vibe map returned ${res.status()} even though the embeddings are present ` +
+                    `-- the projection step is broken, not the embedder`,
+            ).toBeTruthy();
             const body = await res.json();
-            const nodes = Array.isArray(body) ? body.length : (body.tracks?.length ?? 0);
-            expect(nodes, "the vibe map API returned no tracks").toBeGreaterThan(0);
+            const mapped = Array.isArray(body) ? body : (body.tracks ?? []);
+            expect(mapped.length, "the map projected no tracks").toBeGreaterThan(0);
 
-            const canvas = page.locator("canvas");
-            const hasCanvas = (await canvas.count()) > 0;
-            return { mappedTracks: nodes, canvasRendered: hasCanvas };
+            const placed = mapped.filter(
+                (t: { x?: number; y?: number }) =>
+                    Number.isFinite(t.x) && Number.isFinite(t.y),
+            ).length;
+            expect(
+                placed,
+                "tracks came back without usable coordinates, so the map cannot draw them",
+            ).toBe(mapped.length);
+
+            return { mappedTracks: mapped.length, allPlaced: placed === mapped.length };
         });
 
-        session.assertClean("Journey 5 (explore)");
+        await session.step("the vibe screen renders it", async () => {
+            await navigateByClick(page, "/vibe");
+            await settle(page, 3500);
+            const canvas = await page.locator("canvas").count();
+            const empty = await page
+                .locator("text=/no tracks|nothing to show|no data/i")
+                .count();
+            expect(
+                empty,
+                "the vibe screen shows an empty state despite a populated map",
+            ).toBe(0);
+            return { canvasPresent: canvas > 0 };
+        });
+
+        session.assertClean("Journey 5 (collect)");
     });
 
     // ----------------------------------------------------------------------------------

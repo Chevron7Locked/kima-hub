@@ -71,10 +71,20 @@ export async function readLibraryFacts(
     const withFeatures =
         sample?.tracks?.filter((t) => t.audioFeatures && t.audioFeatures.bpm != null).length ?? 0;
 
-    // The vibe map is the user-visible end of the embedding pipeline. Ask it directly
-    // rather than counting rows, because what matters is whether the map has anything to
-    // draw, not what the database holds.
-    const vibeMap = await getJson<{ tracks?: unknown[] }>(api, "/api/vibe/map", token);
+    // Embeddings are counted from enrichment progress, NOT from the vibe map.
+    //
+    // The map is a UMAP projection built ON TOP of the embeddings, so a broken projection
+    // makes it answer "no tracks" while every embedding sits happily in the database. This
+    // preflight used to read the map, and it did exactly that: it reported zero embeddings
+    // against a library with all 59 present, and the walkthrough recorded the vibe journey
+    // as "not covered" instead of failing on a map that was returning 500. Using a derived,
+    // failure-prone endpoint to decide whether to test its own upstream turned a broken
+    // feature into a skipped one -- the precise outcome this file exists to prevent.
+    const progress = await getJson<{ clapEmbeddings?: { completed?: number } }>(
+        api,
+        "/api/enrichment/progress",
+        token,
+    );
 
     const countOf = (v: unknown): number => {
         if (Array.isArray(v)) return v.length;
@@ -96,7 +106,7 @@ export async function readLibraryFacts(
         tracks: tracks?.total ?? 0,
         playlists: countOf(playlists),
         tracksWithAudioFeatures: withFeatures,
-        embeddedTracks: countOf(vibeMap),
+        embeddedTracks: progress?.clapEmbeddings?.completed ?? 0,
         podcasts: countOf(podcasts),
         audiobooks: countOf(audiobooks),
     };
@@ -137,6 +147,7 @@ export function assertReady(facts: LibraryFacts, baseUrl: string): void {
  * passing one.
  */
 export function availableJourneys(facts: LibraryFacts): {
+    /** Whether the data-collection journey has enough material to be meaningful. */
     vibe: boolean;
     podcasts: boolean;
     audiobooks: boolean;
@@ -144,11 +155,14 @@ export function availableJourneys(facts: LibraryFacts): {
 } {
     const reasons: string[] = [];
 
-    const vibe = facts.embeddedTracks >= 5;
+    // The collect journey rebuilds embeddings itself, so it does not need any to exist
+    // beforehand -- it needs a library big enough for the timing to mean something. A
+    // handful of tracks would make throughput noise rather than signal.
+    const vibe = facts.tracks >= 10;
     if (!vibe) {
         reasons.push(
-            `vibe journey not run: the map holds ${facts.embeddedTracks} tracks, needs 5+ ` +
-                `(run the enrichment cycle to build embeddings)`,
+            `data-collection journey not run: ${facts.tracks} tracks is too few to say ` +
+                `anything about pipeline throughput (needs 10+)`,
         );
     }
 
