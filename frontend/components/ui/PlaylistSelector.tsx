@@ -30,16 +30,24 @@ export function PlaylistSelector({
     const [isCreating, setIsCreating] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [selected, setSelected] = useState<Set<string>>(new Set());
+    const [error, setError] = useState<string | null>(null);
     const [isConfirming, setIsConfirming] = useState(false);
 
     const isMulti = mode === "multi";
 
-    useEffect(() => {
+    // Reset dialog state when `isOpen` flips. Done during render (the
+    // React-endorsed prop-change pattern) rather than in an effect body,
+    // where a synchronous setState is a lint error.
+    const [prevOpen, setPrevOpen] = useState(isOpen);
+    if (isOpen !== prevOpen) {
+        setPrevOpen(isOpen);
         if (isOpen) {
-            loadPlaylists();
             setSelected(new Set());
+            setError(null);
         }
-    }, [isOpen]);
+    }
+
+
 
     const loadPlaylists = async () => {
         try {
@@ -52,12 +60,23 @@ export function PlaylistSelector({
             setIsLoading(false);
         }
     };
+    useEffect(() => {
+        if (!isOpen) return;
+        let cancelled = false;
+        api.getPlaylists()
+            .then((data) => {
+                if (!cancelled) setPlaylists(Array.isArray(data) ? data : []);
+            })
+            .catch((error) => console.error("Failed to load playlists:", error));
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen]);
 
     const handleCreatePlaylist = async () => {
-        if (!newPlaylistName.trim()) return;
-
         try {
             setIsCreating(true);
+            setError(null);
             const playlist = await api.createPlaylist(
                 newPlaylistName.trim(),
                 isPublic
@@ -79,6 +98,7 @@ export function PlaylistSelector({
             );
         } catch (error) {
             console.error("Failed to create playlist:", error);
+            setError("Couldn't create that playlist — try again.");
         } finally {
             setIsCreating(false);
         }
@@ -99,6 +119,7 @@ export function PlaylistSelector({
         }
 
         try {
+            setError(null);
             await onSelectPlaylist?.(playlistId);
             window.dispatchEvent(
                 new CustomEvent("playlist-updated", { detail: { playlistId } })
@@ -107,6 +128,7 @@ export function PlaylistSelector({
             onClose();
         } catch (error) {
             console.error("Failed to add to playlist:", error);
+            setError("Couldn't add to that playlist — try again.");
         }
     };
 
@@ -115,6 +137,7 @@ export function PlaylistSelector({
 
         try {
             setIsConfirming(true);
+            setError(null);
             await onSelectPlaylists(Array.from(selected));
             for (const playlistId of selected) {
                 window.dispatchEvent(
@@ -124,6 +147,7 @@ export function PlaylistSelector({
             onClose();
         } catch (error) {
             console.error("Failed to add to playlists:", error);
+            setError("Couldn't add to those playlists — try again.");
         } finally {
             setIsConfirming(false);
         }
@@ -156,6 +180,15 @@ export function PlaylistSelector({
                     <div className="px-6 py-3 flex items-center gap-3 bg-black/30 border-b border-white/10 text-sm text-[var(--text-primary)]">
                         <GradientSpinner size="sm" />
                         <span>{loadingMessage || "Adding..."}</span>
+                    </div>
+                )}
+
+                {error && (
+                    <div
+                        role="alert"
+                        className="px-6 py-3 bg-black/30 border-b border-white/10 text-sm text-[var(--text-primary)]"
+                    >
+                        {error}
                     </div>
                 )}
 

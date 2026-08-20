@@ -189,15 +189,14 @@ export default function AlbumPage({ params }: AlbumPageProps) {
     const handlePlaylistSelected = async (playlistId: string) => {
         if (!pendingTrackIds.length) return;
 
-        try {
-            await api.addTracksToPlaylist(playlistId, pendingTrackIds);
-            queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
-            queryClient.invalidateQueries({ queryKey: queryKeys.playlist(playlistId) });
-            setPendingTrackIds([]);
-            setShowPlaylistSelector(false);
-        } catch (error) {
-            console.error("Failed to add track(s) to playlist:", error);
-        }
+        // Errors propagate to the selector, which reports them and stays
+        // open. Swallowing here closed the dialog and made a rejected add
+        // look like success.
+        await api.addTracksToPlaylist(playlistId, pendingTrackIds);
+        queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
+        queryClient.invalidateQueries({ queryKey: queryKeys.playlist(playlistId) });
+        setPendingTrackIds([]);
+        setShowPlaylistSelector(false);
     };
 
     return (

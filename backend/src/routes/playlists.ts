@@ -407,7 +407,7 @@ router.post("/:id/items", requirePlaylistOwner, async (req, res) => {
 
         if (result.added === 0 && result.duplicates === 0) {
             return res.status(404).json({
-                error: "No playable library tracks in request",
+                error: "No matching tracks in request",
                 rejected: result.rejected,
             });
         }

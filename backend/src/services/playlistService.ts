@@ -19,7 +19,6 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { rankAfter, rankBetween, rankSequence } from "../utils/lexoRank";
-import { LIBRARY_TRACK_WHERE } from "./libraryFilters";
 
 /** Cap on a single bulk operation, so one request cannot pin a connection. */
 export const MAX_BULK_TRACKS = 1000;
@@ -167,7 +166,7 @@ export async function addTracks(
     }
 
     const playable = await prisma.track.findMany({
-        where: { id: { in: requested }, ...LIBRARY_TRACK_WHERE },
+        where: { id: { in: requested } },
         select: { id: true },
     });
     const playableIds = new Set(playable.map((t) => t.id));

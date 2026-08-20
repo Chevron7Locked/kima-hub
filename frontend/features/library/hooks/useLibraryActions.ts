@@ -100,7 +100,10 @@ export function useLibraryActions() {
             queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
             queryClient.invalidateQueries({ queryKey: queryKeys.playlist(playlistId) });
         } catch (error) {
+            // The selector dialog stays open and reports the failure; a
+            // swallowed error here made a rejected add look like success.
             console.error("Error adding track to playlist:", error);
+            throw error;
         }
     }, [queryClient]);
 
