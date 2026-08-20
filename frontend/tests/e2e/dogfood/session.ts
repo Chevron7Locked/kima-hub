@@ -81,6 +81,7 @@ export class DogfoodSession {
     private sseRequests = 0;
     private startedAt = Date.now();
     private heapSamples: Array<{ step: string; mb: number }> = [];
+    private notCovered: string[] = [];
 
     /** The page layout and heap checks run against; swapped when a journey opens another. */
     private activePage: Page;
@@ -195,6 +196,23 @@ export class DogfoodSession {
     }
 
     /**
+     * Record something this run could NOT check, and why.
+     *
+     * The preflight knows some gaps before the run starts. Others only surface once the
+     * run is under way -- a podcast directory that is down, an Audiobookshelf with nothing
+     * in it. Both kinds belong in the same list, because the danger is identical: an
+     * unexercised journey silently reading as a passing one.
+     */
+    noteNotCovered(reason: string): void {
+        this.notCovered.push(reason);
+    }
+
+    /** Everything this run could not exercise, discovered before or during it. */
+    get gaps(): string[] {
+        return [...this.notCovered];
+    }
+
+    /**
      * Run one interaction and record what it saw.
      *
      * The callback returns whatever the step observed -- a track count, a stream URL, a
@@ -305,6 +323,7 @@ export class DogfoodSession {
             durationMs: Date.now() - this.startedAt,
             steps: this.steps,
             violations: clean,
+            notCovered: this.notCovered,
             sseConnections: this.sseRequests,
             heapSamples: this.heapSamples,
             heapGrowthMb: this.heapGrowthMb,
@@ -343,6 +362,13 @@ export class DogfoodSession {
                 .join(", ");
             const flag = s.violations > 0 ? ` ⚠️ ${s.violations}` : "";
             lines.push(`- ${s.name} — ${s.ms}ms${obs ? ` — ${obs}` : ""}${flag}`);
+        }
+
+        if (this.notCovered.length > 0) {
+            lines.push("");
+            lines.push(`## Not covered by this run`);
+            lines.push("");
+            for (const r of this.notCovered) lines.push(`- ${r}`);
         }
 
         lines.push("");

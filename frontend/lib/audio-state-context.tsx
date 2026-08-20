@@ -193,6 +193,23 @@ function parseStorageJson<T>(key: string, fallback: T): T {
     try { return JSON.parse(raw) as T; } catch { return fallback; }
 }
 
+/**
+ * Did the server say this thing no longer exists?
+ *
+ * 404 means gone: unsubscribed, deleted, or removed from the library. Anything else --
+ * a timeout, a 500, the laptop waking up on a dead wifi connection -- is a reason to try
+ * again later, not a reason to throw away what the user was listening to.
+ */
+function isGone(err: unknown): boolean {
+    return (err as { status?: number } | null)?.status === 404;
+}
+
+/** Forget a stored item that the server no longer has. */
+function forgetStorage(key: string): void {
+    if (typeof window === "undefined") return;
+    try { localStorage.removeItem(key); } catch { /* storage may be unavailable */ }
+}
+
 export function AudioStateProvider({ children }: { children: ReactNode }) {
     // Don't restore currentTrack from localStorage. The server state API is the
     // source of truth for what was playing. This prevents ghost tracks appearing
@@ -275,6 +292,15 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         }
                     })
                     .catch((err: unknown) => {
+                        // The audiobook is gone -- removed from the library, or the
+                        // Audiobookshelf connection no longer serves it. Drop it, or the
+                        // stored id outlives it and every future page load repeats this
+                        // request and this error, forever.
+                        if (isGone(err)) {
+                            forgetStorage(STORAGE_KEYS.CURRENT_AUDIOBOOK);
+                            setCurrentAudiobook(null);
+                            return;
+                        }
                         console.error(
                             "[AudioState] Failed to refresh audiobook progress:",
                             err
@@ -303,6 +329,14 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             }
                         })
                         .catch((err: unknown) => {
+                            // Unsubscribed, or the podcast was removed. Keeping the id
+                            // means refetching a 404 on every single page load and
+                            // showing a player for something that is not there any more.
+                            if (isGone(err)) {
+                                forgetStorage(STORAGE_KEYS.CURRENT_PODCAST);
+                                setCurrentPodcast(null);
+                                return;
+                            }
                             console.error(
                                 "[AudioState] Failed to refresh podcast progress:",
                                 err

@@ -1087,6 +1087,11 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 });
                 dispatchQueryEvent("audiobook-progress-updated");
             } catch (err) {
+                // Same as podcasts: gone means gone, so stop trying to save against it.
+                if ((err as { status?: number } | null)?.status === 404) {
+                    state.setCurrentAudiobook(null);
+                    return;
+                }
                 console.error("[AudioControls] Failed to save audiobook progress:", err);
             }
         },
@@ -1128,6 +1133,14 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 });
                 dispatchQueryEvent("podcast-progress-updated");
             } catch (err) {
+                // A 404 means the podcast is no longer subscribed or no longer exists.
+                // Progress for it can never be saved again, so stop the player rather
+                // than repeating the request every few seconds for the rest of the
+                // session -- which is what happens if you unsubscribe while listening.
+                if ((err as { status?: number } | null)?.status === 404) {
+                    state.setCurrentPodcast(null);
+                    return;
+                }
                 console.error("[AudioControls] Failed to save podcast progress:", err);
             }
         },

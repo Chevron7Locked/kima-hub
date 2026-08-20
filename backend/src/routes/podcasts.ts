@@ -393,6 +393,15 @@ router.get("/preview/:itunesId", requireAuth, async (req, res) => {
             return await previewDeezerPodcast(req, res, itunesId.slice(7));
         }
 
+        // iTunes ids are numeric. Anything else cannot identify a podcast there, and
+        // forwarding it produced a 500: iTunes rejects the lookup, axios throws, and the
+        // handler's catch turns someone else's "that is not an id" into "this server
+        // broke". Our own podcast page hits this when it falls back to preview using the
+        // internal record id, so it is a live path, not a hypothetical bad request.
+        if (!/^\d+$/.test(itunesId)) {
+            return res.status(404).json({ error: "Podcast not found" });
+        }
+
         logger.debug(`\n [PODCAST PREVIEW] iTunes ID: ${itunesId}`);
 
         const itunesResponse = await axios.get(

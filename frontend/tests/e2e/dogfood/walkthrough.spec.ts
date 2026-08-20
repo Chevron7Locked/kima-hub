@@ -99,7 +99,11 @@ test.describe("Dogfood walkthrough", () => {
             if (session.heapGrowthMb >= 0) {
                 console.log(`[dogfood] JS heap grew ${session.heapGrowthMb}MB across the session`);
             }
-            for (const r of journeys?.reasons ?? []) console.log(`[dogfood] NOT COVERED -- ${r}`);
+            // Preflight gaps and gaps discovered mid-run print together -- both mean the
+            // same thing to whoever reads this before deploying.
+            for (const r of [...(journeys?.reasons ?? []), ...session.gaps]) {
+                console.log(`[dogfood] NOT COVERED -- ${r}`);
+            }
         }
         await context?.close();
     });
@@ -554,6 +558,278 @@ test.describe("Dogfood walkthrough", () => {
         });
 
         session.assertClean("Journey 5 (collect)");
+    });
+
+    // ----------------------------------------------------------------------------------
+    test("5b. subscribe: follow a podcast and listen to an episode", async () => {
+        session.setJourney("5b. Podcast");
+
+        // Nothing is skipped here for want of a subscription: subscribing IS the journey,
+        // the same way journey 4 creates the playlist it then uses. What this cannot supply
+        // for itself is the outside world -- the feed lives on someone else's server, and
+        // the subscribe endpoint refuses private addresses (SSRF protection), so a local
+        // stand-in is not an option.
+        //
+        // Which makes the distinction below the important part. A directory that is down,
+        // or a feed that will not load, is not this build's fault and must not fail the
+        // deploy; it is recorded and the journey stops. Anything the app itself gets wrong
+        // still fails.
+        let podcastId = "";
+        let podcastTitle = "";
+        let externalBlocker = "";
+
+        try {
+            await session.step("browse the podcast directory", async () => {
+                const res = await page.request.get("/api/podcasts/discover/top?limit=5", {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                expect(
+                    res.status(),
+                    `podcast discovery returned ${res.status()} -- that is the app failing, ` +
+                        `not the directory being unreachable`,
+                ).toBeLessThan(500);
+
+                if (!res.ok()) {
+                    externalBlocker = `the podcast directory answered ${res.status()}`;
+                    return { reachedDirectory: false };
+                }
+
+                const body = await res.json();
+                const list = Array.isArray(body) ? body : (body.podcasts ?? []);
+                const candidate = list.find(
+                    (p: { itunesId?: number | string; feedUrl?: string }) =>
+                        p.itunesId || p.feedUrl,
+                );
+                if (!candidate) {
+                    externalBlocker = "the podcast directory returned nothing to subscribe to";
+                    return { reachedDirectory: true, offered: list.length };
+                }
+
+                podcastTitle = candidate.title ?? "";
+                return { offered: list.length, picked: podcastTitle };
+            });
+
+            if (externalBlocker) {
+                session.noteNotCovered(`podcast journey stopped: ${externalBlocker}`);
+                return;
+            }
+
+            await session.step("subscribe to it", async () => {
+                const listRes = await page.request.get("/api/podcasts/discover/top?limit=5", {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const body = await listRes.json();
+                const list = Array.isArray(body) ? body : (body.podcasts ?? []);
+                const candidate = list.find(
+                    (p: { itunesId?: number | string; feedUrl?: string }) =>
+                        p.itunesId || p.feedUrl,
+                );
+
+                const res = await page.request.post("/api/podcasts/subscribe", {
+                    data: candidate.itunesId
+                        ? { itunesId: candidate.itunesId }
+                        : { feedUrl: candidate.feedUrl },
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+
+                expect(
+                    res.status(),
+                    `subscribing returned ${res.status()} -- a 5xx here is the app breaking, ` +
+                        `not the feed being unavailable`,
+                ).toBeLessThan(500);
+
+                if (!res.ok()) {
+                    externalBlocker = `the feed could not be fetched (${res.status()})`;
+                    return { subscribed: false, status: res.status() };
+                }
+
+                const created = await res.json();
+                podcastId = created.id ?? created.podcast?.id ?? "";
+                podcastTitle = created.title ?? created.podcast?.title ?? podcastTitle;
+                expect(podcastId, "subscribing succeeded but returned no podcast id").toBeTruthy();
+                return { id: podcastId, title: podcastTitle };
+            });
+
+            if (externalBlocker) {
+                session.noteNotCovered(`podcast journey stopped: ${externalBlocker}`);
+                return;
+            }
+
+            // The library renders each podcast as a button, not a link, so it is found by
+            // its accessible name rather than an href.
+            await session.step("it appears in the podcast list", async () => {
+                await navigateByClick(page, "/podcasts");
+                await settle(page, 2500);
+                const card = page
+                    .locator("main")
+                    .getByRole("button", { name: new RegExp(escapeRegExp(podcastTitle)) })
+                    .first();
+                await expect(card).toBeVisible({ timeout: 15_000 });
+                return { title: podcastTitle };
+            });
+
+            let episodeCount = 0;
+            await session.step("open it and see its episodes", async () => {
+                await page
+                    .locator("main")
+                    .getByRole("button", { name: new RegExp(escapeRegExp(podcastTitle)) })
+                    .first()
+                    .click();
+                await page.waitForURL(/\/podcasts\/[^/]+/, { timeout: 15_000 });
+                await settle(page, 3000);
+
+                const rows = page.locator("[data-track-index]");
+                await expect(rows.first()).toBeVisible({ timeout: 20_000 });
+                episodeCount = await rows.count();
+                expect(episodeCount, "the podcast page listed no episodes").toBeGreaterThan(0);
+                return { episodes: episodeCount };
+            });
+
+            // Episodes start on a double click, which is how the list distinguishes playing
+            // from selecting.
+            await session.step("play an episode and hear it advance", async () => {
+                await page.locator("[data-track-index]").first().dblclick();
+                await page.getByTitle("Pause", { exact: true }).waitFor({ timeout: 30_000 });
+
+                const read = () =>
+                    page.evaluate(
+                        (sel) => {
+                            const el = document.querySelector(sel) as HTMLAudioElement | null;
+                            return { t: el?.currentTime ?? -1, paused: el?.paused ?? true, src: el?.src ?? "" };
+                        },
+                        PLAYER,
+                    );
+
+                const first = await read();
+                await page.waitForTimeout(3000);
+                const second = await read();
+
+                expect(second.src, "no audio source was set for the episode").toBeTruthy();
+                expect(second.paused, "the player shows Pause but the audio is paused").toBe(false);
+                expect(
+                    second.t,
+                    `episode playback did not advance (${first.t}s -> ${second.t}s)`,
+                ).toBeGreaterThan(first.t);
+
+                return { from: first.t.toFixed(2), to: second.t.toFixed(2) };
+            });
+
+            session.assertClean("Journey 5b (podcast)");
+        } finally {
+            // Leave the library as it was found, pass or fail.
+            //
+            // Stop playback and leave the page BEFORE unsubscribing. The player keeps
+            // saving position and refreshing progress for whatever it is playing, and if
+            // the subscription disappears underneath it those calls start 404ing on a
+            // loop -- noise that would otherwise land on whichever journey runs next and
+            // be blamed there. (The app retrying without backing off in that situation is
+            // worth a look on its own, but it is not what this journey is testing.)
+            const pause = page.getByTitle("Pause", { exact: true });
+            if (await pause.isVisible({ timeout: 2000 }).catch(() => false)) {
+                await pause.click().catch(() => {});
+            }
+            await page.goto("/").catch(() => {});
+            await settle(page, 1200);
+
+            if (podcastId) {
+                await page.request
+                    .delete(`/api/podcasts/${podcastId}/unsubscribe`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                    })
+                    .catch(() => {});
+            }
+        }
+    });
+
+    // ----------------------------------------------------------------------------------
+    test("5c. audiobooks: pull them from Audiobookshelf and listen", async () => {
+        session.setJourney("5c. Audiobooks");
+
+        // Unlike podcasts, this one genuinely cannot supply its own material: it needs a
+        // configured Audiobookshelf with something in it. Whether that is present is a
+        // property of the deployment, so it is reported rather than asserted -- but the
+        // report says so plainly instead of quietly passing.
+        const features = await page.request.get("/api/system/features", {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        const enabled = features.ok()
+            ? ((await features.json())?.audiobookshelfEnabled ?? false)
+            : false;
+
+        if (!enabled) {
+            session.noteNotCovered(
+                "audiobook journey not run: Audiobookshelf is not enabled on this instance",
+            );
+            test.skip(true, "Audiobookshelf is not enabled");
+        }
+
+        let bookId = "";
+
+        await session.step("pull the library from Audiobookshelf", async () => {
+            const res = await page.request.post("/api/audiobooks/sync", {
+                headers: { Authorization: `Bearer ${token}` },
+                timeout: 180_000,
+            });
+            expect(
+                res.status(),
+                `the audiobook sync returned ${res.status()}`,
+            ).toBeLessThan(500);
+            return { syncStatus: res.status() };
+        });
+
+        await session.step("the audiobooks arrived", async () => {
+            const res = await page.request.get("/api/audiobooks?limit=5", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            expect(res.ok(), `listing audiobooks returned ${res.status()}`).toBeTruthy();
+            const body = await res.json();
+            const list = Array.isArray(body) ? body : (body.audiobooks ?? body.items ?? []);
+
+            if (list.length === 0) {
+                session.noteNotCovered(
+                    "audiobook playback not exercised: Audiobookshelf is connected but " +
+                        "returned no books",
+                );
+                return { books: 0 };
+            }
+            bookId = list[0].id ?? "";
+            return { books: list.length, first: list[0].title ?? "" };
+        });
+
+        if (!bookId) return;
+
+        await session.step("open one and listen", async () => {
+            await page.goto(`/audiobooks/${bookId}`);
+            await settle(page, 3000);
+
+            const play = page.getByLabel("Play all").or(page.getByTitle("Play", { exact: true })).first();
+            await play.waitFor({ state: "visible", timeout: 20_000 });
+            await play.click();
+            await page.getByTitle("Pause", { exact: true }).waitFor({ timeout: 30_000 });
+
+            const read = () =>
+                page.evaluate(
+                    (sel) => {
+                        const el = document.querySelector(sel) as HTMLAudioElement | null;
+                        return { t: el?.currentTime ?? -1, paused: el?.paused ?? true, src: el?.src ?? "" };
+                    },
+                    PLAYER,
+                );
+
+            const first = await read();
+            await page.waitForTimeout(3000);
+            const second = await read();
+
+            expect(second.src, "no audio source was set for the audiobook").toBeTruthy();
+            expect(
+                second.t,
+                `audiobook playback did not advance (${first.t}s -> ${second.t}s)`,
+            ).toBeGreaterThan(first.t);
+
+            return { book: bookId, from: first.t.toFixed(2), to: second.t.toFixed(2) };
+        });
+
+        session.assertClean("Journey 5c (audiobooks)");
     });
 
     // ----------------------------------------------------------------------------------
