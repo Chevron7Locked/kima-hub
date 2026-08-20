@@ -69,7 +69,14 @@ function EpisodeRow({
             <div
                 data-track-index={index}
                 onDoubleClick={() => {
-                    if (!isCurrentEpisode) {
+                    // Double-clicking the episode you are already on used to do nothing at
+                    // all. Since the last-played episode is restored from the server on
+                    // load, that made the most likely row in the list inert: open a
+                    // podcast, double-click where you left off, and nothing happens. Play
+                    // and pause it like any other row.
+                    if (isCurrentEpisode) {
+                        onPlayPause(episode);
+                    } else {
                         onPlay(episode);
                     }
                 }}
@@ -78,7 +85,11 @@ function EpisodeRow({
                     if (isNaN(idx)) return;
                     const now = Date.now();
                     if (now - lastTapRef.current.time < 300 && lastTapRef.current.index === idx) {
-                        if (!isCurrentEpisode) {
+                        // Same on touch: a double-tap on the current episode has to work
+                        // too, or the behaviour differs between phone and desktop.
+                        if (isCurrentEpisode) {
+                            onPlayPause(episode);
+                        } else {
                             onPlay(episode);
                         }
                         lastTapRef.current = { time: 0, index: -1 };
