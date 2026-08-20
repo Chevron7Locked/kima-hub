@@ -14,6 +14,7 @@ import {
     computeClusterLabels,
     computeInitialViewState,
 } from "./mapUtils";
+import { normalizeNFC } from "@/lib/format";
 
 interface VibeMapProps {
     tracks: MapTrack[];
@@ -383,7 +384,7 @@ export function VibeMap({
             id: "track-names",
             data: tracks,
             getPosition: (d) => [d.x, d.y + offsetY],
-            getText: (d) => d.title,
+            getText: (d) => normalizeNFC(d.title),
             getSize: 10,
             getColor: [255, 255, 255, 90],
             fontFamily: "Montserrat, system-ui, sans-serif",

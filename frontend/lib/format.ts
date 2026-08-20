@@ -14,3 +14,11 @@ export function formatListeners(count: number | undefined): string {
 
     return `${count.toLocaleString()} listeners`;
 }
+/**
+ * Normalize a string to Unicode NFC (precomposed) form.
+ * Prevents deck.gl TextLayer warnings for accented characters
+ * stored as decomposed sequences (e.g. "e" + U+0301).
+ */
+export function normalizeNFC(str: string): string {
+    return str.normalize("NFC");
+}
