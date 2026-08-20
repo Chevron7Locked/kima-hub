@@ -201,13 +201,28 @@ test.describe("Dogfood walkthrough", () => {
             }
             const cards = page.locator('main a[href^="/album/"]');
             await cards.first().waitFor({ state: "visible", timeout: 10_000 });
-            // Journey 3 queues a *second* track from whatever album opens here.
-            // Production data contains single-track albums (a first card that is
-            // one leaves journey 3 waiting for a row that does not exist), so
-            // prefer an album with at least two rows.
+            // Journey 3 queues a *second* track from whatever album opens
+            // here, and production data contains single-track albums, so
+            // prefer an album with at least two rows. The search page keeps
+            // its query in component state (the URL is a bare /search), so
+            // going *back* to it restores an empty results list -- collect
+            // candidate hrefs up front and navigate directly to the next
+            // album instead of relying on history.
+            const hrefs = await cards.evaluateAll((els) =>
+                els
+                    .slice(0, 5)
+                    .map((e) => (e as HTMLAnchorElement).getAttribute("href"))
+                    .filter((h): h is string => !!h),
+            );
             let opened = false;
-            for (let i = 0; i < 5; i++) {
-                await cards.nth(i).click();
+            for (let i = 0; i < hrefs.length; i++) {
+                if (i === 0) {
+                    await cards.first().click();
+                } else {
+                    await page.goto(new URL(hrefs[i], page.url()).toString(), {
+                        waitUntil: "domcontentloaded",
+                    });
+                }
                 await page.waitForURL(/\/album\//, { timeout: 10_000 });
                 await settle(page, 800);
                 const rows = await page.locator("[data-track-row]").count();
@@ -215,8 +230,6 @@ test.describe("Dogfood walkthrough", () => {
                     opened = true;
                     break;
                 }
-                await page.goBack();
-                await settle(page, 500);
             }
             expect(
                 opened,
