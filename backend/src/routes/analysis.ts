@@ -696,8 +696,11 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
         if (force) {
             await prisma.$executeRaw`DELETE FROM track_embeddings`;
             await enrichmentFailureService.clearAllFailures("vibe");
+            // Every embedding is gone, so every status must go too --
+            // leaving 'completed' on rows with no embedding made any
+            // consumer keying on vibeAnalysisStatus lie mid-rebuild.
             await prisma.track.updateMany({
-                where: { vibeAnalysisStatus: { in: ["failed", "processing"] } },
+                where: {},
                 data: { vibeAnalysisStatus: null, vibeAnalysisRetryCount: 0, vibeAnalysisStatusUpdatedAt: null },
             });
             logger.info("Cleared all vibe embeddings for re-generation");
