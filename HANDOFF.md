@@ -345,10 +345,34 @@ everything behind them fails.
    Category L exists precisely because dev and prod differ, and the production path has never
    been run.
 2. **Run the walkthrough against the built image**, six times.
-3. **Get a scale answer.** Restore a copy of the 9,088-track production database onto the test
-   stack and watch enrichment for an hour: memory, cycle cadence, and query time on the pool
-   that also serves streaming. Item 3 in section 3 is the biggest risk in this branch and it is
-   under a change I made.
+3. **Get a scale answer — the operator has asked for this explicitly.** Before deployment,
+   point the build at the full library and test against it. Restore a copy of the
+   9,088-track production database onto the test stack and watch enrichment for an hour:
+   memory, cycle cadence, and query time on the pool that also serves streaming. Item 3 in
+   section 3 is the biggest risk in this branch and it is under a change I made.
+
+   This is a gate, not a nice-to-have. Every measurement in this document was taken against
+   59 tracks. Specific things that only appear at scale, and where to watch them:
+
+   - **Memory over hours, not minutes.** The leak I introduced went 181MB → 2.2GB in two
+     minutes at 59 tracks; a subtler one would take longer and more rows to show. Sample RSS
+     every 30s for an hour, not the seven minutes I managed.
+   - **The per-cycle full-table work.** `computeEnrichmentProgress` runs a `LEFT JOIN` between
+     `Track` and `track_embeddings` on every cycle (`unifiedEnrichment.ts`, flagged by the
+     worker audit), memoized for only 5 seconds — the same as the busy interval, so the worker
+     pays it every time. Invisible at 59 rows. Time it at 9,088 against the pool that also
+     serves audio streaming.
+   - **The cadence change.** My scheduler fix makes cycles run roughly ten times more often.
+     Everything above is multiplied by that.
+   - **The unbounded loops.** The purgatory drain (`:1480`) has no `take` and issues one query
+     per row; `audioAnalysisCleanup.ts:108` and `dataIntegrity.ts` are the same shape. At 59
+     tracks these are free.
+   - **A real embedding rebuild.** Journey 5 of the walkthrough wipes and rebuilds every
+     embedding with a 4s/track ceiling. At 9,088 tracks that is a much longer run and a much
+     better test than the 26-second one I measured — raise the budget, keep the ceiling.
+
+   Run the dogfood walkthrough against that instance too. Its preflight reports what it saw,
+   so the report will state the real library size rather than implying 59.
 4. **Work the taxonomy.** Five read-only audit agents were dispatched against categories A/B,
    C–H, I/J, L and K. If their findings are appended to this file as section 8, start there;
    if section 8 is absent, the run did not complete and the categories are unswept — do them
