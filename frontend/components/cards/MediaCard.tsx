@@ -79,14 +79,11 @@ export function MediaCard({
                         <Play className="w-5 h-5 fill-current ml-0.5" />
                     </div>
 
-                    {/* Color accent bar */}
-                    <div
-                        className={cn(
-                            "absolute bottom-0 left-0 right-0 h-1 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150",
-                            accentColor.gradient,
-                        )}
-                    />
                 </div>
+                <div className={cn(
+                    "h-1 scale-x-0 group-hover:scale-x-100 transition-transform duration-150",
+                    accentColor.gradient,
+                )} />
 
                 {/* Info section */}
                 <div className="p-3 bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]">

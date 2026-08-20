@@ -60,8 +60,8 @@ const PlaylistCard = memo(function PlaylistCard({
                         <button className="touch-reveal absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#9333ea] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 hover:bg-[#7e22ce]">
                             <Play className="w-4 h-4 fill-current ml-0.5 text-white" />
                         </button>
-                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#a855f7] to-[#c026d3] transform scale-x-0 group-hover:scale-x-100 transition-transform duration-150" />
                     </div>
+                    <div className="h-0.5 bg-gradient-to-r from-[#a855f7] to-[#c026d3] scale-x-0 group-hover:scale-x-100 transition-transform duration-150" />
                     <div className="p-3 bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]">
                         <h3 className="text-sm font-bold text-white truncate tracking-tight">
                             {playlist.title}
