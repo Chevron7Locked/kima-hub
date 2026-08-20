@@ -218,7 +218,8 @@ export function VibeMap({
         const labels = computeClusterLabels(
             tracks,
             { minX: 0, maxX: 1, minY: 0, maxY: 1 },
-            labelZoom < 7 ? 4 : 6,
+            8,
+            { maxLabels: 8 },
         );
 
         if (labels.length === 0) return null;

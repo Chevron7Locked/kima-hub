@@ -589,7 +589,7 @@ function TrackLabels({
 // label (Upbeat, Chill, etc.) appears exactly once at its geographic center.
 function RegionLabels({ tracks }: { tracks: MapTrack[] }) {
     const labels = useMemo(() => {
-        const raw = computeClusterLabels(tracks, { minX: 0, maxX: 1, minY: 0, maxY: 1 }, 6);
+        const raw = computeClusterLabels(tracks, { minX: 0, maxX: 1, minY: 0, maxY: 1 }, 8, { maxLabels: 8 });
         // Merge cells with the same mood name into a single weighted centroid
         const byLabel = new Map<string, { x: number; y: number; weight: number }>();
         for (const l of raw) {

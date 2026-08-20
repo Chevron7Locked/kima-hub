@@ -22,14 +22,11 @@ const MOOD_LABEL_MAP: Record<string, string> = {
     neutral: "Mixed",
 };
 
-// Cache is keyed by track.id:moodScore:dominantMood so it auto-invalidates after enrichment.
-// Capped at 2000 entries -- evicts oldest when full to prevent unbounded growth on large libraries.
 const _moodColorCache = new Map<string, [number, number, number]>();
 const MOOD_COLOR_CACHE_MAX = 50000;
 
 /**
  * Blend a track's mood scores into a single RGB color.
- * saturationBoost controls how aggressively the blended color is pushed away from gray.
  * Use 1.6 for sRGB contexts (Deck.gl), 2.0 for linear-light contexts (Three.js).
  */
 export function blendMoodColorRGB(track: MapTrack, saturationBoost = 1.6): [number, number, number] {
@@ -75,56 +72,122 @@ export function blendMoodColorRGB(track: MapTrack, saturationBoost = 1.6): [numb
     return result;
 }
 
+// ── Cluster labels for the vibe map ────────────────────────────────────
+// The original algorithm: 5×5 grid, drops cells with < 3 tracks.
+// Problem: with 73% acoustic/electronic and tiny counts for rarer moods,
+// nearly every cell that ISN'T acoustic or electronic has < 3 tracks and
+// gets discarded — the map only ever showed two vibes.
+//
+// Fix (8-track library):  8×8 grid (finer spatial resolution), no minimum
+// threshold (every occupied cell contributes), 4-connected BFS merge so
+// adjacent same-mood cells collapse into a single labelled region, cap at
+// N labels (default 8) sorted by count descending.
+// ───────────────────────────────────────────────────────────────────────
 
 export function computeClusterLabels(
     tracks: MapTrack[],
     viewBounds: { minX: number; maxX: number; minY: number; maxY: number },
-    gridSize = 5
+    gridSize = 8,
+    opts?: { maxLabels?: number }
 ): Array<{ x: number; y: number; label: string; count: number }> {
+
     const { minX, maxX, minY, maxY } = viewBounds;
     const cellW = (maxX - minX) / gridSize;
     const cellH = (maxY - minY) / gridSize;
 
     if (cellW <= 0 || cellH <= 0) return [];
 
-    const grid: Map<string, Map<string, number>> = new Map();
+    /* --- populate grid: (col,row) → mood→count --- */
+    const grid = new Map<string, Map<string, number>>();
 
     for (const track of tracks) {
         if (track.x < minX || track.x > maxX || track.y < minY || track.y > maxY) continue;
-
         const col = Math.min(gridSize - 1, Math.floor((track.x - minX) / cellW));
         const row = Math.min(gridSize - 1, Math.floor((track.y - minY) / cellH));
         const key = `${col},${row}`;
-
         if (!grid.has(key)) grid.set(key, new Map());
         const cell = grid.get(key)!;
-        cell.set(track.dominantMood, (cell.get(track.dominantMood) || 0) + 1);
+        cell.set(track.dominantMood, (cell.get(track.dominantMood) ?? 0) + 1);
     }
 
-    const labels: Array<{ x: number; y: number; label: string; count: number }> = [];
+    /* --- step 1: dominant mood per cell (threshold = 1) --- */
+    type CellInfo = { col: number; row: number; label: string; total: number };
+    const cellInfos: CellInfo[] = [];
 
     for (const [key, moods] of grid) {
         let total = 0;
-        for (const count of moods.values()) total += count;
-        if (total < 3) continue;
+        for (const c of moods.values()) total += c;
+        if (total < 1) continue;              // allow even a single-track cell
 
-        let bestMood = "";
-        let bestCount = 0;
+        let bestMood = "", bestCount = 0;
         for (const [mood, count] of moods) {
-            if (count > bestCount) {
-                bestMood = mood;
-                bestCount = count;
+            if (count > bestCount) { bestMood = mood; bestCount = count; }
+        }
+        if (!bestMood) continue;
+
+        const [col, row] = key.split(",").map(Number);
+        cellInfos.push({
+            col, row,
+            label: MOOD_LABEL_MAP[bestMood] ?? "Mixed",
+            total,
+        });
+    }
+
+    /* --- step 2: 4-connected BFS merge of adjacent same-mood cells --- */
+    const visited = new Set<number>();
+    type Region = { cx: number; cy: number; label: string; count: number };
+    const regions: Region[] = [];
+
+    for (let i = 0; i < cellInfos.length; i++) {
+        if (visited.has(i)) continue;
+
+        const regionLabel = cellInfos[i].label;
+        const queue: number[] = [i];
+        visited.add(i);
+
+        let sx = 0, sy = 0, stotal = 0, cellCount = 0;
+
+        while (queue.length) {
+            const idx = queue.shift()!;
+            const cur = cellInfos[idx];
+            sx += (cur.col + 0.5);
+            sy += (cur.row + 0.5);
+            stotal += cur.total;
+            cellCount++;
+
+            const dirs: [number, number][] = [
+                [cur.col + 1, cur.row],
+                [cur.col - 1, cur.row],
+                [cur.col, cur.row + 1],
+                [cur.col, cur.row - 1],
+            ];
+            for (const [nc, nr] of dirs) {
+                for (let j = 0; j < cellInfos.length; j++) {
+                    if (visited.has(j)) continue;
+                    const nb = cellInfos[j];
+                    if (nb.label === regionLabel && nb.col === nc && nb.row === nr) {
+                        visited.add(j);
+                        queue.push(j);
+                        break;
+                    }
+                }
             }
         }
 
-        const [col, row] = key.split(",").map(Number);
-        const x = minX + (col + 0.5) * cellW;
-        const y = minY + (row + 0.5) * cellH;
-
-        labels.push({ x, y, label: MOOD_LABEL_MAP[bestMood] || "Mixed", count: total });
+        regions.push({
+            cx: minX + ((sx / cellCount) * cellW),
+            cy: minY + ((sy / cellCount) * cellH),
+            label: regionLabel,
+            count: stotal,
+        });
     }
 
-    return labels;
+    /* --- step 3: cap – largest regions first --- */
+    regions.sort((a, b) => b.count - a.count);
+    const maxLabels = opts?.maxLabels ?? 8;
+    if (maxLabels < regions.length) regions.splice(maxLabels);
+
+    return regions.map(r => ({ x: r.cx, y: r.cy, label: r.label, count: r.count }));
 }
 
 function baseRadiusForZoom(zoom: number): number {
