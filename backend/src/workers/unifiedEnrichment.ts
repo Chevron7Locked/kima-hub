@@ -366,6 +366,10 @@ export async function startUnifiedEnrichmentWorker() {
 function scheduleNextEnrichmentCycle(delayMs: number = ENRICHMENT_INTERVAL_MS) {
     enrichmentInterval = setTimeout(async () => {
         let didWork = false;
+        // How long to wait before the next cycle. Set here and used by the single
+        // scheduling call in the finally block, because scheduling from more than one
+        // place spawns parallel timer chains -- see the note there.
+        let nextDelayMs: number | null = null;
         // The reschedule MUST be in a finally. Without it, a single rejection
         // from runEnrichmentCycle (a Redis reconnect, a DB failover) skips the
         // next-schedule call and the enrichment chain is dead for the lifetime
@@ -386,13 +390,9 @@ function scheduleNextEnrichmentCycle(delayMs: number = ENRICHMENT_INTERVAL_MS) {
             // embedder sitting idle through gaps of 216s and 350s -- long enough that it
             // also unloaded its model and paid to load it again.
             if (result.declined) {
-                if (enrichmentInterval !== null) {
-                    const waitedFor = Date.now() - lastRunTime;
-                    const untilAllowed = Math.max(0, MIN_INTERVAL_MS - waitedFor);
-                    scheduleNextEnrichmentCycle(
-                        Math.max(untilAllowed, ENRICHMENT_INTERVAL_MS),
-                    );
-                }
+                const waitedFor = Date.now() - lastRunTime;
+                const untilAllowed = Math.max(0, MIN_INTERVAL_MS - waitedFor);
+                nextDelayMs = Math.max(untilAllowed, ENRICHMENT_INTERVAL_MS);
                 return;
             }
 
@@ -414,13 +414,28 @@ function scheduleNextEnrichmentCycle(delayMs: number = ENRICHMENT_INTERVAL_MS) {
                 error instanceof Error ? error.message : String(error)
             );
         } finally {
-            // stopUnifiedEnrichmentWorker() nulls this out; don't resurrect the
-            // chain after an explicit stop.
+            // EXACTLY ONE scheduling call, and it lives here.
+            //
+            // A `return` inside the try above still runs this block, so scheduling from
+            // both places does not replace the timer -- it starts a second chain. Each
+            // declined cycle would then double the number of chains, and since a declined
+            // cycle is the common case while work is outstanding, the process fills with
+            // timers until it dies. That is not theoretical: it took the test server from
+            // 181MB to 886MB in about a minute and then out of memory entirely.
+            //
+            // The reschedule must also stay in a finally. Without it, a single rejection
+            // from runEnrichmentCycle (a Redis reconnect, a DB failover) skips the
+            // next-schedule call and the enrichment chain is dead for the lifetime of the
+            // process, silently -- the only trace is one unhandledRejection log line.
+            //
+            // stopUnifiedEnrichmentWorker() nulls this out; don't resurrect the chain
+            // after an explicit stop.
             if (enrichmentInterval !== null) {
                 scheduleNextEnrichmentCycle(
-                    didWork
-                        ? ENRICHMENT_INTERVAL_MS
-                        : ENRICHMENT_IDLE_INTERVAL_MS
+                    nextDelayMs ??
+                        (didWork
+                            ? ENRICHMENT_INTERVAL_MS
+                            : ENRICHMENT_IDLE_INTERVAL_MS)
                 );
             }
         }
