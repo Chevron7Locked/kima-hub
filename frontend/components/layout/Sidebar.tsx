@@ -434,7 +434,7 @@ export function Sidebar() {
                                         {/* Stack index */}
                                         <span
                                             className={cn(
-                                                "w-5 text-micro tabular-nums font-semibold text-center shrink-0",
+                                                "w-5 t-meta font-semibold text-center shrink-0",
                                                 isActive ? "text-[#a855f7]" : (
                                                     "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]"
                                                 ),
@@ -468,9 +468,9 @@ export function Sidebar() {
                                             </div>
                                             <div
                                                 className={cn(
-                                                    "text-micro tabular-nums truncate mt-0.5",
-                                                    isActive ? "text-[var(--text-muted)]"
-                                                    :   "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]",
+                                                    "t-meta truncate mt-0.5",
+                                                    isActive ? ""
+                                                    : "group-hover:text-[var(--text-secondary)]",
                                                 )}
                                             >
                                                 {playlist.trackCount}{" "}
