@@ -5,6 +5,13 @@ import { logger } from "../utils/logger";
 export interface SimilarTrack {
     id: string;
     title: string;
+    /**
+     * Seconds. Carried because the vibe queue is built straight from these rows, and the
+     * player treats duration as non-optional -- without it the seek bar, remaining time and
+     * total queue length are all NaN for every track in the queue. The two sibling vibe
+     * endpoints (/vibe/alchemy, /vibe/path) have always selected it; this one did not.
+     */
+    duration: number;
     distance: number;
     similarity: number;
     albumId: string;
@@ -95,6 +102,7 @@ async function findSimilarHybrid(
         SELECT
             t.id,
             t.title,
+            t.duration,
             c.clap_dist as distance,
             (
                 ${WEIGHTS.clap} * c.clap_sim +
@@ -135,6 +143,7 @@ async function findSimilarClapOnly(
         SELECT
             t.id,
             t.title,
+            t.duration,
             te.embedding <=> (SELECT embedding FROM source) as distance,
             GREATEST(0, 1 - (te.embedding <=> (SELECT embedding FROM source))) as similarity,
             a.id as "albumId",
@@ -183,6 +192,7 @@ async function findSimilarFeaturesOnly(
         SELECT
             t.id,
             t.title,
+            t.duration,
             0 as distance,
             (
                 ${FEATURES_ONLY_WEIGHTS.energy} * (1 - ABS(COALESCE(t.energy, 0.5) - COALESCE(s.energy, 0.5))) +

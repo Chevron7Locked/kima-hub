@@ -1765,7 +1765,10 @@ class ApiClient {
                 id: string;
                 title: string;
                 duration: number;
-                trackNo: number;
+                // No trackNo here: /vibe/similar has never sent one. It was declared
+                // required, so callers could read undefined with TypeScript's blessing.
+                // Nothing consumes it, so the declaration goes rather than the endpoint
+                // inventing a value. (vibeSearch below genuinely does send it.)
                 distance: number;
                 album: {
                     id: string;

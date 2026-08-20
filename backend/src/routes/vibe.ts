@@ -256,6 +256,7 @@ router.get("/similar/:trackId", requireAuth, async (req, res) => {
             tracks: tracks.map((t) => ({
                 id: t.id,
                 title: t.title,
+                duration: t.duration,
                 distance: t.distance,
                 similarity: t.similarity,
                 album: {
