@@ -140,9 +140,8 @@ export default function RadioPage() {
 
                         <div className="flex items-baseline justify-between flex-wrap gap-4">
                             <div>
-                                <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-3">
-                                    Library<br />
-                                    <span className="text-brand">Radio</span>
+                                <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white leading-none mb-3">
+                                    Library Radio
                                 </h1>
                                 <p className="text-sm text-[var(--text-muted)]">
                                     Continuous shuffle from your personal archive

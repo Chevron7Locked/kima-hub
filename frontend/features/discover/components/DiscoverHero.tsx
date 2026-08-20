@@ -39,9 +39,8 @@ export function DiscoverHero({ playlist, config, onOpenSettings }: DiscoverHeroP
                 <div className="flex items-end gap-8">
                     {/* Info - Bottom Aligned */}
                     <div className="flex-1 min-w-0 pb-2">
-                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-6">
-                            Discover<br/>
-                            <span className="text-brand">Weekly</span>
+                        <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white leading-none mb-6">
+                            Discover Weekly
                         </h1>
                         <p className="text-sm md:text-base text-[var(--text-muted)] mb-4 max-w-2xl">
                             Algorithm-generated playlist / Updated weekly / Personalized to your taste

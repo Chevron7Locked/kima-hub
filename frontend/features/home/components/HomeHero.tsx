@@ -2,14 +2,13 @@
 
 const getGreeting = () => {
     const hour = new Date().getHours();
-    if (hour < 12) return "Good\nmorning";
-    if (hour < 18) return "Good\nafternoon";
-    return "Good\nevening";
+    if (hour < 12) return "Good morning";
+    if (hour < 18) return "Good afternoon";
+    return "Good evening";
 };
 
 export function HomeHero() {
     const greeting = getGreeting();
-    const [line1, line2] = greeting.split("\n");
 
     return (
         <div className="relative bg-gradient-to-b from-[#0a0a0a] via-[#0f0f0f] to-transparent pt-6 pb-8 px-4 sm:px-6 md:px-8 border-b border-white/5">
@@ -25,9 +24,8 @@ export function HomeHero() {
                 {/* Title */}
                 <div className="flex items-baseline justify-between flex-wrap gap-4">
                     <div>
-                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-3">
-                            {line1}<br />
-                            <span className="text-brand">{line2}</span>
+                        <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white leading-none mb-3">
+                            {greeting}
                         </h1>
                         <p className="text-sm text-[var(--text-muted)]">
                             Personal streaming hub / Your library at a glance

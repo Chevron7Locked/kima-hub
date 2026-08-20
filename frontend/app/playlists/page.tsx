@@ -804,9 +804,8 @@ export default function PlaylistsPage() {
 
                     <div className="flex items-end justify-between gap-4">
                         <div>
-                            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none">
-                                Play<br />
-                                <span className="text-brand">lists</span>
+                            <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white leading-none">
+                                Playlists
                             </h1>
                             <div className="flex items-center gap-3 mt-3 text-xs tabular-nums text-[var(--text-muted)]">
                                 <span className="font-bold text-white text-sm normal-case tracking-tight">
