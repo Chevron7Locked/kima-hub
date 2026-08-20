@@ -67,6 +67,7 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 # mismatched torch ABI (the cause of #165 in v1.7.9).
 RUN pip3 install --no-cache-dir --break-system-packages \
     --index-url https://download.pytorch.org/whl/cpu \
+    --extra-index-url https://pypi.org/simple \
     'torch==2.5.1' \
     'torchaudio==2.5.1' \
     'torchvision==0.20.1' \
