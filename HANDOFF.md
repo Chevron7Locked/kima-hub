@@ -2,9 +2,18 @@
 
 Branch `port/backend-security`, **126 commits ahead of `main`, nothing pushed, nothing deployed**.
 
-Your job is to get this to production. Most of the work is not writing features — it is
-finding the remaining bugs of the kinds catalogued below, and closing the gap between "green
-in dev on 59 tracks" and "correct in a built image on 9,088 tracks".
+Your job is to get this to production. Two different kinds of work, and it matters which is
+which:
+
+- **Certain and concrete:** nothing is built, deployed, pushed, or tested at production scale.
+  That is section 3's "not verified" list and section 6's order. Do it first; none of it is
+  speculative.
+- **Speculative:** the bug taxonomy in section 2. Every category is real and every one had
+  siblings, but hunting is open-ended. It is worth a lot and it is not a substitute for the
+  above.
+
+The gap to close is between "green in dev on 59 tracks" and "correct in a built image on
+9,088 tracks".
 
 Read section 1 first. It is the part that will change how you work.
 
@@ -163,7 +172,12 @@ means what you think — `updatedAt` did not, because unrelated bulk writes touc
 `itunesId`; the column is `String?`. Browse then subscribe — the obvious pairing — answered
 500. Sibling endpoints stringified the same field and three did not (`ea87d619`).
 
-**Hunt "discover then act" pairs:** search→play, discover→subscribe, preview→add, browse→import.
+**Hunt "discover then act" pairs** — an endpoint that hands you an object, and another that
+takes an id from it. Confirmed to exist and worth checking: `/podcasts/discover/top` and
+`/podcasts/preview/:itunesId` both feed `/podcasts/subscribe` (that pair is where the bug was).
+Others plausibly exist around `/browse/playlists/*` → playlist import, `/search` → play, and
+`/releases` / `/discover` → whatever acts on them, but I have NOT confirmed those wire together
+— check before hunting.
 
 ### L. Dev/prod divergence
 
@@ -181,7 +195,10 @@ root (`4b3c6b5c`).
 ### N. Side effects inside a state updater
 
 `setX(prev => { doSomething(); return next })` — Strict Mode double-invokes updaters. Bit this
-codebase earlier via the activity panel.
+codebase via `hooks/useActivityPanel.ts`, which dispatched a window event inside the updater and
+left the panel unable to open. **That instance is already fixed** (it now uses a ref and calls
+the side effect outside the updater) — the category is here because siblings are likely, not
+because that one is outstanding.
 
 ---
 
@@ -218,6 +235,34 @@ codebase earlier via the activity panel.
    guard and the sync-poller freshness check were both written while chasing the queue bug and
    neither fixed it. They are correct on their own terms and were kept, but nothing
    demonstrates they resolve a real failure. Do not treat them as proven.
+
+---
+
+## 3b. Found and NOT fixed
+
+Short list, kept honest about how much I actually checked. The first is confirmed by
+observation; the second I only read in the source and never saw happen.
+
+**1. `/api/system/features` says a service is enabled when it cannot work.** CONFIRMED — I
+watched it report `audiobookshelfEnabled: true` while `AudiobookshelfService.ensureInitialized`
+threw "Audiobookshelf not configured" on every call. The flag reflects the settings boolean
+only, not whether the credentials resolve, so the UI offers audiobooks while everything behind
+them fails. `services/featureDetection.ts` and `services/audiobookshelf.ts`. Note the two
+disagree by design right now: I set the enable flag directly in the database with a key the
+instance could not decrypt, which is exactly the state a user reaches by pasting a bad key.
+
+**2. The activity panel's z-index sits above the modal tier.** UNVERIFIED — `app/globals.css`
+sets `--z-panel: 100` and `--z-modal: 80`, so a panel opened over a dialog should cover it.
+I never opened one over the other to see. Check before believing it; the tokens may not be
+the whole story.
+
+Two things I looked at and concluded were NOT bugs, recorded so nobody re-investigates:
+
+- **Unsubscribing leaves the `Podcast` row in the database.** It removes your subscription and
+  keeps the feed metadata, so re-subscribing reuses the row. Sensible for a shared catalogue.
+- **The podcast page shows episodes you cannot play when unsubscribed.** It renders
+  `PreviewEpisodes` with "Subscribe to Unlock All Episodes", which is correct. I briefly
+  reported this as a bug and was wrong — I was looking at a still-subscribed session.
 
 ---
 
