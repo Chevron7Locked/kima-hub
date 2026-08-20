@@ -65,6 +65,11 @@ const MAX_CONSECUTIVE_SYSTEM_FAILURES = 5; // Circuit breaker threshold
 
 let isRunning = false;
 let enrichmentInterval: NodeJS.Timeout | null = null;
+// Whether the worker has been explicitly stopped. Distinct from "no timer pending": while a
+// cycle is executing there is no pending timer either, and the two must not be confused --
+// treating a running cycle as a stopped worker is what allowed a second timer chain to be
+// armed alongside the one the cycle was about to arm itself.
+let enrichmentStopped = false;
 let redis: Redis | null = null;
 let controlSubscriber: Redis | null = null;
 let isPaused = false;
@@ -272,6 +277,9 @@ async function setupControlChannel() {
  * Start the unified enrichment worker (incremental mode)
  */
 export async function startUnifiedEnrichmentWorker() {
+    // Clear the stop latch, or a restart within the same process arms one cycle and then
+    // never reschedules.
+    enrichmentStopped = false;
     logger.debug("\n=== Starting Unified Enrichment Worker ===");
     logger.debug(`   Artist batch: ${ARTIST_BATCH_SIZE}`);
     logger.debug(`   Track batch: ${TRACK_BATCH_SIZE}`);
@@ -365,6 +373,13 @@ export async function startUnifiedEnrichmentWorker() {
  */
 function scheduleNextEnrichmentCycle(delayMs: number = ENRICHMENT_INTERVAL_MS) {
     enrichmentInterval = setTimeout(async () => {
+        // Drop the handle immediately. Once this callback is running the timer has already
+        // fired and the handle is spent -- but it is still non-null, and anything that
+        // tests "is a timer pending?" would believe one is and try to replace it. Clearing
+        // a spent handle does nothing, so that caller's replacement timer survives
+        // alongside the one this callback arms in its finally: two chains where there
+        // should be one. See bumpScheduleToFastInterval.
+        enrichmentInterval = null;
         let didWork = false;
         // How long to wait before the next cycle. Set here and used by the single
         // scheduling call in the finally block, because scheduling from more than one
@@ -430,7 +445,10 @@ function scheduleNextEnrichmentCycle(delayMs: number = ENRICHMENT_INTERVAL_MS) {
             //
             // stopUnifiedEnrichmentWorker() nulls this out; don't resurrect the chain
             // after an explicit stop.
-            if (enrichmentInterval !== null) {
+            // The handle was nulled at the top of this callback, so it can no longer stand
+            // in for "the worker is still running". stopUnifiedEnrichmentWorker sets
+            // workerStopped, which is what actually means "do not resurrect the chain".
+            if (!enrichmentStopped) {
                 scheduleNextEnrichmentCycle(
                     nextDelayMs ??
                         (didWork
@@ -451,8 +469,14 @@ function scheduleNextEnrichmentCycle(delayMs: number = ENRICHMENT_INTERVAL_MS) {
  * work starts flowing. Reset it.
  */
 function bumpScheduleToFastInterval(): void {
+    // No pending timer means either the worker is stopped or a cycle is running right now.
+    // In the second case the cycle's own finally is about to arm the next one, and arming
+    // another here would leave both alive forever -- one leaked chain per overlapping
+    // trigger, each polling Redis on its own five-second beat. Scan completions call this
+    // without awaiting, so overlapping is the common case, not the edge case.
     if (enrichmentInterval === null) return;
     clearTimeout(enrichmentInterval);
+    enrichmentInterval = null;
     scheduleNextEnrichmentCycle(ENRICHMENT_INTERVAL_MS);
 }
 
@@ -460,11 +484,12 @@ function bumpScheduleToFastInterval(): void {
  * Stop the enrichment worker
  */
 export async function stopUnifiedEnrichmentWorker() {
+    enrichmentStopped = true;
     if (enrichmentInterval) {
         clearTimeout(enrichmentInterval);
         enrichmentInterval = null;
-        logger.debug("[Enrichment] Worker stopped");
     }
+    logger.debug("[Enrichment] Worker stopped");
     if (redis) {
         redis.disconnect();
         redis = null;
@@ -1553,8 +1578,20 @@ async function executeVibePhase(): Promise<number> {
     // Defer vibe phase until audio analysis is idle -- both ML models
     // competing for CPU/GPU causes thrashing and UI flickering.
     // permanently_failed tracks are terminal and should not block vibe phase
+    //
+    // `corrupt` has to be excluded or one unparseable file switches embedding off for good.
+    // The scanner sets that flag (services/musicScanner.ts:166) on files it cannot read;
+    // the header-validation phase skips those rows (`corrupt: false` in its where), so
+    // scanStatus stays "pending" forever, so the Essentia queue-filler -- which only takes
+    // scanStatus "valid" -- never touches them, so analysisStatus stays "pending" forever
+    // too. Counted here, that is a permanent >= 1, and this phase returns 0 on every cycle
+    // from then on. No track gets a CLAP embedding again and the vibe map quietly stops
+    // growing.
     const audioInFlight = await prisma.track.count({
-        where: { analysisStatus: { in: ["processing", "pending"] } },
+        where: {
+            analysisStatus: { in: ["processing", "pending"] },
+            corrupt: false,
+        },
     });
     if (audioInFlight > 0) {
         return 0;
@@ -1766,7 +1803,13 @@ async function computeEnrichmentProgress() {
                   AND "analysisStatus" <> 'permanently_failed'
                   AND NOT "corrupt"
             )                                                         AS tags_enriched,
-            count(*) FILTER (WHERE "analysisStatus" = 'pending')      AS audio_pending,
+            -- Excludes corrupt for the same reason as the vibe phase's in-flight count:
+            -- those rows are permanently pending, and isFullyComplete gates on this being
+            -- zero, so counting them means enrichment never reports complete and the
+            -- completion notification and vibe-map precompute never fire.
+            count(*) FILTER (
+                WHERE "analysisStatus" = 'pending' AND NOT "corrupt"
+            )                                                         AS audio_pending,
             count(*) FILTER (WHERE "analysisStatus" = 'queued')       AS audio_queued,
             count(*) FILTER (WHERE "analysisStatus" = 'processing')   AS audio_processing,
             count(*) FILTER (WHERE "analysisStatus" = 'completed')    AS audio_completed,
