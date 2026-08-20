@@ -373,8 +373,38 @@ function scheduleNextEnrichmentCycle(delayMs: number = ENRICHMENT_INTERVAL_MS) {
         // log line.
         try {
             const result = await runEnrichmentCycle(false);
+
+            // A cycle that declined to run has learned nothing about whether there is
+            // work, so backing off for a minute on the strength of it is wrong. Come back
+            // as soon as the floor allows.
+            //
+            // This is not hypothetical. The busy interval is 5s and the floor is 10s, so
+            // EVERY productive cycle armed a 5s timer whose tick was then refused for
+            // being early, reported "nothing happened", and re-armed at 60s. The real
+            // cadence with work outstanding was 65 seconds. Measured cost while embedding
+            // 59 tracks: 50 seconds of actual work spread over ten minutes, with the
+            // embedder sitting idle through gaps of 216s and 350s -- long enough that it
+            // also unloaded its model and paid to load it again.
+            if (result.declined) {
+                if (enrichmentInterval !== null) {
+                    const waitedFor = Date.now() - lastRunTime;
+                    const untilAllowed = Math.max(0, MIN_INTERVAL_MS - waitedFor);
+                    scheduleNextEnrichmentCycle(
+                        Math.max(untilAllowed, ENRICHMENT_INTERVAL_MS),
+                    );
+                }
+                return;
+            }
+
+            // Every phase that queued something counts. Scan and vibe were left out, so a
+            // cycle whose only achievement was handing the embedder a hundred tracks
+            // reported itself as idle and slept for a minute.
             didWork =
-                result.artists > 0 || result.tracks > 0 || result.audioQueued > 0;
+                result.artists > 0 ||
+                result.tracks > 0 ||
+                result.audioQueued > 0 ||
+                (result.scanQueued ?? 0) > 0 ||
+                (result.vibeQueued ?? 0) > 0;
         } catch (error) {
             // Treat a failure as "work pending" so the retry is prompt rather
             // than backed off for a minute.
@@ -548,6 +578,19 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
     artists: number;
     tracks: number;
     audioQueued: number;
+    /** Queued for header validation this cycle. */
+    scanQueued?: number;
+    /** Queued for embedding this cycle. */
+    vibeQueued?: number;
+    /**
+     * Set when the cycle declined to run at all rather than running and finding nothing.
+     *
+     * The two look identical from the outside and must not be treated the same: a cycle
+     * that found nothing should back off, while a cycle that was merely too early should
+     * come back promptly. Conflating them is what left the embedder idle for minutes at a
+     * time -- see the scheduling note in scheduleNextEnrichmentCycle.
+     */
+    declined?: "already-running" | "too-soon";
 }> {
     const emptyResult = { artists: 0, tracks: 0, audioQueued: 0 };
 
@@ -623,14 +666,14 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
 
     // Never allow concurrent runs
     if (isRunning) {
-        return emptyResult;
+        return { ...emptyResult, declined: "already-running" };
     }
 
     // Enforce minimum interval (unless full mode or immediate request)
     const bypassIntervalCheck = fullMode || immediateEnrichmentRequested;
     const now = Date.now();
     if (!bypassIntervalCheck && now - lastRunTime < MIN_INTERVAL_MS) {
-        return emptyResult;
+        return { ...emptyResult, declined: "too-soon" };
     }
 
     immediateEnrichmentRequested = false;
@@ -647,6 +690,8 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
     let artistsProcessed = 0;
     let tracksProcessed = 0;
     let audioQueued = 0;
+    let scanQueued = 0;
+    let vibeQueued = 0;
 
     try {
         consecutiveSystemFailures = 0;
@@ -669,6 +714,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         if (scanResult === null) {
             return { artists: artistsProcessed, tracks: tracksProcessed, audioQueued: 0 };
         }
+        scanQueued = scanResult;
 
         const audioResult = await runPhase("audio", executeAudioPhase);
         if (audioResult === null) {
@@ -680,7 +726,8 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         await runPhase("podcasts", executePodcastRefreshPhase);
 
         // Vibe embedding sweep — catches tracks missed by the event-driven subscriber
-        await runPhase("vibe", executeVibePhase);
+        const vibeResult = await runPhase("vibe", executeVibePhase);
+        vibeQueued = vibeResult ?? 0;
 
         // Orphaned failure cleanup -- runs at most once per hour, never during stop/pause
         const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -905,7 +952,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         isRunning = false;
     }
 
-    return { artists: artistsProcessed, tracks: tracksProcessed, audioQueued };
+    return { artists: artistsProcessed, tracks: tracksProcessed, audioQueued, scanQueued, vibeQueued };
 }
 
 
