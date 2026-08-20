@@ -376,3 +376,115 @@ c7cfae41 test(e2e): make data collection a journey, not an assumption
 1c410ac1 fix(analyzer): stop condemning a track because its cover art is broken
 6b00c81a fix(enrichment): make the corrupt-file check actually gate analysis
 ```
+
+---
+
+## 8. Audit findings — five read-only agents
+
+Five agents swept the taxonomy. **Every finding below is a LEAD, not a fact.** None was
+reproduced at runtime: no server started, no request issued, no test run. They are static
+traces. I was wrong twice this session diagnosing this exact class from reading code, so
+reproduce before you fix.
+
+I verified and fixed six of them myself; those are marked FIXED with a commit. Everything
+else is untouched.
+
+### Fixed from these reports
+
+| # | What | Commit |
+|---|---|---|
+| 1 | `/artists/discover/:nameOrMbid` → 500 on a stale MBID from Last.fm. Reachable by clicking a "Fans Also Like" tile. | `960071a6` |
+| 2 | Clearing Release Year in the metadata editor → 500 (`parseInt("")` → NaN → null → `Int?` column). Same for trackNo. | `960071a6` |
+| 3 | Enriching a row deleted by a concurrent scan → 500; the service threw where both routes had a dead 404 branch. | `960071a6` |
+| 4 | `/vibe/similar` never sent `duration`, the frontend type declared it required → every track in a vibe queue had NaN seek bar and remaining time. | `8354d6e0` |
+| 5 | **One corrupt file switched CLAP embedding off permanently** and blocked completion forever. | `50a980c3` |
+| 6 | `bumpScheduleToFastInterval` leaked a timer chain per overlapping trigger — same shape as `73fdc732`, different door. | `50a980c3` |
+
+### The highest-value unfixed leads
+
+Ranked by my judgement of user impact, not by the agents' order.
+
+1. **Settings silently revert on container restart** — `utils/envWriter.ts:13` resolves the
+   `.env` path by walking up from the working directory, which is only correct in dev. Writes
+   to `/app/.env` in the shipped image (nothing reads it, not on the volume) and to `/` in the
+   compose image (permission denied). Failure is swallowed. Prod-only, which is why it has
+   survived. Same assumption at `workers/organizeSingles.ts:236`.
+2. **Remote images 400 in the compose deployment** — `frontend/Dockerfile` never copies
+   `next.config.ts`, and `next start` re-reads it at boot. Rewrites and headers survive via
+   `routes-manifest.json`; `images.remotePatterns` does not, so Deezer/Last.fm/Apple artwork
+   fails. Presents as "some covers are broken".
+3. **A stale-track reset that never counts the retry** — `services/audioAnalysisCleanup.ts:206`
+   resets without incrementing `analysisRetryCount`, while the Python side does increment and
+   says why. The backend sweep runs every cycle and the Python one only when idle, so the
+   backend nearly always wins: the retry ceiling is unreachable and a poison file loops
+   forever, tripping the circuit breaker as it goes. **This corroborates finding A1 from the
+   earlier enrichment review — two independent passes reached it.**
+4. **`vibeAnalysisStatus='processing'` has no reaper** — the exact `scanStatus='validating'`
+   bug that stranded 58 of 59 tracks, still live on the vibe column. `vibeAnalysisStartedAt`
+   already exists and is already nulled on every reset; the column is there waiting.
+5. **One failed SSE ticket request kills live updates for the session** —
+   `hooks/useEventSource.ts:37`. Reconnect is scheduled when the ticket resolves falsy or the
+   EventSource errors, but not when the ticket call *rejects*, which is what a network failure
+   does. Costs download progress, notifications, import status, scan progress. Only a reload
+   fixes it.
+6. **Session restore overwrites the media you just started** — `lib/audio-state-context.tsx:381`
+   and `:397`, `:418`. The queue got this guard; `currentTrack` / `currentAudiobook` /
+   `currentPodcast` did not. If it was an audiobook, `playbackType` flips and position saving
+   silently stops for the session.
+7. **The mood mix you hear is not the one that gets saved** — `getMoodMix` shuffles and samples,
+   the save route accepts explicit ids, but `api.saveMoodBucketMix` has no parameter to pass
+   them, so it regenerates a different 15.
+8. **`removeFromQueue` calls setState and pauses audio from inside a state updater** —
+   `lib/audio-controls-context.tsx:736`. Category N, and unlike its neighbours not idempotent.
+9. **The mood-bucket worker re-scores the same tracks every 30s forever** — a track scoring
+   zero on all nine moods writes no rows, so it still matches `moodBuckets: { none: {} }` next
+   pass. ~500 wasted queries a minute, permanently, and the purgatory-recovery path
+   manufactures such tracks by construction.
+10. **`LOG_LEVEL` in a `.env` file is inert and production hides everything below `warn`** —
+    `utils/logger.ts:10` caches the level at module load, before `dotenv.config()` runs. So the
+    documented way to turn on debug logging in production does nothing, which is a large part
+    of why a production-only failure is hard to diagnose at all.
+
+The full reports contain roughly forty more, most of them smaller. They are in the session
+transcript rather than reproduced here.
+
+### Coverage — what these agents did NOT look at
+
+Read this before believing any category is swept. Every agent was asked to declare its
+boundary and every one did.
+
+- **Backend routes:** `discover.ts`'s background-job internals unswept. ~20 files were
+  pattern-searched for the three bug classes rather than read: `systemSettings.ts`,
+  `notifications.ts`, `soulseek.ts`, `onboarding.ts`, `auth.ts`, `search.ts`,
+  `recommendations.ts`, `homepage.ts`, `settings.ts`, `webhooks.ts`, several `subsonic/*` and
+  `library/*`.
+- **Contract drift:** **the entire `subsonic/` surface got zero pair analysis** — a whole
+  second client contract. Also never examined pair-by-pair: `audiobooks.ts`, `playlists.ts`,
+  `enrichment.ts`, `artists.ts`, `releases.ts`, `analysis.ts`, `offline.ts`, `auth.ts`,
+  `library/tracks.ts`, `library/artists.ts`, `library/streaming.ts`, `library/coverArt.ts`.
+- **Workers/services:** `unifiedEnrichment.ts` was read in full (2,171 lines). But roughly
+  **44,000 of the ~48,000 lines under `services/`** were never opened — including
+  `spotifyImport.ts`, `discoverWeekly.ts`, `lidarr.ts`, `musicScanner.ts`, `lastfm.ts`,
+  `musicbrainz.ts`, `audiobookshelf.ts`, `rateLimiter.ts` and the whole `discovery/` and
+  `mixes/` trees. They were pattern-filtered only.
+- **Frontend state:** `lib/api.ts` — ~150 of 1,973 lines read. `hooks/useTVNavigation.ts` and
+  `hooks/useMetadataDisplay.ts` partial. Never opened: `lib/enrichmentApi.ts`,
+  `lib/iosAudioLog.ts`, `lib/track-format.ts`, `lib/lyrics-utils.ts`.
+- **Dev/prod:** `"use client"` boundaries and hydration behaviour **not covered** — the only
+  evidence there is that `npm run build` passes, which catches a bad import but not a
+  hydration mismatch, and not anything masked in dev by Strict Mode's double-invoked effects.
+  Mobile clients (`android/`, `ios/`) not touched.
+
+One useful non-finding, recorded so nobody re-chases it: `npm prune --production` in the
+shipped image looks like it would break `prisma migrate deploy`, because `prisma` is a
+devDependency. It does not — the lockfile marks it `devOptional` via `@prisma/client`'s
+optional peer dependency, and `--omit=dev` keeps those. The CLI resolves locally.
+
+### One structural thing worth knowing before you deploy
+
+There are **three** deployment shapes, not two, and they run the backend three different ways:
+the published all-in-one image runs `node dist/index.js` as root; the compose backend image
+runs `npx tsx src/index.ts` as an unprivileged user; dev runs `tsx watch`. So "production runs
+the built image" is true of the published artifact and false of the compose one — every
+`dist`-versus-`src` question has two answers. The umap fix resolves differently in each: the
+published image uses the compiled worker, the compose image runs the inline string.
