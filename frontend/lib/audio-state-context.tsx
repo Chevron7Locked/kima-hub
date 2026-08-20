@@ -346,6 +346,16 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             } catch { /* ignore parse errors */ }
         }
 
+        // Wipe whatever the server told us to restore, when it turns out not to exist.
+        const clearRestoredPlayback = () => {
+            setCurrentTrack(null);
+            setCurrentAudiobook(null);
+            setCurrentPodcast(null);
+            setPlaybackType(null);
+            setQueue([]);
+            setCurrentIndex(0);
+        };
+
         // Load playback state from server
         api.getPlaybackState()
             .then((serverState) => {
@@ -365,49 +375,61 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         .catch(() => {
                             // Fire-and-forget: clearing stale server state, failure is non-critical
                             api.clearPlaybackState().catch(() => {});
-                            setCurrentTrack(null);
-                            setCurrentAudiobook(null);
-                            setCurrentPodcast(null);
-                            setPlaybackType(null);
-                            setQueue([]);
-                            setCurrentIndex(0);
+                            clearRestoredPlayback();
                         });
                 } else if (
                     serverState.playbackType === "audiobook" &&
                     serverState.audiobookId
                 ) {
-                    api.getAudiobook(serverState.audiobookId).then(
-                        (audiobook) => {
+                    api.getAudiobook(serverState.audiobookId)
+                        .then((audiobook) => {
                             setCurrentAudiobook(audiobook);
                             setPlaybackType("audiobook");
                             setCurrentTrack(null);
                             setCurrentPodcast(null);
-                        }
-                    );
+                        })
+                        .catch(() => {
+                            // The audiobook the server says you were on is gone. Without
+                            // this the rejection was unhandled -- a page error on sign-in,
+                            // every sign-in, because the stale server state never cleared
+                            // itself. The track branch above has always done this.
+                            api.clearPlaybackState().catch(() => {});
+                            clearRestoredPlayback();
+                        });
                 } else if (
                     serverState.playbackType === "podcast" &&
                     serverState.podcastId
                 ) {
                     const [podcastId, episodeId] =
                         serverState.podcastId.split(":");
-                    api.getPodcast(podcastId).then((podcast: { title: string; coverUrl: string; episodes?: Episode[] }) => {
-                        const episode = podcast.episodes?.find(
-                            (ep: Episode) => ep.id === episodeId
-                        );
-                        if (episode) {
-                            setCurrentPodcast({
-                                id: serverState.podcastId,
-                                title: episode.title,
-                                podcastTitle: podcast.title,
-                                coverUrl: podcast.coverUrl,
-                                duration: episode.duration,
-                                progress: episode.progress,
-                            });
-                            setPlaybackType("podcast");
-                            setCurrentTrack(null);
-                            setCurrentAudiobook(null);
-                        }
-                    });
+                    api.getPodcast(podcastId)
+                        .then((podcast: { title: string; coverUrl: string; episodes?: Episode[] }) => {
+                            const episode = podcast.episodes?.find(
+                                (ep: Episode) => ep.id === episodeId
+                            );
+                            if (episode) {
+                                setCurrentPodcast({
+                                    id: serverState.podcastId,
+                                    title: episode.title,
+                                    podcastTitle: podcast.title,
+                                    coverUrl: podcast.coverUrl,
+                                    duration: episode.duration,
+                                    progress: episode.progress,
+                                });
+                                setPlaybackType("podcast");
+                                setCurrentTrack(null);
+                                setCurrentAudiobook(null);
+                            }
+                        })
+                        .catch(() => {
+                            // Unsubscribed -- possibly on another device -- so the podcast
+                            // the server remembers no longer resolves. This rejection was
+                            // unhandled, which meant an error on every sign-in for as long
+                            // as the stale state survived, which was forever because
+                            // nothing cleared it.
+                            api.clearPlaybackState().catch(() => {});
+                            clearRestoredPlayback();
+                        });
                 }
 
                 if (serverState.queue) setQueue(serverState.queue);

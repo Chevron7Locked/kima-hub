@@ -159,11 +159,17 @@ router.delete("/", requireAuth, async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        await prisma.playbackState.delete({
+        // deleteMany, not delete: delete() throws when there is no row, and that surfaced
+        // as a 500 for a request that had already got what it asked for. It matters more
+        // than it looks, because this endpoint IS the recovery path -- the client calls it
+        // when the server hands back playback state pointing at something that no longer
+        // exists. A 500 here meant the stale state could never be cleared, so every
+        // sign-in restored it, failed on it, and failed to clean it up again.
+        const removed = await prisma.playbackState.deleteMany({
             where: { userId },
         });
 
-        res.json({ success: true });
+        res.json({ success: true, cleared: removed.count });
     } catch (error) {
         logger.error("Delete playback state error:", error);
         res.status(500).json({ error: "Failed to delete playback state" });
