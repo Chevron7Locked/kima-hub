@@ -11,7 +11,6 @@ interface MediaCardProps {
     fallbackIcon: LucideIcon;
     accentColor: {
         border: string;
-        gradient: string;
         button: string;
         shadow: string;
     };
@@ -80,11 +79,6 @@ export function MediaCard({
                     </div>
 
                 </div>
-                <div className={cn(
-                    "h-1 scale-x-0 group-hover:scale-x-100 transition-transform duration-150",
-                    accentColor.gradient,
-                )} />
-
                 {/* Info section */}
                 <div className="p-3 bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]">
                     <h3 className="text-sm font-bold text-white truncate mb-1 tracking-tight">

@@ -49,7 +49,6 @@ const PopularArtistCard = memo(function PopularArtistCard({
                             )}
                         </div>
                     </div>
-                    <div className="h-0.5 bg-gradient-to-r from-[#fca200] to-[#d48c00] scale-x-0 group-hover:scale-x-100 transition-transform duration-150" />
                     <div className="p-3 bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]">
                         <h3 className="text-sm font-bold text-white truncate tracking-tight">
                             {artist.name}
