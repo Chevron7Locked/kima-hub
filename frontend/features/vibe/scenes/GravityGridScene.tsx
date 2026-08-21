@@ -1197,7 +1197,7 @@ export function GravityGridScene({
                 <>
                     <div className="fixed inset-0 z-(--z-scene-panel)" onClick={() => setContextMenu(null)} />
                     <div
-                        className="fixed z-(--z-scene) bg-black/90 border border-white/10 rounded-xl shadow-2xl backdrop-blur-md overflow-hidden text-sm min-w-[120px]"
+                        className="fixed z-(--z-scene) bg-black/90 border border-white/10 rounded-xl backdrop-blur-md overflow-hidden text-sm min-w-[120px]"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
                     >
                         {(["vibe", "similar", "drift"] as const).map((op) => {

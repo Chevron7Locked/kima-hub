@@ -439,7 +439,7 @@ export default function VibePage() {
 
                 {mode === "idle" && !onboardingDismissed && (
                     <div className="absolute bottom-[max(2.5rem,calc(env(safe-area-inset-bottom)+2.5rem))] left-1/2 -translate-x-1/2 z-(--z-raised) w-[calc(100vw-2rem)] max-w-sm animate-hint-in">
-                        <div className="rounded-xl border border-white/10 bg-black/75 backdrop-blur-md px-4 py-3 flex items-start gap-3 shadow-lg">
+                        <div className="rounded-xl border border-white/10 bg-black/75 backdrop-blur-md px-4 py-3 flex items-start gap-3">
                             <div className="flex-1 min-w-0">
                                 {!(isMobile || isTablet) && (
                                     <p className="text-[var(--text-primary)] text-xs font-semibold mb-0.5 tracking-wide">

@@ -26,7 +26,7 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
     return (
         <Link
             href={`/artist/${artistId}`}
-            className="group relative block overflow-hidden rounded-2xl bg-gradient-to-br from-[#1a1a1a] to-[#0f0f0f] border border-white/5 hover:border-[#eab308]/30 transition-all duration-200 hover:scale-[1.02] hover:shadow-2xl hover:shadow-[#eab308]/10"
+            className="group relative block overflow-hidden rounded-2xl bg-gradient-to-br from-[#1a1a1a] to-[#0f0f0f] border border-white/5 hover:border-[#eab308]/30 transition-all duration-200 hover:scale-[1.02]"
             data-tv-card
             data-tv-card-index={0}
             tabIndex={0}

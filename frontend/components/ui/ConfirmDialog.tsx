@@ -109,7 +109,7 @@ export function ConfirmDialog({
                 aria-modal="true"
                 aria-labelledby="confirm-dialog-title"
                 aria-describedby="confirm-dialog-message"
-                className="bg-[#121212] rounded-xl max-w-md w-full overflow-hidden border border-white/10 shadow-2xl animate-pop"
+                className="bg-[#121212] rounded-xl max-w-md w-full overflow-hidden border border-white/10 animate-pop"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}

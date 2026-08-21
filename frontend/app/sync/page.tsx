@@ -199,7 +199,7 @@ export default function SyncPage() {
                                     alt="Kima"
                                     width={48}
                                     height={48}
-                                    className="relative z-(--z-raised) drop-shadow-2xl"
+                                    className="relative z-(--z-raised)"
                                 />
                             </div>
                             <h1 className="text-4xl font-bold text-white">
@@ -209,7 +209,7 @@ export default function SyncPage() {
                     </div>
 
                     {/* Sync card -- same aesthetic as onboarding card */}
-                    <div className="bg-[#111]/90 rounded-lg border border-white/10 shadow-xl overflow-hidden">
+                    <div className="bg-[#111]/90 rounded-lg border border-white/10 overflow-hidden">
                         <div className="p-6 md:p-8 space-y-6">
                             {/* Title + status message */}
                             <div>

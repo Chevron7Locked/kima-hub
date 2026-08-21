@@ -39,7 +39,7 @@ export function SimilarPodcasts({ podcasts }: SimilarPodcastsProps) {
                     return (
                         <button
                             key={podcast.id}
-                            className="group text-left bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#3b82f6]/40 hover:shadow-lg hover:shadow-[#3b82f6]/10 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
+                            className="group text-left bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#3b82f6]/40 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
                             onClick={() => router.push(`/podcasts/${podcast.id}`)}
                         >
                             <div className="relative w-full aspect-square bg-[var(--bg-secondary)] overflow-hidden">

@@ -83,7 +83,7 @@ export default function SearchPage() {
     return (
         <div className="min-h-screen relative overflow-hidden">
             {/* Main content */}
-            <div className="relative z-(--z-raised) px-6 py-8 max-w-[1600px] mx-auto animate-rise">
+            <div className="relative z-(--z-raised) px-6 py-8 max-w-[1800px] mx-auto animate-rise">
                 <TVSearchInput initialQuery={query} onSearch={handleTVSearch} />
 
                 {/* Hero Header - Only show when no search */}
@@ -109,7 +109,7 @@ export default function SearchPage() {
                     <div className="mb-8">
                         <div className="flex items-center justify-between mb-6">
                             <div>
-                                <h1 className="text-4xl font-bold mb-2 tracking-tight">
+                                <h1 className="text-2xl font-semibold mb-2 tracking-tight">
                                     {query}
                                 </h1>
                                 {isLoading && (
@@ -184,7 +184,7 @@ export default function SearchPage() {
                                 {/* Featured Result - Larger card */}
                                 <div className="space-y-4">
                                     <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3">
-                                        <span className="w-1 h-8 bg-gradient-to-b from-[#eab308] to-[#f59e0b] rounded-full" />
+                                        <span className="w-1 h-8 bg-gradient-to-b from-brand to-[#f97316] rounded-full" />
                                         Top Match
                                     </h2>
                                     <TopResult
@@ -225,7 +225,7 @@ export default function SearchPage() {
                                     hasTopResult && (
                                         <section className="animate-fade-soft">
                                             <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
-                                                <span className="w-1 h-8 bg-gradient-to-b from-[#eab308] to-[#f59e0b] rounded-full" />
+                                                <span className="w-1 h-8 bg-gradient-to-b from-brand to-[#f97316] rounded-full" />
                                                 Top Match
                                             </h2>
                                             <TopResult

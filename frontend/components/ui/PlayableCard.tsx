@@ -64,7 +64,7 @@ const PlayableCard = memo(function PlayableCard({
             <div className="relative aspect-square mb-3">
                 <div
                     className={cn(
-                        "relative w-full h-full bg-[#282828] flex items-center justify-center overflow-hidden shadow-lg",
+                        "relative w-full h-full bg-[#282828] flex items-center justify-center overflow-hidden",
                         circular ? "rounded-full" : "rounded-md",
                     )}
                     style={{ contain: "content" }}
@@ -98,7 +98,7 @@ const PlayableCard = memo(function PlayableCard({
                         style={{ backgroundColor: KIMA_YELLOW }}
                         className={cn(
                             "absolute bottom-2 right-2 w-10 h-10 rounded-full flex items-center justify-center",
-                            "shadow-xl shadow-black/50",
+                            "",
                             isPlaying
                                 ? "opacity-100"
                                 : "opacity-0 group-hover:opacity-100",

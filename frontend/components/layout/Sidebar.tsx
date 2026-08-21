@@ -221,7 +221,7 @@ export function Sidebar() {
                             onClick={handleSync}
                             disabled={isSyncing}
                             className={cn(
-                                "w-10 h-10 flex items-center justify-center rounded-full transition-all duration-300",
+                                "w-11 h-11 flex items-center justify-center rounded-full transition-all duration-300",
                                 isSyncing ?
                                     "bg-[#1DB954] text-black"
                                 :   "bg-white/10 text-white hover:bg-white/15 active:scale-95",
@@ -362,7 +362,7 @@ export function Sidebar() {
                             <Plus className="w-3.5 h-3.5" />
                         </button>
                         {showCreatePlaylist && (
-                            <div className="absolute right-0 top-8 z-(--z-dropdown) w-56 bg-[var(--bg-hover)] border border-white/10 rounded-lg shadow-2xl p-3">
+                            <div className="absolute right-0 top-8 z-(--z-dropdown) w-56 bg-[var(--bg-hover)] border border-white/10 rounded-lg p-3">
                                 <input
                                     type="text"
                                     value={newPlaylistName}

@@ -161,7 +161,7 @@ export function PlaylistSelector({
             onClick={onClose}
         >
             <div
-                className="bg-linear-to-b from-[#121212] to-[#121212] rounded-xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col border border-white/10 shadow-2xl animate-pop"
+                className="bg-linear-to-b from-[#121212] to-[#121212] rounded-xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col border border-white/10 animate-pop"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-center justify-between p-6 border-b border-white/10">

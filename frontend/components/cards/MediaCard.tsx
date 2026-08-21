@@ -13,7 +13,7 @@ interface MediaCardProps {
         border: string;
         gradient: string;
         button: string;
-        shadow: string;
+        shadow: string; /* unused — kept for API compatibility */
     };
     index?: number;
     imageClassName?: string;
@@ -39,9 +39,8 @@ export function MediaCard({
         >
             <div
                 className={cn(
-                    "relative bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg overflow-hidden transition-all duration-300 hover:shadow-lg",
+                    "relative bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg overflow-hidden transition-all duration-300",
                     accentColor.border,
-                    accentColor.shadow,
                 )}
             >
                 <div className="relative aspect-square">
@@ -72,7 +71,7 @@ export function MediaCard({
                     {/* Play button */}
                     <div
                         className={cn(
-                            "absolute bottom-3 right-3 w-11 h-11 rounded-lg flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200",
+                            "absolute bottom-3 right-3 w-11 h-11 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200",
                             accentColor.button,
                         )}
                     >

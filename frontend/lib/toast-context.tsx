@@ -138,7 +138,7 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
             aria-live={toast.type === "error" ? "assertive" : "polite"}
             aria-atomic="true"
             className={cn(
-                "flex items-start gap-3 p-4 rounded-sm border shadow-2xl  animate-in slide-in-from-right duration-300",
+                "flex items-start gap-3 p-4 rounded-sm border animate-in slide-in-from-right duration-300",
                 styles[toast.type]
             )}
         >

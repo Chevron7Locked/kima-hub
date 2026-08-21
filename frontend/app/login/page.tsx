@@ -150,7 +150,7 @@ export default function LoginPage() {
                                     alt="Kima"
                                     width={40}
                                     height={40}
-                                    className="relative z-(--z-raised) drop-shadow-2xl"
+                                    className="relative z-(--z-raised)"
                                 />
                             </div>
                             <span className="text-3xl font-bold text-white">
@@ -160,7 +160,7 @@ export default function LoginPage() {
                     </div>
 
                     {/* Login Card */}
-                    <div className="bg-[#111]/90 rounded-lg p-6 md:p-8 border border-white/10 shadow-xl animate-rise transition-shadow duration-200 hover:shadow-2xl">
+                    <div className="bg-[#111]/90 rounded-lg p-6 md:p-8 border border-white/10 animate-rise transition-shadow duration-200">
                         <h1 className="text-2xl font-bold text-white mb-1 text-center">
                             Welcome back
                         </h1>
@@ -281,7 +281,7 @@ export default function LoginPage() {
                                             autoFocus
                                             autoCapitalize="none"
                                             autoCorrect="off"
-                                            className="w-full px-4 py-2.5 bg-white/5 border border-brand/30 rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-transparent transition-all duration-200  text-center text-2xl tracking-widest"
+                                            className="w-full px-4 py-2.5 bg-white/5 border border-brand/30 rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-transparent transition-all duration-200  text-center text-xl tracking-[0.5em]"
                                         />
                                         <p className="text-xs text-[var(--text-secondary)] mt-2">
                                             {useRecoveryCode

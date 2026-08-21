@@ -78,7 +78,7 @@ const TrackRow = memo(
                             e.stopPropagation();
                             onPlayTrack();
                         }}
-                        className="w-8 h-8 flex items-center justify-center"
+                        className="w-10 h-10 flex items-center justify-center"
                         aria-label={isCurrentlyPlaying ? "Pause" : "Play"}
                     >
                         <span
@@ -128,7 +128,7 @@ const TrackRow = memo(
 
                 {/* Album - hidden on mobile */}
                 <div className="hidden md:block min-w-0">
-                    <p className="text-sm tabular-nums text-[var(--text-muted)] truncate">
+                    <p className="text-xs tabular-nums text-[var(--text-muted)] truncate">
                         {track.album?.title}
                     </p>
                 </div>
@@ -140,7 +140,7 @@ const TrackRow = memo(
                             e.stopPropagation();
                             onAddToQueue(track);
                         }}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all duration-150 border border-transparent hover:border-white/20"
+                        className="w-10 h-10 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all duration-150 border border-transparent hover:border-white/20"
                         title="Add to Queue"
                     >
                         <ListPlus className="w-4 h-4" />
@@ -150,7 +150,7 @@ const TrackRow = memo(
                             e.stopPropagation();
                             onShowAddToPlaylist(track.id);
                         }}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all duration-150 border border-transparent hover:border-white/20"
+                        className="w-10 h-10 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all duration-150 border border-transparent hover:border-white/20"
                         title="Add to Playlist"
                     >
                         <Plus className="w-4 h-4" />
@@ -160,7 +160,7 @@ const TrackRow = memo(
                             e.stopPropagation();
                             onDelete(track.id, track.title);
                         }}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all duration-150 border border-transparent hover:border-red-500/30"
+                        className="w-10 h-10 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all duration-150 border border-transparent hover:border-red-500/30"
                         title="Delete Track"
                     >
                         <Trash2 className="w-4 h-4" />

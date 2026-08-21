@@ -39,7 +39,7 @@ export function AudiobookCard({
         >
             <div className="cursor-pointer group relative h-full flex flex-col">
                 <div className="relative flex-shrink-0">
-                    <div className="aspect-[2/3] rounded-lg overflow-hidden bg-[var(--bg-primary)] border border-white/10 group-hover:border-[#f59e0b]/40 group-hover:shadow-xl group-hover:shadow-[#f59e0b]/10 transition-all duration-300 relative">
+                    <div className="aspect-[2/3] rounded-lg overflow-hidden bg-[var(--bg-primary)] border border-white/10 group-hover:border-[#f59e0b]/40 transition-all duration-300 relative">
                         {resolvedCoverUrl ? (
                             <CachedImage
                                 src={resolvedCoverUrl}
@@ -73,14 +73,14 @@ export function AudiobookCard({
 
                         {/* Completion badge */}
                         {progress?.isFinished && (
-                            <div className="absolute top-2 right-2 bg-green-500 rounded-full p-1 shadow-lg">
+                            <div className="absolute top-2 right-2 bg-green-500 rounded-full p-1">
                                 <CheckCircle className="w-3 h-3 text-white" />
                             </div>
                         )}
 
                         {/* Series badge */}
                         {seriesBadge && (
-                            <div className="absolute top-2 right-2 bg-[#f59e0b] text-black rounded px-2 py-0.5 text-xs font-semibold shadow-lg">
+                            <div className="absolute top-2 right-2 bg-[#f59e0b] text-black rounded px-2 py-0.5 text-xs font-semibold">
                                 {seriesBadge}
                             </div>
                         )}

@@ -37,17 +37,17 @@ const TYPE_COLORS: Record<string, { border: string; accent: string; gradient: st
     artist: {
         border: "hover:border-[#fca200]/40",
         accent: "from-[#fca200] to-[#d48c00]",
-        gradient: "hover:shadow-[#fca200]/10",
+        gradient: "",
     },
     podcast: {
         border: "hover:border-[#3b82f6]/40",
         accent: "from-[#3b82f6] to-[#2563eb]",
-        gradient: "hover:shadow-[#3b82f6]/10",
+        gradient: "",
     },
     audiobook: {
         border: "hover:border-[#f59e0b]/40",
         accent: "from-[#f59e0b] to-[#d97706]",
-        gradient: "hover:shadow-[#f59e0b]/10",
+        gradient: "",
     },
 };
 
@@ -88,7 +88,7 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
                 )}
                 style={staggered ? { "--i": index } as CSSProperties : undefined}
             >
-                <div className={`relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden ${colors.border} transition-[border-color,box-shadow] duration-150 hover:shadow-lg ${colors.gradient} mx-1`}>
+                <div className={`relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden ${colors.border} transition-[border-color] duration-150 mx-1`}>
                     <div className="relative aspect-square overflow-hidden">
                         <div className="w-full h-full bg-[#181818] flex items-center justify-center">
                             {imageSrc ? (

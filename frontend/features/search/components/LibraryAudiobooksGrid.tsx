@@ -31,7 +31,7 @@ export function LibraryAudiobooksGrid({
                         border: "hover:border-[#f59e0b]/50",
                         gradient: "bg-gradient-to-r from-[#f59e0b] to-[#d97706]",
                         button: "bg-[#f59e0b] text-black",
-                        shadow: "hover:shadow-[#f59e0b]/10",
+                        shadow: "",
                     }}
                     index={index}
                 />

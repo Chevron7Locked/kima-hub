@@ -240,7 +240,7 @@ export default function OnboardingPage() {
                                         alt="Kima"
                                         width={48}
                                         height={48}
-                                        className="relative z-(--z-raised) drop-shadow-2xl"
+                                        className="relative z-(--z-raised)"
                                     />
                                 </div>
                                 <h1 className="text-4xl font-bold text-white">
@@ -296,7 +296,7 @@ export default function OnboardingPage() {
                         </div>
 
                         {/* Main Content Card */}
-                        <div className="bg-[#111]/90 rounded-lg border border-white/10 shadow-xl overflow-hidden">
+                        <div className="bg-[#111]/90 rounded-lg border border-white/10 overflow-hidden">
                             <div className="p-6 md:p-8">
                                 {step === 1 && (
                                     <div className="space-y-6">
@@ -709,7 +709,7 @@ function IntegrationCard({
                         } focus:outline-none focus:ring-2 focus:ring-brand/30`}
                     >
                         <div
-                            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-brand rounded-lg transition-all shadow-lg ${
+                            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-brand rounded-lg transition-all ${
                                 enabled ? "translate-x-5" : ""
                             }`}
                         />
@@ -878,7 +878,7 @@ function SoulseekCard({
                         } focus:outline-none focus:ring-2 focus:ring-brand/30`}
                     >
                         <div
-                            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-brand rounded-lg transition-all shadow-lg ${
+                            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-brand rounded-lg transition-all ${
                                 enabled ? "translate-x-5" : ""
                             }`}
                         />

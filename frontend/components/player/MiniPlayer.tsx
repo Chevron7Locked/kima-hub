@@ -145,7 +145,7 @@ export function MiniPlayer() {
             return (
                 <button
                     onClick={() => setIsMinimized(false)}
-                    className="fixed right-0 z-(--z-player) shadow-2xl transition-transform hover:scale-105 active:scale-95"
+                    className="fixed right-0 z-(--z-player) transition-transform hover:scale-105 active:scale-95"
                     style={{
                         bottom: "calc(56px + var(--standalone-safe-area-bottom, 0px) + 8px)",
                     }}
@@ -153,13 +153,13 @@ export function MiniPlayer() {
                     title="Show player"
                 >
                     <div
-                        className="rounded-l-xl p-[2px]"
+                        className="rounded-l-2xl p-[2px]"
                         style={{
                             background: "linear-gradient(90deg, #fca200 0%, #f97316 100%)",
                         }}
                     >
-                        <div className="rounded-l-[10px] overflow-hidden">
-                            <div className="relative bg-gradient-to-r from-[#1a1508] to-[#0f0f0f]">
+                        <div className="rounded-l-xl overflow-hidden">
+                            <div className="relative bg-gradient-to-r from-[#1a1508] via-[#1a1200] to-[#1a1508]">
                                 <div className="absolute inset-0 bg-gradient-to-r from-brand/30 to-[#f97316]/20" />
 
                                 {/* Progress bar at top */}
@@ -202,7 +202,7 @@ export function MiniPlayer() {
 
         return (
             <div
-                className="fixed left-2 right-2 z-(--z-player) shadow-2xl"
+                className="fixed left-2 right-2 z-(--z-player)"
                 style={{
                     bottom: "calc(56px + var(--standalone-safe-area-bottom, 0px) + 8px)",
                     transform: `translateX(${swipeOffset}px)`,
@@ -219,13 +219,13 @@ export function MiniPlayer() {
 
                 {/* Gradient border container - uses padding technique for gradient border */}
                 <div
-                    className="rounded-[14px] p-[2px]"
+                    className="rounded-2xl p-[2px]"
                     style={{
                         background: "linear-gradient(90deg, #fca200 0%, #f97316 50%, #fca200 100%)",
                     }}
                 >
                     {/* Inner container with overflow hidden for proper clipping */}
-                    <div className="rounded-[12px] overflow-hidden">
+                    <div className="rounded-xl overflow-hidden">
                         {/* Single solid background with gradient overlay - prevents corner bleed */}
                         <div className="relative bg-gradient-to-r from-[#1a1508] via-[#1a1200] to-[#1a1508]">
                             <div className="absolute inset-0 bg-gradient-to-r from-brand/25 via-[#f97316]/35 to-brand/25" />
@@ -245,7 +245,7 @@ export function MiniPlayer() {
                             >
                                 {/* Album Art - expand button for keyboard/AT users */}
                                 <button
-                                    className="relative w-12 h-12 flex-shrink-0 rounded-lg overflow-hidden bg-black/30 shadow-md"
+                                    className="relative w-12 h-12 flex-shrink-0 rounded-lg overflow-hidden bg-black/30"
                                     aria-label="Expand player"
                                     onClick={(e) => {
                                         e.stopPropagation();
@@ -342,7 +342,7 @@ export function MiniPlayer() {
                                             }
                                         }}
                                         className={cn(
-                                            "w-10 h-10 rounded-full flex items-center justify-center transition shadow-md",
+                                            "w-10 h-10 rounded-full flex items-center justify-center transition",
                                             audioError
                                                 ? "bg-red-500 text-white hover:bg-red-400"
                                                 : isBuffering
@@ -416,7 +416,7 @@ export function MiniPlayer() {
                                 href={mediaLink}
                                 className="relative flex-shrink-0 w-12 h-12"
                             >
-                                <div className={cn("relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center", "transition-transform duration-300", isPlaying && "scale-[1.03]")}>
+                                <div className={cn("relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden flex items-center justify-center", "transition-transform duration-300", isPlaying && "scale-[1.03]")}>
                                     {coverUrl ? (
                                         <Image
                                             key={coverUrl}
@@ -435,7 +435,7 @@ export function MiniPlayer() {
                             </Link>
                         ) : (
                             <div className="relative flex-shrink-0 w-12 h-12">
-                                <div className={cn("relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center", "transition-transform duration-300", isPlaying && "scale-[1.03]")}>
+                                <div className={cn("relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden flex items-center justify-center", "transition-transform duration-300", isPlaying && "scale-[1.03]")}>
                                     <MusicIcon className="w-6 h-6 text-[var(--text-muted)]" />
                                 </div>
                             </div>
@@ -466,7 +466,7 @@ export function MiniPlayer() {
                         <div className="flex items-center gap-1 flex-shrink-0">
                             <button
                                 onClick={() => setPlayerMode("full")}
-                                className="text-[var(--text-secondary)] hover:text-white transition p-1"
+                                className="text-[var(--text-secondary)] hover:text-white transition p-2"
                                 aria-label="Show bottom player"
                                 title="Show bottom player"
                             >
@@ -475,7 +475,7 @@ export function MiniPlayer() {
                             <button
                                 onClick={() => setPlayerMode("overlay")}
                                 className={cn(
-                                    "transition p-1",
+                                    "transition p-2",
                                     hasMedia
                                         ? "text-[var(--text-secondary)] hover:text-white"
                                         : "text-[var(--text-muted)] cursor-not-allowed"
@@ -555,7 +555,7 @@ export function MiniPlayer() {
                             onClick={isPlaying ? pause : resumeWithGesture}
                             disabled={!hasMedia}
                             className={cn(
-                                "w-8 h-8 rounded-full flex items-center justify-center transition",
+                                "w-10 h-10 rounded-full flex items-center justify-center transition",
                                 hasMedia
                                     ? isBuffering
                                         ? "bg-brand/80 text-black"

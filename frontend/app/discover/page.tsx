@@ -206,7 +206,7 @@ export default function DiscoverWeeklyPage() {
                 />
 
                 {/* Track Listing */}
-                <div className="px-4 md:px-8 pb-32">
+                <div className="px-4 md:px-8 pb-32 max-w-[1800px] mx-auto">
                     {playlist && playlist.tracks.length > 0 ? (
                             <div className="section-stack">
                                 {/* Section header */}
@@ -245,7 +245,7 @@ export default function DiscoverWeeklyPage() {
                             </div>
                         ) : (
                             <div className="max-w-3xl mx-auto py-16">
-                                <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-12 shadow-2xl shadow-black/40">
+                                <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-12">
                                     {/* Accent line */}
                                     <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-[var(--color-brand)] to-[var(--color-brand-hover)]" />
 
@@ -307,7 +307,7 @@ export default function DiscoverWeeklyPage() {
                                             "w-full py-4 px-6 border-2 rounded-lg font-bold text-sm transition-all duration-300 min-h-[52px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2",
                                             isGenerating
                                                 ? "border-white/20 bg-white/5 text-[var(--text-muted)] cursor-not-allowed"
-                                                : "border-[var(--color-brand)] bg-[var(--color-brand)] text-black hover:bg-[var(--color-brand-hover)] hover:border-[var(--color-brand-hover)] hover:scale-[1.02] hover:shadow-lg hover:shadow-[var(--color-brand)]/20"
+                                                : "border-[var(--color-brand)] bg-[var(--color-brand)] text-black hover:bg-[var(--color-brand-hover)] hover:border-[var(--color-brand-hover)] hover:scale-[1.02]"
                                         )}
                                     >
                                         {isGenerating ? (

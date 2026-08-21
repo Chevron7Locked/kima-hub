@@ -173,7 +173,7 @@ function PlaylistCard({
                 tabIndex={0}
             >
                 {/* Cover Image */}
-                <div className="relative aspect-square mb-3 rounded-lg overflow-hidden bg-[var(--bg-primary)] border border-white/10 shadow-lg">
+                <div className="relative aspect-square mb-3 rounded-lg overflow-hidden bg-[var(--bg-primary)] border border-white/10">
                     <PlaylistMosaic
                         items={playlist.items}
                         greyed={isHiddenView}
@@ -574,7 +574,7 @@ function EmptyState({
 }) {
     if (showHiddenTab) {
         return (
-            <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-12 shadow-2xl shadow-black/40">
+        <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-12">
                 <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-brand to-[#f97316]" />
                 <div className="flex items-center gap-3 mb-8 pb-4 border-b border-white/10">
                     <div className="w-2 h-2 bg-brand" />
@@ -598,7 +598,7 @@ function EmptyState({
     }
 
     return (
-        <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-8 md:p-12 shadow-2xl shadow-black/40">
+        <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-8 md:p-12">
             <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-brand to-[#f97316]" />
 
             <div className="flex items-center gap-3 mb-8 pb-4 border-b border-white/10">

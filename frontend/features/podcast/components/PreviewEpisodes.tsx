@@ -65,7 +65,7 @@ export function PreviewEpisodes({
                             <button
                                 onClick={onSubscribe}
                                 disabled={isSubscribing}
-                                className="flex items-center gap-2 pointer-events-auto h-10 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] transition-all font-bold text-sm text-white disabled:opacity-50 shadow-xl hover:scale-[1.02] active:scale-[0.98]"
+                                className="flex items-center gap-2 pointer-events-auto h-10 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] transition-all font-bold text-sm text-white disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
                             >
                                 {isSubscribing ? (
                                     <>

@@ -69,7 +69,7 @@ const ArtistCardItem = memo(
                     index < 8 ? "animate-rise [animation-delay:calc(var(--i)*45ms)]" : "",
                 )}
             >
-                <div className="relative bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg overflow-hidden hover:border-[#fca200]/50 transition-all duration-200 hover:shadow-lg hover:shadow-[#fca200]/10" style={{ transform: "translateZ(0)" }}>
+                <div className="relative bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg overflow-hidden hover:border-[#fca200]/50 transition-all duration-200" style={{ transform: "translateZ(0)" }}>
                     <div className="relative aspect-square">
                         <div className="w-full h-full bg-[#181818] flex items-center justify-center overflow-hidden" style={{ contain: "content" }}>
                             {coverArtUrl ? (
@@ -91,7 +91,7 @@ const ArtistCardItem = memo(
                         {/* Play button */}
                         <button
                             onClick={handlePlay}
-                            className="touch-reveal absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#fca200] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-150 hover:scale-110 hover:bg-[#d48c00]"
+                            className="touch-reveal absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#fca200] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-150 hover:scale-110 hover:bg-[#d48c00]"
                         >
                             <Play className="w-5 h-5 fill-current ml-0.5 text-white" />
                         </button>

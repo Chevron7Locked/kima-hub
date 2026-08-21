@@ -44,7 +44,7 @@ const PlaylistCard = memo(function PlaylistCard({
                 )}
                 style={staggered ? { "--i": index } as CSSProperties : undefined}
             >
-                <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#a855f7]/40 transition-[border-color,box-shadow] duration-150 hover:shadow-lg hover:shadow-[#a855f7]/10 mx-1">
+                <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#a855f7]/40 transition-[border-color] duration-150 mx-1">
                     <div className="relative aspect-square">
                         <div className="w-full h-full bg-[#181818] flex items-center justify-center overflow-hidden">
                             {playlist.imageUrl ? (
@@ -64,7 +64,7 @@ const PlaylistCard = memo(function PlaylistCard({
                         <div className="absolute top-2 left-2 p-1 bg-black/60 rounded">
                             <DeezerIcon className="w-3.5 h-3.5 text-[#a855f7]" />
                         </div>
-                        <button className="touch-reveal absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#9333ea] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 hover:bg-[#7e22ce]">
+                        <button className="touch-reveal absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#9333ea] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 hover:bg-[#7e22ce]">
                             <Play className="w-4 h-4 fill-current ml-0.5 text-white" />
                         </button>
                     </div>

@@ -83,7 +83,7 @@ export function AlbumHero({
             <div className="relative px-4 md:px-8 pt-16 pb-6">
                 <div className="flex items-end gap-6">
                     {/* Album Cover - Square */}
-                    <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden relative">
+                    <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shrink-0 overflow-hidden relative">
                         {coverUrl ? (
                             <Image
                                 src={coverUrl}

@@ -209,7 +209,7 @@ export default function BrowsePlaylistsPage() {
             onClick={() => handleItemClick(item)}
             className="group cursor-pointer text-left w-full"
         >
-            <div className="relative aspect-square mb-2.5 rounded-lg overflow-hidden bg-[var(--bg-primary)] border border-white/10 group-hover:border-[#a855f7]/40 group-hover:shadow-xl group-hover:shadow-[#a855f7]/10 transition-all duration-300">
+            <div className="relative aspect-square mb-2.5 rounded-lg overflow-hidden bg-[var(--bg-primary)] border border-white/10 group-hover:border-[#a855f7]/40 transition-all duration-300">
                 {item.imageUrl ?
                     <Image
                         src={item.imageUrl}
@@ -240,7 +240,7 @@ export default function BrowsePlaylistsPage() {
         <button
             key={genre.id}
             onClick={() => handleGenreClick(genre)}
-            className="group cursor-pointer relative aspect-square rounded-lg overflow-hidden border border-white/10 hover:border-[#a855f7]/40 hover:shadow-xl hover:shadow-[#a855f7]/10 transition-all duration-300"
+            className="group cursor-pointer relative aspect-square rounded-lg overflow-hidden border border-white/10 hover:border-[#a855f7]/40 transition-all duration-300"
         >
             {genre.imageUrl ?
                 <Image
@@ -558,7 +558,7 @@ export default function BrowsePlaylistsPage() {
                     onClick={() => setShowUrlModal(false)}
                 >
                     <div
-                        className="bg-[var(--bg-secondary)] rounded-lg max-w-lg w-full shadow-2xl border border-white/10 animate-in zoom-in-95 duration-200"
+                        className="bg-[var(--bg-secondary)] rounded-lg max-w-lg w-full border border-white/10 animate-in zoom-in-95 duration-200"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Header */}

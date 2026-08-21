@@ -208,7 +208,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
             onClick={onClose}
         >
             <div
-                className="bg-gradient-to-b from-[#1a1a1a] to-[#0a0a0a] rounded-2xl max-w-lg w-full max-h-[85vh] overflow-hidden border border-white/10 shadow-2xl animate-pop"
+                className="bg-gradient-to-b from-[#1a1a1a] to-[#0a0a0a] rounded-2xl max-w-lg w-full max-h-[85vh] overflow-hidden border border-white/10 animate-pop"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}
@@ -278,12 +278,12 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                                             {isGenerating ? (
                                                 <Loader2 className="w-8 h-8 text-white animate-spin" />
                                             ) : (
-                                                <Icon className="w-8 h-8 text-white drop-shadow-lg" />
+                                                <Icon className="w-8 h-8 text-white" />
                                             )}
                                         </div>
 
                                         {/* Label */}
-                                        <span className="relative z-(--z-raised) text-sm font-semibold text-white drop-shadow-lg">
+                                        <span className="relative z-(--z-raised) text-sm font-semibold text-white">
                                             {config.label}
                                         </span>
 

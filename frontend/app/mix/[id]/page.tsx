@@ -202,7 +202,7 @@ export default function MixPage() {
             >
                 <div className="flex items-end gap-6">
                         {/* Cover Art Mosaic */}
-                        <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden">
+                        <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shrink-0 overflow-hidden">
                             {mix.coverUrls && mix.coverUrls.length > 0 ? (
                                 <div className="grid grid-cols-2 gap-0 w-full h-full">
                                     {mix.coverUrls.slice(0, 4).map((url: string, index: number) => {
@@ -262,7 +262,7 @@ export default function MixPage() {
                         <button
                             onClick={handlePlayMix}
                             aria-label={isThisMixPlaying && isPlaying ? `Pause ${mix.name}` : `Play ${mix.name}`}
-                            className="h-12 w-12 rounded-full bg-brand hover:bg-[#d4a000] hover:scale-105 flex items-center justify-center shadow-lg transition-all"
+                            className="h-12 w-12 rounded-full bg-brand hover:bg-[#d4a000] hover:scale-105 flex items-center justify-center transition-all"
                         >
                             {isThisMixPlaying && isPlaying ? (
                                 <Pause className="w-5 h-5 fill-current text-black" />

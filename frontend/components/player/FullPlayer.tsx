@@ -121,7 +121,7 @@ export function FullPlayer() {
                                 href={mediaLink}
                                 className="relative w-14 h-14 flex-shrink-0"
                             >
-                                <div className={cn("relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center", "transition-transform duration-300", isPlaying && "scale-[1.03]")}>
+                                <div className={cn("relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden flex items-center justify-center", "transition-transform duration-300", isPlaying && "scale-[1.03]")}>
                                     {coverUrl ? (
                                         <Image
                                             key={coverUrl}
@@ -140,7 +140,7 @@ export function FullPlayer() {
                             </Link>
                         ) : (
                             <div className="relative w-14 h-14 flex-shrink-0">
-                                <div className={cn("relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center", "transition-transform duration-300", isPlaying && "scale-[1.03]")}>
+                                <div className={cn("relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden flex items-center justify-center", "transition-transform duration-300", isPlaying && "scale-[1.03]")}>
                                     <MusicIcon className="w-6 h-6 text-[var(--text-muted)]" />
                                 </div>
                             </div>
@@ -260,7 +260,7 @@ export function FullPlayer() {
                                     audioError
                                         ? "bg-red-500 text-white hover:scale-110 hover:bg-red-400"
                                         : hasMedia && !isBuffering
-                                        ? "bg-brand text-black hover:scale-110 hover:shadow-[#fca200]/30"
+                                        ? "bg-brand text-black hover:scale-110"
                                         : isBuffering
                                         ? "bg-brand/80 text-black"
                                         : "bg-gray-700 text-[var(--text-muted)] cursor-not-allowed"
@@ -449,7 +449,7 @@ export function FullPlayer() {
                         <div className="w-full flex items-center gap-3">
                             <span
                                 className={cn(
-                                    "text-xs text-right tabular-nums font-medium tabular-nums",
+                                    "text-xs text-right tabular-nums font-medium",
                                     hasMedia
                                         ? "text-[var(--text-secondary)]"
                                         : "text-[var(--text-muted)]",
@@ -470,7 +470,7 @@ export function FullPlayer() {
                             />
                             <span
                                 className={cn(
-                                    "text-xs tabular-nums font-medium tabular-nums",
+                                    "text-xs tabular-nums font-medium",
                                     hasMedia
                                         ? "text-[var(--text-secondary)]"
                                         : "text-[var(--text-muted)]",
@@ -518,7 +518,7 @@ export function FullPlayer() {
                                         ? "rgba(255,255,255,0.15)"
                                         : `linear-gradient(to right, #fca200 ${volume * 100}%, rgba(255,255,255,0.15) ${volume * 100}%)`
                                 }}
-                                className="w-full h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[#eab308] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:transition-all [&::-webkit-slider-thumb]:hover:scale-110"
+                                className="w-full h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[#eab308] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:transition-all [&::-webkit-slider-thumb]:hover:scale-110"
                             />
                         </div>
 

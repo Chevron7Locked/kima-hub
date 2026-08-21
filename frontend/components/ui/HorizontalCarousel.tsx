@@ -80,7 +80,7 @@ export function HorizontalCarousel({
                         "flex items-center justify-center",
                         "opacity-0 group-hover/carousel:opacity-100 transition-opacity",
                         "hover:bg-black hover:scale-105 transition-all",
-                        "border border-white/10 shadow-lg",
+                        "border border-white/10",
                         "-translate-x-1/2"
                     )}
                     aria-label="Scroll left"
@@ -113,7 +113,7 @@ export function HorizontalCarousel({
                         "flex items-center justify-center",
                         "opacity-0 group-hover/carousel:opacity-100 transition-opacity",
                         "hover:bg-black hover:scale-105 transition-all",
-                        "border border-white/10 shadow-lg",
+                        "border border-white/10",
                         "translate-x-1/2"
                     )}
                     aria-label="Scroll right"

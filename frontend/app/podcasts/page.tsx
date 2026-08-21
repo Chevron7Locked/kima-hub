@@ -47,7 +47,7 @@ function PodcastCard({
             data-tv-card
             data-tv-card-index={index}
             tabIndex={0}
-            className="group text-left bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#3b82f6]/40 hover:shadow-lg hover:shadow-[#3b82f6]/10 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
+            className="group text-left bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#3b82f6]/40 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
         >
             <div className="relative w-full aspect-square bg-[var(--bg-secondary)] overflow-hidden">
                 {imageUrl ? (
@@ -384,7 +384,7 @@ export default function PodcastsPage() {
                                             id="podcast-search-listbox"
                                             role="listbox"
                                             aria-label="Podcast search results"
-                                            className="absolute top-full left-0 mt-2 w-full bg-[var(--bg-secondary)] border-2 border-white/10 rounded-lg shadow-2xl overflow-hidden z-(--z-dropdown) max-h-96 overflow-y-auto"
+                                            className="absolute top-full left-0 mt-2 w-full bg-[var(--bg-secondary)] border-2 border-white/10 rounded-lg overflow-hidden z-(--z-dropdown) max-h-96 overflow-y-auto"
                                         >
                                             {searchResults.map((result) => {
                                                 const imageUrl = getProxiedImageUrl(result.coverUrl);
@@ -446,7 +446,7 @@ export default function PodcastsPage() {
                                         searchResults.length === 0 &&
                                         !isSearching &&
                                         searchQuery.length >= 2 && (
-                                            <div className="absolute top-full left-0 mt-2 w-full bg-[var(--bg-secondary)] border-2 border-white/10 rounded-lg shadow-2xl p-4 z-(--z-dropdown)">
+                                            <div className="absolute top-full left-0 mt-2 w-full bg-[var(--bg-secondary)] border-2 border-white/10 rounded-lg p-4 z-(--z-dropdown)">
                                                 <p className="text-xs text-[var(--text-muted)] text-center">
                                                     No podcasts found
                                                 </p>

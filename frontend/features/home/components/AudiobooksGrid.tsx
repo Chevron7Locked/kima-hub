@@ -37,7 +37,7 @@ const AudiobookCard = memo(function AudiobookCard({
                 )}
                 style={staggered ? { "--i": index } as CSSProperties : undefined}
             >
-                <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#f59e0b]/40 transition-[border-color,box-shadow] duration-150 hover:shadow-lg hover:shadow-[#f59e0b]/10 mx-1">
+                <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#f59e0b]/40 transition-[border-color] duration-150 mx-1">
                     <div className="relative aspect-square">
                         <div className="w-full h-full bg-[#181818] flex items-center justify-center overflow-hidden">
                             {audiobook.coverUrl ? (

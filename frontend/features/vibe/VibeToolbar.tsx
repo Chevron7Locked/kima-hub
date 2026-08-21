@@ -43,7 +43,7 @@ export function VibeToolbar({ mode, onSearch, onPathMode, onAlchemyMode, onReset
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder="Search tracks or artists..."
-                    className="w-64 md:w-80 pl-9 pr-8 py-2 bg-white/10 backdrop-blur-md border border-white/10 rounded-lg text-sm text-white placeholder-white/40 focus:outline-none focus:border-white/30"
+                    className="w-full max-w-64 md:max-w-80 pl-9 pr-8 py-2 bg-white/10 backdrop-blur-md border border-white/10 rounded-lg text-sm text-white placeholder-white/40 focus:outline-none focus:border-white/30"
                     aria-label="Search tracks or artists"
                 />
                 {query && (

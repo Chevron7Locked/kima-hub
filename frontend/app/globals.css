@@ -118,39 +118,43 @@
      * 4.46:1 inside a card, which is where most labels actually live. */
     --text-muted: #858585; /* labels, meta, timestamps */
 
-    /* ── Stacking order ───────────────────────────────────────────────────
-     *
-     * One ladder, named by what sits on each rung. It replaces fifteen
-     * hand-picked numbers that had drifted into an arms race -- z-[45],
-     * z-[55], z-[70], z-[101], z-[200], z-[9999] -- where each new overlay
-     * simply outbid whatever it landed on top of.
-     *
-     * The numbers below preserve the order the app already had. Two oddities
-     * were found and deliberately NOT changed here, because reordering
-     * stacking contexts breaks things silently and belongs in its own pass:
-     *   - the fixed top bar and in-page dropdowns both sat at 50
-     *   - the activity panel (100) sits above modals (80), so a dialog
-     *     opened while the panel is out would render behind it
-     * ─────────────────────────────────────────────────────────────────── */
-    --z-raised: 10; /* overlay inside a component: hover play button, scrim */
-    --z-scene: 20; /* overlays within the vibe canvas */
-    --z-scene-panel: 30; /* the vibe sheet */
-    --z-nav: 40; /* bottom navigation */
-    --z-player: 45; /* mini player -- above the nav it overlaps */
-    --z-header: 50; /* fixed top bar */
-    --z-dropdown: 50; /* menus and popovers anchored to a control */
-    --z-toast-inline: 55; /* transient confirmation over page content */
-    --z-drawer-backdrop: 60;
-    --z-drawer: 70; /* mobile sidebar */
-    --z-modal: 80; /* dialogs */
-    /* The panel's own backdrop sits one rung below it. Both were collapsed onto
-     * --z-panel by the token pass, which left the panel above its scrim only
-     * because it happens to be the later sibling; any reorder would have
-     * dropped it behind a black/60 sheet that swallows every tap. */
-    --z-panel-backdrop: 99;
-    --z-panel: 100; /* activity panel */
-    --z-toast: 200; /* app-level prompts, e.g. "update available" */
-    --z-overlay: 300; /* full-screen player */
+/* ── Stacking order ───────────────────────────────────────────────────
+ *
+ * One ladder, named by what sits on each rung. It replaces fifteen
+ * hand-picked numbers that had drifted into an arms race -- z-[45],
+ * z-[55], z-[70], z-[101], z-[200], z-[9999] -- where each new overlay
+ * simply outbid whatever it landed on top of.
+ *
+ *   10  --z-raised          overlay inside a component: hover play button, scrim
+ *   20  --z-scene           overlays within the vibe canvas
+ *   30  --z-scene-panel     the vibe sheet
+ *   40  --z-nav             bottom navigation
+ *   45  --z-player          mini player -- above the nav it overlaps
+ *   50  --z-header          fixed top bar
+ *   55  --z-dropdown        menus and popovers anchored to a control
+ *   65  --z-toast-inline    transient confirmation over page content
+ *   70  --z-drawer-backdrop mobile sidebar backdrop
+ *   75  --z-panel-backdrop  activity panel scrim (same tier as the drawer)
+ *   76  --z-panel           activity panel -- below any dialog it opens
+ *   80  --z-modal           dialogs (cover the panel and everything lower)
+ *  100  --z-toast           app-level prompts, e.g. "update available"
+ *  200  --z-overlay         full-screen player
+ * ─────────────────────────────────────────────────────────────────── */
+    --z-raised: 10;
+    --z-scene: 20;
+    --z-scene-panel: 30;
+    --z-nav: 40;
+    --z-player: 45;
+    --z-header: 50;
+    --z-dropdown: 55;
+    --z-toast-inline: 65;
+    --z-drawer-backdrop: 70;
+    --z-drawer: 75;
+    --z-modal: 80;
+    --z-panel-backdrop: 75;
+    --z-panel: 76;
+    --z-toast: 100;
+    --z-overlay: 200;
 }
 
 * {

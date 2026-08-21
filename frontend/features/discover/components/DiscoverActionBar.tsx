@@ -33,7 +33,7 @@ export function DiscoverActionBar({
                             "h-12 w-12 flex items-center justify-center border-2 rounded-lg transition-all duration-300",
                             isGenerating ?
                                 "border-white/20 bg-white/5 cursor-not-allowed opacity-50"
-                            :   "border-[#eab308] bg-[#eab308] hover:bg-[#f59e0b] hover:border-[#f59e0b] hover:scale-110 hover:shadow-lg hover:shadow-[#eab308]/20",
+                            :   "border-[#eab308] bg-[#eab308] hover:bg-[#f59e0b] hover:border-[#f59e0b] hover:scale-110",
                         )}
                     >
                         {isPlaylistPlaying && isPlaying ?

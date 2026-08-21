@@ -79,7 +79,7 @@ export function ArtistHero({
             <div className="relative px-4 md:px-8 pt-16 pb-6">
                 <div className="flex items-end gap-6">
                     {/* Artist Image - Circular */}
-                    <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded-full shadow-2xl shrink-0 overflow-hidden relative">
+                    <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded-full shrink-0 overflow-hidden relative">
                         {heroImage ? (
                             <Image
                                 src={heroImage}

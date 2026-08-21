@@ -281,7 +281,7 @@ export default function DeezerPlaylistDetailPage() {
 
                         <div className="flex items-end gap-6">
                             {/* Cover Art */}
-                            <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[var(--bg-primary)] rounded-lg shadow-2xl shrink-0 overflow-hidden relative border-2 border-white/10">
+                            <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[var(--bg-primary)] rounded-lg shrink-0 overflow-hidden relative border-2 border-white/10">
                                 {playlist.imageUrl ? (
                                     <Image
                                         src={playlist.imageUrl}

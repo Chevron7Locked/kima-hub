@@ -42,7 +42,7 @@ const PodcastCard = memo(
                     )}
                     style={staggered ? { "--i": index } as CSSProperties : undefined}
                 >
-                    <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#3b82f6]/40 transition-[border-color,box-shadow] duration-150 hover:shadow-lg hover:shadow-[#3b82f6]/10 mx-1">
+                    <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#3b82f6]/40 transition-[border-color] duration-150 mx-1">
                         <div className="relative aspect-square">
                             <div className="w-full h-full bg-[#181818] flex items-center justify-center overflow-hidden">
                                 {imageUrl ? (

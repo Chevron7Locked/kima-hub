@@ -99,7 +99,7 @@ export function UnifiedSongsList({
                     >
                         <button
                             onClick={() => handlePlayTrack(track, index)}
-                            className="w-8 h-8 flex items-center justify-center flex-shrink-0"
+                            className="w-10 h-10 flex items-center justify-center flex-shrink-0"
                         >
                             {isPlayingThis ? (
                                 <Pause className="w-4 h-4 text-brand" />
@@ -115,7 +115,7 @@ export function UnifiedSongsList({
                             )}
                         </button>
 
-                        <div className="w-10 h-10 bg-[#282828] rounded overflow-hidden flex-shrink-0">
+                        <div className="w-10 h-10 bg-[#181818] rounded overflow-hidden flex-shrink-0">
                             {coverUrl ? (
                                 <Image
                                     src={coverUrl}
@@ -192,7 +192,7 @@ export function UnifiedSongsList({
                         <button
                             onClick={() => !isDownloading && onDownload(result)}
                             disabled={isDownloading}
-                            className="w-8 h-8 flex items-center justify-center flex-shrink-0"
+                            className="w-10 h-10 flex items-center justify-center flex-shrink-0"
                         >
                             {isDownloading ? (
                                 <CheckCircle className="w-4 h-4 text-green-400" />

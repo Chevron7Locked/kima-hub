@@ -27,7 +27,7 @@ const MixCard = memo(
                 tabIndex={0}
                 className="group block"
             >
-                <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-brand/40 transition-all duration-300 hover:shadow-lg hover:shadow-[#fca208]/10 mx-1">
+                <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-brand/40 transition-all duration-300 mx-1">
                     <div className="relative aspect-square">
                         <div className="w-full h-full bg-[#181818] overflow-hidden">
                             {mix.coverUrls.length > 0 ? (

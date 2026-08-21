@@ -26,7 +26,7 @@ export function LibraryAlbumsGrid({ albums }: LibraryAlbumsGridProps) {
                         border: "hover:border-[#22c55e]/50",
                         gradient: "bg-gradient-to-r from-[#22c55e] to-[#16a34a]",
                         button: "bg-[#22c55e] text-black",
-                        shadow: "hover:shadow-[#22c55e]/10",
+                        shadow: "",
                     }}
                     index={index}
                 />

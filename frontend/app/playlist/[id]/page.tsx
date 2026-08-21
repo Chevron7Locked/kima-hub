@@ -806,7 +806,7 @@ export default function PlaylistDetailPage() {
 
                         <div className="flex items-end gap-6">
                             {/* Cover Art Mosaic */}
-                            <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[var(--bg-primary)] rounded-lg shadow-2xl shrink-0 overflow-hidden relative border-2 border-white/10">
+                            <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[var(--bg-primary)] rounded-lg shrink-0 overflow-hidden relative border-2 border-white/10">
                                 {coverUrls && coverUrls.length === 1 ? (
                                     <Image
                                         src={api.getCoverArtUrl(coverUrls[0], 400)}
@@ -1002,7 +1002,7 @@ export default function PlaylistDetailPage() {
 
                             {/* Share Popover */}
                             {showSharePopover && shareUrl && (
-                                <div className="absolute right-0 top-full mt-2 z-(--z-dropdown) w-80 bg-[var(--bg-hover)] border border-white/10 rounded-lg shadow-2xl shadow-black/50 p-3">
+                                <div className="absolute right-0 top-full mt-2 z-(--z-dropdown) w-80 bg-[var(--bg-hover)] border border-white/10 rounded-lg p-3">
                                     <div className="flex items-center gap-2 mb-2">
                                         <LinkIcon className="w-3.5 h-3.5 text-brand" />
                                         <span className="text-xs text-[var(--text-secondary)]">
@@ -1185,7 +1185,7 @@ export default function PlaylistDetailPage() {
                         </div>
                     ) : (
                         <div>
-                            <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-12 shadow-2xl shadow-black/40">
+                            <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-12">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-brand to-[#f97316]" />
 
                                 <div className="flex items-center gap-3 mb-8 pb-4 border-b border-white/10">

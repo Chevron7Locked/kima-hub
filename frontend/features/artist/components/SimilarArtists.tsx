@@ -56,7 +56,7 @@ export function SimilarArtists({
                             className="bg-transparent hover:bg-white/5 transition-all p-3 rounded-md cursor-pointer group"
                         >
                             {/* Circular Artist Image */}
-                            <div className="w-full aspect-square bg-[#282828] rounded-full mb-2.5 overflow-hidden relative shadow-lg">
+                            <div className="w-full aspect-square bg-[#282828] rounded-full mb-2.5 overflow-hidden relative">
                                 {imageUrl ? (
                                     <Image
                                         src={imageUrl}

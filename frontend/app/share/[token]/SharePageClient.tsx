@@ -305,7 +305,7 @@ export default function SharePageClient() {
                 <div className="w-full max-w-lg">
 
                     {/* Cover art */}
-                    <div className="animate-rise relative w-full aspect-square max-w-[280px] mx-auto mb-8 rounded-xl overflow-hidden bg-white/[0.03] shadow-2xl shadow-black/60" style={{ "--i": 0 } as CSSProperties}>
+                    <div className="animate-rise relative w-full aspect-square max-w-[280px] mx-auto mb-8 rounded-xl overflow-hidden bg-white/[0.03]" style={{ "--i": 0 } as CSSProperties}>
                         {coverArtUrl ? (
                             <Image
                                 src={coverArtUrl}

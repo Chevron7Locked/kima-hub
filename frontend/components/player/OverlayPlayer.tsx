@@ -142,12 +142,12 @@ export function OverlayPlayer() {
             <div className="flex-1 flex flex-col landscape:flex-row items-center justify-center px-6 pb-6 landscape:px-8 landscape:gap-8 overflow-hidden">
                 {/* Artwork / Lyrics swap */}
                 {isLyricsActive && isMobileOrTablet ? (
-                    <div className="w-full max-w-[280px] landscape:max-w-[220px] landscape:w-[220px] aspect-square flex-shrink-0 relative mb-6 landscape:mb-0 rounded-2xl bg-[var(--bg-primary)]/90 border border-white/[0.06]">
+                    <div className="w-full max-w-[280px] landscape:flex-1 aspect-square flex-shrink-0 relative mb-6 landscape:mb-0 rounded-2xl bg-[var(--bg-primary)]/90 border border-white/[0.06]">
                         <MobileLyricsView />
                     </div>
                 ) : (
                     <div
-                        className="w-full max-w-[280px] landscape:max-w-[220px] landscape:w-[220px] aspect-square flex-shrink-0 relative mb-6 landscape:mb-0"
+                        className="w-full max-w-[280px] landscape:flex-1 aspect-square flex-shrink-0 relative mb-6 landscape:mb-0"
                         style={{
                             transform: `translateX(${swipeOffset * 0.5}px)`,
                             opacity: 1 - Math.abs(swipeOffset) / 200,
@@ -165,7 +165,7 @@ export function OverlayPlayer() {
 
                         {/* Album art */}
                         <div className={cn(
-                            "relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-2xl overflow-hidden shadow-2xl transition-transform duration-300",
+                            "relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-2xl overflow-hidden transition-transform duration-300",
                             isPlaying && "scale-[1.03]"
                         )}>
                         {coverUrl ? (
@@ -298,7 +298,7 @@ export function OverlayPlayer() {
                         <button
                             onClick={isPlaying ? pause : resumeWithGesture}
                             className={cn(
-                                "w-16 h-16 rounded-full flex items-center justify-center hover:scale-105 transition-all shadow-xl",
+                                "w-16 h-16 rounded-full flex items-center justify-center hover:scale-105 transition-all",
                                 audioError
                                     ? "bg-red-500 text-black hover:bg-red-400"
                                     : isBuffering

@@ -309,7 +309,7 @@ export function TopBar() {
                                 className="group-hover:scale-105 transition-transform"
                             />
                         </Link>
-                        <span className="ml-2 px-1.5 py-0.5 text-micro font-medium text-[var(--text-muted)] bg-white/5 rounded border border-white/10 -mt-3">
+                        <span className="ml-2 px-1.5 py-0.5 text-micro font-medium text-[var(--text-muted)] bg-white/5 rounded border border-white/10">
                             v{APP_VERSION}
                         </span>
                     </div>
@@ -374,7 +374,7 @@ export function TopBar() {
                                     : "Sync library"
                             }
                             className={cn(
-                                "flex items-center gap-2 px-3 h-10 rounded-full transition-all duration-200 text-sm font-medium",
+                                "flex items-center gap-2 px-3 h-11 rounded-full transition-all duration-200 text-sm font-medium",
                                 isPolling
                                     ? "bg-white/10 text-[var(--text-muted)] cursor-not-allowed"
                                     : hasActiveDownloads
@@ -407,7 +407,7 @@ export function TopBar() {
                         <Link
                             href="/settings"
                             className={cn(
-                                "w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200",
+                                "w-11 h-11 rounded-full flex items-center justify-center transition-all duration-200",
                                 pathname === "/settings"
                                     ? "bg-white text-black"
                                     : "text-[var(--text-secondary)] hover:text-white"
@@ -419,7 +419,7 @@ export function TopBar() {
                         </Link>
                         <button
                             onClick={handleLogout}
-                            className="w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 text-red-400 hover:text-red-300"
+                            className="w-11 h-11 rounded-full flex items-center justify-center transition-all duration-200 text-red-400 hover:text-red-300"
                             aria-label="Logout"
                             title="Logout"
                         >
