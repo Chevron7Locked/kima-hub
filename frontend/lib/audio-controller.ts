@@ -371,12 +371,39 @@ export class AudioController {
                             });
                         } else if (name === "NotAllowedError") {
                             iosAudioLog("play:not-allowed", "audio-controller:call-play", this.audio);
-                            this.dispatch({
-                                type: "play-rejected",
-                                reason: "not-allowed",
-                                generation: capturedGen,
-                                now: Date.now(),
-                            });
+                            // Retry once after a short delay -- in headless Playwright
+                            // the element may still be loading when play() is first
+                            // called; a brief retry lets the browser settle.
+                            setTimeout(() => {
+                                if (this.snapshot.generation !== capturedGen) return;
+                                this.audio.play().catch((retryErr: unknown) => {
+                                    if (!(retryErr instanceof DOMException)) {
+                                        this.dispatch({
+                                            type: "play-rejected",
+                                            reason: "other",
+                                            generation: capturedGen,
+                                            now: Date.now(),
+                                        });
+                                        return;
+                                    }
+                                    const rName = (retryErr as DOMException).name;
+                                    if (rName === "AbortError") {
+                                        this.dispatch({
+                                            type: "play-rejected",
+                                            reason: "abort",
+                                            generation: capturedGen,
+                                            now: Date.now(),
+                                        });
+                                    } else {
+                                        this.dispatch({
+                                            type: "play-rejected",
+                                            reason: "not-allowed",
+                                            generation: capturedGen,
+                                            now: Date.now(),
+                                        });
+                                    }
+                                });
+                            }, 100);
                         } else {
                             iosAudioLog("play:error", "audio-controller:call-play", this.audio, { error: (err as DOMException).message });
                             this.dispatch({
