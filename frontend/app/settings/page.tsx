@@ -135,6 +135,7 @@ export default function SettingsPage() {
     return (
         <SettingsLayout sidebarItems={sidebarItems} isAdmin={isAdmin}>
                 {/* Account Section */}
+            <div className="section-stack">
                 <AccountSection />
 
                 {/* Native Apps - Subsonic */}
@@ -208,6 +209,7 @@ export default function SettingsPage() {
                         <UserManagementSection />
                     </>
                 )}
+            </div>
 
                 {/* Save Button - Fixed at bottom */}
                 <div className="sticky bottom-0 pt-8 pb-8 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a] to-[#0a0a0a]/80">

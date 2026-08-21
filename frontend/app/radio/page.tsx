@@ -169,7 +169,7 @@ export default function RadioPage() {
 
                 {/* Content */}
                 <div className="relative max-w-[1800px] mx-auto px-4 sm:px-6 md:px-8 pb-32 pt-8 animate-rise">
-                    <div className="space-y-12">
+                    <div className="section-stack">
                         {/* Quick Start */}
                         <section>
                             <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">

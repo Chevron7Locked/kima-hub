@@ -764,7 +764,7 @@ export default function PlaylistDetailPage() {
     const heroImage = coverUrls.length > 0 ? api.getCoverArtUrl(coverUrls[0] as string, 500) : null;
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-[#0a0a0a] to-black">
+        <div className="min-h-screen bg-gradient-to-b from-[#0a0a0a] to-black section-stack">
             {/* Hero Section */}
             <div className="relative">
                 {/* Blurred background */}
@@ -928,7 +928,7 @@ export default function PlaylistDetailPage() {
             </div>
 
             {/* Action Bar */}
-            <div className="px-4 md:px-8 py-4">
+            <div className="relative px-4 md:px-8 py-4">
                 <div className="max-w-[1800px] mx-auto flex items-center gap-4">
                     {/* Play Button */}
                     {playlist.items && playlist.items.length > 0 && (
@@ -1113,7 +1113,7 @@ export default function PlaylistDetailPage() {
             </div>
 
             {/* Track Listing */}
-            <div className="px-4 md:px-8 pb-32">
+            <div className="relative px-4 md:px-8 pb-32">
                 <div className="max-w-[1800px] mx-auto">
                     {/* Pending tracks notice */}
                     {playlist.pendingCount > 0 && (

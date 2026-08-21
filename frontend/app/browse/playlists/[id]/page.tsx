@@ -240,7 +240,7 @@ export default function DeezerPlaylistDetailPage() {
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-[#0a0a0a] to-black">
+        <div className="min-h-screen bg-gradient-to-b from-[#0a0a0a] to-black section-stack">
             {/* Hero Section */}
             <div className="relative">
                 {/* Background */}
@@ -325,56 +325,56 @@ export default function DeezerPlaylistDetailPage() {
                         </div>
                     </div>
                 </div>
+            </div>
 
-                {/* Action Bar */}
-                <div className="relative px-4 md:px-8 pb-4">
-                    <div className="max-w-[1800px] mx-auto">
-                        <div className="flex items-center gap-3">
-                            {/* Download/Import Button */}
-                            <button
-                                onClick={handleImport}
-                                disabled={isImporting}
-                                className="h-10 px-5 rounded-lg bg-[#9333ea] hover:bg-[#7e22ce] transition-all flex items-center gap-2 font-bold text-sm text-white disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
-                            >
-                                {isImporting ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                    <Download className="w-4 h-4" />
-                                )}
-                                <span>{isImporting ? "Importing" : "Import Playlist"}</span>
-                            </button>
-
-                            {/* Volume Control */}
-                            {playingTrackId && (
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={handleToggleMute}
-                                        className="p-2 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all"
-                                    >
-                                        {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                                    </button>
-                                    <button
-                                        onClick={stopPreview}
-                                        className="px-3 py-1.5 rounded-lg text-xs bg-white/5 text-[var(--text-secondary)] hover:bg-white/10 hover:text-white border border-white/10 transition-all"
-                                    >
-                                        Stop Preview
-                                    </button>
-                                </div>
+            {/* Action Bar */}
+            <div className="relative px-4 md:px-8 pb-4">
+                <div className="max-w-[1800px] mx-auto">
+                    <div className="flex items-center gap-3">
+                        {/* Download/Import Button */}
+                        <button
+                            onClick={handleImport}
+                            disabled={isImporting}
+                            className="h-10 px-5 rounded-lg bg-[#9333ea] hover:bg-[#7e22ce] transition-all flex items-center gap-2 font-bold text-sm text-white disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+                        >
+                            {isImporting ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                                <Download className="w-4 h-4" />
                             )}
+                            <span>{isImporting ? "Importing" : "Import Playlist"}</span>
+                        </button>
 
-                            <div className="flex-1" />
+                        {/* Volume Control */}
+                        {playingTrackId && (
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={handleToggleMute}
+                                    className="p-2 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all"
+                                >
+                                    {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                                </button>
+                                <button
+                                    onClick={stopPreview}
+                                    className="px-3 py-1.5 rounded-lg text-xs bg-white/5 text-[var(--text-secondary)] hover:bg-white/10 hover:text-white border border-white/10 transition-all"
+                                >
+                                    Stop Preview
+                                </button>
+                            </div>
+                        )}
 
-                            {/* Open in Deezer */}
-                            <a
-                                href={playlist.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="p-2.5 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all"
-                                title="Open in Deezer"
-                            >
-                                <ExternalLink className="w-4 h-4" />
-                            </a>
-                        </div>
+                        <div className="flex-1" />
+
+                        {/* Open in Deezer */}
+                        <a
+                            href={playlist.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2.5 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all"
+                            title="Open in Deezer"
+                        >
+                            <ExternalLink className="w-4 h-4" />
+                        </a>
                     </div>
                 </div>
             </div>

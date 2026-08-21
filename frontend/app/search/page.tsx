@@ -178,7 +178,7 @@ export default function SearchPage() {
 
                 {/* All / Library / Discover Tabs */}
                 {filterTab !== "soulseek" && (
-                    <div className="space-y-12">
+                    <div className="section-stack">
                         {show2ColumnLayout ?
                             <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.5fr] gap-8 animate-fade-soft">
                                 {/* Featured Result - Larger card */}

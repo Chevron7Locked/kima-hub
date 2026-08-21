@@ -85,7 +85,7 @@ export default function AudiobookDetailPage() {
                     }}
                 />
 
-                <div className="relative max-w-[1800px] mx-auto px-4 md:px-8 py-8 space-y-10">
+                <div className="relative max-w-[1800px] mx-auto px-4 md:px-8 py-8 section-stack">
                     {/* Sections */}
                     {audiobook.sections && audiobook.sections.length > 0 && (
                         <div>
@@ -101,7 +101,7 @@ export default function AudiobookDetailPage() {
                     {showDescription && (
                         <div>
                             <section>
-                                <div className="flex items-center gap-3 mb-4">
+                                <div className="flex items-center gap-3 mb-6">
                                     <span className="w-1 h-6 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full shrink-0" />
                                     <h2 className="text-xl font-bold tracking-tight">About</h2>
                                     <span className="flex-1 border-t border-white/10" />
@@ -122,7 +122,7 @@ export default function AudiobookDetailPage() {
                     {audiobook.series && (
                         <div>
                             <section>
-                                <div className="flex items-center gap-3 mb-4">
+                                <div className="flex items-center gap-3 mb-6">
                                     <span className="w-1 h-6 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full shrink-0" />
                                     <h2 className="text-xl font-bold tracking-tight">Series</h2>
                                     <span className="flex-1 border-t border-white/10" />

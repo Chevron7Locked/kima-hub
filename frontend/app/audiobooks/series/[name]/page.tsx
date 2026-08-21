@@ -106,7 +106,7 @@ export default function SeriesDetailPage() {
     const heroImage = firstBook.coverUrl ? getCoverUrl(firstBook.coverUrl, 500) : null;
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-[#0a0a0a] to-black">
+        <div className="min-h-screen bg-gradient-to-b from-[#0a0a0a] to-black section-stack">
             {/* Hero Section */}
             <div className="relative">
                 {/* Background */}
