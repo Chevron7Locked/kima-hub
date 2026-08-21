@@ -163,6 +163,13 @@ class LastFmService {
                 await this.cache.set(cacheKey, results, 604800);
             }
 
+            // An empty MBID result is usually a stale/orphaned Last.fm artist
+            // page (merged MBIDs), not a truly unknown artist: the name search
+            // hits the live page and has data. Fall through before giving up.
+            if (results.length === 0 && artistName) {
+                return this.getSimilarArtistsByName(artistName, limit);
+            }
+
             return results;
         } catch (error) {
             // If MBID lookup fails, try by name. Error 6 ("artist not found")
