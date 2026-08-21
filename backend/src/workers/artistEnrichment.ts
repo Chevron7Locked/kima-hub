@@ -241,6 +241,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
             mbid?: string;
             match: number;
         }> = [];
+        let similarFetchFailed = false;
         try {
             // Filter out temp MBIDs
             const validMbid = hasRealMbid(artist.mbid) ? artist.mbid : "";
@@ -252,7 +253,8 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                 `${logPrefix} Similar artists: Found ${similarArtists.length}`
             );
         } catch (error: any) {
-            logger.debug(
+            similarFetchFailed = true;
+            logger.warn(
                 `${logPrefix} Similar artists: FAILED - ${
                     error?.message || error
                 }`
@@ -310,7 +312,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                 similarArtistsJson,
                 genres: genres.length > 0 ? genres : undefined,
                 lastEnriched: new Date(),
-                enrichmentStatus: "completed",
+                enrichmentStatus: similarFetchFailed ? "failed" : "completed",
             },
         });
 
