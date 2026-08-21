@@ -4,6 +4,7 @@ import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { buildSections, resolveMetaTags } from "./audiobookSections";
+import { UserFacingError } from "../utils/errors";
 import { artistSortName } from "./artistIdentity";
 
 const TRACK_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -42,7 +43,7 @@ class AudiobookshelfService {
 
             // Check if Audiobookshelf is explicitly disabled
             if (settings && settings.audiobookshelfEnabled === false) {
-                throw new Error("Audiobookshelf is disabled in settings");
+                throw new UserFacingError("Audiobookshelf is disabled in settings");
             }
 
             if (
@@ -89,7 +90,7 @@ class AudiobookshelfService {
             logger.debug("Audiobookshelf configured from .env");
             this.initialized = true;
         } else {
-            throw new Error("Audiobookshelf not configured");
+            throw new UserFacingError("Audiobookshelf is not configured — add the server URL and API key in Settings");
         }
     }
 

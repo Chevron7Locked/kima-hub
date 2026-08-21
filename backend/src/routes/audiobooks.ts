@@ -2,9 +2,9 @@ import { Router } from "express";
 import * as fs from "fs";
 import * as path from "path";
 import { logger } from "../utils/logger";
-import { safeError } from "../utils/errors";
-import { audiobookshelfService } from "../services/audiobookshelf";
+import { safeError, UserFacingError } from "../utils/errors";
 import { audiobookCacheService } from "../services/audiobookCache";
+import { audiobookshelfService } from "../services/audiobookshelf";
 import { prisma } from "../utils/db";
 import { requireAuthOrToken } from "../middleware/auth";
 import { apiLimiter } from "../middleware/rateLimiter";
@@ -141,6 +141,15 @@ router.post("/sync", requireAuthOrToken, apiLimiter, async (req, res) => {
                 : String(error);
         logger.error("[AUDIOBOOK] Sync failed:", errMsg);
 
+        // Precondition failures the service throws on purpose (not configured,
+        // disabled in settings) carry their own status -- they are caller
+        // problems, not server bugs, and must not land in the 500 bucket.
+        if (error instanceof UserFacingError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                error: errMsg,
+            });
+        }
         // Distinguish upstream failures (bad credentials, network) from internal bugs.
         // An axios error from Audiobookshelf carries the remote status in error.response.status.
         const upstreamStatus =

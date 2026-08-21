@@ -33,11 +33,15 @@ jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: jest.fn(),
 }));
 
-jest.mock("../../utils/errors", () => ({
-    safeError: jest.fn((res: any, _msg: string, err: any) => {
-        res.status(500).json({ error: String(err) });
-    }),
-}));
+jest.mock("../../utils/errors", () => {
+    const actual = jest.requireActual("../../utils/errors") as typeof errorsModule;
+    return {
+        ...actual,
+        safeError: jest.fn((res: Response, _context: string, error: unknown) => {
+            res.status(500).json({ error: String(error) });
+        }),
+    };
+});
 
 jest.mock("../../services/audiobookshelf", () => ({
     audiobookshelfService: {
@@ -79,9 +83,12 @@ jest.mock("../../config", () => ({
 import express from "express";
 import request from "supertest";
 import audiobooksRoutes from "../audiobooks";
+import type * as errorsModule from "../../utils/errors";
+import type { Response } from "express";
 import { prisma } from "../../utils/db";
 import { getSystemSettings } from "../../utils/systemSettings";
 import { audiobookCacheService } from "../../services/audiobookCache";
+import { UserFacingError } from "../../utils/errors";
 
 function createApp() {
     const app = express();
@@ -348,6 +355,18 @@ describe("POST /audiobooks/sync", () => {
         expect(res.status).toBe(200);
         expect(res.body.success).toBe(true);
         expect(res.body.result.synced).toBe(3);
+    });
+
+    it("returns 400 when Audiobookshelf is not configured", async () => {
+        (audiobookCacheService.syncAll as jest.Mock).mockRejectedValue(
+            new UserFacingError("Audiobookshelf is not configured — add the server URL and API key in Settings"),
+        );
+
+        const res = await request(app).post("/audiobooks/sync");
+
+        expect(res.status).toBe(400);
+        expect(res.body.success).toBe(false);
+        expect(res.body.error).toContain("not configured");
     });
 
     it("returns 400 when Audiobookshelf rejects credentials (401)", async () => {
