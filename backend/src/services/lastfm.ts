@@ -11,11 +11,18 @@ import { normalizeToArray } from "../utils/normalize";
 import { stripAlbumEdition } from "../utils/artistNormalization";
 import { CacheWrapper } from "../utils/cacheWrapper";
 
-interface SimilarArtist {
+export interface SimilarArtist {
     name: string;
     mbid?: string;
     match: number; // 0-1 similarity score
     url: string;
+}
+
+export interface SimilarTrack {
+    name: string;
+    match?: number | string; // 0-1 similarity score (Last.fm returns a string)
+    url?: string;
+    artist?: { name?: string };
 }
 
 class LastFmService {
@@ -105,7 +112,20 @@ class LastFmService {
         const response = await rateLimiter.execute("lastfm", () =>
             this.client.get<T>("/", { params })
         );
-        return response.data;
+
+        // Last.fm reports failures in the response body ({ error, message }),
+        // even when the HTTP status is 200. Surface them as thrown errors so
+        // callers can't mistake an error body for empty successful data.
+        const data = response.data;
+        if (data && typeof data === "object") {
+            // T is caller-supplied and unbounded; cast to the error body shape for inspection.
+            const body = data as unknown as { error?: number; message?: string };
+            if (body.error) {
+                throw new Error(`Last.fm API error ${body.error}: ${body.message}`);
+            }
+        }
+
+        return data;
     }
 
     async getSimilarArtists(
@@ -138,16 +158,32 @@ class LastFmService {
                 url: artist.url,
             }));
 
-            // Cache for 7 days
-            await this.cache.set(cacheKey, results, 604800);
+            // Cache for 7 days (non-empty results only, so a failure is never cached)
+            if (results.length > 0) {
+                await this.cache.set(cacheKey, results, 604800);
+            }
 
             return results;
-        } catch (error: any) {
-            // If MBID lookup fails, try by name
-            if (
-                error.response?.status === 404 ||
-                error.response?.data?.error === 6
-            ) {
+        } catch (error) {
+            // If MBID lookup fails, try by name. Error 6 ("artist not found")
+            // arrives either as an axios-style response (HTTP 404 / body error)
+            // or, when Last.fm answers HTTP 200 with an error body, as the
+            // "Last.fm API error 6" thrown by request().
+            type HttpError = Error & {
+                response?: { status?: number; data?: { error?: number } };
+            };
+            // The Error class carries no response type; the guard above checks it.
+            const httpError =
+                error instanceof Error && "response" in error
+                    ? (error as HttpError)
+                    : null;
+
+            const isNotFound =
+                httpError?.response?.status === 404 ||
+                httpError?.response?.data?.error === 6 ||
+                (error instanceof Error && error.message.includes("Last.fm API error 6"));
+
+            if (isNotFound) {
                 logger.debug(
                     `Artist MBID not found on Last.fm, trying name search: ${artistName}`
                 );
@@ -155,7 +191,7 @@ class LastFmService {
             }
 
             logger.error(`Last.fm error for ${artistName}:`, error);
-            return [];
+            throw error;
         }
     }
 
@@ -192,21 +228,23 @@ class LastFmService {
                 url: artist.url,
             }));
 
-            // Cache for 7 days
-            try {
-                await redisClient.setex(
-                    cacheKey,
-                    604800,
-                    JSON.stringify(results)
-                );
-            } catch (err) {
-                logger.warn("Redis set error:", err);
+            // Cache for 7 days (non-empty results only, so a failure is never cached)
+            if (results.length > 0) {
+                try {
+                    await redisClient.setex(
+                        cacheKey,
+                        604800,
+                        JSON.stringify(results)
+                    );
+                } catch (err) {
+                    logger.warn("Redis set error:", err);
+                }
             }
 
             return results;
         } catch (error) {
             logger.error(`Last.fm error for ${artistName}:`, error);
-            return [];
+            throw error;
         }
     }
 
@@ -336,7 +374,7 @@ class LastFmService {
         }
     }
 
-    async getSimilarTracks(artistName: string, trackName: string, limit = 20) {
+    async getSimilarTracks(artistName: string, trackName: string, limit = 20): Promise<SimilarTrack[]> {
         const cacheKey = `lastfm:similar:track:${artistName}:${trackName}`;
 
         try {
@@ -360,15 +398,17 @@ class LastFmService {
 
             const tracks = data.similartracks?.track || [];
 
-            // Cache for 7 days
-            try {
-                await redisClient.setex(
-                    cacheKey,
-                    604800,
-                    JSON.stringify(tracks)
-                );
-            } catch (err) {
-                logger.warn("Redis set error:", err);
+            // Cache for 7 days (non-empty results only, so a failure is never cached)
+            if (tracks.length > 0) {
+                try {
+                    await redisClient.setex(
+                        cacheKey,
+                        604800,
+                        JSON.stringify(tracks)
+                    );
+                } catch (err) {
+                    logger.warn("Redis set error:", err);
+                }
             }
 
             return tracks;
@@ -377,7 +417,7 @@ class LastFmService {
                 `Last.fm similar tracks error for ${trackName}:`,
                 error
             );
-            return [];
+            throw error;
         }
     }
 

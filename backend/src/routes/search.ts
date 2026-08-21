@@ -2,7 +2,7 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
-import { lastFmService } from "../services/lastfm";
+import { lastFmService, type SimilarArtist } from "../services/lastfm";
 import { searchService, normalizeCacheQuery, type SearchResults } from "../services/search";
 import axios from "axios";
 import { redisClient } from "../utils/redis";
@@ -298,18 +298,31 @@ router.get("/discover/similar", async (req, res) => {
             logger.warn("[SEARCH SIMILAR] Redis read error:", err);
         }
 
-        const similar = await lastFmService.getSimilarArtists(artistMbid, artistName, 10);
-        const similarArtists = similar.length > 0
+        let similar: SimilarArtist[] = [];
+        let fetchFailed = false;
+
+        // On transient Last.fm failure, return an empty list WITHOUT caching it,
+        // so the next request retries instead of reading a poisoned cache entry.
+        try {
+            similar = await lastFmService.getSimilarArtists(artistMbid, artistName, 10);
+        } catch (err) {
+            logger.warn("[SEARCH SIMILAR] Last.fm similar fetch failed, returning empty:", err);
+            fetchFailed = true;
+        }
+
+        const similarArtists = !fetchFailed && similar.length > 0
             ? await lastFmService.enrichSimilarArtists(similar, 6)
             : [];
 
         const payload = { similarArtists };
 
-        try {
-            // Cache TTL: 1 hour (3600s) -- similar artists rarely change
-            await redisClient.setex(cacheKey, 3600, JSON.stringify(payload));
-        } catch (err) {
-            logger.warn("[SEARCH SIMILAR] Redis write error:", err);
+        if (!fetchFailed) {
+            try {
+                // Cache TTL: 1 hour (3600s) -- similar artists rarely change
+                await redisClient.setex(cacheKey, 3600, JSON.stringify(payload));
+            } catch (err) {
+                logger.warn("[SEARCH SIMILAR] Redis write error:", err);
+            }
         }
 
         res.json(payload);

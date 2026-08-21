@@ -2,7 +2,7 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
-import { lastFmService } from "../services/lastfm";
+import { lastFmService, type SimilarTrack } from "../services/lastfm";
 
 const router = Router();
 
@@ -411,12 +411,18 @@ router.get("/tracks", async (req, res) => {
             return res.status(404).json({ error: "Track not found" });
         }
 
-        // Use Last.fm to get similar tracks
-        const similarTracksFromLastFm = await lastFmService.getSimilarTracks(
-            seedTrack.album.artist.name,
-            seedTrack.title,
-            20
-        );
+        // Use Last.fm to get similar tracks; on a transient failure, continue with an
+        // empty list so the radio builds from library tracks instead of 500ing.
+        let similarTracksFromLastFm: SimilarTrack[] = [];
+        try {
+            similarTracksFromLastFm = await lastFmService.getSimilarTracks(
+                seedTrack.album.artist.name,
+                seedTrack.title,
+                20
+            );
+        } catch (err) {
+            logger.warn("Last.fm similar tracks fetch failed, continuing without:", err);
+        }
 
         // Batch match similar tracks in our library instead of N+1
         const trackTitles = similarTracksFromLastFm.map((t: any) => t.name);
