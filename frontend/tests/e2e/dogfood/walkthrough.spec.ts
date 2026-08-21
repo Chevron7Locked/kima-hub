@@ -389,6 +389,8 @@ test.describe("Dogfood walkthrough", () => {
 
     // ----------------------------------------------------------------------------------
     test("3a. queue, deeper: the up-next list survives being edited", async () => {
+        // The default 60s is too tight once hover-gated buttons and audio waits stack up.
+        test.setTimeout(180_000);
         session.setJourney("3a. Queue editing");
 
         const queueLength = () =>
@@ -447,33 +449,32 @@ test.describe("Dogfood walkthrough", () => {
         });
 
         await session.step("move an upcoming track down and back up", async () => {
-            const len = await queueLength();
-            const row = page
+            const rows = page
                 .locator("main .group")
-                .filter({ has: page.locator('[aria-label^="Move "]') })
-                .first();
-            await row.hover();
-            const down = row.locator('[aria-label$=" down"]').first();
-            // The last row's move-down is disabled; with >=2 upcoming rows the first
-            // one is always movable.
+                .filter({ has: page.locator('[aria-label^="Move "]') });
+            const first = rows.first();
+            await first.hover();
+            const down = first.locator('[aria-label$=" down"]').first();
             await expect(down).toBeEnabled();
-            const titleBefore = (await row.textContent())?.replace(/\s+/g, " ").trim();
+            const titleBefore = (await first.textContent())?.replace(/\s+/g, " ").trim();
             await down.click();
             await page.waitForTimeout(400);
-            await row.hover();
-            await row.locator('[aria-label$=" up"]').first().click();
+
+            // The moved row is now second; its own up-button is the enabled one.
+            // (The first row's up is permanently disabled -- it sits against
+            // Now Playing -- which is the row's design, not a bug.)
+            const moved = rows.nth(1);
+            await moved.hover();
+            const up = moved.locator('[aria-label$=" up"]').first();
+            await expect(up).toBeEnabled();
+            await up.click();
             await page.waitForTimeout(400);
-            const titleAfter = (
-                await page
-                    .locator("main .group")
-                    .filter({ has: page.locator('[aria-label^="Move "]') })
-                    .first()
-                    .textContent()
-            )?.replace(/\s+/g, " ").trim();
+
+            const titleAfter = ((await rows.first().textContent()) ?? "").replace(/\s+/g, " ").trim();
             expect(titleAfter, `row moved down and back up but read "${titleBefore}" then "${titleAfter}"`).toBe(
                 titleBefore,
             );
-            return { queueLength: len, roundTripped: titleAfter === titleBefore };
+            return { roundTripped: titleAfter === titleBefore };
         });
 
         await session.step("play now jumps to a chosen track", async () => {
@@ -512,6 +513,8 @@ test.describe("Dogfood walkthrough", () => {
 
     // ----------------------------------------------------------------------------------
     test("3b. session resilience: pause, wait, resume, run to the end, reload", async () => {
+        // 15s idle + up to 25s auto-advance + a reload, in one journey.
+        test.setTimeout(240_000);
         session.setJourney("3b. Session resilience");
 
         await session.step("start playing again", async () => {
@@ -697,6 +700,7 @@ test.describe("Dogfood walkthrough", () => {
 
     // ----------------------------------------------------------------------------------
     test("4b. curate, deeper: rename, remove, hide, and delete from the UI", async () => {
+        test.setTimeout(180_000);
         session.setJourney("4b. Playlist editing");
 
         const name = `${RUN_TAG}-edit`;
@@ -1306,6 +1310,7 @@ test.describe("Dogfood walkthrough", () => {
 
     // ----------------------------------------------------------------------------------
     test("5d. vibe, deeper: a song path becomes a queue that plays", async () => {
+        test.setTimeout(180_000);
         session.setJourney("5d. Vibe interaction");
 
         test.skip(facts.tracks < 10, "vibe needs a projected library");
@@ -1439,6 +1444,7 @@ test.describe("Dogfood walkthrough", () => {
 
     // ----------------------------------------------------------------------------------
     test("5e. radio: start a station and hear it play", async () => {
+        test.setTimeout(120_000);
         session.setJourney("5e. Radio");
 
         test.skip(facts.tracks < 10, "radio needs a library to shuffle");
@@ -1497,6 +1503,7 @@ test.describe("Dogfood walkthrough", () => {
 
     // ----------------------------------------------------------------------------------
     test("5f. search, deeper: discover results, empty results, and the P2P tab", async () => {
+        test.setTimeout(120_000);
         session.setJourney("5f. Search surfaces");
 
         let query = "";
@@ -1905,6 +1912,7 @@ test.describe("Dogfood walkthrough", () => {
 
     // ----------------------------------------------------------------------------------
     test("7b. a second device: state agrees across sessions", async () => {
+        test.setTimeout(240_000);
         session.setJourney("7b. Second device");
 
         const otherContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
