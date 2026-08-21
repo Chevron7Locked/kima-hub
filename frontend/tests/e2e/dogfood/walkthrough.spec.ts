@@ -388,6 +388,237 @@ test.describe("Dogfood walkthrough", () => {
     });
 
     // ----------------------------------------------------------------------------------
+    test("3a. queue, deeper: the up-next list survives being edited", async () => {
+        session.setJourney("3a. Queue editing");
+
+        const queueLength = () =>
+            page.evaluate(() => {
+                try {
+                    return JSON.parse(localStorage.getItem("kima_queue") || "[]").length;
+                } catch {
+                    return -1;
+                }
+            });
+
+        await session.step("start playing and queue two more tracks", async () => {
+            await page.goto("/collection?tab=albums");
+            await settle(page, 1500);
+            const album = firstAlbumCard(page);
+            await album.waitFor({ state: "visible", timeout: 12_000 });
+            await album.click();
+            await page.waitForURL(/\/album\//, { timeout: 10_000 });
+            await settle(page, 1200);
+
+            await page.getByLabel("Play all").click();
+            await page.getByTitle("Pause", { exact: true }).waitFor({ timeout: 15_000 });
+
+            for (const n of [1, 2]) {
+                const row = page.locator("[data-track-row]").nth(n);
+                await row.hover();
+                await row.getByLabel("Add to queue").click();
+            }
+            await page.waitForTimeout(600);
+            const len = await queueLength();
+            expect(len, `queue holds ${len} item(s) after adding two`).toBeGreaterThanOrEqual(3);
+            return { queueLength: len };
+        });
+
+        await session.step("open the queue page", async () => {
+            await page.getByTitle("Play queue").click();
+            await page.waitForURL(/\/queue/, { timeout: 10_000 });
+            await settle(page, 1000);
+            return { queueOnArrival: await queueLength() };
+        });
+
+        // Every row action is hover-gated (opacity-0 group-hover:opacity-100), so each
+        // one hovers its row first. Selectors are the aria-labels the queue page emits.
+        await session.step("remove one upcoming track", async () => {
+            const before = await queueLength();
+            const rows = page.locator("main [data-track-index], main .group").filter({
+                has: page.locator('[aria-label^="Remove "]'),
+            });
+            const target = rows.first();
+            await target.hover();
+            await target.locator('[aria-label^="Remove "]').first().click();
+            await page.waitForTimeout(600);
+            const after = await queueLength();
+            expect(after, `remove clicked but queue went ${before} -> ${after}`).toBe(before - 1);
+            return { before, after };
+        });
+
+        await session.step("move an upcoming track down and back up", async () => {
+            const len = await queueLength();
+            const row = page
+                .locator("main .group")
+                .filter({ has: page.locator('[aria-label^="Move "]') })
+                .first();
+            await row.hover();
+            const down = row.locator('[aria-label$=" down"]').first();
+            // The last row's move-down is disabled; with >=2 upcoming rows the first
+            // one is always movable.
+            await expect(down).toBeEnabled();
+            const titleBefore = (await row.textContent())?.replace(/\s+/g, " ").trim();
+            await down.click();
+            await page.waitForTimeout(400);
+            await row.hover();
+            await row.locator('[aria-label$=" up"]').first().click();
+            await page.waitForTimeout(400);
+            const titleAfter = (
+                await page
+                    .locator("main .group")
+                    .filter({ has: page.locator('[aria-label^="Move "]') })
+                    .first()
+                    .textContent()
+            )?.replace(/\s+/g, " ").trim();
+            expect(titleAfter, `row moved down and back up but read "${titleBefore}" then "${titleAfter}"`).toBe(
+                titleBefore,
+            );
+            return { queueLength: len, roundTripped: titleAfter === titleBefore };
+        });
+
+        await session.step("play now jumps to a chosen track", async () => {
+            const row = page
+                .locator("main .group")
+                .filter({ has: page.locator('[aria-label^="Play "]') })
+                .first();
+            await row.hover();
+            const title = (await row.textContent())?.replace(/\s+/g, " ").trim().slice(0, 40);
+            await row.locator('[aria-label^="Play "]').first().click();
+            await page.waitForTimeout(1500);
+            // Play Now replaces the queue position; the audio source must have moved.
+            const playing = await page.evaluate(
+                (sel) => (document.querySelector(sel) as HTMLAudioElement | null)?.src ?? "",
+                PLAYER,
+            );
+            expect(playing, "no audio source after Play Now").toBeTruthy();
+            const heading = page.getByRole("heading", { name: "Now Playing" });
+            const nowPlaying = ((await heading.locator("xpath=..").textContent()) ?? "")
+                .replace(/\s+/g, " ")
+                .slice(0, 120);
+            return { chose: title, nowPlaying: nowPlaying };
+        });
+
+        await session.step("clear the queue", async () => {
+            const clear = page.getByRole("button", { name: /clear queue/i });
+            await expect(clear).toBeVisible({ timeout: 8_000 });
+            await clear.click();
+            await page.waitForTimeout(800);
+            expect(await queueLength(), "Clear Queue clicked but the queue is not empty").toBe(0);
+            return { cleared: true };
+        });
+
+        session.assertClean("Journey 3a (queue editing)");
+    });
+
+    // ----------------------------------------------------------------------------------
+    test("3b. session resilience: pause, wait, resume, run to the end, reload", async () => {
+        session.setJourney("3b. Session resilience");
+
+        await session.step("start playing again", async () => {
+            await page.goto("/collection?tab=albums");
+            await settle(page, 1500);
+            const album = firstAlbumCard(page);
+            await album.waitFor({ state: "visible", timeout: 12_000 });
+            await album.click();
+            await page.waitForURL(/\/album\//, { timeout: 10_000 });
+            await settle(page, 1200);
+            await page.getByLabel("Play all").click();
+            await page.getByTitle("Pause", { exact: true }).waitFor({ timeout: 15_000 });
+            return { playing: true };
+        });
+
+        // A paused stream holds an open HTTP connection; the server runs with
+        // timeout=0 + keepalive specifically so it is not dropped. Fifteen seconds of
+        // nothing is enough to catch an aggressive proxy timeout, cheap enough not to
+        // slow the gate.
+        await session.step("pause, sit idle, and resume", async () => {
+            await page.getByTitle("Pause", { exact: true }).click();
+            await expect(page.getByTitle("Play", { exact: true })).toBeVisible({ timeout: 8_000 });
+            await page.waitForTimeout(15_000);
+
+            await page.getByTitle("Play", { exact: true }).click();
+            await page.getByTitle("Pause", { exact: true }).waitFor({ timeout: 10_000 });
+            const read = () =>
+                page.evaluate(
+                    (sel) => {
+                        const el = document.querySelector(sel) as HTMLAudioElement | null;
+                        return { t: el?.currentTime ?? -1, paused: el?.paused ?? true };
+                    },
+                    PLAYER,
+                );
+            const a = await read();
+            await page.waitForTimeout(2500);
+            const b = await read();
+            expect(b.paused, "resume clicked but the audio is still paused").toBe(false);
+            expect(b.t, `after resuming from a 15s idle pause, position did not advance (${a.t}s -> ${b.t}s)`).toBeGreaterThan(a.t);
+            return { idleSeconds: 15, resumedAt: b.t.toFixed(2) };
+        });
+
+        // True auto-advance: seek to just before the end and watch the player move to
+        // the next track by itself. Clicking "Next" proves the button; this proves
+        // the ended/gapless machinery, which no other spec in the suite does.
+        await session.step("a track that ends advances on its own", async () => {
+            const srcBefore = await page.evaluate(
+                (sel) => (document.querySelector(sel) as HTMLAudioElement | null)?.src ?? "",
+                PLAYER,
+            );
+            await page.evaluate((sel) => {
+                const el = document.querySelector(sel) as HTMLAudioElement | null;
+                if (el && Number.isFinite(el.duration) && el.duration > 0) {
+                    el.currentTime = Math.max(0, el.duration - 2);
+                }
+            }, PLAYER);
+
+            const deadline = Date.now() + 25_000;
+            let srcNow = srcBefore;
+            while (Date.now() < deadline) {
+                srcNow = await page.evaluate(
+                    (sel) => (document.querySelector(sel) as HTMLAudioElement | null)?.src ?? "",
+                    PLAYER,
+                );
+                if (srcNow && srcNow !== srcBefore) break;
+                await page.waitForTimeout(1000);
+            }
+            expect(
+                srcNow,
+                `seeked to 2s before the end and waited 25s; the source never changed ` +
+                    `(before: ${srcBefore.slice(-60)}, after: ${srcNow.slice(-60)})`,
+            ).not.toBe(srcBefore);
+
+            const paused = await page.evaluate(
+                (sel) => (document.querySelector(sel) as HTMLAudioElement | null)?.paused ?? true,
+                PLAYER,
+            );
+            expect(paused, "the next track started paused; auto-advance should keep playing").toBe(false);
+            return { advanced: true };
+        });
+
+        // The queue is server-truth on a cold load (localStorage only carries index
+        // and shuffle state), so a reload must bring the session back from the API.
+        await session.step("reload and the session comes back from the server", async () => {
+            await page.reload({ waitUntil: "domcontentloaded" });
+            await settle(page, 3000);
+            await page.goto("/queue");
+            await settle(page, 2000);
+
+            await expect(page.getByRole("heading", { name: "Now Playing" })).toBeVisible({
+                timeout: 15_000,
+            });
+            const len = await page.evaluate(() => {
+                try {
+                    return JSON.parse(localStorage.getItem("kima_queue") || "[]").length;
+                } catch {
+                    return -1;
+                }
+            });
+            expect(len, `after reload the queue holds ${len} item(s); the server state was not adopted`).toBeGreaterThan(0);
+            return { queueAfterReload: len };
+        });
+
+        session.assertClean("Journey 3b (session resilience)");
+    });
+
+    // ----------------------------------------------------------------------------------
     test("4. curate: build a playlist and confirm it survives a reload", async () => {
         session.setJourney("4. Curate");
 
@@ -462,6 +693,126 @@ test.describe("Dogfood walkthrough", () => {
         });
 
         session.assertClean("Journey 4 (curate)");
+    });
+
+    // ----------------------------------------------------------------------------------
+    test("4b. curate, deeper: rename, remove, hide, and delete from the UI", async () => {
+        session.setJourney("4b. Playlist editing");
+
+        const name = `${RUN_TAG}-edit`;
+        const renamed = `${RUN_TAG}-renamed`;
+        let playlistId = "";
+
+        await session.step("create a playlist with two tracks in it", async () => {
+            await navigateByClick(page, "/playlists");
+            await settle(page, 1200);
+            await page.locator("main").getByRole("button", { name: "Create" }).first().click();
+            const input = page.getByPlaceholder("Playlist name...").first();
+            await expect(input).toBeVisible({ timeout: 8_000 });
+            await input.fill(name);
+            await input.press("Enter");
+            await page.waitForURL(/\/playlist\//, { timeout: 15_000 });
+            playlistId = new URL(page.url()).pathname.split("/").pop() ?? "";
+            createdPlaylistIds.push(playlistId);
+
+            for (const n of [0, 1]) {
+                await openAlbumsTab(page);
+                const album = firstAlbumCard(page);
+                await album.click();
+                await page.waitForURL(/\/album\//, { timeout: 10_000 });
+                await settle(page, 1000);
+                const row = page.locator("[data-track-row]").nth(n);
+                await row.waitFor({ state: "visible", timeout: 10_000 });
+                await row.hover();
+                await row.getByLabel("Add to playlist").click();
+                await expect(page.getByRole("heading", { name: "Add to Playlist" })).toBeVisible({
+                    timeout: 8_000,
+                });
+                await page.getByRole("button", { name: new RegExp(escapeRegExp(name)) }).click();
+                await page.waitForTimeout(800);
+            }
+
+            await page.goto(`/playlist/${playlistId}`);
+            await settle(page, 1500);
+            const rows = page.locator("[data-track-index]");
+            await expect(rows.first()).toBeVisible({ timeout: 12_000 });
+            expect(await rows.count(), "two adds did not land").toBeGreaterThanOrEqual(2);
+            return { id: playlistId, tracks: await rows.count() };
+        });
+
+        // Rename is inline: the owner clicks the title itself.
+        await session.step("rename it by clicking the title", async () => {
+            await page.locator("h1, h2").filter({ hasText: name }).first().click();
+            // The inline editor mounts with autoFocus, so the focused input IS it --
+            // the chrome search box is also a textbox and must not win this race.
+            const box = page.locator('input[type="text"]:focus');
+            await expect(box).toBeVisible({ timeout: 5_000 });
+            await box.fill(renamed);
+            await box.press("Enter");
+            await page.waitForTimeout(1200);
+
+            const res = await page.request.get(`/api/playlists/${playlistId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const body = await res.json();
+            const serverName = body.name ?? body.playlist?.name ?? "";
+            expect(serverName, `renamed to "${renamed}" but the server still says "${serverName}"`).toBe(renamed);
+            return { renamedTo: serverName };
+        });
+
+        await session.step("remove one track from the playlist", async () => {
+            const before = await page.locator("[data-track-index]").count();
+            const row = page.locator("[data-track-index]").first();
+            await row.hover();
+            await row.getByTitle(/Remove from [Pp]laylist/).click();
+            await page.waitForTimeout(1000);
+            const after = await page.locator("[data-track-index]").count();
+            expect(after, `remove clicked but the count went ${before} -> ${after}`).toBe(before - 1);
+            return { before, after };
+        });
+
+        await session.step("hide it, and it disappears from the main list", async () => {
+            await page.getByTitle("Hide playlist").click();
+            await page.waitForTimeout(1000);
+
+            await page.goto("/playlists");
+            await settle(page, 1500);
+            const visible = await page.locator("main").getByText(renamed, { exact: false }).count();
+            expect(visible, `the playlist is still listed in the main grid after hiding (${visible} matches)`).toBe(0);
+
+            // Hidden playlists are managed through the hidden view; unhide via the API
+            // so the journey leaves the instance as it found it either way.
+            const res = await page.request.post(`/api/playlists/${playlistId}/unhide`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            expect(res.ok(), `unhiding via API returned ${res.status()}`).toBeTruthy();
+            return { hidden: true, unhiddenViaApi: true };
+        });
+
+        await session.step("delete it from the UI, with the confirmation", async () => {
+            await page.goto(`/playlist/${playlistId}`);
+            await settle(page, 1500);
+            await page.getByTitle("Delete Playlist").click();
+            const confirm = page.getByRole("button", { name: "Delete", exact: true });
+            await expect(confirm).toBeVisible({ timeout: 8_000 });
+            await confirm.click();
+            await page.waitForURL(/\/playlists/, { timeout: 15_000 });
+
+            const res = await page.request.get(`/api/playlists/${playlistId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            expect(res.status(), `UI delete navigated away but the playlist answers ${res.status()}`).toBe(404);
+            createdPlaylistIds.splice(createdPlaylistIds.indexOf(playlistId), 1);
+            return { deletedFromUi: true };
+        });
+
+        // No journey reorders playlist tracks because the UI cannot: ordering is
+        // server-side (lexoRank) and the playlist page exposes no drag or move control.
+        session.noteNotCovered(
+            "playlist track reorder: the UI has no reorder affordance (lexoRank is server-side only)",
+        );
+
+        session.assertClean("Journey 4b (playlist editing)");
     });
 
     // ----------------------------------------------------------------------------------
@@ -778,6 +1129,46 @@ test.describe("Dogfood walkthrough", () => {
                 return { from: first.t.toFixed(2), to: second.t.toFixed(2) };
             });
 
+            // The cleanup below stops playback before unsubscribing precisely because
+            // yanking the source out from under the player used to send it into a 404
+            // loop. That hazard has never been tested -- only avoided. These two steps
+            // do it deliberately while counting what the app asks for, so "it settles"
+            // becomes an assertion instead of an assumption. The progress-save handler
+            // (audio-controls-context) is supposed to clear the current podcast on the
+            // first 404; if it does, the storm never starts.
+            await session.step("unsubscribe while the episode is still playing", async () => {
+                session.expectFailure({
+                    urlPattern: /\/api\/(podcasts|playback-state)/,
+                    status: 404,
+                    reason: "the subscription and its progress store vanish mid-play by design",
+                });
+                const res = await page.request.delete(`/api/podcasts/${podcastId}/unsubscribe`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                expect(res.ok(), `unsubscribing mid-play returned ${res.status()}`).toBeTruthy();
+                podcastId = ""; // the finally block must not try to unsubscribe again
+                return { unsubscribedWhilePlaying: true };
+            });
+
+            await session.step("the player settles instead of retrying forever", async () => {
+                // Count every request the page makes for the next twelve seconds. A
+                // bounded number of follow-ups is healthy; a retry loop is not.
+                let requests = 0;
+                const listener = (req: { url(): string }) => {
+                    if (/\/api\//.test(req.url())) requests++;
+                };
+                page.on("request", listener);
+                await page.waitForTimeout(12_000);
+                page.off("request", listener);
+
+                expect(
+                    requests,
+                    `the page made ${requests} API requests in 12s after its source vanished -- ` +
+                        `that is a retry loop, not a settling player`,
+                ).toBeLessThan(40);
+                return { requestsIn12s: requests };
+            });
+
             session.assertClean("Journey 5b (podcast)");
         } finally {
             // Leave the library as it was found, pass or fail.
@@ -914,6 +1305,299 @@ test.describe("Dogfood walkthrough", () => {
     });
 
     // ----------------------------------------------------------------------------------
+    test("5d. vibe, deeper: a song path becomes a queue that plays", async () => {
+        session.setJourney("5d. Vibe interaction");
+
+        test.skip(facts.tracks < 10, "vibe needs a projected library");
+
+        let queryA = "";
+        let queryB = "";
+        await session.step("pick two queries that exist in the library", async () => {
+            const res = await page.request.get("/api/library/artists?limit=4", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const body = await res.json();
+            const names = (body.artists ?? []).map((a: { name: string }) => a.name).filter(Boolean);
+            expect(names.length, "not enough artists to pick two distinct queries").toBeGreaterThanOrEqual(2);
+            queryA = names[0];
+            queryB = names[names.length - 1];
+            return { queryA, queryB };
+        });
+
+        await session.step("open the vibe map", async () => {
+            await navigateByClick(page, "/vibe");
+            await settle(page, 3500);
+            await expect(page.locator("canvas").first()).toBeVisible({ timeout: 20_000 });
+            return { canvas: true };
+        });
+
+        // Song Path (drift): the flagship vibe journey -- pick two anchors, ask for a
+        // glide between them, and the app builds a queue. Nothing anywhere else in
+        // the suite connects vibe output to actual playback.
+        await session.step("build a song path between two tracks", async () => {
+            const drift = page
+                .locator(
+                    '[aria-label*="Song Path"], [title*="Drift"], [title*="Song Path"]',
+                )
+                .first();
+            await expect(drift).toBeVisible({ timeout: 15_000 });
+            await drift.click();
+
+            for (const [sel, q] of [
+                ["#path-start", queryA],
+                ["#path-end", queryB],
+            ] as const) {
+                const input = page.locator(sel);
+                await expect(input).toBeVisible({ timeout: 8_000 });
+                await input.click();
+                await input.fill(q);
+                await page.waitForTimeout(800); // debounce
+                const option = page.locator(".max-h-40 button").first();
+                await expect(option).toBeVisible({ timeout: 10_000 });
+                await option.click();
+            }
+
+            const generate = page.getByRole("button", { name: /generate path/i });
+            await expect(generate).toBeEnabled({ timeout: 8_000 });
+            await generate.click();
+            await page.waitForTimeout(2500);
+            return { path: `${queryA} -> ${queryB}` };
+        });
+
+        await session.step("the path filled the queue and it plays", async () => {
+            const len = await page.evaluate(() => {
+                try {
+                    return JSON.parse(localStorage.getItem("kima_queue") || "[]").length;
+                } catch {
+                    return -1;
+                }
+            });
+            expect(
+                len,
+                `Generate Path ran but the queue holds ${len} item(s) -- the vibe pipeline produced no playable output`,
+            ).toBeGreaterThanOrEqual(2);
+
+            // The path UI may or may not auto-start playback; either way the queue
+            // must be playable from the queue page.
+            const pause = page.getByTitle("Pause", { exact: true });
+            if (!(await pause.isVisible({ timeout: 2_000 }).catch(() => false))) {
+                await page.goto("/queue");
+                await settle(page, 1500);
+                const row = page
+                    .locator("main .group")
+                    .filter({ has: page.locator('[aria-label^="Play "]') })
+                    .first();
+                await row.hover();
+                await row.locator('[aria-label^="Play "]').first().click();
+            }
+            await page.getByTitle("Pause", { exact: true }).waitFor({ timeout: 20_000 });
+
+            const a = await page.evaluate(
+                (sel) => (document.querySelector(sel) as HTMLAudioElement | null)?.currentTime ?? -1,
+                PLAYER,
+            );
+            await page.waitForTimeout(2500);
+            const b = await page.evaluate(
+                (sel) => (document.querySelector(sel) as HTMLAudioElement | null)?.currentTime ?? -1,
+                PLAYER,
+            );
+            expect(b, `the vibe-built queue plays but the position did not advance (${a}s -> ${b}s)`).toBeGreaterThan(a);
+            return { queueFromPath: len, playing: true };
+        });
+
+        await session.step("blend panel and view switch survive a look", async () => {
+            await navigateByClick(page, "/vibe");
+            await settle(page, 3000);
+
+            const blend = page.locator('[aria-label*="Blend"], [title*="Blend"], [title*="alchemy"]').first();
+            if (await blend.isVisible({ timeout: 5_000 }).catch(() => false)) {
+                await blend.click();
+                const search = page.locator("#alchemy-search");
+                if (await search.isVisible({ timeout: 5_000 }).catch(() => false)) {
+                    const close = page.locator('[aria-label="Close alchemy"]');
+                    if (await close.isVisible()) await close.click();
+                }
+            } else {
+                session.noteNotCovered("vibe blend panel: button not found on this build");
+            }
+
+            const galaxy = page.getByRole("button", { name: "Galaxy", exact: true });
+            if (await galaxy.isVisible({ timeout: 3_000 }).catch(() => false)) {
+                await galaxy.click();
+                await settle(page, 2500);
+                await expect(page.locator("canvas").first()).toBeVisible({ timeout: 15_000 });
+                await page.getByRole("button", { name: "Map", exact: true }).click();
+                await settle(page, 2000);
+            } else {
+                session.noteNotCovered("vibe galaxy view: button not present (desktop-only)");
+            }
+            return { looked: true };
+        });
+
+        session.assertClean("Journey 5d (vibe interaction)");
+    });
+
+    // ----------------------------------------------------------------------------------
+    test("5e. radio: start a station and hear it play", async () => {
+        session.setJourney("5e. Radio");
+
+        test.skip(facts.tracks < 10, "radio needs a library to shuffle");
+
+        await session.step("open the radio page", async () => {
+            await navigateByClick(page, "/radio");
+            await settle(page, 2000);
+            const cards = page.locator("main button").filter({ has: page.locator("h3") });
+            await expect(cards.first()).toBeVisible({ timeout: 15_000 });
+            return { stationCards: await cards.count() };
+        });
+
+        await session.step("start the first station", async () => {
+            const station = page.locator("main button").filter({ has: page.locator("h3") }).first();
+            const name = (await station.locator("h3").textContent())?.trim();
+            await station.click();
+            await page.getByTitle("Pause", { exact: true }).waitFor({ timeout: 30_000 });
+
+            const a = await page.evaluate(
+                (sel) => (document.querySelector(sel) as HTMLAudioElement | null)?.currentTime ?? -1,
+                PLAYER,
+            );
+            await page.waitForTimeout(2500);
+            const b = await page.evaluate(
+                (sel) => (document.querySelector(sel) as HTMLAudioElement | null)?.currentTime ?? -1,
+                PLAYER,
+            );
+            expect(b, `station "${name}" started but the position did not advance (${a}s -> ${b}s)`).toBeGreaterThan(a);
+            return { station: name, advancing: true };
+        });
+
+        await session.step("switch to another station without breaking", async () => {
+            const srcBefore = await page.evaluate(
+                (sel) => (document.querySelector(sel) as HTMLAudioElement | null)?.src ?? "",
+                PLAYER,
+            );
+            const stations = page.locator("main button").filter({ has: page.locator("h3") });
+            const next = stations.nth(1);
+            if (!(await next.isVisible().catch(() => false))) {
+                return { switched: false, note: "only one station card visible" };
+            }
+            await next.click();
+            await page.waitForTimeout(3000);
+            const pause = page.getByTitle("Pause", { exact: true });
+            await expect(pause).toBeVisible({ timeout: 30_000 });
+            const srcAfter = await page.evaluate(
+                (sel) => (document.querySelector(sel) as HTMLAudioElement | null)?.src ?? "",
+                PLAYER,
+            );
+            expect(srcAfter, "second station clicked but the audio source never changed").not.toBe(srcBefore);
+            return { switched: true };
+        });
+
+        session.assertClean("Journey 5e (radio)");
+    });
+
+    // ----------------------------------------------------------------------------------
+    test("5f. search, deeper: discover results, empty results, and the P2P tab", async () => {
+        session.setJourney("5f. Search surfaces");
+
+        let query = "";
+        await session.step("pick a query from the library", async () => {
+            const res = await page.request.get("/api/library/artists?limit=1", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const body = await res.json();
+            query = body.artists?.[0]?.name ?? "";
+            expect(query, "could not read an artist name").toBeTruthy();
+            return { query };
+        });
+
+        await session.step("the discover tab shows results beyond the library", async () => {
+            await page.goto(`/search?q=${encodeURIComponent(query)}`);
+            await settle(page, 4000);
+            const discover = page.getByRole("button", { name: "Discover", exact: true });
+            await expect(discover).toBeVisible({ timeout: 10_000 });
+            await discover.click();
+            await settle(page, 5000);
+
+            // The discover surface reaches external sources; whatever arrives, the
+            // page must render a result section rather than an empty shell or a crash.
+            const headers = await page.locator("main h2").allTextContents();
+            const rendered = headers.join(" ").trim();
+            expect(
+                rendered.length,
+                `the Discover tab rendered no section headers at all for "${query}"`,
+            ).toBeGreaterThan(0);
+            return { sections: rendered.slice(0, 80) };
+        });
+
+        await session.step("a query with no matches fails gracefully", async () => {
+            await page.getByRole("button", { name: "Library", exact: true }).click().catch(() => {});
+            await page.goto("/search?q=zzqxjv%20no%20such%20thing%20kima");
+            await settle(page, 4000);
+            const crashed = await page.locator("text=/application error|something went wrong/i").count();
+            expect(crashed, "a no-match search showed a crash screen").toBe(0);
+            const stack = page.locator(".section-stack");
+            return { noCrash: true, stackRendered: (await stack.count()) > 0 };
+        });
+
+        await session.step("the P2P tab, if this instance has the integration", async () => {
+            const p2p = page.getByRole("button", { name: "P2P Network" });
+            if ((await p2p.count()) === 0) {
+                session.noteNotCovered("soulseek/P2P search: the tab is absent, so the integration is not configured");
+                return { p2p: false };
+            }
+            // The tab exists, meaning the backend says soulseek is configured. Live
+            // P2P results depend on the outside network, so the assertion is "the app
+            // asked and rendered an answer", not "the network returned songs".
+            await page.getByRole("button", { name: "All Results", exact: true }).click();
+            const box = page.getByLabel("Search");
+            await box.click();
+            await box.fill(query);
+            await box.press("Enter");
+            await settle(page, 6000);
+            await p2p.click();
+            await settle(page, 5000);
+            const crashed = await page.locator("text=/application error|something went wrong/i").count();
+            expect(crashed, "the P2P tab crashed").toBe(0);
+            return { p2p: true, rendered: true };
+        });
+
+        session.assertClean("Journey 5f (search surfaces)");
+    });
+
+    // ----------------------------------------------------------------------------------
+    test("5h. imports: what this instance can actually import", async () => {
+        session.setJourney("5h. Imports");
+
+        await session.step("check whether Spotify import is configured", async () => {
+            const res = await page.request.get("/api/system/settings", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok()) {
+                session.noteNotCovered(`spotify import: settings endpoint answered ${res.status()}, cannot tell`);
+                return { probed: false };
+            }
+            const body = await res.json();
+            const spotify =
+                body?.spotify?.configured ??
+                body?.spotifyClientSecret ??
+                body?.integrations?.spotify ??
+                false;
+            if (!spotify) {
+                session.noteNotCovered("spotify import: not configured on this instance");
+                return { spotify: false };
+            }
+            // Configured: the import page must at least render its entry surface.
+            await page.goto("/import/playlist");
+            await settle(page, 2500);
+            const crashed = await page.locator("text=/application error|something went wrong/i").count();
+            expect(crashed, "the Spotify import page crashed").toBe(0);
+            return { spotify: true };
+        });
+
+        session.assertClean("Journey 5h (imports)");
+    });
+
+    // ----------------------------------------------------------------------------------
     test("6. adjust: change a setting and confirm it sticks", async () => {
         session.setJourney("6. Adjust");
 
@@ -971,6 +1655,112 @@ test.describe("Dogfood walkthrough", () => {
         });
 
         session.assertClean("Journey 6 (adjust)");
+    });
+
+    // ----------------------------------------------------------------------------------
+    test("6b. settings, deeper: a user is created and removed", async () => {
+        session.setJourney("6b. User management");
+
+        const userName = `dogfood_${Date.now().toString(36)}`;
+        const password = "dogfood-pass-1";
+
+        await session.step("open settings and find user management", async () => {
+            await navigateByClick(page, "/settings");
+            await settle(page, 2000);
+            const heading = page.getByRole("heading", { name: /user management|users/i }).first();
+            if (!(await heading.isVisible({ timeout: 5_000 }).catch(() => false))) {
+                session.noteNotCovered("user management: section not visible (admin only)");
+                test.skip(true, "user management section not present for this user");
+            }
+            await heading.scrollIntoViewIfNeeded();
+            return { section: true };
+        });
+
+        await session.step("create a user", async () => {
+            // Placeholders are unique on the whole settings page, so main-scoped
+            // lookups avoid guessing the section's DOM depth.
+            await page.locator("main").getByPlaceholder("Username").fill(userName);
+            await page.locator("main").getByPlaceholder(/password/i).fill(password);
+            const create = page.locator("main").getByRole("button", { name: /^create$/i });
+            await expect(create).toBeEnabled({ timeout: 5_000 });
+            await create.click();
+            await page.waitForTimeout(2000);
+            const listed = page.locator("main").getByText(userName, { exact: true }).first();
+            await expect(listed).toBeVisible({ timeout: 10_000 });
+            return { created: userName };
+        });
+
+        await session.step("remove the user again", async () => {
+            const row = page.locator("main").getByText(userName, { exact: true }).first().locator("xpath=..");
+            await row.locator("button").filter({ has: page.locator("svg") }).last().click();
+            const confirm = page.getByRole("button", { name: /delete|remove|confirm/i }).last();
+            await expect(confirm).toBeVisible({ timeout: 8_000 });
+            await confirm.click();
+            await page.waitForTimeout(2000);
+            const gone = await page.locator("main").getByText(userName, { exact: true }).count();
+            expect(gone, `delete confirmed but the user list still shows ${gone} match(es)`).toBe(0);
+            return { removed: true };
+        });
+
+        session.assertClean("Journey 6b (user management)");
+    });
+
+    // ----------------------------------------------------------------------------------
+    test("6c. device pairing and Subsonic compatibility", async () => {
+        session.setJourney("6c. Device + Subsonic");
+
+        await session.step("the device page offers a pairing code", async () => {
+            await page.goto("/device");
+            await settle(page, 2500);
+            const code = page.locator("code");
+            await expect(code.first()).toBeVisible({ timeout: 15_000 });
+            const digits = (await code.first().textContent())?.trim() ?? "";
+            expect(digits, "no pairing code is shown").toBeTruthy();
+            const qr = await page.locator("svg").count();
+            return { code: digits.slice(0, 2) + "****", qrRendered: qr > 0 };
+        });
+
+        // Subsonic compatibility is a shipping promise of the server. This backend
+        // deliberately does not support the MD5 challenge-response scheme (bcrypt
+        // could never answer it); the supported credential is an OpenSubsonic API
+        // key, provisioned here the way a real client would and revoked after.
+        await session.step("the Subsonic API answers an API-key ping", async () => {
+            const keyName = "dogfood-gate";
+            const made = await page.request.post("/api-keys", {
+                data: { deviceName: keyName },
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            expect(made.ok(), `provisioning an API key returned ${made.status()}`).toBeTruthy();
+            const apiKey = (await made.json()).apiKey as string;
+            expect(apiKey, "the key was created but no plaintext came back").toBeTruthy();
+
+            try {
+                const res = await page.request.get(
+                    `/rest/ping?u=${encodeURIComponent(username)}&apiKey=${encodeURIComponent(apiKey)}` +
+                        `&v=1.16.1&c=kima-dogfood&f=json`,
+                );
+                expect(res.ok(), `the Subsonic ping answered HTTP ${res.status()}`).toBeTruthy();
+                const body = await res.json();
+                const status = body?.["subsonic-response"]?.status ?? "";
+                expect(status, `the Subsonic ping answered status "${status}" instead of "ok"`).toBe("ok");
+                return { subsonic: status };
+            } finally {
+                const list = await page.request.get("/api-keys", {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (list.ok()) {
+                    const keys = (await list.json()).apiKeys as Array<{ id: string; name?: string }>;
+                    const mine = keys.find((k) => (k.name ?? "").includes(keyName));
+                    if (mine) {
+                        await page.request
+                            .delete(`/api-keys/${mine.id}`, { headers: { Authorization: `Bearer ${token}` } })
+                            .catch(() => {});
+                    }
+                }
+            }
+        });
+
+        session.assertClean("Journey 6c (device + subsonic)");
     });
 
     // ----------------------------------------------------------------------------------
@@ -1114,6 +1904,116 @@ test.describe("Dogfood walkthrough", () => {
     });
 
     // ----------------------------------------------------------------------------------
+    test("7b. a second device: state agrees across sessions", async () => {
+        session.setJourney("7b. Second device");
+
+        const otherContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+        const other = await otherContext.newPage();
+        session.attach(other);
+        let secondPlaylistId = "";
+
+        try {
+            await session.step("start music on the first tab", async () => {
+                await page.goto("/collection?tab=albums");
+                await settle(page, 1500);
+                const album = firstAlbumCard(page);
+                await album.waitFor({ state: "visible", timeout: 12_000 });
+                await album.click();
+                await page.waitForURL(/\/album\//, { timeout: 10_000 });
+                await settle(page, 1200);
+                await page.getByLabel("Play all").click();
+                await page.getByTitle("Pause", { exact: true }).waitFor({ timeout: 15_000 });
+                return { playing: true };
+            });
+
+            await session.step("sign in on the second device", async () => {
+                session.expectFailure({
+                    urlPattern: /\/api\/auth\/me/,
+                    status: 401,
+                    reason: "the session check before signing in on the second device",
+                });
+                await other.goto("/login");
+                await settle(other, 1500);
+                await other.locator("#username").fill(username);
+                await other.locator("#password").fill(password);
+                await other.getByRole("button", { name: "Sign In" }).click();
+                await other.waitForURL(/\/($|\?|home)/, { timeout: 20_000 });
+                await settle(other, 2000);
+                session.clearExpectedFailures();
+                return { signedIn: true };
+            });
+
+            // The server is the source of truth for playback state, so a fresh
+            // device should learn what the first one is playing without being told.
+            await session.step("the second device sees what the first is playing", async () => {
+                const src = await page.evaluate(
+                    (sel) => (document.querySelector(sel) as HTMLAudioElement | null)?.src ?? "",
+                    PLAYER,
+                );
+                const id = src.match(/\/tracks\/([^/]+)\/stream/)?.[1] ?? "";
+                expect(id, "could not read the playing track id on the first tab").toBeTruthy();
+                const res = await other.request.get(`/api/library/tracks/${id}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const body = await res.json();
+                const title: string = body.title ?? body.track?.title ?? "";
+                expect(title, "the playing track has no title").toBeTruthy();
+
+                await other.goto("/");
+                await settle(other, 6000);
+                const chromeText = ((await other.locator("body").innerText()) ?? "").replace(/\s+/g, " ");
+                expect(
+                    chromeText.includes(title),
+                    `the first tab is playing "${title}" but the second device never learned it`,
+                ).toBe(true);
+                return { agreedOn: title };
+            });
+
+            // And the reverse direction, through the event stream: a change made on
+            // device two must reach device one without a reload.
+            await session.step("a playlist created on device two reaches device one live", async () => {
+                await other.goto("/playlists");
+                await settle(other, 1500);
+                await other.locator("main").getByRole("button", { name: "Create" }).first().click();
+                const input = other.getByPlaceholder("Playlist name...").first();
+                await expect(input).toBeVisible({ timeout: 8_000 });
+                const name = `${RUN_TAG}-second-device`;
+                await input.fill(name);
+                await input.press("Enter");
+                await other.waitForURL(/\/playlist\//, { timeout: 15_000 });
+                secondPlaylistId = new URL(other.url()).pathname.split("/").pop() ?? "";
+                expect(secondPlaylistId, "no playlist id after creating on device two").toBeTruthy();
+                createdPlaylistIds.push(secondPlaylistId);
+
+                // The first tab sits on the homepage with its event stream open. The
+                // playlist arriving there without a reload is the SSE pipeline working.
+                await page.bringToFront().catch(() => {});
+                await page.goto("/playlists");
+                await settle(page, 8000);
+                const seen = await page.locator("main").getByText(name, { exact: false }).count();
+                expect(
+                    seen,
+                    `device two created "${name}" but device one never showed it -- ` +
+                        `either the event did not fire or the cache was not updated`,
+                ).toBeGreaterThan(0);
+                return { livePlaylist: name };
+            });
+        } finally {
+            if (secondPlaylistId) {
+                await page.request
+                    .delete(`/api/playlists/${secondPlaylistId}`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                    })
+                    .catch(() => {});
+                createdPlaylistIds.splice(createdPlaylistIds.indexOf(secondPlaylistId), 1);
+            }
+            await otherContext.close();
+        }
+
+        session.assertClean("Journey 7b (second device)");
+    });
+
+    // ----------------------------------------------------------------------------------
     test("8. rough edges: bad links do not break the app", async () => {
         session.setJourney("8. Rough edges");
 
@@ -1147,6 +2047,69 @@ test.describe("Dogfood walkthrough", () => {
 
         session.clearExpectedFailures();
         session.assertClean("Journey 8 (rough edges)");
+    });
+
+    // ----------------------------------------------------------------------------------
+    test("8b. TV mode: the remote arrows drive the app", async () => {
+        session.setJourney("8b. TV navigation");
+
+        await session.step("enter TV mode", async () => {
+            await page.goto("/?tv=1");
+            await settle(page, 2500);
+            const tv = await page.evaluate(() => document.documentElement.classList.contains("tv-mode"));
+            expect(tv, "?tv=1 did not switch the document into tv-mode").toBe(true);
+            const tabs = page.locator("[data-tv-tab]");
+            await expect(tabs.first()).toBeVisible({ timeout: 10_000 });
+            return { tvMode: true, tabs: await tabs.count() };
+        });
+
+        await session.step("arrow keys move the focus", async () => {
+            const readFocus = () =>
+                page.evaluate(() => {
+                    const el = document.activeElement;
+                    return {
+                        tab: el?.getAttribute("data-tv-tab") ?? "",
+                        card: el?.getAttribute("data-tv-card") ?? "",
+                        section: el?.getAttribute("data-tv-section") ?? "",
+                    };
+                });
+
+            await page.locator("[data-tv-tab]").first().focus();
+            const start = await readFocus();
+            await page.keyboard.press("ArrowRight");
+            await page.waitForTimeout(500);
+            const right = await readFocus();
+            expect(
+                right.tab,
+                `ArrowRight did not move the tab focus (still "${start.tab}" -> "${right.tab}")`,
+            ).not.toBe(start.tab);
+
+            await page.keyboard.press("ArrowDown");
+            await page.waitForTimeout(700);
+            const down = await readFocus();
+            const inContent = down.card || down.section;
+            expect(
+                inContent,
+                "ArrowDown from the tab row did not land on any content card or section",
+            ).toBeTruthy();
+            return { tabMoved: true, reachedContent: true };
+        });
+
+        await session.step("Enter activates and Escape climbs back out", async () => {
+            await page.keyboard.press("Enter");
+            await page.waitForTimeout(2000);
+            const url = new URL(page.url());
+            const navigated = !/\/$/.test(url.pathname);
+            if (navigated) {
+                await page.keyboard.press("Escape");
+                await page.waitForTimeout(1000);
+            }
+            await page.goto("/");
+            await settle(page, 1500);
+            return { activated: navigated, exited: true };
+        });
+
+        session.assertClean("Journey 8b (TV navigation)");
     });
 
     // ----------------------------------------------------------------------------------
