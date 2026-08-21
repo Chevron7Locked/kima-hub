@@ -49,7 +49,7 @@ export default function HomePage() {
             <div className="relative">
                 <HomeHero />
 
-                <div className="relative max-w-[1800px] mx-auto px-4 sm:px-6 md:px-8 pb-32 pt-8">
+                <div className="section-stack relative max-w-[1800px] mx-auto px-4 sm:px-6 md:px-8 pb-32 pt-8">
                 {/* Sections rise in staggered order on mount. Only the first 8 visible sections animate;
                     items 9+ render immediately. Animation is mount-only (CSS animation-fill-mode: both). */}
                 {(() => {
