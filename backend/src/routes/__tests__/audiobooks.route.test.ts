@@ -16,6 +16,7 @@ jest.mock("../../utils/db", () => ({
             findMany: jest.fn(),
             findUnique: jest.fn(),
             update: jest.fn().mockResolvedValue({}),
+            count: jest.fn(),
         },
         audiobookProgress: {
             findMany: jest.fn().mockResolvedValue([]),
@@ -323,5 +324,80 @@ describe("GET /audiobooks/:id", () => {
 
         expect(res.status).toBe(200);
         expect(res.body).not.toHaveProperty("trackCount");
+    });
+});
+// ── POST /sync ──────────────────────────────────────────────────────────────────
+
+describe("POST /audiobooks/sync", () => {
+    const app = createApp();
+
+    beforeEach(() => {
+        (getSystemSettings as jest.Mock).mockResolvedValue(enabledSettings);
+        (prisma.audiobook.count as jest.Mock).mockResolvedValue(0);
+        (audiobookCacheService.syncAll as jest.Mock).mockResolvedValue({
+            synced: 3,
+            failed: 0,
+            skipped: 0,
+            errors: [],
+        });
+    });
+
+    it("returns 200 on successful sync", async () => {
+        const res = await request(app).post("/audiobooks/sync");
+
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.result.synced).toBe(3);
+    });
+
+    it("returns 400 when Audiobookshelf rejects credentials (401)", async () => {
+        const absError = Object.assign(new Error("Unauthorized"), {
+            response: { status: 401 },
+        });
+        (audiobookCacheService.syncAll as jest.Mock).mockRejectedValue(absError);
+
+        const res = await request(app).post("/audiobooks/sync");
+
+        expect(res.status).toBe(400);
+        expect(res.body.success).toBe(false);
+        expect(res.body.error).toContain("rejected the stored credentials");
+    });
+
+    it("returns 400 when Audiobookshelf rejects credentials (403)", async () => {
+        const absError = Object.assign(new Error("Forbidden"), {
+            response: { status: 403 },
+        });
+        (audiobookCacheService.syncAll as jest.Mock).mockRejectedValue(absError);
+
+        const res = await request(app).post("/audiobooks/sync");
+
+        expect(res.status).toBe(400);
+        expect(res.body.success).toBe(false);
+        expect(res.body.error).toContain("rejected the stored credentials");
+    });
+
+    it("returns 502 for other upstream status codes", async () => {
+        const absError = Object.assign(new Error("Bad Gateway"), {
+            response: { status: 502 },
+        });
+        (audiobookCacheService.syncAll as jest.Mock).mockRejectedValue(absError);
+
+        const res = await request(app).post("/audiobooks/sync");
+
+        expect(res.status).toBe(502);
+        expect(res.body.success).toBe(false);
+        expect(res.body.error).toContain("Audiobookshelf returned status 502");
+    });
+
+    it("returns 500 for genuine internal errors (no response.status)", async () => {
+        (audiobookCacheService.syncAll as jest.Mock).mockRejectedValue(
+            new Error("Database connection failed"),
+        );
+
+        const res = await request(app).post("/audiobooks/sync");
+
+        expect(res.status).toBe(500);
+        expect(res.body.success).toBe(false);
+        expect(res.body.error).toBe("Database connection failed");
     });
 });

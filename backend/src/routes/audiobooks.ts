@@ -134,11 +134,35 @@ router.post("/sync", requireAuthOrToken, apiLimiter, async (req, res) => {
             success: true,
             result,
         });
-    } catch (error: any) {
-        logger.error("[AUDIOBOOK] Sync failed:", error?.message ?? error);
+    } catch (error: unknown) {
+        const errMsg =
+            error && typeof error === "object" && "message" in error
+                ? String((error as { message: unknown }).message)
+                : String(error);
+        logger.error("[AUDIOBOOK] Sync failed:", errMsg);
+
+        // Distinguish upstream failures (bad credentials, network) from internal bugs.
+        // An axios error from Audiobookshelf carries the remote status in error.response.status.
+        const upstreamStatus =
+            error && typeof error === "object" && "response" in error
+                ? (error as { response?: { status?: number } }).response?.status
+                : undefined;
+        if (upstreamStatus === 401 || upstreamStatus === 403) {
+            return res.status(400).json({
+                success: false,
+                error: "Audiobookshelf rejected the stored credentials — check the API key or token expiry",
+            });
+        }
+        if (upstreamStatus != null) {
+            return res.status(502).json({
+                success: false,
+                error: `Audiobookshelf returned status ${upstreamStatus}: ${errMsg}`,
+            });
+        }
+        // Genuine internal error — keep as 500.
         res.status(500).json({
             success: false,
-            error: error?.message ?? "Audiobook sync failed",
+            error: errMsg || "Audiobook sync failed",
         });
     }
 });
