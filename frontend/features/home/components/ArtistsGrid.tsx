@@ -4,8 +4,9 @@ import Link from "next/link";
 import Image from "next/image";
 import { Music } from "lucide-react";
 import { api } from "@/lib/api";
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
+import { cn } from "@/utils/cn";
 import { Artist } from "../types";
 
 interface ArtistsGridProps {
@@ -20,6 +21,7 @@ interface ArtistCardProps {
 const ArtistCard = memo(
     function ArtistCard({ artist, index }: ArtistCardProps) {
         const imageSrc = artist.coverArt ? api.getCoverArtUrl(artist.coverArt, 300) : null;
+        const staggered = index < 8;
 
         return (
             <CarouselItem>
@@ -28,9 +30,13 @@ const ArtistCard = memo(
                     data-tv-card
                     data-tv-card-index={index}
                     tabIndex={0}
-                    className="group block"
+                    className={cn(
+                        "group block",
+                        staggered && "animate-rise [animation-delay:calc(var(--i)*45ms)]",
+                    )}
+                    style={staggered ? { "--i": index } as CSSProperties : undefined}
                 >
-                    <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#fca200]/40 transition-all duration-300 hover:shadow-lg hover:shadow-[#fca200]/10 mx-1">
+                    <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#fca200]/40 transition-[border-color,box-shadow] duration-150 hover:shadow-lg hover:shadow-[#fca200]/10 mx-1">
                         <div className="relative aspect-square">
                             <div className="w-full h-full bg-[#181818] flex items-center justify-center overflow-hidden">
                                 {imageSrc ? (

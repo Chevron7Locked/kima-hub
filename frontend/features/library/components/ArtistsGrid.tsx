@@ -3,15 +3,17 @@ import Link from "next/link";
 import { Music, Play, Trash2 } from "lucide-react";
 import { Artist } from "../types";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { api } from "@/lib/api";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { CachedImage } from "@/components/ui/CachedImage";
-import { api } from "@/lib/api";
+import { cn } from "@/utils/cn";
 
 interface ArtistsGridProps {
     artists: Artist[];
     onPlay: (artistId: string) => Promise<void>;
     onDelete: (artistId: string, artistName: string) => void;
     isLoading?: boolean;
+    gridKey?: number;
 }
 
 const getArtistImageSrc = (coverArt?: string): string | null => {
@@ -61,10 +63,13 @@ const ArtistCardItem = memo(
                 prefetch={true}
                 data-tv-card
                 data-tv-card-index={index}
-                tabIndex={0}
-                className="group block"
+                style={{ "--i": index } as React.CSSProperties}
+                className={cn(
+                    "group block",
+                    index < 8 ? "animate-rise [animation-delay:calc(var(--i)*45ms)]" : "",
+                )}
             >
-                <div className="relative bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg overflow-hidden hover:border-[#fca200]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#fca200]/10" style={{ transform: "translateZ(0)" }}>
+                <div className="relative bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg overflow-hidden hover:border-[#fca200]/50 transition-all duration-200 hover:shadow-lg hover:shadow-[#fca200]/10" style={{ transform: "translateZ(0)" }}>
                     <div className="relative aspect-square">
                         <div className="w-full h-full bg-[#181818] flex items-center justify-center overflow-hidden" style={{ contain: "content" }}>
                             {coverArtUrl ? (
@@ -81,12 +86,12 @@ const ArtistCardItem = memo(
                         </div>
 
                         {/* Gradient overlay on hover */}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
 
                         {/* Play button */}
                         <button
                             onClick={handlePlay}
-                            className="touch-reveal absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#fca200] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 hover:bg-[#d48c00]"
+                            className="touch-reveal absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#fca200] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-150 hover:scale-110 hover:bg-[#d48c00]"
                         >
                             <Play className="w-5 h-5 fill-current ml-0.5 text-white" />
                         </button>
@@ -94,7 +99,7 @@ const ArtistCardItem = memo(
                         {/* Delete button */}
                         <button
                             onClick={handleDelete}
-                            className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-black/80 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-all duration-200 border border-white/20"
+                            className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-black/80 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-all duration-150 border border-white/20"
                             title="Delete artist"
                         >
                             <Trash2 className="w-4 h-4 text-white" />
@@ -127,6 +132,7 @@ const ArtistsGrid = memo(function ArtistsGrid({
     onPlay,
     onDelete,
     isLoading = false,
+    gridKey,
 }: ArtistsGridProps) {
     if (isLoading) {
         return (
@@ -148,6 +154,7 @@ const ArtistsGrid = memo(function ArtistsGrid({
 
     return (
         <div
+            key={gridKey}
             data-tv-section="library-artists"
             className="grid-media"
         >

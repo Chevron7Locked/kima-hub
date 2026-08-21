@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense, type CSSProperties } from "react";
 import { formatTime } from "@/utils/formatTime";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
@@ -605,7 +605,7 @@ function ImportPlaylistPageContent() {
 
                         {/* Summary Stats */}
                         <div className="grid grid-cols-4 gap-3">
-                            <div className="text-center py-3 bg-white/5 rounded-lg">
+                            <div className="animate-rise text-center py-3 bg-white/5 rounded-lg" style={{ "--i": 0 } as CSSProperties}>
                                 <div className="text-xl font-bold text-white">
                                     {preview.summary.total}
                                 </div>
@@ -613,7 +613,7 @@ function ImportPlaylistPageContent() {
                                     Total
                                 </div>
                             </div>
-                            <div className="text-center py-3 bg-green-500/10 rounded-lg">
+                            <div className="animate-rise text-center py-3 bg-green-500/10 rounded-lg" style={{ "--i": 1 } as CSSProperties}>
                                 <div className="text-xl font-bold text-green-400">
                                     {preview.summary.inLibrary}
                                 </div>
@@ -621,7 +621,7 @@ function ImportPlaylistPageContent() {
                                     In Library
                                 </div>
                             </div>
-                            <div className="text-center py-3 bg-[#1DB954]/10 rounded-lg">
+                            <div className="animate-rise text-center py-3 bg-[#1DB954]/10 rounded-lg" style={{ "--i": 2 } as CSSProperties}>
                                 <div className="text-xl font-bold text-[#1DB954]">
                                     {preview.summary.downloadable}
                                 </div>
@@ -630,7 +630,7 @@ function ImportPlaylistPageContent() {
                                 </div>
                             </div>
                             {preview.summary.notFound > 0 ? (
-                                <div className="text-center py-3 bg-red-500/10 rounded-lg">
+                                <div className="animate-rise text-center py-3 bg-red-500/10 rounded-lg" style={{ "--i": 3 } as CSSProperties}>
                                     <div className="text-xl font-bold text-red-400">
                                         {preview.summary.notFound}
                                     </div>
@@ -639,7 +639,7 @@ function ImportPlaylistPageContent() {
                                     </div>
                                 </div>
                             ) : (
-                                <div className="text-center py-3 bg-green-500/10 rounded-lg">
+                                <div className="animate-rise text-center py-3 bg-green-500/10 rounded-lg" style={{ "--i": 3 } as CSSProperties}>
                                     <div className="text-xl font-bold text-green-400">
                                         ✓
                                     </div>
@@ -949,7 +949,7 @@ function ImportPlaylistPageContent() {
 
                 {/* Step: Importing */}
                 {step === "importing" && importJob && (
-                    <div className="text-center py-12">
+                    <div className="animate-rise text-center py-12">
                         <Loader2 className="w-10 h-10 text-[#1DB954] animate-spin mx-auto mb-4" />
                         <h2 className="text-lg font-bold text-white mb-1">
                             {importJob.status === "fetching"
@@ -992,7 +992,7 @@ function ImportPlaylistPageContent() {
                         </p>
                         <div className="w-full max-w-xs mx-auto bg-white/10 rounded-full h-1.5">
                             <div
-                                className="bg-[#1DB954] h-1.5 rounded-full transition-all duration-500"
+                                className="bg-[#1DB954] h-1.5 rounded-full transition-all duration-200"
                                 style={{ width: `${importJob.progress}%` }}
                             />
                         </div>
@@ -1024,7 +1024,7 @@ function ImportPlaylistPageContent() {
 
                 {/* Step: Complete */}
                 {step === "complete" && importJob && (
-                    <div className="text-center py-12">
+                    <div className="animate-rise text-center py-12">
                         <div
                             className={
                                 "w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 " +

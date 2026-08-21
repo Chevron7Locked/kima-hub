@@ -1,10 +1,11 @@
-import React, { memo, useCallback, useMemo } from "react";
+import React, { memo, useCallback, useMemo, type CSSProperties } from "react";
 import Link from "next/link";
 import { Album } from "../types";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { CachedImage } from "@/components/ui/CachedImage";
 import { Disc3, Play, Trash2 } from "lucide-react";
+import { cn } from "@/utils/cn";
 import { api } from "@/lib/api";
 
 interface AlbumsGridProps {
@@ -12,6 +13,7 @@ interface AlbumsGridProps {
     onPlay: (albumId: string) => Promise<void>;
     onDelete: (albumId: string, albumTitle: string) => void;
     isLoading?: boolean;
+    gridKey?: number;
 }
 
 interface AlbumCardItemProps {
@@ -57,9 +59,13 @@ const AlbumCardItem = memo(
                 data-tv-card
                 data-tv-card-index={index}
                 tabIndex={0}
-                className="group block"
+                style={{ "--i": index } as CSSProperties}
+                className={cn(
+                    "group block",
+                    index < 8 ? "animate-rise [animation-delay:calc(var(--i)*45ms)]" : "",
+                )}
             >
-                <div className="relative bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg overflow-hidden hover:border-[#22c55e]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#22c55e]/10" style={{ transform: "translateZ(0)" }}>
+                <div className="relative bg-[var(--bg-primary)] border-2 border-white/10 rounded-lg overflow-hidden hover:border-[#22c55e]/50 transition-all duration-200 hover:shadow-lg hover:shadow-[#22c55e]/10" style={{ transform: "translateZ(0)" }}>
                     <div className="relative aspect-square">
                         <div className="w-full h-full bg-[#181818] flex items-center justify-center overflow-hidden" style={{ contain: "content" }}>
                             {coverArtUrl ? (
@@ -76,12 +82,12 @@ const AlbumCardItem = memo(
                         </div>
 
                         {/* Gradient overlay on hover */}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
 
                         {/* Play button */}
                         <button
                             onClick={handlePlay}
-                            className="touch-reveal absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#22c55e] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 hover:bg-[#16a34a]"
+                            className="touch-reveal absolute bottom-3 right-3 w-11 h-11 rounded-lg bg-[#22c55e] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-150 hover:scale-110 hover:bg-[#16a34a]"
                         >
                             <Play className="w-5 h-5 fill-current ml-0.5 text-black" />
                         </button>
@@ -89,7 +95,7 @@ const AlbumCardItem = memo(
                         {/* Delete button */}
                         <button
                             onClick={handleDelete}
-                            className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-black/80 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-all duration-200 border border-white/20"
+                            className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-black/80 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-all duration-150 border border-white/20"
                             title="Delete album"
                         >
                             <Trash2 className="w-4 h-4 text-white" />
@@ -122,6 +128,7 @@ const AlbumsGrid = memo(function AlbumsGrid({
     onPlay,
     onDelete,
     isLoading = false,
+    gridKey,
 }: AlbumsGridProps) {
     if (isLoading) {
         return (
@@ -143,6 +150,7 @@ const AlbumsGrid = memo(function AlbumsGrid({
 
     return (
         <div
+            key={gridKey}
             data-tv-section="library-albums"
             className="grid-media"
         >

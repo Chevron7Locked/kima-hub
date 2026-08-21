@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo, useCallback, useEffect } from "react";
+import { useState, useRef, useMemo, useCallback, useEffect, type CSSProperties } from "react";
 import { Radio, Play, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
@@ -85,27 +85,31 @@ export function LibraryRadioStations() {
         });
     };
 
-    const renderCard = (station: RadioStation, compact: boolean, idx: number) => (
-        <button
-            key={station.id}
-            data-tv-card
-            data-tv-card-index={idx}
-            tabIndex={0}
-            onClick={() => startRadio(station)}
-            disabled={loadingStation !== null}
-            className={cn(
-                "relative group overflow-hidden",
-                "bg-[var(--bg-primary)] border border-white/10 rounded-lg",
-                station.hoverBorder,
-                "transition-all duration-300",
-                "hover:shadow-lg",
-                station.hoverShadow,
-                "disabled:opacity-50 disabled:cursor-not-allowed",
-                compact
-                    ? "flex-shrink-0 snap-start w-[180px] h-[80px]"
-                    : "w-full aspect-[5/3]"
-            )}
-        >
+    const renderCard = (station: RadioStation, compact: boolean, globalIdx: number) => {
+        const staggered = globalIdx < 8;
+        return (
+            <button
+                key={station.id}
+                data-tv-card
+                data-tv-card-index={globalIdx}
+                tabIndex={0}
+                onClick={() => startRadio(station)}
+                disabled={loadingStation !== null}
+                className={cn(
+                    "relative group overflow-hidden",
+                    "bg-[var(--bg-primary)] border border-white/10 rounded-lg",
+                    station.hoverBorder,
+                    "transition-[border-color,box-shadow] duration-150",
+                    "hover:shadow-lg",
+                    station.hoverShadow,
+                    "disabled:opacity-50 disabled:cursor-not-allowed",
+                    staggered && "animate-rise [animation-delay:calc(var(--i)*45ms)]",
+                    compact
+                        ? "flex-shrink-0 snap-start w-[180px] h-[80px]"
+                        : "w-full aspect-[5/3]"
+                )}
+                style={staggered ? { "--i": globalIdx } as CSSProperties : undefined}
+>
             {/* Subtle gradient tint */}
             <div className={cn("absolute inset-0 bg-gradient-to-br", station.color)} />
 
@@ -121,9 +125,6 @@ export function LibraryRadioStations() {
                     <h3 className="text-sm font-bold text-white truncate tracking-tight leading-tight">
                         {station.name}
                     </h3>
-                    {/* The description is a sentence, not a label. In caps it
-                        ran ~15% wider and truncated mid-word on a phone --
-                        "Lesser-played gems" arrived as "LESSER-PLAY...". */}
                     <p className="text-xs text-[var(--text-muted)] truncate">
                         {station.description}
                     </p>
@@ -154,6 +155,7 @@ export function LibraryRadioStations() {
             )}
         </button>
     );
+    };
 
     // Desktop: horizontal scroll
     if (!isMobileOrTablet) {
@@ -205,7 +207,7 @@ export function LibraryRadioStations() {
                         key={pageIndex}
                         className="flex-shrink-0 snap-start w-full grid grid-cols-2 grid-rows-3 sm:grid-cols-3 sm:grid-rows-2 gap-2"
                     >
-                        {page.map((station, i) => renderCard(station, false, i))}
+                        {page.map((station, i) => renderCard(station, false, pageIndex * 6 + i))}
                         {page.length < 6 &&
                             Array.from({ length: 6 - page.length }).map((_, i) => (
                                 <div key={`empty-${i}`} className="aspect-[5/3]" />

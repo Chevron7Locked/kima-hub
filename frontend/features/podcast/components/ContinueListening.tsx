@@ -58,7 +58,8 @@ export function ContinueListening({
                 {/* Previous Episode */}
                 {previousEpisode && (
                     <div
-                        className="flex items-center gap-3 p-3 rounded-lg border border-transparent hover:border-white/5 hover:bg-white/[0.02] transition-all cursor-pointer opacity-40 hover:opacity-60"
+                        className="flex items-center gap-3 p-3 rounded-lg border border-transparent hover:border-white/5 hover:bg-white/[0.02] transition-all cursor-pointer opacity-40 hover:opacity-60 animate-rise"
+                        style={{ animationDelay: "0ms" }}
                         onClick={() => onPlayEpisode(previousEpisode)}
                     >
                         <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
@@ -75,7 +76,8 @@ export function ContinueListening({
 
                 {/* Current Episode */}
                 <div
-                    className="flex items-center gap-4 p-4 rounded-lg bg-[var(--bg-primary)] border-2 border-[#3b82f6]/30 hover:border-[#3b82f6]/50 transition-all cursor-pointer"
+                    className="flex items-center gap-4 p-4 rounded-lg bg-[var(--bg-primary)] border-2 border-[#3b82f6]/30 hover:border-[#3b82f6]/50 transition-all cursor-pointer animate-rise"
+                    style={{ animationDelay: "45ms" }}
                     onClick={() => onPlayPause(recentEpisode)}
                 >
                     <button
@@ -124,8 +126,8 @@ export function ContinueListening({
                 {/* Next Episode */}
                 {nextEpisode && (
                     <div
-                        className="flex items-center gap-3 p-3 rounded-lg border border-transparent hover:border-white/5 hover:bg-white/[0.02] transition-all cursor-pointer opacity-40 hover:opacity-60"
-                        onClick={() => onPlayEpisode(nextEpisode)}
+                        className="flex items-center gap-3 p-3 rounded-lg border border-transparent hover:border-white/5 hover:bg-white/[0.02] transition-all cursor-pointer opacity-40 hover:opacity-60 animate-rise"
+                        style={{ animationDelay: "90ms" }}
                     >
                         <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
                             <Play className="w-3 h-3 text-[var(--text-secondary)]" />

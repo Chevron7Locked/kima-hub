@@ -233,7 +233,7 @@ export function TopBar() {
                                 new CustomEvent("toggle-mobile-menu")
                             );
                         }}
-                        className="w-11 h-11 flex items-center justify-center bg-[var(--bg-secondary)] border border-[var(--border-interactive)] rounded-md text-white hover:bg-[var(--bg-tertiary)] transition-colors mr-2 flex-shrink-0"
+                        className="w-11 h-11 flex items-center justify-center bg-[var(--bg-secondary)] border border-[var(--border-interactive)] rounded-md text-white hover:bg-[var(--bg-tertiary)] transition-colors duration-200 mr-2 flex-shrink-0"
                         aria-label="Open menu"
                     >
                         <Menu className="w-5 h-5" />
@@ -243,7 +243,7 @@ export function TopBar() {
                     <Link
                         href="/"
                         className={cn(
-                            "w-11 h-11 rounded-full flex items-center justify-center transition-all flex-shrink-0 mr-2",
+                                "w-11 h-11 rounded-full flex items-center justify-center transition-all duration-200 flex-shrink-0 mr-2",
                             pathname === "/"
                                 ? "bg-white text-black"
                                 : "bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-white"
@@ -270,7 +270,7 @@ export function TopBar() {
                                 autoCapitalize="none"
                                 autoCorrect="off"
                                 tabIndex={0}
-                                className="w-full h-11 pl-10 pr-3 bg-[var(--bg-hover)] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
+                                className="w-full h-11 pl-10 pr-3 bg-[var(--bg-hover)] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all duration-200 outline-none"
                             />
                         </div>
                     </form>
@@ -284,7 +284,7 @@ export function TopBar() {
                         }}
                         aria-expanded={isActivityPanelOpen}
                         aria-controls="activity-panel-mobile"
-                        className="w-11 h-11 flex items-center justify-center text-[var(--text-secondary)] hover:text-white transition-colors ml-2 flex-shrink-0 relative"
+                        className="w-11 h-11 flex items-center justify-center text-[var(--text-secondary)] hover:text-white transition-colors duration-200 ml-2 flex-shrink-0 relative"
                         aria-label="Notifications"
                         title="Notifications"
                     >
@@ -319,7 +319,7 @@ export function TopBar() {
                         <Link
                             href="/"
                             className={cn(
-                                "w-12 h-12 rounded-full flex items-center justify-center transition-all flex-shrink-0",
+                                "w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 flex-shrink-0",
                                 pathname === "/"
                                     ? "bg-white text-black"
                                     : "bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-white hover:scale-105"
@@ -351,7 +351,7 @@ export function TopBar() {
                                     autoCapitalize="none"
                                     autoCorrect="off"
                                     tabIndex={0}
-                                    className="w-full h-12 pl-12 pr-4 bg-[var(--bg-hover)] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
+                                    className="w-full h-12 pl-12 pr-4 bg-[var(--bg-hover)] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all duration-200 outline-none"
                                 />
                             </div>
                         </form>
@@ -374,7 +374,7 @@ export function TopBar() {
                                     : "Sync library"
                             }
                             className={cn(
-                                "flex items-center gap-2 px-3 h-10 rounded-full transition-all text-sm font-medium",
+                                "flex items-center gap-2 px-3 h-10 rounded-full transition-all duration-200 text-sm font-medium",
                                 isPolling
                                     ? "bg-white/10 text-[var(--text-muted)] cursor-not-allowed"
                                     : hasActiveDownloads
@@ -407,7 +407,7 @@ export function TopBar() {
                         <Link
                             href="/settings"
                             className={cn(
-                                "w-10 h-10 rounded-full flex items-center justify-center transition-all",
+                                "w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200",
                                 pathname === "/settings"
                                     ? "bg-white text-black"
                                     : "text-[var(--text-secondary)] hover:text-white"
@@ -419,7 +419,7 @@ export function TopBar() {
                         </Link>
                         <button
                             onClick={handleLogout}
-                            className="w-10 h-10 rounded-full flex items-center justify-center transition-all text-red-400 hover:text-red-300"
+                            className="w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 text-red-400 hover:text-red-300"
                             aria-label="Logout"
                             title="Logout"
                         >

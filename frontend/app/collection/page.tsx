@@ -189,11 +189,12 @@ export default function LibraryPage() {
         if (activeTab === "tracks") {
             setFilter("owned");
         }
+        setGridKey((k) => k + 1);
     }, [activeTab]);
 
-    // Reset page when filter or sort changes
     useEffect(() => {
         setCurrentPage(1);
+        setGridKey((k) => k + 1);
     }, [filter, sortBy, itemsPerPage]);
 
     // Get total items and pages from pagination
@@ -207,6 +208,10 @@ export default function LibraryPage() {
         id: "",
         title: "",
     });
+
+    // Monotonic key that increments on tab/filter/sort change to remount grids
+    // and replay staggered entrance animations.
+    const [gridKey, setGridKey] = useState(0);
 
     // Change tab function
     const changeTab = useCallback(
@@ -356,30 +361,36 @@ export default function LibraryPage() {
 
                 {activeTab === "artists" && (
                     <ArtistsGrid
+                        key={gridKey}
                         artists={artists}
                         isLoading={isLoading}
                         onPlay={playArtist}
                         onDelete={handleDeleteArtist}
+                        gridKey={gridKey}
                     />
                 )}
 
                 {activeTab === "albums" && (
                     <AlbumsGrid
+                        key={gridKey}
                         albums={albums}
                         isLoading={isLoading}
                         onPlay={playAlbum}
                         onDelete={handleDeleteAlbum}
+                        gridKey={gridKey}
                     />
                 )}
 
                 {activeTab === "tracks" && (
                     <TracksList
+                        key={gridKey}
                         tracks={tracks}
                         isLoading={isLoading}
                         onPlay={handlePlayTracks}
                         onAddToQueue={addTrackToQueue}
                         onAddToPlaylist={addTrackToPlaylist}
                         onDelete={handleDeleteTrack}
+                        gridKey={gridKey}
                     />
                 )}
 

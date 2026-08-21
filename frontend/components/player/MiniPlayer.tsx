@@ -209,7 +209,7 @@ export function MiniPlayer() {
                     opacity: swipeOpacity,
                     transition:
                         swipeOffset === 0
-                            ? "transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1)"
+                            ? "transform 0.25s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.25s cubic-bezier(0.25, 1, 0.5, 1)"
                             : "none",
                 }}
                 onTouchStart={handleTouchStart}
@@ -416,7 +416,7 @@ export function MiniPlayer() {
                                 href={mediaLink}
                                 className="relative flex-shrink-0 w-12 h-12"
                             >
-                                <div className="relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center">
+                                <div className={cn("relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center", "transition-transform duration-300", isPlaying && "scale-[1.03]")}>
                                     {coverUrl ? (
                                         <Image
                                             key={coverUrl}
@@ -435,7 +435,7 @@ export function MiniPlayer() {
                             </Link>
                         ) : (
                             <div className="relative flex-shrink-0 w-12 h-12">
-                                <div className="relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center">
+                                <div className={cn("relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center", "transition-transform duration-300", isPlaying && "scale-[1.03]")}>
                                     <MusicIcon className="w-6 h-6 text-[var(--text-muted)]" />
                                 </div>
                             </div>
@@ -574,9 +574,9 @@ export function MiniPlayer() {
                             {isBuffering ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
                             ) : isPlaying ? (
-                                <Pause className="w-4 h-4" />
+                                <span className="animate-pop"><Pause className="w-4 h-4" /></span>
                             ) : (
-                                <Play className="w-4 h-4 ml-0.5" />
+                                <span className="animate-pop"><Play className="w-4 h-4 ml-0.5" /></span>
                             )}
                         </button>
 

@@ -213,7 +213,7 @@ export function VibeMap({
     const labelZoom = Math.round(zoom * 2) / 2;
 
     const labelLayer = useMemo(() => {
-        if (labelZoom > 9) return null;
+        if (labelZoom >= 11.5) return null;
 
         const labels = computeClusterLabels(
             tracks,
@@ -230,7 +230,7 @@ export function VibeMap({
             getPosition: (d) => [d.x, d.y],
             getText: (d) => d.label,
             getSize: labelZoom < 7 ? 15 : 12,
-            getColor: [255, 255, 255, labelZoom < 7 ? 70 : 50],
+            getColor: [255, 255, 255, labelZoom < 7 ? 150 : 100],
             fontFamily: "Montserrat, system-ui, sans-serif",
             fontWeight: 500,
             getTextAnchor: "middle" as const,

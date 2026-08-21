@@ -82,9 +82,10 @@ export function VibePanelSheet({
 
     return (
         <motion.div
-            className="fixed bottom-0 left-0 right-0 z-(--z-scene-panel) bg-[var(--bg-primary)] rounded-t-2xl border-t border-white/10 flex flex-col"
+            className="fixed bottom-0 left-0 right-0 z-(--z-scene-panel) bg-[var(--bg-primary)] rounded-t-2xl border-t border-white/10 flex flex-col animate-panel-up"
             style={{ height: sheetHeight }}
-            animate={{ y: snapY[snap] }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1, y: snapY[snap] }}
             transition={prefersReducedMotion
                 ? { duration: 0 }
                 : { type: "spring", damping: 30, stiffness: 300 }

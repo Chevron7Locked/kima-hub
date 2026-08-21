@@ -67,7 +67,7 @@ export function BottomNavigation() {
                             key={item.name}
                             href={item.href}
                             className={cn(
-                                "flex flex-col items-center justify-center flex-1 h-full py-2 transition-colors",
+                                "flex flex-col items-center justify-center flex-1 h-full py-2 transition-colors duration-200",
                                 isActive
                                     ? "text-white"
                                     : "text-[var(--text-muted)] active:text-gray-300"
@@ -77,14 +77,14 @@ export function BottomNavigation() {
                         >
                             <Icon
                                 className={cn(
-                                    "w-5 h-5 mb-1",
+                                    "w-5 h-5 mb-1 transition-all duration-200",
                                     isActive && "text-white"
                                 )}
                                 strokeWidth={isActive ? 2.5 : 2}
                             />
                             <span
                                 className={cn(
-                                    "text-micro tracking-wide",
+                                    "text-micro tracking-wide transition-colors duration-200",
                                     isActive ? "font-semibold" : "font-medium"
                                 )}
                             >

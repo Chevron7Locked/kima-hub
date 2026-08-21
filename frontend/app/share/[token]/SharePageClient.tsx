@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from "react";
 import { useParams } from "next/navigation";
 import Image from "next/image";
 import {
@@ -305,7 +305,7 @@ export default function SharePageClient() {
                 <div className="w-full max-w-lg">
 
                     {/* Cover art */}
-                    <div className="relative w-full aspect-square max-w-[280px] mx-auto mb-8 rounded-xl overflow-hidden bg-white/[0.03] shadow-2xl shadow-black/60">
+                    <div className="animate-rise relative w-full aspect-square max-w-[280px] mx-auto mb-8 rounded-xl overflow-hidden bg-white/[0.03] shadow-2xl shadow-black/60" style={{ "--i": 0 } as CSSProperties}>
                         {coverArtUrl ? (
                             <Image
                                 src={coverArtUrl}
@@ -322,7 +322,7 @@ export default function SharePageClient() {
                     </div>
 
                     {/* Title and subtitle */}
-                    <div className="text-center mb-6">
+                    <div className="animate-rise text-center mb-6" style={{ "--i": 1 } as CSSProperties}>
                         <h1 className="text-xl font-bold text-white tracking-tight mb-1 line-clamp-2">
                             {getEntityTitle(data)}
                         </h1>
@@ -451,11 +451,14 @@ export default function SharePageClient() {
                                     <button
                                         key={track.id}
                                         onClick={() => playTrack(index)}
-                                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors group ${
+                                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+                                            index < 8 ? "animate-rise" : ""
+                                        } group ${
                                             isActive
                                                 ? "bg-white/[0.04]"
                                                 : "hover:bg-white/[0.02]"
                                         }`}
+                                        style={index < 8 ? { "--i": index } as CSSProperties : undefined}
                                     >
                                         <div className="w-8 text-center flex-shrink-0">
                                             {isActive && isPlaying ? (

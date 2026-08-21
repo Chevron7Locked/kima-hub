@@ -160,7 +160,7 @@ export default function LoginPage() {
                     </div>
 
                     {/* Login Card */}
-                    <div className="bg-[#111]/90 rounded-lg p-6 md:p-8 border border-white/10 shadow-xl ">
+                    <div className="bg-[#111]/90 rounded-lg p-6 md:p-8 border border-white/10 shadow-xl animate-rise transition-shadow duration-200 hover:shadow-2xl">
                         <h1 className="text-2xl font-bold text-white mb-1 text-center">
                             Welcome back
                         </h1>

@@ -38,7 +38,7 @@ export function ArtistHero({
     const bgImage = backgroundImage || heroImage;
 
     return (
-        <div className="relative">
+        <div className="relative animate-rise">
             {/* Background Image with VibrantJS gradient */}
             {bgImage ? (
                 <div className="absolute inset-0 overflow-hidden">

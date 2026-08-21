@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, lazy, Suspense } from "react";
+import React, { useState, lazy, Suspense } from "react";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { RefreshCw, AudioWaveform } from "lucide-react";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
@@ -50,31 +50,29 @@ export default function HomePage() {
                 <HomeHero />
 
                 <div className="relative max-w-[1800px] mx-auto px-4 sm:px-6 md:px-8 pb-32 pt-8">
-                    <div className="section-stack">
-                        {/* Library Radio Stations */}
-                        <section data-tv-section="library-radio">
-                            <SectionHeader title="Library Radio" showAllHref="/radio" color="featured" />
-                            <LibraryRadioStations />
-                        </section>
-
-                        {/* Continue Listening */}
-                        {recentlyListened.length > 0 && (
+                {/* Sections rise in staggered order on mount. Only the first 8 visible sections animate;
+                    items 9+ render immediately. Animation is mount-only (CSS animation-fill-mode: both). */}
+                {(() => {
+                    const sections: Array<{ key: string; visible: boolean; content: React.ReactNode }> = [
+                        { key: "library-radio", visible: true, content: (
+                            <section data-tv-section="library-radio">
+                                <SectionHeader title="Library Radio" showAllHref="/radio" color="featured" />
+                                <LibraryRadioStations />
+                            </section>
+                        )},
+                        { key: "continue-listening", visible: recentlyListened.length > 0, content: (
                             <section data-tv-section="continue-listening">
                                 <SectionHeader title="Continue Listening" showAllHref="/collection?tab=artists" color="featured" />
                                 <ContinueListening items={recentlyListened} />
                             </section>
-                        )}
-
-                        {/* Recently Added */}
-                        {recentlyAdded.length > 0 && (
+                        )},
+                        { key: "recently-added", visible: recentlyAdded.length > 0, content: (
                             <section data-tv-section="recently-added">
                                 <SectionHeader title="Recently Added" showAllHref="/collection?tab=artists" color="artists" />
                                 <ArtistsGrid artists={recentlyAdded} />
                             </section>
-                        )}
-
-                        {/* Made For You */}
-                        {mixes.length > 0 && (
+                        )},
+                        { key: "made-for-you", visible: mixes.length > 0, content: (
                             <section data-tv-section="made-for-you">
                                 <SectionHeader
                                     title="Made For You"
@@ -108,26 +106,20 @@ export default function HomePage() {
                                 />
                                 <MixesGrid mixes={mixes} />
                             </section>
-                        )}
-
-                        {/* Recommended For You */}
-                        {recommended.length > 0 && (
+                        )},
+                        { key: "recommended", visible: recommended.length > 0, content: (
                             <section data-tv-section="recommended">
                                 <SectionHeader title="Recommended" showAllHref="/discover" badge="Last.FM" color="artists" />
                                 <ArtistsGrid artists={recommended} />
                             </section>
-                        )}
-
-                        {/* Popular Artists */}
-                        {popularArtists.length > 0 && (
+                        )},
+                        { key: "popular-artists", visible: popularArtists.length > 0, content: (
                             <section data-tv-section="popular-artists">
                                 <SectionHeader title="Popular Artists" badge="Last.FM" color="artists" />
                                 <PopularArtistsGrid artists={popularArtists} />
                             </section>
-                        )}
-
-                        {/* Featured Playlists */}
-                        {(isBrowseLoading || featuredPlaylists.length > 0) && (
+                        )},
+                        { key: "featured-playlists", visible: isBrowseLoading || featuredPlaylists.length > 0, content: (
                             <section data-tv-section="featured-playlists">
                                 <SectionHeader title="Featured Playlists" showAllHref="/browse/playlists" badge="Deezer" color="tracks" />
                                 {isBrowseLoading && featuredPlaylists.length === 0 ? (
@@ -136,24 +128,38 @@ export default function HomePage() {
                                     <FeaturedPlaylistsGrid playlists={featuredPlaylists} />
                                 )}
                             </section>
-                        )}
-
-                        {/* Popular Podcasts */}
-                        {recentPodcasts.length > 0 && (
+                        )},
+                        { key: "popular-podcasts", visible: recentPodcasts.length > 0, content: (
                             <section data-tv-section="popular-podcasts">
                                 <SectionHeader title="Popular Podcasts" showAllHref="/podcasts" color="podcasts" />
                                 <PodcastsGrid podcasts={recentPodcasts} />
                             </section>
-                        )}
-
-                        {/* Audiobooks */}
-                        {recentAudiobooks.length > 0 && (
+                        )},
+                        { key: "audiobooks", visible: recentAudiobooks.length > 0, content: (
                             <section data-tv-section="audiobooks">
                                 <SectionHeader title="Audiobooks" showAllHref="/audiobooks" color="audiobooks" />
                                 <AudiobooksGrid audiobooks={recentAudiobooks} />
                             </section>
-                        )}
-                    </div>
+                        )},
+                    ];
+
+                    let visibleIdx = 0;
+                    return sections.map((s) => {
+                        if (!s.visible) return null;
+                        const staggered = visibleIdx < 8;
+                        const el = (
+                            <div
+                                key={s.key}
+                                className={staggered ? "animate-rise [animation-delay:calc(var(--i)*45ms)]" : undefined}
+                                style={staggered ? { "--i": visibleIdx } as React.CSSProperties : undefined}
+                            >
+                                {s.content}
+                            </div>
+                        );
+                        visibleIdx++;
+                        return el;
+                    });
+                })()}
                 </div>
             </div>
 

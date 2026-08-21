@@ -242,7 +242,7 @@ export function Sidebar() {
                         <Link
                             href="/settings"
                             className={cn(
-                                "w-10 h-10 flex items-center justify-center rounded-full transition-all",
+                                "w-10 h-10 flex items-center justify-center rounded-full transition-all duration-200",
                                 pathname === "/settings" ?
                                     "bg-white text-black"
                                 :   "bg-white/10 text-[var(--text-secondary)] hover:text-white hover:bg-white/15 active:scale-95",
@@ -262,7 +262,7 @@ export function Sidebar() {
                 role="navigation"
                 aria-label="Main navigation"
             >
-                <div className="mb-3 flex items-center gap-2 px-2">
+                <div className="mb-3 flex items-center gap-2 px-2 animate-rise">
                     <div className="w-1.5 h-1.5 bg-[#22c55e] rounded-full" />
                     <span className="t-eyebrow">
                         Navigation Index
@@ -290,7 +290,7 @@ export function Sidebar() {
                                 {/* Command index number */}
                                 <span
                                     className={cn(
-                                        "w-6 text-xs tabular-nums font-semibold text-center shrink-0",
+                                        "w-6 text-xs tabular-nums font-semibold text-center shrink-0 transition-colors duration-200",
                                         isActive ? "text-[#eab308]" : (
                                             "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]"
                                         ),
@@ -337,7 +337,7 @@ export function Sidebar() {
                         isMobileOrTablet ? "px-4" : "px-3",
                     )}
                 >
-                    <div className="flex items-center gap-2 px-2">
+                    <div className="flex items-center gap-2 px-2 animate-rise">
                         <div className="w-1.5 h-1.5 bg-[#a855f7] rounded-full" />
                         <Link
                             href="/playlists"
@@ -355,7 +355,7 @@ export function Sidebar() {
                                 setShowCreatePlaylist((v) => !v);
                                 setNewPlaylistName("");
                             }}
-                            className="w-6 h-6 flex items-center justify-center bg-[var(--bg-primary)] border-2 border-white/10 text-[var(--text-muted)] hover:text-[#a855f7] hover:border-[#a855f7]/50 hover:bg-[#a855f7]/5 transition-all"
+                            className="w-6 h-6 flex items-center justify-center bg-[var(--bg-primary)] border-2 border-white/10 text-[var(--text-muted)] hover:text-[#a855f7] hover:border-[#a855f7]/50 hover:bg-[#a855f7]/5 transition-all duration-200"
                             aria-label="Create playlist"
                             title="Create Playlist"
                         >
@@ -425,7 +425,7 @@ export function Sidebar() {
                                         href={`/playlist/${playlist.id}`}
                                         prefetch={false}
                                         className={cn(
-                                            "flex items-center gap-3 py-2 px-2 border-l-2 transition-all group",
+                                            "flex items-center gap-3 py-2 px-2 border-l-2 transition-all duration-200 group",
                                             isActive ?
                                                 "bg-[var(--bg-primary)] border-[#a855f7] text-white"
                                             :   "border-transparent text-[var(--text-muted)] hover:text-white hover:bg-white/5 hover:border-white/20",
@@ -434,7 +434,7 @@ export function Sidebar() {
                                         {/* Stack index */}
                                         <span
                                             className={cn(
-                                                "w-5 t-meta font-semibold text-center shrink-0",
+                                                "w-5 t-meta font-semibold text-center shrink-0 transition-colors duration-200",
                                                 isActive ? "text-[#a855f7]" : (
                                                     "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]"
                                                 ),
@@ -448,7 +448,7 @@ export function Sidebar() {
                                             <div className="flex items-center gap-1.5">
                                                 <div
                                                     className={cn(
-                                                        "text-xs font-semibold tracking-tight truncate",
+                                                        "text-xs font-semibold tracking-tight truncate transition-colors duration-200",
                                                         isActive ? "text-white"
                                                         :   "group-hover:text-white",
                                                     )}
@@ -468,7 +468,7 @@ export function Sidebar() {
                                             </div>
                                             <div
                                                 className={cn(
-                                                    "t-meta truncate mt-0.5",
+                                                    "t-meta truncate mt-0.5 transition-colors duration-200",
                                                     isActive ? ""
                                                     : "group-hover:text-[var(--text-secondary)]",
                                                 )}

@@ -122,7 +122,7 @@ export function ActivityPanel({
                                     key={tab.id}
                                     onClick={() => handleTabClick(tab.id)}
                                     className={cn(
-                                        "flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors relative",
+                                        "flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors duration-200 relative",
                                         resolvedActiveTab === tab.id
                                             ? "text-white border-b-2 border-[#f5c518]"
                                             : "text-[var(--text-secondary)] hover:text-white/70"
@@ -173,7 +173,7 @@ export function ActivityPanel({
             {/* Panel container - slides via transform (GPU-accelerated, no layout recalc) */}
             <div
                 id="activity-panel"
-                className="absolute inset-y-0 right-0 w-[450px] bg-[var(--bg-primary)] flex flex-col overflow-hidden transition-transform duration-200 ease-out"
+                className="absolute inset-y-0 right-0 w-[450px] bg-[var(--bg-primary)] flex flex-col overflow-hidden transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]"
                 style={{
                     transform: isOpen ? 'translateX(0)' : 'translateX(402px)',
                     willChange: 'transform',
@@ -199,7 +199,7 @@ export function ActivityPanel({
                 {/* Expanded content */}
                 <div
                     className={cn(
-                        "flex flex-col h-full transition-opacity duration-150",
+                        "flex flex-col h-full transition-opacity duration-300",
                         isOpen ? "opacity-100" : "opacity-0 pointer-events-none"
                     )}
                 >
@@ -236,7 +236,7 @@ export function ActivityPanel({
                                 key={tab.id}
                                 onClick={() => handleTabClick(tab.id)}
                                 className={cn(
-                                    "flex-1 flex items-center justify-center gap-2 py-2.5 px-2 text-xs tabular-nums font-semibold transition-all relative whitespace-nowrap border-l-2",
+                                    "flex-1 flex items-center justify-center gap-2 py-2.5 px-2 text-xs tabular-nums font-semibold transition-all duration-200 relative whitespace-nowrap border-l-2",
                                     resolvedActiveTab === tab.id
                                         ? "bg-[var(--bg-secondary)] border-[#eab308] text-white"
                                         : "border-transparent text-[var(--text-muted)] hover:text-white hover:bg-white/5"

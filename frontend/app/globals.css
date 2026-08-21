@@ -50,6 +50,42 @@
      * ─────────────────────────────────────────────────────────────────── */
     --default-transition-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
     --default-transition-duration: 200ms;
+
+    /* ── Animation primitives ─────────────────────────────────────────────
+     * Shared keyframes for the sitewide motion pass. Consume them as
+     * utilities -- animate-rise, animate-fade-soft, animate-pop,
+     * animate-panel-up, animate-panel-down -- and stagger with a per-item
+     * [animation-delay:calc(var(--i)*45ms)] capped so the ninth child and
+     * beyond arrive with no delay. Easing is the house quart curve; reduced
+     * motion is zeroed globally (durations and delays), so these need no
+     * per-site guard. Exits run at roughly three quarters of their entrance.
+     * ─────────────────────────────────────────────────────────────────── */
+    --animate-rise: rise 300ms cubic-bezier(0.25, 1, 0.5, 1) both;
+    --animate-fade-soft: fade-soft 200ms cubic-bezier(0.25, 1, 0.5, 1) both;
+    --animate-pop: pop 200ms cubic-bezier(0.25, 1, 0.5, 1) both;
+    --animate-panel-up: panel-up 300ms cubic-bezier(0.25, 1, 0.5, 1) both;
+    --animate-panel-down: panel-down 220ms cubic-bezier(0.25, 1, 0.5, 1) both;
+
+    @keyframes rise {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fade-soft {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    @keyframes pop {
+        from { opacity: 0; transform: scale(0.96); }
+        to { opacity: 1; transform: scale(1); }
+    }
+    @keyframes panel-up {
+        from { opacity: 0; transform: translateY(16px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes panel-down {
+        from { opacity: 1; transform: translateY(0); }
+        to { opacity: 0; transform: translateY(8px); }
+    }
 }
 
 :root {

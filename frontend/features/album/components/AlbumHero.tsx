@@ -42,7 +42,7 @@ export function AlbumHero({
     const totalDuration = formatDuration(album.duration);
 
     return (
-        <div className="relative">
+        <div className="relative animate-rise">
             {/* Background Image with VibrantJS gradient */}
             {coverUrl ? (
                 <div className="absolute inset-0 overflow-hidden">

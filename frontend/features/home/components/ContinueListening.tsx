@@ -5,7 +5,8 @@ import Image from "next/image";
 import { Music, Disc, BookOpen } from "lucide-react";
 import { api } from "@/lib/api";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
+import { cn } from "@/utils/cn";
 import { ListenedItem } from "../types";
 
 interface ContinueListeningProps {
@@ -24,19 +25,10 @@ const getImageForItem = (item: ListenedItem) => {
 
 const getDescriptionLabel = (item: ListenedItem) => {
     if (item.type === "podcast") {
-        if (
-            item.author &&
-            item.author.trim().length > 0 &&
-            item.author.trim().toLowerCase() !== item.name.trim().toLowerCase()
-        ) {
-            return item.author;
-        }
-        return "Podcast";
+        return item.author || "Podcast";
     }
     if (item.type === "audiobook") {
-        return item.author && item.author.trim().length > 0
-            ? item.author
-            : "Audiobook";
+        return item.author || "Audiobook";
     }
     return "Artist";
 };
@@ -74,13 +66,14 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
     const href = isPodcast
         ? `/podcasts/${item.id}`
         : isAudiobook
-        ? `/audiobooks/${item.id}`
-        : `/artist/${item.id}`;
+            ? `/audiobooks/${item.id}`
+            : `/artist/${item.id}`;
     const hasProgress =
         (isPodcast || isAudiobook) &&
         item.progress &&
         item.progress > 0;
     const colors = TYPE_COLORS[item.type] || TYPE_COLORS.artist;
+    const staggered = index < 8;
 
     return (
         <CarouselItem>
@@ -89,9 +82,13 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
                 data-tv-card
                 data-tv-card-index={index}
                 tabIndex={0}
-                className="group block"
+                className={cn(
+                    "group block",
+                    staggered && "animate-rise [animation-delay:calc(var(--i)*45ms)]",
+                )}
+                style={staggered ? { "--i": index } as CSSProperties : undefined}
             >
-                <div className={`relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden ${colors.border} transition-all duration-300 hover:shadow-lg ${colors.gradient} mx-1`}>
+                <div className={`relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden ${colors.border} transition-[border-color,box-shadow] duration-150 hover:shadow-lg ${colors.gradient} mx-1`}>
                     <div className="relative aspect-square overflow-hidden">
                         <div className="w-full h-full bg-[#181818] flex items-center justify-center">
                             {imageSrc ? (
@@ -121,9 +118,9 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
                             </div>
                         )}
                     </div>
-                        {!hasProgress && (
-                            <div className={`h-0.5 bg-gradient-to-r ${colors.accent} scale-x-0 group-hover:scale-x-100 transition-transform duration-150`} />
-                        )}
+                    {!hasProgress && (
+                        <div className={`h-0.5 bg-gradient-to-r ${colors.accent} scale-x-0 group-hover:scale-x-100 transition-transform duration-150`} />
+                    )}
                     <div className="relative z-10 p-3 bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]">
                         <h3 className="text-sm font-bold text-white truncate tracking-tight">
                             {item.name}

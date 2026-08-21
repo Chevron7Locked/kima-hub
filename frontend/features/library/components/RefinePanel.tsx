@@ -150,7 +150,7 @@ export function RefinePanel({
                     // trigger is the first thing in the toolbar at every
                     // width, so right-0 hung the panel off the start of the
                     // page: at 388px, 162px of its 288px was unreachable.
-                    className="absolute left-0 top-full mt-2 z-(--z-dropdown) w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] shadow-xl shadow-black/50 p-4 flex flex-col gap-5"
+                    className="absolute left-0 top-full mt-2 z-(--z-dropdown) w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] shadow-xl shadow-black/50 p-4 flex flex-col gap-5 animate-panel-up"
                 >
                     {/* Panel header */}
                     <div className="flex items-center justify-between">

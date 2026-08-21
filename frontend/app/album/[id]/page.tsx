@@ -226,7 +226,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
             </AlbumHero>
 
             {/* Main Content - fills remaining viewport height */}
-            <div className="relative min-h-[50vh] flex-1">
+            <div className="relative min-h-[50vh] flex-1 animate-rise">
                 {/* Dynamic color gradient */}
                 <div
                     className="absolute inset-0 pointer-events-none"

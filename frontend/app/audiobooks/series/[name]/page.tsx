@@ -205,7 +205,7 @@ export default function SeriesDetailPage() {
             </div>
 
             {/* Books List */}
-            <div className="relative px-4 md:px-8 pb-24">
+            <div className="relative px-4 md:px-8 pb-24 animate-rise">
                 <div className="max-w-[1800px] mx-auto">
                     <div>
                         <div className="flex items-center gap-3 mb-6">

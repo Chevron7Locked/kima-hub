@@ -887,7 +887,7 @@ export default function PlaylistsPage() {
             </div>
 
             {/* Content */}
-            <div className="relative px-4 md:px-8 pb-24">
+            <div className="relative px-4 md:px-8 pb-24 animate-rise">
                 <div className="max-w-[1800px] mx-auto">
                     {/* Hidden playlists notice */}
                     {showHiddenTab && (

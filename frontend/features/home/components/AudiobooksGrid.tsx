@@ -6,7 +6,8 @@ import { BookOpen } from "lucide-react";
 import { api } from "@/lib/api";
 import { Audiobook } from "../types";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
+import { cn } from "@/utils/cn";
 
 interface AudiobooksGridProps {
     audiobooks: Audiobook[];
@@ -21,6 +22,8 @@ const AudiobookCard = memo(function AudiobookCard({
     audiobook,
     index,
 }: AudiobookCardProps) {
+    const staggered = index < 8;
+
     return (
         <CarouselItem>
             <Link
@@ -28,9 +31,13 @@ const AudiobookCard = memo(function AudiobookCard({
                 data-tv-card
                 data-tv-card-index={index}
                 tabIndex={0}
-                className="group block"
+                className={cn(
+                    "group block",
+                    staggered && "animate-rise [animation-delay:calc(var(--i)*45ms)]",
+                )}
+                style={staggered ? { "--i": index } as CSSProperties : undefined}
             >
-                <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#f59e0b]/40 transition-all duration-300 hover:shadow-lg hover:shadow-[#f59e0b]/10 mx-1">
+                <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#f59e0b]/40 transition-[border-color,box-shadow] duration-150 hover:shadow-lg hover:shadow-[#f59e0b]/10 mx-1">
                     <div className="relative aspect-square">
                         <div className="w-full h-full bg-[#181818] flex items-center justify-center overflow-hidden">
                             {audiobook.coverUrl ? (

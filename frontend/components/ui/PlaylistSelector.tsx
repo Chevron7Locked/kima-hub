@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { api } from "@/lib/api";
 import { X, Plus, Music2, Check } from "lucide-react";
 import { GradientSpinner } from "./GradientSpinner";
@@ -157,11 +157,11 @@ export function PlaylistSelector({
 
     return (
         <div
-            className="fixed inset-0 bg-black/80 flex items-center justify-center z-(--z-modal) p-4"
+            className="fixed inset-0 bg-black/80 flex items-center justify-center z-(--z-modal) p-4 transition-opacity duration-200"
             onClick={onClose}
         >
             <div
-                className="bg-linear-to-b from-[#121212] to-[#121212] rounded-xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col border border-white/10 shadow-2xl"
+                className="bg-linear-to-b from-[#121212] to-[#121212] rounded-xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col border border-white/10 shadow-2xl animate-pop"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-center justify-between p-6 border-b border-white/10">
@@ -206,18 +206,21 @@ export function PlaylistSelector({
                             </p>
                         </div>
                     ) : (
-                        playlists.map((playlist) => {
+                        playlists.map((playlist, i) => {
                             const isSelected = selected.has(playlist.id);
                             return (
                                 <button
                                     key={playlist.id}
                                     onClick={() => handleSelectPlaylist(playlist.id)}
                                     className={`w-full text-left px-4 py-4 rounded-lg transition-all border group ${
+                                        i < 8 ? `animate-rise [animation-delay:calc(var(--i)*45ms)]` : ""
+                                    } ${
                                         isMulti && isSelected
                                             ? "bg-[var(--color-brand)]/10 border-[var(--color-brand)]/30"
                                             : "bg-white/5 hover:bg-white/10 border-white/5 hover:border-white/10"
                                     }`}
                                     disabled={isSaving || isConfirming}
+                                    style={{ "--i": i } as CSSProperties}
                                 >
                                     <div className="flex items-center justify-between">
                                         {isMulti && (

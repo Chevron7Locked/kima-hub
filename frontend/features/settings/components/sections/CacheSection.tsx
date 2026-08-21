@@ -46,7 +46,7 @@ function ProgressBar({
         <div className="flex items-center gap-2 flex-1">
             <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
                 <div
-                    className={`h-full ${color} transition-all duration-500 ease-out`}
+                    className={`h-full ${color} transition-all duration-200`}
                     style={{ width: `${Math.min(100, progress)}%` }}
                 />
             </div>

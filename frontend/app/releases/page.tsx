@@ -123,7 +123,7 @@ export default function ReleasesPage() {
                 </div>
             </div>
 
-            <div className="px-4 md:px-8 space-y-10">
+            <div className="px-4 md:px-8 space-y-10 animate-rise">
                 {/* Upcoming Releases */}
                 {data?.upcoming && data.upcoming.length > 0 && (
                     <section>

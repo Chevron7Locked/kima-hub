@@ -20,6 +20,7 @@ interface TracksListProps {
     onAddToPlaylist: (playlistId: string, trackId: string) => void;
     onDelete: (trackId: string, trackTitle: string) => void;
     isLoading?: boolean;
+    gridKey?: number;
 }
 
 
@@ -61,11 +62,13 @@ const TrackRow = memo(
                 data-tv-card
                 data-tv-card-index={index}
                 tabIndex={0}
+                style={{ "--i": index } as React.CSSProperties}
                 className={cn(
-                    "grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_1fr_auto] items-center gap-3 px-4 py-3 rounded-lg border-2 transition-all group cursor-pointer touch-manipulation",
+                    "grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_1fr_auto] items-center gap-3 px-4 py-3 rounded-lg border-2 transition-all duration-200 group cursor-pointer touch-manipulation",
                     isCurrentlyPlaying
                         ? "bg-[#a855f7]/10 border-[#a855f7]/30 "
                         : "bg-[var(--bg-primary)] border-white/5 hover:border-[#a855f7]/30 hover:bg-[#a855f7]/5",
+                    index < 8 ? "animate-rise [animation-delay:calc(var(--i)*45ms)]" : "",
                 )}
             >
                 {/* Track number / Play button */}
@@ -88,7 +91,7 @@ const TrackRow = memo(
                                 <AudioLines className="w-4 h-4 text-[#a855f7]" />
                             :   displayTrackLabel}
                         </span>
-                        <Play className="w-4 h-4 text-[#a855f7] hidden group-hover:block fill-current" />
+                        <Play className="w-4 h-4 text-[#a855f7] opacity-0 group-hover:opacity-100 transition-opacity duration-150 fill-current" />
                     </button>
                 </div>
 
@@ -137,7 +140,7 @@ const TrackRow = memo(
                             e.stopPropagation();
                             onAddToQueue(track);
                         }}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-white/20"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all duration-150 border border-transparent hover:border-white/20"
                         title="Add to Queue"
                     >
                         <ListPlus className="w-4 h-4" />
@@ -147,7 +150,7 @@ const TrackRow = memo(
                             e.stopPropagation();
                             onShowAddToPlaylist(track.id);
                         }}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-white/20"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all duration-150 border border-transparent hover:border-white/20"
                         title="Add to Playlist"
                     >
                         <Plus className="w-4 h-4" />
@@ -157,7 +160,7 @@ const TrackRow = memo(
                             e.stopPropagation();
                             onDelete(track.id, track.title);
                         }}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-red-500/30"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all duration-150 border border-transparent hover:border-red-500/30"
                         title="Delete Track"
                     >
                         <Trash2 className="w-4 h-4" />
@@ -185,6 +188,7 @@ export function TracksList({
     onAddToPlaylist,
     onDelete,
     isLoading = false,
+    gridKey,
 }: TracksListProps) {
     const { currentTrack } = useAudioState();
     const currentTrackId = currentTrack?.id;
@@ -234,7 +238,7 @@ export function TracksList({
                 <div className="w-[140px] text-right pr-2 text-xs font-semibold text-[#a855f7]">Duration</div>
             </div>
 
-            <div data-tv-section="library-tracks" className="space-y-1">
+            <div key={gridKey} data-tv-section="library-tracks" className="space-y-1">
                 {tracks.map((track, index) => {
                     const isCurrentlyPlaying = currentTrackId === track.id;
                     return (

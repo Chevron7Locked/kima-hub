@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type CSSProperties } from "react";
 import { api, MoodType, MoodBucketPreset } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { Track } from "@/lib/audio-state-context";
@@ -204,15 +204,11 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
 
     return (
         <div
-            className={`fixed inset-0 z-(--z-modal) bg-black/80 flex items-center justify-center p-4 transition-opacity duration-200 ${
-                isOpen ? "opacity-100" : "opacity-0"
-            }`}
+            className="fixed inset-0 z-(--z-modal) bg-black/80 flex items-center justify-center p-4 animate-fade-soft"
             onClick={onClose}
         >
             <div
-                className={`bg-gradient-to-b from-[#1a1a1a] to-[#0a0a0a] rounded-2xl max-w-lg w-full max-h-[85vh] overflow-hidden border border-white/10 shadow-2xl transition-all duration-200 ${
-                    isOpen ? "scale-100 opacity-100" : "scale-95 opacity-0"
-                }`}
+                className="bg-gradient-to-b from-[#1a1a1a] to-[#0a0a0a] rounded-2xl max-w-lg w-full max-h-[85vh] overflow-hidden border border-white/10 shadow-2xl animate-pop"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}
@@ -247,7 +243,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                     ) : (
                         /* 3x3 Mood Grid */
                         <div className="grid grid-cols-3 gap-3">
-                            {MOOD_ORDER.map((mood) => {
+                            {MOOD_ORDER.map((mood, i) => {
                                 const config = MOOD_CONFIG[mood];
                                 const Icon = config.icon;
                                 const trackCount = getTrackCount(mood);
@@ -268,12 +264,14 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                                             transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]
                                             disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100
                                             flex flex-col items-center justify-center gap-2 p-3
+                                            ${i < 8 ? `animate-rise [animation-delay:calc(var(--i)*45ms)]` : ""}
                                         `}
                                         title={
                                             isDisabled
                                                 ? `Need at least 8 tracks (have ${trackCount})`
                                                 : config.description
                                         }
+                                        style={{ "--i": i } as CSSProperties}
                                     >
                                         {/* Icon */}
                                         <div className="relative z-(--z-raised)">

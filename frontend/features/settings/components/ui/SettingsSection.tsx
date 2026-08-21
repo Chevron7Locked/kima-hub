@@ -16,7 +16,7 @@ export function SettingsSection({
     showSeparator = true
 }: SettingsSectionProps) {
     return (
-        <section id={id} className="scroll-mt-24">
+        <section id={id} className="scroll-mt-24 animate-rise">
             <div className="mb-4">
                 <div className="flex items-center gap-3 mb-1">
                     <span className="w-1 h-6 bg-gradient-to-b from-brand to-[#f97316] rounded-full shrink-0" />

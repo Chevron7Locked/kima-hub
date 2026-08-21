@@ -75,14 +75,14 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
         <>
             {/* Backdrop */}
             <div
-                className="fixed inset-0 bg-black/60 z-(--z-drawer-backdrop) transition-opacity"
+                className="fixed inset-0 bg-black/60 z-(--z-drawer-backdrop) transition-opacity duration-200"
                 onClick={onClose}
                 aria-hidden="true"
             />
 
             {/* Sidebar Drawer */}
             <div
-                className="fixed inset-y-0 left-0 w-[280px] bg-[var(--bg-primary)] z-(--z-drawer) flex flex-col overflow-hidden transform transition-transform border-r border-white/[0.06]"
+                className="fixed inset-y-0 left-0 w-[280px] bg-[var(--bg-primary)] z-(--z-drawer) flex flex-col overflow-hidden transform transition-transform duration-300 border-r border-white/[0.06]"
                 style={{
                     paddingTop: "var(--standalone-safe-area-top, 0px)",
                 }}
@@ -108,7 +108,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                     </Link>
                     <button
                         onClick={onClose}
-                        className="w-9 h-9 flex items-center justify-center text-[var(--text-muted)] hover:text-white transition-colors rounded-full hover:bg-white/10"
+                className="w-9 h-9 flex items-center justify-center text-[var(--text-muted)] hover:text-white transition-colors duration-200 rounded-full hover:bg-white/10"
                         aria-label="Close menu"
                     >
                         <X className="w-5 h-5" />
@@ -134,7 +134,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             }
                             aria-label="Discover"
                             className={cn(
-                                "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors",
+                                "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200",
                                 pathname === "/discover" ?
                                     "bg-white/10 text-white"
                                 :   "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
@@ -153,7 +153,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             }
                             aria-label="Radio"
                             className={cn(
-                                "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors",
+                                "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200",
                                 pathname === "/radio" ?
                                     "bg-white/10 text-white"
                                 :   "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
@@ -176,7 +176,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             onClick={handleSync}
                             disabled={isSyncing}
                             className={cn(
-                                "w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-colors text-left",
+                                "w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200 text-left",
                                 isSyncing ? "text-green-400" : (
                                     "text-[var(--text-secondary)] hover:text-white hover:bg-white/5"
                                 ),
@@ -199,7 +199,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                                 pathname === "/settings" ? "page" : undefined
                             }
                             className={cn(
-                                "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors",
+                                "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200",
                                 pathname === "/settings" ?
                                     "bg-white/10 text-white"
                                 :   "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
@@ -217,7 +217,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                 <div className="border-t border-white/[0.06] p-3">
                     <button
                         onClick={handleLogout}
-                        className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                        className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors duration-200"
                     >
                         <LogOut className="w-5 h-5" />
                         <span className="text-sm font-medium">Logout</span>

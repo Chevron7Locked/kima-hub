@@ -384,7 +384,7 @@ export default function AudiobooksPage() {
                 </div>
             </div>
 
-            <div className="relative px-4 md:px-8 pb-24">
+            <div className="relative px-4 md:px-8 pb-24 animate-rise">
                 <div className="max-w-[1800px] mx-auto">
                     {/* Filter and Sort Controls */}
                     <div className="mb-8 space-y-3">

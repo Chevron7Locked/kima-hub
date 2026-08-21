@@ -3,9 +3,10 @@
 import { Music2, Play } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
-import { memo, useCallback } from "react";
+import { memo, useCallback, type CSSProperties } from "react";
 import Image from "next/image";
 import { PlaylistPreview } from "../types";
+import { cn } from "@/utils/cn";
 
 interface FeaturedPlaylistsGridProps {
     playlists: PlaylistPreview[];
@@ -28,6 +29,8 @@ const PlaylistCard = memo(function PlaylistCard({
     index,
     onClick,
 }: PlaylistCardProps) {
+    const staggered = index < 8;
+
     return (
         <CarouselItem>
             <div
@@ -35,9 +38,13 @@ const PlaylistCard = memo(function PlaylistCard({
                 data-tv-card
                 data-tv-card-index={index}
                 tabIndex={0}
-                className="group block cursor-pointer"
+                className={cn(
+                    "group block cursor-pointer",
+                    staggered && "animate-rise [animation-delay:calc(var(--i)*45ms)]",
+                )}
+                style={staggered ? { "--i": index } as CSSProperties : undefined}
             >
-                <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#a855f7]/40 transition-all duration-300 hover:shadow-lg hover:shadow-[#a855f7]/10 mx-1">
+                <div className="relative bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden hover:border-[#a855f7]/40 transition-[border-color,box-shadow] duration-150 hover:shadow-lg hover:shadow-[#a855f7]/10 mx-1">
                     <div className="relative aspect-square">
                         <div className="w-full h-full bg-[#181818] flex items-center justify-center overflow-hidden">
                             {playlist.imageUrl ? (
@@ -78,7 +85,7 @@ const PlaylistCard = memo(function PlaylistCard({
 
 export function FeaturedPlaylistsSkeleton() {
     return (
-        <div className="flex gap-3 overflow-hidden">
+        <div className="flex gap-3 overflow-hidden animate-fade-soft">
             {[...Array(8)].map((_, i) => (
                 <div key={i} className="flex-shrink-0 w-[140px] sm:w-[160px] md:w-[170px] lg:w-[180px]">
                     <div className="bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden mx-1">

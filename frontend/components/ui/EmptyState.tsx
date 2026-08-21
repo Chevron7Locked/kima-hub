@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, memo } from "react";
+import { ReactNode, memo, type CSSProperties } from "react";
 import { Button } from "./Button";
 
 export interface EmptyStateProps {
@@ -24,11 +24,11 @@ const EmptyState = memo(function EmptyState({
 }: EmptyStateProps) {
     return (
         <div className="flex flex-col items-center justify-center py-12 md:py-16 text-center px-4">
-            <div className="mb-4 text-[var(--text-muted)]">{icon}</div>
-            <h3 className="text-lg md:text-xl font-medium text-white mb-2">
+            <div className="mb-4 text-[var(--text-muted)] animate-rise">{icon}</div>
+            <h3 className="text-lg md:text-xl font-medium text-white mb-2 animate-rise [animation-delay:calc(var(--i)*45ms)]" style={{ "--i": 1 } as CSSProperties}>
                 {title}
             </h3>
-            <p className="text-sm md:text-base text-[var(--text-muted)] mb-6 max-w-md">
+            <p className="text-sm md:text-base text-[var(--text-muted)] mb-6 max-w-md animate-rise [animation-delay:calc(var(--i)*45ms)]" style={{ "--i": 2 } as CSSProperties}>
                 {description}
             </p>
             {children}

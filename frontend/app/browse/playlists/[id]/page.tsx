@@ -380,7 +380,7 @@ export default function DeezerPlaylistDetailPage() {
             </div>
 
             {/* Track Listing */}
-            <div className="relative px-4 md:px-8 pb-32">
+            <div className="relative px-4 md:px-8 pb-32 animate-rise">
                 <div className="max-w-[1800px] mx-auto">
                     {playlist.tracks.length > 0 ? (
                         <div>

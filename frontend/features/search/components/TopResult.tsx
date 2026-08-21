@@ -26,13 +26,13 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
     return (
         <Link
             href={`/artist/${artistId}`}
-            className="group relative block overflow-hidden rounded-2xl bg-gradient-to-br from-[#1a1a1a] to-[#0f0f0f] border border-white/5 hover:border-[#eab308]/30 transition-all duration-500 hover:scale-[1.02] hover:shadow-2xl hover:shadow-[#eab308]/10"
+            className="group relative block overflow-hidden rounded-2xl bg-gradient-to-br from-[#1a1a1a] to-[#0f0f0f] border border-white/5 hover:border-[#eab308]/30 transition-all duration-200 hover:scale-[1.02] hover:shadow-2xl hover:shadow-[#eab308]/10"
             data-tv-card
             data-tv-card-index={0}
             tabIndex={0}
         >
             {/* Background Image with Overlay */}
-            <div className="absolute inset-0 opacity-20 group-hover:opacity-30 transition-opacity duration-500">
+            <div className="absolute inset-0 opacity-20 group-hover:opacity-30 transition-opacity duration-200">
                 {imageUrl ? (
                     <Image
                         src={api.getCoverArtUrl(imageUrl, 400)}
@@ -51,7 +51,7 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
             <div className="relative p-8 flex items-end min-h-[280px]">
                 <div className="flex items-center gap-6 w-full">
                     {/* Artist Image */}
-                    <div className="relative w-32 h-32 rounded-2xl bg-[#181818] flex items-center justify-center overflow-hidden shrink-0 ring-2 ring-white/10 group-hover:ring-[#eab308]/50 transition-all duration-500">
+                    <div className="relative w-32 h-32 rounded-2xl bg-[#181818] flex items-center justify-center overflow-hidden shrink-0 ring-2 ring-white/10 group-hover:ring-[#eab308]/50 transition-all duration-200">
                         {imageUrl ? (
                             <Image
                                 src={api.getCoverArtUrl(imageUrl, 200)}
@@ -65,7 +65,7 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
                         ) : (
                             <Music className="w-16 h-16 text-[var(--text-muted)]" />
                         )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
                     </div>
 
                     {/* Text Content */}
@@ -79,7 +79,7 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
                                 {isLibrary ? "Your Library" : "Discover"}
                             </span>
                         </div>
-                        <h3 className="text-4xl font-bold text-white mb-2 leading-tight truncate group-hover:text-[#eab308] transition-colors duration-300">
+                        <h3 className="text-4xl font-bold text-white mb-2 leading-tight truncate group-hover:text-[#eab308] transition-colors duration-200">
                             {name}
                         </h3>
                         <div className="flex items-center gap-2 text-[var(--text-secondary)] group-hover:text-gray-300 transition-colors">

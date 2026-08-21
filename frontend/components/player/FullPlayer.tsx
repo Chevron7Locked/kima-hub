@@ -121,7 +121,7 @@ export function FullPlayer() {
                                 href={mediaLink}
                                 className="relative w-14 h-14 flex-shrink-0"
                             >
-                                <div className="relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center">
+                                <div className={cn("relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center", "transition-transform duration-300", isPlaying && "scale-[1.03]")}>
                                     {coverUrl ? (
                                         <Image
                                             key={coverUrl}
@@ -140,7 +140,7 @@ export function FullPlayer() {
                             </Link>
                         ) : (
                             <div className="relative w-14 h-14 flex-shrink-0">
-                                <div className="relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center">
+                                <div className={cn("relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center", "transition-transform duration-300", isPlaying && "scale-[1.03]")}>
                                     <MusicIcon className="w-6 h-6 text-[var(--text-muted)]" />
                                 </div>
                             </div>
@@ -293,9 +293,9 @@ export function FullPlayer() {
                                 ) : isBuffering ? (
                                     <Loader2 className="w-5 h-5 animate-spin relative z-(--z-raised)" />
                                 ) : isPlaying ? (
-                                    <Pause className="w-5 h-5 relative z-(--z-raised)" />
+                                    <span className="animate-pop"><Pause className="w-5 h-5 relative z-(--z-raised)" /></span>
                                 ) : (
-                                    <Play className="w-5 h-5 ml-0.5 relative z-(--z-raised)" />
+                                    <span className="animate-pop"><Play className="w-5 h-5 ml-0.5 relative z-(--z-raised)" /></span>
                                 )}
                             </button>
 

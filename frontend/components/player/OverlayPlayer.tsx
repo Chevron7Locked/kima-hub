@@ -164,23 +164,26 @@ export function OverlayPlayer() {
                         />
 
                         {/* Album art */}
-                        <div className="relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-2xl overflow-hidden shadow-2xl">
-                            {coverUrl ? (
-                                <Image
-                                    key={coverUrl}
-                                    src={coverUrl}
-                                    alt={title}
-                                    fill
-                                    sizes="280px"
-                                    className="object-cover"
-                                    priority
-                                    unoptimized
-                                />
-                            ) : (
-                                <div className="w-full h-full flex items-center justify-center">
-                                    <MusicIcon className="w-24 h-24 text-[var(--text-muted)]" />
-                                </div>
-                            )}
+                        <div className={cn(
+                            "relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-2xl overflow-hidden shadow-2xl transition-transform duration-300",
+                            isPlaying && "scale-[1.03]"
+                        )}>
+                        {coverUrl ? (
+                            <Image
+                                key={coverUrl}
+                                src={coverUrl}
+                                alt={title}
+                                fill
+                                sizes="280px"
+                                className="object-cover"
+                                priority
+                                unoptimized
+                            />
+                        ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                                <MusicIcon className="w-24 h-24 text-[var(--text-muted)]" />
+                            </div>
+                        )}
                         </div>
 
                         {/* Swipe hint indicators */}
@@ -317,9 +320,9 @@ export function OverlayPlayer() {
                             ) : isBuffering ? (
                                 <Loader2 className="w-7 h-7 animate-spin" />
                             ) : isPlaying ? (
-                                <Pause className="w-7 h-7" />
+                                <span className="animate-pop"><Pause className="w-7 h-7" /></span>
                             ) : (
-                                <Play className="w-7 h-7 ml-1" />
+                                <span className="animate-pop"><Play className="w-7 h-7 ml-1" /></span>
                             )}
                         </button>
 

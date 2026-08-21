@@ -51,8 +51,10 @@ function EpisodeRow({
                 "group relative rounded-lg transition-all",
                 isCurrentEpisode
                     ? "bg-white/5 border border-[#3b82f6]/30"
-                    : "border border-transparent hover:bg-white/[0.03] hover:border-white/5"
+                    : "border border-transparent hover:bg-white/[0.03] hover:border-white/5",
+                index < 8 && "animate-rise",
             )}
+            style={index < 8 ? { animationDelay: `${index * 45}ms` } : undefined}
         >
             {/* Progress bar */}
             {episode.progress && episode.progress.progress > 0 && (
@@ -120,14 +122,14 @@ function EpisodeRow({
                             </span>
                             {isCurrentEpisode && isPlaying ? (
                                 <Pause
-                                    className="w-4 h-4 text-[#3b82f6] cursor-pointer"
+                                    className="w-4 h-4 text-[#3b82f6] cursor-pointer animate-pulse"
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         onPlayPause(episode);
                                     }}
-                                />
+                            />
                             ) : (
-                                <Play
+                            <Play
                                     className={cn(
                                         "w-4 h-4 cursor-pointer",
                                         isCurrentEpisode
@@ -216,13 +218,12 @@ function EpisodeRow({
                             e.stopPropagation();
                             onMarkComplete(episode.id, episode.duration);
                         }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg hover:bg-white/10"
+                        className="opacity-0 group-hover:opacity-100 group-hover:translate-y-0 translate-y-1 transition-[opacity,transform] duration-150 p-1.5 rounded-lg hover:bg-white/10"
                         title="Mark as complete"
                     >
                         <CheckCircle className="w-4 h-4 text-[var(--text-muted)] hover:text-green-400 transition-colors" />
                     </button>
                 )}
-            </div>
 
             {/* Expanded description */}
             {expanded && hasDescription && (
@@ -235,6 +236,7 @@ function EpisodeRow({
                     />
                 </div>
             )}
+        </div>
         </div>
     );
 }

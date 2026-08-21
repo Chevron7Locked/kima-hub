@@ -100,7 +100,7 @@ export function ConfirmDialog({
 
     return (
         <div
-            className="fixed inset-0 bg-black/75 flex items-center justify-center z-(--z-modal) p-4 animate-fadeIn"
+            className="fixed inset-0 bg-black/75 flex items-center justify-center z-(--z-modal) p-4 transition-opacity duration-200"
             onClick={onClose}
         >
             <div
@@ -109,7 +109,7 @@ export function ConfirmDialog({
                 aria-modal="true"
                 aria-labelledby="confirm-dialog-title"
                 aria-describedby="confirm-dialog-message"
-                className="bg-[#121212] rounded-xl max-w-md w-full overflow-hidden border border-white/10 shadow-2xl animate-slideUp"
+                className="bg-[#121212] rounded-xl max-w-md w-full overflow-hidden border border-white/10 shadow-2xl animate-pop"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}
@@ -139,48 +139,18 @@ export function ConfirmDialog({
                     <button
                         ref={cancelRef}
                         onClick={onClose}
-                        className="flex-1 px-4 py-3 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-lg transition-all border border-white/10"
+                        className="flex-1 px-4 py-3 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-lg transition-colors duration-150 border border-white/10"
                     >
                         {cancelText}
                     </button>
                     <button
                         onClick={handleConfirm}
-                        className={`flex-1 px-4 py-3 font-semibold rounded-lg transition-all ${styles.confirmButton}`}
+                        className={`flex-1 px-4 py-3 font-semibold rounded-lg transition-colors duration-150 ${styles.confirmButton}`}
                     >
                         {confirmText}
                     </button>
                 </div>
             </div>
-
-            <style jsx global>{`
-                @keyframes fadeIn {
-                    from {
-                        opacity: 0;
-                    }
-                    to {
-                        opacity: 1;
-                    }
-                }
-
-                @keyframes slideUp {
-                    from {
-                        transform: translateY(20px);
-                        opacity: 0;
-                    }
-                    to {
-                        transform: translateY(0);
-                        opacity: 1;
-                    }
-                }
-
-                .animate-fadeIn {
-                    animation: fadeIn 0.2s ease-out;
-                }
-
-                .animate-slideUp {
-                    animation: slideUp 0.3s ease-out;
-                }
-            `}</style>
         </div>
     );
 }

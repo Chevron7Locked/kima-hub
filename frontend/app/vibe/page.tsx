@@ -308,7 +308,7 @@ export default function VibePage() {
     }
 
     return (
-        <div className="w-full h-full relative overflow-hidden">
+        <div className="w-full h-full relative overflow-hidden animate-rise">
                 <VibeMapErrorBoundary>
                     {effectiveView === "map" ? (
                         <VibeMap

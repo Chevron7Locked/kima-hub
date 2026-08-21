@@ -103,16 +103,25 @@ const TrackRow = memo(
                 data-track-row
                 data-tv-card
                 data-tv-card-index={index}
+                data-track-index={index}
                 tabIndex={0}
                 className={cn(
                     "group relative flex items-center gap-3 md:gap-4 px-3 md:px-4 py-3 hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer touch-manipulation",
                     isPlaying && "bg-[var(--bg-hover)] border-l-2",
-                    isPreviewOnly && "opacity-70 hover:opacity-90"
+                    isPreviewOnly && "opacity-70 hover:opacity-90",
+                    index < 8 && "animate-rise",
                 )}
                 style={
-                    isPlaying
-                        ? { borderLeftColor: colors?.vibrant || "#a855f7" }
-                        : undefined
+                    index < 8
+                        ? {
+                              animationDelay: `${index * 45}ms`,
+                              ...(isPlaying
+                                  ? { borderLeftColor: colors?.vibrant || "#a855f7" }
+                                  : {}),
+                          }
+                        : isPlaying
+                          ? { borderLeftColor: colors?.vibrant || "#a855f7" }
+                          : undefined
                 }
                 {...doubleTapProps}
                 onKeyDown={(e) => {
@@ -139,7 +148,7 @@ const TrackRow = memo(
                             className={cn(
                                 "group-hover:hidden text-sm",
                                 isPlaying
-                                    ? "text-purple-400 font-bold"
+                                    ? "text-purple-400 font-bold animate-pulse"
                                     : "text-[var(--text-muted)]"
                             )}
                         >
@@ -194,7 +203,7 @@ const TrackRow = memo(
                     <>
                         <button
                             onClick={handleAddToQueue}
-                            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-2 hover:bg-[#2a2a2a] rounded-full transition-all text-[var(--text-secondary)] hover:text-white"
+                            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:translate-y-1 sm:hover:translate-y-0 p-2 hover:bg-[#2a2a2a] rounded-full transition-[opacity,transform] duration-150 text-[var(--text-secondary)] hover:text-white"
                             aria-label="Add to queue"
                             title="Add to queue"
                         >
@@ -202,7 +211,7 @@ const TrackRow = memo(
                         </button>
                         <button
                             onClick={handleAddToPlaylist}
-                            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-2 hover:bg-[#2a2a2a] rounded-full transition-all text-[var(--text-secondary)] hover:text-white"
+                            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:translate-y-1 sm:hover:translate-y-0 p-2 hover:bg-[#2a2a2a] rounded-full transition-[opacity,transform] duration-150 text-[var(--text-secondary)] hover:text-white"
                             aria-label="Add to playlist"
                             title="Add to playlist"
                         >

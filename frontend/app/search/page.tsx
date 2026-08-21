@@ -83,12 +83,12 @@ export default function SearchPage() {
     return (
         <div className="min-h-screen relative overflow-hidden">
             {/* Main content */}
-            <div className="relative z-(--z-raised) px-6 py-8 max-w-[1600px] mx-auto">
+            <div className="relative z-(--z-raised) px-6 py-8 max-w-[1600px] mx-auto animate-rise">
                 <TVSearchInput initialQuery={query} onSearch={handleTVSearch} />
 
                 {/* Hero Header - Only show when no search */}
                 {!hasSearched && (
-                    <div className="mb-12 text-center animate-fade-in">
+                    <div className="mb-12 text-center animate-rise">
                         <div className="inline-flex items-center gap-3 mb-4 text-[#eab308]">
                             <span className="text-sm font-semibold">
                                 Discovery Engine
@@ -162,7 +162,7 @@ export default function SearchPage() {
 
                 {/* Soulseek Tab */}
                 {filterTab === "soulseek" && hasSearched && (
-                    <div>
+                    <div className="animate-fade-soft">
                         <SoulseekBrowser
                             results={soulseekResults}
                             isSearching={isSoulseekSearching}
@@ -180,7 +180,7 @@ export default function SearchPage() {
                 {filterTab !== "soulseek" && (
                     <div className="space-y-12">
                         {show2ColumnLayout ?
-                            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.5fr] gap-8">
+                            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.5fr] gap-8 animate-fade-soft">
                                 {/* Featured Result - Larger card */}
                                 <div className="space-y-4">
                                     <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3">
@@ -223,7 +223,7 @@ export default function SearchPage() {
                                 {hasSearched &&
                                     (showDiscover || showLibrary) &&
                                     hasTopResult && (
-                                        <section>
+                                        <section className="animate-fade-soft">
                                             <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                                 <span className="w-1 h-8 bg-gradient-to-b from-[#eab308] to-[#f59e0b] rounded-full" />
                                                 Top Match
@@ -238,7 +238,7 @@ export default function SearchPage() {
                                     )}
 
                                 {hasSearched && hasTracks && (
-                                    <section>
+                                    <section className="animate-fade-soft">
                                         <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                             <span className="w-1 h-8 bg-gradient-to-b from-[#a855f7] to-[#c026d3] rounded-full" />
                                             Tracks
@@ -272,7 +272,7 @@ export default function SearchPage() {
                         {hasSearched &&
                             showLibrary &&
                             (libraryResults?.albums?.length ?? 0) > 0 && (
-                                <section>
+                                <section className="animate-fade-soft">
                                     <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                         <span className="w-1 h-8 bg-gradient-to-b from-[#22c55e] to-[#16a34a] rounded-full" />
                                         Albums
@@ -287,7 +287,7 @@ export default function SearchPage() {
                         {hasSearched &&
                             showLibrary &&
                             (libraryResults?.podcasts?.length ?? 0) > 0 && (
-                                <section>
+                                <section className="animate-fade-soft">
                                     <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                         <span className="w-1 h-8 bg-gradient-to-b from-[#3b82f6] to-[#2563eb] rounded-full" />
                                         Podcasts
@@ -302,7 +302,7 @@ export default function SearchPage() {
                         {hasSearched &&
                             showLibrary &&
                             (libraryResults?.audiobooks?.length ?? 0) > 0 && (
-                                <section>
+                                <section className="animate-fade-soft">
                                     <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                         <span className="w-1 h-8 bg-gradient-to-b from-[#f59e0b] to-[#d97706] rounded-full" />
                                         Audiobooks
@@ -317,7 +317,7 @@ export default function SearchPage() {
                         {hasSearched &&
                             showDiscover &&
                             similarArtists.length > 0 && (
-                                <section>
+                                <section className="animate-fade-soft">
                                     <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3 mb-6">
                                         <span className="w-1 h-8 bg-gradient-to-b from-[#fca200] to-[#d48c00] rounded-full" />
                                         Related Artists
@@ -342,7 +342,7 @@ export default function SearchPage() {
                             !libraryResults.podcasts?.length &&
                             !libraryResults.audiobooks?.length &&
                             !libraryResults.episodes?.length)) && (
-                        <div className="flex flex-col items-center justify-center py-32 text-center animate-fade-in">
+                        <div className="flex flex-col items-center justify-center py-32 text-center animate-fade-soft">
                             <div className="relative mb-8">
                                 <SearchIcon className="w-20 h-20 text-[var(--text-muted)]" />
                                 <div className="absolute inset-0 bg-gradient-to-br from-[#eab308]/20 to-[#a855f7]/20 blur-2xl" />
