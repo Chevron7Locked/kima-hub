@@ -794,10 +794,10 @@ test.describe("Dogfood walkthrough", () => {
 
             // Hidden playlists are managed through the hidden view; unhide via the API
             // so the journey leaves the instance as it found it either way.
-            const res = await page.request.post(`/api/playlists/${playlistId}/unhide`, {
+            const res = await page.request.delete(`/api/playlists/${playlistId}/hide`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            expect(res.ok(), `unhiding via API returned ${res.status()}`).toBeTruthy();
+            expect(res.ok(), `unhiding (DELETE /hide) returned ${res.status()}`).toBeTruthy();
             return { hidden: true, unhiddenViaApi: true };
         });
 
