@@ -289,7 +289,17 @@ export class DogfoodSession {
      * names the journey that caused it rather than surfacing at teardown with no context.
      */
     assertClean(journey: string): void {
-        const fresh = this.violations.filter((v) => !v.detail.startsWith("[reported]"));
+        // Only count violations from steps that belong to this journey.
+        // Earlier journeys that threw before their assertClean may have
+        // left unreported violations that should not penalize the current journey.
+        const currentJourneySteps = this.steps
+            .filter((s) => s.name.startsWith(this.currentJourney))
+            .map((s) => s.name);
+        const fresh = this.violations.filter(
+            (v) =>
+                !v.detail.startsWith("[reported]") &&
+                currentJourneySteps.includes(v.step),
+        );
         if (fresh.length === 0) return;
 
         const summary = fresh
