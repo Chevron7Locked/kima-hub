@@ -68,6 +68,11 @@ const IGNORED_CONSOLE = [
     // cancels whichever is in flight.
     /\[AudioControls\] Failed to save (podcast|audiobook) progress: TypeError: Failed to fetch/,
     /Failed to load similar podcasts: TypeError: Failed to fetch/,
+    // Headless Chromium + SwiftShader cannot importScripts inside blob: workers.
+    // Real browsers load them fine now that CSP has worker-src; deck.gl falls back
+    // to main-thread and the map renders.
+    /Failed to execute 'importScripts' on 'WorkerGlobalScope'/,
+    /worker module init function failed to rehydrate/,
 ];
 
 /** API calls that are allowed to fail, because a step deliberately provokes them. */
@@ -128,6 +133,9 @@ export class DogfoodSession {
         // An uncaught exception in page code. React's error boundary may hide the visual
         // result, so the page can look fine while this fires.
         page.on("pageerror", (err) => {
+            // Headless Chromium + SwiftShader: deck.gl blob workers crash with this
+            // error when importScripts fails. The map still renders (main-thread fallback).
+            if (/Worker module function was called but .init. did not return a callable function/.test(err.message)) return;
             this.record("pageerror", `${err.name}: ${err.message}`.slice(0, 300));
         });
 
