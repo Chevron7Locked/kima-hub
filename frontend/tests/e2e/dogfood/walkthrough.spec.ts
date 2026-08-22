@@ -1300,7 +1300,7 @@ test.describe("Dogfood walkthrough", () => {
             const play = page.getByLabel("Play all").or(page.getByTitle("Play", { exact: true })).first();
             await play.waitFor({ state: "visible", timeout: 20_000 });
             await play.click();
-            await page.getByTitle("Pause", { exact: true }).waitFor({ timeout: 30_000 });
+            await page.getByLabel("Pause", { exact: true }).waitFor({ timeout: 30_000 });
 
             const read = () =>
                 page.evaluate(
