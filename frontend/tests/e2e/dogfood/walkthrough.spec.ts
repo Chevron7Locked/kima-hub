@@ -831,7 +831,7 @@ test.describe("Dogfood walkthrough", () => {
         session.setJourney("5. Collect");
 
         test.skip(
-            true,
+            facts.tracks < 10,
             `only ${facts.tracks} tracks -- too few to say anything about pipeline throughput`,
         );
 
