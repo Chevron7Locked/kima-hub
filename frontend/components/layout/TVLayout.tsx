@@ -258,7 +258,7 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
             {hasMedia && (
                 <div className="tv-now-playing-bar">
                     {coverUrl && (
-                        <Image src={coverUrl} alt={title} width={48} height={48} className="tv-np-cover" />
+                        <Image src={coverUrl} alt={title} width={48} height={48} className="tv-np-cover" unoptimized />
                     )}
                     <div className="tv-np-info">
                         <div className="tv-np-title">{title}</div>
