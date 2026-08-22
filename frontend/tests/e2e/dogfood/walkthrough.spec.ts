@@ -1567,10 +1567,11 @@ test.describe("Dogfood walkthrough", () => {
         await session.step("switch to another station without breaking", async () => {
             const readActiveSrc = () =>
                 page.evaluate(() => {
-                    const main = document.querySelector('[data-kima-player="main"]') as HTMLAudioElement | null;
-                    if (main?.src) return main.src;
-                    const next = document.querySelector('[data-kima-player="next"]') as HTMLAudioElement | null;
-                    return next?.src ?? "";
+                    const els = Array.from(
+                        document.querySelectorAll("audio[data-kima-player]"),
+                    ) as HTMLAudioElement[];
+                    const playing = els.filter((a) => !a.paused && a.currentTime > 0 && a.src);
+                    return (playing[0] ?? els.find((a) => a.src))?.src ?? "";
                 });
             const srcBefore = await readActiveSrc();
             const stations = page.locator("main button").filter({ has: page.locator("h3") });
@@ -1579,10 +1580,16 @@ test.describe("Dogfood walkthrough", () => {
                 return { switched: false, note: "only one station card visible" };
             }
             await next.click();
-            await page.waitForTimeout(3000);
             const pause = page.getByTitle("Pause", { exact: true });
             await expect(pause).toBeVisible({ timeout: 30_000 });
-            const srcAfter = await readActiveSrc();
+            // Poll for the station switch to take effect — gapless swap can leave main
+            // holding the stale src for a few hundred ms; poll until it changes or timeout.
+            let srcAfter = "";
+            for (let i = 0; i < 30; i++) {
+                srcAfter = await readActiveSrc();
+                if (srcAfter !== srcBefore) break;
+                await page.waitForTimeout(500);
+            }
             expect(srcAfter, "second station clicked but the audio source never changed").not.toBe(srcBefore);
             return { switched: true };
         });
