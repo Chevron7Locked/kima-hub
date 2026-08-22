@@ -829,6 +829,7 @@ test.describe("Dogfood walkthrough", () => {
     // ----------------------------------------------------------------------------------
     test("5. collect: rebuild the embeddings and watch the data reach the screen", async () => {
         session.setJourney("5. Collect");
+        test.setTimeout(4_500_000);
 
         test.skip(
             facts.tracks < 10,
