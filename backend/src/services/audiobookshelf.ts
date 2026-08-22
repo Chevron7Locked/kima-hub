@@ -449,6 +449,15 @@ class AudiobookshelfService {
                         continue;
                     }
 
+                    // Skip books whose source files are missing on disk (ABS marks them isMissing).
+                    if (item.isMissing) {
+                        logger.debug(
+                            `[AUDIOBOOKSHELF] Skipping "${item.media?.metadata?.title || item.id}" - source files missing`
+                        );
+                        skippedCount++;
+                        continue;
+                    }
+
                     const metadata = item.media?.metadata || {};
 
                     let series: string | null = null;
