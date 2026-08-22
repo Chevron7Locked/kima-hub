@@ -82,13 +82,13 @@ jest.mock("../../config", () => ({
 
 import express from "express";
 import request from "supertest";
-import audiobooksRoutes from "../audiobooks";
+import { UserFacingError } from "../../utils/errors";
 import type * as errorsModule from "../../utils/errors";
 import type { Response } from "express";
 import { prisma } from "../../utils/db";
 import { getSystemSettings } from "../../utils/systemSettings";
 import { audiobookCacheService } from "../../services/audiobookCache";
-import { UserFacingError } from "../../utils/errors";
+import audiobooksRoutes from "../audiobooks";
 
 function createApp() {
     const app = express();
