@@ -800,6 +800,16 @@ class ApiClient {
         });
     }
 
+    async moveTrackInPlaylist(playlistId: string, itemId: string, afterItemId: string | null) {
+        return this.request<{ success: boolean; rank: string }>(
+            `/playlists/${playlistId}/items/${itemId}/move`,
+            {
+                method: "PATCH",
+                body: JSON.stringify({ afterItemId }),
+            }
+        );
+    }
+
     async hidePlaylist(playlistId: string) {
         return this.request<{ message: string; isHidden: boolean }>(
             `/playlists/${playlistId}/hide`,

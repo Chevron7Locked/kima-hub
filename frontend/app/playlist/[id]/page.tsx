@@ -11,7 +11,7 @@ import { useAudioController } from "@/lib/audio-controller-context";
 import { cn } from "@/utils/cn";
 import { shuffleArray } from "@/utils/shuffle";
 import { formatTime } from "@/utils/formatTime";
-import { queryKeys, usePlaylistQuery, useRemoveFromPlaylistMutation, useDeletePlaylistMutation, useUpdatePlaylistMutation } from "@/hooks/useQueries";
+import { queryKeys, usePlaylistQuery, useRemoveFromPlaylistMutation, useDeletePlaylistMutation, useUpdatePlaylistMutation, useMoveTrackInPlaylistMutation } from "@/hooks/useQueries";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/lib/toast-context";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
@@ -38,6 +38,9 @@ import {
     Globe,
     Lock,
     FileX,
+    GripVertical,
+    ChevronUp,
+    ChevronDown,
 } from "lucide-react";
 import { useTrackFormat } from "@/hooks/useTrackFormat";
 import { formatTrackDisplay } from "@/lib/track-format";
@@ -94,6 +97,9 @@ export default function PlaylistDetailPage() {
     const { mutateAsync: removeTrack } = useRemoveFromPlaylistMutation();
     const { mutateAsync: deletePlaylistMut } = useDeletePlaylistMutation();
     const { mutateAsync: updatePlaylist, isPending: isUpdatingPlaylist } = useUpdatePlaylistMutation();
+    const { mutateAsync: moveTrack } = useMoveTrackInPlaylistMutation();
+    const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+    const [dragOverItemId, setDragOverItemId] = useState<string | null>(null);
     const [isEditingName, setIsEditingName] = useState(false);
     const [editName, setEditName] = useState("");
     const editSaveRef = useRef(false);
@@ -484,6 +490,74 @@ export default function PlaylistDetailPage() {
         addToQueue(formattedTrack);
     };
 
+    // ── Drag-to-reorder ──────────────────────────────────────────────────────
+
+    const handleDragStart = (itemId: string) => {
+        setDraggedItemId(itemId);
+    };
+
+    const handleDragOver = (e: React.DragEvent, itemId: string) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (dragOverItemId !== itemId) {
+            setDragOverItemId(itemId);
+        }
+    };
+
+    const handleDragEnd = () => {
+        setDraggedItemId(null);
+        setDragOverItemId(null);
+    };
+
+    const handleDrop = async (targetItemId: string) => {
+        if (!draggedItemId || draggedItemId === targetItemId) {
+            handleDragEnd();
+            return;
+        }
+        try {
+            await moveTrack({
+                playlistId,
+                itemId: draggedItemId,
+                afterItemId: targetItemId,
+            });
+        } catch {
+            toast.error("Failed to reorder track");
+        }
+        handleDragEnd();
+    };
+
+    // ── Up/down keyboard/touch reorder ───────────────────────────────────────
+
+    const handleMoveTrackUp = async (itemId: string) => {
+        if (!playlist?.items || playlist.items.length < 2) return;
+        const idx = playlist.items.findIndex((i: PlaylistItem) => i.id === itemId);
+        if (idx <= 0) return;
+        try {
+            await moveTrack({
+                playlistId,
+                itemId,
+                afterItemId: playlist.items[idx - 1].id,
+            });
+        } catch {
+            toast.error("Failed to move track");
+        }
+    };
+
+    const handleMoveTrackDown = async (itemId: string) => {
+        if (!playlist?.items || playlist.items.length < 2) return;
+        const idx = playlist.items.findIndex((i: PlaylistItem) => i.id === itemId);
+        if (idx === -1 || idx >= playlist.items.length - 1) return;
+        try {
+            await moveTrack({
+                playlistId,
+                itemId,
+                afterItemId: playlist.items[idx + 1].id,
+            });
+        } catch {
+            toast.error("Failed to move track");
+        }
+    };
+
     const rows: (PlaylistItem | PendingTrack)[] = useMemo(
         () => (playlist?.mergedItems || playlist?.items || []) as (PlaylistItem | PendingTrack)[],
         [playlist?.mergedItems, playlist?.items]
@@ -627,15 +701,29 @@ export default function PlaylistDetailPage() {
                 <div
                     key={playlistItem.id}
                     data-track-index={trackIndex}
+                    draggable={!!playlist?.isOwner}
+                    onDragStart={(e) => {
+                        e.dataTransfer.setData("text/plain", playlistItem.id);
+                        e.dataTransfer.effectAllowed = "move";
+                        handleDragStart(playlistItem.id);
+                    }}
+                    onDragOver={(e) => handleDragOver(e, playlistItem.id)}
+                    onDragEnd={handleDragEnd}
+                    onDrop={(e) => {
+                        e.preventDefault();
+                        handleDrop(playlistItem.id);
+                    }}
                     onDoubleClick={() => handlePlayTrack(trackIndex)}
                     onTouchEnd={handleRowTouchEnd}
                     className={cn(
-                        "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 rounded-lg hover:bg-white/[0.03] transition-all group cursor-pointer border border-transparent hover:border-white/5 touch-manipulation",
+                        "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_24px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 rounded-lg hover:bg-white/[0.03] transition-all group cursor-pointer border border-transparent hover:border-white/5 touch-manipulation",
+                        draggedItemId === playlistItem.id && "opacity-50",
+                        dragOverItemId === playlistItem.id && "border-brand/40 bg-brand/5",
                         isCurrentlyPlaying && "bg-white/5 border-brand/30"
                     )}
                 >
-                    {/* Track Number / Play Button */}
-                    <div className="flex items-center justify-center">
+                    {/* Track Number / Play Button + Drag Handle */}
+                    <div className="flex items-center justify-center gap-1">
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
@@ -660,6 +748,22 @@ export default function PlaylistDetailPage() {
                             </span>
                             <Play className="w-4 h-4 text-white hidden group-hover:block" />
                         </button>
+                        {playlist?.isOwner && (
+                            <button
+                                draggable={false}
+                                onDragStart={(e) => {
+                                    e.stopPropagation();
+                                    e.dataTransfer.setData("text/plain", playlistItem.id);
+                                    e.dataTransfer.effectAllowed = "move";
+                                    handleDragStart(playlistItem.id);
+                                }}
+                                onDragEnd={handleDragEnd}
+                                className="w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-60 hover:opacity-100 transition-all cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-white"
+                                title="Drag to reorder"
+                            >
+                                <GripVertical className="w-4 h-4" />
+                            </button>
+                        )}
                     </div>
 
                     {/* Title + Artist */}
@@ -728,16 +832,38 @@ export default function PlaylistDetailPage() {
                             {formatTime(playlistItem.track.duration)}
                         </span>
                         {playlist?.isOwner && (
-                            <button
-                                className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-red-400 transition-all"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRemoveTrack(playlistItem.track.id);
-                                }}
-                                title="Remove from Playlist"
-                            >
-                                <Trash2 className="w-4 h-4" />
-                            </button>
+                            <>
+                                <button
+                                    className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleMoveTrackUp(playlistItem.id);
+                                    }}
+                                    title="Move up"
+                                >
+                                    <ChevronUp className="w-4 h-4" />
+                                </button>
+                                <button
+                                    className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleMoveTrackDown(playlistItem.id);
+                                    }}
+                                    title="Move down"
+                                >
+                                    <ChevronDown className="w-4 h-4" />
+                                </button>
+                                <button
+                                    className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-red-400 transition-all"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRemoveTrack(playlistItem.track.id);
+                                    }}
+                                    title="Remove from Playlist"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                            </>
                         )}
                     </div>
                 </div>
@@ -1150,8 +1276,9 @@ export default function PlaylistDetailPage() {
                             </div>
 
                             {/* Table Header */}
-                            <div className="hidden md:grid grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 text-xs text-[var(--text-muted)] border-b border-white/10 mb-2">
+                            <div className="hidden md:grid grid-cols-[40px_24px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 text-xs text-[var(--text-muted)] border-b border-white/10 mb-2">
                                 <span className="text-center">#</span>
+                                <span className="sr-only">Reorder</span>
                                 <span>Title</span>
                                 <span>Album</span>
                                 <span className="text-right">Duration</span>

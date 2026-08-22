@@ -12,6 +12,7 @@ import {
     requirePlaylistReader,
 } from "../middleware/playlistOwner";
 import * as playlistService from "../services/playlistService";
+import { eventBus } from "../services/eventBus";
 
 const router = Router();
 
@@ -561,7 +562,6 @@ router.delete("/:id/items/:trackId", requirePlaylistOwner, async (req, res) => {
 //
 // Replaces PUT /items/reorder, which required the client to send the complete
 // ordering, rewrote every row one UPDATE at a time, and silently reshuffled the
-// rest of the playlist if given a partial list. It also had no callers.
 router.patch("/:id/items/:itemId/move", requirePlaylistOwner, async (req, res) => {
     try {
         const parsed = moveItemSchema.safeParse(req.body);
@@ -577,6 +577,13 @@ router.patch("/:id/items/:itemId/move", requirePlaylistOwner, async (req, res) =
             req.params.itemId,
             parsed.data.afterItemId ?? null
         );
+
+        eventBus.emit({
+            type: "playlist:updated",
+            userId: req.user?.id ?? "*",
+            payload: { playlistId: req.params.id },
+        });
+
         res.json({ success: true, rank });
     } catch (error: any) {
         if (error?.code === "ITEM_NOT_FOUND") {

@@ -153,6 +153,17 @@ export function useEventSource() {
                                 ["preview-status", data.jobId],
                                 { status: data.error ? "failed" : "completed", preview: data.preview, error: data.error, jobId: data.jobId }
                             );
+                        case "preview:complete":
+                            queryClient.setQueryData(
+                                ["preview-status", data.jobId],
+                                { status: data.error ? "failed" : "completed", preview: data.preview, error: data.error, jobId: data.jobId }
+                            );
+                            break;
+                        case "playlist:updated":
+                            if (data.playlistId) {
+                                queryClient.invalidateQueries({ queryKey: ["playlists"] });
+                                queryClient.invalidateQueries({ queryKey: ["playlist", data.playlistId] });
+                            }
                             break;
                         case "connected":
                             // Only refetch on reconnect (not initial connect) to avoid

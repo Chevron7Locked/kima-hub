@@ -820,6 +820,58 @@ export function useDeletePlaylistMutation() {
     });
 }
 
+export function useMoveTrackInPlaylistMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({
+            playlistId,
+            itemId,
+            afterItemId,
+        }: {
+            playlistId: string;
+            itemId: string;
+            afterItemId: string | null;
+        }) => api.moveTrackInPlaylist(playlistId, itemId, afterItemId),
+        onMutate: async (variables) => {
+            await queryClient.cancelQueries({ queryKey: queryKeys.playlist(variables.playlistId) });
+            const previous = queryClient.getQueryData(queryKeys.playlist(variables.playlistId));
+            queryClient.setQueryData(queryKeys.playlist(variables.playlistId), (old: Record<string, unknown> | undefined) => {
+                if (!old || !Array.isArray(old.items)) return old;
+                const items = old.items as Array<Record<string, unknown>>;
+                const idx = items.findIndex((item) => item.id === variables.itemId);
+                if (idx === -1) return old;
+                const [moved] = items.splice(idx, 1);
+                if (variables.afterItemId) {
+                    const afterIdx = items.findIndex((item) => item.id === variables.afterItemId);
+                    if (afterIdx !== -1) {
+                        items.splice(afterIdx + 1, 0, moved);
+                    } else {
+                        items.splice(idx, 0, moved);
+                    }
+                } else {
+                    items.unshift(moved);
+                }
+                return { ...old, items };
+            });
+            return { previous };
+        },
+        onError: (_err, variables, context) => {
+            if (context?.previous) {
+                queryClient.setQueryData(queryKeys.playlist(variables.playlistId), context.previous);
+            }
+        },
+        onSettled: (_, __, variables) => {
+            queryClient.invalidateQueries({
+                queryKey: queryKeys.playlist(variables.playlistId),
+            });
+            queryClient.invalidateQueries({
+                queryKey: queryKeys.playlists(),
+            });
+        },
+    });
+}
+
 interface PlaylistPreview {
     id: string;
     source: string;
