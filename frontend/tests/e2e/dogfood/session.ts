@@ -120,7 +120,9 @@ export class DogfoodSession {
             // the browser's "Failed to load resource", and the app's own logger. Suppress
             // all three together, or declaring one expected failure still fails the run.
             if (this.isExpected(msg.location()?.url ?? "", text)) return;
-            this.record("console", text.slice(0, 300));
+            const loc = msg.location();
+            const url = loc?.url ? ` at ${loc.url}` : "";
+            this.record("console", `${text.slice(0, 300)}${url}`);
         });
 
         // An uncaught exception in page code. React's error boundary may hide the visual
@@ -234,7 +236,11 @@ export class DogfoodSession {
             const result = await fn();
             if (result) observed = result;
         } catch (err) {
-            this.record("assertion", String(err).slice(0, 400));
+            // test.skip() inside a step throws; it must propagate so the runner marks
+            // the journey skipped, but the gap is already captured via noteNotCovered --
+            // recording it here would fail the run for a deliberate, disclosed skip.
+            const deliberate = String(err).startsWith("Test is skipped");
+            if (!deliberate) this.record("assertion", String(err).slice(0, 400));
             this.steps.push({
                 name,
                 journey: this.currentJourney,
@@ -244,6 +250,7 @@ export class DogfoodSession {
             });
             throw err;
         }
+
 
         await this.checkLayout();
         await this.sampleHeap(name);
