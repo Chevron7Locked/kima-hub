@@ -125,6 +125,12 @@ class AudiobookCacheService {
             return false;
         }
 
+        // Skip books whose source files are missing on disk (ABS marks them isMissing).
+        if (book.isMissing) {
+            logger.debug(`  Skipping audiobook ${book.id} - source files missing`);
+            return false;
+        }
+
         const author = metadata.authorName || metadata.author || null;
         const narrator = metadata.narratorName || metadata.narrator || null;
         const description = metadata.description || null;
