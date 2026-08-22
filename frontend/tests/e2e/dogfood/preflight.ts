@@ -149,7 +149,7 @@ export function assertReady(facts: LibraryFacts, baseUrl: string): void {
 export function availableJourneys(facts: LibraryFacts): {
     /** Whether the data-collection journey has enough material to be meaningful. */
     vibe: boolean;
-    /** Whether the podcast management journey ran (always true: 5b creates the subscription). */
+    /** Whether the audiobook journey can run (needs audiobooks on this instance). */
     audiobooks: boolean;
     reasons: string[];
 } {

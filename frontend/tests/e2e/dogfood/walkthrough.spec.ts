@@ -1439,13 +1439,13 @@ test.describe("Dogfood walkthrough", () => {
             return { book: bookId, from: first.t.toFixed(2), to: second.t.toFixed(2) };
         });
 
-        session.assertClean("Journey 5c (audiobooks)");
+        session.assertClean("Journey 5d (audiobooks)");
     });
 
     // ----------------------------------------------------------------------------------
-    test("5d. vibe, deeper: a song path becomes a queue that plays", async () => {
+    test("5e. vibe, deeper: a song path becomes a queue that plays", async () => {
         test.setTimeout(180_000);
-        session.setJourney("5d. Vibe interaction");
+        session.setJourney("5e. Vibe interaction");
 
         test.skip(false, "vibe needs a projected library");
 
@@ -1635,13 +1635,13 @@ test.describe("Dogfood walkthrough", () => {
             return { looked: true };
         });
 
-        session.assertClean("Journey 5d (vibe interaction)");
+        session.assertClean("Journey 5e (vibe interaction)");
     });
 
     // ----------------------------------------------------------------------------------
-    test("5e. radio: start a station and hear it play", async () => {
+    test("5f. radio: start a station and hear it play", async () => {
         test.setTimeout(120_000);
-        session.setJourney("5e. Radio");
+        session.setJourney("5f. Radio");
 
         test.skip(false, "radio needs a library to shuffle");
 
@@ -1710,13 +1710,13 @@ test.describe("Dogfood walkthrough", () => {
             return { switched: true };
         });
 
-        session.assertClean("Journey 5e (radio)");
+        session.assertClean("Journey 5f (radio)");
     });
 
     // ----------------------------------------------------------------------------------
-    test("5f. search, deeper: discover results, empty results, and the P2P tab", async () => {
+    test("5g. search, deeper: discover results, empty results, and the P2P tab", async () => {
         test.setTimeout(120_000);
-        session.setJourney("5f. Search surfaces");
+        session.setJourney("5g. Search surfaces");
 
         let query = "";
         await session.step("pick a query from the library", async () => {
@@ -1780,7 +1780,7 @@ test.describe("Dogfood walkthrough", () => {
             return { p2p: true, rendered: true };
         });
 
-        session.assertClean("Journey 5f (search surfaces)");
+        session.assertClean("Journey 5g (search surfaces)");
     });
 
     // ----------------------------------------------------------------------------------
