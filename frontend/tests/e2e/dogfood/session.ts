@@ -239,7 +239,7 @@ export class DogfoodSession {
             // test.skip() inside a step throws; it must propagate so the runner marks
             // the journey skipped, but the gap is already captured via noteNotCovered --
             // recording it here would fail the run for a deliberate, disclosed skip.
-            const deliberate = String(err).startsWith("Test is skipped");
+            const deliberate = String(err).startsWith("Test is skipped") || String(err).startsWith("Error: Test is skipped");
             if (!deliberate) this.record("assertion", String(err).slice(0, 400));
             this.steps.push({
                 name,
