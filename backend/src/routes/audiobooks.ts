@@ -769,6 +769,22 @@ router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
             }
         });
     } catch (error) {
+        const errMsg =
+            error && typeof error === "object" && "message" in error
+                ? String((error as { message: unknown }).message)
+                : String(error);
+        // Distinguish upstream failures (track/file gone from ABS) from internal bugs.
+        // An axios error from Audiobookshelf carries the remote status in error.response.status.
+        const upstreamStatus =
+            error && typeof error === "object" && "response" in error
+                ? (error as { response?: { status?: number } }).response?.status
+                : undefined;
+        if (upstreamStatus === 404) {
+            return res.status(404).json({ success: false, error: `Audiobookshelf returned 404: ${errMsg}` });
+        }
+        if (upstreamStatus != null) {
+            return res.status(502).json({ success: false, error: `Audiobookshelf returned status ${upstreamStatus}: ${errMsg}` });
+        }
         safeError(res, "Failed to stream audiobook", error);
     }
 });
