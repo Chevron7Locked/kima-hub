@@ -149,7 +149,7 @@ export function assertReady(facts: LibraryFacts, baseUrl: string): void {
 export function availableJourneys(facts: LibraryFacts): {
     /** Whether the data-collection journey has enough material to be meaningful. */
     vibe: boolean;
-    podcasts: boolean;
+    /** Whether the podcast management journey ran (always true: 5b creates the subscription). */
     audiobooks: boolean;
     reasons: string[];
 } {
@@ -166,8 +166,9 @@ export function availableJourneys(facts: LibraryFacts): {
         );
     }
 
-    const podcasts = facts.podcasts > 0;
-    if (!podcasts) reasons.push("podcast journey not run: no podcast subscriptions on this instance");
+    // Podcasts are created by journey 5b (subscribe), so the preflight count
+    // is always zero. The journey runs regardless and the deeper management
+    // journey (5c) exercises the subscription lifecycle.
 
     const audiobooks = facts.audiobooks > 0;
     if (!audiobooks) reasons.push("audiobook journey not run: no audiobooks on this instance");
@@ -179,5 +180,5 @@ export function availableJourneys(facts: LibraryFacts): {
         );
     }
 
-    return { vibe, podcasts, audiobooks, reasons };
+    return { vibe, audiobooks, reasons };
 }
