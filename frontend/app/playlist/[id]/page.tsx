@@ -536,7 +536,9 @@ export default function PlaylistDetailPage() {
             await moveTrack({
                 playlistId,
                 itemId,
-                afterItemId: playlist.items[idx - 1].id,
+                // Move to position idx-1: place after the item two positions above,
+                // or null (first position) when idx === 1.
+                afterItemId: idx === 1 ? null : playlist.items[idx - 2].id,
             });
         } catch {
             toast.error("Failed to move track");

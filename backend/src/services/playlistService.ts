@@ -306,7 +306,12 @@ export async function moveItem(
 
         const next = await nextRankAfter(tx, playlistId, before, itemId);
 
-        const rank = rankBetween(before, next);
+        // When nextRankAfter returns empty (no item after the anchor), the moved
+        // item is being placed at the end of the playlist. rankAfter(before)
+        // generates a key that sorts directly after the anchor — the correct
+        // destination for a move-to-end. Using rankBetween(before, "") would
+        // also work but rankAfter is the idiomatic call for this case.
+        const rank = next ? rankBetween(before, next) : rankAfter(before);
         await tx.playlistItem.update({ where: { id: itemId }, data: { rank } });
         await tx.playlist.update({
             where: { id: playlistId },
