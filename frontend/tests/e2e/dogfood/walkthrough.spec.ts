@@ -68,6 +68,7 @@ test.describe("Dogfood walkthrough", () => {
     const createdPlaylistIds: string[] = [];
     let podcastId = "";
     let podcastTitle = "";
+    let movedTrackTitle = "";
 
     test.beforeAll(async ({ browser: launched }) => {
         browser = launched;
@@ -819,13 +820,199 @@ test.describe("Dogfood walkthrough", () => {
             return { deletedFromUi: true };
         });
 
-        // No journey reorders playlist tracks because the UI cannot: ordering is
-        // server-side (lexoRank) and the playlist page exposes no drag or move control.
-        session.noteNotCovered(
-            "playlist track reorder: the UI has no reorder affordance (lexoRank is server-side only)",
-        );
 
         session.assertClean("Journey 4b (playlist editing)");
+    });
+
+    // ----------------------------------------------------------------------------------
+    test("4c. curate: reorder tracks and the order survives a reload", async () => {
+        session.setJourney("4c. Playlist reorder");
+        test.setTimeout(180_000);
+
+        // Create a playlist with ≥3 tracks for the reorder journey.
+        // 4b creates and deletes a 2-track playlist, so we need our own.
+        let playlistId = "";
+        let trackIds: string[] = [];
+
+        await session.step("create a playlist with three tracks via the API", async () => {
+            // Create the playlist
+            const createRes = await page.request.post("/api/playlists", {
+                data: { name: `${RUN_TAG}-reorder` },
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            expect(createRes.ok(), `playlist creation returned ${createRes.status()}`).toBeTruthy();
+            const created = await createRes.json();
+            playlistId = created.id ?? created.playlist?.id ?? "";
+            expect(playlistId, "playlist creation returned no id").toBeTruthy();
+            createdPlaylistIds.push(playlistId);
+
+            // Get three tracks from the library
+            const tracksRes = await page.request.get("/api/library/tracks?limit=10", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            expect(tracksRes.ok(), `track list returned ${tracksRes.status()}`).toBeTruthy();
+            const tracksBody = await tracksRes.json();
+            const tracks = Array.isArray(tracksBody)
+                ? tracksBody
+                : (tracksBody.tracks ?? tracksBody.items ?? []);
+            expect(tracks.length, "library has fewer than 3 tracks to add").toBeGreaterThanOrEqual(3);
+            trackIds = tracks.slice(0, 3).map((t: { id: string }) => t.id);
+
+            // Add all three tracks
+            for (const trackId of trackIds) {
+                const addRes = await page.request.post(
+                    `/api/playlists/${playlistId}/items`,
+                    {
+                        data: { trackId },
+                        headers: { Authorization: `Bearer ${token}` },
+                    },
+                );
+                expect(
+                    addRes.ok(),
+                    `adding track ${trackId} returned ${addRes.status()}`,
+                ).toBeTruthy();
+            }
+
+            return { id: playlistId, tracksAdded: trackIds.length };
+        });
+
+        // Open the playlist and capture initial order
+        await session.step("open the playlist and capture initial order", async () => {
+            await page.goto(`/playlist/${playlistId}`);
+            await settle(page, 2000);
+            const rows = page.locator("[data-track-index]");
+            await expect(rows.first()).toBeVisible({ timeout: 15_000 });
+            const count = await rows.count();
+            expect(count, "playlist has fewer than 3 tracks after adding").toBeGreaterThanOrEqual(3);
+            // Capture track titles in DOM order
+            const titles = await rows.evaluateAll(
+                (els) =>
+                    els.map(
+                        (el) =>
+                            el.querySelector("p.text-sm.font-bold")?.textContent?.trim() ??
+                            el.querySelector("p")?.textContent?.trim() ??
+                            "",
+                    ),
+            );
+            expect(titles.length, "no track titles found in DOM").toBeGreaterThanOrEqual(3);
+            return { initialOrder: titles.join(" | "), trackCount: count };
+        });
+
+        // Move the last track up twice via the up buttons
+        await session.step("move the last track up twice", async () => {
+            const rows = page.locator("[data-track-index]");
+            const lastRow = rows.last();
+            const lastTitle = await lastRow.locator("p.text-sm.font-bold, p").first().textContent() ?? "";
+            movedTrackTitle = lastTitle;
+
+            // Hover the row to reveal the buttons, then click up
+            await lastRow.hover();
+            await settle(page, 300);
+            await lastRow.getByLabel("Move track up").click();
+            await settle(page, 800);
+
+            await lastRow.hover();
+            await settle(page, 300);
+            await lastRow.getByLabel("Move track up").click();
+            await settle(page, 800);
+
+            return { movedTitle: lastTitle, moves: 2 };
+        });
+
+        // Assert DOM order changed
+        await session.step("assert DOM order changed after moves", async () => {
+            const rows = page.locator("[data-track-index]");
+            const newTitles = await rows.evaluateAll(
+                (els) =>
+                    els.map(
+                        (el) =>
+                            el.querySelector("p.text-sm.font-bold")?.textContent?.trim() ??
+                            el.querySelector("p")?.textContent?.trim() ??
+                            "",
+                    ),
+            );
+            expect(newTitles.length, "track count changed after reorder").toBe(trackIds.length);
+
+            // The track that was last should no longer be last after two up-moves.
+            const lastRow = rows.last();
+            const newLastTitle = await lastRow.locator("p.text-sm.font-bold, p").first().textContent() ?? "";
+            // After two up-moves from the bottom, the original last track should
+            // be at position length-3 (third from end) or higher.
+            const movedTitleIdx = newTitles.indexOf(movedTrackTitle);
+            expect(
+                movedTitleIdx,
+                `the moved track "${movedTrackTitle}" is still at the end (index ${movedTitleIdx})`,
+            ).toBeLessThan(newTitles.length - 1);
+            return { newOrder: newTitles.join(" | "), lastMovedTo: newLastTitle };
+        });
+        // Reload and assert order persisted
+        await session.step("reload and assert order persisted", async () => {
+            await page.reload();
+            await settle(page, 2000);
+            const rows = page.locator("[data-track-index]");
+            await expect(rows.first()).toBeVisible({ timeout: 15_000 });
+
+            const persistedTitles = await rows.evaluateAll(
+                (els) =>
+                    els.map(
+                        (el) =>
+                            el.querySelector("p.text-sm.font-bold")?.textContent?.trim() ??
+                            el.querySelector("p")?.textContent?.trim() ??
+                            "",
+                    ),
+            );
+            expect(persistedTitles.length, "track count changed after reload").toBe(trackIds.length);
+            return { persistedOrder: persistedTitles.join(" | ") };
+        });
+
+        // GET the playlist via API and assert order matches DOM
+        await session.step("API order matches DOM order (server truth)", async () => {
+            const res = await page.request.get(`/api/playlists/${playlistId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            expect(res.ok(), `playlist fetch returned ${res.status()}`).toBeTruthy();
+            const body = await res.json();
+            const items = body.items ?? body.playlist?.items ?? [];
+            expect(items.length, "playlist has no items from API").toBeGreaterThanOrEqual(3);
+
+            // Compare API order with DOM order
+            const rows = page.locator("[data-track-index]");
+            const domTitles = await rows.evaluateAll(
+                (els) =>
+                    els.map(
+                        (el) =>
+                            el.querySelector("p.text-sm.font-bold")?.textContent?.trim() ??
+                            el.querySelector("p")?.textContent?.trim() ??
+                            "",
+                    ),
+            );
+
+            const apiTitles = items.map(
+                (item: { track?: { title?: string }; title?: string }) =>
+                    item.track?.title ?? item.title ?? "",
+            );
+
+            // Verify API order matches DOM order (not just presence)
+            for (let i = 0; i < domTitles.length; i++) {
+                expect(
+                    apiTitles[i],
+                    `API order mismatch at position ${i}: expected "${domTitles[i]}" but got "${apiTitles[i]}"`,
+                ).toBe(domTitles[i]);
+            }
+            return { apiItemCount: items.length, domItemCount: domTitles.length, orderMatched: true };
+        });
+
+        // Cleanup: delete the playlist
+        await session.step("clean up the reorder playlist", async () => {
+            const res = await page.request.delete(`/api/playlists/${playlistId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            expect(res.ok(), `deleting reorder playlist returned ${res.status()}`).toBeTruthy();
+            createdPlaylistIds.splice(createdPlaylistIds.indexOf(playlistId), 1);
+            return { deleted: playlistId };
+        });
+
+        session.assertClean("Journey 4c (playlist reorder)");
     });
 
     // ----------------------------------------------------------------------------------

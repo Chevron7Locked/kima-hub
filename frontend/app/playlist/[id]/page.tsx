@@ -758,8 +758,8 @@ export default function PlaylistDetailPage() {
                                     handleDragStart(playlistItem.id);
                                 }}
                                 onDragEnd={handleDragEnd}
+                                aria-label="Drag to reorder"
                                 className="w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-60 hover:opacity-100 transition-all cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-white"
-                                title="Drag to reorder"
                             >
                                 <GripVertical className="w-4 h-4" />
                             </button>
@@ -834,22 +834,24 @@ export default function PlaylistDetailPage() {
                         {playlist?.isOwner && (
                             <>
                                 <button
-                                    className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleMoveTrackUp(playlistItem.id);
-                                    }}
-                                    title="Move up"
+                                aria-label="Move track up"
+                                className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMoveTrackUp(playlistItem.id);
+                                }}
+                                title="Move up"
                                 >
                                     <ChevronUp className="w-4 h-4" />
                                 </button>
                                 <button
-                                    className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleMoveTrackDown(playlistItem.id);
-                                    }}
-                                    title="Move down"
+                                    aria-label="Move track down"
+                                className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMoveTrackDown(playlistItem.id);
+                                }}
+                                title="Move down"
                                 >
                                     <ChevronDown className="w-4 h-4" />
                                 </button>
