@@ -2706,20 +2706,32 @@ class LidarrService {
             // Strategy 3: edition differences — "Dangerous Days" against a
             // held "Dangerous Days (Deluxe Edition)".
             //
-            // Compared on identity keys, which strip editions and remaster
-            // suffixes for exactly this purpose. The previous version tested
-            // raw substring containment in BOTH directions, so any held album
-            // whose title merely appeared inside the requested one counted as
-            // a match: asking for "Trust In Trance" and owning "Trance" said
-            // yes. That marks a download complete for an album we do not have,
-            // which then reads as ACQUIRED and leaves retention deleting
-            // something that was never there.
+            // This deliberately does NOT reuse albumIdentityKey() on its own.
+            // That key answers a DIFFERENT question — "are these one row in the
+            // library?" — and as of 2026-08-23 it answers NO for editions, so a
+            // remaster and its original stay separate albums on the shelf.
+            // Acquisition needs the opposite answer: already holding the deluxe
+            // edition is reason enough not to fetch the plain one again. The two
+            // questions shared one key until the library rule changed, which
+            // silently flipped this check; acquisition now derives its own key —
+            // strip the edition marker FIRST, then apply the same
+            // casefold/unaccent/alphanumeric rules the library key uses.
+            //
+            // What must never come back: raw substring containment tested in
+            // both directions. Any held album whose title merely appeared inside
+            // the requested one counted as a match — asking for "Trust In
+            // Trance" while owning "Trance" said yes. That marks a download
+            // complete for an album we do not have, which then reads as ACQUIRED
+            // and leaves retention deleting something that was never there.
+            // Comparing whole stripped keys for equality keeps that shut.
+            const acquisitionKey = (title: string) => albumIdentityKey(stripAlbumEdition(title));
+
             const normalizedArtist = artistName.toLowerCase().trim();
-            const wantKey = albumIdentityKey(albumTitle);
+            const wantKey = acquisitionKey(albumTitle);
             if (wantKey) {
                 for (const [titleKey] of snapshot.albumsByTitle) {
                     const [keyArtist, keyAlbum] = titleKey.split("|");
-                    if (keyArtist === normalizedArtist && albumIdentityKey(keyAlbum) === wantKey) {
+                    if (keyArtist === normalizedArtist && acquisitionKey(keyAlbum) === wantKey) {
                         return true;
                     }
                 }

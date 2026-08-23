@@ -10,6 +10,7 @@
 
 import { lidarrService } from "../lidarr";
 import type { ReconciliationSnapshot } from "../lidarr";
+import { albumIdentityKey } from "../albumIdentity";
 
 const snapshotOf = (held: [artist: string, album: string][]): ReconciliationSnapshot => {
     const albumsByTitle = new Map<string, any>();
@@ -67,5 +68,52 @@ describe("isAlbumAvailableInSnapshot", () => {
 
     it("says no when the library holds nothing", () => {
         expect(available(snapshotOf([]), "Anyone", "Anything")).toBe(false);
+    });
+});
+
+/**
+ * The library and the download check ask DIFFERENT questions about the same two
+ * titles, and must keep giving opposite answers.
+ *
+ *   library      -- "is this one row on the shelf?"        -> NO, editions are separate
+ *   acquisition  -- "do we already hold this, so skip it?" -> YES, the deluxe counts
+ *
+ * They shared one key until 2026-08-23, when the library rule changed to keep
+ * editions apart and silently flipped acquisition with it -- every album held
+ * only as a deluxe/remaster started reading as "not owned" and got fetched
+ * again. These tests fail if the two are ever re-coupled, in either direction.
+ */
+describe("library grouping and acquisition disagree on editions, on purpose", () => {
+    const PLAIN = "Dangerous Days";
+    const DELUXE = "Dangerous Days (Deluxe Edition)";
+
+    it("the library keeps an edition apart from its original", () => {
+        expect(albumIdentityKey(DELUXE)).not.toBe(albumIdentityKey(PLAIN));
+    });
+
+    it("acquisition treats that same pair as already held, in both directions", () => {
+        expect(available(snapshotOf([["Perturbator", DELUXE]]), "Perturbator", PLAIN)).toBe(true);
+        expect(available(snapshotOf([["Perturbator", PLAIN]]), "Perturbator", DELUXE)).toBe(true);
+    });
+
+    it.each([
+        ["Abbey Road (2019 Remaster)", "Abbey Road"],
+        ["Abbey Road [Remastered]", "Abbey Road"],
+        ["Abbey Road - 2019 Remaster", "Abbey Road"],
+        ["Playing the Angel (Deluxe)", "Playing the Angel"],
+    ])("acquisition sees %s as covering %s", (held, wanted) => {
+        expect(available(snapshotOf([["The Beatles", held]]), "The Beatles", wanted)).toBe(true);
+    });
+
+    it("edition tolerance still does not let a different album through", () => {
+        // The substring defect, re-checked against the edition-stripped key:
+        // stripping "(Deluxe)" must not widen matching back into containment.
+        const snap = snapshotOf([["Astral Projection", "Trance (Deluxe Edition)"]]);
+        expect(available(snap, "Astral Projection", "Trust In Trance")).toBe(false);
+    });
+
+    it("edition tolerance does not merge across artists", () => {
+        const snap = snapshotOf([["Gost", DELUXE]]);
+        expect(available(snap, "Perturbator", PLAIN)).toBe(false);
     });
 });
