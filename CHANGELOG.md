@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.10.0] - 2026-08-23
 ### Added
 
 - **Playlists can be reordered by drag.** The playlist detail page now has a GripVertical drag handle plus ChevronUp/ChevronDown move-up/move-down buttons on every track row; order persists via the existing lexoRank backend (`PATCH /playlists/:id/items/:itemId/move`) and syncs to other tabs and devices over the `playlist:updated` SSE live-update channel (TanStack Query invalidation on both `["playlists"]` and `["playlist", id]`).
