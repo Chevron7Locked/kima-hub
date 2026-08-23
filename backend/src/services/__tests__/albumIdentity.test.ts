@@ -91,6 +91,71 @@ describe("albumIdentityKey — only true duplicates merge", () => {
     });
 });
 
+describe("instrumental albums stay separate from originals", () => {
+    it('keeps "Album X" and "Album X (Instrumental)" apart', () => {
+        expect(albumIdentityKey("Album X")).not.toBe(
+            albumIdentityKey("Album X (Instrumental)")
+        );
+        expect(albumIdentityKey("Album X")).toBe("albumx");
+        expect(albumIdentityKey("Album X (Instrumental)")).toBe("albumxinstrumental");
+    });
+
+    it('keeps "Album X (Instrumental)" and "Album X (Instrumental Edition)" apart', () => {
+        expect(albumIdentityKey("Album X (Instrumental)")).not.toBe(
+            albumIdentityKey("Album X (Instrumental Edition)")
+        );
+        expect(albumIdentityKey("Album X (Instrumental)")).toBe("albumxinstrumental");
+        expect(albumIdentityKey("Album X (Instrumental Edition)")).toBe("albumxinstrumentaledition");
+    });
+
+    it('keeps "Album X (Instrumental)" and "Album X (Remastered)" apart', () => {
+        expect(albumIdentityKey("Album X (Instrumental)")).not.toBe(
+            albumIdentityKey("Album X (Remastered)")
+        );
+    });
+
+    it('merges case variants of "instrumental" — "Album X (INSTRUMENTAL)" = "Album X (instrumental)"', () => {
+        expect(albumIdentityKey("Album X (INSTRUMENTAL)")).toBe(
+            albumIdentityKey("Album X (instrumental)")
+        );
+        expect(albumIdentityKey("Album X (INSTRUMENTAL)")).toBe("albumxinstrumental");
+    });
+
+    it('merges "The Instrumentals" and "The Instrumental" (true duplicate, not an edition)', () => {
+        // These are different album titles — one is plural, one singular.
+        // They should NOT merge.
+        expect(albumIdentityKey("The Instrumentals")).not.toBe(
+            albumIdentityKey("The Instrumental")
+        );
+        expect(albumIdentityKey("The Instrumentals")).toBe("theinstrumentals");
+        expect(albumIdentityKey("The Instrumental")).toBe("theinstrumental");
+    });
+
+    it('merges case variants of "The Instrumental" (true duplicate)', () => {
+        expect(albumIdentityKey("The Instrumental")).toBe(
+            albumIdentityKey("THE INSTRUMENTAL")
+        );
+        expect(albumIdentityKey("The Instrumental")).toBe(
+            albumIdentityKey("the instrumental")
+        );
+    });
+
+    it('keeps "Album X" and "Album X (Instrumental)" distinct even with accents', () => {
+        expect(albumIdentityKey("Álbum X")).not.toBe(
+            albumIdentityKey("Álbum X (Instrumental)")
+        );
+        expect(albumIdentityKey("Álbum X")).toBe("albumx");
+        expect(albumIdentityKey("Álbum X (Instrumental)")).toBe("albumxinstrumental");
+    });
+
+    it('keeps "Album X (Instrumental)" and "Album X (Instrumental Mix)" apart', () => {
+        expect(albumIdentityKey("Album X (Instrumental)")).not.toBe(
+            albumIdentityKey("Album X (Instrumental Mix)")
+        );
+        expect(albumIdentityKey("Album X (Instrumental Mix)")).toBe("albumxinstrumentalmix");
+    });
+});
+
 describe("isGenericAlbumTitle — gates cross-artist matching", () => {
     it.each([
         "Greatest Hits",
