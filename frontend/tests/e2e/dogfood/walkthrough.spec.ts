@@ -828,7 +828,11 @@ test.describe("Dogfood walkthrough", () => {
     test("4c. curate: reorder tracks and the order survives a reload", async () => {
         session.setJourney("4c. Playlist reorder");
         test.setTimeout(180_000);
-
+        // Count PATCH /move requests (permanent evidence for this journey)
+        let moveReqs = 0;
+        page.on("request", (r) => {
+            if (r.method() === "PATCH" && r.url().includes("/move")) moveReqs++;
+        });
         // Create a playlist with ≥3 tracks for the reorder journey.
         // 4b creates and deletes a 2-track playlist, so we need our own.
         let playlistId = "";
@@ -900,23 +904,28 @@ test.describe("Dogfood walkthrough", () => {
 
         // Move the last track up twice via the up buttons
         await session.step("move the last track up twice", async () => {
+            // Pin the track we're moving by its title (not position)
             const rows = page.locator("[data-track-index]");
             const lastRow = rows.last();
-            const lastTitle = await lastRow.locator("p.text-sm.font-bold, p").first().textContent() ?? "";
-            movedTrackTitle = lastTitle;
+            movedTrackTitle = (await lastRow.locator("p.text-sm.font-bold, p").first().textContent()) ?? "";
+            expect(movedTrackTitle, "found a last row with a title").toBeTruthy();
+
+            const movedRow = rows.filter({ hasText: movedTrackTitle }).first();
+            const moveUp = movedRow.getByLabel("Move track up");
 
             // Hover the row to reveal the buttons, then click up
-            await lastRow.hover();
+            await movedRow.hover();
             await settle(page, 300);
-            await lastRow.getByLabel("Move track up").click();
+            await moveUp.click();
             await settle(page, 800);
 
-            await lastRow.hover();
+
+            await movedRow.hover();
             await settle(page, 300);
-            await lastRow.getByLabel("Move track up").click();
+            await moveUp.click();
             await settle(page, 800);
 
-            return { movedTitle: lastTitle, moves: 2 };
+            return { movedTitle: movedTrackTitle, moves: 2, moveReqs };
         });
 
         // Assert DOM order changed
