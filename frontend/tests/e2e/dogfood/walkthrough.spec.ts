@@ -1608,9 +1608,11 @@ test.describe("Dogfood walkthrough", () => {
             await page.goto(`/audiobooks/${bookId}`);
             await settle(page, 3000);
 
-            const play = page.getByLabel("Play all").or(page.getByTitle("Play", { exact: true })).first();
-            await play.waitFor({ state: "visible", timeout: 20_000 });
-            await play.click();
+            const play = page
+                .locator("main")
+                .getByTitle("Play", { exact: true })
+                .or(page.locator("main").getByTitle("Resume", { exact: true }));
+            await play.first().click();
             await page.getByLabel("Pause", { exact: true }).waitFor({ timeout: 30_000 });
 
             const read = () =>
