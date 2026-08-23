@@ -291,9 +291,8 @@ export default function PodcastsPage() {
 
                         <div className="flex items-end justify-between flex-wrap gap-4">
                             <div>
-                                <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-3">
-                                    Pod<br />
-                                    <span className="text-[#3b82f6]">casts</span>
+                                <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white leading-none mb-3">
+                                    Podcasts
                                 </h1>
                                 <p className="text-sm text-[var(--text-muted)]">
                                     Subscribe, discover, and listen

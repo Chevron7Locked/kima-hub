@@ -290,9 +290,8 @@ export default function AudiobooksPage() {
                                 Not Configured
                             </span>
                         </div>
-                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-4">
-                            Audio<br />
-                            <span className="text-[#f59e0b]">books</span>
+                        <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white leading-none mb-4">
+                            Audiobooks
                         </h1>
                         <p className="text-sm text-[var(--text-muted)] max-w-xl">
                             Connect Audiobookshelf to unlock your audiobook library
@@ -374,9 +373,8 @@ export default function AudiobooksPage() {
                             Library
                         </span>
                     </div>
-                    <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-none mb-2">
-                        Audio<br />
-                        <span className="text-[#f59e0b]">books</span>
+                    <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white leading-none mb-2">
+                        Audiobooks
                     </h1>
                     <p className="text-sm tabular-nums text-[var(--text-muted)]">
                         {audiobooks.length} {audiobooks.length === 1 ? "book" : "books"} in library
