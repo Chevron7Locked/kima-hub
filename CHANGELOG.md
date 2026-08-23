@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Collections pagination buttons stay enabled during fetches.** The albums and tracks tabs now use `placeholderData` like the artists tab, so page buttons remain interactive while data loads — no more "work then stop, never the same page" lockup.
 - **API requests now time out after 30 seconds with streaming exemptions.** Ordinary JSON calls get a default `AbortSignal.timeout(30_000)`; audio streaming (`/stream`), SSE events (`/api/events`), and blob/arrayBuffer responses opt out via `noTimeout: true` so legitimate long streams are not killed. Server-side timeout=0 for streams is preserved.
 - **Audiobookshelf sync no longer imports books whose files are missing on the server.** Items flagged `isMissing` by Audiobookshelf are skipped during sync (backend `audiobookshelf.ts:453`), so deleted collections (e.g. a removed Blinkist library) no longer leave hundreds of unplayable entries in the library.
+- **Album identity merges only case/punctuation variants, not editions.** Albums that differ just by letter case, punctuation, or accents (e.g. "3D" and "3‐D") collapse into one; remasters, deluxe/anniversary editions, and remixes remain separate albums.
 
 ### Changed
 

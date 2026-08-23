@@ -2,9 +2,9 @@
  * Album identity.
  *
  * Regressions locked down here:
- *  - Album lookup matched `title` raw, so "Abbey Road", "abbey road" and
- *    "Abbey Road (2019 Remaster)" became three rows under one artist. Album
- *    models a MusicBrainz RELEASE GROUP; those are three releases of ONE group.
+ *  - Only true duplicates merge: case/punctuation/accent/unicode-variant.
+ *    Edition markers (remaster, deluxe, anniversary, remix, live, etc.) are
+ *    NOT stripped -- they produce distinct album rows.
  *  - A cross-artist fallback matched title+year across EVERY artist, guarded
  *    only against the literal strings "Unknown Album"/"Unknown", so one
  *    artist's 1995 "Greatest Hits" absorbed another's.
@@ -12,39 +12,59 @@
 
 import { albumIdentityKey, isGenericAlbumTitle, resolveAlbum } from "../albumIdentity";
 
-describe("albumIdentityKey — editions collapse to one release group", () => {
-    it("unifies the pressings of one album", () => {
+describe("albumIdentityKey — only true duplicates merge", () => {
+    it("merges case variants of the same album", () => {
         const forms = [
             "Abbey Road",
             "abbey road",
             "ABBEY ROAD",
-            "Abbey Road (2019 Remaster)",
-            "Abbey Road [Remastered]",
-            "Abbey Road (Deluxe Edition)",
-            "Abbey Road (Super Deluxe)",
         ];
         const keys = forms.map(albumIdentityKey);
         expect(new Set(keys).size).toBe(1);
         expect(keys[0]).toBe("abbeyroad");
     });
 
+    it("keeps edition variants apart", () => {
+        expect(albumIdentityKey("Abbey Road (2019 Remaster)")).not.toBe(
+            albumIdentityKey("Abbey Road")
+        );
+        expect(albumIdentityKey("Abbey Road [Remastered]")).not.toBe(
+            albumIdentityKey("Abbey Road")
+        );
+        expect(albumIdentityKey("Abbey Road (Deluxe Edition)")).not.toBe(
+            albumIdentityKey("Abbey Road")
+        );
+        expect(albumIdentityKey("Abbey Road (Super Deluxe)")).not.toBe(
+            albumIdentityKey("Abbey Road")
+        );
+    });
+
     it.each([
-        ["Nocturnal (Deluxe)", "nocturnal"],
-        ["In A Time Lapse (Deluxe Edition)", "inatimelapse"],
-        ["Dark Side of the Moon [Remastered]", "darksideofthemoon"],
+        ["Nocturnal (Deluxe)", "nocturnaldeluxe"],
+        ["In A Time Lapse (Deluxe Edition)", "inatimelapsedeluxeedition"],
+        ["Dark Side of the Moon [Remastered]", "darksideofthemoonremastered"],
         ["4x4=12", "4x412"],
         ["Sigur Rós - Ágætis Byrjun", "sigurrosagaetisbyrjun"],
         ["Mötley Crüe", "motleycrue"],
     ])("%s -> %s", (title, expected) => {
         expect(albumIdentityKey(title)).toBe(expected);
     });
-
     it("keeps genuinely different albums apart", () => {
         expect(albumIdentityKey("Leather Teeth")).not.toBe(
             albumIdentityKey("Leather Temple")
         );
         expect(albumIdentityKey("Abbey Road")).not.toBe(
             albumIdentityKey("Abbey Road Sessions")
+        );
+        // Edition variants are distinct albums
+        expect(albumIdentityKey("Abbey Road")).not.toBe(
+            albumIdentityKey("Abbey Road (2019 Remaster)")
+        );
+        expect(albumIdentityKey("Playing the Angel")).not.toBe(
+            albumIdentityKey("Playing the Angel (Deluxe)")
+        );
+        expect(albumIdentityKey("Random Access Memories")).not.toBe(
+            albumIdentityKey("Random Access Memories (Drum & Bass Remix)")
         );
     });
 
@@ -88,9 +108,11 @@ describe("isGenericAlbumTitle — gates cross-artist matching", () => {
         expect(isGenericAlbumTitle(title)).toBe(true);
     });
 
-    it("catches a generic title wearing an edition suffix", () => {
-        expect(isGenericAlbumTitle("Greatest Hits (Deluxe Edition)")).toBe(true);
-        expect(isGenericAlbumTitle("The Best Of [Remastered]")).toBe(true);
+    it("does not treat generic titles with edition suffixes as generic", () => {
+        // With the new policy, edition markers make a title specific.
+        // "Greatest Hits" is generic; "Greatest Hits (Deluxe Edition)" is not.
+        expect(isGenericAlbumTitle("Greatest Hits (Deluxe Edition)")).toBe(false);
+        expect(isGenericAlbumTitle("The Best Of [Remastered]")).toBe(false);
     });
 
     it.each([
@@ -135,14 +157,14 @@ describe("resolveAlbum — sortName is written on creation", () => {
         }));
     });
 
-    it("does not edition-strip sortName the way identityKey does -- title order for filing, not dedup", async () => {
+    it("keeps sortName from the full title, identityKey reflects editions", async () => {
         const create = jest.fn().mockResolvedValue({ id: "new-album" });
         const db = fakeDb({ create });
 
         await resolveAlbum(db, { artistId: "artist-1", title: "Abbey Road (2019 Remaster)" });
 
         const call = create.mock.calls[0][0];
-        expect(call.data.identityKey).toBe("abbeyroad");
+        expect(call.data.identityKey).toBe("abbeyroad2019remaster");
         expect(call.data.sortName).toBe("abbey road (2019 remaster)");
     });
 

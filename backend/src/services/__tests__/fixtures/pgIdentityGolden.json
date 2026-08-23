@@ -2559,35 +2559,35 @@
   "identityKey": "abbeyroad2019remaster",
   "normalizedName": "abbey road - 2019 remaster",
   "sortName": "abbey road - 2019 remaster",
-  "albumIdentityKey": "abbeyroad"
+  "albumIdentityKey": "abbeyroad2019remaster"
  },
  {
   "in": "Abbey Road (1969)",
   "identityKey": "abbeyroad1969",
   "normalizedName": "abbey road (1969)",
   "sortName": "abbey road (1969)",
-  "albumIdentityKey": "abbeyroad"
+  "albumIdentityKey": "abbeyroad1969"
  },
  {
   "in": "Abbey Road: Deluxe Edition",
   "identityKey": "abbeyroaddeluxeedition",
   "normalizedName": "abbey road: deluxe edition",
   "sortName": "abbey road: deluxe edition",
-  "albumIdentityKey": "abbeyroad"
+  "albumIdentityKey": "abbeyroaddeluxeedition"
  },
  {
   "in": "Nocturnal (Deluxe)",
   "identityKey": "nocturnaldeluxe",
   "normalizedName": "nocturnal (deluxe)",
   "sortName": "nocturnal (deluxe)",
-  "albumIdentityKey": "nocturnal"
+  "albumIdentityKey": "nocturnaldeluxe"
  },
  {
   "in": "Dark Side of the Moon [Remastered]",
   "identityKey": "darksideofthemoonremastered",
   "normalizedName": "dark side of the moon [remastered]",
   "sortName": "dark side of the moon [remastered]",
-  "albumIdentityKey": "darksideofthemoon"
+  "albumIdentityKey": "darksideofthemoonremastered"
  },
  {
   "in": "4x4=12",

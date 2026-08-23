@@ -11,16 +11,17 @@
  * that change, not this one.
  *
  * `Album` models a MusicBrainz RELEASE GROUP (`rgMbid`), not an individual
- * release. That distinction decides the rules below: a remaster, a deluxe
- * edition and the original pressing are three releases of ONE release group,
- * so they must resolve to one Album row. "Abbey Road" and "Abbey Road (2019
- * Remaster)" are the same album.
+ * release. That distinction decides the rules below: only true duplicates merge.
+ * "Il Pozzo D'Amor" = "Il Pozzo d'Amor" (merge); "Playing the Angel (Deluxe)"
+ * ≠ "Playing the Angel" (separate); "Random Access Memories" ≠ "Random Access
+ * Memories (Drum & Bass Remix)" (separate).
  *
  * The defects this replaces:
  *
  *   - Lookup matched `title` raw and un-normalised, so "Abbey Road",
  *     "abbey road" and "Abbey Road (2019 Remaster)" became three rows under one
- *     artist. `stripAlbumEdition` already existed and was never called here.
+ *     artist. The identity key now preserves edition markers, so "Abbey Road" and
+ *     "Abbey Road (2019 Remaster)" are distinct albums.
  *   - `rgMbid` was the only UNIQUE column and was NOT NULL, so the scanner
  *     invented `temp-<ts>-<random>` when MusicBrainz gave nothing -- a
  *     guaranteed-unique value on the only unique column, which meant the
@@ -32,7 +33,6 @@
  */
 
 import { Prisma } from "@prisma/client";
-import { stripAlbumEdition } from "../utils/artistNormalization";
 import { foldIdentityText, artistSortName } from "./artistIdentity";
 import { pgCollapseSpace, pgLower, pgTrim, stripNonAlnum } from "./pgTextRules";
 
@@ -63,28 +63,30 @@ const GENERIC_TITLES = new Set([
 /**
  * The dedupe key for an album title, scoped to its artist.
  *
- * Edition markers are stripped BEFORE the key is built, so every pressing of a
- * release group lands on one row -- which is what `Album` is supposed to be.
+ * Only case/punctuation/accent/unicode-variant duplicates merge. Edition
+ * markers (remaster, deluxe, anniversary, remix, live, etc.) are NOT stripped:
+ * an album whose title differs by any such marker stays its own row.
  *
- *   "Abbey Road" | "abbey road" | "Abbey Road (2019 Remaster)"  -> "abbeyroad"
- *   "( )"                                                        -> "" (see below)
+ *   "Il Pozzo D'Amor" | "il pozzo d'amor"        -> "ilpozzodamor"
+ *   "Playing the Angel (Deluxe)"                  -> "playingtheangel(deluxe)"
+ *   "( )"                                          -> "" (see below)
  */
 export function albumIdentityKey(title: string | null | undefined): string {
     if (title == null) return "";
-    const base = stripAlbumEdition(pgTrim(String(title)));
-    return stripNonAlnum(pgLower(foldIdentityText(base)));
+    return stripNonAlnum(pgLower(foldIdentityText(pgTrim(String(title)))));
 }
 
 /**
  * Is this title too generic to be matched across artists?
  *
- * Compared on the edition-stripped, casefolded form so "The Best Of (Deluxe
- * Edition)" is caught alongside "best of".
+ * Compared on the casefolded form so "The Best Of" is caught alongside
+ * "best of". Edition markers are kept so "Best Of (Deluxe)" and "Best Of"
+ * are treated as distinct titles.
  */
 export function isGenericAlbumTitle(title: string | null | undefined): boolean {
     if (title == null) return true;
     const normalised = pgTrim(
-        pgCollapseSpace(pgLower(foldIdentityText(stripAlbumEdition(pgTrim(String(title))))))
+        pgCollapseSpace(pgLower(foldIdentityText(pgTrim(String(title)))))
     );
     // Emptiness is judged on the identity key, not on this spacing-preserving
     // form: "( )" is non-empty here but collapses to "" as a key, and a title
