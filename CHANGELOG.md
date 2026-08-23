@@ -7,11 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
-### Fixed
+### Added
 
+- **Playlists can be reordered by drag.** The playlist detail page now has a GripVertical drag handle plus ChevronUp/ChevronDown move-up/move-down buttons on every track row; order persists via the existing lexoRank backend (`PATCH /playlists/:id/items/:itemId/move`) and syncs to other tabs and devices over the `playlist:updated` SSE live-update channel (TanStack Query invalidation on both `["playlists"]` and `["playlist", id]`).
+
+### Fixed
 - **iOS background audio holds through interruptions and track changes.** Playback no longer dies after a call, Siri, a notification, or toggling earbuds/headphones, and the multi-second gap between tracks no longer strands the player. The AudioContext now resumes alongside (not before) `play()` so the iOS autoplay grant is preserved on auto-advance; a load-deadline timer covers the inter-track `loading` window the recovery ladder previously ignored; the audio session re-arms on foreground and route changes; and the lock-screen transport reflects buffering state.
 - **Collections pagination buttons stay enabled during fetches.** The albums and tracks tabs now use `placeholderData` like the artists tab, so page buttons remain interactive while data loads — no more "work then stop, never the same page" lockup.
 - **API requests now time out after 30 seconds with streaming exemptions.** Ordinary JSON calls get a default `AbortSignal.timeout(30_000)`; audio streaming (`/stream`), SSE events (`/api/events`), and blob/arrayBuffer responses opt out via `noTimeout: true` so legitimate long streams are not killed. Server-side timeout=0 for streams is preserved.
+- **Audiobookshelf sync no longer imports books whose files are missing on the server.** Items flagged `isMissing` by Audiobookshelf are skipped during sync (backend `audiobookshelf.ts:453`), so deleted collections (e.g. a removed Blinkist library) no longer leave hundreds of unplayable entries in the library.
 
 ### Changed
 
