@@ -307,9 +307,19 @@ class ApiClient {
         options: RequestInit & {
             silent404?: boolean;
             _retryCount?: number;
+            noTimeout?: boolean; // exempt streaming/blob/arrayBuffer from default timeout
         } = {}
     ): Promise<T> {
-        const { silent404, _retryCount = 0, ...fetchOptions } = options;
+        const { silent404, _retryCount = 0, noTimeout, ...fetchOptions } = options;
+
+        // Default 30s timeout for JSON API calls; streaming/blob/arrayBuffer exempt via noTimeout.
+        // Server uses timeout=0 for streams — a client-side cap would kill legitimate long streams.
+        const signal = noTimeout
+            ? fetchOptions.signal
+            : fetchOptions.signal
+                ? AbortSignal.any([AbortSignal.timeout(30_000), fetchOptions.signal])
+                : AbortSignal.timeout(30_000);
+
         const headers: HeadersInit = {
             "Content-Type": "application/json",
             ...fetchOptions.headers,
@@ -328,7 +338,8 @@ class ApiClient {
         const response = await fetch(url, {
             ...fetchOptions,
             headers,
-            credentials: "include", // Still send cookies for backward compatibility
+            credentials: "include",
+            signal,
         });
 
         if (!response.ok) {

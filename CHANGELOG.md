@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **iOS background audio holds through interruptions and track changes.** Playback no longer dies after a call, Siri, a notification, or toggling earbuds/headphones, and the multi-second gap between tracks no longer strands the player. The AudioContext now resumes alongside (not before) `play()` so the iOS autoplay grant is preserved on auto-advance; a load-deadline timer covers the inter-track `loading` window the recovery ladder previously ignored; the audio session re-arms on foreground and route changes; and the lock-screen transport reflects buffering state.
-- **Audiobooks with broken Audiobookshelf chapters now navigate correctly.** Books whose ABS chapter data is sparse or doesn't span the file (it would show, e.g., two markers covering the first hour of a six-hour book) no longer surface that misleading list. Navigation uses a validated section model: real chapters when they cover the book, otherwise parts derived from the audio files.
+- **Collections pagination buttons stay enabled during fetches.** The albums and tracks tabs now use `placeholderData` like the artists tab, so page buttons remain interactive while data loads — no more "work then stop, never the same page" lockup.
+- **API requests now time out after 30 seconds with streaming exemptions.** Ordinary JSON calls get a default `AbortSignal.timeout(30_000)`; audio streaming (`/stream`), SSE events (`/api/events`), and blob/arrayBuffer responses opt out via `noTimeout: true` so legitimate long streams are not killed. Server-side timeout=0 for streams is preserved.
 
 ### Changed
 

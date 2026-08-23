@@ -298,6 +298,8 @@ export function useLibraryAlbumsQuery({
         }),
         staleTime: 2 * 60 * 1000,
         enabled,
+        // Use placeholder data for better perceived performance (keeps pagination buttons enabled during fetches)
+        placeholderData: (previousData) => previousData,
     });
 }
 
@@ -324,6 +326,8 @@ export function useLibraryTracksQuery({
         }),
         staleTime: 2 * 60 * 1000,
         enabled,
+        // Use placeholder data for better perceived performance (keeps pagination buttons enabled during fetches)
+        placeholderData: (previousData) => previousData,
     });
 }
 
