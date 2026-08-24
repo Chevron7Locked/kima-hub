@@ -1,6 +1,6 @@
 name: Pre-release Image
 
-# A preview image you push on purpose, not on a timer.
+# A pre-release image you push on purpose, not on a timer.
 #
 # This replaces the old nightly build, which pushed a two-architecture image to
 # Docker Hub every single night whether anything had changed or not -- and which
@@ -23,7 +23,7 @@ on:
     workflow_dispatch:
         inputs:
             tag_suffix:
-                description: "Extra tag for this preview, e.g. rc1 gives :preview-rc1"
+                description: "Extra tag for this build, e.g. rc1 gives :prerelease-rc1"
                 required: false
                 type: string
 
@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
     build:
-        name: Build & Push Preview (ghcr.io only)
+        name: Build & Push Pre-release (ghcr.io only)
         runs-on: ubuntu-latest
         timeout-minutes: 90
         permissions:
@@ -78,9 +78,9 @@ jobs:
             - name: Compose tag list
               id: tags
               run: |
-                  TAGS="${GHCR_IMAGE}:preview"$'\n'"${GHCR_IMAGE}:preview-${{ steps.sha.outputs.short }}"
+                  TAGS="${GHCR_IMAGE}:prerelease"$'\n'"${GHCR_IMAGE}:prerelease-${{ steps.sha.outputs.short }}"
                   if [ -n "${{ inputs.tag_suffix }}" ]; then
-                    TAGS="${TAGS}"$'\n'"${GHCR_IMAGE}:preview-${{ inputs.tag_suffix }}"
+                    TAGS="${TAGS}"$'\n'"${GHCR_IMAGE}:prerelease-${{ inputs.tag_suffix }}"
                   fi
                   {
                     echo 'list<<TAGS_EOF'
@@ -88,20 +88,20 @@ jobs:
                     echo 'TAGS_EOF'
                   } >> $GITHUB_OUTPUT
 
-            - name: Build and push preview
+            - name: Build and push pre-release
               uses: docker/build-push-action@v5
               with:
                   context: .
                   file: ./Dockerfile
                   push: true
                   tags: ${{ steps.tags.outputs.list }}
-                  # Makes the running app show "1.10.0-preview" rather than a
-                  # bare version, so nobody mistakes a preview for a release.
+                  # Makes the running app show "1.10.0-prerelease" rather than a
+                  # bare version, so nobody mistakes one for a release.
                   build-args: |
-                      NEXT_PUBLIC_BUILD_TYPE=preview
+                      NEXT_PUBLIC_BUILD_TYPE=prerelease
                   labels: |
                       org.opencontainers.image.revision=${{ github.sha }}
-                      org.opencontainers.image.version=preview-${{ steps.sha.outputs.short }}
+                      org.opencontainers.image.version=prerelease-${{ steps.sha.outputs.short }}
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
                   platforms: linux/amd64,linux/arm64
@@ -109,11 +109,11 @@ jobs:
             - name: Summary
               run: |
                   {
-                    echo "### Preview image published"
+                    echo "### Pre-release image published"
                     echo ""
                     echo "Both architectures built, so a release tag off this commit should build too."
                     echo ""
                     echo '```'
-                    echo "docker pull ${GHCR_IMAGE}:preview-${{ steps.sha.outputs.short }}"
+                    echo "docker pull ${GHCR_IMAGE}:prerelease-${{ steps.sha.outputs.short }}"
                     echo '```'
                   } >> $GITHUB_STEP_SUMMARY

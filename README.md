@@ -361,27 +361,27 @@ docker pull chevron7locked/kima:latest
 docker pull chevron7locked/kima:v1.10.0
 ```
 
-### 🔴 Preview (Development)
+### 🔴 Pre-release (Development)
 
-Unreleased builds, published on demand rather than on a timer — so a preview
-exists because someone deliberately cut one, not because a clock struck 4am.
+Unreleased builds, published on demand rather than on a timer — one exists
+because someone deliberately cut it, not because a clock struck 4am.
 They live on GitHub's registry; Docker Hub carries stable releases only.
 
-⚠️ **Not recommended for production** — may be unstable or broken. A preview
-build labels itself in the interface (`v1.10.0-preview`) so you can always tell
-which channel a running instance came from.
+⚠️ **Not recommended for production** — may be unstable or broken. A pre-release
+build labels itself in the interface (`v1.10.0-prerelease`) so you can always
+tell which channel a running instance came from.
 
 ```bash
-# most recent preview
-docker pull ghcr.io/chevron7locked/kima:preview
+# most recent pre-release
+docker pull ghcr.io/chevron7locked/kima:prerelease
 
 # or a specific one, by commit
-docker pull ghcr.io/chevron7locked/kima:preview-a1b2c3d
+docker pull ghcr.io/chevron7locked/kima:prerelease-a1b2c3d
 ```
 
 > **The old `chevron7locked/kima:nightly` tag is retired.** It was last built
 > successfully on 2026-08-12 and is not updated any more. If you are running it,
-> move to a stable release or to the preview channel above.
+> move to a stable release or to the pre-release channel above.
 
 **For contributors:** See [`CONTRIBUTING.md`](CONTRIBUTING.md) for information on submitting pull requests and contributing to Kima.
 

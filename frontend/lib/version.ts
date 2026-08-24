@@ -7,8 +7,8 @@ const BASE_VERSION = packageJson.version;
 // bug report carries the channel it came from. Set at build time via
 // NEXT_PUBLIC_BUILD_TYPE:
 //
-//   "preview"  the on-demand pre-release channel, published to ghcr.io
-//   "dev"      a locally built stack (docker-compose.yml defaults to this)
+//   "prerelease"  the on-demand channel, published to ghcr.io
+//   "dev"         a locally built stack (docker-compose.yml defaults to this)
 //
 // A tagged release passes nothing, so it renders as a bare version number.
 // Anything else passed through shows up verbatim rather than being swallowed --
