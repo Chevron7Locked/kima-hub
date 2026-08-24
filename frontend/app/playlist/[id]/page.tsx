@@ -106,8 +106,8 @@ interface PendingTrack {
  * at runtime (`md:${TRACK_GRID}`) produces a class that is never compiled and a
  * grid that silently never applies. Keep them adjacent so drift is visible.
  */
-const TRACK_GRID = "grid-cols-[64px_minmax(0,2fr)_minmax(0,1fr)_200px]";
-const TRACK_GRID_MD = "md:grid-cols-[64px_minmax(0,2fr)_minmax(0,1fr)_200px]";
+const TRACK_GRID = "grid-cols-[64px_minmax(0,2fr)_minmax(0,1fr)_56px_136px]";
+const TRACK_GRID_MD = "md:grid-cols-[64px_minmax(0,2fr)_minmax(0,1fr)_56px_136px]";
 
 export default function PlaylistDetailPage() {
     const controller = useAudioController();
@@ -631,7 +631,7 @@ export default function PlaylistDetailPage() {
                 return (
                     <div
                         key={`pending-${pending.id}`}
-                        className={cn("grid grid-cols-[40px_1fr_auto]", TRACK_GRID_MD, "gap-4 px-4 py-2 rounded-lg opacity-60 hover:opacity-80 group transition-opacity")}
+                        className={cn("grid grid-cols-[40px_minmax(0,1fr)_auto_auto]", TRACK_GRID_MD, "gap-4 px-4 py-2 rounded-lg opacity-60 hover:opacity-80 group transition-opacity")}
                     >
                         <div className="flex items-center justify-center">
                             {isMissing ? (
@@ -668,6 +668,8 @@ export default function PlaylistDetailPage() {
                         <p className="hidden md:block self-center text-xs tabular-nums text-[var(--text-muted)] truncate">
                             {pending.album}
                         </p>
+
+                        <span aria-hidden="true" />
 
                         <div className="flex items-center justify-end gap-1">
                             <span className={cn(
@@ -745,7 +747,7 @@ export default function PlaylistDetailPage() {
                     onDoubleClick={() => handlePlayTrack(trackIndex)}
                     onTouchEnd={handleRowTouchEnd}
                     className={cn(
-                        "grid grid-cols-[40px_1fr_auto]",
+                        "grid grid-cols-[40px_minmax(0,1fr)_auto_auto]",
                         TRACK_GRID_MD,
                         "gap-4 px-4 py-2 rounded-lg hover:bg-white/[0.03] transition-all group cursor-pointer border border-transparent hover:border-white/5 touch-manipulation",
                         draggedItemId === playlistItem.id && "opacity-50",
@@ -848,9 +850,16 @@ export default function PlaylistDetailPage() {
                     </p>
 
                     {/* Duration + Actions */}
+                    {/* Duration sits in its own cell rather than between the
+                        buttons, so the row reads left to right as data first,
+                        controls last. */}
+                    <span className="self-center text-xs tabular-nums text-[var(--text-muted)] text-right">
+                        {formatTime(playlistItem.track.duration)}
+                    </span>
+
                     <div className="flex items-center justify-end gap-2">
                         <button
-                            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
+                            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 handleAddToQueue(playlistItem.track);
@@ -859,14 +868,11 @@ export default function PlaylistDetailPage() {
                         >
                             <ListPlus className="w-4 h-4" />
                         </button>
-                        <span className="text-xs tabular-nums text-[var(--text-muted)] w-12 text-right">
-                            {formatTime(playlistItem.track.duration)}
-                        </span>
                         {playlist?.isOwner && (
                             <>
                                 <button
                                 aria-label="Move track up"
-                                className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
+                                className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     handleMoveTrackUp(playlistItem.id);
@@ -877,7 +883,7 @@ export default function PlaylistDetailPage() {
                                 </button>
                                 <button
                                     aria-label="Move track down"
-                                className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
+                                className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     handleMoveTrackDown(playlistItem.id);
@@ -887,7 +893,7 @@ export default function PlaylistDetailPage() {
                                     <ChevronDown className="w-4 h-4" />
                                 </button>
                                 <button
-                                    className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-red-400 transition-all"
+                                    className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-red-400 transition-all"
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         handleRemoveTrack(playlistItem.track.id);
@@ -1316,6 +1322,7 @@ export default function PlaylistDetailPage() {
                                 <span>Title</span>
                                 <span>Album</span>
                                 <span className="text-right">Duration</span>
+                                <span className="sr-only">Actions</span>
                             </div>
 
                             {/* Track Rows -- window-virtualized */}
