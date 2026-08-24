@@ -1,0 +1,115 @@
+name: Pre-release Image
+
+# A preview image you push on purpose, not on a timer.
+#
+# This replaces the old nightly build, which pushed a two-architecture image to
+# Docker Hub every single night whether anything had changed or not -- and which
+# then failed eleven nights running without anyone noticing, because nothing
+# watched it and it opened no issue.
+#
+# Two ways in: push the branch named `prerelease`, or press Run workflow on the
+# Actions tab. Either way the image goes ONLY to this repository's GitHub
+# Container Registry. Docker Hub is the public release channel and stays
+# reserved for version tags -- see docker-publish.yml.
+#
+# It builds BOTH architectures deliberately. The ARM leg is the fragile one: it
+# compiles PyTorch from source whenever a prebuilt wheel is missing, and that is
+# exactly what breaks a release build while the Intel leg looks fine. Proving
+# ARM here, before you tag, is the whole reason this workflow exists.
+
+on:
+    push:
+        branches: [prerelease]
+    workflow_dispatch:
+        inputs:
+            tag_suffix:
+                description: "Extra tag for this preview, e.g. rc1 gives :preview-rc1"
+                required: false
+                type: string
+
+concurrency:
+    group: prerelease
+    cancel-in-progress: true
+
+jobs:
+    build:
+        name: Build & Push Preview (ghcr.io only)
+        runs-on: ubuntu-latest
+        timeout-minutes: 90
+        permissions:
+            contents: read
+            packages: write
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set image name
+              run: |
+                  OWNER="${{ github.repository_owner }}"
+                  echo "GHCR_IMAGE=ghcr.io/${OWNER,,}/kima" >> $GITHUB_ENV
+
+            # The image carries PyTorch, twelve ML models and a full Postgres,
+            # so a default runner runs out of disk partway through the build.
+            - name: Free up disk space
+              run: |
+                  sudo rm -rf /usr/share/dotnet
+                  sudo rm -rf /opt/ghc
+                  sudo rm -rf /usr/local/share/boost
+                  sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Login to GitHub Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Get short SHA
+              id: sha
+              run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+            - name: Compose tag list
+              id: tags
+              run: |
+                  TAGS="${GHCR_IMAGE}:preview"$'\n'"${GHCR_IMAGE}:preview-${{ steps.sha.outputs.short }}"
+                  if [ -n "${{ inputs.tag_suffix }}" ]; then
+                    TAGS="${TAGS}"$'\n'"${GHCR_IMAGE}:preview-${{ inputs.tag_suffix }}"
+                  fi
+                  {
+                    echo 'list<<TAGS_EOF'
+                    echo "${TAGS}"
+                    echo 'TAGS_EOF'
+                  } >> $GITHUB_OUTPUT
+
+            - name: Build and push preview
+              uses: docker/build-push-action@v5
+              with:
+                  context: .
+                  file: ./Dockerfile
+                  push: true
+                  tags: ${{ steps.tags.outputs.list }}
+                  labels: |
+                      org.opencontainers.image.revision=${{ github.sha }}
+                      org.opencontainers.image.version=preview-${{ steps.sha.outputs.short }}
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+                  platforms: linux/amd64,linux/arm64
+
+            - name: Summary
+              run: |
+                  {
+                    echo "### Preview image published"
+                    echo ""
+                    echo "Both architectures built, so a release tag off this commit should build too."
+                    echo ""
+                    echo '```'
+                    echo "docker pull ${GHCR_IMAGE}:preview-${{ steps.sha.outputs.short }}"
+                    echo '```'
+                  } >> $GITHUB_STEP_SUMMARY

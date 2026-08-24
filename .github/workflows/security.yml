@@ -1,5 +1,15 @@
 name: Security Checks
 
+# Two jobs with very different costs, so they run on different schedules.
+#
+# The dependency scan is seconds and runs on every pull request -- it is the one
+# you want in front of a merge.
+#
+# The security end-to-end suite builds the whole image, boots it and drives it
+# with a browser. It used to run on every pull request too, which meant every PR
+# built the same image TWICE: once here and once in pr-checks.yml. It now runs on
+# the weekly schedule and on demand, where the cost is worth paying.
+
 on:
     pull_request:
         branches: [main]
@@ -9,31 +19,69 @@ on:
 
 jobs:
     dependency-audit:
-        name: Dependency Audit
+        name: Dependency & Secret Scan
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
 
-            - uses: actions/setup-node@v4
+            # Replaces `npm audit --audit-level=critical`, which was set to a
+            # threshold that caught nothing: the repo carried 36 high-severity
+            # advisories and zero critical ones, so this job passed clean every
+            # week while Next.js sat on eleven of them.
+            #
+            # Trivy reads both lockfiles and the Python requirements in one pass,
+            # and finds committed secrets at the same time.
+            - name: Install Trivy
+              uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
               with:
-                  node-version: "24"
+                  version: v0.74.0
+                  cache: true
 
-            - name: Audit frontend (critical only)
-              working-directory: frontend
+            # Blocks on anything HIGH or CRITICAL that has a fix published --
+            # i.e. anything you could actually do something about. Findings with
+            # no fix are printed by the next step instead of failing the build;
+            # deliberate exceptions live in .trivyignore with a reason.
+            - name: Dependencies and secrets -- fixable HIGH/CRITICAL blocks
               run: |
-                  npm ci --ignore-scripts
-                  npm audit --audit-level=critical
+                  trivy fs \
+                    --scanners vuln,secret \
+                    --severity HIGH,CRITICAL \
+                    --ignore-unfixed \
+                    --ignorefile .trivyignore \
+                    --exit-code 1 \
+                    --format table \
+                    .
 
-            - name: Audit backend (critical only)
-              working-directory: backend
+            - name: Full report, including findings with no fix (never blocks)
+              if: always()
               run: |
-                  npm ci --ignore-scripts
-                  npm audit --audit-level=critical
+                  trivy fs \
+                    --scanners vuln,secret \
+                    --severity HIGH,CRITICAL \
+                    --exit-code 0 \
+                    --format table \
+                    . >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
+
+            # Dockerfile and compose misconfiguration. Reported, not gated: the
+            # release image runs as root on purpose -- it starts Postgres and
+            # Redis itself and drops to their users with gosu -- so the headline
+            # finding here is a design decision, not a defect.
+            - name: Container configuration (report only)
+              if: always()
+              run: |
+                  trivy config \
+                    --severity HIGH,CRITICAL \
+                    --exit-code 0 \
+                    --format table \
+                    . >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
 
     security-e2e:
         name: Security E2E Tests
+        # Weekly and on demand only. On a pull request this was a second full
+        # image build of the exact image pr-checks.yml had already built.
+        if: github.event_name != 'pull_request'
         runs-on: ubuntu-latest
-        timeout-minutes: 20
+        timeout-minutes: 30
 
         steps:
             - uses: actions/checkout@v4

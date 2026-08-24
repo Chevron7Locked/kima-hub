@@ -64,6 +64,58 @@ jobs:
                     echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
                   fi
 
+            # ---- Vulnerability gate -------------------------------------
+            # Build the Intel image on its own first and scan it before anything
+            # is published. This costs almost nothing on top of the real build:
+            # the multi-architecture step below reuses the identical cached
+            # layers for its Intel leg.
+            #
+            # What blocks a release: a HIGH or CRITICAL vulnerability that has a
+            # fixed version available -- something you can actually act on. What
+            # does not: a finding with no fix published, because there is nothing
+            # to do about it and failing on it would just teach everyone to
+            # ignore this job. Those still get printed by the report step below,
+            # and anything deliberately accepted goes in .trivyignore with a
+            # reason attached.
+            - name: Build image for scanning (amd64)
+              uses: docker/build-push-action@v5
+              with:
+                  context: .
+                  file: ./Dockerfile
+                  push: false
+                  load: true
+                  tags: kima:scan
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+                  platforms: linux/amd64
+
+            - name: Install Trivy
+              uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+              with:
+                  version: v0.74.0
+                  cache: true
+
+            - name: Scan image -- fixable HIGH/CRITICAL blocks the release
+              run: |
+                  trivy image \
+                    --scanners vuln,secret \
+                    --severity HIGH,CRITICAL \
+                    --ignore-unfixed \
+                    --ignorefile .trivyignore \
+                    --exit-code 1 \
+                    --format table \
+                    kima:scan
+
+            - name: Full report, including findings with no fix (never blocks)
+              if: always()
+              run: |
+                  trivy image \
+                    --scanners vuln,secret \
+                    --severity HIGH,CRITICAL \
+                    --exit-code 0 \
+                    --format table \
+                    kima:scan >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
+
             - name: Build and push
               uses: docker/build-push-action@v5
               with:

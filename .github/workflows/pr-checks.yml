@@ -7,7 +7,7 @@ on:
 
 jobs:
     lint-frontend:
-        name: Lint Frontend
+        name: Frontend Lint & Unit Tests
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -25,6 +25,13 @@ jobs:
             - name: Run ESLint
               working-directory: frontend
               run: npm run lint
+
+            # These 303 tests existed for months without ever running in CI --
+            # nothing in any workflow referenced vitest. They take under a
+            # second and this job has already paid for `npm ci`.
+            - name: Run frontend unit tests
+              working-directory: frontend
+              run: npm run test:unit
 
     typecheck:
         name: TypeScript Typecheck

@@ -1,0 +1,21 @@
+# Vulnerabilities deliberately accepted, with the reason and who decided.
+#
+# This file is for findings that HAVE a fix but that we are choosing not to take
+# yet. Findings with no fix available are already excluded by the scan itself
+# (`--ignore-unfixed`), so they do not belong here -- there is nothing to accept
+# or decline.
+#
+# Format: one vulnerability id per line. Always leave a comment above it saying
+# what the exposure actually is and when to revisit, otherwise this file quietly
+# turns into a place where problems go to be forgotten.
+#
+# Currently empty. For the record, the findings the scan drops as unfixable:
+#
+#   CVE-2025-71329, CVE-2025-71330 -- image-size 0.7.5, denial of service when
+#   parsing a malformed ICNS/JXL/HEIF image. No fixed version exists. It reaches
+#   us four levels deep under deck.gl (deck.gl -> @loaders.gl/textures ->
+#   texture-compressor -> image-size), where texture-compressor is a build-time
+#   GPU-texture CLI that the app never calls at runtime. npm's suggested "fix"
+#   is to downgrade deck.gl from 9.x to 8.9.36, which would be a far larger
+#   change than the exposure warrants. Revisit if deck.gl 9.x ever refreshes its
+#   pinned @loaders.gl.
