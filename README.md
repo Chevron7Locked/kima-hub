@@ -372,12 +372,33 @@ build labels itself in the interface (`v1.10.0-prerelease`) so you can always
 tell which channel a running instance came from.
 
 ```bash
-# most recent pre-release
 docker pull ghcr.io/chevron7locked/kima:prerelease
-
-# or a specific one, by commit
-docker pull ghcr.io/chevron7locked/kima:prerelease-a1b2c3d
 ```
+
+`:prerelease` always points at the newest one — pull it again whenever you want
+to move up.
+
+**In Compose, the registry prefix is required.** Stable images come from Docker
+Hub, which Docker assumes by default, so `chevron7locked/kima:latest` resolves.
+Pre-releases live on GitHub's registry and will not resolve without the
+`ghcr.io/` prefix — a bare `kima:prerelease` sends Docker looking on Docker Hub
+for an image that isn't there.
+
+```yaml
+services:
+    kima-hub:
+        image: ghcr.io/chevron7locked/kima:prerelease
+```
+
+Every build is also tagged with its commit (`:prerelease-a1b2c3d`). You don't
+need it to follow the channel — it's there for pinning a known-good build or
+for saying which one you were on in a bug report.
+
+⚠️ **Point it at a fresh data volume, not your live one.** A pre-release runs
+any new database migrations on first boot, and Prisma migrations don't roll
+back. Once they've applied, the older image can no longer read that database.
+Use a separate volume and a separate port to run one alongside your real
+instance — or take a backup first if you're deliberately upgrading in place.
 
 > **The old `chevron7locked/kima:nightly` tag is retired.** It was last built
 > successfully on 2026-08-12 and is not updated any more. If you are running it,
