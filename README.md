@@ -14,7 +14,13 @@ Kima is built for music lovers who want the convenience of streaming services wi
 
 ## A Note on Native Apps
 
-Once the core experience is solid and properly tested, a native mobile app (likely React Native) is on the roadmap. The PWA works great for most cases for now.
+***The native iOS app is built and in testing — targeting an October release.*** It's a real Swift app, not a wrapper around the web view.
+
+**Why iOS first, and not Android.** The PWA is genuinely good on Android — background playback, lock-screen controls, and resuming after an interruption all just work. On iOS it fights the platform. A standalone PWA's audio session gets suspended when the app is backgrounded, and playback stops dead when a track ends: Media Session still reports "playing" while no sound comes out. That's [WebKit #261858](https://bugs.webkit.org/show_bug.cgi?id=261858) — filed September 2023, still open.
+
+Kima works around it, and the workarounds hold: audio is routed through an AudioContext that claims the session more durably than a bare `<audio>` element, the session is re-claimed on foreground and route changes, and every wait in the recovery ladder has a deadline. But that machinery exists because the platform breaks the ordinary path, not because the ordinary path was wrong. A native app needs none of it.
+
+The PWA isn't going anywhere and stays fully supported — Android users in particular lose nothing by staying on it.
 
 Thanks for your patience while I work through this.
 
