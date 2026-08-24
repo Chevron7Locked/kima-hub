@@ -10,7 +10,8 @@ export const searchRouter = Router();
 // ===================== SEARCH =====================
 
 searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async (req, res) => {
-    const query = (req.query.query as string | undefined) ?? "";
+    let query = (req.query.query as string | undefined) ?? "";
+    if (/^["'\s]*$/.test(query)) query = "";
 
     const artistCount = clamp(parseIntParam(req.query.artistCount as string | undefined, 20), 0, 500);
     const albumCount  = clamp(parseIntParam(req.query.albumCount  as string | undefined, 20), 0, 500);
@@ -22,10 +23,6 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
     const isSearch3 = req.path.startsWith("/search3");
     const isLegacySearch = req.path.startsWith("/search.") || req.path.startsWith("/search/") || req.path.startsWith("/search");
     const responseKey = isSearch3 ? "searchResult3" : isLegacySearch ? "searchResult" : "searchResult2";
-
-    if (!query.trim()) {
-        return subsonicOk(req, res, { [responseKey]: {} });
-    }
 
     const [artists, rawAlbums, tracks] = await Promise.all([
         artistCount > 0
