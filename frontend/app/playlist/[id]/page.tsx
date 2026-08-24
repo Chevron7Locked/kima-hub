@@ -82,6 +82,33 @@ interface PendingTrack {
     };
 }
 
+/**
+ * The track table's column track, shared by the header and every row so the two
+ * cannot drift apart.
+ *
+ * Four columns, and each row must render exactly four grid children:
+ *
+ *   1. the track number / play button, with the drag handle beside it
+ *   2. cover art + title + artist
+ *   3. album (hidden below `md`, where the mobile three-column track applies)
+ *   4. the row actions and duration
+ *
+ * The play button and the drag handle share one cell deliberately. The handle
+ * renders only for the playlist's owner, so giving it a column of its own would
+ * leave every other viewer one child short of the track and shift the entire row
+ * left — which is exactly what happened when drag-to-reorder first landed: the
+ * title block was squeezed into a 24px column and disappeared, and the album
+ * moved under the "Title" heading.
+ */
+/*
+ * Both spellings are written out in full on purpose. Tailwind generates only the
+ * classes it can find as literal strings in the source, so building the variant
+ * at runtime (`md:${TRACK_GRID}`) produces a class that is never compiled and a
+ * grid that silently never applies. Keep them adjacent so drift is visible.
+ */
+const TRACK_GRID = "grid-cols-[64px_minmax(200px,4fr)_minmax(100px,1fr)_80px]";
+const TRACK_GRID_MD = "md:grid-cols-[64px_minmax(200px,4fr)_minmax(100px,1fr)_80px]";
+
 export default function PlaylistDetailPage() {
     const controller = useAudioController();
     const params = useParams();
@@ -718,7 +745,9 @@ export default function PlaylistDetailPage() {
                     onDoubleClick={() => handlePlayTrack(trackIndex)}
                     onTouchEnd={handleRowTouchEnd}
                     className={cn(
-                        "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_24px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 rounded-lg hover:bg-white/[0.03] transition-all group cursor-pointer border border-transparent hover:border-white/5 touch-manipulation",
+                        "grid grid-cols-[40px_1fr_auto]",
+                        TRACK_GRID_MD,
+                        "gap-4 px-4 py-2 rounded-lg hover:bg-white/[0.03] transition-all group cursor-pointer border border-transparent hover:border-white/5 touch-manipulation",
                         draggedItemId === playlistItem.id && "opacity-50",
                         dragOverItemId === playlistItem.id && "border-brand/40 bg-brand/5",
                         isCurrentlyPlaying && "bg-white/5 border-brand/30"
@@ -1280,9 +1309,10 @@ export default function PlaylistDetailPage() {
                             </div>
 
                             {/* Table Header */}
-                            <div className="hidden md:grid grid-cols-[40px_24px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 text-xs text-[var(--text-muted)] border-b border-white/10 mb-2">
+                            {/* The number and the drag handle share a row's first cell,
+                                so they share one heading. See TRACK_GRID. */}
+                            <div className={cn("hidden md:grid", TRACK_GRID, "gap-4 px-4 py-2 text-xs text-[var(--text-muted)] border-b border-white/10 mb-2")}>
                                 <span className="text-center">#</span>
-                                <span className="sr-only">Reorder</span>
                                 <span>Title</span>
                                 <span>Album</span>
                                 <span className="text-right">Duration</span>
