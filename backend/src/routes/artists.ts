@@ -9,6 +9,7 @@ import { redisClient } from "../utils/redis";
 import { normalizeToArray } from "../utils/normalize";
 import { requireAuthOrToken } from "../middleware/auth";
 import { safeError } from "../utils/errors";
+import { upstreamHeader } from "../utils/upstreamHeaders";
 
 const router = Router();
 router.use(requireAuthOrToken);
@@ -67,15 +68,18 @@ router.get("/preview/:artistName/:trackTitle/stream", async (req, res) => {
             timeout: 10000,
         });
 
+        const upstreamContentLength = upstreamHeader(upstream.headers["content-length"]);
+        const upstreamAcceptRanges = upstreamHeader(upstream.headers["accept-ranges"]);
+
         res.setHeader(
             "Content-Type",
-            upstream.headers["content-type"] || "audio/mpeg"
+            upstreamHeader(upstream.headers["content-type"]) || "audio/mpeg"
         );
-        if (upstream.headers["content-length"]) {
-            res.setHeader("Content-Length", upstream.headers["content-length"]);
+        if (upstreamContentLength) {
+            res.setHeader("Content-Length", upstreamContentLength);
         }
-        if (upstream.headers["accept-ranges"]) {
-            res.setHeader("Accept-Ranges", upstream.headers["accept-ranges"]);
+        if (upstreamAcceptRanges) {
+            res.setHeader("Accept-Ranges", upstreamAcceptRanges);
         }
         res.setHeader("Cache-Control", "no-store");
 

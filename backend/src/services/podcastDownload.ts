@@ -5,6 +5,7 @@ import fs from "fs/promises";
 import path from "path";
 import axios from "axios";
 import { validateUrlForFetch } from "../utils/ssrf";
+import { upstreamHeaderNumber } from "../utils/upstreamHeaders";
 
 /**
  * PodcastDownloadService - Background download and caching of podcast episodes
@@ -219,8 +220,8 @@ async function performDownload(
             decompress: false
         });
         
-        const contentLength = parseInt(response.headers["content-length"] || "0", 10);
-        let expectedBytes = Number.isFinite(contentLength) && contentLength > 0 ? contentLength : 0;
+        const contentLength = upstreamHeaderNumber(response.headers["content-length"]);
+        let expectedBytes = contentLength;
 
         // If the origin provides Content-Length, treat it as ground truth and persist it.
         // This prevents us from "accepting" partial caches that later break seeking.

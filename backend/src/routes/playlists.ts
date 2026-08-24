@@ -13,6 +13,7 @@ import {
 } from "../middleware/playlistOwner";
 import * as playlistService from "../services/playlistService";
 import { eventBus } from "../services/eventBus";
+import { upstreamHeader } from "../utils/upstreamHeaders";
 
 const router = Router();
 
@@ -690,15 +691,18 @@ router.get("/:id/pending/:trackId/preview/stream", async (req, res) => {
             timeout: 10000,
         });
 
+        const upstreamContentLength = upstreamHeader(upstream.headers["content-length"]);
+        const upstreamAcceptRanges = upstreamHeader(upstream.headers["accept-ranges"]);
+
         res.setHeader(
             "Content-Type",
-            upstream.headers["content-type"] || "audio/mpeg"
+            upstreamHeader(upstream.headers["content-type"]) || "audio/mpeg"
         );
-        if (upstream.headers["content-length"]) {
-            res.setHeader("Content-Length", upstream.headers["content-length"]);
+        if (upstreamContentLength) {
+            res.setHeader("Content-Length", upstreamContentLength);
         }
-        if (upstream.headers["accept-ranges"]) {
-            res.setHeader("Accept-Ranges", upstream.headers["accept-ranges"]);
+        if (upstreamAcceptRanges) {
+            res.setHeader("Accept-Ranges", upstreamAcceptRanges);
         }
         res.setHeader("Cache-Control", "no-store");
 

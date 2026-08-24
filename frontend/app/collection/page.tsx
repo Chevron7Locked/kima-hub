@@ -182,6 +182,17 @@ export default function LibraryPage() {
         deleteTrack,
     } = useLibraryActions();
 
+    // Monotonic key that increments on tab/filter/sort change to remount grids
+    // and replay staggered entrance animations.
+    //
+    // Declared above the effects that call setGridKey, not below them. Both
+    // orders run correctly -- an effect body executes long after the whole
+    // component function has, so the binding is initialised by then -- but
+    // reading a `const` from a line above its declaration puts the reference in
+    // the temporal dead zone as written, which the React Compiler flags and a
+    // future refactor could turn into a real ReferenceError.
+    const [gridKey, setGridKey] = useState(0);
+
     // Reset page and filter when tab changes
     useEffect(() => {
         setCurrentPage(1);
@@ -208,10 +219,6 @@ export default function LibraryPage() {
         id: "",
         title: "",
     });
-
-    // Monotonic key that increments on tab/filter/sort change to remount grids
-    // and replay staggered entrance animations.
-    const [gridKey, setGridKey] = useState(0);
 
     // Change tab function
     const changeTab = useCallback(

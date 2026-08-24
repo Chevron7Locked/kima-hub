@@ -13,6 +13,7 @@ import { notificationService } from "../services/notificationService";
 import { config } from "../config";
 import { resolveWithinMusicRoot } from "./library/trackPath";
 import { artistSortName } from "../services/artistIdentity";
+import { upstreamHeader } from "../utils/upstreamHeaders";
 
 /**
  * Resolve the Access-Control-Allow-Origin value for a cover/stream response,
@@ -733,15 +734,17 @@ router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
         res.status(responseStatus);
 
         // Set content type - ensure it's audio
-        const contentType = headers["content-type"] || "audio/mpeg";
+        const contentType = upstreamHeader(headers["content-type"]) || "audio/mpeg";
         res.setHeader("Content-Type", contentType);
 
         // Set other headers
-        if (headers["content-length"]) {
-            res.setHeader("Content-Length", headers["content-length"]);
+        const upstreamContentLength = upstreamHeader(headers["content-length"]);
+        const upstreamAcceptRanges = upstreamHeader(headers["accept-ranges"]);
+        if (upstreamContentLength) {
+            res.setHeader("Content-Length", upstreamContentLength);
         }
-        if (headers["accept-ranges"]) {
-            res.setHeader("Accept-Ranges", headers["accept-ranges"]);
+        if (upstreamAcceptRanges) {
+            res.setHeader("Accept-Ranges", upstreamAcceptRanges);
         } else {
             res.setHeader("Accept-Ranges", "bytes");
         }

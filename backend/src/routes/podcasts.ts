@@ -11,6 +11,7 @@ import { deezerService, mergeAndDedupePodcasts } from "../services/deezer";
 import axios from "axios";
 import fs from "fs";
 import { resolveCorsOrigin } from "./audiobooks";
+import { upstreamHeader, upstreamHeaderNumber } from "../utils/upstreamHeaders";
 
 const router = Router();
 
@@ -1340,9 +1341,7 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
         if (!fileSize) {
             try {
                 const headResponse = await axios.head(episode.audioUrl);
-                fileSize = parseInt(
-                    headResponse.headers["content-length"] || "0"
-                );
+                fileSize = upstreamHeaderNumber(headResponse.headers["content-length"]);
                 if (Number.isFinite(fileSize) && fileSize > 0) {
                     await prisma.podcastEpisode.update({
                         where: { id: episode.id },
@@ -1402,7 +1401,7 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                         "Content-Type": episode.mimeType || "audio/mpeg",
                         "Accept-Ranges": "bytes",
                         "Content-Length":
-                            response.headers["content-length"] || fileSize,
+                            upstreamHeader(response.headers["content-length"]) || fileSize,
                         "Cache-Control": "public, max-age=3600",
                         ...(corsOrigin && {
                             "Access-Control-Allow-Origin": corsOrigin,
@@ -1463,7 +1462,7 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                     signal: controller.signal,
                 });
 
-                const contentLength = response.headers["content-length"];
+                const contentLength = upstreamHeader(response.headers["content-length"]);
 
                 res.writeHead(200, {
                     "Content-Type": episode.mimeType || "audio/mpeg",
@@ -1515,7 +1514,7 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                     signal: controller.signal,
                 });
 
-                const contentLength = response.headers["content-length"];
+                const contentLength = upstreamHeader(response.headers["content-length"]);
 
                 res.writeHead(200, {
                     "Content-Type": episode.mimeType || "audio/mpeg",

@@ -66,8 +66,8 @@ test.describe("Dogfood walkthrough", () => {
     let journeys: ReturnType<typeof availableJourneys>;
     let token = "";
     const createdPlaylistIds: string[] = [];
-    let podcastId = "";
-    let podcastTitle = "";
+    const podcastId = "";
+    const podcastTitle = "";
     let movedTrackTitle = "";
 
     test.beforeAll(async ({ browser: launched }) => {
