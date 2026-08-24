@@ -106,8 +106,8 @@ interface PendingTrack {
  * at runtime (`md:${TRACK_GRID}`) produces a class that is never compiled and a
  * grid that silently never applies. Keep them adjacent so drift is visible.
  */
-const TRACK_GRID = "grid-cols-[64px_minmax(200px,4fr)_minmax(100px,1fr)_80px]";
-const TRACK_GRID_MD = "md:grid-cols-[64px_minmax(200px,4fr)_minmax(100px,1fr)_80px]";
+const TRACK_GRID = "grid-cols-[64px_minmax(0,2fr)_minmax(0,1fr)_200px]";
+const TRACK_GRID_MD = "md:grid-cols-[64px_minmax(0,2fr)_minmax(0,1fr)_200px]";
 
 export default function PlaylistDetailPage() {
     const controller = useAudioController();
@@ -631,7 +631,7 @@ export default function PlaylistDetailPage() {
                 return (
                     <div
                         key={`pending-${pending.id}`}
-                        className="grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_120px] gap-4 px-4 py-2 rounded-lg opacity-60 hover:opacity-80 group transition-opacity"
+                        className={cn("grid grid-cols-[40px_1fr_auto]", TRACK_GRID_MD, "gap-4 px-4 py-2 rounded-lg opacity-60 hover:opacity-80 group transition-opacity")}
                     >
                         <div className="flex items-center justify-center">
                             {isMissing ? (
@@ -665,7 +665,7 @@ export default function PlaylistDetailPage() {
                             </div>
                         </div>
 
-                        <p className="hidden md:flex items-center text-xs tabular-nums text-[var(--text-muted)] truncate">
+                        <p className="hidden md:block self-center text-xs tabular-nums text-[var(--text-muted)] truncate">
                             {pending.album}
                         </p>
 
@@ -843,7 +843,7 @@ export default function PlaylistDetailPage() {
                     </div>
 
                     {/* Album */}
-                    <p className="hidden md:flex items-center text-xs tabular-nums text-[var(--text-muted)] truncate">
+                    <p className="hidden md:block self-center text-xs tabular-nums text-[var(--text-muted)] truncate">
                         {playlistItem.track.album.title}
                     </p>
 
