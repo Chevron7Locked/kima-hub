@@ -75,8 +75,14 @@ export async function downloadAndStoreImage(
             return null;
         }
 
-        await fs.promises.writeFile(filePath, Buffer.from(buffer));
-        logger.debug(`[ImageStorage] Saved ${type} image: ${filename}`);
+        // Downscale oversized artwork before caching so we don't keep multi-MB
+        // originals on disk and ship them to the browser.
+        const original = Buffer.from(buffer);
+        const toWrite = await downscaleForCache(original, type);
+        await fs.promises.writeFile(filePath, toWrite);
+        logger.debug(
+            `[ImageStorage] Saved ${type} image: ${filename} (${original.byteLength} -> ${toWrite.byteLength} bytes)`
+        );
 
         return `native:${subdir}/${filename}`;
     } catch (error: any) {
@@ -172,6 +178,40 @@ export async function checkLocalArtistImage(
 export function isNativePath(url: string | null | undefined): boolean {
     if (!url) return false;
     return url.startsWith("native:");
+}
+
+/**
+ * Downscale an image buffer for on-disk caching: constrain the longest edge to
+ * a per-type maximum (see config.artwork) and re-encode as JPEG. Only ever
+ * shrinks — images already within budget are returned untouched. Falls back to
+ * the original buffer on any failure so caching never breaks on a bad image.
+ */
+async function downscaleForCache(
+    buffer: Buffer,
+    type: "artist" | "album"
+): Promise<Buffer> {
+    const maxDim =
+        type === "artist"
+            ? config.artwork.maxArtistDim
+            : config.artwork.maxAlbumDim;
+    if (!maxDim || maxDim < 16) return buffer;
+
+    try {
+        const sharp = (await import("sharp")).default;
+        const metadata = await sharp(buffer).metadata();
+        const longestEdge = Math.max(metadata.width || 0, metadata.height || 0);
+
+        // Already within budget — keep the original bytes untouched.
+        if (longestEdge && longestEdge <= maxDim) return buffer;
+
+        return await sharp(buffer)
+            .resize(maxDim, maxDim, { fit: "inside", withoutEnlargement: true })
+            .jpeg({ quality: config.artwork.quality, progressive: true })
+            .toBuffer();
+    } catch (err: any) {
+        logger.warn(`[ImageStorage] Cache downscale failed: ${err.message}`);
+        return buffer;
+    }
 }
 
 /**
