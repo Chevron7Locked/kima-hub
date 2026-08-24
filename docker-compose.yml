@@ -75,8 +75,10 @@ services:
                 # Prefer relative /api requests (Next.js rewrites will proxy to backend).
                 # If you need a custom API URL, set NEXT_PUBLIC_API_URL explicitly.
                 NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
-                # Build type: "nightly" for dev builds, unset/empty for tagged releases
-                NEXT_PUBLIC_BUILD_TYPE: ${NEXT_PUBLIC_BUILD_TYPE:-nightly}
+                # Build type: labels a non-release build in the UI. "dev" for this
+                # local stack, "preview" for the pre-release channel, unset for a
+                # tagged release (which then shows a bare version number).
+                NEXT_PUBLIC_BUILD_TYPE: ${NEXT_PUBLIC_BUILD_TYPE:-dev}
                 # Backend URL for Next.js rewrites (compiled at build time).
                 # In multi-container mode, frontend proxies to the backend service.
                 NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://backend:3006}

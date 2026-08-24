@@ -239,6 +239,13 @@ COPY frontend/ ./
 # MALLOC_ARENA_MAX=1 reduces mmap arena churn during build.
 # Build needs 2GB for tsc; runtime stays at 512MB (set in supervisor config).
 ENV NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:3006
+
+# Marks a non-release build in the UI, so a screenshot or a bug report says
+# which channel the image came from. The pre-release workflow passes "preview";
+# a tagged release passes nothing and renders a bare version number.
+ARG NEXT_PUBLIC_BUILD_TYPE=""
+ENV NEXT_PUBLIC_BUILD_TYPE=${NEXT_PUBLIC_BUILD_TYPE}
+
 RUN MALLOC_ARENA_MAX=1 NODE_OPTIONS="--max-old-space-size=2048" npm run build
 
 # ============================================

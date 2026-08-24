@@ -53,7 +53,7 @@ body:
       attributes:
           label: Kima Version
           description: What version of Kima are you running?
-          placeholder: "e.g., v1.0.0, nightly-2024-01-15, or commit hash"
+          placeholder: "e.g., v1.10.0, 1.10.0-preview, or a commit hash"
       validations:
           required: true
 

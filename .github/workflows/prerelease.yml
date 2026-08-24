@@ -95,6 +95,10 @@ jobs:
                   file: ./Dockerfile
                   push: true
                   tags: ${{ steps.tags.outputs.list }}
+                  # Makes the running app show "1.10.0-preview" rather than a
+                  # bare version, so nobody mistakes a preview for a release.
+                  build-args: |
+                      NEXT_PUBLIC_BUILD_TYPE=preview
                   labels: |
                       org.opencontainers.image.revision=${{ github.sha }}
                       org.opencontainers.image.version=preview-${{ steps.sha.outputs.short }}

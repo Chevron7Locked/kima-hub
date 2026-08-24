@@ -14,8 +14,10 @@ First off, thanks for taking the time to contribute! 🎉
 All development happens on the `main` branch:
 
 -   **All PRs should target `main`**
--   Every push to `main` triggers a nightly Docker build
--   Stable releases are created via version tags
+-   Preview images are built on demand, not on a schedule: push the `prerelease`
+    branch, or run the **Pre-release Image** workflow from the Actions tab. They
+    publish to this repository's GitHub Container Registry only
+-   Stable releases are created via version tags, and those publish to Docker Hub
 
 ## Making Contributions
 
