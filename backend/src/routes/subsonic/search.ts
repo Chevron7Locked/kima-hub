@@ -24,25 +24,88 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
     const isLegacySearch = req.path.startsWith("/search.") || req.path.startsWith("/search/") || req.path.startsWith("/search");
     const responseKey = isSearch3 ? "searchResult3" : isLegacySearch ? "searchResult" : "searchResult2";
 
-    if (!query.trim()) {
-        return subsonicOk(req, res, { [responseKey]: {} });
+    // OpenSubsonic clients (Symfonium, DSub, Substreamer) sync by paginating
+    // search3 over an empty query: `query=`, a missing query, or the literal
+    // two-quote string some clients send. That enumerates the library;
+    // anything else is a ranked search.
+    const trimmed = query.trim();
+    const enumerateLibrary = !trimmed || trimmed === "\"\"";
+
+    let artists: { id: string; name: string }[];
+    let rawAlbums: { id: string; title: string; artistId: string; artistName: string; year: number | null }[];
+    let tracks: { id: string; title: string; artistId: string; artistName: string; albumId: string; albumTitle: string; duration: number | null }[];
+
+    if (enumerateLibrary) {
+        [artists, rawAlbums, tracks] = await Promise.all([
+            artistCount > 0
+                ? prisma.$queryRaw<{ id: string; name: string }[]>`
+                      SELECT ar.id, ar.name FROM "Artist" ar
+                      WHERE ar."libraryAlbumCount" > 0
+                      ORDER BY LOWER(ar.name) ASC, ar.id ASC
+                      LIMIT ${artistCount} OFFSET ${artistOffset}`
+                : Promise.resolve([]),
+            albumCount > 0
+                ? prisma.$queryRaw<{ id: string; title: string; artistId: string; artistName: string; year: number | null }[]>`
+                      SELECT al.id, al.title, al."artistId", ar.name AS "artistName", al.year
+                      FROM "Album" al JOIN "Artist" ar ON al."artistId" = ar.id
+                      WHERE al.location = 'LIBRARY'
+                      ORDER BY LOWER(al.title) ASC, al.id ASC
+                      LIMIT ${albumCount} OFFSET ${albumOffset}`
+                : Promise.resolve([]),
+            songCount > 0
+                ? prisma.$queryRaw<{ id: string; title: string; artistId: string; artistName: string; albumId: string; albumTitle: string; duration: number | null }[]>`
+                      SELECT t.id, t.title, al."artistId", ar.name AS "artistName",
+                             t."albumId", al.title AS "albumTitle", t.duration
+                      FROM "Track" t
+                      JOIN "Album" al ON t."albumId" = al.id
+                      JOIN "Artist" ar ON al."artistId" = ar.id
+                      WHERE al.location = 'LIBRARY' AND t.corrupt = false AND t."missingSince" IS NULL
+                      ORDER BY LOWER(t.title) ASC, t.id ASC
+                      LIMIT ${songCount} OFFSET ${songOffset}`
+                : Promise.resolve([]),
+        ]);
+    } else {
+        [artists, rawAlbums, tracks] = await Promise.all([
+            artistCount > 0
+                ? searchService
+                      .searchArtists({ query, limit: artistCount, offset: artistOffset })
+                      .then((rows) => rows.map((a) => ({ id: a.id, name: a.name })))
+                : Promise.resolve([]),
+            albumCount > 0
+                ? searchService
+                      .searchAlbums({ query, limit: albumCount, offset: albumOffset })
+                      .then((rows) =>
+                          rows.map((al) => ({
+                              id: al.id,
+                              title: al.title,
+                              artistId: al.artistId,
+                              artistName: al.artistName,
+                              year: al.year ?? null,
+                          }))
+                      )
+                : Promise.resolve([]),
+            songCount > 0
+                ? searchService
+                      .searchTracks({ query, limit: songCount, offset: songOffset })
+                      .then((rows) =>
+                          rows.map((t) => ({
+                              id: t.id,
+                              title: t.title,
+                              artistId: t.artistId,
+                              artistName: t.artistName,
+                              albumId: t.albumId,
+                              albumTitle: t.albumTitle,
+                              duration: t.duration ?? null,
+                          }))
+                      )
+                : Promise.resolve([]),
+        ]);
     }
 
-    const [artists, rawAlbums, tracks] = await Promise.all([
-        artistCount > 0
-            ? searchService.searchArtists({ query, limit: artistCount, offset: artistOffset })
-            : Promise.resolve([]),
-        albumCount > 0
-            ? searchService.searchAlbums({ query, limit: albumCount, offset: albumOffset })
-            : Promise.resolve([]),
-        songCount > 0
-            ? searchService.searchTracks({ query, limit: songCount, offset: songOffset })
-            : Promise.resolve([]),
-    ]);
-
-    // Exclude DISCOVER albums — only library content is visible via Subsonic
+    // Exclude DISCOVER albums — only library content is visible via Subsonic.
+    // The enumeration path already filters to LIBRARY at the query.
     let albums = rawAlbums;
-    if (rawAlbums.length > 0) {
+    if (!enumerateLibrary && rawAlbums.length > 0) {
         const libraryIds = new Set(
             (await prisma.album.findMany({
                 where: { id: { in: rawAlbums.map((a) => a.id) }, location: LIBRARY_LOCATION },
