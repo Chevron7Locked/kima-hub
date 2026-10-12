@@ -642,6 +642,7 @@ router.get("/:id/pending/:trackId/preview/stream", async (req, res) => {
         await proxyPreviewStream(res, previewUrl, {
             notFoundMessage: "No preview available on Deezer",
             logLabel: "Pending preview stream",
+            rangeHeader: req.headers.range,
         });
     } catch (error) {
         safeError(res, "Pending track preview stream", error);

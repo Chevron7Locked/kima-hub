@@ -4,19 +4,30 @@ import { logger } from "./logger";
 import { upstreamHeader } from "./upstreamHeaders";
 
 /**
- * Pipe a Deezer preview to the client as same-origin media. An upstream 404
- * answers 404 with `notFoundMessage`; any other failure is thrown to the caller.
+ * Pipe a Deezer preview to the client as same-origin media, honoring the
+ * client's Range header by forwarding it upstream and mirroring the
+ * upstream's 206/416 so seeks land on the right bytes. An upstream 404
+ * answers 404 with `notFoundMessage`; any other failure is thrown to the
+ * caller.
  */
 export async function proxyPreviewStream(
     res: Response,
     previewUrl: string,
-    { notFoundMessage, logLabel }: { notFoundMessage: string; logLabel: string }
+    {
+        notFoundMessage,
+        logLabel,
+        rangeHeader,
+    }: { notFoundMessage: string; logLabel: string; rangeHeader?: string }
 ): Promise<void> {
     let upstream;
     try {
         upstream = await axios.get(previewUrl, {
             responseType: "stream",
             timeout: 10000,
+            headers: rangeHeader ? { Range: rangeHeader } : undefined,
+            // 206 and 416 are the range protocol working, not failures.
+            validateStatus: (status) =>
+                (status >= 200 && status < 300) || status === 416,
         });
     } catch (error) {
         if (axios.isAxiosError(error) && error.response?.status === 404) {
@@ -28,11 +39,18 @@ export async function proxyPreviewStream(
 
     const upstreamContentLength = upstreamHeader(upstream.headers["content-length"]);
     const upstreamAcceptRanges = upstreamHeader(upstream.headers["accept-ranges"]);
+    const upstreamContentRange = upstreamHeader(upstream.headers["content-range"]);
 
     res.setHeader(
         "Content-Type",
         upstreamHeader(upstream.headers["content-type"]) || "audio/mpeg"
     );
+    if (upstream.status === 206 || upstream.status === 416) {
+        res.status(upstream.status);
+        if (upstreamContentRange) {
+            res.setHeader("Content-Range", upstreamContentRange);
+        }
+    }
     if (upstreamContentLength) {
         res.setHeader("Content-Length", upstreamContentLength);
     }

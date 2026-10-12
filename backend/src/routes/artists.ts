@@ -72,6 +72,7 @@ router.get("/preview/:artistName/:trackTitle/stream", async (req, res) => {
         await proxyPreviewStream(res, previewUrl, {
             notFoundMessage: "Preview not found",
             logLabel: "Preview stream",
+            rangeHeader: req.headers.range,
         });
     } catch (error) {
         safeError(res, "Track preview stream", error);
