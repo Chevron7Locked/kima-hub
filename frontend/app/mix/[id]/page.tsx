@@ -356,7 +356,7 @@ export default function MixPage() {
 
                                         <div className="flex items-center justify-end gap-2">
                                             <button
-                                                className="min-h-[44px] min-w-[44px] rounded-full opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/10 text-[var(--text-secondary)] hover:text-white transition-all flex items-center justify-center"
+                                                className="min-h-[44px] min-w-[44px] rounded-full opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/10 text-[var(--text-secondary)] hover:text-white transition-all flex items-center justify-center touch-reveal"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     handleAddToQueue(track);

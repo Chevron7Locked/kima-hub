@@ -108,7 +108,7 @@ function PlaylistCard({
                         aria-label={playlist.isHidden ? "Show playlist" : "Hide playlist"}
                         title={playlist.isHidden ? "show playlist" : "hide playlist"}
                         className={cn(
-                            "w-8 h-8 rounded-lg flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity duration-150",
+                            "w-8 h-8 rounded-lg flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity duration-150 touch-reveal",
                             playlist.isHidden ? "text-success" : "text-[var(--text-muted)]",
                             isHiding && "opacity-50 cursor-not-allowed",
                         )}

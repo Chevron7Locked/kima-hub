@@ -155,7 +155,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                             onPreview(track);
                                         }}
                                         aria-label={isPreviewPlaying ? `stop the preview of ${track.title}` : `play a preview of ${track.title}`}
-                                        className="p-1.5 rounded-full opacity-0 group-hover:opacity-100 focus-visible:opacity-100 group-hover:translate-y-0 focus-visible:translate-y-0 translate-y-1 transition-[opacity,transform] duration-150 hover:bg-white/10 text-[var(--text-secondary)] hover:text-white"
+                                        className="p-1.5 rounded-full opacity-0 group-hover:opacity-100 focus-visible:opacity-100 group-hover:translate-y-0 focus-visible:translate-y-0 translate-y-1 transition-[opacity,transform] duration-150 hover:bg-white/10 text-[var(--text-secondary)] hover:text-white touch-reveal"
                                     >
                                         {isPreviewPlaying ? (
                                             <Pause className="w-4 h-4" />

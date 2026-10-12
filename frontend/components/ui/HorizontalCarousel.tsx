@@ -78,7 +78,7 @@ export function HorizontalCarousel({
                         "absolute left-0 top-1/2 -translate-y-1/2 z-(--z-raised)",
                         "w-10 h-10 rounded-full bg-black/80 ",
                         "flex items-center justify-center",
-                        "opacity-0 group-hover/carousel:opacity-100 focus-visible:opacity-100 transition-opacity",
+                        "opacity-0 group-hover/carousel:opacity-100 focus-visible:opacity-100 transition-opacity touch-reveal",
                         "hover:bg-black hover:scale-105 transition-all",
                         "border border-white/10",
                         "-translate-x-1/2"
@@ -111,7 +111,7 @@ export function HorizontalCarousel({
                         "absolute right-0 top-1/2 -translate-y-1/2 z-(--z-raised)",
                         "w-10 h-10 rounded-full bg-black/80 ",
                         "flex items-center justify-center",
-                        "opacity-0 group-hover/carousel:opacity-100 focus-visible:opacity-100 transition-opacity",
+                        "opacity-0 group-hover/carousel:opacity-100 focus-visible:opacity-100 transition-opacity touch-reveal",
                         "hover:bg-black hover:scale-105 transition-all",
                         "border border-white/10",
                         "translate-x-1/2"

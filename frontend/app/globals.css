@@ -285,6 +285,7 @@ code {
      * group-hover opacity. */
     .touch-reveal {
         opacity: 1;
+        transform: none;
         pointer-events: auto;
     }
 }

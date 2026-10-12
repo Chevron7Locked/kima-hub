@@ -118,7 +118,7 @@ export function MetadataEditor({
         <>
             <button
                 onClick={handleOpen}
-                className="p-2 rounded-full bg-black/40 hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                className="p-2 rounded-full bg-black/40 hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100 focus-visible:opacity-100 touch-reveal"
                 title={`Edit ${type} metadata`.toLowerCase()}
                 aria-label={`Edit ${type} metadata`}
             >

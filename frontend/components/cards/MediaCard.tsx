@@ -171,7 +171,7 @@ export const MediaCard = memo(function MediaCard({
                         onClick={stop(onDelete)}
                         aria-label={`Delete ${title}`}
                         title={`Delete ${title}`.toLowerCase()}
-                        className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/80 border border-white/20 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-danger/90 transition-opacity duration-150"
+                        className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/80 border border-white/20 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-danger/90 transition-opacity duration-150 touch-reveal"
                     >
                         <Trash2 className="w-4 h-4 text-white" />
                     </button>

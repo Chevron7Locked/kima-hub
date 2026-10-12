@@ -144,7 +144,7 @@ export function TrackList({
                                     aria-label={track.isLiked ? `unlike ${track.title}` : `like ${track.title}`}
                                     aria-pressed={track.isLiked}
                                     className={cn(
-                                        "p-1.5 rounded-full opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-all",
+                                        "p-1.5 rounded-full opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-all touch-reveal",
                                         track.isLiked
                                             ? "text-brand hover:text-brand-light"
                                             : "text-[var(--text-secondary)] hover:text-white"
