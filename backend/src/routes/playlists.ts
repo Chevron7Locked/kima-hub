@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { z } from "zod";
 import { requireAuthOrToken, requireAcquirePermission } from "../middleware/auth";
@@ -59,7 +59,10 @@ const createPlaylistSchema = z.object({
 const updatePlaylistSchema = z.object({
     name: z.string().min(1).max(200).optional(),
     isPublic: z.boolean().optional(),
+    reverseOrder: z.boolean().optional(),
 });
+
+const playlistOrderSchema = z.enum(["asc", "rev"]).optional();
 
 const addTracksSchema = z
     .object({
@@ -224,6 +227,17 @@ router.get("/:id", requirePlaylistReader, async (req, res) => {
             return res.status(404).json({ error: "Playlist not found" });
         }
 
+        const order = playlistOrderSchema.safeParse(req.query.order);
+        if (!order.success) {
+            return res
+                .status(400)
+                .json({ error: "Invalid order", details: order.error.errors });
+        }
+        // An explicit ?order= wins; otherwise the playlist's stored flag.
+        const reversed =
+            order.data === "rev" ||
+            (order.data === undefined && playlist.reverseOrder);
+
         // Format playlist items
         const formattedItems = playlist.items.map((item) => ({
             ...item,
@@ -261,15 +275,18 @@ router.get("/:id", requirePlaylistReader, async (req, res) => {
             // Items and pending tracks share one rank space, so a string compare orders them.
         ].sort((a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0));
 
+        const displayItems = reversed ? [...formattedItems].reverse() : formattedItems;
+        const displayMerged = reversed ? [...mergedItems].reverse() : mergedItems;
+
         res.json({
             ...playlist,
             isOwner: playlist.userId === userId,
             isHidden: playlist.hiddenByUsers.length > 0,
             trackCount: playlist.items.length,
             pendingCount: playlist.pendingTracks.length,
-            items: formattedItems,
+            items: displayItems,
             pendingTracks: formattedPending,
-            mergedItems,
+            mergedItems: displayMerged,
         });
     } catch (error) {
         logger.error("Get playlist error:", error);
@@ -277,8 +294,9 @@ router.get("/:id", requirePlaylistReader, async (req, res) => {
     }
 });
 
-// PUT /playlists/:id
-router.put("/:id", requirePlaylistOwner, async (req, res) => {
+// PUT and PATCH share one handler: rename, visibility and reverseOrder are
+// the same owner-only edit surface.
+async function updatePlaylist(req: Request, res: Response) {
     try {
         if (!req.user) {
             return res.status(401).json({ error: "Unauthorized" });
@@ -290,6 +308,9 @@ router.put("/:id", requirePlaylistOwner, async (req, res) => {
             data: {
                 ...(data.name !== undefined && { name: data.name }),
                 ...(data.isPublic !== undefined && { isPublic: data.isPublic }),
+                ...(data.reverseOrder !== undefined && {
+                    reverseOrder: data.reverseOrder,
+                }),
             },
         });
 
@@ -303,7 +324,10 @@ router.put("/:id", requirePlaylistOwner, async (req, res) => {
         logger.error("Update playlist error:", error);
         res.status(500).json({ error: "Failed to update playlist" });
     }
-});
+}
+
+router.put("/:id", requirePlaylistOwner, updatePlaylist);
+router.patch("/:id", requirePlaylistOwner, updatePlaylist);
 
 // POST /playlists/:id/hide - Hide any playlist from your view
 router.post("/:id/hide", requirePlaylistReader, async (req, res) => {

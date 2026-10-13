@@ -898,6 +898,13 @@ class ApiClient {
         });
     }
 
+    async updatePlaylistOrder(id: string, reverseOrder: boolean) {
+        return this.request<ApiData>(`/playlists/${id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ reverseOrder }),
+        });
+    }
+
     async deletePlaylist(id: string) {
         return this.request<void>(`/playlists/${id}`, {
             method: "DELETE",

@@ -10,7 +10,7 @@ import { toPlaybackTrack } from "@/lib/playback-track";
 import { cn } from "@/lib/cn";
 import { shuffleArray } from "@/lib/shuffle";
 import { formatTime, plural } from "@/lib/format";
-import { queryKeys, usePlaylistQuery, useRemoveFromPlaylistMutation, useDeletePlaylistMutation, useUpdatePlaylistMutation, useMoveTrackInPlaylistMutation } from "@/hooks/useQueries";
+import { queryKeys, usePlaylistQuery, useRemoveFromPlaylistMutation, useDeletePlaylistMutation, useUpdatePlaylistMutation, useSetPlaylistReverseMutation, useMoveTrackInPlaylistMutation } from "@/hooks/useQueries";
 import { usePreview } from "@/hooks/usePreview";
 import { useQueryClient } from "@tanstack/react-query";
 import { notify } from "@/lib/notify";
@@ -42,6 +42,7 @@ import {
     GripVertical,
     ChevronUp,
     ChevronDown,
+    ArrowDownUp,
 } from "lucide-react";
 import { useTrackFormat } from "@/hooks/useTrackFormat";
 import { formatTrackDisplay } from "@/lib/track-format";
@@ -115,6 +116,7 @@ export default function PlaylistDetailPage() {
     const { mutateAsync: removeTrack } = useRemoveFromPlaylistMutation();
     const { mutateAsync: deletePlaylistMut } = useDeletePlaylistMutation();
     const { mutateAsync: updatePlaylist, isPending: isUpdatingPlaylist } = useUpdatePlaylistMutation();
+    const { mutateAsync: setReverseOrder, isPending: isReordering } = useSetPlaylistReverseMutation();
     const { mutateAsync: moveTrack } = useMoveTrackInPlaylistMutation();
     const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
     const [dragOverItemId, setDragOverItemId] = useState<string | null>(null);
@@ -270,6 +272,20 @@ export default function PlaylistDetailPage() {
         }
     };
 
+    const reverseOrder = Boolean(playlist?.reverseOrder);
+
+    const handleToggleReverse = async () => {
+        if (!playlist?.isOwner) return;
+        try {
+            await setReverseOrder({
+                playlistId,
+                reverseOrder: !reverseOrder,
+            });
+        } catch {
+            notify.error("Failed to update playlist order");
+        }
+    };
+
     const coverUrls = useMemo(
         () => mosaicCovers((playlist?.items ?? []).map((item: PlaylistItem) => item.track.album?.coverArt)),
         [playlist],
@@ -408,11 +424,29 @@ export default function PlaylistDetailPage() {
             handleDragEnd();
             return;
         }
+        const items = playlist?.items ?? [];
+        const targetIndex = items.findIndex(
+            (i: PlaylistItem) => i.id === targetItemId
+        );
+        // "After the target on screen" stores the mirrored position when the
+        // display is reversed: just before the target in rank order.
+        const afterItemId =
+            targetIndex === -1
+                ? targetItemId
+                : reverseOrder
+                  ? targetIndex === items.length - 1
+                    ? null
+                    : items[targetIndex + 1].id
+                  : targetItemId;
+        if (afterItemId === draggedItemId) {
+            handleDragEnd();
+            return;
+        }
         try {
             await moveTrack({
                 playlistId,
                 itemId: draggedItemId,
-                afterItemId: targetItemId,
+                afterItemId,
             });
         } catch {
             notify.error("Failed to reorder track");
@@ -426,13 +460,17 @@ export default function PlaylistDetailPage() {
         if (!playlist?.items || playlist.items.length < 2) return;
         const idx = playlist.items.findIndex((i: PlaylistItem) => i.id === itemId);
         if (idx <= 0) return;
+        // Reversed display flips the visual move onto the stored ranks.
+        const afterItemId = reverseOrder
+            ? playlist.items[idx - 1].id
+            : idx === 1
+              ? null
+              : playlist.items[idx - 2].id;
         try {
             await moveTrack({
                 playlistId,
                 itemId,
-                // Move to position idx-1: place after the item two positions above,
-                // or null (first position) when idx === 1.
-                afterItemId: idx === 1 ? null : playlist.items[idx - 2].id,
+                afterItemId,
             });
         } catch {
             notify.error("Failed to move track");
@@ -443,11 +481,18 @@ export default function PlaylistDetailPage() {
         if (!playlist?.items || playlist.items.length < 2) return;
         const idx = playlist.items.findIndex((i: PlaylistItem) => i.id === itemId);
         if (idx === -1 || idx >= playlist.items.length - 1) return;
+        const count = playlist.items.length;
+        // Reversed display flips the visual move onto the stored ranks.
+        const afterItemId = reverseOrder
+            ? idx === count - 2
+                ? null
+                : playlist.items[idx + 2].id
+            : playlist.items[idx + 1].id;
         try {
             await moveTrack({
                 playlistId,
                 itemId,
-                afterItemId: playlist.items[idx + 1].id,
+                afterItemId,
             });
         } catch {
             notify.error("Failed to move track");
@@ -967,6 +1012,30 @@ export default function PlaylistDetailPage() {
                             title="shuffle play"
                         >
                             <Shuffle className="w-5 h-5" />
+                        </button>
+                    )}
+
+                    {playlist.isOwner && playlist.items && playlist.items.length > 1 && (
+                        <button
+                            onClick={handleToggleReverse}
+                            disabled={isReordering}
+                            aria-label="reverse order"
+                            aria-pressed={reverseOrder}
+                            className={cn(
+                                "h-8 w-8 rounded-lg flex items-center justify-center transition-all",
+                                reverseOrder
+                                    ? "text-brand"
+                                    : "text-[var(--text-muted)] hover:text-white/60",
+                                isReordering && "opacity-50 cursor-not-allowed"
+                            )}
+                            title={reverseOrder ? "restore order" : "reverse order"}
+                        >
+                            <ArrowDownUp
+                                className={cn(
+                                    "w-5 h-5 transition-transform duration-200",
+                                    reverseOrder && "rotate-180"
+                                )}
+                            />
                         </button>
                     )}
 

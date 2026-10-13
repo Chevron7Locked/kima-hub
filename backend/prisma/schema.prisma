@@ -459,6 +459,7 @@ model Playlist {
   mixId              String?
   name               String
   isPublic           Boolean                @default(false)
+  reverseOrder       Boolean                @default(false)
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @default(now()) @updatedAt
   spotifyPlaylistId  String?

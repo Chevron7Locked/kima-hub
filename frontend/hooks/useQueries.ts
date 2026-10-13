@@ -478,6 +478,34 @@ export function useUpdatePlaylistMutation() {
     });
 }
 
+export function useSetPlaylistReverseMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({
+            playlistId,
+            reverseOrder,
+        }: {
+            playlistId: string;
+            reverseOrder: boolean;
+        }) => api.updatePlaylistOrder(playlistId, reverseOrder),
+        onMutate: ({ playlistId, reverseOrder }) =>
+            applyOptimisticPlaylistEdit(queryClient, playlistId, (old) => {
+                if (!old || !Array.isArray(old.items)) return old;
+                return {
+                    ...old,
+                    reverseOrder,
+                    items: [...(old.items as unknown[])].reverse(),
+                    ...(Array.isArray(old.mergedItems) && {
+                        mergedItems: [...(old.mergedItems as unknown[])].reverse(),
+                    }),
+                };
+            }),
+        onError: (_err, variables, context) => rollbackPlaylistEdit(queryClient, variables.playlistId, context),
+        onSettled: (_, __, variables) => invalidatePlaylist(queryClient, variables.playlistId),
+    });
+}
+
 export function useDeletePlaylistMutation() {
     const queryClient = useQueryClient();
 
