@@ -208,7 +208,7 @@ export function WhatsNewWindow({
                             data-item={item.key}
                             aria-current={current ? "true" : undefined}
                             onClick={() => openItem(item.key)}
-                            className={`group w-full rounded-lg px-3 py-3 flex items-center gap-3 text-left transition-colors hover:bg-white/[0.05] ${current ? "bg-white/[0.07]" : ""}`}
+                            className={`group w-full rounded-lg px-3 py-3 flex items-center gap-3 text-left transition-colors hover:bg-white/[0.06] ${current ? "bg-white/[0.13] ring-1 ring-inset ring-white/[0.07]" : ""}`}
                         >
                             <span className="min-w-0 flex-1">
                                 <span className="flex items-baseline justify-between gap-3">
@@ -265,14 +265,7 @@ export function WhatsNewWindow({
     const backLabel = (
         <>
             <ChevronLeft className="w-4 h-4" />
-            {wide ? (
-                <>
-                    <span className="lg:hidden">What&apos;s new</span>
-                    <span className="hidden lg:inline">{release.note!.from}&apos;s note</span>
-                </>
-            ) : (
-                "What's new"
-            )}
+            What&apos;s new
         </>
     );
 
