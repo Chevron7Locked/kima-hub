@@ -102,6 +102,57 @@ const KEVIN_1_11 = [
 
 export const RELEASES: Release[] = [
     {
+        version: "1.12.0",
+        title: "Kima 1.12",
+        summary:
+            "Loudness normalization, per-step enrichment reruns, update pings, and fixes.",
+        date: "2026-10-13",
+        items: [
+            {
+                kind: "note",
+                key: "playback.normalization",
+                title: "Loudness normalization",
+                summary:
+                    "Songs play toward one loudness so volume stops jumping between tracks.",
+                body:
+                    "Turn it on in Settings → Playback. Louder songs are turned down; quiet ones keep their level, so the library's quieter masters don't get even quieter. When it's off, songs play at whatever loudness their master was cut at.\n\nOpenSubsonic clients get a per-track gain tag; everything else adjusts through the player, so it works on Subsonic, web and the iOS app.",
+                links: [{ label: "Open Settings", href: "/settings" }],
+            },
+            {
+                kind: "note",
+                key: "enrichment.rerun",
+                title: "Rerun from any step",
+                summary:
+                    "Pick which enrichment step to redo; a fresh vibe map comes with each rerun.",
+                body:
+                    "Settings now let you re-run enrichment from whichever step you choose — start over on audio analysis, or just re-build the vibe map without repeating identification or artists. Each rerun produces a fresh map layout.\n\nThe full wipe is still there too.",
+                links: [{ label: "Settings \u2192 Cache", href: "/settings#cache" }],
+            },
+            {
+                kind: "note",
+                key: "updates.pings",
+                title: "Update pings",
+                summary:
+                    "An amber dot on the version number when a newer release is found.",
+                body:
+                    "Kima checks GitHub for newer releases once every 24 hours. An amber dot appears by the version number when a release is found, and tapping the version opens its What's New window. This can be turned off in Settings → Under the hood.",
+            },
+            {
+                kind: "note",
+                key: "fixes.12",
+                title: "Fixes and small improvements",
+                summary:
+                    "Touch-screen controls, preview streams everywhere, consistent labels, a right-sized play queue for iOS, and security fixes.",
+                body:
+                    "- Touch screens (artist and album pages): reveal-on-hover controls now show on tap too\n- Preview streams play on every client (the range headers were missing)\n- The release window says \"What's new\" everywhere, not \"Kevin's note\" on wide screens\n- An ordered play queue for iOS that doesn't drag the full artist payload\n- The collection page hides delete buttons from non-admins\n- Three HIGH-severity CVEs closed in the CLAP stack (transformers model-loading path)\n- Empty Subsonic search3 queries return the library instead of erroring",
+                links: [
+                    { label: "Full changelog on GitHub", href: "https://github.com/Chevron7Locked/kima-hub/releases" },
+                ],
+            },
+        ],
+    },
+
+    {
         version: "1.11.0",
         title: "Kima 1.11",
         summary:

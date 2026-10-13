@@ -5,7 +5,31 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - nightly
+## [1.12.0] - 2026-10-13
+
+### Added
+
+- **Loudness normalization.** A setting in Settings → Playback ("Normalize loudness") that plays every song toward −18 LUFS. Louder songs are turned down; quiet ones keep their level. Off by default; when off, songs play at whatever loudness their master was cut at. Subsonic clients get a per-track `trackGain` tag; web and iOS adjust through the player. Each reading measured with R128 for its full track (median −9.1 LUFS on a 9,204-track library; 24 junk readings outside the valid range are not trusted).
+- **Per-step enrichment reruns.** Settings → Library Enrichment now has a step picker that re-runs from identification, artists, audio analysis, sound vectors, or similarity — each clears itself and everything after it, including the vibe map (always a fresh layout). The full wipe-and-rerun is unchanged.
+- **Update pings.** Every 24 hours Kima checks GitHub's releases API for newer versions. When one is found, an amber dot appears on the version number in the app; tapping it opens the release's What's New window. The check can be turned off in Settings → Under the hood.
+- **An ordered play queue for iOS.** `GET /api/library/artists/:id/play-tracks` returns only the fields a queue needs (id, title, track/disc number, duration, album cover, artist name) in canonical server order — effective year desc, title asc, disc/track within album. MusicBrainz preview rows are excluded (they carry no file). The endpoint matches what the artist page serves today, but without the artist's full discography payload.
+
+### Changed
+
+- **The release window says "What's new" everywhere.** In wide mode the back button used to read "{sender}'s note" (confusing — it navigates to the overview, not a note). Now it says "What's new" on every screen size.
+- **Open item highlight is more visible.** The background went from 0.07 to 0.13 with a subtle inset ring, so it clearly differs from the item hover state.
+
+### Fixed
+
+- **Touch-screen hover-reveal controls** on artist and album pages now respond to taps. Before, the controls that appear on hover were stuck off on touch screens (8 places fixed: play/edit/queue/lyrics on album and artist pages).
+- **Preview stream range requests** (`GET /discover/:id/preview`) now forward `Range` headers through the binary-stream parser (`parseBinary`), and are tested against a real upstream URL with a 206 response.
+- **Subsonic `search3` with an empty query** enumerates the library (same as `getAlbumList2`) instead of returning an empty response.
+- **Collection-page delete controls** no longer show to non-admins (the backend already enforced it; the frontend was gated on the route returning `isAdmin`, which it now does).
+- **Audio analysis GPU status** is reported before the download has finished (a regression from the settings-validation pass that made it show "off" during the transition).
+
+### Security
+
+- `transformers` bumped from 4.57.6 to 5.10.4 in both `services/audio-analyzer-clap/requirements.txt` and the all-in-one image's runtime pip install. Fixes CVE-2026-4372, CVE-2026-5241 and CVE-2026-9856 (model-loading RCE class). The gate asserts bit-identical output (mel filter bank, window, mel spectrograms, 512-d audio and text embeddings, token ids — all identical on the shipped fixtures). The sha-gated ONNX export stage keeps its own pin on 4.57.6 (the export is torch-based and would not load a newer release under the same condition). The security nightly's "Dependency & Secret Scan" now reports zero HIGH/CRITICAL findings.
 
 ## [1.11.0] - 2026-10-12
 
