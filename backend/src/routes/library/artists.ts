@@ -402,9 +402,10 @@ router.post("/backfill-genres", requireAdmin, async (_req, res) => {
 // every album's detail to build this list themselves. The order is the
 // canonical one clients consume as-given: owned albums by effective year
 // (displayYear ?? year, missing last) descending, title ascending, tracks by
-// disc then track number. Albums the library has as files all count as owned
-// here — the same set the artist page marks owned — so discovery-kept albums
-// play exactly as they do from the page today.
+// disc then track number, an untagged disc counting as disc one — the same
+// rule the iOS client's albumOrder uses. Albums the library has as files all
+// count as owned here — the same set the artist page marks owned — so
+// discovery-kept albums play exactly as they do from the page today.
 router.get("/artists/:id/play-tracks", async (req, res) => {
   try {
     const idParam = req.params.id;
@@ -435,10 +436,7 @@ router.get("/artists/:id/play-tracks", async (req, res) => {
                 discNumber: true,
                 duration: true,
               },
-              orderBy: [
-                { discNumber: { sort: Prisma.SortOrder.asc, nulls: "first" } },
-                { trackNo: Prisma.SortOrder.asc },
-              ],
+              orderBy: [{ trackNo: Prisma.SortOrder.asc }],
             },
           },
         },
@@ -460,15 +458,23 @@ router.get("/artists/:id/play-tracks", async (req, res) => {
       });
 
     const tracks = albums.flatMap((album) =>
-      album.tracks.map((track) => ({
-        id: track.id,
-        title: track.title,
-        trackNo: track.trackNo,
-        discNumber: track.discNumber,
-        duration: track.duration,
-        album: { id: album.id, title: album.title, coverArt: album.coverUrl },
-        artist: { id: artist.id, name: artist.name },
-      })),
+      album.tracks
+        .slice()
+        .sort((a, b) => {
+          const aDisc = a.discNumber ?? 1;
+          const bDisc = b.discNumber ?? 1;
+          if (aDisc !== bDisc) return aDisc - bDisc;
+          return (a.trackNo ?? Number.MAX_SAFE_INTEGER) - (b.trackNo ?? Number.MAX_SAFE_INTEGER);
+        })
+        .map((track) => ({
+          id: track.id,
+          title: track.title,
+          trackNo: track.trackNo,
+          discNumber: track.discNumber,
+          duration: track.duration,
+          album: { id: album.id, title: album.title, coverArt: album.coverUrl },
+          artist: { id: artist.id, name: artist.name },
+        })),
     );
 
     res.json({ artist: { id: artist.id, name: artist.name }, tracks });

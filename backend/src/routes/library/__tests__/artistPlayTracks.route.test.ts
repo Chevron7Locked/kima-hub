@@ -136,6 +136,27 @@ describe("GET /library/artists/:id/play-tracks", () => {
         expect(track.embedding).toBeUndefined();
     });
 
+    it("sorts an untagged disc with disc one, like the iOS albumOrder", async () => {
+        await makeAlbum(`${P}alb-mixed`, "Mixed", { year: 2019 });
+        await makeTrack(`${P}alb-mixed`, 3, { disc: 1, title: "D1 T3" });
+        await makeTrack(`${P}alb-mixed`, 2, { disc: null, title: "untagged" });
+        await makeTrack(`${P}alb-mixed`, 1, { disc: 2, title: "D2 T1" });
+        try {
+            const res = await request(app).get(`/artists/${P}art/play-tracks`);
+            const ids = res.body.tracks
+                .filter((t: any) => t.album.id === `${P}alb-mixed`)
+                .map((t: any) => t.id);
+            expect(ids).toEqual([
+                `${P}alb-mixed-t2`, // untagged disc counts as disc 1
+                `${P}alb-mixed-t3`, // disc 1, track 3
+                `${P}alb-mixed-t1`, // disc 2
+            ]);
+        } finally {
+            await prisma.track.deleteMany({ where: { albumId: `${P}alb-mixed` } });
+            await prisma.album.deleteMany({ where: { id: `${P}alb-mixed` } });
+        }
+    });
+
     it("finds the artist by name and mbid like the page route does", async () => {
         const byName = await request(app).get("/artists/play tracks artist/play-tracks");
         expect(byName.status).toBe(200);
