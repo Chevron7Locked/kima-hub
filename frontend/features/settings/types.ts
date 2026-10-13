@@ -53,6 +53,7 @@ export interface SystemSettings {
     primaryFailureFallback: "none" | "lidarr" | "soulseek";
     // Server
     publicUrl: string;
+    updateChecksEnabled: boolean;
 }
 
 export interface ConnectionTestResult {

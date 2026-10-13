@@ -36,6 +36,7 @@ const defaultSystemSettings: SystemSettings = {
     primaryFailureFallback: "none",
     // Server
     publicUrl: "",
+    updateChecksEnabled: true,
 };
 
 export function useSystemSettings() {

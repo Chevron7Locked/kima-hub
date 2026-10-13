@@ -39,6 +39,17 @@ router.get("/pending", async (req, res) => {
     }
 });
 
+/** GET /whats-new/update-status — whether a newer server release exists. */
+router.get("/update-status", async (_req, res) => {
+    try {
+        const { getUpdateStatus } = await import("../services/updateCheck");
+        res.json(await getUpdateStatus());
+    } catch (error) {
+        logger.error("[WhatsNew] update status failed:", error);
+        res.status(500).json({ error: "Failed to check for updates" });
+    }
+});
+
 /** GET /whats-new/current — the newest release with what this user already settled, to read again after closing it. */
 router.get("/current", async (req, res) => {
     try {

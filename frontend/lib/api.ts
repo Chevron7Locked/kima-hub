@@ -58,6 +58,14 @@ interface VibeTrack {
  */
 export type MoodMixDecision = "rebuild" | "keep" | "remove";
 
+export interface UpdateStatus {
+    enabled: boolean;
+    current: string;
+    latest: string | null;
+    hasUpdate: boolean;
+    lastCheckedAt: string | null;
+}
+
 export interface MoodMixReleaseState {
     /**
      * The user's saved mood mix; null when they have none or cleared it.
@@ -1604,6 +1612,11 @@ class ApiClient {
     // Release window: the mood-mix question
     async getMoodMixReleaseState() {
         return this.get<MoodMixReleaseState>("/whats-new/mood-mixes");
+    }
+
+    // Release window: is a newer server release out?
+    async getUpdateStatus() {
+        return this.get<UpdateStatus>("/whats-new/update-status");
     }
 
     async decideMoodMixes(decision: MoodMixDecision) {

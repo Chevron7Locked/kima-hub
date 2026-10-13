@@ -109,6 +109,7 @@ const systemSettingsSchema = z.object({
   // Server
   publicUrl: z.union([z.string().url(), z.literal("")]).optional(),
   registrationOpen: z.boolean().optional(),
+  updateChecksEnabled: z.boolean().optional(),
 });
 
 // GET /system-settings

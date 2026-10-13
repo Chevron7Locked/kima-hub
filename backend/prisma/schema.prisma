@@ -698,6 +698,11 @@ model SystemSettings {
   soulseekMode                String?  @default("p2p")
   slskdUrl                    String?
   slskdApiKey                 String?
+  /// Daily anonymous check against GitHub releases so the UI can flag a newer
+  /// server. Off suits air-gapped installs; nothing else changes.
+  updateChecksEnabled         Boolean  @default(true)
+  lastUpdateCheck             DateTime?
+  latestKnownVersion          String?
 }
 
 model Track {

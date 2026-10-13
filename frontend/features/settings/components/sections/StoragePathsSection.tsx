@@ -1,6 +1,6 @@
 "use client";
 
-import { SettingsSection, SettingsRow, SettingsInput } from "../ui";
+import { SettingsSection, SettingsRow, SettingsInput, SettingsToggle } from "../ui";
 import { SystemSettings } from "../../types";
 
 interface StoragePathsSectionProps {
@@ -24,6 +24,17 @@ export function StoragePathsSection({ settings, onUpdate }: StoragePathsSectionP
                     onChange={(v) => onUpdate({ publicUrl: v })}
                     placeholder="https://kima.example.com"
                     className="w-64"
+                />
+            </SettingsRow>
+
+            <SettingsRow
+                label="Check for updates"
+                description="One anonymous request per day to github releases, so the version badge can flag a newer server. off suits installs without internet."
+            >
+                <SettingsToggle
+                    id="update-checks"
+                    checked={settings.updateChecksEnabled}
+                    onChange={(checked) => onUpdate({ updateChecksEnabled: checked })}
                 />
             </SettingsRow>
 
