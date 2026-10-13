@@ -21,6 +21,7 @@ jest.mock("../../utils/logger", () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));
 jest.mock("../../middleware/auth", () => ({
+    requireAcquirePermission: (_req: any, _res: any, next: any) => next(),
     requireAuthOrToken: (req: any, _res: any, next: any) => {
         req.user = { id: "user-1" };
         next();

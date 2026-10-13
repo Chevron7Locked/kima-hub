@@ -264,6 +264,34 @@ export async function requireAdmin(
     next();
 }
 
+// Acquisition gate (issue #238): downloads cost money, hit peer networks and
+// fill the disk, so they are operator-only by default. A Settings toggle
+// opens them to signed-in members — acquire only. Deleting is never here;
+// every destructive route keeps requireAdmin.
+export async function requireAcquirePermission(
+    req: Request,
+    res: Response,
+    next: NextFunction
+) {
+    // Reuse the user when an auth guard already ran on this request.
+    const user = req.user ?? (await authenticateRequest(req, false));
+    if (!user) {
+        return res.status(401).json({ error: "Not authenticated" });
+    }
+    req.user = user;
+    if (user.role === "admin") {
+        return next();
+    }
+    const { getSystemSettings } = await import("../utils/systemSettings");
+    const settings = await getSystemSettings();
+    if (!settings?.allowMemberAcquire) {
+        return res.status(403).json({
+            error: "Acquisition is operator-only. An admin can allow member downloads in Settings."
+        });
+    }
+    next();
+}
+
 // For streaming URLs that may use query params or need special handling
 export async function requireAuthOrToken(
     req: Request,

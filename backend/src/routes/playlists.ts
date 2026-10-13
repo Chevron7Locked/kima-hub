@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
 import { z } from "zod";
-import { requireAuthOrToken } from "../middleware/auth";
+import { requireAuthOrToken, requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { sessionLog } from "../utils/playlistLogger";
 import { safeError } from "../utils/errors";
@@ -654,7 +654,7 @@ router.get("/:id/pending/:trackId/preview/stream", async (req, res) => {
  * Retry downloading ALL failed/pending tracks from Soulseek
  * Returns immediately and processes downloads sequentially in background
  */
-router.post("/:id/pending/retry-all", async (req, res) => {
+router.post("/:id/pending/retry-all", requireAcquirePermission, async (req, res) => {
     try {
         const userId = req.user!.id;
         const { id: playlistId } = req.params;

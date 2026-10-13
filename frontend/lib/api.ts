@@ -1015,6 +1015,10 @@ class ApiClient {
     }
 
     // System Settings
+    async getPublicConfig(): Promise<{ publicUrl: string; canAcquire: boolean }> {
+        return this.request<{ publicUrl: string; canAcquire: boolean }>("/system-settings/public-config");
+    }
+
     async getSystemSettings() {
         return this.request<ApiData>("/system-settings");
     }

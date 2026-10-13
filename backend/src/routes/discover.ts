@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken, requireAdmin } from "../middleware/auth";
+import { requireAuthOrToken, requireAdmin, requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { listenBrainzService } from "../services/listenBrainz";
 import { startOfWeek, endOfWeek } from "date-fns";
@@ -795,7 +795,7 @@ router.delete("/unlike", async (req, res) => {
     }
 });
 
-router.post("/retry-unavailable", async (req, res) => {
+router.post("/retry-unavailable", requireAcquirePermission, async (req, res) => {
     try {
         const userId = req.user!.id;
 

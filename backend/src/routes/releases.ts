@@ -11,7 +11,7 @@ import { logger } from "../utils/logger";
 import { lidarrService } from "../services/lidarr";
 import { prisma } from "../utils/db";
 import { ConfigurationError } from "../utils/errors";
-import { requireAuthOrToken } from "../middleware/auth";
+import { requireAuthOrToken, requireAcquirePermission } from "../middleware/auth";
 import { withAlbumArtwork } from "../services/artwork";
 import { z } from "zod";
 
@@ -260,7 +260,7 @@ const downloadReleaseSchema = z.object({
     albumTitle: z.string().min(1),
 });
 
-router.post("/download/:albumMbid", async (req, res) => {
+router.post("/download/:albumMbid", requireAcquirePermission, async (req, res) => {
     try {
         const { albumMbid } = req.params;
         const userId = req.user?.id;

@@ -22,6 +22,7 @@ interface SoulseekBrowserProps {
     downloadingFiles: Set<string>;
     onDownload: (result: SoulseekResult) => void;
     onBulkDownload: (results: SoulseekResult[]) => void;
+    canAcquire?: boolean;
 }
 
 const PAGE_SIZE = 100;
@@ -59,6 +60,7 @@ export function SoulseekBrowser({
     downloadingFiles,
     onDownload,
     onBulkDownload,
+    canAcquire = true,
 }: SoulseekBrowserProps) {
     const [formatFilters, setFormatFilters] = useState<Set<SoulseekFormatFilter>>(new Set(["all"]));
     const [sortField, setSortField] = useState<SoulseekSortField>("quality");
@@ -281,6 +283,8 @@ export function SoulseekBrowser({
                     <Button
                         variant="primary"
                         onClick={handleBulkDownloadClick}
+                        disabled={!canAcquire}
+                        title={canAcquire ? undefined : "Downloads are operator-only — an admin can allow members in Settings"}
                         className="ml-auto"
                     >
                         <Download className="w-4 h-4" />
@@ -297,6 +301,7 @@ export function SoulseekBrowser({
                     onToggleSelect={toggleSelect}
                     onToggleSelectAll={toggleSelectAll}
                     onDownload={onDownload}
+                    canAcquire={canAcquire}
                 />
             ) : (
                 <GroupedView
@@ -307,6 +312,7 @@ export function SoulseekBrowser({
                     onToggleGroup={toggleGroup}
                     onToggleSelect={toggleSelect}
                     onDownload={onDownload}
+                    canAcquire={canAcquire}
                 />
             )}
 
@@ -330,6 +336,7 @@ interface FlatViewProps {
     onToggleSelect: (key: string) => void;
     onToggleSelectAll: () => void;
     onDownload: (result: SoulseekResult) => void;
+    canAcquire: boolean;
 }
 
 function FlatView({
@@ -339,6 +346,7 @@ function FlatView({
     onToggleSelect,
     onToggleSelectAll,
     onDownload,
+    canAcquire,
 }: FlatViewProps) {
     const allSelected = results.length > 0 && results.every((r) => selectedKeys.has(getResultKey(r)));
 
@@ -369,6 +377,7 @@ function FlatView({
                     isDownloading={downloadingFiles.has(getResultKey(result))}
                     onToggleSelect={onToggleSelect}
                     onDownload={onDownload}
+                    canAcquire={canAcquire}
                     animationDelay={index * Math.round(CASCADE_WINDOW_MS / Math.max(results.length, 1))}
                 />
             ))}
@@ -384,6 +393,7 @@ interface ResultRowProps {
     isDownloading: boolean;
     onToggleSelect: (key: string) => void;
     onDownload: (result: SoulseekResult) => void;
+    canAcquire: boolean;
     animationDelay: number;
 }
 
@@ -393,6 +403,7 @@ function ResultRow({
     isDownloading,
     onToggleSelect,
     onDownload,
+    canAcquire,
     animationDelay,
 }: ResultRowProps) {
     const key = getResultKey(result);
@@ -440,12 +451,16 @@ function ResultRow({
             <div className="flex items-center justify-center">
                 <button
                     onClick={() => onDownload(result)}
-                    disabled={isDownloading}
+                    disabled={isDownloading || !canAcquire}
+                    title={canAcquire ? undefined : "Downloads are operator-only — an admin can allow members in Settings"}
+                    aria-label={canAcquire ? "Download from Soulseek" : "Downloads are operator-only"}
                     className={cn(
                         "p-1.5 rounded-full transition-colors",
                         isDownloading
                             ? "text-success cursor-not-allowed"
-                            : "text-brand hover:bg-brand/10",
+                            : !canAcquire
+                              ? "text-brand opacity-40 cursor-not-allowed"
+                              : "text-brand hover:bg-brand/10",
                     )}
                 >
                     {isDownloading ? (
@@ -469,6 +484,7 @@ interface GroupedViewProps {
     onToggleGroup: (username: string) => void;
     onToggleSelect: (key: string) => void;
     onDownload: (result: SoulseekResult) => void;
+    canAcquire: boolean;
 }
 
 function GroupedView({
@@ -479,6 +495,7 @@ function GroupedView({
     onToggleGroup,
     onToggleSelect,
     onDownload,
+    canAcquire,
 }: GroupedViewProps) {
     return (
         <div className="space-y-1">
@@ -512,6 +529,7 @@ function GroupedView({
                                         isDownloading={downloadingFiles.has(getResultKey(result))}
                                         onToggleSelect={onToggleSelect}
                                         onDownload={onDownload}
+                                        canAcquire={canAcquire}
                                         animationDelay={0}
                                     />
                                 ))}

@@ -650,6 +650,10 @@ model SpotifyImportJob {
 model SystemSettings {
   id                          String   @id @default("default")
   lidarrEnabled               Boolean  @default(true)
+  /// Acquisition (Soulseek search-and-download, Lidarr requests, playlist
+  /// retries) is operator-only by default. On, signed-in members can acquire
+  /// too; deleting is never opened to them.
+  allowMemberAcquire          Boolean  @default(false)
   lidarrUrl                   String?  @default("http://localhost:8686")
   lidarrApiKey                String?
   /// Kima removes junk downloads (no usable music, the wrong album) so Lidarr

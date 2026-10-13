@@ -5,6 +5,7 @@ import { ConnectionTestResult, SystemSettings } from "../types";
 
 const defaultSystemSettings: SystemSettings = {
     lidarrEnabled: true,
+    allowMemberAcquire: false,
     lidarrUrl: "http://localhost:8686",
     lidarrApiKey: "",
     fanartEnabled: false,

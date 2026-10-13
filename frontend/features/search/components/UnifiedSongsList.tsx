@@ -11,6 +11,7 @@ interface UnifiedSongsListProps {
     soulseekResults: SoulseekResult[];
     downloadingFiles: Set<string>;
     onDownload: (result: SoulseekResult) => void;
+    canAcquire?: boolean;
     maxTotal?: number;
     maxLibrary?: number;
 }
@@ -26,6 +27,7 @@ export function UnifiedSongsList({
     soulseekResults,
     downloadingFiles,
     onDownload,
+    canAcquire = true,
     maxTotal = 6,
     maxLibrary = 4,
 }: UnifiedSongsListProps) {
@@ -66,9 +68,11 @@ export function UnifiedSongsList({
                         className="flex items-center gap-3 p-2 rounded-md hover:bg-white/5 transition-colors"
                     >
                         <button
-                            onClick={() => !isDownloading && onDownload(result)}
-                            disabled={isDownloading}
-                            className="w-10 h-10 flex items-center justify-center flex-shrink-0"
+                            onClick={() => canAcquire && !isDownloading && onDownload(result)}
+                            disabled={!canAcquire || isDownloading}
+                            title={canAcquire ? "Download" : "Downloads are operator-only — an admin can allow members in Settings"}
+                            aria-label={canAcquire ? "Download from Soulseek" : "Downloads are operator-only"}
+                            className="w-10 h-10 flex items-center justify-center flex-shrink-0 disabled:opacity-40"
                         >
                             {isDownloading ? (
                                 <CheckCircle className="w-4 h-4 text-success" />

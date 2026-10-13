@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { notificationService } from "../services/notificationService";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
 import { soulseekConfigured } from "../utils/soulseekConfigured";
@@ -289,6 +289,7 @@ router.post(
 router.post(
     "/downloads/:id/retry",
     requireAuth,
+    requireAcquirePermission,
     async (req: Request, res: Response) => {
         try {
             const failedJob = await prisma.downloadJob.findFirst({

@@ -24,13 +24,17 @@ import { safeError } from "../utils/errors";
 const router = Router();
 
 // Public (any authenticated user) — returns only the configured server URL
-router.get("/public-config", requireAuth, async (_req, res) => {
+router.get("/public-config", requireAuth, async (req, res) => {
   try {
     const settings = await prisma.systemSettings.findUnique({
       where: { id: "default" },
-      select: { publicUrl: true },
+      select: { publicUrl: true, allowMemberAcquire: true },
     });
-    res.json({ publicUrl: settings?.publicUrl || "" });
+    // Members need this to know whether to offer download buttons; the
+    // server enforces the same rule regardless of what the UI shows.
+    const canAcquire =
+      req.user?.role === "admin" || Boolean(settings?.allowMemberAcquire);
+    res.json({ publicUrl: settings?.publicUrl || "", canAcquire });
   } catch (error) {
     logger.error("Get public config error:", error);
     res.status(500).json({ error: "Failed to get server config" });
@@ -43,6 +47,7 @@ router.use(requireAdmin);
 const systemSettingsSchema = z.object({
   // Download Services
   lidarrEnabled: z.boolean().optional(),
+  allowMemberAcquire: z.boolean().optional(),
   lidarrUrl: z.string().optional(),
   lidarrApiKey: z.string().nullable().optional(),
   lidarrWebhookSecret: z.string().nullable().optional(),

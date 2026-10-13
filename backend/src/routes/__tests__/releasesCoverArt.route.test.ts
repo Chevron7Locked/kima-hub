@@ -17,6 +17,7 @@ jest.mock('../../utils/logger', () => ({
 }));
 
 jest.mock('../../middleware/auth', () => ({
+    requireAcquirePermission: (_req: any, _res: any, next: any) => next(),
     requireAuthOrToken: (req: any, _res: any, next: any) => {
         req.user = { id: 'user-123' };
         next();

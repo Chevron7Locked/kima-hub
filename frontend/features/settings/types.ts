@@ -16,6 +16,8 @@ export interface UserSettings {
 export interface SystemSettings {
     // Lidarr
     lidarrEnabled: boolean;
+    /// Operator-only by default; on, signed-in members may acquire (never delete).
+    allowMemberAcquire: boolean;
     lidarrUrl: string;
     lidarrApiKey: string;
     lidarrQualityProfileId: number | null;

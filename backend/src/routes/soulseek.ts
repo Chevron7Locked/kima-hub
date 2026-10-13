@@ -4,7 +4,7 @@ import { safeError } from "../utils/errors";
 /** Soulseek routes: UI searches and track downloads over the vendored soulseek-ts connection. */
 
 import { Router } from "express";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireAcquirePermission } from "../middleware/auth";
 import { soulseekService } from "../services/soulseek";
 import { getSystemSettings } from "../utils/systemSettings";
 import { randomUUID } from "crypto";
@@ -297,6 +297,7 @@ router.get("/search/:searchId", requireAuth, async (req, res) => {
 router.post(
     "/download",
     requireAuth,
+    requireAcquirePermission,
     requireSoulseekConfigured,
     async (req, res) => {
         let jobId: string | null = null;
