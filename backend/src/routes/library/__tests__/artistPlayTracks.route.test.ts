@@ -110,8 +110,6 @@ describe("GET /library/artists/:id/play-tracks", () => {
         expect(res.body.tracks.map((t: any) => t.id)).toEqual([
             // 2024 first (displayYear wins over year 2010)
             `${P}alb-newest-t1`, `${P}alb-newest-t2`,
-            // 2020 discovery-kept album beats both 2018s
-            `${P}alb-disco-t1`,
             // 2018 tie: Alpha before Beta by title
             `${P}alb-tie-a-t1`, `${P}alb-tie-b-t1`,
             // 2015: disc 1 before disc 2
@@ -119,13 +117,16 @@ describe("GET /library/artists/:id/play-tracks", () => {
             // no year: last
             `${P}alb-nodate-t1`,
         ]);
+        // DISCOVER-owned albums never ride the queue — a pending or failed
+        // download has no file to stream
+        expect(res.body.tracks.map((t: any) => t.id)).not.toContain(`${P}alb-disco-t1`);
     });
 
     it("ships only the fields a player reads", async () => {
         const res = await request(app).get(`/artists/${P}art/play-tracks`);
         const track = res.body.tracks[0];
         expect(Object.keys(track).sort()).toEqual([
-            "album", "artist", "discNumber", "duration", "id", "loudness", "title", "trackNo",
+            "album", "artist", "discNumber", "duration", "id", "loudness", "title", "trackNo", "trackPeak",
         ]);
         expect(Object.keys(track.album).sort()).toEqual(["coverArt", "id", "title"]);
         expect(Object.keys(track.artist).sort()).toEqual(["id", "name"]);
