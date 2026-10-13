@@ -39,6 +39,21 @@ describe("compareVersions", () => {
     });
 });
 
+// Golden table pinning the comparison the version chip rides on.
+/* GitHub /releases/latest never returns prereleases (GitHub behavior, checked 10-13) and
+   nightly publishes with prerelease: false (docker-publish.yml), so rc tags cannot reach
+   this comparison — the pairs below are the bounded input it must keep answering. */
+describe(`compareVersions golden table (1.12 pin)`, () => {
+    it.each([
+        [`1.11.5`, `1.12.0`, -1],
+        [`1.9.0`, `1.10.0`, -1],
+        [`1.12.0`, `1.12.0`, 0],
+        [`v1.12.0`, `1.12.0`, 0],
+    ])(`%s vs %s -> %d`, (a, b, expected) => {
+        expect(Math.sign(compareVersions(a, b))).toBe(expected);
+    });
+});
+
 describe("getUpdateStatus", () => {
     it("marks an update when the latest tag is newer", async () => {
         get.mockResolvedValue({ status: 200, data: { tag_name: "v99.0.0" } });
