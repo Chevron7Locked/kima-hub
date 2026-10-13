@@ -396,6 +396,88 @@ router.post("/backfill-genres", requireAdmin, async (_req, res) => {
   }
 });
 
+// The play queue for one artist, in one response: what a Play All tap needs
+// and nothing else. The artist page's payload carries audioFeatures and a
+// MusicBrainz discography the player never reads; native clients re-fetch
+// every album's detail to build this list themselves. The order is the
+// canonical one clients consume as-given: owned albums by effective year
+// (displayYear ?? year, missing last) descending, title ascending, tracks by
+// disc then track number. Albums the library has as files all count as owned
+// here — the same set the artist page marks owned — so discovery-kept albums
+// play exactly as they do from the page today.
+router.get("/artists/:id/play-tracks", async (req, res) => {
+  try {
+    const idParam = req.params.id;
+
+    const artist = await prisma.artist.findFirst({
+      where: {
+        OR: [
+          { id: idParam },
+          { name: { equals: idParam, mode: "insensitive" } },
+          { mbid: idParam },
+        ],
+      },
+      select: {
+        id: true,
+        name: true,
+        albums: {
+          select: {
+            id: true,
+            title: true,
+            coverUrl: true,
+            displayYear: true,
+            year: true,
+            tracks: {
+              select: {
+                id: true,
+                title: true,
+                trackNo: true,
+                discNumber: true,
+                duration: true,
+              },
+              orderBy: [
+                { discNumber: { sort: Prisma.SortOrder.asc, nulls: "first" } },
+                { trackNo: Prisma.SortOrder.asc },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    if (!artist) {
+      return res.status(404).json({ error: "Artist not found" });
+    }
+
+    const albums = artist.albums
+      .slice()
+      .sort((a, b) => {
+        const aYear = a.displayYear ?? a.year ?? 0;
+        const bYear = b.displayYear ?? b.year ?? 0;
+        return aYear !== bYear
+          ? bYear - aYear
+          : a.title.localeCompare(b.title);
+      });
+
+    const tracks = albums.flatMap((album) =>
+      album.tracks.map((track) => ({
+        id: track.id,
+        title: track.title,
+        trackNo: track.trackNo,
+        discNumber: track.discNumber,
+        duration: track.duration,
+        album: { id: album.id, title: album.title, coverArt: album.coverUrl },
+        artist: { id: artist.id, name: artist.name },
+      })),
+    );
+
+    res.json({ artist: { id: artist.id, name: artist.name }, tracks });
+  } catch (error) {
+    logger.error("Get artist play tracks error:", error);
+    res.status(500).json({ error: "Failed to fetch artist play tracks" });
+  }
+});
+
 router.get("/artists/:id", async (req, res) => {
   try {
     const idParam = req.params.id;
