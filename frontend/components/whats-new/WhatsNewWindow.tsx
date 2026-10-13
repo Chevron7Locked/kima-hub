@@ -322,15 +322,7 @@ export function WhatsNewWindow({
                 onClick={() => setOpenKey(null)}
                 className="-ml-2 self-start min-h-9 py-1.5 pl-1 pr-3 rounded-lg flex items-center gap-1 text-sm text-[var(--text-secondary)] hover:text-white hover:bg-white/5 transition-colors"
             >
-                <ChevronLeft className="w-4 h-4" />
-                {wide ? (
-                    <>
-                        <span className="lg:hidden">What&apos;s new</span>
-                        <span className="hidden lg:inline">{release.note!.from}&apos;s note</span>
-                    </>
-                ) : (
-                    "What's new"
-                )}
+                {backLabel}
             </button>
             <h3 id="whats-new-item" className="text-xl font-semibold tracking-tight text-white text-balance">
                 {item.title}
