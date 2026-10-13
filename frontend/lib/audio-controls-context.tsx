@@ -176,9 +176,19 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             if (document.visibilityState === "visible") apply();
         };
         document.addEventListener("visibilitychange", onVisible);
+        // A settings save in this tab applies at once — the dirty-save flow
+        // announces the persisted choice on this event.
+        const onSettingsSaved = (event: Event) => {
+            const detail = (event as CustomEvent<{ loudnessNormalization?: boolean }>).detail;
+            if (detail && typeof detail.loudnessNormalization === "boolean") {
+                controllerRef.current?.setNormalizationEnabled(detail.loudnessNormalization);
+            }
+        };
+        window.addEventListener("kima:user-settings-saved", onSettingsSaved);
         return () => {
             cancelled = true;
             document.removeEventListener("visibilitychange", onVisible);
+            window.removeEventListener("kima:user-settings-saved", onSettingsSaved);
         };
     }, []);
 

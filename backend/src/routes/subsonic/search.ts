@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { searchService } from "../../services/search";
-import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong } from "./mappers";
+import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong, trackGainDb } from "./mappers";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
 
 export const searchRouter = Router();
@@ -152,18 +152,22 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
     }
 
     if (tracks.length > 0) {
-        result.song = tracks.map((t) => ({
-            "@_id": t.id,
-            "@_title": t.title,
-            "@_album": t.albumTitle,
-            "@_artist": t.artistName,
-            "@_artistId": t.artistId,
-            "@_albumId": t.albumId,
-            "@_coverArt": t.albumId,
-            "@_duration": t.duration ? Math.round(t.duration) : 0,
-            "@_type": "music",
-            "@_genre": genreMap.get(t.artistId) || undefined,
-        }));
+        result.song = tracks.map((t) => {
+            const gain = trackGainDb(t.loudness);
+            return {
+                "@_id": t.id,
+                "@_title": t.title,
+                "@_album": t.albumTitle,
+                "@_artist": t.artistName,
+                "@_artistId": t.artistId,
+                "@_albumId": t.albumId,
+                "@_coverArt": t.albumId,
+                "@_duration": t.duration ? Math.round(t.duration) : 0,
+                "@_type": "music",
+                "@_genre": genreMap.get(t.artistId) || undefined,
+                replayGain: gain === null ? {} : { trackGain: gain },
+            };
+        });
     }
 
     return subsonicOk(req, res, { [responseKey]: result });
