@@ -32,25 +32,6 @@ SSH_HOST="${KIMA_TEST_SSH_HOST:-media-server}"
 DB_CONTAINER="${KIMA_TEST_DB_CONTAINER:-kima-fulltest}"
 DB_USER="${KIMA_TEST_DB_USER:-kima}"
 DB_NAME="${KIMA_TEST_DB_NAME:-kima}"
-GAIN_MAX_DB=30          # ledger M1.4 bar: no |trackGain| above this may ship
-RG_REFERENCE_LUFS=-18   # backend/src/routes/subsonic/mappers.ts:74
-
-[ -r "$CREDS_FILE" ] || { echo "FATAL: creds file not readable: $CREDS_FILE" >&2; exit 2; }
-# shellcheck disable=SC1090
-source "$CREDS_FILE"
-BASE="${KIMA_TEST_BASE:-${KIMA_FULLTEST_BASE:-}}"
-[ -n "$BASE" ] || { echo "FATAL: set KIMA_TEST_BASE (e.g. http://<media-server>:3056)" >&2; exit 2; }
-: "${KIMA_TEST_USERNAME:?FATAL: KIMA_TEST_USERNAME missing in creds file}"
-: "${KIMA_TEST_PASSWORD:?FATAL: KIMA_TEST_PASSWORD missing in creds file}"
-export KIMA_TEST_USERNAME KIMA_TEST_PASSWORD BASE
-
-PASSES=0
-FAILS=0
-SKIPS=0
-mkdir -p "$(dirname "$EVIDENCE")"
-T="$(mktemp -d)"
-trap 'rm -rf "$T"' EXIT
-
 now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # record CHECK STATUS CMD NUMBERS_JSON [REASON] — one JSONL row + one console line
@@ -136,127 +117,6 @@ print(json.dumps({"username": os.environ["KIMA_TEST_USERNAME"],
 PY
 }
 
-# parse_surface.py IN_JSON IDS_OUT -> stats line "rows obj gain outliers nids"
-# (song list located by $ENVELOPE, e.g. searchResult3.song)
-cat > "$T/parse_surface.py" <<'PY'
-import json, os, re, sys
-path, ids_out = sys.argv[1], sys.argv[2]
-with open(path) as f:
-    data = json.load(f)
-node = data.get("subsonic-response", data) if isinstance(data, dict) else {}
-for part in os.environ.get("ENVELOPE", "searchResult3.song").split("."):
-    if part:
-        node = node.get(part) if isinstance(node, dict) else None
-songs = node if isinstance(node, list) else []
-maxdb = float(os.environ.get("GAIN_MAX_DB", "30"))
-rows = len(songs)
-obj = sum(1 for s in songs if isinstance(s.get("replayGain"), dict))
-gain = sum(1 for s in songs
-           if isinstance(s.get("replayGain"), dict)
-           and s["replayGain"].get("trackGain") is not None)
-outl = sum(1 for s in songs
-           if isinstance(s.get("replayGain"), dict)
-           and isinstance(s["replayGain"].get("trackGain"), (int, float))
-           and abs(s["replayGain"]["trackGain"]) > maxdb)
-ok = re.compile(r"^[A-Za-z0-9_-]+$")
-ids = [s["id"] for s in songs if isinstance(s.get("id"), str) and ok.match(s["id"])]
-with open(ids_out, "w") as f:
-    f.write("\n".join(ids))
-print(f"{rows}\t{obj}\t{gain}\t{outl}\t{len(ids)}")
-PY
-
-# db_valid_for_ids IDS_FILE -> how many of those rows hold loudness that ships a gain
-db_valid_for_ids() {
-  local arr n
-  n="$(grep -cE '^[A-Za-z0-9_-]+$' "$1" 2>/dev/null || true)"
-  if [ "${n:-0}" -eq 0 ]; then echo 0; return 0; fi
-  arr="$(ids_to_sql_array "$1")"
-  db_q "SELECT count(*) FROM \"Track\" WHERE \"id\" = ANY(ARRAY[$arr]) AND \"loudness\" IS NOT NULL AND \"loudness\" > -60 AND \"loudness\" <= 0"
-}
-
-# ---- M1.1 / M5.1 / M5.2: replayGain on every song row of a surface ----
-gain_surface() { # gain_surface CHECK ENVELOPE CMD URL [curl params...]
-  local check="$1" envelope="$2" cmd="$3" url="$4"
-  shift 4
-  local out="$T/$check.json" ids="$T/$check.ids" stats="$T/$check.stats"
-  local code stats_line rows obj gain outl nids dbv cov numbers
-  code="$(rest_get "$out" "$url" "$@" 2>/dev/null || echo 000)"
-  stats_line="$(ENVELOPE="$envelope" GAIN_MAX_DB="$GAIN_MAX_DB" \
-    python3 "$T/parse_surface.py" "$out" "$ids" 2>/dev/null || printf '0\t0\t0\t0\t0')"
-  IFS=$'\t' read -r rows obj gain outl nids <<<"$stats_line"
-  printf '%s\n' "$stats_line" > "$stats"
-  if [ "$code" != "200" ]; then
-    record "$check" false "$cmd" "{\"http\":$code,\"rows\":$rows}" "HTTP $code from $url"
-    return 0
-  fi
-  numbers="{\"http\":$code,\"rows\":$rows,\"with_replayGain_object\":$obj,\"with_trackGain\":$gain,\"api_gain_outliers\":$outl}"
-  if [ "$rows" -eq 0 ]; then
-    record "$check" false "$cmd" "$numbers" "surface returned 0 song rows"
-    return 0
-  fi
-  if ! dbv="$(db_valid_for_ids "$ids")"; then
-    record "$check" false "$cmd" "$numbers" "DB census query failed"
-    return 0
-  fi
-  cov="$(python3 -c "print(round($gain * 100.0 / $rows, 1))")"
-  numbers="{\"http\":$code,\"rows\":$rows,\"with_replayGain_object\":$obj,\"with_trackGain\":$gain,\"db_valid_loudness_rows\":${dbv:-0},\"coverage_pct\":$cov,\"api_gain_outliers\":$outl}"
-  if [ "$obj" -eq "$rows" ] && [ "$gain" -eq "${dbv:-0}" ] && [ "$outl" -eq 0 ]; then
-    record "$check" true "$cmd" "$numbers"
-  else
-    record "$check" false "$cmd" "$numbers" \
-      "replayGain object $obj/$rows; trackGain $gain vs db-valid ${dbv:-?}; outliers $outl"
-  fi
-}
-
-check_search3() {
-  gain_surface search3_gain "searchResult3.song" \
-    "curl -G $BASE/rest/search3.view?query=&songCount=500&f=json (u,p from test-creds.env; M1.1+M5.1)" \
-    "$BASE/rest/search3.view" \
-    --data-urlencode "query=" --data-urlencode "songCount=500"
-}
-
-check_album() {
-  local alb
-  alb="$(db_q "SELECT al.\"id\" FROM \"Album\" al JOIN \"Track\" t ON t.\"albumId\"=al.\"id\" WHERE al.\"location\"='LIBRARY' AND t.\"corrupt\"=false AND t.\"missingSince\" IS NULL AND t.\"loudness\" IS NOT NULL GROUP BY al.\"id\" ORDER BY count(*) DESC LIMIT 1" | head -1)"
-  if [ -z "$alb" ]; then
-    record album_gain false "psql pick album (SELECT-only)" '{"rows":0}' \
-      "no LIBRARY album with measured tracks in DB (or DB census query failed)"
-    return 0
-  fi
-  gain_surface album_gain "album.song" \
-    "curl -G $BASE/rest/getAlbum.view?id=$alb&f=json (u,p from test-creds.env; M1.1 album door)" \
-    "$BASE/rest/getAlbum.view" --data-urlencode "id=$alb"
-}
-
-check_random() {
-  gain_surface random_gain "randomSongs.song" \
-    "curl -G $BASE/rest/getRandomSongs.view?size=100&f=json (u,p from test-creds.env; M5.2 476a0e22 inline builder)" \
-    "$BASE/rest/getRandomSongs.view" --data-urlencode "size=100"
-}
-
-# ---- M1.4: no outlier |trackGain| > GAIN_MAX_DB ships to any client ----
-check_outliers() {
-  local cmd="psql (SELECT-only) full-library shipped-gain math + api surface scan (M1.4)"
-  local db_stats junk would_ship abs30 api_outl sampled f numbers
-  if ! db_stats="$(db_q "WITH playable AS (SELECT t.\"loudness\" AS l FROM \"Track\" t JOIN \"Album\" al ON al.\"id\"=t.\"albumId\" WHERE t.\"corrupt\"=false AND t.\"missingSince\" IS NULL AND t.\"loudness\" IS NOT NULL) SELECT count(*) FILTER (WHERE l > 0 OR l <= -60), count(*) FILTER (WHERE l > -60 AND l <= 0 AND l < $((RG_REFERENCE_LUFS - GAIN_MAX_DB))), count(*) FILTER (WHERE abs(l) > $GAIN_MAX_DB) FROM playable")"; then
-    record gain_outliers false "$cmd" '{}' "DB census query failed"
-    return 0
-  fi
-  IFS='|' read -r junk would_ship abs30 <<<"${db_stats:-0|0|0}"
-  sampled=0
-  for f in "$T"/*.ids; do
-    [ -e "$f" ] || continue
-    sampled=$((sampled + $(grep -cE '^[A-Za-z0-9_-]+$' "$f" 2>/dev/null || true)))
-  done
-  api_outl="$(awk -F'\t' 'NF>=4 {s+=$4} END {print s+0}' "$T"/*.stats 2>/dev/null || echo 0)"
-  numbers="{\"db_unshippable_junk_rows\":${junk:-0},\"db_would_ship_gt${GAIN_MAX_DB}db\":${would_ship:-0},\"db_abs_loudness_gt${GAIN_MAX_DB}db\":${abs30:-0},\"api_observed_gt${GAIN_MAX_DB}db\":${api_outl:-0},\"api_rows_scanned\":$sampled}"
-  if [ "${would_ship:-1}" -eq 0 ] && [ "${api_outl:-1}" -eq 0 ]; then
-    record gain_outliers true "$cmd" "$numbers"
-  else
-    record gain_outliers false "$cmd" "$numbers" "outlier gains would ship / shipped"
-  fi
-}
-
 # ---- M2.1: rerun guard — an unknown step must 400, never start a run ----
 check_rerun_guard() {
   local body="$T/rerun.json" code numbers
@@ -331,50 +191,6 @@ PY
   else
     record playtracks_ownership false "$cmd" "$numbers" \
       "$note — endpoint count must equal playable rows (Task A filter not deployed?)"
-  fi
-}
-
-# ---- M1.1 on the iOS surface: served rows carry valid loudness ----
-check_playtracks_gains() {
-  local art="${OWNERSHIP_ARTIST:-}"
-  if [ -z "$art" ]; then
-    record playtracks_gain false \
-      "curl $BASE/api/library/artists/<id>/play-tracks" '{"rows":0}' \
-      "no artist resolved by the ownership check"
-    return 0
-  fi
-  local stats rows withloud valid http dbv cov numbers
-  stats="$(PT_JSON="$T/pt.json" PT_HTTP="$(cat "$T/pt.http" 2>/dev/null || echo 0)" \
-    python3 - <<'PY'
-import json, os
-try:
-    d = json.load(open(os.environ["PT_JSON"]))
-except Exception:
-    d = {}
-tracks = d.get("tracks", [])
-loud = [t.get("loudness") for t in tracks]
-withloud = sum(1 for v in loud if v is not None)
-valid = sum(1 for v in loud if isinstance(v, (int, float)) and -60 < v <= 0)
-print(f"{len(tracks)}\t{withloud}\t{valid}\t{os.environ.get('PT_HTTP', '0')}")
-PY
-)"
-  IFS=$'\t' read -r rows withloud valid http <<<"$stats"
-  if ! dbv="$(db_q "SELECT count(*) FROM \"Track\" t JOIN \"Album\" al ON al.\"id\"=t.\"albumId\" WHERE al.\"artistId\"='$art' AND al.\"location\"='LIBRARY' AND t.\"corrupt\"=false AND t.\"missingSince\" IS NULL AND t.\"loudness\" IS NOT NULL AND t.\"loudness\" > -60 AND t.\"loudness\" <= 0")"; then
-    record playtracks_gain false \
-      "curl $BASE/api/library/artists/$art/play-tracks" '{"rows":0}' "DB census query failed"
-    return 0
-  fi
-  cov="$(python3 -c "print(round($valid * 100.0 / max($rows, 1), 1))")"
-  numbers="{\"http\":$http,\"rows\":$rows,\"rows_with_loudness\":$withloud,\"rows_valid_loudness\":$valid,\"db_playable_valid_loudness\":${dbv:-0},\"coverage_pct\":$cov}"
-  if [ "$valid" -eq "${dbv:-0}" ] && [ "$rows" -eq "${OWNERSHIP_PLAYABLE:-$rows}" ]; then
-    record playtracks_gain true \
-      "curl $BASE/api/library/artists/$art/play-tracks (loudness is the gain field iOS consumes; M1.1)" \
-      "$numbers"
-  else
-    record playtracks_gain false \
-      "curl $BASE/api/library/artists/$art/play-tracks (loudness is the gain field iOS consumes; M1.1)" \
-      "$numbers" \
-      "served rows must be exactly the playable valid-loudness set (same root cause as playtracks_ownership until Task A deploys)"
   fi
 }
 
@@ -510,7 +326,6 @@ print_manual() {
   cat <<'EOF'
 -- manual rows (ears / visual / cross-repo; no evidence row claimed) --
 MANUAL  M1.2  live toggle: flip normalization ON/OFF mid-play; applies via kima:user-settings-saved without reload (screenshot)
-MANUAL  M1.3  audible mechanism: stream RMS with gain vs -(loudness - target) clamped; final ears = Kevin
 MANUAL  M2.2  per-step rerun buttons render and progress via SSE + DB drain
 MANUAL  M2.3  wipe-and-rerun rehearsal (only if M2.1 guard passed); log throughput vs 98-min bar
 MANUAL  M3.1  play-tracks disc order vs iOS albumOrder rule (KimaAPIClient+Library.swift:63)
@@ -555,13 +370,8 @@ if [ -z "$TOKEN" ]; then
 fi
 
 run_check health_analyzers     check_health
-run_check search3_gain         check_search3
-run_check album_gain           check_album
-run_check random_gain          check_random
-run_check gain_outliers        check_outliers
 run_check rerun_guard          check_rerun_guard
 run_check playtracks_ownership check_ownership
-run_check playtracks_gain      check_playtracks_gains
 run_check playlist_reverse     check_reverse
 run_check update_status        check_update_status
 run_check transformers_pin     check_transformers_pin

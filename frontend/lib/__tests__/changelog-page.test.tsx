@@ -17,10 +17,10 @@ const changelog = {
         {
             version: "1.12.0",
             title: "Kima 1.12",
-            summary: "Loudness normalization and fixes.",
+            summary: "Rerun from any step and fixes.",
             date: "2026-10-13",
             dismissed: false,
-            items: [{ key: "playback.normalization", kind: "note", title: "Loudness normalization", summary: "One loudness.", body: "Songs play toward one loudness." }],
+            items: [{ key: "enrichment.rerun", kind: "note", title: "Rerun from any step", summary: "Redo a step, get a fresh map.", body: "Each rerun makes a fresh map." }],
         },
         {
             version: "1.11.0",

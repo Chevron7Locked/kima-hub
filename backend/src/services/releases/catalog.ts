@@ -105,19 +105,9 @@ export const RELEASES: Release[] = [
         version: "1.12.0",
         title: "Kima 1.12",
         summary:
-            "Loudness normalization, per-step enrichment reruns, update pings, and fixes.",
+            "Per-step enrichment reruns, update pings, and fixes.",
         date: "2026-10-13",
         items: [
-            {
-                kind: "note",
-                key: "playback.normalization",
-                title: "Loudness normalization",
-                summary:
-                    "Songs play toward one loudness so volume stops jumping between tracks.",
-                body:
-                    "Turn it on in Settings → Playback. Louder songs are turned down; quiet ones keep their level, so the library's quieter masters don't get even quieter. When it's off, songs play at whatever loudness their master was cut at.\n\nOpenSubsonic clients get a per-track gain tag; everything else adjusts through the player, so it works on Subsonic, web and the iOS app.",
-                links: [{ label: "Open Settings", href: "/settings" }],
-            },
             {
                 kind: "note",
                 key: "enrichment.rerun",

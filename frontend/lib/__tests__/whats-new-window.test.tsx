@@ -39,10 +39,10 @@ const R11: Release = {
 const R12: Release = {
     version: "1.12.0",
     title: "Kima 1.12",
-    summary: "Loudness normalization and fixes.",
+    summary: "Rerun from any step and fixes.",
     date: "2026-10-13",
     items: [
-        { kind: "note", key: "playback.normalization", title: "Loudness normalization", summary: "One loudness.", body: "Songs play toward one loudness.", links: [{ label: "Open Settings", href: "/settings" }] },
+        { kind: "note", key: "enrichment.rerun", title: "Rerun from any step", summary: "Redo a step, get a fresh map.", body: "Each rerun makes a fresh map.", links: [{ label: "Open Settings", href: "/settings" }] },
     ],
 };
 
@@ -110,7 +110,7 @@ describe("WhatsNewWindow", () => {
         });
         check();
         await act(async () => {
-            container.querySelector<HTMLButtonElement>('[data-item="playback.normalization"]')!.click();
+            container.querySelector<HTMLButtonElement>('[data-item="enrichment.rerun"]')!.click();
         });
         check(); // item page
         await act(async () => {
@@ -125,7 +125,7 @@ describe("WhatsNewWindow", () => {
 
     it("shows a release without a note an intro instead of a missing note", async () => {
         await renderWindow([R12]);
-        expect(container.textContent).toContain("Loudness normalization and fixes.");
+        expect(container.textContent).toContain("Rerun from any step and fixes.");
         expect(container.textContent).not.toContain("A note from");
     });
 });
