@@ -146,6 +146,42 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const controllerRef = useRef(controller);
     useEffect(() => { controllerRef.current = controller; }, [controller]);
 
+    // Loudness leveling: the gain factor follows the current music track
+    // (null for podcasts/audiobooks, which play untouched). Gapless advance
+    // adopts the next track's loudness inside the controller itself.
+    const currentTrackId = state.currentTrack?.id;
+    const currentTrackLoudness = state.currentTrack?.loudness ?? null;
+    useEffect(() => {
+        controllerRef.current?.setLoudness(currentTrackLoudness);
+    }, [currentTrackId, currentTrackLoudness]);
+
+    // The on/off choice lives in the user's settings; re-read when the page
+    // becomes visible so a toggle applies without a reload.
+    useEffect(() => {
+        let cancelled = false;
+        const apply = async () => {
+            try {
+                const settings = await api.getSettings();
+                if (!cancelled) {
+                    controllerRef.current?.setNormalizationEnabled(
+                        settings.loudnessNormalization === true
+                    );
+                }
+            } catch {
+                // Offline or signed out mid-session: leave the factor as-is.
+            }
+        };
+        apply();
+        const onVisible = () => {
+            if (document.visibilityState === "visible") apply();
+        };
+        document.addEventListener("visibilitychange", onVisible);
+        return () => {
+            cancelled = true;
+            document.removeEventListener("visibilitychange", onVisible);
+        };
+    }, []);
+
     const currentTimeRef = useRef(playback.currentTime);
     useEffect(() => {
         currentTimeRef.current = playback.currentTime;
@@ -1231,7 +1267,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             const ctrl2 = controllerRef.current;
             if (!ctrl2) return;
             pendingGaplessNextRef.current = nextTrack;
-            ctrl2.setExpectedNext(api.getStreamUrl(nextTrack.id), nextTrack.id, nextTrack.duration);
+            ctrl2.setExpectedNext(api.getStreamUrl(nextTrack.id), nextTrack.id, nextTrack.duration, nextTrack.loudness ?? null);
             ctrl2.preloadNext();
         };
 

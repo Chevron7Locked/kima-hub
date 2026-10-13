@@ -33,7 +33,7 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
 
     let artists: { id: string; name: string }[];
     let rawAlbums: { id: string; title: string; artistId: string; artistName: string; year: number | null }[];
-    let tracks: { id: string; title: string; artistId: string; artistName: string; albumId: string; albumTitle: string; duration: number | null }[];
+    let tracks: { id: string; title: string; artistId: string; artistName: string; albumId: string; albumTitle: string; duration: number | null; loudness: number | null }[];
 
     if (enumerateLibrary) {
         [artists, rawAlbums, tracks] = await Promise.all([
@@ -53,9 +53,9 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
                       LIMIT ${albumCount} OFFSET ${albumOffset}`
                 : Promise.resolve([]),
             songCount > 0
-                ? prisma.$queryRaw<{ id: string; title: string; artistId: string; artistName: string; albumId: string; albumTitle: string; duration: number | null }[]>`
+                ? prisma.$queryRaw<{ id: string; title: string; artistId: string; artistName: string; albumId: string; albumTitle: string; duration: number | null; loudness: number | null }[]>`
                       SELECT t.id, t.title, al."artistId", ar.name AS "artistName",
-                             t."albumId", al.title AS "albumTitle", t.duration
+                             t."albumId", al.title AS "albumTitle", t.duration, t.loudness
                       FROM "Track" t
                       JOIN "Album" al ON t."albumId" = al.id
                       JOIN "Artist" ar ON al."artistId" = ar.id
@@ -96,6 +96,7 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
                               albumId: t.albumId,
                               albumTitle: t.albumTitle,
                               duration: t.duration ?? null,
+                              loudness: t.loudness ?? null,
                           }))
                       )
                 : Promise.resolve([]),

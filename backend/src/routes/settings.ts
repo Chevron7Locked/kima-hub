@@ -22,6 +22,7 @@ const settingsSchema = z.object({
     // never echoed back on GET.
     listenbrainzToken: z.string().min(1).nullable().optional(),
     shareLiveListening: z.boolean().optional(),
+    loudnessNormalization: z.boolean().optional(),
 });
 
 /** Whether this user is the one whose listening KIMA_PUBLIC_VIBE shares. */

@@ -33,6 +33,7 @@ export type TrackRow = {
     filePath: string | null;
     mime: string | null;
     fileSize: number | null;
+    loudness?: number | null;
 };
 
 export function mapArtist(a: ArtistRow) {
@@ -59,6 +60,29 @@ export function mapAlbum(album: AlbumRow, artistName: string) {
     };
 }
 
+/** ReplayGain 2 reference: EBU R128 loudness a gain-normalized track lands on. */
+export const RG_REFERENCE_LUFS = -18;
+
+/**
+ * A measured integrated loudness is only trusted inside the range real audio
+ * lands in; anything else (null, unanalyzed, or a corrupted reading) counts
+ * as absent and no gain is derived from it.
+ */
+export function isValidLoudness(loudness: unknown): loudness is number {
+    return typeof loudness === "number" && Number.isFinite(loudness) && loudness > -60 && loudness <= 0;
+}
+
+/**
+ * The gain in dB that plays a track at the ReplayGain 2 reference loudness
+ * (the OpenSubsonic trackGain value; signed, so a quiet track gets a boost
+ * for native clients that handle their own peak protection). The web player
+ * derives its own attenuation-only factor from this measurement.
+ */
+export function trackGainDb(loudness: number | null | undefined): number | null {
+    if (!isValidLoudness(loudness)) return null;
+    return Math.round((RG_REFERENCE_LUFS - loudness) * 10) / 10;
+}
+
 export function mapSong(
     track: TrackRow,
     album: { id: string; title: string; displayTitle: string | null; year: number | null },
@@ -66,6 +90,7 @@ export function mapSong(
     artistId: string,
     genre?: string | null
 ) {
+    const gain = trackGainDb(track.loudness);
     return {
         "@_id": track.id,
         "@_parent": album.id,
@@ -86,6 +111,9 @@ export function mapSong(
         "@_artistId": artistId,
         "@_type": "music",
         "@_genre": genre || undefined,
+        // OpenSubsonic: the object is always present; fields are omitted when
+        // the measurement is missing or untrustworthy.
+        replayGain: gain === null ? {} : { trackGain: gain },
     };
 }
 
