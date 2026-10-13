@@ -19,6 +19,7 @@ import {
     Compass,
     X,
     Check,
+    ImagePlus,
 } from "lucide-react";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { api } from "@/lib/api";
@@ -30,6 +31,9 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { plural } from "@/lib/format";
 import { MediaCard } from "@/components/cards/MediaCard";
 import { mosaicCovers } from "@/features/playlist/coverMosaic";
+import { useUploadPlaylistCoverMutation } from "@/hooks/useQueries";
+import { COVER_ACCEPT, coverUploadError } from "@/features/playlist/playlistCover";
+import { notify } from "@/lib/notify";
 
 type ActionPanel = "create" | "importUrl" | "importFile" | null;
 
@@ -49,12 +53,16 @@ interface Playlist {
     items?: PlaylistItem[];
     isOwner?: boolean;
     isHidden?: boolean;
+    coverUrl?: string | null;
     user?: {
         username: string;
     };
 }
 
-function mosaicUrls(items: PlaylistItem[] | undefined): string[] {
+function mosaicUrls(items: PlaylistItem[] | undefined, coverUrl?: string | null): string[] {
+    // A custom cover (issue #151) takes the whole card; only fall back to the
+    // track mosaic when there is no custom cover.
+    if (coverUrl) return [api.getCoverArtUrl(coverUrl, 200)];
     return mosaicCovers((items ?? []).map((item) => item.track?.album?.coverUrl)).map(
         (cover) => api.getCoverArtUrl(cover, 200),
     );
@@ -65,17 +73,25 @@ function PlaylistCard({
     index,
     onPlay,
     onToggleHide,
+    onSetCover,
     isHiddenView = false,
 }: {
     playlist: Playlist;
     index: number;
     onPlay: (playlistId: string) => void;
     onToggleHide: (playlistId: string, hide: boolean) => void;
+    onSetCover: (playlistId: string, file: File) => Promise<void>;
     isHiddenView?: boolean;
 }) {
     const isShared = playlist.isOwner === false;
+    const isOwner = playlist.isOwner === true;
     const [isHiding, setIsHiding] = useState(false);
-    const imageUrl = useMemo(() => mosaicUrls(playlist.items), [playlist.items]);
+    const [isUploadingCover, setIsUploadingCover] = useState(false);
+    const coverFileRef = useRef<HTMLInputElement>(null);
+    const imageUrl = useMemo(
+        () => mosaicUrls(playlist.items, playlist.coverUrl),
+        [playlist.items, playlist.coverUrl],
+    );
 
     const handleToggleHide = async (e: React.MouseEvent) => {
         e.preventDefault();
@@ -85,6 +101,28 @@ function PlaylistCard({
             await onToggleHide(playlist.id, !playlist.isHidden);
         } finally {
             setIsHiding(false);
+        }
+    };
+
+    const handleCoverFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (!file) return;
+
+        const problem = coverUploadError(file);
+        if (problem) {
+            notify.error(problem);
+            return;
+        }
+
+        setIsUploadingCover(true);
+        try {
+            await onSetCover(playlist.id, file);
+        } catch (error) {
+            console.error("Failed to upload playlist cover:", error);
+            notify.error("Failed to upload cover image");
+        } finally {
+            setIsUploadingCover(false);
         }
     };
 
@@ -100,7 +138,7 @@ function PlaylistCard({
             className={cn(isHiddenView && "opacity-60 hover:opacity-100")}
             action={{ icon: Play, label: "Play", onClick: () => onPlay(playlist.id) }}
             corner={
-                isShared && (
+                isShared ? (
                     <button
                         type="button"
                         onClick={handleToggleHide}
@@ -115,7 +153,31 @@ function PlaylistCard({
                     >
                         {playlist.isHidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                     </button>
-                )
+                ) : isOwner ? (
+                    <>
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                coverFileRef.current?.click();
+                            }}
+                            disabled={isUploadingCover}
+                            aria-label="Set cover image"
+                            title="Set cover"
+                            className="w-8 h-8 rounded-lg flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity duration-150 text-[var(--text-muted)] hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <ImagePlus className="w-3.5 h-3.5" />
+                        </button>
+                        <input
+                            ref={coverFileRef}
+                            type="file"
+                            accept={COVER_ACCEPT}
+                            className="hidden"
+                            onChange={handleCoverFileChange}
+                        />
+                    </>
+                ) : null
             }
         />
     );
@@ -615,6 +677,14 @@ export default function PlaylistsPage() {
         }
     };
 
+    // Custom cover upload (issue #151); the mutation itself invalidates the
+    // playlist + playlist-list queries on success.
+    const { mutateAsync: uploadPlaylistCover } = useUploadPlaylistCoverMutation();
+
+    const handleSetCover = async (playlistId: string, file: File) => {
+        await uploadPlaylistCover({ playlistId, file });
+    };
+
     const toggleAction = (action: ActionPanel) => {
         setActiveAction((prev) => (prev === action ? null : action));
     };
@@ -721,6 +791,7 @@ export default function PlaylistsPage() {
                                         index={index}
                                         onPlay={handlePlayPlaylist}
                                         onToggleHide={handleToggleHide}
+                                        onSetCover={handleSetCover}
                                         isHiddenView={showHiddenTab}
                                     />
                                 )

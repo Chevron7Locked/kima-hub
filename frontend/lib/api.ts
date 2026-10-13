@@ -893,6 +893,34 @@ class ApiClient {
         });
     }
 
+    // Custom playlist cover image (issue #151). Uses raw fetch like
+    // importM3U -- FormData requires the browser-set Content-Type.
+    async uploadPlaylistCover(id: string, file: File): Promise<{ coverUrl: string }> {
+        const formData = new FormData();
+        formData.append("cover", file);
+
+        const response = await fetch(`${getApiBaseUrl()}/api/playlists/${id}/cover`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${this.getToken()}` },
+            body: formData,
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(
+                (error as Record<string, string>).error || "Cover upload failed"
+            );
+        }
+
+        return response.json();
+    }
+
+    async removePlaylistCover(id: string): Promise<{ message: string }> {
+        return this.request<{ message: string }>(`/playlists/${id}/cover`, {
+            method: "DELETE",
+        });
+    }
+
     async addTrackToPlaylist(playlistId: string, trackId: string) {
         return this.request<ApiData>(`/playlists/${playlistId}/items`, {
             method: "POST",

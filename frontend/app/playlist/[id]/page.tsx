@@ -9,7 +9,8 @@ import { useAudioState, useAudioPlayback, useAudioControls, Track as AudioTrack 
 import { cn } from "@/lib/cn";
 import { shuffleArray } from "@/lib/shuffle";
 import { formatTime, plural } from "@/lib/format";
-import { queryKeys, usePlaylistQuery, useRemoveFromPlaylistMutation, useDeletePlaylistMutation, useUpdatePlaylistMutation, useMoveTrackInPlaylistMutation } from "@/hooks/useQueries";
+import { queryKeys, usePlaylistQuery, useRemoveFromPlaylistMutation, useDeletePlaylistMutation, useUpdatePlaylistMutation, useMoveTrackInPlaylistMutation, useUploadPlaylistCoverMutation, useRemovePlaylistCoverMutation } from "@/hooks/useQueries";
+import { COVER_ACCEPT, coverUploadError } from "@/features/playlist/playlistCover";
 import { usePreview } from "@/hooks/usePreview";
 import { useQueryClient } from "@tanstack/react-query";
 import { notify } from "@/lib/notify";
@@ -33,6 +34,7 @@ import {
     ArrowLeft,
     Share2,
     Copy,
+    ImagePlus,
     Check,
     Link as LinkIcon,
     Globe,
@@ -121,6 +123,11 @@ export default function PlaylistDetailPage() {
     const { mutateAsync: deletePlaylistMut } = useDeletePlaylistMutation();
     const { mutateAsync: updatePlaylist, isPending: isUpdatingPlaylist } = useUpdatePlaylistMutation();
     const { mutateAsync: moveTrack } = useMoveTrackInPlaylistMutation();
+    const { mutateAsync: uploadPlaylistCover } = useUploadPlaylistCoverMutation();
+    const { mutateAsync: removePlaylistCover } = useRemovePlaylistCoverMutation();
+    const [isUploadingCover, setIsUploadingCover] = useState(false);
+    const [isRemovingCover, setIsRemovingCover] = useState(false);
+    const coverFileRef = useRef<HTMLInputElement>(null);
     const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
     const [dragOverItemId, setDragOverItemId] = useState<string | null>(null);
     const [isEditingName, setIsEditingName] = useState(false);
@@ -275,10 +282,51 @@ export default function PlaylistDetailPage() {
         }
     };
 
+    // Custom cover (issue #151) wins over the track-mosaic; getCoverArtUrl
+    // resolves both "native:" and external URLs, so a single code path below
+    // renders whichever source is active.
     const coverUrls = useMemo(
-        () => mosaicCovers((playlist?.items ?? []).map((item: PlaylistItem) => item.track.album?.coverArt)),
+        () =>
+            playlist?.coverUrl
+                ? [playlist.coverUrl]
+                : mosaicCovers((playlist?.items ?? []).map((item: PlaylistItem) => item.track.album?.coverArt)),
         [playlist],
     );
+
+    const handleCoverFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (!file || !playlist) return;
+
+        const problem = coverUploadError(file);
+        if (problem) {
+            notify.error(problem);
+            return;
+        }
+
+        setIsUploadingCover(true);
+        try {
+            await uploadPlaylistCover({ playlistId, file });
+        } catch (error) {
+            console.error("Failed to upload playlist cover:", error);
+            notify.error("Failed to upload cover image");
+        } finally {
+            setIsUploadingCover(false);
+        }
+    };
+
+    const handleRemoveCover = async () => {
+        if (!playlist) return;
+        setIsRemovingCover(true);
+        try {
+            await removePlaylistCover(playlistId);
+        } catch (error) {
+            console.error("Failed to remove playlist cover:", error);
+            notify.error("Failed to remove cover image");
+        } finally {
+            setIsRemovingCover(false);
+        }
+    };
 
     const handleRemoveTrack = async (trackId: string) => {
         try {
@@ -832,7 +880,7 @@ export default function PlaylistDetailPage() {
                         </div>
 
                         <div className="flex items-end gap-6">
-                            <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[var(--bg-primary)] rounded-lg shrink-0 overflow-hidden relative border-2 border-white/10">
+                            <div className="group w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[var(--bg-primary)] rounded-lg shrink-0 overflow-hidden relative border-2 border-white/10">
                                 {coverUrls.length === 1 ? (
                                     <CachedImage
                                         src={api.getCoverArtUrl(coverUrls[0], 400)}
@@ -862,6 +910,45 @@ export default function PlaylistDetailPage() {
                                     <div className="w-full h-full flex items-center justify-center">
                                         <ListMusic className="w-16 h-16 text-white/10" />
                                     </div>
+                                )}
+                                {playlist.isOwner && (
+                                    <>
+                                        <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-black/60 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150">
+                                            <button
+                                                type="button"
+                                                onClick={() => coverFileRef.current?.click()}
+                                                disabled={isUploadingCover}
+                                                aria-label="Change cover image"
+                                                title="Change cover"
+                                                className="w-9 h-9 rounded-lg flex items-center justify-center bg-white/10 hover:bg-white/20 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {isUploadingCover ? (
+                                                    <GradientSpinner size="sm" />
+                                                ) : (
+                                                    <ImagePlus className="w-4 h-4" />
+                                                )}
+                                            </button>
+                                            {playlist.coverUrl && (
+                                                <button
+                                                    type="button"
+                                                    onClick={handleRemoveCover}
+                                                    disabled={isRemovingCover}
+                                                    aria-label="Remove cover image"
+                                                    title="Remove cover"
+                                                    className="w-9 h-9 rounded-lg flex items-center justify-center bg-white/10 hover:bg-white/20 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    <X className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                        </div>
+                                        <input
+                                            ref={coverFileRef}
+                                            type="file"
+                                            accept={COVER_ACCEPT}
+                                            className="hidden"
+                                            onChange={handleCoverFileChange}
+                                        />
+                                    </>
                                 )}
                             </div>
 

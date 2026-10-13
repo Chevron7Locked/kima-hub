@@ -1,4 +1,6 @@
 import { Router } from "express";
+import fs from "fs";
+import multer from "multer";
 import { logger } from "../utils/logger";
 import { z } from "zod";
 import { requireAuthOrToken } from "../middleware/auth";
@@ -14,6 +16,23 @@ import * as playlistService from "../services/playlistService";
 import { eventBus } from "../services/eventBus";
 import { proxyPreviewStream } from "../utils/previewProxy";
 import { soulseekConfigured } from "../utils/soulseekConfigured";
+import { getLocalImagePath, storePlaylistCover } from "../services/imageStorage";
+
+// Cover image upload (issue #151): JPEG/PNG/WebP up to 10 MB, kept in memory;
+// the route square-crops/resizes it via sharp before storing under
+// covers/playlists. The existing /api/library/cover-art route then serves it.
+const COVER_MAX_BYTES = 10 * 1024 * 1024;
+const coverUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: COVER_MAX_BYTES, files: 1 },
+    fileFilter: (_req, file, cb) => {
+        if (["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error("Only JPEG, PNG and WebP images are accepted"));
+        }
+    },
+});
 
 const router = Router();
 
@@ -348,6 +367,108 @@ router.delete("/:id/hide", async (req, res) => {
     } catch (error) {
         logger.error("Unhide playlist error:", error);
         res.status(500).json({ error: "Failed to unhide playlist" });
+    }
+});
+
+// POST /playlists/:id/cover
+// Upload a custom cover image (JPEG/PNG/WebP). It is square-cropped and
+// resized to at most 1000px under covers/playlists/, and the playlist is
+// pointed at it via a `native:` cover URL served by /api/library/cover-art.
+// Re-uploads overwrite the previous file; the previous cover is never
+// orphaned.
+router.post(
+    "/:id/cover",
+    requirePlaylistOwner,
+    (req, res, next) => {
+        coverUpload.single("cover")(req, res, (err) => {
+            if (err) {
+                const message =
+                    err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE"
+                        ? "Image is too large (10 MB max)"
+                        : err.message;
+                return res.status(400).json({ error: message });
+            }
+            next();
+        });
+    },
+    async (req, res) => {
+        try {
+            if (!req.file) {
+                return res.status(400).json({ error: "No image uploaded" });
+            }
+            const playlistId = req.params.id;
+
+            let coverUrl: string;
+            try {
+                coverUrl = await storePlaylistCover(req.file.buffer, playlistId);
+            } catch (error: any) {
+                // Not a decodable image (fake extension, corrupt data, ...)
+                logger.warn(`[Playlists] Cover upload rejected for ${playlistId}: ${error.message}`);
+                return res.status(400).json({ error: "Could not decode image" });
+            }
+
+            const playlist = await prisma.playlist.update({
+                where: { id: playlistId },
+                data: { coverUrl },
+                select: { id: true, coverUrl: true },
+            });
+
+            eventBus.emit({
+                type: "playlist:updated",
+                userId: req.user?.id ?? "*",
+                payload: { playlistId },
+            });
+            sessionLog("PLAYLISTS", `Cover image uploaded for playlist ${playlistId}`);
+
+            res.json({ id: playlist.id, coverUrl: playlist.coverUrl });
+        } catch (error) {
+            logger.error("Upload playlist cover error:", error);
+            res.status(500).json({ error: "Failed to upload cover" });
+        }
+    }
+);
+
+// DELETE /playlists/:id/cover
+// Remove the custom cover: the stored file (if present) is deleted and the
+// playlist falls back to the generated cover mosaic in the UI.
+router.delete("/:id/cover", requirePlaylistOwner, async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+        const playlistId = req.params.id;
+        const playlist = await prisma.playlist.findUnique({
+            where: { id: playlistId },
+            select: { id: true, coverUrl: true },
+        });
+        if (!playlist) {
+            return res.status(404).json({ error: "Playlist not found" });
+        }
+        if (!playlist.coverUrl) {
+            return res.status(404).json({ error: "No custom cover to remove" });
+        }
+        if (playlist.coverUrl.startsWith("native:playlists/")) {
+            const filePath = getLocalImagePath(playlist.coverUrl);
+            if (filePath) {
+                await fs.promises.rm(filePath, { force: true });
+            }
+        }
+        await prisma.playlist.update({
+            where: { id: playlistId },
+            data: { coverUrl: null },
+        });
+
+        eventBus.emit({
+            type: "playlist:updated",
+            userId: req.user.id,
+            payload: { playlistId },
+        });
+        sessionLog("PLAYLISTS", `Cover image removed for playlist ${playlistId}`);
+
+        res.json({ message: "Cover removed" });
+    } catch (error) {
+        logger.error("Remove playlist cover error:", error);
+        res.status(500).json({ error: "Failed to remove cover" });
     }
 });
 

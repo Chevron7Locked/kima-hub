@@ -463,6 +463,10 @@ model Playlist {
   updatedAt          DateTime               @default(now()) @updatedAt
   spotifyPlaylistId  String?
   spotifyPlaylistUrl String?
+  /// Custom cover image, `native:playlists/<id>.jpg` after upload; NULL means
+  /// the UI falls back to the generated cover mosaic. Served by the existing
+  /// /api/library/cover-art route (issue #151).
+  coverUrl           String?
   hiddenByUsers      HiddenPlaylist[]
   user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   items              PlaylistItem[]

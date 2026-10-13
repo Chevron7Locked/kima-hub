@@ -12,6 +12,8 @@ import { config, USER_AGENT } from "../config";
 
 const ARTIST_IMAGES_DIR = "artists";
 const ALBUM_IMAGES_DIR = "albums";
+const PLAYLIST_IMAGES_DIR = "playlists";
+const PLAYLIST_COVER_SIZE = 1000;
 
 /**
  * Get the base covers directory path
@@ -94,6 +96,42 @@ export async function downloadAndStoreImage(
         logger.debug(`[ImageStorage] Download failed: ${error.message}`);
         return null;
     }
+}
+
+/**
+ * Store an uploaded playlist cover image (issue #151). The input is
+ * square-cropped (center) and written as a progressive JPEG, never
+ * upscaled: the side length is min(width, height, PLAYLIST_COVER_SIZE),
+ * so a 1600x800 input becomes 800x800 and a 2000x1500 input 1000x1000.
+ * Returns the native path ("native:playlists/<id>.jpg") served by
+ * /api/library/cover-art. Re-uploads overwrite the previous file, so no
+ * orphaned images accumulate.
+ *
+ * Throws when the buffer is not a decodable image.
+ */
+export async function storePlaylistCover(buffer: Buffer, playlistId: string): Promise<string> {
+    const safeId = playlistId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const dirPath = ensureCoversDir(PLAYLIST_IMAGES_DIR);
+    const filename = `${safeId}.jpg`;
+    const filePath = path.join(dirPath, filename);
+
+    const sharp = (await import("sharp")).default;
+    const metadata = await sharp(buffer, { failOn: "error" }).metadata();
+    // Square side: the shorter input side, capped at PLAYLIST_COVER_SIZE, so
+    // fit:"cover" crops without ever enlarging (sharp refuses to upscale when
+    // withoutEnlargement is set, which would leave the output non-square).
+    const size = Math.min(metadata.width ?? PLAYLIST_COVER_SIZE, metadata.height ?? PLAYLIST_COVER_SIZE, PLAYLIST_COVER_SIZE);
+
+    await sharp(buffer, { failOn: "error" })
+        .resize(size, size, {
+            fit: "cover",
+            withoutEnlargement: true,
+        })
+        .jpeg({ quality: 85, progressive: true })
+        .toFile(filePath);
+
+    logger.debug(`[ImageStorage] Saved playlist cover: ${filename}`);
+    return `native:${PLAYLIST_IMAGES_DIR}/${filename}`;
 }
 
 /**

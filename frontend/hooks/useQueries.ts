@@ -491,6 +491,41 @@ export function useDeletePlaylistMutation() {
     });
 }
 
+// Custom playlist cover image (issue #151)
+export function useUploadPlaylistCoverMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({
+            playlistId,
+            file,
+        }: {
+            playlistId: string;
+            file: File;
+        }) => api.uploadPlaylistCover(playlistId, file),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({
+                queryKey: queryKeys.playlists(),
+            });
+            invalidatePlaylist(queryClient, variables.playlistId);
+        },
+    });
+}
+
+export function useRemovePlaylistCoverMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (playlistId: string) => api.removePlaylistCover(playlistId),
+        onSuccess: (_, playlistId) => {
+            queryClient.invalidateQueries({
+                queryKey: queryKeys.playlists(),
+            });
+            invalidatePlaylist(queryClient, playlistId);
+        },
+    });
+}
+
 export function useMoveTrackInPlaylistMutation() {
     const queryClient = useQueryClient();
 
