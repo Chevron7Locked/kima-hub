@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
+import { toPlaybackTracks } from "@/lib/playback-track";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { Play, Pause, Music, Shuffle, Save, ListPlus } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -65,22 +66,7 @@ export default function MixPage() {
         return mixTrackIds.has(currentTrack.id);
     }, [isPlaying, currentTrack, mixTrackIds, mix?.tracks?.length]);
 
-    const formatTracksForPlayback = (tracks: MixTrack[]) => {
-        return tracks.map((track) => ({
-            id: track.id,
-            title: track.title,
-            artist: {
-                name: track.album.artist.name,
-                id: track.album.artist.id,
-            },
-            album: {
-                title: track.album.title,
-                coverArt: track.album.coverUrl,
-                id: track.albumId,
-            },
-            duration: track.duration,
-        }));
-    };
+    const formatTracksForPlayback = (tracks: MixTrack[]) => toPlaybackTracks(tracks);
 
     const handlePlayMix = () => {
         if (!mix?.tracks || mix.tracks.length === 0) return;

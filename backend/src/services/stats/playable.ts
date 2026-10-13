@@ -12,6 +12,7 @@ export interface PlayableTrack {
     id: string;
     title: string;
     duration: number;
+    loudness: number | null;
     artist: { id: string; name: string };
     album: { id: string; title: string; coverArt: string | null };
 }
@@ -42,7 +43,7 @@ export function spellingsOf(pitch: string): string[] {
 /** One listen per record, the same view every other figure is built on. */
 
 interface Row {
-    id: string; title: string; duration: number;
+    id: string; title: string; duration: number; loudness: number | null;
     artist_id: string; artist_name: string;
     album_id: string; album_title: string; cover: string | null;
 }
@@ -52,13 +53,14 @@ const shape = (rows: Row[]): PlayableTrack[] =>
         id: r.id,
         title: r.title,
         duration: r.duration,
+        loudness: r.loudness ?? null,
         artist: { id: r.artist_id, name: r.artist_name },
         album: { id: r.album_id, title: r.album_title, coverArt: r.cover },
     }));
 
 /** The columns every slice returns, so the player always gets the same shape. */
 const SELECT = Prisma.sql`
-    t.id, coalesce(t."displayTitle", t.title) AS title, t.duration,
+    t.id, coalesce(t."displayTitle", t.title) AS title, t.duration, t.loudness,
     ar.id AS artist_id, coalesce(ar."displayName", ar.name) AS artist_name,
     al.id AS album_id, coalesce(al."displayTitle", al.title) AS album_title,
     coalesce(al."userCoverUrl", al."coverUrl") AS cover`;
@@ -94,7 +96,7 @@ export async function playableSlice(params: {
                 ${listenRows(userId, period)}
                 SELECT ${SELECT}, count(*)::int AS n
                 FROM p JOIN "Track" t ON t.id = p."trackId" ${JOINS}
-                GROUP BY t.id, t."displayTitle", t.title, t.duration, ar.id, ar."displayName", ar.name,
+                GROUP BY t.id, t."displayTitle", t.title, t.duration, t.loudness, ar.id, ar."displayName", ar.name,
                          al.id, al."displayTitle", al.title, al."userCoverUrl", al."coverUrl"
                 ORDER BY n DESC LIMIT ${limit}`);
             return shape(rows);
@@ -122,7 +124,7 @@ export async function playableSlice(params: {
                 SELECT ${SELECT}, count(*)::int AS n
                 FROM p JOIN "Track" t ON t.id = p."trackId" ${JOINS}
                 WHERE t.key IN (${Prisma.join(pitches)}) AND t."keyScale" = ${scale}
-                GROUP BY t.id, t."displayTitle", t.title, t.duration, ar.id, ar."displayName", ar.name,
+                GROUP BY t.id, t."displayTitle", t.title, t.duration, t.loudness, ar.id, ar."displayName", ar.name,
                          al.id, al."displayTitle", al.title, al."userCoverUrl", al."coverUrl"
                 ORDER BY n DESC LIMIT ${limit}`);
             return shape(rows);

@@ -551,6 +551,7 @@ router.get("/tracks/:id", async (req, res) => {
         id: track.album?.id,
       },
       duration: track.duration,
+      loudness: track.loudness ?? null,
       audioFeatures: toAudioFeaturesDTO(track),
     };
 
@@ -1209,6 +1210,7 @@ router.get("/radio", async (req, res) => {
       id: track.id,
       title: track.title,
       duration: track.duration,
+      loudness: track.loudness ?? null,
       trackNo: track.trackNo,
       discNumber: track.discNumber,
       discSubtitle: track.discSubtitle,

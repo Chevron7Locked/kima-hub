@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, type CSSProperties } from "react";
 import { api, MoodType, MoodBucketPreset } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
+import { toPlaybackTracks } from "@/lib/playback-track";
 import { Track } from "@/lib/audio-state-context";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -110,20 +111,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
             const mix = await api.getMoodBucketMix(mood);
 
             if (mix.tracks && mix.tracks.length > 0) {
-                const tracks: Track[] = mix.tracks.map((t) => ({
-                    id: t.id,
-                    title: t.title,
-                    artist: {
-                        name: t.album?.artist?.name || "Unknown Artist",
-                        id: t.album?.artist?.id,
-                    },
-                    album: {
-                        title: t.album?.title || "Unknown Album",
-                        coverArt: t.album?.coverUrl,
-                        id: t.albumId,
-                    },
-                    duration: t.duration,
-                }));
+                const tracks: Track[] = toPlaybackTracks(mix.tracks);
 
                 playTracks(tracks, 0);
 

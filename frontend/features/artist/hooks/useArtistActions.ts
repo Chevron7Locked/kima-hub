@@ -1,18 +1,10 @@
 import { useCallback } from 'react';
 import { api } from '@/lib/api';
 import { useAudioControls } from '@/lib/audio-context';
+import type { Track as PlaybackTrack } from '@/lib/audio-context';
+import { toPlaybackTrack, PlayableRow } from '@/lib/playback-track';
 import { Artist, Album, Track } from '../types';
 import { shuffleArray } from '@/lib/shuffle';
-
-interface FormattedTrack {
-  id: string;
-  title: string;
-  trackNumber: number;
-  discNumber: number;
-  artist: { name: string; id: string };
-  album: { title: string; coverArt?: string; id: string; year?: number };
-  duration: number;
-}
 
 async function loadAllOwnedTracks(artist: Artist, albums: Album[]) {
   const ownedAlbums = albums
@@ -30,32 +22,30 @@ async function loadAllOwnedTracks(artist: Artist, albums: Album[]) {
   const albumsData = await Promise.all(albumDataPromises);
 
   // Combine all tracks, maintaining album order (newest first)
-  const allTracks: FormattedTrack[] = [];
+  // Rows enter the player through the canonical mapper; keep the player's own contract as the type.
+  const allTracks: PlaybackTrack[] = [];
 
   albumsData.forEach((albumData, index) => {
     if (!albumData || !albumData.tracks) return;
 
     const album = ownedAlbums[index];
     const formattedTracks = albumData.tracks.map((track: Record<string, unknown>) => ({
-      id: track.id,
-      title: track.title,
-      trackNumber: Number(track.trackNumber ?? 0),
+      ...track,
       discNumber: Number(track.discNumber ?? 1),
-      artist: { name: artist.name, id: artist.id },
-      album: {
-        title: album.title,
-        coverArt: album.coverArt,
-        id: album.id,
-        year: album.year,
-      },
-      duration: track.duration,
-    }));
+      trackNumber: Number(track.trackNumber ?? 0),
+    })) as (PlayableRow & { discNumber: number; trackNumber: number })[];
 
-    // Sort tracks within album by disc number then track number
-    formattedTracks.sort((a: FormattedTrack, b: FormattedTrack) =>
-      a.discNumber - b.discNumber || a.trackNumber - b.trackNumber
+    // Sort by disc, then track number.
+    formattedTracks.sort((a, b) => a.discNumber - b.discNumber || a.trackNumber - b.trackNumber);
+    allTracks.push(
+      ...formattedTracks.map((track) =>
+        toPlaybackTrack({
+          ...track,
+          artist: { id: artist.id, name: artist.name },
+          album: { id: album.id, title: album.title, coverArt: album.coverArt },
+        })
+      )
     );
-    allTracks.push(...formattedTracks);
   });
 
   return allTracks;
@@ -99,17 +89,12 @@ export function useArtistActions() {
 
   const playTrack = useCallback(
     (track: Track, artist: Artist) => {
-      playTrackFromContext({
-        id: track.id,
-        title: track.title,
-        artist: { name: artist.name, id: artist.id },
-        album: {
-          title: track.album?.title || 'Unknown Album',
-          coverArt: track.album?.coverArt,
-          id: track.album?.id,
-        },
-        duration: track.duration,
-      });
+      playTrackFromContext(
+        toPlaybackTrack({
+          ...track,
+          artist: { name: artist.name, id: artist.id },
+        })
+      );
     },
     [playTrackFromContext]
   );

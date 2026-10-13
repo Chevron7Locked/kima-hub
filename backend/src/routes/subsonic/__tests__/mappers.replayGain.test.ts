@@ -7,7 +7,7 @@
  * web player clamps to attenuation on its own (lib/loudness.ts).
  */
 
-import { mapSong, trackGainDb, isValidLoudness } from "../mappers";
+import { mapSong, mapQueueEntry, trackGainDb, isValidLoudness } from "../mappers";
 
 const ALBUM = { id: "al1", title: "Album", displayTitle: null, year: 2020 };
 
@@ -57,5 +57,25 @@ describe("mapSong replayGain", () => {
         expect(song(-9.1).replayGain).toEqual({ trackGain: -8.9 });
         expect(song(null).replayGain).toEqual({});
         expect(song(2868.6).replayGain).toEqual({});
+    });
+});
+
+describe("mapQueueEntry replayGain", () => {
+    function queueEntry(loudness?: number | null) {
+        return mapQueueEntry({ id: "t1", title: "Song", loudness }) as Record<string, any>;
+    }
+
+    // The play queue is a song child too; it must obey the exact same gain
+    // contract as mapSong (it used to be hand-rolled in queue.ts and dropped it).
+    it("carries replayGain on every playQueue entry, trackGain only when measured", () => {
+        expect(queueEntry(-9.1).replayGain).toEqual({ trackGain: -8.9 });
+        expect(queueEntry(-24).replayGain).toEqual({ trackGain: 6 });
+        expect(queueEntry(null).replayGain).toEqual({});
+        expect(queueEntry(undefined).replayGain).toEqual({});
+        expect(queueEntry(2868.6).replayGain).toEqual({});
+    });
+
+    it("agrees with mapSong for the same loudness", () => {
+        expect(queueEntry(-9.1).replayGain).toEqual(song(-9.1).replayGain);
     });
 });

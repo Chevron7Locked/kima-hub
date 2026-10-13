@@ -7,6 +7,7 @@ import { usePlaylistsQuery } from "@/hooks/useQueries";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/hooks/useQueries";
 import { useAudioControls } from "@/lib/audio-context";
+import { toPlaybackTracks } from "@/lib/playback-track";
 import {
     Play,
     Music,
@@ -581,20 +582,7 @@ export default function PlaylistsPage() {
         try {
             const playlist = await api.getPlaylist(playlistId);
             if (playlist?.items && playlist.items.length > 0) {
-                const tracks = playlist.items.map((item: { track: { id: string; title: string; duration: number; album?: { id?: string; title?: string; coverArt?: string; artist?: { id?: string; name?: string } } } }) => ({
-                    id: item.track.id,
-                    title: item.track.title,
-                    artist: {
-                        name: item.track.album?.artist?.name || "Unknown",
-                        id: item.track.album?.artist?.id,
-                    },
-                    album: {
-                        title: item.track.album?.title || "Unknown",
-                        coverArt: item.track.album?.coverArt,
-                        id: item.track.album?.id,
-                    },
-                    duration: item.track.duration,
-                }));
+                const tracks = toPlaybackTracks(playlist.items.map((item: { track: { id: string } }) => item.track));
                 playTracks(tracks, 0);
             }
         } catch (error) {
