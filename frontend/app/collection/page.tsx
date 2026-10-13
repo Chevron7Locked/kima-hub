@@ -3,7 +3,6 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { toPlaybackTracks } from "@/lib/playback-track";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Tab, DeleteDialogState } from "@/features/library/types";
 import {
@@ -277,9 +276,22 @@ export default function LibraryPage() {
         [activeTab, filter, sortBy, itemsPerPage, router],
     );
 
-    // Library rows enter the player through the canonical mapper, so loudness survives like every other surface.
+    // Helper to convert library Track to audio context Track format
     const formatTracksForAudio = useCallback((libraryTracks: typeof tracks) => {
-        return toPlaybackTracks(libraryTracks);
+        return libraryTracks.map((track) => ({
+            id: track.id,
+            title: track.title,
+            duration: track.duration,
+            artist: {
+                id: track.album?.artist?.id,
+                name: track.album?.artist?.name || "Unknown Artist",
+            },
+            album: {
+                id: track.album?.id,
+                title: track.album?.title || "Unknown Album",
+                coverArt: track.album?.coverArt,
+            },
+        }));
     }, []);
 
     const handlePlayTracks = useCallback(

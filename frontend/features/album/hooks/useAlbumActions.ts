@@ -4,15 +4,22 @@ import { useDownloadContext } from "@/lib/download-context";
 import { shuffleArray } from "@/lib/shuffle";
 import { notify } from "@/lib/notify";
 import { isMbid } from "@/lib/mbid";
-import { toPlaybackTrack } from "@/lib/playback-track";
 import { Album, Track } from "../types";
 
-const toQueueTrack = (track: Track, album: Album) =>
-    toPlaybackTrack({
-        ...track,
-        artist: track.artist ?? album.artist,
-        album: { id: album.id, title: album.title, coverArt: album.coverArt || album.coverUrl },
-    });
+const toQueueTrack = (track: Track, album: Album) => ({
+    id: track.id,
+    title: track.title,
+    duration: track.duration,
+    artist: {
+        name: track.artist?.name || album.artist?.name || "",
+        id: track.artist?.id || album.artist?.id || "",
+    },
+    album: {
+        title: album.title,
+        id: album.id,
+        coverArt: album.coverArt || album.coverUrl,
+    },
+});
 
 export function useAlbumActions() {
     const {

@@ -437,7 +437,6 @@ router.get("/artists/:id/play-tracks", async (req, res) => {
                 trackNo: true,
                 discNumber: true,
                 duration: true,
-                loudness: true,
               },
               orderBy: [{ trackNo: Prisma.SortOrder.asc }],
             },
@@ -475,7 +474,6 @@ router.get("/artists/:id/play-tracks", async (req, res) => {
           trackNo: track.trackNo,
           discNumber: track.discNumber,
           duration: track.duration,
-          loudness: track.loudness ?? null,
           album: { id: album.id, title: album.title, coverArt: album.coverUrl },
           artist: { id: artist.id, name: artist.name },
         })),
@@ -803,9 +801,7 @@ router.get("/artists/:id", async (req, res) => {
         Array<{
           id: string;
           title: string;
-          displayTitle: string | null;
           duration: number;
-          loudness: number | null;
           albumId: string;
           albumTitle: string;
           albumCoverUrl: string | null;
@@ -814,7 +810,7 @@ router.get("/artists/:id", async (req, res) => {
           playCount: bigint;
         }>
       >`
-        SELECT t.id, t.title, t."displayTitle", t.duration, t.loudness,
+        SELECT t.id, t.title, t.duration,
                t."albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
                a."artistId", ar.name AS "artistName",
                COUNT(p.id)::bigint AS "playCount"
@@ -823,7 +819,7 @@ router.get("/artists/:id", async (req, res) => {
         JOIN "Artist" ar ON ar.id = a."artistId"
         JOIN "Play" p ON p."trackId" = t.id AND p."userId" = ${userId}
         WHERE a."artistId" = ${artist.id}
-        GROUP BY t.id, t."displayTitle", t.title, t.duration, t.loudness, t."albumId", a.title, a."coverUrl", a."artistId", ar.name
+        GROUP BY t.id, t.title, t.duration, t."albumId", a.title, a."coverUrl", a."artistId", ar.name
         HAVING COUNT(p.id) > 0
         ORDER BY COUNT(p.id) DESC, MAX(p."playedAt") DESC
         LIMIT 10

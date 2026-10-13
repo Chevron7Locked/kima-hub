@@ -91,8 +91,6 @@ router.post("/", requireAuth, async (req, res) => {
                     id: String(item.id || ""),
                     title: String(item.title || "Unknown").substring(0, 500),
                     duration: Number(item.duration) || 0,
-                    displayTitle: item.displayTitle ? String(item.displayTitle).substring(0, 500) : undefined,
-                    loudness: item.loudness == null ? null : Number.isFinite(Number(item.loudness)) ? Number(item.loudness) : null,
                     artist: item.artist ? {
                         id: String(item.artist.id || ""),
                         name: String(item.artist.name || "Unknown").substring(0, 200),

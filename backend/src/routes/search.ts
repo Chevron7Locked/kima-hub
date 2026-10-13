@@ -37,7 +37,6 @@ function transformSearchResults(serviceResults: SearchResults) {
             title: track.title,
             albumId: track.albumId,
             duration: track.duration,
-            loudness: track.loudness ?? null,
             trackNo: 0,
             discNumber: null,
             discSubtitle: null,

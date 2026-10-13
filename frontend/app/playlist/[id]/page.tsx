@@ -6,7 +6,6 @@ import { useParams, useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { api } from "@/lib/api";
 import { useAudioState, useAudioPlayback, useAudioControls, Track as AudioTrack } from "@/lib/audio-context";
-import { toPlaybackTrack } from "@/lib/playback-track";
 import { cn } from "@/lib/cn";
 import { shuffleArray } from "@/lib/shuffle";
 import { formatTime, plural } from "@/lib/format";
@@ -71,7 +70,13 @@ interface Track {
 
 /** A playlist track as the player takes it. */
 function toAudioTrack(track: Track): AudioTrack {
-    return toPlaybackTrack(track);
+    return {
+        id: track.id,
+        title: track.title,
+        artist: { name: track.album.artist.name, id: track.album.artist.id },
+        album: { title: track.album.title, coverArt: track.album.coverArt, id: track.album.id },
+        duration: track.duration,
+    };
 }
 
 interface PlaylistItem {

@@ -10,7 +10,6 @@ import type { LibraryIndex } from "./librarySearch";
 import { useTrackFinder } from "./useTrackFinder";
 import { TrackFinderResults, TrackSearchInput } from "./TrackFinder";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { toPlaybackTracks } from "@/lib/playback-track";
 import type { Track, VibeOperation } from "@/lib/audio-state-context";
 
 interface VibeAlchemyProps {
@@ -117,7 +116,13 @@ export function VibeAlchemy({ library, onHighlight, onClose }: VibeAlchemyProps)
     }, [mutation, onHighlight]);
 
     const handlePlayResults = useCallback(() => {
-        const playable: Track[] = toPlaybackTracks(results);
+        const playable: Track[] = results.map((t) => ({
+            id: t.id,
+            title: t.title,
+            duration: t.duration,
+            album: { title: t.album.title, coverArt: t.album.coverUrl ?? undefined, id: t.album.id },
+            artist: { name: t.artist.name, id: t.artist.id },
+        }));
         const op: VibeOperation = {
             type: "blend",
             addTrackIds: picked.add.map((t) => t.id),

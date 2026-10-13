@@ -14,7 +14,6 @@ import { MoodLegend } from "@/features/vibe/MoodLegend";
 import { buildLibraryIndex, searchLibrary } from "@/features/vibe/librarySearch";
 import { useAudioState } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { toPlaybackTracks } from "@/lib/playback-track";
 import { api } from "@/lib/api";
 import type { Track, VibeOperation } from "@/lib/audio-state-context";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
@@ -82,6 +81,16 @@ function MapIconButton({ icon: Icon, compact, className, ...props }: { icon: Luc
             <Icon className={compact ? "h-[18px] w-[18px]" : "h-4 w-4"} />
         </button>
     );
+}
+
+function toQueueTrack(t: { id: string; title: string; duration?: number; artist: { id: string; name: string }; album: { id: string; title: string; coverUrl: string | null } }): Track {
+    return {
+        id: t.id,
+        title: t.title,
+        duration: t.duration ?? 0,
+        artist: { name: t.artist.name, id: t.artist.id },
+        album: { title: t.album.title, coverArt: t.album.coverUrl ?? undefined, id: t.album.id },
+    };
 }
 
 export default function VibePage() {
@@ -159,11 +168,11 @@ export default function VibePage() {
             if (op === "vibe") {
                 const source = await api.getTrack(trackId);
                 if (controller.signal.aborted || !source) return;
-                const tracks = toPlaybackTracks(response.tracks);
+                const tracks = response.tracks.map(toQueueTrack);
                 const operation: VibeOperation = {
                     type: "vibe",
                     sourceTrackId: trackId,
-                    matches: Object.fromEntries(response.tracks.map((t: { id: string; similarity: number }) => [t.id, t.similarity])),
+                    matches: Object.fromEntries(response.tracks.map((t) => [t.id, t.similarity])),
                     trackIds: [trackId, ...tracks.map((t) => t.id)],
                 };
                 await replaceOperation(operation, [source, ...tracks], 0);
@@ -202,7 +211,13 @@ export default function VibePage() {
         try {
             const result = await api.getVibePath(sourceId, targetId, { length: 12, mode: "smooth" });
             const steps = [result.startTrack, ...result.path, result.endTrack];
-            const tracks: Track[] = toPlaybackTracks(steps);
+            const tracks: Track[] = steps.map((t) => ({
+                id: t.id,
+                title: t.title,
+                duration: t.duration,
+                artist: { name: t.artistName, id: t.artistId },
+                album: { title: t.albumTitle, coverArt: t.albumCoverUrl ?? undefined, id: t.albumId },
+            }));
             const operation: VibeOperation = {
                 type: "drift",
                 startTrackId: sourceId,

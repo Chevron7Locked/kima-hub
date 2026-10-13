@@ -1,6 +1,5 @@
 import { useCallback } from "react";
 import { useAudio } from "@/lib/audio-context";
-import { toPlaybackTracks } from "@/lib/playback-track";
 import { notify } from "@/lib/notify";
 import { api } from "@/lib/api";
 import { DiscoverTrack, DiscoverPlaylist } from "../types";
@@ -76,7 +75,17 @@ export function useDiscoverActions(
 
     const formatPlaylistTracks = useCallback(() => {
         if (!playlist || playlist.tracks.length === 0) return null;
-        return toPlaybackTracks(playlist.tracks);
+        return playlist.tracks.map((track) => ({
+            id: track.id,
+            title: track.title,
+            artist: { name: track.artist },
+            album: {
+                id: track.albumId,
+                title: track.album,
+                coverArt: track.coverUrl || undefined,
+            },
+            duration: track.duration || 0,
+        }));
     }, [playlist]);
 
     const handlePlayPlaylist = useCallback(() => {

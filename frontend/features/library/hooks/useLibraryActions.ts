@@ -1,9 +1,23 @@
 import { useCallback, useMemo } from "react";
 import { api } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { toPlaybackTrack, toPlaybackTracks } from "@/lib/playback-track";
 import { useAddToPlaylistMutation } from "@/hooks/useQueries";
 import { Track } from "../types";
+
+const formatTrackForAudio = (track: Track) => ({
+    id: track.id,
+    title: track.title,
+    duration: track.duration,
+    artist: {
+        id: track.album?.artist?.id,
+        name: track.album?.artist?.name || "Unknown Artist",
+    },
+    album: {
+        id: track.album?.id,
+        title: track.album?.title || "Unknown Album",
+        coverArt: track.album?.coverArt,
+    },
+});
 
 export function useLibraryActions() {
     const { playTracks, addToQueue } = useAudioControls();
@@ -38,7 +52,7 @@ export function useLibraryActions() {
                 },
             }));
 
-            playTracks(toPlaybackTracks(tracksWithAlbum), 0);
+            playTracks(tracksWithAlbum, 0);
         } catch (error) {
             console.error("Error playing artist:", error);
         }
@@ -64,14 +78,14 @@ export function useLibraryActions() {
                 },
             }));
 
-            playTracks(toPlaybackTracks(tracksWithAlbum), 0);
+            playTracks(tracksWithAlbum, 0);
         } catch (error) {
             console.error("Error playing album:", error);
         }
     }, [playTracks]);
 
     const addTrackToQueue = useCallback((track: Track) => {
-        addToQueue(toPlaybackTrack(track));
+        addToQueue(formatTrackForAudio(track));
     }, [addToQueue]);
 
     const addTrackToPlaylist = useCallback(

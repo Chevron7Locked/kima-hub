@@ -1,15 +1,39 @@
 import { Request, Router } from "express";
 import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { wrap, mapQueueEntry, type QueueTrack } from "./mappers";
+import { wrap } from "./mappers";
 
 export const queueRouter = Router();
+
+type QueueTrack = {
+    id: string;
+    title?: string;
+    duration?: number;
+    artist?: { id?: string; name?: string } | null;
+    album?: { id?: string; title?: string; coverArt?: string | null } | null;
+};
 
 function getQueueFromPlaybackState(queue: unknown): QueueTrack[] {
     if (!Array.isArray(queue)) return [];
     return queue
         .map((item) => (item && typeof item === "object" ? (item as QueueTrack) : null))
         .filter((item): item is QueueTrack => Boolean(item?.id));
+}
+
+function mapQueueEntry(item: QueueTrack) {
+    return {
+        "@_id": item.id,
+        "@_title": item.title || "Unknown",
+        "@_isDir": false,
+        "@_isVideo": false,
+        "@_type": "music",
+        "@_albumId": item.album?.id || undefined,
+        "@_album": item.album?.title || undefined,
+        "@_artistId": item.artist?.id || undefined,
+        "@_artist": item.artist?.name || undefined,
+        "@_coverArt": item.album?.coverArt || item.album?.id || undefined,
+        "@_duration": item.duration || 0,
+    };
 }
 
 /**
@@ -25,7 +49,6 @@ async function hydrateQueue(ids: string[]): Promise<QueueTrack[]> {
             id: true,
             title: true,
             duration: true,
-            loudness: true,
             album: {
                 select: {
                     id: true,
@@ -45,7 +68,6 @@ async function hydrateQueue(ids: string[]): Promise<QueueTrack[]> {
             id: t.id,
             title: t.title,
             duration: t.duration ?? undefined,
-            loudness: t.loudness ?? undefined,
             artist: t.album?.artist
                 ? {
                       id: t.album.artist.id,

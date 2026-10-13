@@ -5,7 +5,6 @@ import {
     useAudioPlayback,
     useAudioControls,
 } from "@/lib/audio-context";
-import { toPlaybackTracks } from "@/lib/playback-track";
 import { useDownloadContext } from "@/lib/download-context";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { useImageColor } from "@/hooks/useImageColor";
@@ -93,12 +92,17 @@ export default function ArtistPage() {
         if (!artist?.topTracks) return;
 
         const playableTracks = artist.topTracks.filter((t: Track) => t.album?.id);
-        const formattedTracks = toPlaybackTracks(
-            playableTracks.map((t: Track) => ({
-                ...t,
-                artist: { name: artist.name, id: artist.id },
-            })),
-        );
+        const formattedTracks = playableTracks.map((t: Track) => ({
+            id: t.id,
+            title: t.title,
+            artist: { name: artist.name, id: artist.id },
+            album: {
+                title: t.album?.title || "Unknown",
+                coverArt: t.album?.coverArt,
+                id: t.album?.id,
+            },
+            duration: t.duration,
+        }));
 
         const startIndex = formattedTracks.findIndex(
             (t: { id: string }) => t.id === track.id,

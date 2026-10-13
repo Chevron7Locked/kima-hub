@@ -36,16 +36,6 @@ export type TrackRow = {
     loudness?: number | null;
 };
 
-/** A track stored in a playback queue — the shape mapQueueEntry turns into a getPlayQueue child. */
-export type QueueTrack = {
-    id: string;
-    title?: string;
-    duration?: number;
-    loudness?: number | null;
-    artist?: { id?: string; name?: string } | null;
-    album?: { id?: string; title?: string; coverArt?: string | null } | null;
-};
-
 export function mapArtist(a: ArtistRow) {
     return {
         "@_id": a.id,
@@ -123,31 +113,6 @@ export function mapSong(
         "@_genre": genre || undefined,
         // OpenSubsonic: the object is always present; fields are omitted when
         // the measurement is missing or untrustworthy.
-        replayGain: gain === null ? {} : { trackGain: gain },
-    };
-}
-
-/**
- * An entry of getPlayQueue/playQueueByIndex. It is a song child on a queue, so
- * it carries replayGain under the same OpenSubsonic contract as mapSong — the
- * object is always present, trackGain only when trustworthy loudness exists.
- * Living here, beside mapSong, keeps the queue from ever drifting from the
- * canonical gain rule again (it was hand-rolled in the route and dropped it).
- */
-export function mapQueueEntry(item: QueueTrack) {
-    const gain = trackGainDb(item.loudness);
-    return {
-        "@_id": item.id,
-        "@_title": item.title || "Unknown",
-        "@_isDir": false,
-        "@_isVideo": false,
-        "@_type": "music",
-        "@_albumId": item.album?.id || undefined,
-        "@_album": item.album?.title || undefined,
-        "@_artistId": item.artist?.id || undefined,
-        "@_artist": item.artist?.name || undefined,
-        "@_coverArt": item.album?.coverArt || item.album?.id || undefined,
-        "@_duration": item.duration || 0,
         replayGain: gain === null ? {} : { trackGain: gain },
     };
 }

@@ -126,7 +126,7 @@ describe("GET /library/artists/:id/play-tracks", () => {
         const res = await request(app).get(`/artists/${P}art/play-tracks`);
         const track = res.body.tracks[0];
         expect(Object.keys(track).sort()).toEqual([
-            "album", "artist", "discNumber", "duration", "id", "loudness", "title", "trackNo", "trackPeak",
+"album", "artist", "discNumber", "duration", "id", "title", "trackNo",
         ]);
         expect(Object.keys(track.album).sort()).toEqual(["coverArt", "id", "title"]);
         expect(Object.keys(track.artist).sort()).toEqual(["id", "name"]);

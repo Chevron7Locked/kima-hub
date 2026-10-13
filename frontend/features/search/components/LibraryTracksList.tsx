@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useAudioState } from "@/lib/audio-state-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { toPlaybackTracks } from "@/lib/playback-track";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { formatTime } from "@/lib/format";
@@ -28,7 +27,21 @@ export function LibraryTracksList({ tracks, limit }: LibraryTracksListProps) {
     }
 
     const handlePlayTrack = (track: LibraryTrack, index: number) => {
-        const formattedTracks = toPlaybackTracks(tracks);
+        const formattedTracks = tracks.map((t) => ({
+            id: t.id,
+            title: t.title,
+            displayTitle: t.displayTitle,
+            duration: t.duration,
+            artist: {
+                id: t.album.artist.id,
+                name: t.album.artist.name,
+            },
+            album: {
+                id: t.album.id,
+                title: t.album.title,
+                coverArt: t.album.coverUrl ?? undefined,
+            },
+        }));
 
         if (currentTrack?.id === track.id) {
             if (isPlaying) {
