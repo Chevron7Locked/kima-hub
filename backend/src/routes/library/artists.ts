@@ -403,9 +403,9 @@ router.post("/backfill-genres", requireAdmin, async (_req, res) => {
 // canonical one clients consume as-given: owned albums by effective year
 // (displayYear ?? year, missing last) descending, title ascending, tracks by
 // disc then track number, an untagged disc counting as disc one — the same
-// rule the iOS client's albumOrder uses. Albums the library has as files all
-// count as owned here — the same set the artist page marks owned — so
-// discovery-kept albums play exactly as they do from the page today.
+// rule the iOS client's albumOrder uses. Only playable library rows ride the
+// queue — owned albums, uncorrupt files still on disk — the same predicate
+// the search doors use, so the player never loads a row it cannot stream.
 router.get("/artists/:id/play-tracks", async (req, res) => {
   try {
     const idParam = req.params.id;
@@ -422,6 +422,7 @@ router.get("/artists/:id/play-tracks", async (req, res) => {
         id: true,
         name: true,
         albums: {
+          where: { location: "LIBRARY" },
           select: {
             id: true,
             title: true,
@@ -429,6 +430,7 @@ router.get("/artists/:id/play-tracks", async (req, res) => {
             displayYear: true,
             year: true,
             tracks: {
+              where: { corrupt: false, missingSince: null },
               select: {
                 id: true,
                 title: true,

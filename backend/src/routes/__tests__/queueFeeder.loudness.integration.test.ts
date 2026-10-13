@@ -100,6 +100,61 @@ async function seed() {
             year: 2024,
         },
     });
+    // Unplayable shapes: a DISCOVER album with a track still to download, and
+    // a corrupt and a missing-since LIBRARY track. The endpoint must never
+    // queue these.
+    await prisma.album.create({
+        data: {
+            id: `${P}-disc-al`,
+            rgMbid: `${P}-disc-rg`,
+            artistId: `${P}-art`,
+            title: "Pending Download",
+            primaryType: "Album",
+            location: "DISCOVER",
+            // identityKey defaults to "" and (artistId, identityKey) is unique;
+            // the LIBRARY album above already holds the default for this artist.
+            identityKey: `${P}-disc-ident`,
+            tracks: {
+                create: [
+                    {
+                        id: `${P}-disc-trk`,
+                        title: "Not Downloaded",
+                        trackNo: 1,
+                        duration: 200,
+                        filePath: `/tmp/${P}-disc-trk.flac`,
+                        fileModified: new Date(),
+                        fileSize: 1000,
+                    },
+                ],
+            },
+        },
+    });
+    await prisma.track.create({
+        data: {
+            id: `${P}-corrupt`,
+            albumId,
+            title: "Corrupt Song",
+            trackNo: 4,
+            duration: 200,
+            filePath: `/tmp/${P}-corrupt.flac`,
+            fileModified: new Date(),
+            fileSize: 1000,
+            corrupt: true,
+        },
+    });
+    await prisma.track.create({
+        data: {
+            id: `${P}-gone`,
+            albumId,
+            title: "Missing Song",
+            trackNo: 5,
+            duration: 200,
+            filePath: `/tmp/${P}-gone.flac`,
+            fileModified: new Date(),
+            fileSize: 1000,
+            missingSince: new Date(),
+        },
+    });
     // Two measured and one unmeasured: the contract is the field, not a number.
     trackIds = [];
     for (const [i, loudness] of [-9.5, -13.2, null].entries()) {
@@ -134,8 +189,12 @@ async function seed() {
 async function teardown() {
     await prisma.play.deleteMany({ where: { userId: USER } });
     await prisma.playlist.deleteMany({ where: { id: `${P}-pl` } });
-    await prisma.track.deleteMany({ where: { albumId } });
-    await prisma.album.deleteMany({ where: { id: albumId } });
+    await prisma.track.deleteMany({
+        where: { OR: [{ albumId }, { id: `${P}-disc-trk` }] },
+    });
+    await prisma.album.deleteMany({
+        where: { OR: [{ id: albumId }, { id: `${P}-disc-al` }] },
+    });
     await prisma.artist.deleteMany({ where: { id: `${P}-art` } });
     await prisma.user.deleteMany({ where: { id: USER } });
 }
@@ -201,6 +260,20 @@ it("artist play-tracks carries loudness (iOS native leveling reads it)", async (
     const res = await request(artistApp).get(`/artists/${P}-art/play-tracks`);
     expect(res.status).toBe(200);
     assertLoudnessOnEveryRow(res.body.tracks);
+});
+
+it("play-tracks returns only playable LIBRARY rows (its input is provably non-empty)", async () => {
+    const seeded = await prisma.track.count({
+        where: { album: { artistId: `${P}-art` } },
+    });
+    expect(seeded).toBeGreaterThanOrEqual(3 + 3 /* playable + unplayable */);
+    const res = await request(artistApp).get(`/artists/${P}-art/play-tracks`);
+    expect(res.status).toBe(200);
+    const ids = res.body.tracks.map((t: { id: string }) => t.id);
+    expect(ids).toContain(trackIds[0]);
+    expect(ids).not.toContain(`${P}-disc-trk`);
+    expect(ids).not.toContain(`${P}-corrupt`);
+    expect(ids).not.toContain(`${P}-gone`);
 });
 
 it("search results carry loudness", async () => {
