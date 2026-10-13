@@ -10,7 +10,7 @@ import { cascadeStyle } from "@/lib/motion";
 interface AlbumsGridProps {
     albums: Album[];
     onPlay: (albumId: string) => Promise<void>;
-    onDelete: (albumId: string, albumTitle: string) => void;
+    onDelete?: (albumId: string, albumTitle: string) => void;
     /** The mood each album shares with its tracks, from the vibe map. */
     moodByKey?: Map<string, string>;
     isLoading?: boolean;
@@ -21,7 +21,7 @@ interface AlbumCardItemProps {
     album: Album;
     index: number;
     onPlay: (albumId: string) => Promise<void>;
-    onDelete: (albumId: string, albumTitle: string) => void;
+    onDelete?: (albumId: string, albumTitle: string) => void;
     moodKey?: string;
 }
 
@@ -44,7 +44,7 @@ const AlbumCardItem = memo(
                 index={index}
                 action={{ icon: Play, label: "Play", onClick: () => onPlay(album.id) }}
                 moodKey={moodKey}
-                onDelete={() => onDelete(album.id, album.title)}
+                onDelete={onDelete ? () => onDelete(album.id, album.title) : undefined}
             />
         );
     },

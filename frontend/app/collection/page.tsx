@@ -15,6 +15,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useLibraryActions } from "@/features/library/hooks/useLibraryActions";
+import { useAuth } from "@/lib/auth-context";
 import { CollectionMasthead } from "@/features/library/components/CollectionMasthead";
 import { useLibraryVibe } from "@/features/library/useLibraryVibe";
 import { useShelfSummary } from "@/features/library/useShelfSummary";
@@ -91,6 +92,10 @@ export default function LibraryPage() {
     const [latchedTotals, setLatchedTotals] = useState<Partial<Record<Tab, number>>>({});
 
     const queryClient = useQueryClient();
+    const { user } = useAuth();
+    // Deleting library content is an admin action on the backend; the UI must
+    // not offer it to anyone else.
+    const isAdmin = user?.role === "admin";
 
     // Use React Query hooks for cached data fetching
     // Only fetch data for active tab to prevent unnecessary API calls
@@ -410,7 +415,7 @@ export default function LibraryPage() {
                             artists={artists}
                             isLoading={isLoading}
                             onPlay={playArtist}
-                            onDelete={handleDeleteArtist}
+                            onDelete={isAdmin ? handleDeleteArtist : undefined}
                             moodByKey={vibe.artistMood}
                             gridKey={gridKey}
                         />
@@ -422,7 +427,7 @@ export default function LibraryPage() {
                             albums={albums}
                             isLoading={isLoading}
                             onPlay={playAlbum}
-                            onDelete={handleDeleteAlbum}
+                            onDelete={isAdmin ? handleDeleteAlbum : undefined}
                             moodByKey={vibe.albumMood}
                             gridKey={gridKey}
                         />
@@ -436,7 +441,7 @@ export default function LibraryPage() {
                             onPlay={handlePlayTracks}
                             onAddToQueue={addTrackToQueue}
                             onAddToPlaylist={addTrackToPlaylist}
-                            onDelete={handleDeleteTrack}
+                            onDelete={isAdmin ? handleDeleteTrack : undefined}
                             gridKey={gridKey}
                         />
                     )}

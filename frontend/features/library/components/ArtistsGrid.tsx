@@ -11,7 +11,7 @@ import { plural } from "@/lib/format";
 interface ArtistsGridProps {
     artists: Artist[];
     onPlay: (artistId: string) => Promise<void>;
-    onDelete: (artistId: string, artistName: string) => void;
+    onDelete?: (artistId: string, artistName: string) => void;
     /** The mood each artist shares with their tracks, from the vibe map. */
     moodByKey?: Map<string, string>;
     isLoading?: boolean;
@@ -22,7 +22,7 @@ interface ArtistCardItemProps {
     artist: Artist;
     index: number;
     onPlay: (artistId: string) => Promise<void>;
-    onDelete: (artistId: string, artistName: string) => void;
+    onDelete?: (artistId: string, artistName: string) => void;
     moodKey?: string;
 }
 
@@ -45,7 +45,7 @@ const ArtistCardItem = memo(
                 index={index}
                 action={{ icon: Play, label: "Play", onClick: () => onPlay(artist.id) }}
                 moodKey={moodKey}
-                onDelete={() => onDelete(artist.id, artist.name)}
+                onDelete={onDelete ? () => onDelete(artist.id, artist.name) : undefined}
             />
         );
     },

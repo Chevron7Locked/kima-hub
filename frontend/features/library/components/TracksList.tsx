@@ -19,7 +19,7 @@ interface TracksListProps {
     onPlay: (tracks: Track[], startIndex?: number) => void;
     onAddToQueue: (track: Track) => void;
     onAddToPlaylist: (playlistId: string, trackId: string) => void;
-    onDelete: (trackId: string, trackTitle: string) => void;
+    onDelete?: (trackId: string, trackTitle: string) => void;
     isLoading?: boolean;
     gridKey?: number;
 }
@@ -31,7 +31,7 @@ interface TrackRowProps {
     onPlayTrack: () => void;
     onAddToQueue: (track: Track) => void;
     onShowAddToPlaylist: (trackId: string) => void;
-    onDelete: (trackId: string, trackTitle: string) => void;
+    onDelete?: (trackId: string, trackTitle: string) => void;
 }
 
 const TrackRow = memo(
@@ -151,6 +151,7 @@ const TrackRow = memo(
                     >
                         <Plus className="w-4 h-4" />
                     </button>
+                    {onDelete && (
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
@@ -161,6 +162,7 @@ const TrackRow = memo(
                     >
                         <Trash2 className="w-4 h-4" />
                     </button>
+                    )}
                     <span className="text-sm tabular-nums font-bold text-[var(--text-muted)] w-12 text-right">
                         {formatTime(track.duration)}
                     </span>
