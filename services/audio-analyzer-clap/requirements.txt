@@ -11,7 +11,10 @@ onnxruntime==1.30.0
 # numpy audio_utils primitives used by our vendored clap_mel.py (bit-for-bit
 # equivalent of ClapFeatureExtractor's mel, which is torch-gated upstream on
 # every installable version) and the text tokenizer (RobertaTokenizer).
-transformers==4.57.6
+# 5.10.4 fixes CVE-2026-4372/5241/9856 (model-loading RCE class); its
+# audio_utils, tokenizer and 512-d embeddings were verified bit-identical
+# to 4.57.6 on the shipped fixtures.
+transformers==5.10.4
 
 # Database and queue
 redis>=4.5.0
