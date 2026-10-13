@@ -7,6 +7,9 @@ const REFRESH_TOKEN_KEY = "refresh_token";
 // Mood Bucket Types (simplified mood system)
 export type MoodType = "happy" | "sad" | "chill" | "aggressive" | "party";
 
+/** The five enrichment steps a re-run can start from. */
+export type EnrichmentRerunStep = "identification" | "artists" | "analysis" | "vectors" | "similarity";
+
 export interface MoodBucketPreset {
     id: MoodType;
     name: string;
@@ -1732,9 +1735,19 @@ class ApiClient {
     }
 
     async wipeAndRerunEnrichment() {
-        return this.request<{ artists: number; tracks: number; vectors: number }>("/enrichment/wipe-and-rerun", {
-            method: "POST",
-        });
+        return this.request<{ artists: number; tracks: number; vectors: number }>(
+            "/enrichment/wipe-and-rerun",
+            { method: "POST" },
+        );
+    }
+
+    /** Re-run the enrichment from one of the five steps; everything that
+     * depends on the step is worked out again, the vibe map included. */
+    async rerunEnrichment(step: EnrichmentRerunStep) {
+        return this.request<{ artists: number; tracks: number; vectors: number; message: string }>(
+            "/enrichment/rerun",
+            { method: "POST", body: JSON.stringify({ step }) },
+        );
     }
 
     async redecideEverything() {

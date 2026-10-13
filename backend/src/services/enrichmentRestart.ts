@@ -1,8 +1,11 @@
 /**
- * Wipe and re-run the library's enrichment: clears which recording each track is (with its ISRC and genres), artist
- * bios, genres and similar artists, every analysis and sound vector, and the similarity step's feel, statistics and
- * map, then runs the five steps again. Artists keep their MusicBrainz id until the artist step checks it. Keeps the
- * library, fingerprints, artist images, questions closed for good or decided by a person, and everything people made.
+ * Re-run the enrichment from any of its five steps: identification (which
+ * recording each track is), artists, audio analysis, sound vectors, or the
+ * similarity step (feel, statistics and the vibe map). A re-run redoes its
+ * step and everything that depends on it; nothing the engine worked out is
+ * frozen across a run, and the vibe map is laid out again. Answers a person
+ * set aside or closed stay as they left them, and everything people made --
+ * the library, playlists, plays, likes, edits and artist images -- stays.
  */
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
@@ -10,87 +13,163 @@ import { trackQueue, vibeQueue } from "../workers/enrichmentQueues";
 import { STAGE_QUEUES } from "../workers/unifiedEnrichment";
 import { closeStagesForMissingTracks } from "./missingFileStages";
 
+export type RerunStep = "identification" | "artists" | "analysis" | "vectors" | "similarity";
+
 export interface EnrichmentWipe {
     artists: number;
     tracks: number;
     vectors: number;
 }
 
-export async function wipeEnrichment(): Promise<EnrichmentWipe> {
+/**
+ * What each step's re-run clears, in the order the resets share a transaction.
+ * Every step also clears the similarity state and the map, because the
+ * formula reads artist genres, analysis and sound vectors.
+ */
+const STEP_CLEARS: Record<RerunStep, {
+    recording: boolean;
+    artists: boolean;
+    analysis: boolean;
+    vectors: boolean;
+}> = {
+    identification: { recording: true, artists: true, analysis: true, vectors: true },
+    artists: { recording: false, artists: true, analysis: false, vectors: false },
+    analysis: { recording: false, artists: false, analysis: true, vectors: true },
+    vectors: { recording: false, artists: false, analysis: false, vectors: true },
+    similarity: { recording: false, artists: false, analysis: false, vectors: false },
+};
+
+type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+async function resetArtists(tx: Tx): Promise<number> {
+    await tx.$executeRaw`DELETE FROM "SimilarArtist"`;
+    return tx.$executeRaw`
+        UPDATE "Artist"
+        SET summary = NULL, genres = NULL, "similarArtistsJson" = NULL,
+            "lastEnriched" = NULL, "enrichmentStatus" = 'pending', "enrichmentFailures" = 0
+    `;
+}
+
+function resetRecording(tx: Tx): Promise<unknown> {
+    // Identification is asked again where it was answered or is being asked; a
+    // question closed for good or decided by a person stays as it is.
+    return tx.$executeRaw`
+        WITH reopened AS (
+            UPDATE "TrackStage"
+            SET status = 'pending', failures = 0, redelivered = 0, retryable = true, "nextRetryAt" = NULL,
+                evidence = jsonb_build_object('reason', 'enrichment wiped'), "startedAt" = NULL, "finishedAt" = NULL
+            WHERE stage = 'recording' AND status IN ('done', 'working') AND "decidedAt" IS NULL
+            RETURNING "trackId"
+        ), cleared AS (
+            DELETE FROM "TrackGenre" WHERE "trackId" IN (SELECT "trackId" FROM reopened) RETURNING 1
+        )
+        UPDATE "Track" t
+        SET "recordingMbid" = NULL,
+            isrc = CASE WHEN t."isrcSource" = 'musicbrainz' THEN NULL ELSE t.isrc END,
+            "isrcSource" = CASE WHEN t."isrcSource" = 'musicbrainz' THEN NULL ELSE t."isrcSource" END
+        FROM reopened r WHERE t.id = r."trackId"
+    `;
+}
+
+async function resetAnalysis(tx: Tx): Promise<number> {
+    const tracks = await tx.$executeRaw`
+        UPDATE "Track"
+        SET bpm = NULL, "beatsCount" = NULL, key = NULL, "keyScale" = NULL, "keyStrength" = NULL,
+            energy = NULL, loudness = NULL, "dynamicRange" = NULL, danceability = NULL,
+            valence = NULL, arousal = NULL, "deamValence" = NULL, "deamArousal" = NULL,
+            "clapValenceRaw" = NULL, "clapArousalRaw" = NULL,
+            instrumentalness = NULL, acousticness = NULL, speechiness = NULL,
+            "moodHappy" = NULL, "moodSad" = NULL, "moodRelaxed" = NULL, "moodAggressive" = NULL,
+            "moodParty" = NULL, "moodAcoustic" = NULL, "moodElectronic" = NULL, "danceabilityMl" = NULL,
+            "moodTags" = '{}', "essentiaGenres" = '{}',
+            "analysisStatus" = 'pending', "analysisVersion" = NULL, "analysisMode" = NULL,
+            "analyzedAt" = NULL, "analysisError" = NULL, "analysisRetryCount" = 0, "analysisStartedAt" = NULL
+        WHERE NOT EXISTS (SELECT 1 FROM "TrackStage" s
+                          WHERE s."trackId" = "Track".id AND s.stage = 'analysis' AND s."decidedAt" IS NOT NULL)
+    `;
+    await tx.$executeRaw`
+        UPDATE "TrackStage"
+        SET status = 'pending', failures = 0, redelivered = 0, "lastErrorCode" = NULL,
+            "lastErrorMessage" = NULL, "failureClass" = NULL, retryable = true, "nextRetryAt" = NULL,
+            evidence = NULL, "startedAt" = NULL, "finishedAt" = NULL
+        WHERE stage = 'analysis' AND "decidedAt" IS NULL
+    `;
+    return tracks;
+}
+
+async function resetVectors(tx: Tx): Promise<number> {
+    const vectors = await tx.$executeRaw`
+        DELETE FROM track_embeddings e
+        WHERE NOT EXISTS (SELECT 1 FROM "TrackStage" s
+                          WHERE s."trackId" = e.track_id AND s.stage = 'embedding' AND s."decidedAt" IS NOT NULL)
+    `;
+    await tx.$executeRaw`
+        UPDATE "Track"
+        SET "vibeAnalysisStatus" = 'pending', "vibeAnalysisStartedAt" = NULL, "vibeAnalysisError" = NULL,
+            "vibeAnalysisRetryCount" = 0, "vibeAnalysisStatusUpdatedAt" = NULL
+        WHERE NOT EXISTS (SELECT 1 FROM "TrackStage" s
+                          WHERE s."trackId" = "Track".id AND s.stage = 'embedding' AND s."decidedAt" IS NOT NULL)
+    `;
+    await tx.$executeRaw`
+        UPDATE "TrackStage"
+        SET status = 'pending', failures = 0, redelivered = 0, "lastErrorCode" = NULL,
+            "lastErrorMessage" = NULL, "failureClass" = NULL, retryable = true, "nextRetryAt" = NULL,
+            evidence = NULL, "startedAt" = NULL, "finishedAt" = NULL
+        WHERE stage = 'embedding' AND "decidedAt" IS NULL
+    `;
+    return vectors;
+}
+
+function resetSimilarity(tx: Tx): Promise<unknown> {
+    // Deleting the state and every stored position is what makes the next
+    // similarity pass lay the map out again from scratch.
+    return tx.$executeRaw`DELETE FROM matching_map`;
+}
+
+export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> {
+    const clears = STEP_CLEARS[from];
+    const trackWork = clears.recording || clears.analysis || clears.vectors;
     // Queued jobs go first, then every open record is reset, the claimed ones too. A job claimed
     // before the reset holds a claim that no longer matches and is refused when it reports; one
     // claimed after it is a real claim. Emptying the queues after the reset would drop real jobs
     // and leave their records claimed until the lease ran out.
-    await redisClient.del(STAGE_QUEUES.analysis);
-    await vibeQueue.drain();
-    await trackQueue.drain();
+    if (trackWork) {
+        await redisClient.del(STAGE_QUEUES.analysis);
+        await vibeQueue.drain();
+        await trackQueue.drain();
+    }
     return prisma.$transaction(
         async (tx) => {
             // A step a person set aside for a track stays as they left it.
-            const vectors = await tx.$executeRaw`
-                DELETE FROM track_embeddings e
-                WHERE NOT EXISTS (SELECT 1 FROM "TrackStage" s
-                                  WHERE s."trackId" = e.track_id AND s.stage = 'embedding' AND s."decidedAt" IS NOT NULL)
-            `;
+            let artists = 0;
+            let tracks = 0;
+            let vectors = 0;
+            if (clears.recording) await resetRecording(tx);
+            if (clears.artists) artists = await resetArtists(tx);
+            if (clears.analysis) tracks = await resetAnalysis(tx);
+            if (clears.vectors) vectors = await resetVectors(tx);
+            if (clears.artists) {
+                await tx.$executeRaw`DELETE FROM "EnrichmentFailure" WHERE "entityType" = 'artist'`;
+            }
+            // Stage failures live in TrackStage and reset with their stage; the
+            // table's audio/vibe rows only cover system errors on those steps.
+            if (clears.analysis) {
+                await tx.$executeRaw`DELETE FROM "EnrichmentFailure" WHERE "entityType" = 'audio'`;
+            }
+            if (clears.vectors) {
+                await tx.$executeRaw`DELETE FROM "EnrichmentFailure" WHERE "entityType" = 'vibe'`;
+            }
+            await resetSimilarity(tx);
             await tx.$executeRaw`DELETE FROM matching_state`;
-            await tx.$executeRaw`DELETE FROM "SimilarArtist"`;
-            const artists = await tx.$executeRaw`
-                UPDATE "Artist"
-                SET summary = NULL, genres = NULL, "similarArtistsJson" = NULL,
-                    "lastEnriched" = NULL, "enrichmentStatus" = 'pending', "enrichmentFailures" = 0
-            `;
-            const tracks = await tx.$executeRaw`
-                UPDATE "Track"
-                SET bpm = NULL, "beatsCount" = NULL, key = NULL, "keyScale" = NULL, "keyStrength" = NULL,
-                    energy = NULL, loudness = NULL, "dynamicRange" = NULL, danceability = NULL,
-                    valence = NULL, arousal = NULL, "deamValence" = NULL, "deamArousal" = NULL,
-                    "clapValenceRaw" = NULL, "clapArousalRaw" = NULL,
-                    instrumentalness = NULL, acousticness = NULL, speechiness = NULL,
-                    "moodHappy" = NULL, "moodSad" = NULL, "moodRelaxed" = NULL, "moodAggressive" = NULL,
-                    "moodParty" = NULL, "moodAcoustic" = NULL, "moodElectronic" = NULL, "danceabilityMl" = NULL,
-                    "moodTags" = '{}', "essentiaGenres" = '{}',
-                    "analysisStatus" = 'pending', "analysisVersion" = NULL, "analysisMode" = NULL,
-                    "analyzedAt" = NULL, "analysisError" = NULL, "analysisRetryCount" = 0, "analysisStartedAt" = NULL
-                WHERE NOT EXISTS (SELECT 1 FROM "TrackStage" s
-                                  WHERE s."trackId" = "Track".id AND s.stage = 'analysis' AND s."decidedAt" IS NOT NULL)
-            `;
-            await tx.$executeRaw`
-                UPDATE "Track"
-                SET "vibeAnalysisStatus" = 'pending', "vibeAnalysisStartedAt" = NULL, "vibeAnalysisError" = NULL,
-                    "vibeAnalysisRetryCount" = 0, "vibeAnalysisStatusUpdatedAt" = NULL
-                WHERE NOT EXISTS (SELECT 1 FROM "TrackStage" s
-                                  WHERE s."trackId" = "Track".id AND s.stage = 'embedding' AND s."decidedAt" IS NOT NULL)
-            `;
-            await tx.$executeRaw`
-                UPDATE "TrackStage"
-                SET status = 'pending', failures = 0, redelivered = 0, "lastErrorCode" = NULL,
-                    "lastErrorMessage" = NULL, "failureClass" = NULL, retryable = true, "nextRetryAt" = NULL,
-                    evidence = NULL, "startedAt" = NULL, "finishedAt" = NULL
-                WHERE stage IN ('analysis', 'embedding') AND "decidedAt" IS NULL
-            `;
-            // Identification is asked again where it was answered or is being asked; a question
-            // closed for good or decided by a person stays as it is.
-            await tx.$executeRaw`
-                WITH reopened AS (
-                    UPDATE "TrackStage"
-                    SET status = 'pending', failures = 0, redelivered = 0, retryable = true, "nextRetryAt" = NULL,
-                        evidence = jsonb_build_object('reason', 'enrichment wiped'), "startedAt" = NULL, "finishedAt" = NULL
-                    WHERE stage = 'recording' AND status IN ('done', 'working') AND "decidedAt" IS NULL
-                    RETURNING "trackId"
-                ), cleared AS (
-                    DELETE FROM "TrackGenre" WHERE "trackId" IN (SELECT "trackId" FROM reopened) RETURNING 1
-                )
-                UPDATE "Track" t
-                SET "recordingMbid" = NULL,
-                    isrc = CASE WHEN t."isrcSource" = 'musicbrainz' THEN NULL ELSE t.isrc END,
-                    "isrcSource" = CASE WHEN t."isrcSource" = 'musicbrainz' THEN NULL ELSE t."isrcSource" END
-                FROM reopened r WHERE t.id = r."trackId"
-            `;
             // A file that is gone cannot be re-run; its records wait for a scan to find it.
-            await closeStagesForMissingTracks(tx);
-            await tx.$executeRaw`DELETE FROM "EnrichmentFailure" WHERE "entityType" IN ('artist', 'audio', 'vibe')`;
+            if (trackWork) await closeStagesForMissingTracks(tx);
             return { artists, tracks, vectors };
         },
         { timeout: 120_000 },
     );
+}
+
+/** The original full wipe: the identification step and everything after it. */
+export async function wipeEnrichment(): Promise<EnrichmentWipe> {
+    return rerunEnrichment("identification");
 }

@@ -6,6 +6,7 @@ import { SystemSettings } from "../../types";
 import {
     api,
     type EnrichmentFailure,
+    type EnrichmentRerunStep,
     type GpuRuntimeStatus,
 } from "@/lib/api";
 import { useWorkerSetting } from "../../hooks/useWorkerSetting";
@@ -241,8 +242,51 @@ function EnrichmentFailuresList({ active = false }: { active?: boolean }) {
     );
 }
 
-type QueueResult = "retry" | "everything" | "wipe";
+type QueueResult = "retry" | "everything" | "wipe" | "rerun";
 type ConfirmTarget = "retryFailedAndBlocked" | "redecideEverything" | "wipeAndRerun" | null;
+
+/** The five steps a re-run can start from, and what each one redoes. */
+const RERUN_STEPS: {
+    value: EnrichmentRerunStep;
+    label: string;
+    message: string;
+}[] = [
+    {
+        value: "similarity",
+        label: "similarity + map",
+        message:
+            "Rebuilds the feel, the library statistics and the vibe map from scratch. " +
+            "Nothing about your tracks is measured again, so this is the quickest one.",
+    },
+    {
+        value: "vectors",
+        label: "sound vectors",
+        message:
+            "Re-runs sound vectors for every track, then rebuilds the vibe map. " +
+            "Audio analysis and identification are kept.",
+    },
+    {
+        value: "analysis",
+        label: "audio analysis",
+        message:
+            "Re-runs audio analysis for every track, then sound vectors and the vibe map. " +
+            "Identification (which recording each track is) is kept.",
+    },
+    {
+        value: "artists",
+        label: "artists",
+        message:
+            "Re-runs artist bios, genres and similar artists, then rebuilds the vibe map " +
+            "(its formula reads artist genres). Audio analysis and sound vectors are kept.",
+    },
+    {
+        value: "identification",
+        label: "identification (everything)",
+        message:
+            "Same as wiping and re-running everything: identification, artists, audio analysis, " +
+            "sound vectors and the vibe map, all from the start.",
+    },
+];
 
 const WIPE_MESSAGE =
     "Clears what Kima worked out about your music: which recording each track is, audio analysis, vibe data, the vibe map, " +
@@ -364,6 +408,9 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     const [queueResult, setQueueResult] = useState<QueueResult | null>(null);
     const [wiping, setWiping] = useState(false);
     const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget>(null);
+    const [rerunStep, setRerunStep] = useState<EnrichmentRerunStep>("similarity");
+    const [rerunConfirmStep, setRerunConfirmStep] = useState<EnrichmentRerunStep | null>(null);
+    const [rerunningStep, setRerunningStep] = useState(false);
     const [maintenanceOpen, setMaintenanceOpen] = useState(false);
     const [cleanupResult, setCleanupResult] = useState<{
         totalCleaned: number;
@@ -566,6 +613,9 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
 
     const execWipeAndRerun = () =>
         runQueueAction(() => api.wipeAndRerunEnrichment(), setWiping, "wipe", "Couldn't wipe and re-run");
+
+    const execRerunStep = (step: EnrichmentRerunStep) =>
+        runQueueAction(() => api.rerunEnrichment(step), setRerunningStep, "rerun", "Couldn't start the re-run");
 
     const handleClearCaches = async () => {
         setClearingCaches(true);
@@ -810,6 +860,35 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 >
                                     {wiping ? "Wiping..." : "Wipe and re-run"}
                                 </Button>
+                            )}
+                            {currentUser?.role === "admin" && (
+                                <span className="flex items-center gap-2">
+                                    <label htmlFor="enrichment-rerun-step" className="sr-only">
+                                        Step to re-run from
+                                    </label>
+                                    <select
+                                        id="enrichment-rerun-step"
+                                        value={rerunStep}
+                                        onChange={(e) => setRerunStep(e.target.value as EnrichmentRerunStep)}
+                                        disabled={rerunningStep}
+                                        className="h-9 rounded-lg border border-white/10 bg-surface px-2 text-xs text-[var(--text-primary)] focus:border-[var(--color-brand)] focus:outline-none"
+                                        data-testid="enrichment-rerun-select"
+                                    >
+                                        {RERUN_STEPS.map((s) => (
+                                            <option key={s.value} value={s.value}>
+                                                {s.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <Button
+                                        size="sm"
+                                        onClick={() => setRerunConfirmStep(rerunStep)}
+                                        disabled={rerunningStep || wiping}
+                                        data-testid="enrichment-rerun"
+                                    >
+                                        {rerunningStep ? "Starting..." : "Re-run from"}
+                                    </Button>
+                                </span>
                             )}
                             {queueResult !== null && (
                                 <span className="self-center text-xs text-success" data-testid="enrichment-queue-result">
@@ -1179,6 +1258,25 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                     title={confirmMeta[confirmTarget].title}
                     message={confirmMeta[confirmTarget].message}
                     confirmText={confirmMeta[confirmTarget].confirmText}
+                    cancelText="Cancel"
+                    variant="danger"
+                />
+            )}
+            {rerunConfirmStep && (
+                <ConfirmDialog
+                    isOpen={true}
+                    onClose={() => setRerunConfirmStep(null)}
+                    onConfirm={() => {
+                        const step = rerunConfirmStep;
+                        setRerunConfirmStep(null);
+                        void execRerunStep(step);
+                    }}
+                    title={`Re-run from ${RERUN_STEPS.find((s) => s.value === rerunConfirmStep)?.label}?`}
+                    message={
+                        (RERUN_STEPS.find((s) => s.value === rerunConfirmStep)?.message ?? "") +
+                        " The vibe map is laid out again when it finishes. Your music, playlists, plays, likes and edits stay."
+                    }
+                    confirmText="Re-run"
                     cancelText="Cancel"
                     variant="danger"
                 />

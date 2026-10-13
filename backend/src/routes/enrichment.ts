@@ -11,7 +11,7 @@ import {
   redecideEverything,
   startEnrichmentNow,
 } from "../workers/unifiedEnrichment";
-import { wipeEnrichment } from "../services/enrichmentRestart";
+import { wipeEnrichment, rerunEnrichment, type RerunStep } from "../services/enrichmentRestart";
 import { enrichmentStateService } from "../services/enrichmentState";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import {
@@ -167,6 +167,41 @@ router.post("/re-decide-everything", requireAuth, requireAdmin, async (_req, res
   } catch (error) {
     logger.error("Re-decide everything error:", error);
     res.status(500).json({ error: "Failed to re-decide everything" });
+  }
+});
+
+/**
+ * POST /enrichment/rerun
+ * Re-run the enrichment from one of its five steps: the step's answers and
+ * everything that depends on them are cleared and worked out again, the vibe
+ * map laid out fresh (services/enrichmentRestart.ts). Person-decided answers
+ * and everything people made stay. Admin only.
+ */
+const RERUN_STEPS: Record<RerunStep, string> = {
+    identification: "identification",
+    artists: "artists",
+    analysis: "audio analysis",
+    vectors: "sound vectors",
+    similarity: "similarity",
+};
+
+router.post("/rerun", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const step = req.body?.step;
+    if (!(step in RERUN_STEPS)) {
+      res.status(400).json({ error: "step must be one of: identification, artists, analysis, vectors, similarity" });
+      return;
+    }
+    const wiped = await rerunEnrichment(step as RerunStep);
+    invalidateEnrichmentProgress();
+    void startEnrichmentNow();
+    res.json({
+      ...wiped,
+      message: `Re-running from ${RERUN_STEPS[step as RerunStep]}`,
+    });
+  } catch (error) {
+    logger.error("Rerun enrichment error:", error);
+    res.status(500).json({ error: "Failed to re-run enrichment" });
   }
 });
 
