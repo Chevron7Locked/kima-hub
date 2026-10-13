@@ -226,8 +226,9 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
         artistName: string;
         artistGenres: unknown;
         artistUserGenres: unknown;
+        loudness: number | null;
     }[]>`
-        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
+        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.loudness, t.mime, t."fileSize",
                al.id AS "albumId", al.title AS "albumTitle", al.year AS "albumYear",
                ar.id AS "artistId", ar.name AS "artistName",
                ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"
@@ -239,7 +240,9 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
         LIMIT ${size}
     `;
 
-    const songs = rows.map((r) => ({
+    const songs = rows.map((r) => {
+        const gain = trackGainDb(r.loudness);
+        return {
         "@_id": r.id,
         "@_title": r.title,
         "@_album": r.albumTitle,
@@ -255,7 +258,9 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
         "@_size": r.fileSize ?? undefined,
         "@_type": "music",
         "@_genre": firstArtistGenre(r.artistGenres, r.artistUserGenres) || undefined,
-    }));
+        replayGain: gain === null ? {} : { trackGain: gain },
+        };
+    });
 
     return subsonicOk(req, res, {
         randomSongs: songs.length > 0 ? { song: songs } : {},
@@ -290,8 +295,9 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
         artistDisplayName: string | null;
         artistGenres: unknown;
         artistUserGenres: unknown;
+        loudness: number | null;
     }[]>`
-        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
+        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.loudness, t.mime, t."fileSize",
                al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
                ar.id AS "artistId", ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
                ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"
@@ -324,6 +330,7 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
                 filePath: null,
                 mime: row.mime,
                 fileSize: row.fileSize,
+                loudness: row.loudness,
             },
             {
                 id: row.albumId,
@@ -382,8 +389,9 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
         albumDisplayTitle: string | null;
         albumYear: number | null;
         playCount: number;
+        loudness: number | null;
     }[]>`
-        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
+        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.loudness, t.mime, t."fileSize",
                al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
                COUNT(p.id)::int AS "playCount"
         FROM "Track" t
@@ -411,6 +419,7 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
                 filePath: null,
                 mime: row.mime,
                 fileSize: row.fileSize,
+                loudness: row.loudness,
             },
             {
                 id: row.albumId,
@@ -501,8 +510,9 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
         artistDisplayName: string | null;
         artistGenres: unknown;
         artistUserGenres: unknown;
+        loudness: number | null;
     }[]>`
-        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
+        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.loudness, t.mime, t."fileSize",
                al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
                ar.id AS "artistId", ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
                ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"
@@ -528,6 +538,7 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
                 filePath: null,
                 mime: row.mime,
                 fileSize: row.fileSize,
+                loudness: row.loudness,
             },
             {
                 id: row.albumId,

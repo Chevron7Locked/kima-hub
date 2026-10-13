@@ -26,6 +26,8 @@ export interface LibraryTrack {
     title: string;
     /** Seconds. */
     duration: number;
+    /** R128 integrated loudness in LUFS; null when unmeasured. */
+    loudness: number | null;
     albumId: string;
     albumTitle: string;
     albumCoverUrl: string | null;
@@ -79,7 +81,7 @@ interface ProfileRow {
 
 const FEEL_SQ = FEEL_WEIGHT * FEEL_WEIGHT;
 
-const TRACK_COLUMNS = Prisma.sql`t.id, t.title, t.duration,
+const TRACK_COLUMNS = Prisma.sql`t.id, t.title, t.duration, t.loudness,
     a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
     ar.id AS "artistId", ar.name AS "artistName"`;
 

@@ -171,6 +171,7 @@ router.post("/alchemy", requireAuth, async (req, res) => {
                     id: t.id,
                     title: t.title,
                     duration: t.duration,
+                    loudness: t.loudness ?? null,
                     distance: 1 - match,
                     similarity: Math.min(1, Math.max(0, match)),
                     album: { id: t.albumId, title: t.albumTitle, coverUrl: t.albumCoverUrl },
@@ -211,6 +212,7 @@ router.get("/similar/:trackId", requireAuth, async (req, res) => {
                 id: t.id,
                 title: t.title,
                 duration: t.duration,
+                loudness: t.loudness ?? null,
                 distance: t.distance,
                 similarity: t.similarity,
                 album: {
@@ -271,6 +273,7 @@ router.post("/search", requireAuth, async (req, res) => {
                 id: row.id,
                 title: row.title,
                 duration: row.duration,
+                loudness: row.loudness ?? null,
                 trackNo: row.trackNo,
                 distance: row.distance,
                 similarity: distanceToSimilarity(row.distance),

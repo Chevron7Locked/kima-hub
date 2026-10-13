@@ -86,7 +86,7 @@ async function findSimilarFeaturesOnly(
         ),
         combined AS (
             SELECT
-                t.id, t.title, t.duration,
+                t.id, t.title, t.duration, t.loudness,
                 a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
                 ar.id AS "artistId", ar.name AS "artistName",
                 (
@@ -115,7 +115,7 @@ async function findSimilarFeaturesOnly(
             CROSS JOIN source s
             WHERE t.id <> ${trackId} AND t."missingSince" IS NULL
         )
-        SELECT id, title, duration, "albumId", "albumTitle", "albumCoverUrl", "artistId", "artistName",
+        SELECT id, title, duration, loudness, "albumId", "albumTitle", "albumCoverUrl", "artistId", "artistName",
                CASE WHEN den = 0 THEN 0.5 ELSE num / den END AS score
         FROM combined
     `;
