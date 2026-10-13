@@ -188,7 +188,7 @@ const RERUN_STEPS: Record<RerunStep, string> = {
 router.post("/rerun", requireAuth, requireAdmin, async (req, res) => {
   try {
     const step = req.body?.step;
-    if (!(step in RERUN_STEPS)) {
+    if (!Object.prototype.hasOwnProperty.call(RERUN_STEPS, step)) {
       res.status(400).json({ error: "step must be one of: identification, artists, analysis, vectors, similarity" });
       return;
     }

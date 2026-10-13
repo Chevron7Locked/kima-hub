@@ -135,7 +135,7 @@ export const RELEASES: Release[] = [
                 summary:
                     "An amber dot on the version number when a newer release is found.",
                 body:
-                    "Kima checks GitHub for newer releases once every 24 hours. An amber dot appears by the version number when a release is found, and tapping the version opens its What's New window. This can be turned off in Settings → Under the hood.",
+                    "Kima checks GitHub for newer releases once every 24 hours. An amber dot appears by the version number when a release is found, and tapping the version opens its What's New window. This can be turned off in Settings → Storage.",
             },
             {
                 kind: "note",
