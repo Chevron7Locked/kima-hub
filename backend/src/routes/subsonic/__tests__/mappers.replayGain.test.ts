@@ -11,7 +11,7 @@ import { mapSong, mapQueueEntry, trackGainDb, isValidLoudness } from "../mappers
 
 const ALBUM = { id: "al1", title: "Album", displayTitle: null, year: 2020 };
 
-function song(loudness?: number | null, trackPeak?: number | null) {
+function song(loudness?: number | null) {
     return mapSong(
         {
             id: "t1",
@@ -23,8 +23,7 @@ function song(loudness?: number | null, trackPeak?: number | null) {
             mime: "FLAC",
             fileSize: 1000,
             loudness,
-            trackPeak,
-        } as Parameters<typeof mapSong>[0],
+        },
         ALBUM,
         "Artist",
         "ar1"
@@ -53,23 +52,6 @@ describe("trackGainDb", () => {
     );
 });
 
-describe("mapSong trackPeak", () => {
-    it("emits trackPeak as positive linear full-scale beside trackGain", () => {
-        expect(song(-14, 0.891253).replayGain).toEqual({ trackGain: -4, trackPeak: 0.891253 });
-    });
-
-    it("omits trackPeak when unmeasured", () => {
-        expect(song(-14, null).replayGain).toEqual({ trackGain: -4 });
-    });
-
-    // OpenSubsonic extension 28: trackPeak "Must be positive". A zero or
-    // negative reading is no peak at all and is left off.
-    it("omits trackPeak when the reading is not positive", () => {
-        expect(song(-14, 0).replayGain).toEqual({ trackGain: -4 });
-        expect(song(-14, -0.5).replayGain).toEqual({ trackGain: -4 });
-    });
-});
-
 describe("mapSong replayGain", () => {
     it("always carries the replayGain object, trackGain only when measured", () => {
         expect(song(-9.1).replayGain).toEqual({ trackGain: -8.9 });
@@ -79,13 +61,8 @@ describe("mapSong replayGain", () => {
 });
 
 describe("mapQueueEntry replayGain", () => {
-    function queueEntry(loudness?: number | null, trackPeak?: number | null) {
-        return mapQueueEntry({
-            id: "t1",
-            title: "Song",
-            loudness,
-            trackPeak,
-        } as Parameters<typeof mapQueueEntry>[0]) as Record<string, any>;
+    function queueEntry(loudness?: number | null) {
+        return mapQueueEntry({ id: "t1", title: "Song", loudness }) as Record<string, any>;
     }
 
     // The play queue is a song child too; it must obey the exact same gain
@@ -100,12 +77,5 @@ describe("mapQueueEntry replayGain", () => {
 
     it("agrees with mapSong for the same loudness", () => {
         expect(queueEntry(-9.1).replayGain).toEqual(song(-9.1).replayGain);
-    });
-
-    it("carries trackPeak under the same contract as mapSong", () => {
-        expect(queueEntry(-14, 0.891253).replayGain).toEqual({ trackGain: -4, trackPeak: 0.891253 });
-        expect(queueEntry(-14, null).replayGain).toEqual({ trackGain: -4 });
-        expect(queueEntry(-14).replayGain).toEqual({ trackGain: -4 });
-        expect(queueEntry(-14, 0.891253).replayGain).toEqual(song(-14, 0.891253).replayGain);
     });
 });

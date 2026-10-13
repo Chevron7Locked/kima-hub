@@ -26,7 +26,6 @@ async function hydrateQueue(ids: string[]): Promise<QueueTrack[]> {
             title: true,
             duration: true,
             loudness: true,
-            trackPeak: true,
             album: {
                 select: {
                     id: true,

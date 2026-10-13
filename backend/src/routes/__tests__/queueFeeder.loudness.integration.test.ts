@@ -156,15 +156,8 @@ async function seed() {
         },
     });
     // Two measured and one unmeasured: the contract is the field, not a number.
-    // The first track also carries a sample peak; the loudness block measures
-    // both from the same decode, so peak rides the same contract as loudness.
     trackIds = [];
-    const rows = [
-        { loudness: -9.5, trackPeak: 0.891251 },
-        { loudness: -13.2, trackPeak: null },
-        { loudness: null, trackPeak: null },
-    ];
-    for (const [i, row] of rows.entries()) {
+    for (const [i, loudness] of [-9.5, -13.2, null].entries()) {
         const id = `${P}-trk${i}`;
         await prisma.track.create({
             data: {
@@ -176,8 +169,7 @@ async function seed() {
                 filePath: `/tmp/${id}.flac`,
                 fileModified: new Date(),
                 fileSize: 1000,
-                loudness: row.loudness,
-                trackPeak: row.trackPeak,
+                loudness,
             },
         });
         trackIds.push(id);
@@ -268,18 +260,6 @@ it("artist play-tracks carries loudness (iOS native leveling reads it)", async (
     const res = await request(artistApp).get(`/artists/${P}-art/play-tracks`);
     expect(res.status).toBe(200);
     assertLoudnessOnEveryRow(res.body.tracks);
-});
-
-it("artist play-tracks carries trackPeak measured, present-and-null when unmeasured", async () => {
-    const res = await request(artistApp).get(`/artists/${P}-art/play-tracks`);
-    expect(res.status).toBe(200);
-    const byId = new Map(res.body.tracks.map((t: { id: string }) => [t.id, t]));
-    // Measured: the sample peak rides beside loudness for the native clamp.
-    expect(byId.get(trackIds[0])).toMatchObject({ loudness: -9.5, trackPeak: 0.891251 });
-    // Unmeasured: the key is still present, null like loudness — absence
-    // would read as "old client, field unknown" instead of "no measurement".
-    expect(byId.get(trackIds[1])).toHaveProperty("trackPeak", null);
-    expect(byId.get(trackIds[2])).toHaveProperty("trackPeak", null);
 });
 
 it("play-tracks returns only playable LIBRARY rows (its input is provably non-empty)", async () => {
