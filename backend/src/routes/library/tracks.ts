@@ -519,7 +519,6 @@ router.get("/tracks/:id", async (req, res) => {
         id: true,
         title: true,
         duration: true,
-        loudness: true,
         ...AUDIO_FEATURE_SELECT,
         album: {
           include: {

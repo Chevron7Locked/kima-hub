@@ -390,7 +390,6 @@ router.get("/current", async (req, res) => {
                                 coverUrl: track.album?.coverUrl,
                                 available: true,
                                 duration: track.duration,
-                                loudness: track.loudness,
                             });
                         }
                     }

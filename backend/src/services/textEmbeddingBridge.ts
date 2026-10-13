@@ -155,7 +155,6 @@ export interface TextSearchRow {
     id: string;
     title: string;
     duration: number;
-    loudness: number | null;
     trackNo: number;
     /** pgvector cosine distance between the track and the query text. */
     distance: number;
@@ -192,7 +191,6 @@ export async function searchTracksByEmbedding(
                 t.id,
                 t.title,
                 t.duration,
-                t.loudness,
                 t."trackNo",
                 te.embedding <=> ${vector}::vector AS distance,
                 a.id AS "albumId",

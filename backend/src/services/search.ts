@@ -41,8 +41,6 @@ export interface TrackSearchResult {
     artistId: string;
     artistName: string;
     duration: number;
-    /** Integrated loudness in LUFS when analysis ran; null otherwise. */
-    loudness: number | null;
     rank: number;
 }
 
@@ -316,7 +314,6 @@ export class SearchService {
                 title: true,
                 albumId: true,
                 duration: true,
-                loudness: true,
                 album: {
                     select: {
                         title: true,
@@ -344,7 +341,6 @@ export class SearchService {
             artistId: r.album.artistId,
             artistName: r.album.artist.name,
             duration: r.duration,
-            loudness: r.loudness ?? null,
             rank: 0,
         }));
     }
@@ -370,7 +366,6 @@ export class SearchService {
           t.title,
           t."albumId",
           t.duration,
-          t.loudness,
           a.title as "albumTitle",
           a."artistId",
           ar.name as "artistName",

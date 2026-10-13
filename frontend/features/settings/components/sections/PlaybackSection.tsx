@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { SettingsSection, SettingsRow, SettingsSelect, SettingsInput, SettingsToggle } from "../ui";
+import { SettingsSection, SettingsRow, SettingsSelect, SettingsInput } from "../ui";
 import { UserSettings } from "../../types";
 import { useTrackFormat } from "@/hooks/useTrackFormat";
 import { formatTrackDisplay } from "@/lib/track-format";
@@ -9,9 +9,6 @@ import { formatTrackDisplay } from "@/lib/track-format";
 interface PlaybackSectionProps {
     value: UserSettings["playbackQuality"];
     onChange: (quality: UserSettings["playbackQuality"]) => void;
-    /** Loudness normalization on/off; undefined hides the row (not loaded). */
-    normalization?: boolean;
-    onNormalization?: (enabled: boolean) => void;
     /** Server-wide, so only shown to an admin. */
     maxQueueLength?: number;
     onMaxQueueLength?: (value: number) => void;
@@ -80,7 +77,7 @@ export function QueueLimitInput({
     );
 }
 
-export function PlaybackSection({ value, onChange, normalization, onNormalization, maxQueueLength, onMaxQueueLength }: PlaybackSectionProps) {
+export function PlaybackSection({ value, onChange, maxQueueLength, onMaxQueueLength }: PlaybackSectionProps) {
     const { format, setFormat } = useTrackFormat();
     const preview = formatTrackDisplay(SAMPLE_TRACK, format);
 
@@ -96,18 +93,6 @@ export function PlaybackSection({ value, onChange, normalization, onNormalizatio
                     options={qualityOptions}
                 />
             </SettingsRow>
-            {onNormalization && (
-                <SettingsRow
-                    label="Normalize loudness"
-                    description="Plays songs toward one loudness so volume stops jumping between masters. Louder tracks are turned down; quiet ones keep their level."
-                >
-                    <SettingsToggle
-                        id="loudness-normalization"
-                        checked={normalization === true}
-                        onChange={onNormalization}
-                    />
-                </SettingsRow>
-            )}
             <SettingsRow
                 label="Track title format"
                 description="Foobar2000-style format string. Leave empty for default."

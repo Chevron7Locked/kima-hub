@@ -23,8 +23,6 @@ export interface Track {
     album: { title: string; coverArt?: string; id?: string };
     duration: number;
     filePath?: string;
-    /** Integrated loudness in LUFS from analysis; null until measured. */
-    loudness?: number | null;
     // Metadata override fields
     displayTitle?: string | null;
     displayTrackNo?: number | null;

@@ -1,7 +1,6 @@
 "use client";
 
 import { STORAGE_KEYS } from "./storage-keys";
-import { loudnessFactor } from "./loudness";
 import type {
     EngineStatus,
     TimerId,
@@ -65,14 +64,6 @@ export class AudioController {
     // Volume / mute
     private volume = 1;
     private isMuted = false;
-
-    // Loudness normalization: the current track's measured integrated
-    // loudness (LUFS) and the user's on/off choice, composed into gainFactor
-    // and applied multiplicatively with user volume on both elements.
-    private normalizationEnabled = false;
-    private currentLoudness: number | null = null;
-    private gainFactor = 1;
-    private expectedNextLoudness: number | null = null;
 
     // iOS standalone PWAs lose the <audio> session in the background while
     // MediaSession still reports "playing" (WebKit #261858). Routing the element
@@ -537,9 +528,9 @@ export class AudioController {
         this.audioNext = this.createOwnedElement("next");
         this.attachNativeListeners(this.audio, this.nativeListeners);
         this.attachIdleListeners(this.audioNext, this.nativeListenersNext);
-        this.audio.volume = this.effectiveVolume();
+        this.audio.volume = this.isMuted ? 0 : this.volume;
         this.audio.muted = this.isMuted;
-        this.audioNext.volume = this.effectiveVolume();
+        this.audioNext.volume = this.isMuted ? 0 : this.volume;
         this.audioNext.muted = this.isMuted;
 
         // The fresh idle element has no buffer -- drop the stale preload
@@ -744,14 +735,8 @@ export class AudioController {
         this.audioNext.load();
         // Sync volume/mute onto the reused idle element so the NEXT
         // swap carries no jump even if setVolume/setMuted fired in between.
-        this.audioNext.volume = this.effectiveVolume();
+        this.audioNext.volume = this.isMuted ? 0 : this.volume;
         this.audioNext.muted = this.isMuted;
-
-        // The preloaded track is now playing: adopt its loudness so the
-        // leveling factor follows the swap instantly.
-        this.currentLoudness = this.expectedNextLoudness;
-        this.applyGain();
-        this.expectedNextLoudness = null;
 
         this.preloadedTrackId = null;
         this.idleReady = false;
@@ -974,11 +959,10 @@ export class AudioController {
     // setExpectedNext() records which track React expects next; preloadNext()
     // buffers it into the idle element. Separate so a queue change can update
     // the expectation without restarting a fetch already in flight.
-    setExpectedNext(url: string, trackId: string, durationS?: number, loudness?: number | null): void {
+    setExpectedNext(url: string, trackId: string, durationS?: number): void {
         this.expectedNextTrackId = trackId;
         this.expectedNextUrl = url;
         this.expectedNextDurationS = durationS ?? null;
-        this.expectedNextLoudness = loudness ?? null;
     }
 
     preloadNext(): void {
@@ -997,15 +981,14 @@ export class AudioController {
         this.expectedNextTrackId = null;
         this.expectedNextUrl = null;
         this.expectedNextDurationS = null;
-        this.expectedNextLoudness = null;
         this.preloadedTrackId = null;
     }
 
     setVolume(volume: number): void {
         this.volume = Math.max(0, Math.min(1, volume));
         if (!this.isMuted) {
-            this.audio.volume = this.effectiveVolume();
-            this.audioNext.volume = this.effectiveVolume();
+            this.audio.volume = this.volume;
+            this.audioNext.volume = this.volume;
         }
     }
 
@@ -1016,34 +999,8 @@ export class AudioController {
         this.audioNext.muted = muted;
         // Also set volume for non-iOS devices
         if (!muted) {
-            this.audio.volume = this.effectiveVolume();
-            this.audioNext.volume = this.effectiveVolume();
-        }
-    }
-
-    setNormalizationEnabled(enabled: boolean): void {
-        this.normalizationEnabled = enabled;
-        this.applyGain();
-    }
-
-    // The loudness of the track now playing; recomputes the leveling factor.
-    // Unmeasured tracks play untouched.
-    setLoudness(loudness: number | null | undefined): void {
-        this.currentLoudness = loudness ?? null;
-        this.applyGain();
-    }
-
-    private effectiveVolume(): number {
-        return this.volume * this.gainFactor;
-    }
-
-    private applyGain(): void {
-        const factor = loudnessFactor(this.currentLoudness, this.normalizationEnabled);
-        if (factor === this.gainFactor) return;
-        this.gainFactor = factor;
-        if (!this.isMuted) {
-            this.audio.volume = this.effectiveVolume();
-            this.audioNext.volume = this.effectiveVolume();
+            this.audio.volume = this.volume;
+            this.audioNext.volume = this.volume;
         }
     }
 
@@ -1064,8 +1021,8 @@ export class AudioController {
                 this.isMuted = true;
             }
 
-            this.audio.volume = this.effectiveVolume();
-            this.audioNext.volume = this.effectiveVolume();
+            this.audio.volume = this.isMuted ? 0 : this.volume;
+            this.audioNext.volume = this.isMuted ? 0 : this.volume;
         } catch (error) {
             console.error("[AudioController] Failed to initialize from storage:", error);
         }

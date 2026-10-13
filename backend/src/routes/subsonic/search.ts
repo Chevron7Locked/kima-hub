@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { searchService } from "../../services/search";
-import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong, trackGainDb } from "./mappers";
+import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong } from "./mappers";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
 
 export const searchRouter = Router();
@@ -33,7 +33,7 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
 
     let artists: { id: string; name: string }[];
     let rawAlbums: { id: string; title: string; artistId: string; artistName: string; year: number | null }[];
-    let tracks: { id: string; title: string; artistId: string; artistName: string; albumId: string; albumTitle: string; duration: number | null; loudness: number | null }[];
+    let tracks: { id: string; title: string; artistId: string; artistName: string; albumId: string; albumTitle: string; duration: number | null }[];
 
     if (enumerateLibrary) {
         [artists, rawAlbums, tracks] = await Promise.all([
@@ -53,9 +53,9 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
                       LIMIT ${albumCount} OFFSET ${albumOffset}`
                 : Promise.resolve([]),
             songCount > 0
-                ? prisma.$queryRaw<{ id: string; title: string; artistId: string; artistName: string; albumId: string; albumTitle: string; duration: number | null; loudness: number | null }[]>`
+                ? prisma.$queryRaw<{ id: string; title: string; artistId: string; artistName: string; albumId: string; albumTitle: string; duration: number | null }[]>`
                       SELECT t.id, t.title, al."artistId", ar.name AS "artistName",
-                             t."albumId", al.title AS "albumTitle", t.duration, t.loudness
+                             t."albumId", al.title AS "albumTitle", t.duration
                       FROM "Track" t
                       JOIN "Album" al ON t."albumId" = al.id
                       JOIN "Artist" ar ON al."artistId" = ar.id
@@ -96,7 +96,6 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
                               albumId: t.albumId,
                               albumTitle: t.albumTitle,
                               duration: t.duration ?? null,
-                              loudness: t.loudness ?? null,
                           }))
                       )
                 : Promise.resolve([]),
@@ -152,22 +151,18 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
     }
 
     if (tracks.length > 0) {
-        result.song = tracks.map((t) => {
-            const gain = trackGainDb(t.loudness);
-            return {
-                "@_id": t.id,
-                "@_title": t.title,
-                "@_album": t.albumTitle,
-                "@_artist": t.artistName,
-                "@_artistId": t.artistId,
-                "@_albumId": t.albumId,
-                "@_coverArt": t.albumId,
-                "@_duration": t.duration ? Math.round(t.duration) : 0,
-                "@_type": "music",
-                "@_genre": genreMap.get(t.artistId) || undefined,
-                replayGain: gain === null ? {} : { trackGain: gain },
-            };
-        });
+        result.song = tracks.map((t) => ({
+            "@_id": t.id,
+            "@_title": t.title,
+            "@_album": t.albumTitle,
+            "@_artist": t.artistName,
+            "@_artistId": t.artistId,
+            "@_albumId": t.albumId,
+            "@_coverArt": t.albumId,
+            "@_duration": t.duration ? Math.round(t.duration) : 0,
+            "@_type": "music",
+            "@_genre": genreMap.get(t.artistId) || undefined,
+        }));
     }
 
     return subsonicOk(req, res, { [responseKey]: result });
@@ -226,9 +221,8 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
         artistName: string;
         artistGenres: unknown;
         artistUserGenres: unknown;
-        loudness: number | null;
     }[]>`
-        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.loudness, t.mime, t."fileSize",
+        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
                al.id AS "albumId", al.title AS "albumTitle", al.year AS "albumYear",
                ar.id AS "artistId", ar.name AS "artistName",
                ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"
@@ -240,9 +234,7 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
         LIMIT ${size}
     `;
 
-    const songs = rows.map((r) => {
-        const gain = trackGainDb(r.loudness);
-        return {
+    const songs = rows.map((r) => ({
         "@_id": r.id,
         "@_title": r.title,
         "@_album": r.albumTitle,
@@ -258,9 +250,7 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
         "@_size": r.fileSize ?? undefined,
         "@_type": "music",
         "@_genre": firstArtistGenre(r.artistGenres, r.artistUserGenres) || undefined,
-        replayGain: gain === null ? {} : { trackGain: gain },
-        };
-    });
+    }));
 
     return subsonicOk(req, res, {
         randomSongs: songs.length > 0 ? { song: songs } : {},
@@ -295,9 +285,8 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
         artistDisplayName: string | null;
         artistGenres: unknown;
         artistUserGenres: unknown;
-        loudness: number | null;
     }[]>`
-        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.loudness, t.mime, t."fileSize",
+        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
                al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
                ar.id AS "artistId", ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
                ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"
@@ -330,7 +319,6 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
                 filePath: null,
                 mime: row.mime,
                 fileSize: row.fileSize,
-                loudness: row.loudness,
             },
             {
                 id: row.albumId,
@@ -389,9 +377,8 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
         albumDisplayTitle: string | null;
         albumYear: number | null;
         playCount: number;
-        loudness: number | null;
     }[]>`
-        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.loudness, t.mime, t."fileSize",
+        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
                al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
                COUNT(p.id)::int AS "playCount"
         FROM "Track" t
@@ -419,7 +406,6 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
                 filePath: null,
                 mime: row.mime,
                 fileSize: row.fileSize,
-                loudness: row.loudness,
             },
             {
                 id: row.albumId,
@@ -510,9 +496,8 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
         artistDisplayName: string | null;
         artistGenres: unknown;
         artistUserGenres: unknown;
-        loudness: number | null;
     }[]>`
-        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.loudness, t.mime, t."fileSize",
+        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
                al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
                ar.id AS "artistId", ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
                ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"
@@ -538,7 +523,6 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
                 filePath: null,
                 mime: row.mime,
                 fileSize: row.fileSize,
-                loudness: row.loudness,
             },
             {
                 id: row.albumId,

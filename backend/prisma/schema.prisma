@@ -953,7 +953,6 @@ model UserMoodMix {
 model UserSettings {
   userId             String  @id
   playbackQuality    String  @default("original")
-  loudnessNormalization Boolean @default(false)
   wifiOnly           Boolean @default(false)
   offlineEnabled     Boolean @default(false)
   maxCacheSizeMb     Int     @default(10240)

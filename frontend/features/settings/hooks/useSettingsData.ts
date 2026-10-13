@@ -8,7 +8,6 @@ const defaultSettings: UserSettings = {
     wifiOnly: false,
     offlineEnabled: false,
     maxCacheSizeMb: 5120,
-    loudnessNormalization: false,
 };
 
 export function useSettingsData() {
@@ -42,11 +41,6 @@ export function useSettingsData() {
             setIsSaving(true);
             await api.updateSettings(newSettings);
             setSettings(newSettings);
-            // Live surfaces (the player's loudness leveling) apply the saved
-            // choice immediately instead of waiting for a reload or tab switch.
-            window.dispatchEvent(
-                new CustomEvent("kima:user-settings-saved", { detail: newSettings })
-            );
         } catch (error) {
             console.error("Failed to save settings:", error);
             throw error;

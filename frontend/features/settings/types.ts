@@ -3,8 +3,6 @@ export interface UserSettings {
     wifiOnly: boolean;
     offlineEnabled: boolean;
     maxCacheSizeMb: number;
-    /** Plays songs toward one loudness (ReplayGain-style leveling). */
-    loudnessNormalization: boolean;
     /** True when the user saved an LB scrobble token; the value itself is never returned. */
     hasListenbrainzToken?: boolean;
     /** Whether the public live feed shows what this user is playing. */

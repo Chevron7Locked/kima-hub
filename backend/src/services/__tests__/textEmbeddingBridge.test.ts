@@ -40,7 +40,6 @@ const ROW_A: TextSearchRow = {
     id: "t1",
     title: "First",
     duration: 200,
-    loudness: null,
     trackNo: 1,
     distance: 0.3,
     albumId: "a1",

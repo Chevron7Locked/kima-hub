@@ -200,8 +200,6 @@ export default function SettingsPage() {
                 <PlaybackSection
                     value={userSettings.playbackQuality}
                     onChange={(quality) => updateUserSettings({ playbackQuality: quality })}
-                    normalization={userSettings.loudnessNormalization}
-                    onNormalization={(enabled) => updateUserSettings({ loudnessNormalization: enabled })}
                     // Server-wide, so the row only appears for an admin. Passing
                     // no handler is what hides it.
                     maxQueueLength={isAdmin ? systemSettings.maxQueueLength : undefined}
