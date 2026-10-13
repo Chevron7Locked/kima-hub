@@ -2,8 +2,12 @@
 
 /**
  * The release window, the one surface allowed to block. It opens on the newest release's note and a list of what's
- * new, that release's items first and any older unseen release's after; each line opens that item's own page. Items
- * are a `note`, an `action`, or a `choice` whose default is off. Closing answers no to every untouched choice.
+ * new; older unread releases stack below as one line each, each opening its own read page — content is added to,
+ * never overwritten. The layout rule is exactly one active view: below `lg` the window shows one pane, the list or
+ * the page it opened; from `lg` up the list is always the left column and the page always the right. No two
+ * visibility conditions can hide both panes at once. Items are a `note`, an `action`, or a `choice` whose default
+ * is off. Closing answers no to every untouched choice — read is not done: anything owed stays on /changelog
+ * until the server can see it happened.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -49,6 +53,9 @@ export interface Release {
     items: ReleaseItem[];
 }
 
+/** The window shows exactly one of these below `lg`; from `lg` the list stays put and this selects the right column. */
+export type WindowView = { pane: "list" } | { pane: "needs" } | { pane: "release"; version: string } | { pane: "item"; key: string };
+
 /** A click that replaces this page: a plain left click. Cmd, ctrl, shift or a middle click opens another tab or window. */
 export function opensHere(e: React.MouseEvent): boolean {
     return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
@@ -80,19 +87,20 @@ export function WhatsNewWindow({
     const [choices, setChoices] = useState<Record<string, boolean>>(answered ?? {});
     const [closing, setClosing] = useState(false);
     const [closeError, setCloseError] = useState<string | null>(null);
-    const [openKey, setOpenKey] = useState<string | null>(null);
+    const [view, setView] = useState<WindowView>({ pane: "list" });
     const dialogRef = useRef<HTMLDivElement>(null);
-    const bodyRef = useRef<HTMLDivElement>(null);
-    const lastOpened = useRef<string | null>(null);
+    const contentRef = useRef<HTMLDivElement>(null);
+    // Where the user came from, so going back lands focus on the row they left.
+    const lastRow = useRef<{ kind: "item" | "release"; key: string } | null>(null);
 
     const release = releases[releases.length - 1];
     const older = releases.slice(0, -1).reverse();
     const items = releases.flatMap((r) => r.items);
     const versionOf = (key: string) => releases.find((r) => r.items.some((i) => i.key === key))?.version ?? release.version;
     const shortVersion = (version: string) => version.split(".").slice(0, 2).join(".");
-    const opened = items.find((i) => i.key === openKey) ?? null;
-    const asks = items.filter((i) => i.kind === "choice");
-    const unanswered = asks.filter((i) => choices[i.key] === undefined).length;
+
+    const opened = view.pane === "item" ? (items.find((i) => i.key === view.key) ?? null) : null;
+    const readRelease = view.pane === "release" ? (releases.find((r) => r.version === view.version) ?? null) : null;
 
     // Closes only once the server has the acknowledgement; on failure the window stays open and says so, since the
     // answer was not recorded.
@@ -112,34 +120,40 @@ export function WhatsNewWindow({
     }, [releases, onDismiss, onClose, closing]);
 
     const openItem = (key: string) => {
-        lastOpened.current = key;
-        setOpenKey(key);
+        lastRow.current = { kind: "item", key };
+        setView({ pane: "item", key });
+    };
+    const openRelease = (version: string) => {
+        lastRow.current = { kind: "release", key: version };
+        setView({ pane: "release", version });
     };
 
-    // Each view starts at its top, and focus follows: the back button on an item's page, the line it came from on
-    // the way back.
+    // Each view starts at its top, and focus follows: the back button on a page, the row it came from on the way back.
     useEffect(() => {
-        bodyRef.current?.scrollTo(0, 0);
-        const target = openKey
-            ? dialogRef.current?.querySelector<HTMLElement>("[data-back]")
-            : lastOpened.current
-              ? dialogRef.current?.querySelector<HTMLElement>(`[data-item="${lastOpened.current}"]`)
-              : null;
-        target?.focus();
-    }, [openKey]);
+        contentRef.current?.scrollTo(0, 0);
+        const selector =
+            view.pane === "list"
+                ? lastRow.current
+                    ? lastRow.current.kind === "item"
+                      ? `[data-item="${lastRow.current.key}"]`
+                      : `[data-release="${lastRow.current.key}"]`
+                    : null
+                : "[data-back]";
+        if (selector) dialogRef.current?.querySelector<HTMLElement>(selector)?.focus();
+    }, [view]);
 
-    // Escape leaves an item's page first; on the overview it closes, which is a real answer, through the same path
-    // as the buttons. While a nested confirm is open, Escape belongs to it alone.
+    // Escape leaves a page first; on the list it closes the window — a real answer, through the same path as the
+    // buttons. While a nested confirm is open, Escape belongs to it alone.
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.key !== "Escape") return;
             if (document.querySelector("[data-nested-confirm='true']")) return;
-            if (openKey) setOpenKey(null);
+            if (view.pane !== "list") setView({ pane: "list" });
             else void close();
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
-    }, [close, openKey]);
+    }, [close, view]);
 
     // The window takes the page on purpose, so it owes the keyboard what ConfirmDialog gives: focus lands inside on
     // open, and Tab stays inside while it is up.
@@ -188,7 +202,7 @@ export function WhatsNewWindow({
     const isOpenDecision = (item: ReleaseItem) =>
         item.kind === "choice" ? choices[item.key] === undefined : isDecision(item) && !done.includes(item.key);
     const waiting = items.filter(isOpenDecision);
-    const wide = !!release.note;
+    const unanswered = items.filter((i) => i.kind === "choice" && choices[i.key] === undefined).length;
 
     const status = (item: ReleaseItem): string | null => {
         if (item.kind === "choice" && choices[item.key] !== undefined) return choices[item.key] ? "On" : "Off";
@@ -200,7 +214,7 @@ export function WhatsNewWindow({
         <ul className="-mx-3 flex flex-col">
             {list.map((item) => {
                 const tag = status(item);
-                const current = openKey === item.key;
+                const current = view.pane === "item" && view.key === item.key;
                 return (
                     <li key={item.key}>
                         <button
@@ -242,52 +256,88 @@ export function WhatsNewWindow({
             </h3>
             {group("whats-new-needs", "Needs you", release.items.filter(isDecision))}
             {group("whats-new-changed", "What changed", release.items.filter((i) => !isDecision(i)))}
-            {older.map((r) => (
-                <div key={r.version}>{group(`whats-new-${r.version}`, `From ${shortVersion(r.version)}`, r.items)}</div>
-            ))}
+            {older.length > 0 && (
+                <div className="flex flex-col gap-1">
+                    <h4 className="text-sm font-medium text-[var(--text-secondary)]">Before this</h4>
+                    <ul className="-mx-3 flex flex-col">
+                        {older.map((r) => (
+                            <li key={r.version}>
+                                <button
+                                    type="button"
+                                    data-release={r.version}
+                                    onClick={() => openRelease(r.version)}
+                                    className="group w-full rounded-lg px-3 py-2.5 flex items-center gap-3 text-left transition-colors hover:bg-white/[0.06]"
+                                >
+                                    <span className="min-w-0 flex-1">
+                                        <span className="text-sm font-medium text-white">
+                                            {r.title}
+                                            {r.note && <span className="font-normal text-[var(--text-secondary)]"> — a note from {r.note.from}</span>}
+                                        </span>
+                                        <span className="mt-0.5 block text-sm leading-snug text-[var(--text-muted)]">{r.summary}</span>
+                                    </span>
+                                    <ChevronRight className="w-4 h-4 shrink-0 text-[var(--text-muted)] transition-transform group-hover:translate-x-0.5" />
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                    <p className="pt-1 text-xs text-[var(--text-muted)]">
+                        <Link
+                            href="/changelog"
+                            onClick={(e) => {
+                                if (opensHere(e)) onNavigate?.();
+                            }}
+                            className="text-[var(--text-secondary)] underline underline-offset-4 decoration-white/20 hover:text-white hover:decoration-white/50"
+                        >
+                            The full history lives at /changelog, newest first.
+                        </Link>
+                    </p>
+                </div>
+            )}
         </section>
     );
 
-    const note = release.note && (
-        <section aria-labelledby="whats-new-note" className="flex flex-col gap-4">
-            <h3 id="whats-new-note" className="text-base font-semibold text-white">
-                A note from {release.note.from}
+    const intro = (
+        <section aria-labelledby="whats-new-intro" className="flex flex-col gap-4 max-w-prose">
+            <h3 id="whats-new-intro" className="text-base font-semibold text-white">
+                {release.title}
             </h3>
-            <Body text={release.note.body} />
-            <p className="pt-1 text-[0.9375rem] font-medium text-white">{release.note.from}</p>
+            <p className="text-[0.9375rem] leading-relaxed text-[var(--text-secondary)]">{release.summary}</p>
+            <p className="text-sm text-[var(--text-muted)]">Pick anything from the list to read it.</p>
         </section>
     );
 
-    const NEEDS = "__needs";
+    const noteSection = (r: Release) => (
+        <section aria-labelledby={`whats-new-note-${r.version}`} className="flex flex-col gap-4">
+            <h3 id={`whats-new-note-${r.version}`} className="text-base font-semibold text-white">
+                A note from {r.note!.from}
+            </h3>
+            <Body text={r.note!.body} />
+            <p className="pt-1 text-[0.9375rem] font-medium text-white">{r.note!.from}</p>
+        </section>
+    );
 
-    const fullView = opened !== null || openKey === NEEDS;
-
-    const backLabel = (
-        <>
+    const back = (
+        <button
+            type="button"
+            data-back
+            onClick={() => setView({ pane: "list" })}
+            className="-ml-2 self-start min-h-9 py-1.5 pl-1 pr-3 rounded-lg flex items-center gap-1 text-sm text-[var(--text-secondary)] hover:text-white hover:bg-white/5 transition-colors"
+        >
             <ChevronLeft className="w-4 h-4" />
             What&apos;s new
-        </>
+        </button>
     );
 
     const needsPage = (
         <section aria-labelledby="whats-new-needs-page" className="flex flex-col gap-5 max-w-prose">
-            <button
-                type="button"
-                data-back
-                onClick={() => setOpenKey(null)}
-                className="-ml-2 self-start min-h-9 py-1.5 pl-1 pr-3 rounded-lg flex items-center gap-1 text-sm text-[var(--text-secondary)] hover:text-white hover:bg-white/5 transition-colors"
-            >
-                {backLabel}
-            </button>
+            {back}
             <h3 id="whats-new-needs-page" className="text-xl font-semibold tracking-tight text-white text-balance">
                 Needs you
             </h3>
             {waiting.map((item) => (
                 <div key={item.key} className="flex flex-col gap-3 pt-5 border-t border-white/10">
                     <h4 className="text-base font-semibold text-white">{item.title}</h4>
-                    <div className="flex flex-col gap-3">
-                        <Body text={item.body} />
-                    </div>
+                    <Body text={item.body} />
                     {item.kind === "choice" && (
                         <div className="flex flex-col gap-3">
                             {item.discloses && (
@@ -314,22 +364,24 @@ export function WhatsNewWindow({
         </section>
     );
 
-    const page = (item: ReleaseItem) => (
+    const releasePage = (r: Release) => (
+        <section aria-labelledby="whats-new-release" className="flex flex-col gap-5 max-w-prose">
+            {back}
+            <h3 id="whats-new-release" className="text-xl font-semibold tracking-tight text-white text-balance">
+                {r.title}
+            </h3>
+            {r.note && noteSection(r)}
+            {group(`whats-new-${r.version}-changed`, "What changed", r.items)}
+        </section>
+    );
+
+    const itemPage = (item: ReleaseItem) => (
         <section aria-labelledby="whats-new-item" className="flex flex-col gap-5 max-w-prose">
-            <button
-                type="button"
-                data-back
-                onClick={() => setOpenKey(null)}
-                className="-ml-2 self-start min-h-9 py-1.5 pl-1 pr-3 rounded-lg flex items-center gap-1 text-sm text-[var(--text-secondary)] hover:text-white hover:bg-white/5 transition-colors"
-            >
-                {backLabel}
-            </button>
+            {back}
             <h3 id="whats-new-item" className="text-xl font-semibold tracking-tight text-white text-balance">
                 {item.title}
             </h3>
-            <div className="flex flex-col gap-3">
-                <Body text={item.body} />
-            </div>
+            <Body text={item.body} />
             {item.kind === "choice" && (
                 <div className="flex flex-col gap-3">
                     {item.discloses && (
@@ -357,7 +409,9 @@ export function WhatsNewWindow({
                         <Link
                             key={link.href}
                             href={link.href}
-                            onClick={(e) => { if (opensHere(e)) onNavigate?.(); }}
+                            onClick={(e) => {
+                                if (opensHere(e)) onNavigate?.();
+                            }}
                             className="min-h-11 py-2.5 px-4 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-white text-sm font-medium flex items-center gap-2 transition-colors"
                         >
                             {link.label}
@@ -369,7 +423,21 @@ export function WhatsNewWindow({
         </section>
     );
 
-    const pageBody = opened ? page(opened) : openKey === NEEDS ? needsPage : note;
+    const content =
+        opened !== null ? (
+            itemPage(opened)
+        ) : readRelease ? (
+            releasePage(readRelease)
+        ) : view.pane === "needs" ? (
+            needsPage
+        ) : release.note ? (
+            noteSection(release)
+        ) : (
+            intro
+        );
+
+    const pageOpen = view.pane !== "list";
+    const hasNotes = releases.some((r) => r.note);
 
     return (
         <div
@@ -380,7 +448,7 @@ export function WhatsNewWindow({
         >
             <div
                 ref={dialogRef}
-                className={`w-full ${wide ? "sm:max-w-5xl" : "sm:max-w-2xl"} max-h-[92vh] sm:max-h-[88vh] flex flex-col bg-[var(--bg-secondary)] border border-white/10 rounded-t-2xl sm:rounded-2xl overflow-hidden animate-rise`}
+                className={`w-full ${hasNotes ? "sm:max-w-5xl" : "sm:max-w-2xl"} max-h-[92vh] sm:max-h-[88vh] flex flex-col bg-[var(--bg-secondary)] border border-white/10 rounded-t-2xl sm:rounded-2xl overflow-hidden animate-rise`}
             >
                 <header className="shrink-0 px-5 sm:px-6 pt-4 sm:pt-6 pb-4 sm:pb-5 border-b border-white/10 flex items-center justify-between gap-4">
                     <h2 id="whats-new-title" className="text-xl sm:text-2xl font-bold tracking-tight text-white text-balance">
@@ -396,25 +464,23 @@ export function WhatsNewWindow({
                     </button>
                 </header>
 
-                {wide ? (
-                    <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-                        <div
-                            ref={bodyRef}
-                            className={`min-h-0 overflow-y-auto px-5 sm:px-6 py-6 border-b lg:border-b-0 lg:border-r border-white/10 ${
-                                fullView ? "flex-1 hidden lg:block" : "max-h-[38vh] lg:max-h-none lg:flex-[1.2]"
-                            }`}
-                        >
-                            {pageBody}
-                        </div>
-                        <div className={`min-h-0 overflow-y-auto px-5 sm:px-6 py-6 ${opened ? "hidden lg:block flex-1" : "flex-1"}`}>
-                            {list}
-                        </div>
+                <div className="flex-1 min-h-0 flex flex-col-reverse lg:flex-row">
+                    <div
+                        className={`min-h-0 overflow-y-auto px-5 sm:px-6 py-6 border-t lg:border-t-0 lg:border-r border-white/10 lg:flex-[0.9] ${
+                            pageOpen ? "hidden lg:block" : "flex-1"
+                        }`}
+                    >
+                        {list}
                     </div>
-                ) : (
-                    <div ref={bodyRef} className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-6">
-                        {opened ? page(opened) : openKey === NEEDS ? needsPage : list}
+                    <div
+                        ref={contentRef}
+                        className={`min-h-0 overflow-y-auto px-5 sm:px-6 py-6 flex-1 ${pageOpen || release.note ? "block" : "hidden lg:block"} ${
+                            pageOpen ? "" : "max-h-[38vh] lg:max-h-none"
+                        }`}
+                    >
+                        {content}
                     </div>
-                )}
+                </div>
 
                 <footer className="shrink-0 px-5 sm:px-6 py-4 border-t border-white/10 flex items-center justify-between gap-4">
                     <div className="min-w-0">
@@ -426,7 +492,7 @@ export function WhatsNewWindow({
                             <p className="text-xs leading-relaxed text-[var(--text-muted)]">
                                 <button
                                     type="button"
-                                    onClick={() => openItem(NEEDS)}
+                                    onClick={() => setView({ pane: "needs" })}
                                     data-testid="whatsnew-waiting"
                                     className="text-white underline underline-offset-4 decoration-white/30 hover:decoration-white"
                                 >
@@ -438,14 +504,7 @@ export function WhatsNewWindow({
                             <p className="text-xs text-[var(--text-muted)]">Press Esc to close.</p>
                         )}
                     </div>
-                    <Button
-                        variant="primary"
-                        onClick={close}
-                        disabled={closing}
-                        data-autofocus
-                        data-testid="whatsnew-done"
-                        className="shrink-0"
-                    >
+                    <Button variant="primary" onClick={close} disabled={closing} data-autofocus data-testid="whatsnew-done" className="shrink-0">
                         {closing ? "Saving..." : unanswered > 0 ? "Close" : "Done"}
                     </Button>
                 </footer>

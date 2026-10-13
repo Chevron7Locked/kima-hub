@@ -23,7 +23,7 @@ import { useActivityPanelOpen } from "@/hooks/useActivityPanel";
 import { useAuth } from "@/lib/auth-context";
 import { APP_VERSION } from "@/lib/version";
 import { useUpdateStatus } from "@/hooks/useUpdateStatus";
-import { openWhatsNew } from "@/components/whats-new/WhatsNewGate";
+import { openWhatsNewOrChangelog, fetchOpenCount } from "@/components/whats-new/WhatsNewGate";
 import { KimaMark } from "@/components/ui/KimaMark";
 
 const scanEnded = (status?: string) => status === "completed" || status === "failed";
@@ -38,6 +38,11 @@ export function TopBar() {
     const isMobileOrTablet = isMobile || isTablet;
     const [searchQuery, setSearchQuery] = useState("");
     const [scanJobId, setScanJobId] = useState<string | null>(null);
+    const [openCount, setOpenCount] = useState(0);
+
+    useEffect(() => {
+        void fetchOpenCount().then(setOpenCount);
+    }, []);
     const isActivityPanelOpen = useActivityPanelOpen();
     const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -271,12 +276,13 @@ export function TopBar() {
                         </Link>
                         <button
                             type="button"
-                            onClick={openWhatsNew}
-                            aria-label={`what's new in v${APP_VERSION}${updateStatus?.hasUpdate && updateStatus.latest ? ` — update available: v${updateStatus.latest}` : ""}`}
+                            onClick={() => void openWhatsNewOrChangelog((href) => router.push(href))}
+                            aria-label={`what's new in v${APP_VERSION}${updateStatus?.hasUpdate && updateStatus.latest ? ` — update available: v${updateStatus.latest}` : ""}${openCount > 0 ? ` — ${openCount} open` : ""}`}
                             title={updateStatus?.hasUpdate && updateStatus.latest ? `update available: v${updateStatus.latest}` : `what's new in v${APP_VERSION}`}
                             className="relative ml-2 px-1.5 py-0.5 text-micro font-medium text-brand/80 bg-brand/[0.06] rounded border border-brand/25 transition-colors hover:text-brand hover:bg-brand/10 hover:border-brand/50 focus-visible:outline-2 focus-visible:outline-brand"
                         >
                             v{APP_VERSION}
+                            {openCount > 0 && <span className="ml-1 text-brand">· {openCount} open</span>}
                             {updateStatus?.hasUpdate && updateStatus.latest && (
                                 <span
                                     aria-hidden

@@ -15,6 +15,8 @@ import {
     GPU_CHOICE_KEY,
     pendingReleases,
     currentReleaseFor,
+    changelogFor,
+    openRequirements,
     setChoice,
 } from "../services/releases";
 import { setGpuToggles, gpuSupported } from "../services/gpuRuntime";
@@ -59,6 +61,30 @@ router.get("/current", async (req, res) => {
     } catch (error) {
         logger.error("[WhatsNew] current failed:", error);
         res.status(500).json({ error: "Failed to load release" });
+    }
+});
+
+/**
+ * GET /whats-new/changelog — every release, newest first, permanent.
+ * Each item carries what the server knows: the recorded answer, the action
+ * verifiably done, or a quiet open until it is. Reading it writes nothing.
+ */
+router.get("/changelog", async (req, res) => {
+    try {
+        res.json(await changelogFor(req.user!.id));
+    } catch (error) {
+        logger.error("[WhatsNew] changelog failed:", error);
+        res.status(500).json({ error: "Failed to load the changelog" });
+    }
+});
+
+/** GET /whats-new/open — what this user was told to do and the server cannot yet see done. */
+router.get("/open", async (req, res) => {
+    try {
+        res.json(await openRequirements(req.user!.id));
+    } catch (error) {
+        logger.error("[WhatsNew] open requirements failed:", error);
+        res.status(500).json({ error: "Failed to load open requirements" });
     }
 });
 

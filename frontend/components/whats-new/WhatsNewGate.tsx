@@ -50,6 +50,35 @@ export function openWhatsNew(): void {
     window.dispatchEvent(new Event(OPEN_EVENT));
 }
 
+/** The version number's door: unread news opens the window; otherwise it opens the permanent /changelog. */
+export async function openWhatsNewOrChangelog(push: (href: string) => void): Promise<void> {
+    try {
+        if ((await fetchPending()).length > 0) openWhatsNew();
+        else push("/changelog");
+    } catch {
+        push("/changelog");
+    }
+}
+
+let openCountFetch: Promise<number> | null = null;
+let openCountKey: string | null = null;
+
+/** Open requirements the server cannot yet see done — one fetch per session, per user. */
+export function fetchOpenCount(): Promise<number> {
+    const key = typeof window === "undefined" ? "ssr" : localStorage.getItem("auth_token") ?? "";
+    if (!openCountFetch || openCountKey !== key) {
+        openCountKey = key;
+        openCountFetch = api
+            .get<{ count: number }>("/whats-new/open")
+            .then((r) => r.count)
+            .catch(() => {
+                openCountFetch = null;
+                return 0;
+            });
+    }
+    return openCountFetch;
+}
+
 export function WhatsNewGate() {
     const [queue, setQueue] = useState<Release[]>([]);
     // Following a link to a page defers the window for this user in this tab, so it

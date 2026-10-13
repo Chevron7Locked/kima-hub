@@ -131,6 +131,127 @@ async function forUser(userId: string, releases: Release[]): Promise<Release[]> 
     return out;
 }
 
+/** Per-item state on the changelog: what a user was told, asked, and what the server knows happened. */
+export interface ChangelogItem {
+    key: string;
+    kind: "note" | "action" | "choice";
+    title: string;
+    summary: string;
+    body: string;
+    cta?: string;
+    run?: "wipeEnrichment";
+    confirmTitle?: string;
+    confirmMessage?: string;
+    confirmLabel?: string;
+    ifClosed?: string;
+    discloses?: string;
+    links?: Array<{ label: string; href: string }>;
+    /** A choice's recorded answer, and who said it — "EXPLICIT" or "DISMISSED" (silence, never consent). */
+    answer?: { enabled: boolean; decidedBy: string };
+    /** An action the server can verify: completed for real, not because a window closed. */
+    done?: boolean;
+    /** A tracked action that is still owed, and until when it shows. */
+    open?: boolean;
+}
+
+export interface ChangelogRelease {
+    version: string;
+    title: string;
+    summary: string;
+    date: string;
+    note?: { from: string; body: string };
+    /** The user closed this release's window; its open items stay visible here. */
+    dismissed: boolean;
+    items: ChangelogItem[];
+}
+
+/** Actions whose completion the server can verify from real state. Everything else is informational. */
+async function actionSettled(userId: string, item: ReleaseItem, releaseDate: string): Promise<boolean | undefined> {
+    if (item.kind !== "action") return undefined;
+    if (item.run === "wipeEnrichment") {
+        // Open until no track in the library carries analysis from before the release — i.e. the whole
+        // library has been through the new engine. A rerun restamps what it finishes, so this closes
+        // itself when the work is truly done.
+        return !(await libraryEnrichedBefore(new Date(releaseDate)));
+    }
+    if (item.key === "moods.mixes" || item.key === "moods.mixes.retired") {
+        const state = await moodMixState(userId);
+        return state.decision !== null || state.playlist !== null;
+    }
+    return undefined;
+}
+
+/**
+ * The permanent changelog: every release, newest first, filtered to this user,
+ * each item carrying what the server knows — the answer recorded, the action
+ * actually run, or a quiet "open" until it is. Reading it never writes anything.
+ */
+export async function changelogFor(userId: string): Promise<{ releases: ChangelogRelease[]; openCount: number }> {
+    const [acks, choices, filtered] = await Promise.all([
+        prisma.releaseAcknowledgement.findMany({ where: { userId }, select: { version: true } }),
+        prisma.releaseChoice.findMany({ where: { userId } }),
+        forUser(userId, [...RELEASES].sort(byDate).reverse()),
+    ]);
+    const seen = new Set(acks.map((a) => a.version));
+    const answers = new Map(choices.map((c) => [c.key, c]));
+    if (answers.has(GPU_CHOICE_KEY)) {
+        const settings = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { gpuOnnxEnabled: true } });
+        const gpu = answers.get(GPU_CHOICE_KEY)!;
+        gpu.enabled = settings?.gpuOnnxEnabled ?? false;
+    }
+    let openCount = 0;
+    const releases = await Promise.all(
+        filtered.map(async (r): Promise<ChangelogRelease> => {
+            const items = await Promise.all(
+                r.items.map(async (i): Promise<ChangelogItem> => {
+                    const out: ChangelogItem = {
+                        key: i.key,
+                        kind: i.kind,
+                        title: i.title,
+                        summary: i.summary,
+                        body: i.body,
+                        ...(i.kind === "action"
+                            ? {
+                                  cta: i.cta,
+                                  run: i.run,
+                                  confirmTitle: i.confirmTitle,
+                                  confirmMessage: i.confirmMessage,
+                                  confirmLabel: i.confirmLabel,
+                                  ifClosed: i.ifClosed,
+                              }
+                            : i.kind === "choice"
+                              ? { discloses: i.discloses }
+                              : {}),
+                        ...(i.links ? { links: i.links } : {}),
+                    };
+                    if (i.kind === "choice") {
+                        const a = answers.get(i.key);
+                        if (a) out.answer = { enabled: a.enabled, decidedBy: a.decidedBy };
+                    }
+                    if (seen.has(r.version)) {
+                        const settled = await actionSettled(userId, i, r.date);
+                        if (settled !== undefined) {
+                            out.done = settled;
+                            out.open = !settled;
+                            if (!settled) openCount++;
+                        }
+                    }
+                    return out;
+                }),
+            );
+            return { version: r.version, title: r.title, summary: r.summary, date: r.date, note: r.note, dismissed: seen.has(r.version), items };
+        }),
+    );
+    return { releases, openCount };
+}
+
+/** What this user was told to do and the server cannot yet see done. The quiet ledger. */
+export async function openRequirements(userId: string): Promise<{ count: number; items: Array<{ version: string; key: string; title: string }> }> {
+    const { releases, openCount } = await changelogFor(userId);
+    const items = releases.flatMap((r) => r.items.filter((i) => i.open).map((i) => ({ version: r.version, key: i.key, title: i.title })));
+    return { count: openCount, items };
+}
+
 /**
  * A `/choice` for a key the release never asked about. `moods.mixes.rebuild`
  * is refused too: it is an action, answered through `decideMoodMixes`, which

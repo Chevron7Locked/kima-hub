@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Settings, RefreshCw, LogOut, Compass, X, Radio, ChartNoAxesColumn } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -11,7 +11,7 @@ import { notify } from "@/lib/notify";
 import { KimaMark } from "@/components/ui/KimaMark";
 import { APP_VERSION } from "@/lib/version";
 import { useUpdateStatus } from "@/hooks/useUpdateStatus";
-import { openWhatsNew } from "@/components/whats-new/WhatsNewGate";
+import { openWhatsNewOrChangelog, fetchOpenCount } from "@/components/whats-new/WhatsNewGate";
 
 interface MobileSidebarProps {
     isOpen: boolean;
@@ -20,8 +20,14 @@ interface MobileSidebarProps {
 
 export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
     const pathname = usePathname();
+    const router = useRouter();
     const { logout } = useAuth();
     const updateStatus = useUpdateStatus();
+    const [openCount, setOpenCount] = useState(0);
+
+    useEffect(() => {
+        void fetchOpenCount().then(setOpenCount);
+    }, []);
     const [isSyncing, setIsSyncing] = useState(false);
     const isFirstRender = useRef(true);
     const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -219,13 +225,15 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                         type="button"
                         onClick={() => {
                             onClose();
-                            openWhatsNew();
+                            void openWhatsNewOrChangelog((href) => router.push(href));
                         }}
+                        aria-label={`what's new in v${APP_VERSION}${openCount > 0 ? ` — ${openCount} open` : ""}`}
                         title={updateStatus?.hasUpdate && updateStatus.latest ? `update available: v${updateStatus.latest}` : `what's new in v${APP_VERSION}`}
                         className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 transition-colors duration-200"
                     >
                         <span className="relative text-sm">
                             What&apos;s new in <span className="text-brand/80">v{APP_VERSION}</span>
+                            {openCount > 0 && <span className="ml-1 text-brand/80">· {openCount} open</span>}
                             {updateStatus?.hasUpdate && updateStatus.latest && (
                                 <span
                                     aria-hidden
