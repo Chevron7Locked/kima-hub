@@ -727,6 +727,10 @@ model Track {
   keyStrength                 Float?
   energy                      Float?
   loudness                    Float?
+  // Sample peak of the analyzed decode: the largest absolute sample, linear
+  // 0-1 (s16/32768), not an inter-sample true peak. Written beside loudness
+  // by the same analysis run; null in exactly the cases loudness is.
+  trackPeak                   Float?
   dynamicRange                Float?
   danceability                Float?
   valence                     Float?

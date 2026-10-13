@@ -473,6 +473,7 @@ class AudioAnalyzer:
             'keyStrength': None,
             'energy': None,
             'loudness': None,
+            'trackPeak': None,
             'dynamicRange': None,
             'danceability': None,
             'valence': None,
@@ -560,6 +561,13 @@ class AudioAnalyzer:
             _, _, integrated, loudness_range = self.loudness_ebu(pair)
             result['loudness'] = round(float(integrated), 2)
             result['dynamicRange'] = round(float(loudness_range), 2)
+            # Sample peak of this same decode: the largest absolute sample,
+            # linear 0-1 (s16/32768). This is a sample peak, not an
+            # inter-sample true peak; native clients clamp gain with it so a
+            # boosted quiet master cannot clip. Computed only here, after the
+            # silence gate above has already returned, so it is null in
+            # exactly the cases loudness is.
+            result['trackPeak'] = round(float(np.max(np.abs(decoded))), 6)
 
             # The models' answers: moods, valence/arousal, danceability. A failure fails the
             # track and it is retried, never stored with anything in their place.
@@ -1223,6 +1231,7 @@ class AnalysisWorker:
                     "keyStrength" = %s,
                     energy = %s,
                     loudness = %s,
+                    "trackPeak" = %s,
                     "dynamicRange" = %s,
                     danceability = %s,
                     "deamValence" = %s,
@@ -1248,6 +1257,7 @@ class AnalysisWorker:
                 features['keyStrength'],
                 features['energy'],
                 features['loudness'],
+                features['trackPeak'],
                 features['dynamicRange'],
                 features['danceability'],
                 features['valence'],

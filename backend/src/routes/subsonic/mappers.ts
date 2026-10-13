@@ -34,6 +34,8 @@ export type TrackRow = {
     mime: string | null;
     fileSize: number | null;
     loudness?: number | null;
+    /** Sample peak of the analyzed decode, linear 0-1; null when unmeasured. */
+    trackPeak?: number | null;
 };
 
 /** A track stored in a playback queue — the shape mapQueueEntry turns into a getPlayQueue child. */
@@ -42,6 +44,7 @@ export type QueueTrack = {
     title?: string;
     duration?: number;
     loudness?: number | null;
+    trackPeak?: number | null;
     artist?: { id?: string; name?: string } | null;
     album?: { id?: string; title?: string; coverArt?: string | null } | null;
 };
@@ -93,6 +96,27 @@ export function trackGainDb(loudness: number | null | undefined): number | null 
     return Math.round((RG_REFERENCE_LUFS - loudness) * 10) / 10;
 }
 
+/**
+ * The replayGain object every song child carries — one builder so the song
+ * and queue doors cannot drift. The object is always present; trackGain only
+ * when a trustworthy integrated loudness exists, and trackPeak only when a
+ * positive sample peak was measured beside it (OpenSubsonic extension 28:
+ * trackPeak "Must be positive", spec-checked 2026-10-13 — a null or
+ * non-positive reading is no peak at all). Both measurements come from one
+ * analysis run, so the peak rides only when the gain does.
+ */
+export function replayGainOf(
+    loudness: number | null | undefined,
+    trackPeak: number | null | undefined
+): Record<string, number> {
+    const gain = trackGainDb(loudness);
+    if (gain === null) return {};
+    return {
+        trackGain: gain,
+        ...(trackPeak !== null && trackPeak !== undefined && trackPeak > 0 ? { trackPeak } : {}),
+    };
+}
+
 export function mapSong(
     track: TrackRow,
     album: { id: string; title: string; displayTitle: string | null; year: number | null },
@@ -100,7 +124,6 @@ export function mapSong(
     artistId: string,
     genre?: string | null
 ) {
-    const gain = trackGainDb(track.loudness);
     return {
         "@_id": track.id,
         "@_parent": album.id,
@@ -123,7 +146,7 @@ export function mapSong(
         "@_genre": genre || undefined,
         // OpenSubsonic: the object is always present; fields are omitted when
         // the measurement is missing or untrustworthy.
-        replayGain: gain === null ? {} : { trackGain: gain },
+        replayGain: replayGainOf(track.loudness, track.trackPeak),
     };
 }
 
@@ -135,7 +158,6 @@ export function mapSong(
  * canonical gain rule again (it was hand-rolled in the route and dropped it).
  */
 export function mapQueueEntry(item: QueueTrack) {
-    const gain = trackGainDb(item.loudness);
     return {
         "@_id": item.id,
         "@_title": item.title || "Unknown",
@@ -148,7 +170,7 @@ export function mapQueueEntry(item: QueueTrack) {
         "@_artist": item.artist?.name || undefined,
         "@_coverArt": item.album?.coverArt || item.album?.id || undefined,
         "@_duration": item.duration || 0,
-        replayGain: gain === null ? {} : { trackGain: gain },
+        replayGain: replayGainOf(item.loudness, item.trackPeak),
     };
 }
 
