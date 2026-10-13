@@ -2,7 +2,9 @@
  * mapSong's replayGain follows the OpenSubsonic extension: the object is
  * always present on a song child, trackGain appears only when a trustworthy
  * integrated-loudness measurement exists, and the gain levels a track to the
- * ReplayGain 2 reference (−18 LUFS), attenuation only.
+ * ReplayGain 2 reference (−18 LUFS). trackGainDb is signed — native clients
+ * apply it with peak protection, so a quiet track gets a positive gain; the
+ * web player clamps to attenuation on its own (lib/loudness.ts).
  */
 
 import { mapSong, trackGainDb, isValidLoudness } from "../mappers";
@@ -37,7 +39,7 @@ describe("trackGainDb", () => {
         expect(trackGainDb(-18)).toBe(0);
     });
 
-    it("never boosts: quieter-than-reference tracks stay at their level", () => {
+    it("gives a quiet track a positive gain for native clients", () => {
         expect(trackGainDb(-24)).toBe(6);
     });
 

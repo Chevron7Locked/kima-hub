@@ -66,15 +66,38 @@ beforeAll(async () => {
 
     const titles = [`${MARK} Beta`, `${MARK} alpha`, `${MARK} CHARLIE`];
     await prisma.track.createMany({
-        data: titles.map((title, i) => ({
-            title,
-            albumId: libraryAlbumId,
-            trackNo: i + 1,
-            duration: 100,
-            filePath: `/${MARK}/${i}.flac`,
-            fileModified: new Date(),
-            fileSize: 1000,
-        })),
+        data: [
+            ...titles.map((title, i) => ({
+                title,
+                albumId: libraryAlbumId,
+                trackNo: i + 1,
+                duration: 100,
+                filePath: `/${MARK}/${i}.flac`,
+                fileModified: new Date(),
+                fileSize: 1000,
+            })),
+            // Persisted shapes the enumeration query must exclude.
+            {
+                title: `${MARK} Delta`,
+                albumId: libraryAlbumId,
+                trackNo: 4,
+                duration: 100,
+                filePath: `/${MARK}/4.flac`,
+                fileModified: new Date(),
+                fileSize: 1000,
+                corrupt: true,
+            },
+            {
+                title: `${MARK} Echo`,
+                albumId: libraryAlbumId,
+                trackNo: 5,
+                duration: 100,
+                filePath: `/${MARK}/5.flac`,
+                fileModified: new Date(),
+                fileSize: 1000,
+                missingSince: new Date(),
+            },
+        ],
     });
 });
 
@@ -101,6 +124,17 @@ describe('search3 empty-query library enumeration', () => {
             `${MARK} Beta`,
             `${MARK} CHARLIE`,
         ]);
+    });
+
+    it('keeps corrupt and missing tracks out of the enumeration', async () => {
+        const res = await request(makeApp())
+            .get('/search3.view')
+            .query({ u: 'tester', query: '', songCount: 50, f: 'json' })
+            .expect(200);
+
+        const titles = songs(res.body).map((s) => s.title);
+        expect(titles).not.toContain(`${MARK} Delta`);
+        expect(titles).not.toContain(`${MARK} Echo`);
     });
 
     it('tiles pages without overlap', async () => {

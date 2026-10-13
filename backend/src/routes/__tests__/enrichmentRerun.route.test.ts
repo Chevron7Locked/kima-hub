@@ -68,7 +68,7 @@ describe("POST /enrichment/rerun", () => {
         expect(mockRerun).toHaveBeenCalledWith("similarity");
     });
 
-    it.each(["everything", "", null, 5])("rejects an unknown step %p", async (step) => {
+    it.each(["everything", "", null, 5, "toString", "constructor"])("rejects an unknown step %p", async (step) => {
         const res = await request(app).post("/enrichment/rerun").send({ step });
         expect(res.status).toBe(400);
         expect(mockRerun).not.toHaveBeenCalled();
