@@ -132,15 +132,17 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 # transformers supplies the tokenizer (RobertaTokenizer) for the text encoder
 # and the audio_utils numpy primitives used by our vendored clap_mel.py.
 # NOTE: ClapFeatureExtractor itself is torch-gated on EVERY version we can
-# install (verified 4.57.6 AND 5.8.1 raise ImportError without torch) -- the
-# shipped runtime does NOT use it; clap_mel.py reproduces its mel bit-for-bit
-# (proven, test_clap_mel_parity). 4.57.6 is the pin the parity was validated on.
-# The same pins as services/audio-analyzer-clap/requirements.txt (test_ship_blocker.py checks).
-# transformers is exact: newer releases reference torch.float8_e8m0fnu at import and crash
-# without torch. Bump only with a full ONNX re-validation (verify_runtime.py, the build gate).
+# install -- the shipped runtime does NOT use ClapFeatureExtractor (it is
+# torch-gated upstream); clap_mel.py reproduces its mel bit-for-bit (proven,
+# test_clap_mel_parity). The same pins as services/audio-analyzer-clap/
+# requirements.txt (test_ship_blocker.py checks). transformers is exact:
+# torchless imports crash on unvetted releases, so a bump ships only with a
+# full ONNX re-validation. 5.10.4 passed that gate (mel, tokenizer, 512-d
+# audio and text embeddings bit-identical to 4.57.6) and closes
+# CVE-2026-4372/5241/9856 in the model-loading path.
 RUN pip3 install --no-cache-dir --break-system-packages \
     'onnxruntime==1.30.0' \
-    'transformers==4.57.6' \
+    'transformers==5.10.4' \
     'librosa==0.11.0' \
     'soundfile==0.14.0'
 
