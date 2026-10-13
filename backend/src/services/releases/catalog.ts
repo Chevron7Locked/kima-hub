@@ -145,9 +145,6 @@ export const RELEASES: Release[] = [
                     "Touch-screen controls, preview streams everywhere, consistent labels, a right-sized play queue for iOS, and security fixes.",
                 body:
                     "- Touch screens (artist and album pages): reveal-on-hover controls now show on tap too\n- Preview streams play on every client (the range headers were missing)\n- The release window says \"What's new\" everywhere, not \"Kevin's note\" on wide screens\n- An ordered play queue for iOS that doesn't drag the full artist payload\n- The collection page hides delete buttons from non-admins\n- Three HIGH-severity CVEs closed in the CLAP stack (transformers model-loading path)\n- Empty Subsonic search3 queries return the library instead of erroring",
-                links: [
-                    { label: "Full changelog on GitHub", href: "https://github.com/Chevron7Locked/kima-hub/releases" },
-                ],
             },
         ],
     },

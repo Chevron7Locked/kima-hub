@@ -286,6 +286,7 @@ code {
     .touch-reveal {
         opacity: 1;
         transform: none;
+        translate: none;
         pointer-events: auto;
     }
 }

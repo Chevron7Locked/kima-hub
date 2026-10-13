@@ -1,18 +1,14 @@
 // Reading the current release again after closing it, through the real auth
-// middleware and database.
+// middleware and database. The release-window GPU choice has its own test
+// (whatsNewGpuChoice.route.test.ts); this one stays release-agnostic.
 
 import express from "express";
 import request from "supertest";
 import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import whatsNewRoutes from "../whatsNew";
-import { GPU_CHOICE_KEY, RELEASES } from "../../services/releases/catalog";
-import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+import { RELEASES } from "../../services/releases/catalog";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
-
-// The GPU item and its answer read the same on every host; pin the platform
-// answer so the suite behaves the same on arm/macOS runners as on linux/x86_64.
-jest.mock("../../services/gpuPlatform", () => ({ gpuSupported: () => true }));
 
 const USER = "whatsnew_reopen_user";
 const ADMIN = "whatsnew_reopen_admin";
@@ -50,15 +46,14 @@ it("reads the closed current release again, with only this user's items", async 
     expect(again.body.release.items.some((i: { requires?: string }) => i.requires === "admin")).toBe(false);
 });
 
-it("gives an admin the admin items, with the GPU answer as the setting stands", async () => {
-    await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", gpuOnnxEnabled: true }, update: { gpuOnnxEnabled: true } });
-    invalidateSystemSettingsCache();
+it("gives an admin the current release with its answers", async () => {
+    const asUser = await request(app()).get("/whats-new/current").set("Authorization", as(USER, "user"));
+    const asAdmin = await request(app()).get("/whats-new/current").set("Authorization", as(ADMIN, "admin"));
 
-    const again = await request(app()).get("/whats-new/current").set("Authorization", as(ADMIN, "admin"));
-
-    expect(again.status).toBe(200);
-    expect(again.body.release.items.some((i: { key: string }) => i.key === GPU_CHOICE_KEY)).toBe(true);
-    expect(again.body.answers[GPU_CHOICE_KEY]).toBe(true);
+    expect(asAdmin.status).toBe(200);
+    expect(asAdmin.body.release.version).toBe(newest.version);
+    expect(asAdmin.body.release.items.length).toBeGreaterThanOrEqual(asUser.body.release.items.length);
+    expect(typeof asAdmin.body.answers).toBe("object");
 });
 
 it("needs a signed-in user", async () => {

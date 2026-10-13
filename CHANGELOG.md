@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Loudness normalization.** A setting in Settings → Playback ("Normalize loudness") that plays every song toward −18 LUFS. Louder songs are turned down; quiet ones keep their level. Off by default; when off, songs play at whatever loudness their master was cut at. Subsonic clients get a per-track `trackGain` tag; web and iOS adjust through the player. Each reading measured with R128 for its full track (median −9.1 LUFS on a 9,204-track library; 24 junk readings outside the valid range are not trusted).
-- **Per-step enrichment reruns.** Settings → Library Enrichment now has a step picker that re-runs from identification, artists, audio analysis, sound vectors, or similarity — each clears itself and everything after it, including the vibe map (always a fresh layout). The full wipe-and-rerun is unchanged.
+- **Per-step enrichment reruns.** Settings → Library Enrichment now has a step picker that re-runs from identification, artists, audio analysis, sound vectors, or similarity — each clears itself and what genuinely depends on it (re-running artists keeps analysis and vectors; identification starts from scratch), and always similarity and the vibe map, since the formula reads all three. The full wipe-and-rerun is unchanged.
 - **Update pings.** Every 24 hours Kima checks GitHub's releases API for newer versions. When one is found, an amber dot appears on the version number in the app; tapping it opens the release's What's New window. The check can be turned off in Settings → Storage.
 - **An ordered play queue for iOS.** `GET /api/library/artists/:id/play-tracks` returns only the fields a queue needs (id, title, track/disc number, duration, album cover, artist name) in canonical server order — effective year desc, title asc, disc/track within album. MusicBrainz preview rows are excluded (they carry no file). The album set is the one the artist page marks owned; the endpoint returns it in its own canonical order, which the client consumes as-given, without the artist's full discography payload.
 
@@ -22,9 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Touch-screen hover-reveal controls** on artist and album pages now respond to taps. Before, the controls that appear on hover were stuck off on touch screens (8 places fixed: play/edit/queue/lyrics on album and artist pages).
-- **Preview stream range requests** (the artist and playlist preview-stream endpoints) now forward `Range` headers through the binary-stream parser (`parseBinary`), and are tested against a local upstream server that answers with a real 206.
+- **Preview stream range requests** (the artist and playlist preview-stream endpoints) now forward `Range` headers through the shared preview proxy (`proxyPreviewStream`), and are tested against a local upstream server that answers with a real 206.
 - **Subsonic `search3` with an empty query** enumerates the library (same as `getAlbumList2`) instead of returning an empty response.
-- **Collection-page delete controls** no longer show to non-admins (the backend already enforced it; the frontend was gated on the route returning `isAdmin`, which it now does).
+- **Collection-page delete controls** no longer show to non-admins (the backend already enforced it; the UI now gates on the signed-in user's role, which it previously ignored).
 
 ### Security
 
