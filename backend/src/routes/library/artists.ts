@@ -397,14 +397,9 @@ router.post("/backfill-genres", requireAdmin, async (_req, res) => {
 });
 
 // The play queue for one artist, in one response: what a Play All tap needs
-// and nothing else. The artist page's payload carries audioFeatures and a
-// MusicBrainz discography the player never reads; native clients re-fetch
-// every album's detail to build this list themselves. The order is the
-// canonical one clients consume as-given: owned albums by effective year
-// (displayYear ?? year, missing last) descending, title ascending, tracks by
-// disc then track number, an untagged disc counting as disc one — the same
-// rule the iOS client's albumOrder uses. Only playable library rows ride the
-// queue — owned albums, uncorrupt files still on disk — the same predicate
+// and nothing else, in the canonical order clients consume as-given — owned
+// albums by year desc, title asc, disc/track within album (untagged disc =
+// disc one). Only playable library rows ride the queue, the same predicate
 // the search doors use, so the player never loads a row it cannot stream.
 router.get("/artists/:id/play-tracks", async (req, res) => {
   try {

@@ -13,7 +13,7 @@ import { gpuSupported } from "../gpuRuntime";
 import { MOOD_MIX_RELEASE, moodMixState, type MoodMixState } from "./moodMixes";
 
 export { findRelease, GPU_CHOICE_KEY } from "./catalog";
-export type { Release, ReleaseItem } from "./catalog";
+export type { Release } from "./catalog";
 
 async function isAdminUser(userId: string): Promise<boolean> {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
@@ -132,7 +132,7 @@ async function forUser(userId: string, releases: Release[]): Promise<Release[]> 
 }
 
 /** Per-item state on the changelog: what a user was told, asked, and what the server knows happened. */
-export interface ChangelogItem {
+interface ChangelogItem {
     key: string;
     kind: "note" | "action" | "choice";
     title: string;

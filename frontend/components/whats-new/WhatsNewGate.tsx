@@ -46,7 +46,7 @@ function closeAll(): void {
 const OPEN_EVENT = "kima:whats-new-open";
 
 /** Opens the window on the current release again, closed or not (the version number beside the logo). */
-export function openWhatsNew(): void {
+function openWhatsNew(): void {
     window.dispatchEvent(new Event(OPEN_EVENT));
 }
 

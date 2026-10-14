@@ -61,7 +61,7 @@ interface VibeTrack {
  */
 export type MoodMixDecision = "rebuild" | "keep" | "remove";
 
-export interface UpdateStatus {
+interface UpdateStatus {
     enabled: boolean;
     current: string;
     latest: string | null;
