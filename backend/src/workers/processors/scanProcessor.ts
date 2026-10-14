@@ -20,6 +20,7 @@ export interface ScanJobResult {
     tracksAdded: number;
     tracksUpdated: number;
     tracksMissing: number;
+    tracksRemoved: number;
     tracksCorrupt: number;
     errors: Array<{ file: string; error: string }>;
     duration: number;
@@ -27,11 +28,12 @@ export interface ScanJobResult {
 
 const SCAN_RESULT_KEY = "library-scan";
 
-function scanSummary(r: { tracksAdded: number; tracksUpdated: number; tracksMissing: number; tracksCorrupt: number }): string {
+function scanSummary(r: { tracksAdded: number; tracksUpdated: number; tracksMissing: number; tracksRemoved: number; tracksCorrupt: number }): string {
     const parts = [
         r.tracksAdded > 0 && `${r.tracksAdded} added`,
         r.tracksUpdated > 0 && `${r.tracksUpdated} updated`,
         r.tracksMissing > 0 && `${r.tracksMissing} missing`,
+        r.tracksRemoved > 0 && `${r.tracksRemoved} retired`,
         r.tracksCorrupt > 0 && `${r.tracksCorrupt} corrupt`,
     ].filter(Boolean);
     return parts.length > 0 ? parts.join(", ") : "No changes";
@@ -107,7 +109,7 @@ export async function processScan(
                 userId,
                 payload: {
                     jobId: String(job.id),
-                    result: { tracksAdded: result.tracksAdded, tracksUpdated: result.tracksUpdated, tracksMissing: result.tracksMissing, tracksCorrupt: result.tracksCorrupt },
+                    result: { tracksAdded: result.tracksAdded, tracksUpdated: result.tracksUpdated, tracksMissing: result.tracksMissing, tracksRemoved: result.tracksRemoved, tracksCorrupt: result.tracksCorrupt },
                 },
             });
             if (manual) {

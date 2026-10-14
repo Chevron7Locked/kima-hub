@@ -79,7 +79,9 @@ export async function reconcileDeletedTracks(
 
     await tx.track.deleteMany({ where: { id: { in: ids } } });
 
-    // TrackGenre empties only at the delete above, so the empty-genre sweep must be after it.
+    // Empty-genre cleanup is library-wide, not sweep-scoped: any Genre row with no tracks
+    // after the cascade is removed (a pre-existing empty genre goes too). Rows are
+    // enrichment-derived and invisible to readers while empty; runs only when tracks were swept.
     await tx.genre.deleteMany({ where: { trackGenres: { none: {} } } });
 
     logger.info(`[RECONCILE] retired ${ids.length} track(s) past the missing-file grace period`);
