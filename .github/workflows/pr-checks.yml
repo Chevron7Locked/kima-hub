@@ -150,7 +150,7 @@ jobs:
             - name: Run analyzer tests that need no model weights
               working-directory: services/audio-analyzer
               # ffmpeg drives the decode tests (stereo split, bad frames, channel downmix).
-              run: python -m pytest test_mood_heads.py test_classifier.py test_results_leave_ledger.py test_decode_path.py test_feed_loop.py test_silence.py test_musicnn_groups.py -v
+              run: python -m pytest test_mood_heads.py test_classifier.py test_results_leave_ledger.py test_decode_path.py test_feed_loop.py test_silence.py test_musicnn_groups.py test_loudness_gate.py -v
 
             - name: Install the sound-vector analyzer's dependencies
               run: pip install -r services/audio-analyzer-clap/requirements.txt
