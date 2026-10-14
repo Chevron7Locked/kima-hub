@@ -5,6 +5,16 @@ All notable changes to Kima will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - nightly
+
+### Added
+
+- **Library reconcile (opt-in).** A file gone from disk is flagged, and stays flagged; in `delete-after-grace` mode (`RECONCILE_MODE`, off by default) a track that has been missing past `RECONCILE_GRACE_DAYS` (default 30) is retired — the row and everything hanging off it — and every retirement is written to `RemovalLog` first, so the memory of the track survives the row. Admins see the list at `GET /api/library/removals`.
+
+### Fixed
+
+- **`prisma migrate dev` works again.** The 1.11 play-heard migration backfilled from `_prisma_migrations` without a guard, so any command that replays the history onto an empty database — `migrate dev`'s shadow database — died halfway through. The backfill is now guarded the way the soulseek-resolve migration already guards its own. The full history is proven to apply clean to a fresh database.
+
 ## [1.12.0] - 2026-10-13
 
 ### Added
