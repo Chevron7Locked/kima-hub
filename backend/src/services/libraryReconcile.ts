@@ -6,6 +6,7 @@
  * Every removal is snapshotted into RemovalLog before the delete — the memory of the
  * track survives the row, and the artifact manifest lets a crash gap be re-cleaned.
  */
+import * as fs from "fs/promises";
 import * as path from "path";
 import { Prisma } from "@prisma/client";
 import { config } from "../config";
@@ -55,8 +56,8 @@ export async function reconcileDeletedTracks(
         data: missing.map((t) => ({
             filePath: t.filePath,
             title: t.title,
-            artistName: t.album?.artist?.name ?? "Unknown",
-            albumTitle: t.album?.title ?? "Unknown",
+            artistName: t.album.artist.name,
+            albumTitle: t.album.title,
             reason: "file-missing-grace",
             artifacts: (artifactsByTrack.get(t.id) ?? []).map((p) => ({
                 table: "TranscodedFile",
@@ -87,7 +88,6 @@ export async function reconcileDeletedTracks(
 
 /** Best-effort artifact unlinking after the transaction commits; failures never block a scan. */
 export async function unlinkArtifacts(artifacts: string[]): Promise<void> {
-    const fs = await import("fs/promises");
     for (const p of artifacts) {
         try {
             await fs.rm(p, { force: true });

@@ -138,8 +138,8 @@ router.get("/removals", requireAdmin, async (req, res) => {
     const limit = parseLimit(req.query.limit, 100);
     const offset = Math.max(0, parseInt(req.query.offset as string, 10) || 0);
     const [count, removals] = await Promise.all([
-      prisma.removalLog.count({ where: {} }),
-      prisma.removalLog.findMany({ where: {}, orderBy: { removedAt: "desc" }, skip: offset, take: limit }),
+      prisma.removalLog.count(),
+      prisma.removalLog.findMany({ orderBy: { removedAt: "desc" }, skip: offset, take: limit }),
     ]);
     res.json({
       count,
