@@ -53,6 +53,8 @@ With the split stack (`docker-compose.yml`), set both in a `.env` file next to t
 | `ACOUSTID_CLIENT_KEY` | a shared key | Your own AcoustID key, if you want to lift the shared key's rate limit. Also settable in Settings under AI & Artwork. |
 | `DISABLE_CLAP` | unset | Set to `true` to stop the vibe analyzer from starting in the all-in-one image. Without it there are no sound vectors, so the vibe features do not work. |
 | `ADMIN_RESET_PASSWORD` | unset | Set it and restart to reset an administrator's password. Remove it afterwards, or the password resets again on every start. The reset signs that account out everywhere. |
+| `RECONCILE_MODE` | `flag` | What the scan does with tracks whose files are gone. `flag` (default) only flags them — nothing is ever deleted. `delete-after-grace` retires tracks that have been missing longer than `RECONCILE_GRACE_DAYS`: the track and everything hanging off it (plays, likes, playlist items, stages, embeddings) is removed, and `RemovalLog` records what left — admins can read it at `GET /api/library/removals`. |
+| `RECONCILE_GRACE_DAYS` | `30` | How long a file must have been gone before `delete-after-grace` retires its track. Set it longer than any mount downtime or library reorganisation you expect; a file that returns before the grace passes keeps everything. |
 
 ### Docker Compose helpers
 
