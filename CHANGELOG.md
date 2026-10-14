@@ -22,12 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Per-step enrichment reruns.** Settings → Library Enrichment now has a step picker that re-runs from identification, artists, audio analysis, sound vectors, or similarity — each clears itself and what genuinely depends on it (re-running artists keeps analysis and vectors; identification starts from scratch), and always similarity and the vibe map, since the formula reads all three. The full wipe-and-rerun is unchanged.
 - **Update pings.** Every 24 hours Kima checks GitHub's releases API for newer versions. When one is found, an amber dot appears on the version number in the app; tapping it opens the release's What's New window. The check can be turned off in Settings → Storage.
+- **A permanent changelog.** Every release's note and items stack newest first at `/changelog` and are never overwritten by the next version. Closing the release window marks it read, not done: anything a release still needs from you stays listed there and closes itself when the server sees it happen. The version number opens unread news, otherwise the changelog.
 - **An ordered play queue for iOS.** `GET /api/library/artists/:id/play-tracks` returns only the fields a queue needs (id, title, track/disc number, duration, album cover, artist name) in canonical server order — effective year desc, title asc, disc/track within album. MusicBrainz preview rows are excluded (they carry no file). The album set is the one the artist page marks owned; the endpoint returns it in its own canonical order, which the client consumes as-given, without the artist's full discography payload.
 
 ### Changed
 
 - **The release window says "What's new" everywhere.** In wide mode the back button used to read "{sender}'s note" (confusing — it navigates to the overview, not a note). Now it says "What's new" on every screen size.
 - **Open item highlight is more visible.** The background went from 0.07 to 0.13 with a subtle inset ring, so it clearly differs from the item hover state.
+- **Downloading is operator-only by default.** Downloads cost money, use peer networks and fill the disk, so members can no longer start them unless the operator turns on Member Downloads in Settings → Download Preferences. Deleting stays operator-only either way, and the server enforces it at every download entry point; members keep browsing and searching.
 - **Playlists can flip to reverse order.** A toggle next to shuffle reverses the list — the display order, the queue built from it, and it's remembered per playlist. Stored order and drag-to-reorder are untouched: dragging in the reversed view lands where it looks, not mirrored. (`?order=rev` works on the API too.)
 
 ### Fixed
