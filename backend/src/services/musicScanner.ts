@@ -20,6 +20,7 @@ import { backfillAllArtistCounts } from "./artistCountsService";
 import { findLocalArtistImage } from "./imageStorage";
 import { LIBRARY_LOCATION } from "./libraryFilters";
 import { closeStagesForMissingTracks } from "./missingFileStages";
+import { runReconcile } from "./libraryReconcile";
 
 /**
  * The MusicBrainz id of a credit's primary artist, from the same tag the name came
@@ -121,6 +122,8 @@ interface ScanResult {
     tracksUpdated: number;
     /** Tracks newly flagged missing this scan (file gone from disk). Never deletions. */
     tracksMissing: number;
+    /** Tracks retired by the reconcile sweep; always 0 in `flag` mode. */
+    tracksRemoved: number;
     tracksCorrupt: number;
     errors: Array<{ file: string; error: string }>;
     duration: number;
@@ -152,6 +155,7 @@ export class MusicScannerService {
             tracksAdded: 0,
             tracksUpdated: 0,
             tracksMissing: 0,
+            tracksRemoved: 0,
             tracksCorrupt: 0,
             errors: [],
             duration: 0,
@@ -252,9 +256,11 @@ export class MusicScannerService {
 
         await this.scanQueue.onIdle();
 
-        // Missing files are flagged, never deleted: deleting the row would cascade away
-        // its plays, likes, stage records and embedding. The flag is cleared by the
-        // scan that finds the file again.
+        // Missing files are flagged; in `flag` mode (default) nothing is ever deleted:
+        // deleting the row would cascade away its plays, likes, stage records and
+        // embedding, and the flag is cleared by the scan that finds the file again.
+        // In `delete-after-grace` mode, Step 4b retires tracks whose flag is older
+        // than the grace period, and RemovalLog records what was removed.
         const scannedPaths = new Set(
             audioFiles.map((f) => path.relative(musicPath, f))
         );
@@ -334,6 +340,12 @@ export class MusicScannerService {
             });
         }
 
+        // Step 4b: Reconcile (opt-in). Retires tracks whose files have been gone past
+        // the grace period; inert in `flag` mode. Runs BEFORE Steps 5-6 so their orphan
+        // cleanup cascades the newly-emptied albums and artists for free.
+        const reconcile = await runReconcile();
+        result.tracksRemoved = reconcile.removed;
+
         // Step 5: Clean up orphaned albums (albums with no tracks)
         const orphanedAlbums = await prisma.album.findMany({
             where: {
@@ -376,7 +388,7 @@ export class MusicScannerService {
 
         result.duration = Date.now() - startTime;
         logger.debug(
-            `Scan complete: +${result.tracksAdded} ~${result.tracksUpdated} missing:${result.tracksMissing} corrupt:${result.tracksCorrupt} (${result.duration}ms)`
+            `Scan complete: +${result.tracksAdded} ~${result.tracksUpdated} missing:${result.tracksMissing} corrupt:${result.tracksCorrupt} removed:${result.tracksRemoved} (${result.duration}ms)`
         );
 
         // Update artist counts in background (non-blocking)

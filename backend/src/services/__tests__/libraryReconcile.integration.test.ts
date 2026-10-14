@@ -4,7 +4,8 @@
  * paths are absolute transcode-cache paths — client device paths appear nowhere.
  */
 import { prisma } from "../../utils/db";
-import { reconcileDeletedTracks, transcodeArtifactPath } from "../libraryReconcile";
+import { config } from "../../config";
+import { reconcileDeletedTracks, transcodeArtifactPath, runReconcile } from "../libraryReconcile";
 
 const P = "recon";
 const DAY = 86_400_000;
@@ -154,5 +155,31 @@ describe("reconcileDeletedTracks", () => {
         const abs = transcodeArtifactPath("abc.mp3");
         expect(abs.endsWith("abc.mp3")).toBe(true);
         expect(abs.startsWith("/")).toBe(true);
+    });
+
+    it("flag mode (default) skips the sweep without touching tracks", async () => {
+        await seedTrack(`${P}flag`, { missingDaysAgo: 999 });
+        const res = await runReconcile();
+        expect(res).toEqual({ removed: 0, artifacts: [], skipped: true });
+        expect(await prisma.track.findUnique({ where: { id: `${P}flag` } })).not.toBeNull();
+        expect(await prisma.removalLog.count({ where: { filePath: `/tmp/${P}flag.flac` } })).toBe(0);
+    });
+
+    it("delete-after-grace mode sweeps through runReconcile", async () => {
+        await seedTrack(`${P}swp`, { missingDaysAgo: 45 });
+        const spy = jest.spyOn(config, "music", "get").mockReturnValue({
+            ...config.music,
+            reconcileMode: "delete-after-grace",
+            reconcileGraceDays: 30,
+        });
+        try {
+            const res = await runReconcile();
+            expect(res.skipped).toBe(false);
+            expect(res.removed).toBe(1);
+            expect(await prisma.track.findUnique({ where: { id: `${P}swp` } })).toBeNull();
+            expect(await prisma.removalLog.count({ where: { filePath: `/tmp/${P}swp.flac` } })).toBe(1);
+        } finally {
+            spy.mockRestore();
+        }
     });
 });

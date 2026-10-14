@@ -9,6 +9,7 @@
 import * as path from "path";
 import { Prisma } from "@prisma/client";
 import { config } from "../config";
+import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 
 export interface ReconcileResult {
@@ -94,4 +95,19 @@ export async function unlinkArtifacts(artifacts: string[]): Promise<void> {
             logger.warn(`[RECONCILE] could not unlink cache artifact ${p}: ${err.message}`);
         }
     }
+}
+
+/**
+ * The scan's reconcile step. In `flag` mode (default) it issues no query at all and
+ * changes nothing — the stage is inert. In `delete-after-grace` mode it retires
+ * grace-crossed tracks in one transaction and unlinks their transcode artifacts after.
+ */
+export async function runReconcile(): Promise<ReconcileResult & { skipped: boolean }> {
+    if (config.music.reconcileMode !== "delete-after-grace") {
+        return { removed: 0, artifacts: [], skipped: true };
+    }
+    const cutoff = new Date(Date.now() - config.music.reconcileGraceDays * 86_400_000);
+    const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, cutoff));
+    await unlinkArtifacts(res.artifacts);
+    return { ...res, skipped: false };
 }

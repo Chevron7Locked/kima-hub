@@ -1,12 +1,14 @@
 /**
  * The one library-eligibility predicate.
  *
- * A file missing from disk is flagged `missingSince`, never deleted, never
- * offered to a stage, and never streamed — so it must not appear in any
- * recommendation, ranking, projection, search answer, or mix. Streaming
- * already refuses these tracks; every read path must agree with what it
- * refuses. The flag clears when the file returns, and the track comes back
- * to every consumer with no extra work.
+ * A file missing from disk is flagged `missingSince`, never offered to a
+ * stage, and never streamed — so it must not appear in any recommendation,
+ * ranking, projection, search answer, or mix. Streaming already refuses these
+ * tracks; every read path must agree with what it refuses. The flag clears
+ * when the file returns, and the track comes back to every consumer with no
+ * extra work. Deletion is the reconcile step's decision, never this
+ * predicate's: in `flag` mode (default) flagged rows are never deleted; in
+ * `delete-after-grace` mode the sweep retires them past the grace period.
  *
  * Status counters are the deliberate exception: they count the whole
  * library, missing files included, and show the count (invariant 3 —
