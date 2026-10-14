@@ -16,7 +16,7 @@ import { config } from "../config";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 
-export interface ReconcileResult {
+interface ReconcileResult {
     removed: number;
     /** Absolute transcode-cache paths to unlink after the transaction commits. */
     artifacts: string[];
@@ -115,7 +115,7 @@ export async function reconcileDeletedTracks(
 }
 
 /** Best-effort artifact unlinking after the transaction commits; failures never block a scan. */
-export async function unlinkArtifacts(artifacts: string[]): Promise<void> {
+async function unlinkArtifacts(artifacts: string[]): Promise<void> {
     for (const p of artifacts) {
         try {
             await fs.rm(p, { force: true });

@@ -54,7 +54,7 @@ export interface Release {
 }
 
 /** The window shows exactly one of these below `lg`; from `lg` the list stays put and this selects the right column. */
-export type WindowView = { pane: "list" } | { pane: "needs" } | { pane: "release"; version: string } | { pane: "item"; key: string };
+type WindowView = { pane: "list" } | { pane: "needs" } | { pane: "release"; version: string } | { pane: "item"; key: string };
 
 /** A click that replaces this page: a plain left click. Cmd, ctrl, shift or a middle click opens another tab or window. */
 export function opensHere(e: React.MouseEvent): boolean {

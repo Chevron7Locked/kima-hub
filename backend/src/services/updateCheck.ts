@@ -14,7 +14,7 @@ const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const GITHUB_LATEST_URL =
     "https://api.github.com/repos/Chevron7Locked/kima-hub/releases/latest";
 
-export interface UpdateStatus {
+interface UpdateStatus {
     enabled: boolean;
     current: string;
     latest: string | null;

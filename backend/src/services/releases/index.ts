@@ -13,7 +13,6 @@ import { gpuSupported } from "../gpuRuntime";
 import { MOOD_MIX_RELEASE, moodMixState, type MoodMixState } from "./moodMixes";
 
 export { findRelease, GPU_CHOICE_KEY } from "./catalog";
-export type { Release } from "./catalog";
 
 async function isAdminUser(userId: string): Promise<boolean> {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
@@ -154,7 +153,7 @@ interface ChangelogItem {
     open?: boolean;
 }
 
-export interface ChangelogRelease {
+interface ChangelogRelease {
     version: string;
     title: string;
     summary: string;
