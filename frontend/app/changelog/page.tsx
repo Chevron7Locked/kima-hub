@@ -15,6 +15,7 @@ import { notify } from "@/lib/notify";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/cn";
+import { ReleaseBody } from "@/components/whats-new/ReleaseBody";
 
 interface ChangelogItem {
     key: string;
@@ -165,7 +166,7 @@ export default function ChangelogPage() {
                         {r.note && (
                             <figure className="mt-5 rounded-xl border border-white/10 bg-white/[0.03] p-5">
                                 <figcaption className="text-sm font-semibold text-white">A note from {r.note.from}</figcaption>
-                                <Body text={r.note.body} />
+                                <ReleaseBody size="page" text={r.note.body} />
                                 <p className="pt-2 text-sm font-medium text-white">{r.note.from}</p>
                             </figure>
                         )}
@@ -188,7 +189,7 @@ export default function ChangelogPage() {
                                     </button>
                                     {openItems.has(item.key) && (
                                         <div className="pl-0 sm:pl-1 pb-2 flex flex-col gap-3">
-                                            <Body text={item.body} />
+                                            <ReleaseBody size="page" text={item.body} />
                                             {item.kind === "choice" && !item.answer && <p className="text-xs text-[var(--text-muted)]">You haven&apos;t answered. It stays off.</p>}
                                             {item.kind === "action" && item.open && (
                                                 <div className="flex flex-col gap-2">
@@ -260,29 +261,3 @@ function StateChip({ item, ranNow }: { item: ChangelogItem; ranNow: boolean }) {
     return null;
 }
 
-/** Blank lines separate paragraphs; a block of lines that each start with "- " is a list. */
-function Body({ text }: { text: string }) {
-    return (
-        <>
-            {text.split("\n\n").map((block, i) => {
-                const lines = block.split("\n");
-                if (lines.every((l) => l.startsWith("- "))) {
-                    return (
-                        <ul key={i} className="mt-2 flex flex-col gap-2 pl-5 list-disc marker:text-brand">
-                            {lines.map((l, j) => (
-                                <li key={j} className="pl-1 text-sm leading-relaxed text-[var(--text-secondary)]">
-                                    {l.slice(2)}
-                                </li>
-                            ))}
-                        </ul>
-                    );
-                }
-                return (
-                    <p key={i} className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)] max-w-[62ch]">
-                        {block}
-                    </p>
-                );
-            })}
-        </>
-    );
-}

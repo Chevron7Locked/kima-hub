@@ -11,6 +11,7 @@ import Link from "next/link";
 import { X, Check, Loader2, ChevronLeft, ChevronRight, ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
+import { ReleaseBody } from "./ReleaseBody";
 
 interface ReleaseLink {
     label: string;
@@ -307,7 +308,7 @@ export function WhatsNewWindow({
             <h3 id={`whats-new-note-${r.version}`} className="text-base font-semibold text-white">
                 A note from {r.note!.from}
             </h3>
-            <Body text={r.note!.body} />
+            <ReleaseBody size="window" text={r.note!.body} />
             <p className="pt-1 text-[0.9375rem] font-medium text-white">{r.note!.from}</p>
         </section>
     );
@@ -333,7 +334,7 @@ export function WhatsNewWindow({
             {waiting.map((item) => (
                 <div key={item.key} className="flex flex-col gap-3 pt-5 border-t border-white/10">
                     <h4 className="text-base font-semibold text-white">{item.title}</h4>
-                    <Body text={item.body} />
+                    <ReleaseBody size="window" text={item.body} />
                     {item.kind === "choice" && (
                         <div className="flex flex-col gap-3">
                             {item.discloses && (
@@ -377,7 +378,7 @@ export function WhatsNewWindow({
             <h3 id="whats-new-item" className="text-xl font-semibold tracking-tight text-white text-balance">
                 {item.title}
             </h3>
-            <Body text={item.body} />
+            <ReleaseBody size="window" text={item.body} />
             {item.kind === "choice" && (
                 <div className="flex flex-col gap-3">
                     {item.discloses && (
@@ -509,32 +510,6 @@ export function WhatsNewWindow({
     );
 }
 
-/** Blank lines separate paragraphs; a block of lines that each start with "- " is a list. */
-function Body({ text }: { text: string }) {
-    return (
-        <>
-            {text.split("\n\n").map((block, i) => {
-                const lines = block.split("\n");
-                if (lines.every((l) => l.startsWith("- "))) {
-                    return (
-                        <ul key={i} className="flex flex-col gap-2 pl-5 list-disc marker:text-brand">
-                            {lines.map((l, j) => (
-                                <li key={j} className="pl-1 text-[0.9375rem] leading-relaxed text-[var(--text-secondary)]">
-                                    {l.slice(2)}
-                                </li>
-                            ))}
-                        </ul>
-                    );
-                }
-                return (
-                    <p key={i} className="text-[0.9375rem] leading-relaxed text-[var(--text-secondary)] max-w-[62ch]">
-                        {block}
-                    </p>
-                );
-            })}
-        </>
-    );
-}
 
 function ChoiceButton({ selected, onClick, label }: { selected: boolean; onClick: () => void; label: string }) {
     return (
