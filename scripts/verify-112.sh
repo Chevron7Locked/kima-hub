@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# verify-112.sh — the 1.12 ship ledger that proves itself (plan Task G,
-# .hermes/plans/2026-10-13_141409-close-112-findings.md).
+# verify-112.sh — the 1.12 ship ledger that proves itself.
 #
 # Re-runs every MECHANICAL row of the manual ledger against the fulltest stack
 # and appends one JSONL evidence row per check to
@@ -28,10 +27,16 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EVIDENCE="${KIMA_EVIDENCE_FILE:-$REPO_ROOT/handoff/verify-112-evidence.jsonl}"
 CREDS_FILE="${KIMA_TEST_CREDS:-$HOME/.config/kima/test-creds.env}"
+# shellcheck disable=SC1090
+[ -f "$CREDS_FILE" ] && . "$CREDS_FILE"
+export KIMA_TEST_USERNAME KIMA_TEST_PASSWORD
 SSH_HOST="${KIMA_TEST_SSH_HOST:-media-server}"
+export BASE="${BASE:-${KIMA_TEST_BASE:-http://media-server:3056}}"
+T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 DB_CONTAINER="${KIMA_TEST_DB_CONTAINER:-kima-fulltest}"
 DB_USER="${KIMA_TEST_DB_USER:-kima}"
 DB_NAME="${KIMA_TEST_DB_NAME:-kima}"
+PASSES=0; FAILS=0; SKIPS=0
 now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # record CHECK STATUS CMD NUMBERS_JSON [REASON] — one JSONL row + one console line
@@ -98,8 +103,6 @@ rest_get() {
     -o "$out" -w '%{http_code}' "$@"
 }
 
-# bearer — auth header built here so no credential ever appears in this file's
-# literals or in any cmd string
 # bearer — auth header assembled at runtime so no credential-looking literal
 # ever appears in this file's text or in any cmd string
 bearer() {
@@ -153,9 +156,6 @@ check_ownership() {
       "no artist with playable tracks in DB (or DB census query failed)"
     return 0
   fi
-  # published for check_playtracks_gains (same shell, no subshell)
-  OWNERSHIP_ARTIST="$art"
-  OWNERSHIP_PLAYABLE="$playable"
   ep="$(OWNERSHIP_ARTIST="$art" PT_JSON_OUT="$T/pt.json" PT_HTTP_OUT="$T/pt.http" \
     python3 - <<'PY'
 import json, os, urllib.request, urllib.error
@@ -325,7 +325,6 @@ PY
 print_manual() {
   cat <<'EOF'
 -- manual rows (ears / visual / cross-repo; no evidence row claimed) --
-MANUAL  M1.2  live toggle: flip normalization ON/OFF mid-play; applies via kima:user-settings-saved without reload (screenshot)
 MANUAL  M2.2  per-step rerun buttons render and progress via SSE + DB drain
 MANUAL  M2.3  wipe-and-rerun rehearsal (only if M2.1 guard passed); log throughput vs 98-min bar
 MANUAL  M3.1  play-tracks disc order vs iOS albumOrder rule (KimaAPIClient+Library.swift:63)
