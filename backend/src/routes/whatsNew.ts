@@ -64,11 +64,7 @@ router.get("/current", async (req, res) => {
     }
 });
 
-/**
- * GET /whats-new/changelog — every release, newest first, permanent.
- * Each item carries what the server knows: the recorded answer, the action
- * verifiably done, or a quiet open until it is. Reading it writes nothing.
- */
+/** GET /whats-new/changelog — every release, newest first (see changelogFor). */
 router.get("/changelog", async (req, res) => {
     try {
         res.json(await changelogFor(req.user!.id));

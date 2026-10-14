@@ -6,10 +6,8 @@
  * ranking, projection, search answer, or mix. Streaming already refuses these
  * tracks; every read path must agree with what it refuses. The flag clears
  * when the file returns, and the track comes back to every consumer with no
- * extra work. Deletion is the reconcile step's decision, never this
- * predicate's: in `flag` mode (default) flagged rows are never deleted; in
- * `delete` mode the sweep retires rows the previous scan already had flagged
- * and this scan still cannot find.
+ * extra work. Deleting flagged rows is the reconcile step's job, never this
+ * predicate's.
  *
  * Status counters are the deliberate exception: they count the whole
  * library, missing files included, and show the count (invariant 3 —

@@ -1,13 +1,7 @@
 /**
- * Library reconcile: retire tracks confirmed gone by two consecutive scans.
- * The scanner's missing-file flagging stays the only detector; this is the decision
- * that acts on it, in `delete` mode. A track is retired only when a scan still finds
- * it absent although an EARLIER scan already had it flagged — a mount that dropped
- * mid-copy flags, the next scan sees the files back, nothing is touched. Two guards
- * run beside the sweep, both because one bad scan must never cost metadata:
- * mass-missing stands the sweep down, and every retirement is snapshotted into
- * RemovalLog before the delete — the memory of the track survives the row, and the
- * artifact manifest lets a crash gap be re-cleaned.
+ * Library reconcile (`delete` mode): retire tracks an earlier scan flagged missing and this
+ * scan still cannot find. Every retirement is snapshotted to RemovalLog (with its cache
+ * artifacts) before the delete, and a mass disappearance stands the sweep down.
  */
 import * as fs from "fs/promises";
 import * as path from "path";

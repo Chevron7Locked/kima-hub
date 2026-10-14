@@ -1,13 +1,9 @@
 "use client";
 
 /**
- * The release window, the one surface allowed to block. It opens on the newest release's note and a list of what's
- * new; older unread releases stack below as one line each, each opening its own read page — content is added to,
- * never overwritten. The layout rule is exactly one active view: below `lg` the window shows one pane, the list or
- * the page it opened; from `lg` up the list is always the left column and the page always the right. No two
- * visibility conditions can hide both panes at once. Items are a `note`, an `action`, or a `choice` whose default
- * is off. Closing answers no to every untouched choice — read is not done: anything owed stays on /changelog
- * until the server can see it happened.
+ * The release window, the one surface allowed to block: the newest release's note and items, older unread releases
+ * below. Exactly one active view — one pane below `lg`, list left and page right from `lg` up. Choices default to off;
+ * closing answers no to every untouched one, and anything still owed stays on /changelog until the server sees it done.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
