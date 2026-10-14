@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The analyzer refuses impossible loudness.** A measurement outside −70…0.5 LUFS or a range past 60 LU is meter or decoder failure, not music — the kind that once reached the database as +2868 LUFS. It is now stored as no measurement, with a warning naming the file. Quiet real audio passes untouched.
 - **`prisma migrate dev` works again.** The 1.11 play-heard migration backfilled from `_prisma_migrations` without a guard, so replaying the history onto a database without migration bookkeeping — `migrate dev`'s shadow database, or a raw SQL replay — died at that migration (`migrate deploy` was unaffected: it creates the bookkeeping table before replaying). The backfill is now guarded the way the soulseek-resolve migration already guards its own. The full history is proven to apply clean to a fresh database.
 
 ## [1.12.0] - 2026-10-13

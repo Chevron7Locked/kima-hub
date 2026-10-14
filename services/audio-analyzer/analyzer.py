@@ -87,6 +87,12 @@ MIN_ANALYZE_SECONDS = max(3.0, PATCH_SECONDS)
 # A stage job id ends in its claim: <key>-<attempt>-r<redelivered> (backend `claimOf`).
 CLAIM_IN_JOB_ID = re.compile(r'-(\d+)-r(\d+)$')
 SILENCE_PEAK = 10 ** (-80 / 20)
+# A reading outside these bounds is the meter or a corrupt decode failing, never the music:
+# integrated loudness past 0 LUFS is louder than digital full scale, below -70 LUFS is below
+# anything with audible content, a range past 60 LU cannot exist. They catch, at the source,
+# the garbage that was found stored (+2868.2 LUFS); nothing outside the bounds reaches the row.
+LOUDNESS_RANGE_OK = (-70.0, 0.5)
+DYNAMIC_RANGE_OK = (0.0, 60.0)
 
 # How long to block waiting for work, in seconds (at least 5).
 BRPOP_TIMEOUT = max(5, int(os.getenv('BRPOP_TIMEOUT', '5')))
@@ -459,6 +465,19 @@ class AudioAnalyzer:
             )
         return samples
 
+    @staticmethod
+    def _plausible_loudness(integrated, loudness_range, file_path):
+        """An implausible measurement is stored as no measurement: the bounds catch decoder
+        failure and meter garbage (a silent file read +2868 LUFS), and an implausible loudness
+        makes an implausible energy from the same samples. A warning names the file."""
+        if integrated is None or not (LOUDNESS_RANGE_OK[0] <= float(integrated) <= LOUDNESS_RANGE_OK[1]):
+            logger.warning(f"Implausible loudness {integrated} LUFS on {file_path}; not stored")
+            return None, None
+        if loudness_range is None or not (DYNAMIC_RANGE_OK[0] <= float(loudness_range) <= DYNAMIC_RANGE_OK[1]):
+            logger.warning(f"Implausible loudness range {loudness_range} LU on {file_path}; not stored")
+            return None, None
+        return float(integrated), float(loudness_range)
+
     def analyze(self, file_path: str) -> Dict[str, Any]:
         """
         Analyze audio file and extract all features.
@@ -558,6 +577,7 @@ class AudioAnalyzer:
                 [decoded[0], decoded[1] if decoded.shape[0] > 1 else np.zeros_like(decoded[0])], axis=1
             ).astype(np.float32)
             _, _, integrated, loudness_range = self.loudness_ebu(pair)
+            integrated, loudness_range = self._plausible_loudness(integrated, loudness_range, file_path)
             result['loudness'] = round(float(integrated), 2)
             result['dynamicRange'] = round(float(loudness_range), 2)
 
