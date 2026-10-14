@@ -1,6 +1,10 @@
 import dotenv from "dotenv";
 import { z } from "zod";
-import { validateMusicConfig, MusicConfig } from "./utils/configValidator";
+import {
+    validateMusicConfig,
+    parseMusicOverrides,
+    MusicConfig,
+} from "./utils/configValidator";
 import { logger } from "./utils/logger";
 import packageJson from "../package.json";
 
@@ -43,6 +47,7 @@ let musicConfig: MusicConfig = {
         process.env.TRANSCODE_CACHE_MAX_GB || "10",
         10
     ),
+    ...parseMusicOverrides(process.env),
 };
 
 // Initialize music configuration asynchronously

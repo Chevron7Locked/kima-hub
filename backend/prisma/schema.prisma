@@ -1193,6 +1193,23 @@ enum ChoiceDecidedBy {
   DISMISSED
 }
 
+/// One row per track retired by the library reconcile sweep. No FK to Track: it
+/// must outlive the row it describes, so everything it says is a snapshot.
+model RemovalLog {
+  id         String   @id @default(cuid())
+  filePath   String
+  title      String
+  artistName String
+  albumTitle String
+  reason     String   @default("file-missing-grace")
+  /// [{table: "TranscodedFile", path: "<absolute>"}] — server-side artifacts the
+  /// sweep unlinks after the transaction, so a crash gap stays reconcilable.
+  artifacts  Json?
+  removedAt  DateTime @default(now())
+
+  @@index([removedAt])
+}
+
 /// A track the play-history audit has been told to stop flagging. Ignoring is per
 /// track, not per play, so it keeps applying as new plays arrive; an ignored track
 /// still counts plays like any other and is simply never raised again.
