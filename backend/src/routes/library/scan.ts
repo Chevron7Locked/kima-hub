@@ -6,6 +6,7 @@ import { config } from "../../config";
 import { scanQueue } from "../../workers/queues";
 import { requestScan } from "../../workers/scanRequest";
 import { organizeSingles } from "../../workers/organizeSingles";
+import { parseLimit } from "./paging";
 
 const router = Router();
 
@@ -127,6 +128,35 @@ router.get("/missing-tracks", requireAdmin, async (_req, res) => {
   } catch (error) {
     logger.error("Get missing tracks error:", error);
     res.status(500).json({ error: "Failed to get missing tracks" });
+  }
+});
+
+router.get("/removals", requireAdmin, async (req, res) => {
+  try {
+    // What the reconcile sweep retired, newest first. Rows outlive the tracks they
+    // describe; this is the memory of the library that left.
+    const limit = parseLimit(req.query.limit, 100);
+    const offset = Math.max(0, parseInt(req.query.offset as string, 10) || 0);
+    const [count, removals] = await Promise.all([
+      prisma.removalLog.count({ where: {} }),
+      prisma.removalLog.findMany({ where: {}, orderBy: { removedAt: "desc" }, skip: offset, take: limit }),
+    ]);
+    res.json({
+      count,
+      removals: removals.map((r) => ({
+        id: r.id,
+        filePath: r.filePath,
+        title: r.title,
+        artistName: r.artistName,
+        albumTitle: r.albumTitle,
+        reason: r.reason,
+        artifacts: r.artifacts,
+        removedAt: r.removedAt,
+      })),
+    });
+  } catch (error) {
+    logger.error("Get removals error:", error);
+    res.status(500).json({ error: "Failed to get removals" });
   }
 });
 
