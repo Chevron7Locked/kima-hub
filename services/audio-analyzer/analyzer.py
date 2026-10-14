@@ -307,26 +307,27 @@ def _ffmpeg_command(file_path: str, channels: int, start: Optional[float]) -> Li
     ]
 
 
-def _run_decode(command: List[str], keep_last_bytes: int) -> Tuple[bytes, int, str, Optional[str]]:
-    """Run one ffmpeg decode within DECODE_TIMEOUT: ``(pcm, rc, stderr, failure)``. The output
-    is read as it comes and only its last `keep_last_bytes` kept, so a whole file is never held
-    in memory."""
+def _run_decode(command: List[str], keep_first_bytes: int) -> Tuple[bytes, int, str, Optional[str], int]:
+    """Run one ffmpeg decode within DECODE_TIMEOUT: ``(pcm, rc, stderr, failure, total)``. The output
+    is read as it comes and only its first `keep_first_bytes` kept, so a whole file is never held
+    in memory; `total` counts every byte decoded, which measures the real length."""
     try:
         proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except Exception as e:  # missing ffmpeg, spawn failure
-        return b'', -1, '', f"decode command failed: {e}"
+        return b'', -1, '', f"decode command failed: {e}", 0
     timer = threading.Timer(DECODE_TIMEOUT, proc.kill)
     stderr_chunks: List[bytes] = []
     drain = threading.Thread(target=lambda: stderr_chunks.append(proc.stderr.read()), daemon=True)
     timer.start()
     drain.start()
     try:
-        tail = bytearray()
+        head = bytearray()
+        total = 0
         for chunk in iter(lambda: proc.stdout.read(1 << 20), b''):
-            tail += chunk
-            if len(tail) > 2 * keep_last_bytes:
-                del tail[:len(tail) - keep_last_bytes]
-        raw = bytes(tail[-keep_last_bytes:])
+            total += len(chunk)
+            if len(head) < keep_first_bytes:
+                head += chunk[:keep_first_bytes - len(head)]
+        raw = bytes(head)
         rc = proc.wait()
         drain.join()
     finally:
@@ -334,16 +335,16 @@ def _run_decode(command: List[str], keep_last_bytes: int) -> Tuple[bytes, int, s
         timer.cancel()
     stderr_text = b''.join(stderr_chunks).decode('utf-8', 'replace').strip()
     if timed_out:
-        return b'', rc, stderr_text, f"decode command failed: timed out after {DECODE_TIMEOUT} s"
-    return raw, rc, stderr_text, None
+        return b'', rc, stderr_text, f"decode command failed: timed out after {DECODE_TIMEOUT} s", total
+    return raw, rc, stderr_text, None, total
 
 
 def _decode_to_stereo(file_path: str, duration: int = 90):
-    """Decode the last ``duration`` seconds of the first audio stream (the whole song when it is
-    shorter), skipping bad frames rather than failing. Songs build toward their end, so that is
-    the part analysed. The decode seeks ``duration`` seconds before the header's length and runs
-    to the real end, so a header that understates the length still yields the true end; one that
-    overstates it (a cut-short download) gives a short read and the whole file is read instead.
+    """Decode the middle ``duration`` seconds of the first audio stream (the whole song when it is
+    shorter), skipping bad frames rather than failing. The middle is the song: the ends carry quiet
+    intros, fade-outs, silent tails and hidden tracks after minutes of silence. The header's length
+    places the window; the decode runs to the real end, so when the header was wrong or missing the
+    real length is known and the window is placed again by it.
     A mono source stays one channel (ffmpeg's upmix would lower it 3 dB); wider becomes stereo.
 
     Returns ``(samples, sample_rate, channels, duration, command, rc, stderr, class)``: samples
@@ -352,14 +353,27 @@ def _decode_to_stereo(file_path: str, duration: int = 90):
     """
     channels, length = _source_stream(file_path)
     frame_bytes = 2 * channels
+    rate = 44100 * frame_bytes
     keep = int(duration * 44100) * frame_bytes
-    start = None if length is None or length <= duration else length - duration
+
+    def middle(seconds):
+        return None if seconds is None or seconds <= duration else (seconds - duration) / 2
+
+    start = middle(length)
     command = _ffmpeg_command(file_path, channels, start)
-    raw, rc, stderr_text, failure = _run_decode(command, keep_last_bytes=keep)
-    if failure is None and start is not None and len(raw) < (duration - 1.0) * 44100 * frame_bytes:
-        # The file holds less audio than its header says: the seek overshot.
+    raw, rc, stderr_text, failure, total = _run_decode(command, keep_first_bytes=keep)
+    if failure is None and start is not None and total == 0:
+        # The header placed the window past the real end (a cut-short download): read it all to learn its length.
+        start = None
         command = _ffmpeg_command(file_path, channels, None)
-        raw, rc, stderr_text, failure = _run_decode(command, keep_last_bytes=keep)
+        raw, rc, stderr_text, failure, total = _run_decode(command, keep_first_bytes=keep)
+    if failure is None and total > 0:
+        real = middle((start or 0.0) + total / rate)
+        if real is not None and abs(real - (start or 0.0)) > 1.0:
+            # The header's length was wrong or missing: place the window by the length just decoded.
+            start = real
+            command = _ffmpeg_command(file_path, channels, start)
+            raw, rc, stderr_text, failure, total = _run_decode(command, keep_first_bytes=keep)
     if failure is not None:
         return (None, 44100, 0, 0.0, command, -1, failure, classify_failure(failure))
 
@@ -442,7 +456,7 @@ class AudioAnalyzer:
             logger.error(self.models_error)
 
     def load_audio(self, file_path: str, max_duration: int = 90) -> Optional[np.ndarray]:
-        """The last max_duration seconds at 44.1 kHz, ``(channels, n)``: the decode from
+        """The middle max_duration seconds at 44.1 kHz, ``(channels, n)``: the decode from
         _decode_to_stereo. The decode is the only integrity check; a file with a logged
         bad frame is analysed.
         """

@@ -35,10 +35,8 @@ def test_the_garbage_found_stored_is_nulled():
 
 def test_quiet_real_audio_passes_even_when_the_window_was_wrong():
     # -55.7 LUFS is a valid measurement of near-silent content (a classical outro, the
-    # silent tail of a file). The stored -55.7 on Ultra/Insight is a window bug — the
-    # last 90 s really were that quiet — fixed by measuring the whole file, not by
-    # nulling quiet audio here. A plausibility gate that eats real quiet is worse than
-    # the number it hides.
+    # silent tail of a file), so the gate passes it. Where a reading is quiet because the
+    # window landed in silence, the window is what moves, never the gate.
     assert gate(-55.7, 11.8) == (-55.7, 11.8)
 
 

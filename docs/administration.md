@@ -10,7 +10,7 @@ Enrichment is how Kima works out what is in your library. It runs in the backgro
 | --- | --- |
 | Artist Metadata | Bios, images and similar artists from ListenBrainz and MusicBrainz |
 | Mood Tags | Mood data from the enrichment pipeline |
-| Audio Analysis | Beats per minute, key, energy, danceability, and the valence and arousal behind a song's feel, read from the last 90 seconds of each file |
+| Audio Analysis | Beats per minute, key, energy, danceability, and the valence and arousal behind a song's feel, read from the middle 90 seconds of each file |
 | Vibe Embeddings | The sound vector for each song, from the CLAP model |
 | Similarity | The matches between songs, and the vibe map, from sound, feel and artist genre |
 

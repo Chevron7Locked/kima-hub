@@ -81,7 +81,7 @@ These are read by `docker-compose.yml`. In the all-in-one image the analyzers us
 | `CLAP_THREADS_PER_WORKER` | `1` | Threads per vibe embedding worker. |
 | `CLAP_MODEL_IDLE_TIMEOUT` | `300` | Seconds before an idle vibe analyzer unloads its model. |
 
-Audio analysis reads the last 90 seconds of each song, or the whole song when it is shorter. The vibe analyzer takes five 10-second samples spread across the song and averages them into one sound vector.
+Audio analysis reads the middle 90 seconds of each song, or the whole song when it is shorter. The vibe analyzer takes five 10-second samples spread across the song and averages them into one sound vector.
 
 ### Public vibe feed
 

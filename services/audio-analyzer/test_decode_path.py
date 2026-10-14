@@ -1,6 +1,6 @@
-"""The real ``analyzer._decode_to_stereo``: one ffmpeg command reads the last
+"""The real ``analyzer._decode_to_stereo``: one ffmpeg command reads the middle
 90 s, tolerates bad frames, downmixes to stereo and reads any codec. Fixtures
-(6-channel eac3 and aac, opus, corrupt mp3, 120 s) are generated with ffmpeg."""
+(6-channel eac3 and aac, opus, corrupt mp3, 150 s) are generated with ffmpeg."""
 
 import os
 import shutil
@@ -94,12 +94,13 @@ def opus_file(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def long_file(tmp_path_factory):
-    """120 seconds: 30 s of silence, then 90 s of tone. Only the last 90 s may be read."""
+    """150 seconds: 30 s of silence, 90 s of tone, 30 s of silence (a fade-out or a hidden-track gap).
+    Only the middle 90 s may be read."""
     path = tmp_path_factory.mktemp("fixtures") / "long.flac"
     return _ffmpeg_generate(
         [
             "-f", "lavfi",
-            "-i", "aevalsrc='if(lt(t,30),0,0.5*sin(2*PI*440*t))':d=120",
+            "-i", "aevalsrc='if(between(t,30,120),0.5*sin(2*PI*440*t),0)':d=150",
             str(path),
         ],
         str(path),
@@ -223,19 +224,19 @@ class TestSingleDecodePath:
         assert channels == 1 and samples.shape[0] == 1
         assert abs(float(np.max(np.abs(samples[0]))) - 0.5) < 0.01
 
-    def test_reads_the_last_90_seconds(self, long_file):
+    def test_reads_the_middle_90_seconds(self, long_file):
         samples, sr, channels, duration, command, rc, stderr, cls = _decode(
             long_file
         )
         assert rc == 0, f"decode returned {rc}: {stderr}"
-        # A 120 s file yields its last ~90 s: all of it tone, none of the
-        # opening silence, and never the whole file.
+        # A 150 s file yields its middle ~90 s: all of it tone, none of the
+        # silence at either end, and never the whole file.
         assert 89.0 <= duration <= 90.5, (
             f"expected a 90s window, got {duration}s"
         )
         assert samples.shape[1] <= int(90.5 * sr)
         second_rms = np.sqrt((samples[0][: int(duration) * sr].reshape(-1, sr) ** 2).mean(axis=1))
-        assert second_rms.min() > 0.1, "the window reached into the opening silence"
+        assert second_rms.min() > 0.1, "the window reached into the silence at an end"
 
     def test_a_song_shorter_than_the_window_is_read_whole(self, opus_file):
         samples, sr, channels, duration, command, rc, stderr, cls = _decode(opus_file)
@@ -264,27 +265,28 @@ class TestWhenTheLengthLies:
         second_rms = np.sqrt((samples[0][: (samples.shape[1] // sr) * sr].reshape(-1, sr) ** 2).mean(axis=1))
         return second_rms.min() > 0.1
 
-    def test_an_unreadable_length_still_gives_the_last_90_seconds(self, long_file, monkeypatch):
+    def test_an_unreadable_length_still_gives_the_middle_90_seconds(self, long_file, monkeypatch):
         monkeypatch.setattr(analyzer, "_source_stream", lambda path: (1, None))
         samples, sr, channels, duration, command, rc, stderr, cls = _decode(long_file)
         assert 89.0 <= duration <= 90.5, f"expected a 90s window, got {duration}s"
-        assert self._tone_only(samples, sr), "the window reached into the opening silence"
-        assert "-ss" not in command
+        assert self._tone_only(samples, sr), "the window reached into the silence at an end"
 
-    def test_a_header_longer_than_the_audio_still_gives_its_real_last_90_seconds(self, long_file, monkeypatch):
-        # A cut-short download: the header claims 240 s, the file holds 120 s.
-        monkeypatch.setattr(analyzer, "_source_stream", lambda path: (1, 240.0))
-        samples, sr, channels, duration, command, rc, stderr, cls = _decode(long_file)
-        assert 89.0 <= duration <= 90.5, f"expected a 90s window, got {duration}s"
-        assert self._tone_only(samples, sr)
-
-    def test_a_header_shorter_than_the_audio_still_gives_its_real_last_90_seconds(self, long_file, monkeypatch):
-        # A header that understates the length (an estimate from the bitrate): 85 s and 100 s for 120 s.
-        for header in (85.0, 100.0):
+    def test_a_header_longer_than_the_audio_still_gives_its_real_middle(self, long_file, monkeypatch):
+        # A cut-short download: the header claims more than the file holds (150 s). At 300 s the first
+        # seek lands inside the audio; at 400 s it lands past the real end.
+        for header in (300.0, 400.0):
             monkeypatch.setattr(analyzer, "_source_stream", lambda path, h=header: (1, h))
             samples, sr, channels, duration, command, rc, stderr, cls = _decode(long_file)
             assert 89.0 <= duration <= 90.5, f"header {header}: expected a 90s window, got {duration}s"
-            assert self._tone_only(samples, sr), f"header {header}: the window reached into the opening silence"
+            assert self._tone_only(samples, sr), f"header {header}: the window reached into the silence at an end"
+
+    def test_a_header_shorter_than_the_audio_still_gives_its_real_middle(self, long_file, monkeypatch):
+        # A header that understates the length (an estimate from the bitrate): 85 s and 120 s for 150 s.
+        for header in (85.0, 120.0):
+            monkeypatch.setattr(analyzer, "_source_stream", lambda path, h=header: (1, h))
+            samples, sr, channels, duration, command, rc, stderr, cls = _decode(long_file)
+            assert 89.0 <= duration <= 90.5, f"header {header}: expected a 90s window, got {duration}s"
+            assert self._tone_only(samples, sr), f"header {header}: the window reached into the silence at an end"
 
 
 if __name__ == "__main__":
