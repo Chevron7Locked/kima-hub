@@ -9,6 +9,7 @@ import { safeError } from "../utils/errors";
 import { validateUrlForFetch } from "../utils/ssrf";
 import { deezerService, mergeAndDedupePodcasts } from "../services/deezer";
 import axios from "axios";
+import { z } from "zod";
 import fs from "fs";
 import type { OutgoingHttpHeaders } from "http";
 import type { Readable } from "stream";
@@ -1381,10 +1382,25 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
  * POST /podcasts/:podcastId/episodes/:episodeId/progress
  * Update playback progress for a podcast episode
  */
+// Lenient on shape (numbers as strings, no duration) so no client the route already served is refused.
+const progressSchema = z.object({
+    currentTime: z.coerce.number().finite().min(0),
+    duration: z.coerce.number().finite().min(0).default(0),
+    isFinished: z.boolean().optional(),
+});
+
 router.post("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req, res) => {
     try {
         const { episodeId } = req.params;
-        const { currentTime, duration, isFinished } = req.body;
+        const body = progressSchema.safeParse(req.body);
+        if (!body.success) {
+            return res.status(400).json({ error: "currentTime and duration (seconds) are required" });
+        }
+        const { currentTime, duration, isFinished } = body.data;
+        const episode = await prisma.podcastEpisode.findUnique({ where: { id: episodeId }, select: { id: true } });
+        if (!episode) {
+            return res.status(404).json({ error: "Episode not found" });
+        }
 
         logger.debug(`\n [PODCAST PROGRESS] Update:`);
         logger.debug(`   User: ${req.user!.username}`);

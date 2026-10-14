@@ -5,6 +5,7 @@ import fs from "fs/promises";
 import { createWriteStream } from "fs";
 import path from "path";
 import axios from "axios";
+import { parseFile } from "music-metadata";
 import { validateUrlForFetch } from "../utils/ssrf";
 import { upstreamHeaderNumber } from "../utils/upstreamHeaders";
 
@@ -338,6 +339,7 @@ async function performDownload(
         
         // Move temp file to final location
         await fs.rename(tempPath, finalPath);
+        await recordMeasuredLength(episodeId, finalPath);
         
         // Record in database
         const fileSizeMb = stats.size / 1024 / 1024;
@@ -381,6 +383,38 @@ async function performDownload(
         
         throw error;
     }
+}
+
+/**
+ * Store the audio's own length as the episode's. Ad networks stitch ads into the file when it is
+ * fetched, so the feed's itunes:duration is the ad-free length and runs minutes short of the audio.
+ * A file whose length cannot be read leaves the stored length as it was.
+ */
+export async function recordMeasuredLength(episodeId: string, filePath: string): Promise<void> {
+    try {
+        const seconds = (await parseFile(filePath)).format.duration;
+        if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return;
+        await prisma.podcastEpisode.updateMany({
+            where: { id: episodeId },
+            data: { duration: Math.round(seconds) },
+        });
+    } catch (err) {
+        logger.warn(`[PODCAST-DL] Could not read the length of ${filePath}: ${(err as Error).message}`);
+    }
+}
+
+/** Measure every episode already in the cache: files cached before lengths were measured. */
+export async function measureCachedEpisodeLengths(): Promise<number> {
+    const cacheDir = getPodcastCacheDir();
+    const files = await fs.readdir(cacheDir).catch(() => [] as string[]);
+    let measured = 0;
+    for (const file of files) {
+        if (!file.endsWith(".mp3")) continue;
+        await recordMeasuredLength(path.basename(file, ".mp3"), path.join(cacheDir, file));
+        measured++;
+    }
+    if (measured > 0) logger.info(`[PODCAST-DL] Measured the length of ${measured} cached episode(s)`);
+    return measured;
 }
 
 /**

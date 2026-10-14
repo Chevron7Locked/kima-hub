@@ -552,12 +552,17 @@ async function main() {
     logger.debug("Webhook event cleanup scheduled (daily, 30-day expiry)");
 
     // Podcast cache cleanup - runs daily to remove cached episodes older than 30 days
-    const { cleanupExpiredCache } = await import("./services/podcastDownload");
+    const { cleanupExpiredCache, measureCachedEpisodeLengths } = await import("./services/podcastDownload");
 
-    // Run cleanup on startup (async, don't block)
-    cleanupExpiredCache().catch((err) => {
-        logger.error("Podcast cache cleanup failed:", err);
-    });
+    // Run cleanup on startup (async, don't block), then measure what stays cached.
+    cleanupExpiredCache()
+        .catch((err) => {
+            logger.error("Podcast cache cleanup failed:", err);
+        })
+        .then(() => measureCachedEpisodeLengths())
+        .catch((err) => {
+            logger.error("Measuring cached podcast episode lengths failed:", err);
+        });
 
     // Schedule daily cleanup (every 24 hours)
     podcastCleanupInterval = setInterval(() => {

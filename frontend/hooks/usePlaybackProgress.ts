@@ -36,11 +36,14 @@ export function usePlaybackProgress() {
             time = currentPodcast.progress.currentTime;
         }
     }
-    const displayTime = clampTime(time, duration);
+    // Without the engine's length the metadata's stands in, and it can be short (a feed's length
+    // misses stitched-in ads): the clock keeps running past it instead of freezing there.
+    const shownDuration = playbackDuration > 0 || isMultiTrack ? duration : Math.max(duration, time);
+    const displayTime = clampTime(time, shownDuration);
 
-    const progress = duration > 0
-        ? Math.min(100, Math.max(0, (displayTime / duration) * 100))
+    const progress = shownDuration > 0
+        ? Math.min(100, Math.max(0, (displayTime / shownDuration) * 100))
         : 0;
 
-    return { duration, displayTime, progress };
+    return { duration: shownDuration, displayTime, progress };
 }

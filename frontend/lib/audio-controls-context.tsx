@@ -489,8 +489,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     ? state.currentAudiobook?.duration || 0
                     : state.currentTrack?.duration || 0;
             const isMultiTrack = state.playbackType === "audiobook" && (state.currentAudiobook?.tracks?.length ?? 0) > 1;
+            // A podcast's stored length is the feed's, which ad-stitched audio outruns: the
+            // element's own length wins when it has one.
             const maxDuration = isMultiTrack
                 ? mediaDuration
+                : state.playbackType === "podcast" && playback.duration > 0
+                ? playback.duration
                 : mediaDuration > 0 && playback.duration > 0
                     ? Math.min(mediaDuration, playback.duration)
                     : mediaDuration || playback.duration || 0;
