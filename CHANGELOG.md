@@ -7,15 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
-### Added
-
-- **Library reconcile (opt-in).** A file gone from disk is flagged, and stays flagged; in `delete` mode (`RECONCILE_MODE`, off by default) a track **confirmed gone by two consecutive scans** is retired — the row and everything hanging off it — and every retirement is written to `RemovalLog` first, so the memory of the track survives the row. No stopwatch: the next scan confirms, minutes not months. A mass disappearance (10+ tracks and >10% of the library at once) stands the sweep down — that's a dropped mount, not a deletion. Admins see the list at `GET /api/library/removals`.
-
-### Fixed
-
-- **The analyzer refuses impossible loudness.** A measurement outside −70…0.5 LUFS or a range past 60 LU is meter or decoder failure, not music — the kind that once reached the database as +2868 LUFS. It is now stored as no measurement, with a warning naming the file. Quiet real audio passes untouched.
-- **`prisma migrate dev` works again.** The 1.11 play-heard migration backfilled from `_prisma_migrations` without a guard, so replaying the history onto a database without migration bookkeeping — `migrate dev`'s shadow database, or a raw SQL replay — died at that migration (`migrate deploy` was unaffected: it creates the bookkeeping table before replaying). The backfill is now guarded the way the soulseek-resolve migration already guards its own. The full history is proven to apply clean to a fresh database.
-
 ## [1.12.0] - 2026-10-13
 
 ### Added
@@ -23,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Per-step enrichment reruns.** Settings → Library Enrichment now has a step picker that re-runs from identification, artists, audio analysis, sound vectors, or similarity — each clears itself and what genuinely depends on it (re-running artists keeps analysis and vectors; identification starts from scratch), and always similarity and the vibe map, since the formula reads all three. The full wipe-and-rerun is unchanged.
 - **Update pings.** Every 24 hours Kima checks GitHub's releases API for newer versions. When one is found, an amber dot appears on the version number in the app; tapping it opens the release's What's New window. The check can be turned off in Settings → Storage.
 - **A permanent changelog.** Every release's note and items stack newest first at `/changelog` and are never overwritten by the next version. Closing the release window marks it read, not done: anything a release still needs from you stays listed there and closes itself when the server sees it happen. The version number opens unread news, otherwise the changelog.
+- **Removing songs whose files are gone (opt-in).** By default a file missing from disk is only flagged, as before. With `RECONCILE_MODE=delete`, a track whose file **two consecutive scans** cannot find is removed, with everything attached to it (plays, likes, playlist entries), and its title, artist and album are written to a removal log first. No timer: the next scan confirms. If 10 or more tracks and over 10% of the library vanish at once, nothing is removed — that is a dropped drive, not a deletion. Admins can read the log at `GET /api/library/removals`.
 - **An ordered play queue for iOS.** `GET /api/library/artists/:id/play-tracks` returns only the fields a queue needs (id, title, track/disc number, duration, album cover, artist name) in canonical server order — effective year desc, title asc, disc/track within album. MusicBrainz preview rows are excluded (they carry no file). The album set is the one the artist page marks owned; the endpoint returns it in its own canonical order, which the client consumes as-given, without the artist's full discography payload.
 
 ### Changed
@@ -38,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Preview stream range requests** (the artist and playlist preview-stream endpoints) now forward `Range` headers through the shared preview proxy (`proxyPreviewStream`), and are tested against a local upstream server that answers with a real 206.
 - **Subsonic `search3` with an empty query** enumerates the library (same as `getAlbumList2`) instead of returning an empty response.
 - **Collection-page delete controls** no longer show to non-admins (the backend already enforced it; the UI now gates on the signed-in user's role, which it previously ignored).
+- **The analyzer refuses impossible loudness readings.** A measurement outside −70…0.5 LUFS, or a range past 60 LU, is a meter or decoder failure, not music — one once reached the database as +2868 LUFS. It is now stored as no measurement, with a warning naming the file. Quiet real audio passes untouched.
+- **`prisma migrate dev` works again.** The 1.11 play-heard migration read Prisma's own migration table without checking it exists, so replaying the history onto a fresh database (`migrate dev`'s shadow database, or a raw SQL replay) failed there. `migrate deploy` was unaffected. The full history now applies clean to an empty database.
 - **The artist play queue skips rows it cannot stream.** `play-tracks` now serves only library-owned albums with uncorrupt files still on disk — the same rule the search doors use — so a failed or still-pending download can no longer ride into an iOS queue as a 404. (Live example on the test stack: the endpoint served 413 rows where 410 were playable.)
 
 ### Security
