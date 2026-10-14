@@ -1,14 +1,16 @@
 /**
- * Library reconcile sweep: grace-crossed missing tracks are retired with their cascades,
- * soft refs are nulled (never deleted), the audit row snapshots everything, and artifact
- * paths are absolute transcode-cache paths — client device paths appear nowhere.
+ * Library reconcile sweep on confirmation, not a stopwatch: a track missing since an
+ * EARLIER scan and still absent is retired with its cascades; a track first missed by
+ * this scan waits for the next one; a mass disappearance stands the sweep down; soft
+ * refs are nulled (never deleted); the audit row snapshots everything; artifact paths
+ * are absolute transcode-cache paths — client device paths appear nowhere.
  */
 import { prisma } from "../../utils/db";
 import { config } from "../../config";
 import { reconcileDeletedTracks, transcodeArtifactPath, runReconcile } from "../libraryReconcile";
 
 const P = "recon";
-const DAY = 86_400_000;
+const MIN = 60_000;
 
 async function cleanup() {
     await prisma.removalLog.deleteMany({ where: { filePath: { startsWith: `/tmp/${P}` } } });
@@ -24,7 +26,7 @@ async function cleanup() {
     await prisma.genre.deleteMany({ where: { name: { startsWith: `${P}-genre` } } });
 }
 
-async function seedTrack(id: string, opts: { missingDaysAgo?: number } = {}) {
+async function seedTrack(id: string, opts: { missingMinutesAgo?: number } = {}) {
     await prisma.track.create({
         data: {
             id,
@@ -35,8 +37,8 @@ async function seedTrack(id: string, opts: { missingDaysAgo?: number } = {}) {
             filePath: `/tmp/${id}.flac`,
             fileModified: new Date(),
             fileSize: 1,
-            ...(opts.missingDaysAgo !== undefined
-                ? { missingSince: new Date(Date.now() - opts.missingDaysAgo * DAY) }
+            ...(opts.missingMinutesAgo !== undefined
+                ? { missingSince: new Date(Date.now() - opts.missingMinutesAgo * MIN) }
                 : {}),
         },
     });
@@ -58,6 +60,9 @@ async function seedBase() {
     });
 }
 
+// A scan started a minute ago; files first missed by it carry stamps newer than this.
+const scanStartedAt = () => new Date(Date.now() - MIN);
+
 beforeEach(async () => {
     await cleanup();
     await seedBase();
@@ -70,21 +75,21 @@ afterAll(async () => {
 
 describe("reconcileDeletedTracks", () => {
 
-    it("young flag within grace is kept", async () => {
-        await seedTrack(`${P}young`, { missingDaysAgo: 5 });
-        const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, new Date(Date.now() - 30 * DAY)));
+    it("a flag set by this scan waits for the next one", async () => {
+        await seedTrack(`${P}new`, { missingMinutesAgo: 0 });
+        const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt()));
         expect(res.removed).toBe(0);
-        expect(await prisma.track.findUnique({ where: { id: `${P}young` } })).not.toBeNull();
+        expect(await prisma.track.findUnique({ where: { id: `${P}new` } })).not.toBeNull();
     });
 
-    it("empty sweep returns 0 and touches nothing", async () => {
-        const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, new Date(Date.now() - 30 * DAY)));
+    it("an empty sweep returns 0 and touches nothing", async () => {
+        const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt()));
         expect(res.removed).toBe(0);
         expect(await prisma.removalLog.count({ where: { filePath: { startsWith: `/tmp/${P}` } } })).toBe(0);
     });
 
-    it("grace-crossed track is deleted with cascades and an audit snapshot", async () => {
-        await seedTrack(`${P}gone`, { missingDaysAgo: 45 });
+    it("a track confirmed gone by two scans is deleted with cascades and an audit snapshot", async () => {
+        await seedTrack(`${P}gone`, { missingMinutesAgo: 5 });
         await prisma.play.create({ data: { userId: `${P}user`, trackId: `${P}gone` } });
         await prisma.likedTrack.create({ data: { userId: `${P}user`, trackId: `${P}gone` } });
         const genre = await prisma.genre.create({ data: { id: `${P}g1`, name: `${P}-genre-only` } });
@@ -96,7 +101,7 @@ describe("reconcileDeletedTracks", () => {
             },
         });
 
-        const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, new Date(Date.now() - 30 * DAY)));
+        const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt()));
 
         expect(res.removed).toBe(1);
         expect(await prisma.track.findUnique({ where: { id: `${P}gone` } })).toBeNull();
@@ -110,12 +115,12 @@ describe("reconcileDeletedTracks", () => {
         expect(log!.title).toBe(`${P}gone title`);
         expect(log!.artistName).toBe("Recon Artist");
         expect(log!.albumTitle).toBe("Recon Album");
-        expect(log!.reason).toBe("file-missing-grace");
+        expect(log!.reason).toBe("file-missing-confirmed");
         expect(log!.artifacts).toEqual([{ table: "TranscodedFile", path: transcodeArtifactPath(`${P}gone-cache.mp3`) }]);
     });
 
     it("soft refs are nulled, rows preserved", async () => {
-        await seedTrack(`${P}disc`, { missingDaysAgo: 45 });
+        await seedTrack(`${P}disc`, { missingMinutesAgo: 5 });
         const dt = await prisma.discoveryTrack.create({
             data: {
                 discoveryAlbumId: `${P}dalb`, trackId: `${P}disc`,
@@ -127,7 +132,7 @@ describe("reconcileDeletedTracks", () => {
             data: { userId: `${P}user`, trackId: `${P}disc`, playbackType: "library" },
         });
 
-        await prisma.$transaction((tx) => reconcileDeletedTracks(tx, new Date(Date.now() - 30 * DAY)));
+        await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt()));
 
         const kept = await prisma.discoveryTrack.findUnique({ where: { id: dt.id } });
         expect(kept).not.toBeNull();
@@ -138,7 +143,7 @@ describe("reconcileDeletedTracks", () => {
     });
 
     it("a genre shared with a living track survives", async () => {
-        await seedTrack(`${P}d1`, { missingDaysAgo: 45 });
+        await seedTrack(`${P}d1`, { missingMinutesAgo: 5 });
         await seedTrack(`${P}alive`);
         const g = await prisma.genre.create({ data: { id: `${P}g2`, name: `${P}-genre-shared` } });
         await prisma.trackGenre.createMany({
@@ -147,8 +152,34 @@ describe("reconcileDeletedTracks", () => {
                 { trackId: `${P}alive`, genreId: g.id },
             ],
         });
-        await prisma.$transaction((tx) => reconcileDeletedTracks(tx, new Date(Date.now() - 30 * DAY)));
+        await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt()));
         expect(await prisma.genre.findUnique({ where: { id: g.id } })).not.toBeNull();
+    });
+
+    it("a mass disappearance stands the sweep down and touches nothing", async () => {
+        // past both guards' tripwires: >= 10 tracks and > 10% of the library gone at once
+        const alive = Array.from({ length: 80 }, (_, i) => `${P}a${i}`);
+        await prisma.track.createMany({
+            data: alive.map((id) => ({
+                id, albumId: `${P}alb`, title: `${id}`, trackNo: 1, duration: 200,
+                filePath: `/tmp/${id}.flac`, fileModified: new Date(), fileSize: 1,
+            })),
+        });
+        const gone = Array.from({ length: 10 }, (_, i) => `${P}m${i}`);
+        await prisma.track.createMany({
+            data: gone.map((id) => ({
+                id, albumId: `${P}alb`, title: `${id}`, trackNo: 1, duration: 200,
+                filePath: `/tmp/${id}.flac`, fileModified: new Date(), fileSize: 1,
+                missingSince: new Date(Date.now() - 5 * MIN),
+            })),
+        });
+
+        const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt()));
+        expect(res.removed).toBe(0);
+        for (const id of gone) {
+            expect(await prisma.track.findUnique({ where: { id } })).not.toBeNull();
+        }
+        expect(await prisma.removalLog.count({ where: { filePath: { startsWith: `/tmp/${P}m` } } })).toBe(0);
     });
 
     it("artifact paths are absolute under the transcode cache root", () => {
@@ -158,22 +189,21 @@ describe("reconcileDeletedTracks", () => {
     });
 
     it("flag mode (default) skips the sweep without touching tracks", async () => {
-        await seedTrack(`${P}flag`, { missingDaysAgo: 999 });
-        const res = await runReconcile();
+        await seedTrack(`${P}flag`, { missingMinutesAgo: 999 });
+        const res = await runReconcile(scanStartedAt());
         expect(res).toEqual({ removed: 0, artifacts: [], skipped: true });
         expect(await prisma.track.findUnique({ where: { id: `${P}flag` } })).not.toBeNull();
         expect(await prisma.removalLog.count({ where: { filePath: `/tmp/${P}flag.flac` } })).toBe(0);
     });
 
-    it("delete-after-grace mode sweeps through runReconcile", async () => {
-        await seedTrack(`${P}swp`, { missingDaysAgo: 45 });
+    it("delete mode sweeps confirmed-gone tracks through runReconcile", async () => {
+        await seedTrack(`${P}swp`, { missingMinutesAgo: 5 });
         const spy = jest.spyOn(config, "music", "get").mockReturnValue({
             ...config.music,
-            reconcileMode: "delete-after-grace",
-            reconcileGraceDays: 30,
+            reconcileMode: "delete",
         });
         try {
-            const res = await runReconcile();
+            const res = await runReconcile(scanStartedAt());
             expect(res.skipped).toBe(false);
             expect(res.removed).toBe(1);
             expect(await prisma.track.findUnique({ where: { id: `${P}swp` } })).toBeNull();

@@ -1,10 +1,13 @@
 /**
- * Library reconcile: retire tracks whose files have been gone past the grace period.
+ * Library reconcile: retire tracks confirmed gone by two consecutive scans.
  * The scanner's missing-file flagging stays the only detector; this is the decision
- * that acts on it, in `delete-after-grace` mode. It runs inside the caller's
- * transaction, before the orphaned-album/artist steps, so empty parents cascade free.
- * Every removal is snapshotted into RemovalLog before the delete — the memory of the
- * track survives the row, and the artifact manifest lets a crash gap be re-cleaned.
+ * that acts on it, in `delete` mode. A track is retired only when a scan still finds
+ * it absent although an EARLIER scan already had it flagged — a mount that dropped
+ * mid-copy flags, the next scan sees the files back, nothing is touched. Two guards
+ * run beside the sweep, both because one bad scan must never cost metadata:
+ * mass-missing stands the sweep down, and every retirement is snapshotted into
+ * RemovalLog before the delete — the memory of the track survives the row, and the
+ * artifact manifest lets a crash gap be re-cleaned.
  */
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -24,12 +27,35 @@ export function transcodeArtifactPath(cachePath: string): string {
     return path.resolve(config.music.transcodeCachePath, cachePath);
 }
 
+/**
+ * Above this fraction of the library absent at once, the sweep stands down — but only
+ * past an absolute floor: in a ten-track library one deleted album is 10% of everything
+ * and a perfectly ordinary Tuesday. Mass disappearance means both a big slice AND a
+ * big count; a handful of confirmed-gone tracks retires even in a small library.
+ */
+const MASS_MISSING_ABORT = 0.10;
+const MASS_MISSING_FLOOR = 10;
+
 export async function reconcileDeletedTracks(
     tx: Prisma.TransactionClient,
-    graceCutoff: Date
+    scanStartedAt: Date
 ): Promise<ReconcileResult> {
+    const [totalTracks, missingEver] = await Promise.all([
+        tx.track.count(),
+        tx.track.count({ where: { missingSince: { not: null } } }),
+    ]);
+    if (totalTracks > 0 && missingEver >= MASS_MISSING_FLOOR && missingEver / totalTracks > MASS_MISSING_ABORT) {
+        logger.warn(
+            `[RECONCILE] ${missingEver}/${totalTracks} tracks missing at once — mass disappearance looks like a dropped mount, not a deletion; nothing retired`
+        );
+        return { removed: 0, artifacts: [] };
+    }
+
+    // Confirmed gone: flagged by an earlier scan, still absent this one. Files that
+    // came back had their flag cleared earlier in this scan; files first missed by
+    // this scan carry a stamp newer than scanStartedAt and wait for the next one.
     const missing = await tx.track.findMany({
-        where: { missingSince: { not: null, lt: graceCutoff } },
+        where: { missingSince: { not: null, lt: scanStartedAt } },
         select: {
             id: true,
             filePath: true,
@@ -58,7 +84,7 @@ export async function reconcileDeletedTracks(
             title: t.title,
             artistName: t.album.artist.name,
             albumTitle: t.album.title,
-            reason: "file-missing-grace",
+            reason: "file-missing-confirmed",
             artifacts: (artifactsByTrack.get(t.id) ?? []).map((p) => ({
                 table: "TranscodedFile",
                 path: p,
@@ -84,7 +110,7 @@ export async function reconcileDeletedTracks(
     // enrichment-derived and invisible to readers while empty; runs only when tracks were swept.
     await tx.genre.deleteMany({ where: { trackGenres: { none: {} } } });
 
-    logger.info(`[RECONCILE] retired ${ids.length} track(s) past the missing-file grace period`);
+    logger.info(`[RECONCILE] retired ${ids.length} track(s) confirmed gone by consecutive scans`);
     return { removed: ids.length, artifacts };
 }
 
@@ -101,15 +127,15 @@ export async function unlinkArtifacts(artifacts: string[]): Promise<void> {
 
 /**
  * The scan's reconcile step. In `flag` mode (default) it issues no query at all and
- * changes nothing — the stage is inert. In `delete-after-grace` mode it retires
- * grace-crossed tracks in one transaction and unlinks their transcode artifacts after.
+ * changes nothing — the stage is inert. In `delete` mode it retires tracks confirmed
+ * gone by consecutive scans in one transaction and unlinks their transcode artifacts
+ * after, subject to the mass-missing guard.
  */
-export async function runReconcile(): Promise<ReconcileResult & { skipped: boolean }> {
-    if (config.music.reconcileMode !== "delete-after-grace") {
+export async function runReconcile(scanStartedAt: Date): Promise<ReconcileResult & { skipped: boolean }> {
+    if (config.music.reconcileMode !== "delete") {
         return { removed: 0, artifacts: [], skipped: true };
     }
-    const cutoff = new Date(Date.now() - config.music.reconcileGraceDays * 86_400_000);
-    const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, cutoff));
+    const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt));
     await unlinkArtifacts(res.artifacts);
     return { ...res, skipped: false };
 }

@@ -8,7 +8,8 @@
  * when the file returns, and the track comes back to every consumer with no
  * extra work. Deletion is the reconcile step's decision, never this
  * predicate's: in `flag` mode (default) flagged rows are never deleted; in
- * `delete-after-grace` mode the sweep retires them past the grace period.
+ * `delete` mode the sweep retires rows the previous scan already had flagged
+ * and this scan still cannot find.
  *
  * Status counters are the deliberate exception: they count the whole
  * library, missing files included, and show the count (invariant 3 —

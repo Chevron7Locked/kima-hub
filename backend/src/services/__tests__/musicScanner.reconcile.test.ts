@@ -1,9 +1,9 @@
 /**
- * The scanner in delete-after-grace mode: the full scanLibrary path, not the service
- * called in isolation. Proves the three things the plan asked of Task 3 and the suite
- * previously left unproven — Step 4b runs (result.tracksRemoved is the scanner's own
- * count), it runs BEFORE Steps 5-6 so the emptied album and artist cascade free, and
- * `flag` mode (config unchanged) deletes nothing across the same three scans.
+ * The scanner in delete mode: the full scanLibrary path, not the service called in
+ * isolation. Proves the plan's Task 3 claims — Step 4b runs (result.tracksRemoved is
+ * the scanner's own count), a track is retired only when a SECOND scan still cannot
+ * find it (confirmation, no stopwatch), and it runs BEFORE Steps 5-6 so the emptied
+ * album and artist cascade free; `flag` mode (default config) never deletes.
  * Real scanner, temp directory, test database.
  */
 
@@ -38,7 +38,6 @@ jest.setTimeout(60_000);
 
 const RG_MBID = "rg-recon-scan-1";
 const REL = path.join("Artist", "Album", "01 - Retired.flac");
-
 let musicDir: string;
 let trackFile: string;
 
@@ -80,15 +79,10 @@ afterAll(async () => {
     await prisma.$disconnect();
 });
 
-async function backdate(): Promise<void> {
-    await prisma.$executeRawUnsafe(
-        `UPDATE "Track" SET "missingSince" = now() - interval '40 days' WHERE "filePath" = $1`, REL);
-}
-
-describe("scanLibrary in delete-after-grace mode", () => {
-    it("retires the grace-crossed track, carries the count, and cascades the emptied album and artist in the same scan", async () => {
+describe("scanLibrary in delete mode", () => {
+    it("waits for the confirming scan, then retires the track, carries the count, and cascades the emptied album and artist in the same scan", async () => {
         const spy = jest.spyOn(config, "music", "get").mockReturnValue({
-            ...config.music, reconcileMode: "delete-after-grace", reconcileGraceDays: 30,
+            ...config.music, reconcileMode: "delete",
         });
         try {
             const scanner = new MusicScannerService();
@@ -98,21 +92,21 @@ describe("scanLibrary in delete-after-grace mode", () => {
 
             fs.unlinkSync(trackFile);
             const second = await scanner.scanLibrary(musicDir);
+            // First scan to find it gone: flagged, kept — retirement needs a confirming scan.
             expect(second.tracksMissing).toBe(1);
             expect(second.tracksRemoved).toBe(0);
             expect(await prisma.track.findUnique({ where: { filePath: REL } })).not.toBeNull();
 
-            await backdate();
             const third = await scanner.scanLibrary(musicDir);
 
-            // Step 4b ran, and the scanner reports its own count.
+            // The confirming scan: Step 4b ran, and the scanner reports its own count.
             expect(third.tracksRemoved).toBe(1);
             expect(await prisma.track.findUnique({ where: { filePath: REL } })).toBeNull();
 
             // The audit row carries the snapshot the row no longer holds.
             const log = await prisma.removalLog.findFirst({ where: { filePath: REL } });
             expect(log).not.toBeNull();
-            expect(log!.reason).toBe("file-missing-grace");
+            expect(log!.reason).toBe("file-missing-confirmed");
             expect(log!.artistName).toBe("Recon Scan Artist");
 
             // Steps 5-6 ran AFTER the sweep and cascaded the newly-empty parents.
@@ -128,7 +122,6 @@ describe("scanLibrary in delete-after-grace mode", () => {
         await scanner.scanLibrary(musicDir);
         fs.unlinkSync(trackFile);
         await scanner.scanLibrary(musicDir);
-        await backdate();
         const third = await scanner.scanLibrary(musicDir);
 
         expect(third.tracksRemoved).toBe(0);

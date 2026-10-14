@@ -259,8 +259,8 @@ export class MusicScannerService {
         // Missing files are flagged; in `flag` mode (default) nothing is ever deleted:
         // deleting the row would cascade away its plays, likes, stage records and
         // embedding, and the flag is cleared by the scan that finds the file again.
-        // In `delete-after-grace` mode, Step 4b retires tracks whose flag is older
-        // than the grace period, and RemovalLog records what was removed.
+        // In `delete` mode, Step 4b retires tracks confirmed gone — flagged by the
+        // previous scan, still absent now — and RemovalLog records what was removed.
         const scannedPaths = new Set(
             audioFiles.map((f) => path.relative(musicPath, f))
         );
@@ -340,10 +340,10 @@ export class MusicScannerService {
             });
         }
 
-        // Step 4b: Reconcile (opt-in). Retires tracks whose files have been gone past
-        // the grace period; inert in `flag` mode. Runs BEFORE Steps 5-6 so their orphan
-        // cleanup cascades the newly-emptied albums and artists for free.
-        const reconcile = await runReconcile();
+        // Step 4b: Reconcile (opt-in). Retires tracks confirmed gone by consecutive
+        // scans; inert in `flag` mode. Runs BEFORE Steps 5-6 so their orphan cleanup
+        // cascades the newly-emptied albums and artists for free.
+        const reconcile = await runReconcile(new Date(startTime));
         result.tracksRemoved = reconcile.removed;
 
         // Step 5: Clean up orphaned albums (albums with no tracks)

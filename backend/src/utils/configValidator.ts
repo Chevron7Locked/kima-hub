@@ -13,42 +13,27 @@ export interface MusicConfig {
     musicPath: string;
     transcodeCachePath: string;
     transcodeCacheMaxGb: number;
-    reconcileMode: "flag" | "delete-after-grace";
-    reconcileGraceDays: number;
+    reconcileMode: "flag" | "delete";
 }
 
 /**
- * Parse the reconcile knobs. A mis-parsed grace window would sweep every flagged
- * track, so unknown values fail loudly instead of falling back.
+ * Parse the reconcile knob. An unknown mode fails loudly at boot: silently
+ * falling back would flip the delete decision on or off without anyone saying so.
  */
-export function parseMusicOverrides(env: Record<string, string | undefined>): Pick<MusicConfig, "reconcileMode" | "reconcileGraceDays"> {
+export function parseMusicOverrides(env: Record<string, string | undefined>): Pick<MusicConfig, "reconcileMode"> {
     const rawMode = env.RECONCILE_MODE;
-    let reconcileMode: "flag" | "delete-after-grace";
-    if (rawMode === undefined || rawMode === "flag" || rawMode === "delete-after-grace") {
+    let reconcileMode: "flag" | "delete";
+    if (rawMode === undefined || rawMode === "flag" || rawMode === "delete") {
         reconcileMode = rawMode ?? "flag";
     } else {
         throw new AppError(
             ErrorCode.INVALID_CONFIG,
             ErrorCategory.FATAL,
-            `RECONCILE_MODE must be flag|delete-after-grace, got: ${rawMode}`
+            `RECONCILE_MODE must be flag|delete, got: ${rawMode}`
         );
     }
 
-    const rawGrace = env.RECONCILE_GRACE_DAYS;
-    let reconcileGraceDays = 30;
-    if (rawGrace !== undefined) {
-        const n = Number(rawGrace);
-        if (!Number.isFinite(n)) {
-            throw new AppError(
-                ErrorCode.INVALID_CONFIG,
-                ErrorCategory.FATAL,
-                `RECONCILE_GRACE_DAYS must be a number, got: ${rawGrace}`
-            );
-        }
-        reconcileGraceDays = Math.max(1, Math.floor(n));
-    }
-
-    return { reconcileMode, reconcileGraceDays };
+    return { reconcileMode };
 }
 
 /**

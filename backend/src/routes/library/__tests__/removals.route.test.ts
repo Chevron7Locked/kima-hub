@@ -47,7 +47,7 @@ beforeEach(() => {
 
 const row = {
     id: 'rl1', filePath: '/music/a/b.flac', title: 'B', artistName: 'A',
-    albumTitle: 'Alb', reason: 'file-missing-grace',
+    albumTitle: 'Alb', reason: 'file-missing-confirmed',
     artifacts: [{ table: 'TranscodedFile', path: '/tmp/cache/x.mp3' }],
     removedAt: new Date('2026-10-14T00:00:00Z'),
 };
@@ -59,7 +59,7 @@ it('returns paginated removal rows with a count', async () => {
     expect(res.status).toBe(200);
     expect(res.body.count).toBe(1);
     expect(res.body.removals[0]).toMatchObject({
-        filePath: '/music/a/b.flac', artistName: 'A', reason: 'file-missing-grace',
+        filePath: '/music/a/b.flac', artistName: 'A', reason: 'file-missing-confirmed',
     });
     expect(res.body.removals[0].artifacts).toEqual([{ table: 'TranscodedFile', path: '/tmp/cache/x.mp3' }]);
     expect(mockFindMany.mock.calls[0][0]).toMatchObject({ skip: 0, take: 1 });

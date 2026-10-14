@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Library reconcile (opt-in).** A file gone from disk is flagged, and stays flagged; in `delete-after-grace` mode (`RECONCILE_MODE`, off by default) a track that has been missing past `RECONCILE_GRACE_DAYS` (default 30) is retired — the row and everything hanging off it — and every retirement is written to `RemovalLog` first, so the memory of the track survives the row. Admins see the list at `GET /api/library/removals`.
+- **Library reconcile (opt-in).** A file gone from disk is flagged, and stays flagged; in `delete` mode (`RECONCILE_MODE`, off by default) a track **confirmed gone by two consecutive scans** is retired — the row and everything hanging off it — and every retirement is written to `RemovalLog` first, so the memory of the track survives the row. No stopwatch: the next scan confirms, minutes not months. A mass disappearance (10+ tracks and >10% of the library at once) stands the sweep down — that's a dropped mount, not a deletion. Admins see the list at `GET /api/library/removals`.
 
 ### Fixed
 
