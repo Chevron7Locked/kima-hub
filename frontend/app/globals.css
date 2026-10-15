@@ -16,6 +16,9 @@
 /* A phone on its side: the app's bars and the mini player take less height. */
 @custom-variant landscape-short (@media (orientation: landscape) and (max-height: 480px));
 
+/* A device that can hover: for a hover-revealed control's resting offset, so touch screens show it in place. */
+@custom-variant can-hover (@media (hover: hover));
+
 @theme {
     /* The smallest text size, for eyebrows, counts and status chips.
      * Tailwind's named scale stops at 12px; nothing goes below this. */
@@ -282,11 +285,10 @@ code {
     }
 
     /* For hover-revealed controls the rules above miss, such as a partial
-     * group-hover opacity. */
+     * group-hover opacity. Position is left alone: an offset that only exists
+     * to slide in on hover is written with can-hover:. */
     .touch-reveal {
         opacity: 1;
-        transform: none;
-        translate: none;
         pointer-events: auto;
     }
 }
