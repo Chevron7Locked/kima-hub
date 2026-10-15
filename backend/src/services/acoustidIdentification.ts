@@ -46,8 +46,6 @@ export interface TrackIdentification {
     /** The matched recording MBID (only reachable via `answered`). */
     recordingMbid: string;
     artistMbid?: string;
-    /** For an AcoustID answer: every album AcoustID lists for the recording. */
-    releaseGroups?: { id: string; title: string }[];
     /** For an AcoustID answer: the recordings it would also accept, best first. */
     candidates?: string[];
     /** For an AcoustID answer: false when only the length, not the title, is the track's. */
@@ -69,7 +67,6 @@ function toIdentification(
     return {
         recordingMbid: result.recordingMbid,
         artistMbid: result.artistMbid || undefined,
-        releaseGroups: result.releaseGroups,
         candidates: result.candidates,
         titleAgrees: result.titleAgrees,
     };

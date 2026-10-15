@@ -38,6 +38,11 @@ jest.mock("../audioCompletionSubscriber", () => ({
 }));
 jest.mock("../../services/enrichmentState", () => ({ enrichmentStateService: {} }));
 // The AcoustID batch asked before dispatch is not what this tests, and must never reach the network.
+// The album step before dispatch is not what this tests, and must never reach the network.
+jest.mock("../../services/albumIdentification", () => ({
+    ...jest.requireActual("../../services/albumIdentification"),
+    identifyAlbumsBySound: jest.fn().mockResolvedValue([]),
+}));
 jest.mock("../../services/acoustidIdentification", () => ({
     ...jest.requireActual("../../services/acoustidIdentification"),
     prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),

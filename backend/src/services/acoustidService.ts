@@ -140,6 +140,32 @@ class AcoustIDService {
         return (await this.savedResults(this.replyKey(duration, fingerprint))) !== null;
     }
 
+    /**
+     * AcoustID's answer for a song from its saved reply, never a request: undefined when no reply
+     * is saved, null when the saved reply has no confident pick.
+     */
+    async savedAnswer(duration: number, fingerprint: string, title?: string): Promise<AcoustIDResult | null | undefined> {
+        if (!fingerprint || !(duration > 0)) return undefined;
+        const results = await this.savedResults(this.replyKey(duration, fingerprint));
+        if (results === null) return undefined;
+        const picked = this.pickFingerprintMatch(results, duration, title);
+        return picked ? this.toResult(picked) : null;
+    }
+
+    private toResult(picked: { recording: AcoustIDRecording; candidates: AcoustIDRecording[]; titleAgrees: boolean }): AcoustIDResult {
+        const { recording, candidates, titleAgrees } = picked;
+        const artist = recording.artists?.[0];
+        return {
+            recordingMbid: recording.id,
+            artistMbid: artist?.id || "",
+            releaseGroups: (recording.releasegroups ?? []).map((rg) => ({ id: rg.id, title: rg.title ?? "" })),
+            candidates: candidates.map((rec) => rec.id),
+            titleAgrees,
+            title: recording.title || "",
+            artist: artist?.name || "",
+        };
+    }
+
     /** A failed save never un-answers the question: the caller already has the reply. */
     private async saveResults(key: string, results: AcoustIDResultRaw[]): Promise<void> {
         try {
@@ -294,17 +320,8 @@ class AcoustIDService {
                 });
             }
 
-            const { result, recording, candidates, titleAgrees } = picked;
-            const artist = recording.artists?.[0];
-            const outcome: AcoustIDResult = {
-                recordingMbid: recording.id,
-                artistMbid: artist?.id || "",
-                releaseGroups: (recording.releasegroups ?? []).map((rg) => ({ id: rg.id, title: rg.title ?? "" })),
-                candidates: candidates.map((rec) => rec.id),
-                titleAgrees,
-                title: recording.title || "",
-                artist: artist?.name || "",
-            };
+            const { result } = picked;
+            const outcome = this.toResult(picked);
 
             logger.debug(
                 `[AcoustID] Match recording=${outcome.recordingMbid} albums=${outcome.releaseGroups.length} title="${outcome.title}"`

@@ -6,7 +6,6 @@
 
 import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
-import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { closeStagesForMissingTracks } from "../services/missingFileStages";
 import Redis from "ioredis";
@@ -44,7 +43,7 @@ import {
     prefetchAcoustidReplies,
     readIdentityTags,
 } from "../services/acoustidIdentification";
-import { titlesAgree } from "../services/albumIdentity";
+import { fillAlbumFromCatalogue, identifyAlbumsBySound, type AlbumFacts } from "../services/albumIdentification";
 import { fpcalcService } from "../services/fpcalc";
 import { resolveWithinMusicRoot } from "../routes/library/trackPath";
 import { buildMatching, matchingProgress } from "../services/matching/state";
@@ -1824,14 +1823,6 @@ type AlbumCatalogue = Extract<
     { kind: "answered" }
 >["value"];
 type CatalogueRecording = AlbumCatalogue["recordings"][number];
-type CatalogueGenre = AlbumCatalogue["genres"][number];
-
-/** What one tracklist fetch says about the album itself. */
-type AlbumFacts = {
-    albumGenres: CatalogueGenre[];
-    originalYear: number | null;
-    label: string | null;
-};
 
 /** What the album chain answered: this track's row plus the album-level answers. */
 type CatalogueAnswer = AlbumFacts & { entry: CatalogueRecording };
@@ -1862,31 +1853,6 @@ function matchCatalogueRecording(
     const withIsrc = isrc ? recordings.filter((rec) => rec.isrcs.includes(isrc)) : [];
     const pick = credited(withIsrc) ?? credited(recordings) ?? vouched(withIsrc) ?? vouched(recordings);
     return pick ? recordings.find((rec) => rec.recordingId === pick.id) ?? null : null;
-}
-
-/** Fill the album's original year, label and top five genres, each only where
- * still blank, so scan tags and manual edits are never overwritten. */
-async function fillAlbumFromCatalogue(
-    album: { id: string; year: number | null; label: string | null; genres: Prisma.JsonValue },
-    answer: AlbumFacts,
-): Promise<void> {
-    const data: {
-        year?: number;
-        originalYear?: number;
-        label?: string;
-        genres?: string[];
-    } = {};
-    if (album.year == null && answer.originalYear != null) {
-        data.year = answer.originalYear;
-    }
-    if (!album.label && answer.label) data.label = answer.label;
-    const existing = album.genres as string[] | null;
-    if ((existing == null || existing.length === 0) && answer.albumGenres.length > 0) {
-        data.genres = topVoted(answer.albumGenres, 5);
-    }
-    if (Object.keys(data).length > 0) {
-        await prisma.album.update({ where: { id: album.id }, data });
-    }
 }
 
 /**
@@ -1946,8 +1912,7 @@ export async function enrichSingleTrack(
     // AcoustID failing to answer: kept, and the cause of the deferral only when no other
     // source names the recording.
     let acoustidFailure: FailureOutcome | null = null;
-    // AcoustID's albums for its answer, and the recordings it would also accept, best first.
-    let acoustidAlbums: { id: string; title: string }[] = [];
+    // The recordings AcoustID would also accept, best first.
     let acoustidCandidates: string[] = [];
     // An AcoustID pick whose title is not the track's (only its length is): asked last, as
     // before, once the tracklist, the ISRC and the name search have had their turn.
@@ -1991,7 +1956,6 @@ export async function enrichSingleTrack(
             );
             if (identified.kind === "answered") {
                 fingerprintToStore = identified.value.fingerprint ?? fingerprintToStore;
-                acoustidAlbums = identified.value.releaseGroups ?? [];
                 if (identified.value.titleAgrees === false) {
                     acoustidLengthOnly = {
                         candidates: identified.value.candidates ?? [identified.value.recordingMbid],
@@ -2014,14 +1978,10 @@ export async function enrichSingleTrack(
         }
     }
 
-    // The album's tracklist: the album row's own release group, else the album AcoustID
-    // lists under this album's title. Only an album the row itself names gets its year,
-    // label and genres filled (`rowAlbum`), and only when this track is on it.
-    const albumFromRow = isMbid(track.album.rgMbid) ? track.album.rgMbid : null;
-    const albumRg =
-        albumFromRow ??
-        acoustidAlbums.find((rg) => rg.title && titlesAgree(rg.title, track.album.title))?.id ??
-        null;
+    // The album's tracklist, by the album row's release-group id: from the files' tags, or from
+    // the album step's AcoustID vote (identifyAlbumsBySound). The row's year, label and genres
+    // are filled (`rowAlbum`) only when this track is on it.
+    const albumRg = isMbid(track.album.rgMbid) ? track.album.rgMbid : null;
     if (albumRg) {
         asked.push("album-catalogue");
         const chain = await askWithinBudget(
@@ -2052,7 +2012,7 @@ export async function enrichSingleTrack(
             // The album row is filled only when this track is on its tracklist: by its recording,
             // or, for an AcoustID recording that is not, by its name.
             const onAlbum = entry ?? matchCatalogueRecording(chain.value.recordings, expected, isrc);
-            if (albumRg === albumFromRow && onAlbum) {
+            if (onAlbum) {
                 rowAlbum = { albumGenres: chain.value.genres, originalYear: chain.value.originalYear, label: chain.value.label };
             }
         } else if (chain.kind !== "absent" && !recordingMbid) {
@@ -2101,7 +2061,7 @@ export async function enrichSingleTrack(
             : null;
         if (entry && tracklist) {
             catalogueAnswer = { entry, albumGenres: tracklist.genres, originalYear: tracklist.originalYear, label: tracklist.label };
-            if (albumRg === albumFromRow) rowAlbum = catalogueAnswer;
+            rowAlbum = catalogueAnswer;
         }
         recordingMbid = entry?.recordingId ?? candidates[0];
         answerSource = "acoustid";
@@ -2189,7 +2149,12 @@ export async function enrichSingleTrack(
                     : answerSource === "acoustid"
                       ? "AcoustID's recording, found in the album's tracklist"
                       : "identified from the album's tracklist",
-                album: rowAlbum ? "the album's own id" : "the album AcoustID named",
+                album:
+                    track.album.rgMbidSource === "acoustid"
+                        ? "the album's id from the AcoustID vote"
+                        : track.album.rgMbidSource === "search"
+                          ? "the album's id from a name search"
+                          : "the album's own id",
                 tags: topGenres,
                 ...evidenceFromAcoustid,
             }, jobId);
@@ -2641,7 +2606,31 @@ const ACOUSTID_LOOKAHEAD = 100;
 export async function executeIdentificationPhase(): Promise<number> {
     const upcoming = await getNextWork(ACOUSTID_LOOKAHEAD, "recording");
     await prefetchAcoustidForWork(upcoming);
+    await identifyAlbumsForWork(upcoming);
     return dispatchStageWork("recording", upcoming.slice(0, TRACK_BATCH_SIZE), STAGE_PRODUCERS.recording);
+}
+
+/**
+ * Give untagged albums their MusicBrainz id before their songs are handed out, so each song's
+ * job reads the album's tracklist by that id; the backlog of albums whose songs are already
+ * identified is worked through as well. Holds the dispatch for about one round's budget at
+ * most (identifyAlbumsBySound); a failure only means this round names no album.
+ */
+async function identifyAlbumsForWork(work: StageWork[]): Promise<void> {
+    try {
+        const rows = work.length > 0
+            ? await prisma.track.findMany({
+                  where: { id: { in: work.map((w) => w.trackId) } },
+                  select: { id: true, albumId: true },
+              })
+            : [];
+        // The albums in the order their songs go out.
+        const albumOf = new Map(rows.map((r) => [r.id, r.albumId]));
+        const ordered = [...new Set(work.map((w) => albumOf.get(w.trackId)).filter((id): id is string => !!id))];
+        await identifyAlbumsBySound(ordered);
+    } catch (err) {
+        logger.warn(`[Enrichment] Album identification skipped this round: ${(err as Error).message}`);
+    }
 }
 
 /**

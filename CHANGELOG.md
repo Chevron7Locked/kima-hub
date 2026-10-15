@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+### Added
+
+- **Untagged albums get their real MusicBrainz id.** An album whose files carry no MusicBrainz album id is now identified once from all its songs' AcoustID answers: the album more than half of its songs agree on, under its own title (edition words like "Deluxe" aside, but "Live" kept apart), becomes its id. It then gets Cover Art Archive covers, Lidarr ownership, Discover's "already owned" check and its year, label and genres, and its songs take their details from one album request. Library albums only; generic titles ("Greatest Hits") and albums the votes can't settle are left alone, and a file's own album tag always replaces an id chosen this way. On a 9,151-song test library, 331 of 489 untagged albums would be identified; with the tags of 426 tagged albums hidden, the vote named 373 of the 374 it decided exactly as their tags do.
+
 ### Changed
 
 - **Songs are identified by their sound first.** A file whose tags don't say which recording it is now goes to AcoustID (audio fingerprints) before any MusicBrainz search, ten songs per request, and each reply is kept so no song is asked twice. Its ISRCs and genres then come from one MusicBrainz request per album (the album AcoustID lists under your album's title, or the album your tags name) instead of one request per song; songs AcoustID doesn't recognise, or matches only by length and not by title, still get the MusicBrainz name search first.

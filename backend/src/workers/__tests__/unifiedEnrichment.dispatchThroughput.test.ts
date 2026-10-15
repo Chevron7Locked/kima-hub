@@ -106,6 +106,11 @@ jest.mock("../../services/musicbrainz", () => ({
     },
 }));
 
+// The album step before dispatch is not what this tests, and must never reach the network.
+jest.mock("../../services/albumIdentification", () => ({
+    ...jest.requireActual("../../services/albumIdentification"),
+    identifyAlbumsBySound: jest.fn().mockResolvedValue([]),
+}));
 jest.mock("../../services/acoustidIdentification", () => ({
     prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
     identifyTrackByAcoustid: jest.fn().mockResolvedValue(null),
@@ -150,6 +155,7 @@ import {
     STAGE_IN_FLIGHT_CAP,
 } from "../../workers/unifiedEnrichment";
 import { prefetchAcoustidReplies } from "../../services/acoustidIdentification";
+import { identifyAlbumsBySound } from "../../services/albumIdentification";
 
 const PREFIX = "dthr";
 const id = (n: string) => `${PREFIX}_${n}`;
@@ -371,6 +377,21 @@ describe("identification asks AcoustID ahead of the dispatch", () => {
         expect(queued).toBeGreaterThan(0);
         expect(queued).toBeLessThanOrEqual(20);
         expect(await workingCount("recording")).toBe(queued);
+    });
+
+    it("asks the album step about the albums of the songs coming up", async () => {
+        await seedTracks(30, [["fingerprint", "done"]]);
+
+        await executeIdentificationPhase();
+
+        expect(identifyAlbumsBySound).toHaveBeenCalledWith([id("alb")]);
+    });
+
+    it("hands the songs out even when the album step fails", async () => {
+        await seedTracks(30, [["fingerprint", "done"]]);
+        (identifyAlbumsBySound as jest.Mock).mockRejectedValueOnce(new Error("MusicBrainz unreachable"));
+
+        expect(await executeIdentificationPhase()).toBeGreaterThan(0);
     });
 
     it("hands the songs out even when asking AcoustID fails", async () => {

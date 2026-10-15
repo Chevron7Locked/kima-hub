@@ -829,8 +829,9 @@ export class MusicScannerService {
         // violation.
         let isDiscoveryAlbum = false;
 
-        // Album identity comes from the file's own release-group tag only; an
-        // untagged file keeps the placeholder until the recording stage asks.
+        // Album identity comes from the file's own release-group tag; an untagged album keeps
+        // a placeholder until identification's album step names it from its songs' AcoustID
+        // answers (services/albumIdentification.ts). A tag later replaces that id, never the reverse.
         const taggedRgMbid = metadata.common.musicbrainz_releasegroupid?.trim();
 
         const album = await resolveAlbum(prisma, {

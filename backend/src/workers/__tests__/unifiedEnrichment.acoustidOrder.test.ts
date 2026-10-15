@@ -679,7 +679,7 @@ describe("AcoustID first, and the album it names", () => {
                 artists: ["Perturbator"],
             })),
         });
-    const seedFutureClub = (rgMbid = "temp-1693-abc") =>
+    const seedFutureClub = (rgMbid = "temp-1693-abc", rgMbidSource: string | null = null) =>
         mockTrackFindUnique.mockResolvedValue({
             id: TRACK_ID,
             title: "Future Club",
@@ -688,39 +688,51 @@ describe("AcoustID first, and the album it names", () => {
             isrc: null,
             isrcSource: null,
             acoustidFingerprint: FINGERPRINT,
-            album: { id: "album-dd", title: "Dangerous Days", artist: { name: "Perturbator" }, rgMbid, year: null, label: null, genres: null },
+            album: { id: "album-dd", title: "Dangerous Days", artist: { name: "Perturbator" }, rgMbid, rgMbidSource, year: null, label: null, genres: null },
         });
     const acoustidAnswers = (candidates: string[]) =>
         mockIdentifyTrackByAcoustid.mockResolvedValue(
             answeredWith({ source: "acoustid", recordingMbid: candidates[0], releaseGroups: ACOUSTID_ALBUMS, candidates }),
         );
 
-    it("an untagged album: the tracklist of the album AcoustID lists under this album's title, not its first", async () => {
+    it("an album still without an id: no tracklist per song, the song pays its own details request", async () => {
         seedFutureClub();
+        acoustidAnswers([FUTURE_CLUB]);
+        mockGetRecordingIsrc.mockResolvedValue(answeredWith("TCABW1462862"));
+        mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [{ name: "synthwave", count: 3 }] }));
+
+        const result = await enrichSingleTrack(TRACK_ID);
+
+        expect(result).toBe("identified");
+        // The album's id is decided once, by the album step's vote, never by one song.
+        expect(mockGetAlbumCatalogue).not.toHaveBeenCalled();
+        expect(mockGetRecordingGenres).toHaveBeenCalledWith(FUTURE_CLUB);
+        expect(mockAlbumUpdate).not.toHaveBeenCalled();
+        expect(stageWrittenDone("acoustid")).toBe(true);
+    });
+
+    it("an album the AcoustID vote named: its tracklist by the row's id gives ISRC and genres", async () => {
+        seedFutureClub(DANGEROUS_DAYS, "acoustid");
         acoustidAnswers([FUTURE_CLUB]);
         mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club" }]));
 
         const result = await enrichSingleTrack(TRACK_ID);
 
         expect(result).toBe("identified");
-        expect(mockGetAlbumCatalogue).toHaveBeenCalledTimes(1);
         expect(mockGetAlbumCatalogue).toHaveBeenCalledWith(DANGEROUS_DAYS);
-        // ISRC and genres come from the tracklist row: no per-song MusicBrainz request.
         expect(mockGetRecordingIsrc).not.toHaveBeenCalled();
         expect(mockGetRecordingGenres).not.toHaveBeenCalled();
-        expect(mockIdentifyRecording).not.toHaveBeenCalled();
         expect(mockPopulateTrackGenres).toHaveBeenCalledWith(TRACK_ID, ["electronic", "synthwave"]);
         expect(mockTrackUpdate).toHaveBeenCalledWith({
             where: { id: TRACK_ID },
             data: { isrc: "TCABW1462862", isrcSource: "musicbrainz" },
         });
-        // The album row is left alone: AcoustID named that album, the row did not.
-        expect(mockAlbumUpdate).not.toHaveBeenCalled();
-        expect(stageWrittenDone("acoustid")).toBe(true);
+        const evidence = mockExecuteRawUnsafe.mock.calls.find((call) => String(call[0]).includes(`INSERT INTO "TrackStage"`) && String(call[0]).includes("'done'"));
+        expect(JSON.stringify(evidence)).toContain("the album's id from the AcoustID vote");
     });
 
     it("takes AcoustID's candidate that is on this album's tracklist", async () => {
-        seedFutureClub();
+        seedFutureClub(DANGEROUS_DAYS, "acoustid");
         acoustidAnswers(["compilation-recording", FUTURE_CLUB]);
         mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club" }]));
 
@@ -729,37 +741,6 @@ describe("AcoustID first, and the album it names", () => {
         expect(mockTrackUpdate).toHaveBeenCalledWith(
             expect.objectContaining({ data: expect.objectContaining({ recordingMbid: FUTURE_CLUB }) }),
         );
-    });
-
-    it("keeps AcoustID's recording when it is not on the tracklist, and fetches its details", async () => {
-        seedFutureClub();
-        acoustidAnswers(["remaster-recording"]);
-        mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club" }]));
-        mockGetRecordingIsrc.mockResolvedValue(noData);
-        mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [{ name: "synthwave", count: 1 }] }));
-
-        const result = await enrichSingleTrack(TRACK_ID);
-
-        expect(result).toBe("identified");
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "remaster-recording" }) }),
-        );
-        expect(mockGetRecordingGenres).toHaveBeenCalledWith("remaster-recording");
-    });
-
-    it("no album of AcoustID's carries this album's title: no tracklist is fetched", async () => {
-        seedFutureClub();
-        mockTrackFindUnique.mockResolvedValue({
-            ...(await mockTrackFindUnique()),
-            album: { id: "album-x", title: "Some Bootleg", artist: { name: "Perturbator" }, rgMbid: "temp-2", year: null, label: null, genres: null },
-        });
-        acoustidAnswers([FUTURE_CLUB]);
-        mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [] }));
-
-        await enrichSingleTrack(TRACK_ID);
-
-        expect(mockGetAlbumCatalogue).not.toHaveBeenCalled();
-        expect(mockGetRecordingGenres).toHaveBeenCalledWith(FUTURE_CLUB);
     });
 
     it("the album row's own id wins over AcoustID's albums, and that album is filled", async () => {
