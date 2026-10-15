@@ -22,6 +22,8 @@ import {
     CHART_MAX,
     forYou,
     lookupShows,
+    AppleReplyError,
+    isCategory,
     oldestEpisode,
     rememberSnippet,
     similarShows,
@@ -166,11 +168,26 @@ const pageParams = z.object({
 });
 
 /** GET /podcasts/categories — Apple's podcast categories, sub-categories naming their parent. */
+/**
+ * Apple's trouble is never Kima's 500: a 4xx from Apple means it has no such chart or show, and an outage or a
+ * reply that is not what was asked for is a bad gateway.
+ */
+function appleFailure(res: Response, label: string, error: unknown) {
+    if (axios.isAxiosError(error) && error.response && error.response.status < 500) {
+        return res.status(404).json({ error: "Apple Podcasts has no such chart or show" });
+    }
+    if (error instanceof AppleReplyError || axios.isAxiosError(error)) {
+        logger.warn(`[PODCAST] ${label}: Apple Podcasts did not answer (${(error as Error).message})`);
+        return res.status(502).json({ error: "Apple Podcasts did not answer; try again shortly" });
+    }
+    return safeError(res, label, error);
+}
+
 router.get("/categories", async (_req, res) => {
     try {
         res.json(await categoryTree());
     } catch (error) {
-        safeError(res, "Error fetching podcast categories", error);
+        appleFailure(res, "Error fetching podcast categories", error);
     }
 });
 
@@ -182,10 +199,13 @@ router.get("/charts", async (req, res) => {
         return res.status(400).json({ error: "category must be a category id; limit 1-200; offset 0-200" });
     }
     try {
+        if (category !== null && !(await isCategory(category))) {
+            return res.status(404).json({ error: "No such podcast category" });
+        }
         const shows = (await chart(category)).slice(page.data.offset, page.data.offset + page.data.limit);
         res.json(await toDiscoveryItems(shows));
     } catch (error) {
-        safeError(res, "Error fetching podcast chart", error);
+        appleFailure(res, "Error fetching podcast chart", error);
     }
 });
 
@@ -194,7 +214,7 @@ router.get("/for-you", requireAuth, async (req, res) => {
     try {
         res.json(await forYou(req.user!.id));
     } catch (error) {
-        safeError(res, "Error building podcast recommendations", error);
+        appleFailure(res, "Error building podcast recommendations", error);
     }
 });
 
@@ -280,7 +300,7 @@ router.get("/discover/top", async (req, res) => {
     try {
         res.json(await toDiscoveryItems((await chart(null)).slice(0, page.data.limit)));
     } catch (error) {
-        safeError(res, "Error fetching top podcasts", error);
+        appleFailure(res, "Error fetching top podcasts", error);
     }
 });
 
@@ -295,7 +315,7 @@ router.get("/discover/genres", async (req, res) => {
         for (const id of ids) out[id] = await toDiscoveryItems((await chart(id)).slice(0, 10));
         res.json(out);
     } catch (error) {
-        safeError(res, "Error fetching genre podcasts", error);
+        appleFailure(res, "Error fetching genre podcasts", error);
     }
 });
 
@@ -305,10 +325,11 @@ router.get("/discover/genre/:genreId", async (req, res) => {
     const id = Number(req.params.genreId);
     if (!page.success || !Number.isInteger(id)) return res.status(400).json({ error: "genreId must be a category id" });
     try {
+        if (!(await isCategory(id))) return res.status(404).json({ error: "No such podcast category" });
         const shows = (await chart(id)).slice(page.data.offset, page.data.offset + page.data.limit);
         res.json(await toDiscoveryItems(shows));
     } catch (error) {
-        safeError(res, "Error fetching paginated genre podcasts", error);
+        appleFailure(res, "Error fetching paginated genre podcasts", error);
     }
 });
 
@@ -1132,6 +1153,10 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
         });
         pipeUpstream(res, response.data, "RSS stream");
     } catch (error) {
+        // The host refusing or not having the file (a 4xx) is the episode being unavailable, not a server failure.
+        if (!res.headersSent && axios.isAxiosError(error) && error.response && error.response.status < 500) {
+            return res.status(404).json({ error: "This episode is not available from its host" });
+        }
         if (!res.headersSent) {
             safeError(res, "Podcast stream error", error);
         } else {
@@ -1254,7 +1279,7 @@ router.get("/:id/similar", async (req, res) => {
         const shows = await similarShows(podcast);
         res.json(shows.map((show, i) => ({ ...show, score: shows.length - i })));
     } catch (error) {
-        safeError(res, "Error fetching similar podcasts", error);
+        appleFailure(res, "Error fetching similar podcasts", error);
     }
 });
 

@@ -60,6 +60,16 @@ async function apple<T = any>(pathname: string, params?: Record<string, string |
     return (await axios.get(base + pathname, { params, timeout: 15000 })).data;
 }
 
+/** Apple answered, but not with what was asked for (an error page, a throttled empty reply). Never cached. */
+export class AppleReplyError extends Error {
+    name = "AppleReplyError";
+}
+
+/** Whether Apple has a podcast category with this id. */
+export async function isCategory(id: number): Promise<boolean> {
+    return (await categoryTree()).some((c) => c.id === id);
+}
+
 async function cached<T>(key: string, ttlSeconds: number, load: () => Promise<T>): Promise<T> {
     try {
         const hit = await redisClient.get(key);
@@ -106,6 +116,7 @@ export async function categoryTree(): Promise<PodcastCategory[]> {
                 out.push({ id: Number(subId), name: sub.name, parentId: Number(id) });
             }
         }
+        if (out.length === 0) throw new AppleReplyError("Apple's category list came back empty");
         return out;
     });
 }
@@ -116,7 +127,10 @@ export async function chart(categoryId: number | null): Promise<CatalogPodcast[]
     const genre = categoryId ? `/genre=${categoryId}` : "";
     return cached(`podcasts:chart:v1:${country}:${categoryId ?? "all"}`, 6 * 3600, async () => {
         const data = await apple(`/${country}/rss/toppodcasts/limit=${CHART_MAX}${genre}/json`);
-        const entries: any[] = data?.feed?.entry ?? [];
+        if (!data?.feed) throw new AppleReplyError("Apple's chart reply had no feed");
+        // An empty chart has no entry; a chart of one has an object, not a list.
+        const entry = data.feed.entry;
+        const entries: any[] = Array.isArray(entry) ? entry : entry ? [entry] : [];
         return entries.map((e, i): CatalogPodcast => {
             const itunesId = String(e?.id?.attributes?.["im:id"] ?? "");
             const images: any[] = e?.["im:image"] ?? [];
@@ -158,8 +172,10 @@ export async function lookupShows(itunesIds: string[]): Promise<Map<string, Look
     for (let i = 0; i < missing.length; i += LOOKUP_BATCH) {
         const batch = missing.slice(i, i + LOOKUP_BATCH);
         const data = await rateLimiter.execute("itunes", () => apple("/lookup", { id: batch.join(","), entity: "podcast" }));
+        // Ids missing from a well-formed reply are unknown to Apple; a reply without a results list says nothing.
+        if (!Array.isArray(data?.results)) throw new AppleReplyError("Apple's lookup reply had no results list");
         const found = new Map<string, LookupShow>();
-        for (const r of data?.results ?? []) {
+        for (const r of data.results) {
             if (r?.kind !== "podcast") continue;
             found.set(String(r.collectionId), {
                 itunesId: String(r.collectionId),

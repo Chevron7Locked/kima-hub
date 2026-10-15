@@ -32,7 +32,8 @@ export async function proxyPreviewStream(
                 (status >= 200 && status < 300) || status === 416,
         });
     } catch (error) {
-        if (axios.isAxiosError(error) && error.response?.status === 404) {
+        // Any 4xx (gone, forbidden, an expired signed link) is the preview being unavailable.
+        if (axios.isAxiosError(error) && error.response && error.response.status < 500) {
             res.status(404).json({ error: notFoundMessage });
             return;
         }
