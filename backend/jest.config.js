@@ -6,7 +6,8 @@ process.env.TZ = 'UTC';
 /** @type {import('jest').Config} */
 module.exports = {
     preset: 'ts-jest',
-    testEnvironment: 'node',
+    // Node's environment, closing each file's Prisma clients after the file's own cleanup.
+    testEnvironment: '<rootDir>/src/__mocks__/test-environment.cjs',
     setupFiles: ['<rootDir>/src/__mocks__/test-env.cjs'],
     // Closes every ioredis client at each file boundary so the run can exit.
     setupFilesAfterEnv: ['<rootDir>/src/__mocks__/clientReaper.cjs'],

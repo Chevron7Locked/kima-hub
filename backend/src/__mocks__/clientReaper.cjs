@@ -110,8 +110,9 @@ afterAll(async () => {
 
 // Jest gives each test file its own module registry, so every file that loads utils/db gets
 // its own Prisma client and pool, and a worker kept every finished file's connections open
-// until the run outgrew Postgres. Clients register at birth and close when their file ends.
-const prismaClients = [];
+// until the run outgrew Postgres. Clients register at birth on the file's global; the test
+// environment (test-environment.cjs) closes them after the file's own cleanup has run.
+const prismaClients = (globalThis.__prismaClients = globalThis.__prismaClients || []);
 try {
     const prismaModule = require('@prisma/client');
     const Base = prismaModule.PrismaClient;
@@ -129,6 +130,3 @@ try {
     // A suite without the generated client has no connections to close.
 }
 
-afterAll(async () => {
-    await Promise.all(prismaClients.splice(0).map((client) => client.$disconnect().catch(() => {})));
-});
