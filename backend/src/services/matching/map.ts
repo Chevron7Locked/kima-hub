@@ -141,12 +141,16 @@ async function mapStatus(): Promise<{ laidOut: boolean; complete: boolean }> {
  * nothing to lock and the write is dropped; a write that came first finishes, and the re-run then clears it.
  */
 async function writeWhileStateStands(write: (tx: Prisma.TransactionClient) => Promise<void>): Promise<boolean> {
-    return prisma.$transaction(async (tx) => {
-        const state = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM matching_state WHERE id = 'default' FOR UPDATE`;
-        if (state.length === 0) return false;
-        await write(tx);
-        return true;
-    });
+    return prisma.$transaction(
+        async (tx) => {
+            const state = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM matching_state WHERE id = 'default' FOR UPDATE`;
+            if (state.length === 0) return false;
+            await write(tx);
+            return true;
+        },
+        // Long enough to wait out a re-run holding the state row (enrichmentRestart.ts).
+        { timeout: 8 * 60 * 1000, maxWait: 8 * 60 * 1000 },
+    );
 }
 
 async function update(inputsSettled: boolean): Promise<MapUpdate> {

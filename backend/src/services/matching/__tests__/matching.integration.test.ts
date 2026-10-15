@@ -653,4 +653,82 @@ describe("a re-run while the map is being laid out", () => {
         const stored = await prisma.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM matching_map`;
         expect(stored[0].n).toBe(0);
     }, 120_000);
+
+    it("lets a build that waited behind a re-run write nothing, instead of a state from the data the re-run cleared", async () => {
+        await cleanup();
+        await seed();
+        let release = () => {};
+        const held = new Promise<void>((resolve) => (release = resolve));
+        // A re-run in flight: it has taken the state row and deleted it, and has not committed yet.
+        await buildMatching();
+        const rerun = prisma.$transaction(
+            async (tx) => {
+                await tx.$executeRaw`DELETE FROM matching_state`;
+                await held;
+            },
+            { timeout: 120_000 },
+        );
+        const waitingOnLocks = async (n: number) => {
+            for (let i = 0; i < 1200; i++) {
+                const [{ c }] = await prisma.$queryRaw<{ c: number }[]>`
+                    SELECT count(*)::int AS c FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+                if (c >= n) return;
+                await new Promise((r) => setTimeout(r, 50));
+            }
+            throw new Error(`${n} sessions never waited on a lock`);
+        };
+        await prisma.$executeRaw`UPDATE track_embeddings SET analyzed_at = analyzed_at + interval '1 second'`;
+        const build = buildMatching();
+        try {
+            await waitingOnLocks(1);
+        } finally {
+            release();
+            await rerun;
+        }
+        expect(await build).toEqual({ feelUpdated: 0, rebuilt: false });
+        expect(await prisma.matchingState.findUnique({ where: { id: "default" } })).toBeNull();
+    }, 120_000);
+
+    it("never deadlocks with the sound-vector analyzer storing a vector while a re-run resets it", async () => {
+        await cleanup();
+        await seed();
+        await buildMatching();
+        const id = trackId(1, 0, 0);
+        await prisma.$executeRaw`
+            INSERT INTO "TrackStage" (id, "trackId", stage, status, attempt, redelivered)
+            VALUES (${`stage-${id}`}, ${id}, 'embedding', 'working', 1, 0)
+            ON CONFLICT ("trackId", stage) DO UPDATE SET status = 'working', attempt = 1, redelivered = 0, "decidedAt" = NULL`;
+        const { rerunEnrichment } = await import("../../enrichmentRestart");
+        let resume = () => {};
+        const paused = new Promise<void>((resolve) => (resume = resolve));
+        // The analyzer's own statements (services/audio-analyzer-clap/analyzer.py): its claim on the stage row, then
+        // the vector and the track.
+        const analyzer = prisma.$transaction(
+            async (tx) => {
+                await tx.$queryRaw`SELECT 1 FROM "TrackStage" WHERE "trackId" = ${id} AND stage = 'embedding' AND status = 'working' AND attempt = 1 AND redelivered = 0 FOR SHARE`;
+                await paused;
+                await tx.$executeRaw`UPDATE track_embeddings SET analyzed_at = now() WHERE track_id = ${id}`;
+                await tx.$executeRaw`UPDATE "Track" SET instrumentalness = 0.5 WHERE id = ${id}`;
+            },
+            { timeout: 120_000 },
+        );
+        const waitingOnLocks = async (n: number) => {
+            for (let i = 0; i < 1200; i++) {
+                const [{ c }] = await prisma.$queryRaw<{ c: number }[]>`
+                    SELECT count(*)::int AS c FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+                if (c >= n) return;
+                await new Promise((r) => setTimeout(r, 50));
+            }
+            throw new Error(`${n} sessions never waited on a lock`);
+        };
+        const rerun = rerunEnrichment("vectors");
+        try {
+            await waitingOnLocks(1);
+        } finally {
+            resume();
+        }
+        const outcomes = await Promise.allSettled([analyzer, rerun]);
+        expect(outcomes.map((o) => (o.status === "rejected" ? String(o.reason).slice(0, 120) : "ok"))).toEqual(["ok", "ok"]);
+        expect(await prisma.trackStage.findUnique({ where: { trackId_stage: { trackId: id, stage: "embedding" } }, select: { status: true } })).toEqual({ status: "pending" });
+    }, 120_000);
 });

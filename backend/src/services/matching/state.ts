@@ -6,6 +6,7 @@
  */
 import crypto from "crypto";
 import { Prisma } from "@prisma/client";
+import { logger } from "../../utils/logger";
 import { prisma } from "../../utils/db";
 import { formatEmbedding } from "../../utils/embedding";
 import { getMergedGenres } from "../../utils/metadataOverrides";
@@ -176,8 +177,33 @@ async function computeState(tx: Prisma.TransactionClient): Promise<StateColumns 
  * probe with statistics from another.
  */
 export async function buildMatching(): Promise<{ feelUpdated: number; rebuilt: boolean }> {
+    try {
+        return await build();
+    } catch (error) {
+        // A re-run or map write changed the state row while this build waited for it: what it read is out of date,
+        // so nothing is written and the next pass builds from the new data.
+        if (isWriteConflict(error)) {
+            logger.info("[Matching] State changed while the build waited; the next pass rebuilds it");
+            return { feelUpdated: 0, rebuilt: false };
+        }
+        throw error;
+    }
+}
+
+/** Postgres refused the transaction because of another one (serialization 40001, deadlock 40P01), as Prisma reports it. */
+function isWriteConflict(error: unknown): boolean {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+    if (error.code === "P2034") return true;
+    const pgCode = (error.meta as { code?: string } | undefined)?.code;
+    return error.code === "P2010" && (pgCode === "40001" || pgCode === "40P01");
+}
+
+function build(): Promise<{ feelUpdated: number; rebuilt: boolean }> {
     return prisma.$transaction(
         async (tx) => {
+            // The state row first, as every re-run and map write takes it, before the feel rows that lock sound vectors:
+            // one order, so none of them deadlock.
+            await tx.$queryRaw`SELECT id FROM matching_state WHERE id = 'default' FOR UPDATE`;
             const feelUpdated = await updateFeel(tx);
             const fingerprint = await inputsFingerprint(tx);
             const current = await tx.matchingState.findUnique({

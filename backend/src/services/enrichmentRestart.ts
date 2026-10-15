@@ -130,6 +130,20 @@ function releaseMatchingState(tx: Tx): Promise<unknown> {
     return tx.$executeRaw`DELETE FROM matching_state`;
 }
 
+/**
+ * The stage rows a re-run resets, locked right after the state and before any track or vector row. Both analyzers
+ * lock a track's stage row before they write its track or vector, so taking the stage rows first keeps one order and
+ * no deadlock: an analyzer holding one finishes first, and its claim is then refused when it next reports.
+ */
+function lockStages(tx: Tx, stages: string[]): Promise<unknown> {
+    return tx.$queryRaw`
+        SELECT count(*) FROM (SELECT 1 FROM "TrackStage" WHERE stage = ANY(${stages}) AND "decidedAt" IS NULL FOR UPDATE) locked
+    `;
+}
+
+// Long enough to wait out a similarity build holding the state row (matching/state.ts, five minutes at most).
+const RERUN_TIMEOUT_MS = 7 * 60 * 1000;
+
 function resetSimilarity(tx: Tx): Promise<unknown> {
     // With the state gone (above), deleting every stored position makes the next similarity pass lay the map out
     // again from scratch.
@@ -151,6 +165,9 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
     return prisma.$transaction(
         async (tx) => {
             await releaseMatchingState(tx);
+            const stages = [clears.recording && "recording", clears.analysis && "analysis", clears.vectors && "embedding"];
+            const reset = stages.filter((s): s is string => Boolean(s));
+            if (reset.length > 0) await lockStages(tx, reset);
             // A step a person set aside for a track stays as they left it.
             let artists = 0;
             let tracks = 0;
@@ -175,7 +192,7 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
             if (trackWork) await closeStagesForMissingTracks(tx);
             return { artists, tracks, vectors };
         },
-        { timeout: 120_000 },
+        { timeout: RERUN_TIMEOUT_MS, maxWait: RERUN_TIMEOUT_MS },
     );
 }
 
