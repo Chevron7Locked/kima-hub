@@ -56,7 +56,12 @@ export const queryKeys = {
 
     podcasts: () => ["podcasts"] as const,
     podcast: (id: string) => ["podcast", id] as const,
-    topPodcasts: (limit?: number) => ["podcasts", "top", limit] as const,
+    podcastEpisodes: (id: string, order: string) => ["podcast", id, order] as const,
+    podcastsListening: () => ["podcasts", "listening"] as const,
+    podcastsForYou: () => ["podcasts", "for-you"] as const,
+    podcastCategories: () => ["podcasts", "categories"] as const,
+    podcastChart: (category: number | null, limit: number) => ["podcasts", "chart", category ?? "all", limit] as const,
+    podcastChartPages: (category: number | null) => ["podcasts", "chart", category ?? "all", "paged"] as const,
 
     // Browse (Deezer playlists)
     browseAll: () => ["browse", "all"] as const,
@@ -313,7 +318,7 @@ export function usePodcastQuery(
     const query = useInfiniteQuery({
         // The order is part of the key: "oldest" must fetch a different page,
         // not just re-sort the newest one.
-        queryKey: [...queryKeys.podcast(id || ""), order],
+        queryKey: queryKeys.podcastEpisodes(id || "", order),
         queryFn: async ({ pageParam }) => {
             if (!id) throw new Error("Podcast ID is required");
             if (isItunesId) return null; // iTunes ID - go straight to preview mode
@@ -384,11 +389,23 @@ export function usePublicConfig() {
     return { publicUrl: data?.publicUrl ?? "", canAcquire: data?.canAcquire === true, loaded: data !== undefined };
 }
 
-export function useTopPodcastsQuery(limit: number = 20) {
+/** Apple's chart for a category, or the overall chart for null. */
+export function usePodcastChartQuery(category: number | null, limit: number, enabled = true) {
     return useQuery({
-        queryKey: queryKeys.topPodcasts(limit),
-        queryFn: () => api.getPodcastChart(null, limit),
-        staleTime: 10 * 60 * 1000, // 10 minutes
+        queryKey: queryKeys.podcastChart(category, limit),
+        queryFn: () => api.getPodcastChart(category, limit),
+        enabled,
+        staleTime: 60 * 60 * 1000,
+    });
+}
+
+/** Apple's podcast categories, as the server names them. */
+export function usePodcastCategoriesQuery(enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.podcastCategories(),
+        queryFn: () => api.getPodcastCategories(),
+        enabled,
+        staleTime: 60 * 60 * 1000,
     });
 }
 

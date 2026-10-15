@@ -11,7 +11,7 @@ import { cn } from "@/lib/cn";
 import { subscribeQueryEvent } from "@/lib/query-events";
 import { scrollMainToTop } from "@/lib/scroll";
 import { coverArtUrl } from "@/lib/cover-art";
-import { usePodcastsQuery, queryKeys } from "@/hooks/useQueries";
+import { usePodcastsQuery, usePodcastCategoriesQuery, usePodcastChartQuery, queryKeys } from "@/hooks/useQueries";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { Pagination } from "@/components/ui/Pagination";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -24,7 +24,6 @@ import { ListeningShelf } from "@/features/podcast/components/ListeningShelf";
 import { NewEpisodes } from "@/features/podcast/components/NewEpisodes";
 import { CategoryChips } from "@/features/podcast/components/CategoryChips";
 
-const LISTENING_KEY = ["podcasts", "listening"] as const;
 type SortOption = "title" | "author" | "recent";
 
 export default function PodcastsPage() {
@@ -34,33 +33,23 @@ export default function PodcastsPage() {
 
     const { data: podcasts = [], isLoading } = usePodcastsQuery();
     const { data: listening } = useQuery({
-        queryKey: LISTENING_KEY,
+        queryKey: queryKeys.podcastsListening(),
         queryFn: () => api.getPodcastListening(),
         enabled: isAuthenticated,
         staleTime: 30 * 1000,
     });
     const { data: forYou = [] } = useQuery({
-        queryKey: ["podcasts", "for-you"],
+        queryKey: queryKeys.podcastsForYou(),
         queryFn: () => api.getPodcastsForYou(),
         enabled: isAuthenticated,
         staleTime: 10 * 60 * 1000,
     });
-    const { data: categories = [] } = useQuery({
-        queryKey: ["podcasts", "categories"],
-        queryFn: () => api.getPodcastCategories(),
-        enabled: isAuthenticated,
-        staleTime: 60 * 60 * 1000,
-    });
-    const { data: topShows = [] } = useQuery({
-        queryKey: ["podcasts", "chart", "all"],
-        queryFn: () => api.getPodcastChart(null, 24),
-        enabled: isAuthenticated,
-        staleTime: 60 * 60 * 1000,
-    });
+    const { data: categories = [] } = usePodcastCategoriesQuery(isAuthenticated);
+    const { data: topShows = [] } = usePodcastChartQuery(null, 24, isAuthenticated);
 
     // Progress saved while listening moves episodes between "new" and "continue listening".
     useEffect(
-        () => subscribeQueryEvent("podcast-progress-updated", () => queryClient.invalidateQueries({ queryKey: LISTENING_KEY })),
+        () => subscribeQueryEvent("podcast-progress-updated", () => queryClient.invalidateQueries({ queryKey: queryKeys.podcastsListening() })),
         [queryClient],
     );
 
@@ -78,7 +67,7 @@ export default function PodcastsPage() {
         try {
             await api.refreshAllPodcasts();
             queryClient.invalidateQueries({ queryKey: queryKeys.podcasts() });
-            queryClient.invalidateQueries({ queryKey: LISTENING_KEY });
+            queryClient.invalidateQueries({ queryKey: queryKeys.podcastsListening() });
         } catch (error) {
             notify.error("Couldn't refresh your podcasts", { message: error instanceof Error ? error.message : undefined });
         } finally {

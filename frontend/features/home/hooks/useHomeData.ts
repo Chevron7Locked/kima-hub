@@ -7,19 +7,19 @@ import { notify } from "@/lib/notify";
 import type {
     Artist,
     ListenedItem,
-    Podcast,
     Audiobook,
     Mix,
     PopularArtist,
     PlaylistPreview,
 } from "../types";
+import type { DiscoveryPodcast } from "@/features/podcast/types";
 import {
     useRecentlyListenedQuery,
     useRecentlyAddedQuery,
     useRecommendationsQuery,
     useMixesQuery,
     usePopularArtistsQuery,
-    useTopPodcastsQuery,
+    usePodcastChartQuery,
     useAudiobooksQuery,
     useRefreshMixesMutation,
     useBrowseAllQuery,
@@ -33,7 +33,7 @@ export interface UseHomeDataReturn {
     recommended: Artist[];
     mixes: Mix[];
     popularArtists: PopularArtist[];
-    recentPodcasts: Podcast[];
+    popularPodcasts: DiscoveryPodcast[];
     recentAudiobooks: Audiobook[];
     featuredPlaylists: PlaylistPreview[];
 
@@ -75,7 +75,7 @@ export function useHomeData(): UseHomeDataReturn {
     const { data: popularData, isLoading: isLoadingPopular } =
         usePopularArtistsQuery(20);
     const { data: podcastsData, isLoading: isLoadingPodcasts } =
-        useTopPodcastsQuery(10);
+        usePodcastChartQuery(null, 10);
     const { data: audiobooksData, isLoading: isLoadingAudiobooks } =
         useAudiobooksQuery();
     const { data: browseData, isLoading: isBrowseLoading } =
@@ -116,7 +116,7 @@ export function useHomeData(): UseHomeDataReturn {
         recommended: recommendedData?.artists || [],
         mixes: Array.isArray(mixesData) ? mixesData : [],
         popularArtists: popularData?.artists || [],
-        recentPodcasts: Array.isArray(podcastsData)
+        popularPodcasts: Array.isArray(podcastsData)
             ? podcastsData.slice(0, 10)
             : [],
         recentAudiobooks: Array.isArray(audiobooksData)

@@ -24,18 +24,6 @@ export interface ListenedItem {
 }
 
 /**
- * Podcast entity
- */
-export interface Podcast {
-    id: string;
-    title: string;
-    author?: string;
-    coverUrl?: string | null;
-    coverArt?: string;
-    imageUrl?: string;
-}
-
-/**
  * Audiobook entity
  */
 export interface Audiobook {

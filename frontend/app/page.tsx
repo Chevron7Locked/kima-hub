@@ -10,7 +10,7 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { ContinueListening } from "@/features/home/components/ContinueListening";
 import { ArtistsGrid, PopularArtistsGrid } from "@/features/home/components/ArtistsGrid";
 import { MixesGrid } from "@/features/home/components/MixesGrid";
-import { PodcastsGrid } from "@/features/home/components/PodcastsGrid";
+import { PodcastShelf } from "@/features/podcast/components/PodcastShelf";
 import { AudiobooksGrid } from "@/features/home/components/AudiobooksGrid";
 import { FeaturedPlaylistsGrid, FeaturedPlaylistsSkeleton } from "@/features/home/components/FeaturedPlaylistsGrid";
 import { LibraryRadioStations } from "@/features/home/components/LibraryRadioStations";
@@ -26,7 +26,7 @@ export default function HomePage() {
         recommended,
         mixes,
         popularArtists,
-        recentPodcasts,
+        popularPodcasts,
         recentAudiobooks,
         featuredPlaylists,
         isLoading,
@@ -126,10 +126,10 @@ export default function HomePage() {
                                 )}
                             </section>
                         )},
-                        { key: "popular-podcasts", visible: recentPodcasts.length > 0, content: (
+                        { key: "popular-podcasts", visible: popularPodcasts.length > 0, content: (
                             <section data-tv-section="popular-podcasts">
                                 <SectionHeader title="Popular Podcasts" showAllHref="/podcasts" type="podcast" />
-                                <PodcastsGrid podcasts={recentPodcasts} />
+                                <PodcastShelf podcasts={popularPodcasts} />
                             </section>
                         )},
                         { key: "audiobooks", visible: recentAudiobooks.length > 0, content: (

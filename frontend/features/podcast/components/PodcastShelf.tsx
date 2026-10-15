@@ -13,21 +13,40 @@ export function PodcastShelf({ podcasts, ranked = false }: { podcasts: Discovery
         <HorizontalCarousel style={cascadeStyle(podcasts.length)}>
             {podcasts.map((p, index) => (
                 <CarouselItem key={p.itunesId}>
-                    <MediaCard
-                        href={`/podcasts/${p.itunesId}`}
-                        title={p.title}
-                        subtitle={p.author}
-                        imageUrl={coverArtUrl(p.coverUrl)}
-                        fallbackIcon={Mic2}
-                        type="podcast"
-                        index={index}
-                        sizes="180px"
-                        badge={ranked && p.chartRank ? <RankBadge rank={p.chartRank} /> : undefined}
-                        className="mx-1"
-                    />
+                    <PodcastCard podcast={p} index={index} ranked={ranked} sizes="180px" className="mx-1" />
                 </CarouselItem>
             ))}
         </HorizontalCarousel>
+    );
+}
+
+/** One show from Apple's catalog, opening its page; `ranked` shows its chart position. */
+export function PodcastCard({
+    podcast,
+    index,
+    ranked = false,
+    sizes,
+    className,
+}: {
+    podcast: DiscoveryPodcast;
+    index: number;
+    ranked?: boolean;
+    sizes?: string;
+    className?: string;
+}) {
+    return (
+        <MediaCard
+            href={`/podcasts/${podcast.itunesId}`}
+            title={podcast.title}
+            subtitle={podcast.author}
+            imageUrl={coverArtUrl(podcast.coverUrl)}
+            fallbackIcon={Mic2}
+            type="podcast"
+            index={index}
+            sizes={sizes}
+            badge={ranked && podcast.chartRank ? <RankBadge rank={podcast.chartRank} /> : undefined}
+            className={className}
+        />
     );
 }
 

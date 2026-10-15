@@ -53,7 +53,7 @@ export function usePodcastData() {
       if (savedFor !== podcastId) return;
       // Only the order on screen: patching the other would mark it fresh and
       // drop a refetch it still owes.
-      queryClient.setQueryData<InfiniteData<Podcast | null>>([...queryKeys.podcast(podcastId), sortOrder], (data) =>
+      queryClient.setQueryData<InfiniteData<Podcast | null>>(queryKeys.podcastEpisodes(podcastId, sortOrder), (data) =>
         data && {
           ...data,
           pages: data.pages.map((page) =>

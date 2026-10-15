@@ -1,18 +1,16 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { Mic2 } from "lucide-react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { coverArtUrl } from "@/lib/cover-art";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageMessage } from "@/components/ui/PageMessage";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { Button } from "@/components/ui/Button";
-import { MediaCard } from "@/components/cards/MediaCard";
 import { CategoryChips } from "@/features/podcast/components/CategoryChips";
-import { RankBadge } from "@/features/podcast/components/PodcastShelf";
+import { PodcastCard } from "@/features/podcast/components/PodcastShelf";
+import { queryKeys, usePodcastCategoriesQuery } from "@/hooks/useQueries";
 
 const PAGE = 48;
 /** Apple's charts stop at 200 shows. */
@@ -25,14 +23,9 @@ export default function PodcastCategoryPage() {
     const categoryId = id === "top" ? null : Number(id);
     const valid = categoryId === null || Number.isInteger(categoryId);
 
-    const { data: categories = [], isLoading: loadingCategories } = useQuery({
-        queryKey: ["podcasts", "categories"],
-        queryFn: () => api.getPodcastCategories(),
-        enabled: isAuthenticated,
-        staleTime: 60 * 60 * 1000,
-    });
+    const { data: categories = [], isLoading: loadingCategories } = usePodcastCategoriesQuery(isAuthenticated);
     const chart = useInfiniteQuery({
-        queryKey: ["podcasts", "chart", categoryId ?? "all", "paged"],
+        queryKey: queryKeys.podcastChartPages(categoryId),
         queryFn: ({ pageParam }) => api.getPodcastChart(categoryId, PAGE, pageParam),
         initialPageParam: 0,
         getNextPageParam: (last, pages) => {
@@ -79,17 +72,7 @@ export default function PodcastCategoryPage() {
                 ) : (
                     <div className="grid-media">
                         {shows.map((p, index) => (
-                            <MediaCard
-                                key={p.itunesId}
-                                href={`/podcasts/${p.itunesId}`}
-                                title={p.title}
-                                subtitle={p.author}
-                                imageUrl={coverArtUrl(p.coverUrl)}
-                                fallbackIcon={Mic2}
-                                type="podcast"
-                                index={index % PAGE}
-                                badge={p.chartRank ? <RankBadge rank={p.chartRank} /> : undefined}
-                            />
+                            <PodcastCard key={p.itunesId} podcast={p} index={index % PAGE} ranked />
                         ))}
                     </div>
                 )}
