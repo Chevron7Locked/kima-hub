@@ -10,6 +10,7 @@ import { webhookLimiter } from "../middleware/rateLimiter";
 import { getSystemSettings } from "../utils/systemSettings";
 import { isLidarrConfigured } from "../services/lidarrClient";
 import { logger } from "../utils/logger";
+import { APP_VERSION } from "../config";
 import crypto from "crypto";
 import { webhookEventStore } from "../services/webhookEventStore";
 
@@ -41,7 +42,7 @@ router.get("/lidarr/verify", (_req, res) => {
         status: "ok",
         timestamp: new Date().toISOString(),
         service: "kima",
-        version: process.env.npm_package_version || "unknown",
+        version: APP_VERSION,
     });
 });
 
