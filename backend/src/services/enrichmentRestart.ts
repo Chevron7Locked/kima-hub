@@ -120,12 +120,20 @@ async function resetVectors(tx: Tx): Promise<number> {
     return vectors;
 }
 
-async function resetSimilarity(tx: Tx): Promise<void> {
-    // Deleting the state and every stored position is what makes the next similarity pass lay the map out again from
-    // scratch. The state goes first: a map write locks that row before touching the map (matching/map.ts), so a
-    // layout in flight either finishes before this clears it or finds no state and writes nothing.
-    await tx.$executeRaw`DELETE FROM matching_state`;
-    await tx.$executeRaw`DELETE FROM matching_map`;
+/**
+ * The first statement of every re-run. A map write locks the state row before it touches the stored map
+ * (matching/map.ts), so the re-run takes that row before anything that reaches the map: deleting sound vectors
+ * removes their map rows with them. Both sides then lock state first and map second, and never deadlock; a layout
+ * in flight either finishes before the re-run clears it or finds no state and writes nothing.
+ */
+function releaseMatchingState(tx: Tx): Promise<unknown> {
+    return tx.$executeRaw`DELETE FROM matching_state`;
+}
+
+function resetSimilarity(tx: Tx): Promise<unknown> {
+    // With the state gone (above), deleting every stored position makes the next similarity pass lay the map out
+    // again from scratch.
+    return tx.$executeRaw`DELETE FROM matching_map`;
 }
 
 export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> {
@@ -142,6 +150,7 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
     }
     return prisma.$transaction(
         async (tx) => {
+            await releaseMatchingState(tx);
             // A step a person set aside for a track stays as they left it.
             let artists = 0;
             let tracks = 0;

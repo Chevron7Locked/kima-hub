@@ -57,7 +57,8 @@ jest.mock("../../../middleware/auth", () => {
 
 jest.mock("../../../utils/redis", () => ({
     __esModule: true,
-    redisClient: { ping: jest.fn(async () => "pong") },
+    // A re-run that clears tracks' work empties the analysis queue first (the BullMQ queues use their own connection).
+    redisClient: { ping: jest.fn(async () => "pong"), del: jest.fn(async () => 0) },
 }));
 
 jest.mock("../../featureDetection", () => ({
@@ -410,67 +411,6 @@ describe("the vibe map", () => {
     });
 });
 
-describe("a re-run while the map is being laid out", () => {
-    it("never lets the layout it overtook store the old map over the reset", async () => {
-        // Every re-run lays a fresh map (Kevin, 10-10), so no layout computed before it may be left standing. A re-run
-        // from similarity lands here while the worker computes; the layout then finds no state and writes nothing.
-        await buildMatching();
-        await prisma.$executeRaw`DELETE FROM matching_map`;
-        const { rerunEnrichment } = await import("../../enrichmentRestart");
-        let overtook = false;
-        mockBeforeWorker.run = async () => {
-            mockBeforeWorker.run = null;
-            overtook = true;
-            await rerunEnrichment("similarity");
-        };
-        const outcome = await updateMap(true).catch((e: Error) => e);
-        const stored = await prisma.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM matching_map`;
-        expect({ stored: stored[0].n, overtook }).toEqual({ stored: 0, overtook: true });
-        expect(outcome).toEqual({ laidOut: 0, placed: 0 });
-        // The next similarity pass builds the state again and lays the library out afresh.
-        await buildMatching();
-        expect((await updateMap(true)).laidOut).toBeGreaterThan(0);
-    });
-
-    it("lets a layout that reached the database first finish, then the re-run clears it: no old map is left", async () => {
-        await buildMatching();
-        await prisma.$executeRaw`DELETE FROM matching_map`;
-        const { rerunEnrichment } = await import("../../enrichmentRestart");
-        // Hold the state row, as a map write already under way does, so the layout and the re-run both queue on it
-        // and reach it in the order they were started: the layout first.
-        let release = () => {};
-        const held = new Promise<void>((resolve) => (release = resolve));
-        const blocker = prisma.$transaction(
-            async (tx) => {
-                await tx.$queryRaw`SELECT id FROM matching_state WHERE id = 'default' FOR UPDATE`;
-                await held;
-            },
-            { timeout: 120_000 },
-        );
-        const waitingOnLocks = async (n: number) => {
-            for (let i = 0; i < 1200; i++) {
-                const [{ c }] = await prisma.$queryRaw<{ c: number }[]>`
-                    SELECT count(*)::int AS c FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
-                if (c >= n) return;
-                await new Promise((r) => setTimeout(r, 50));
-            }
-            throw new Error(`${n} sessions never waited on a lock`);
-        };
-        const layout = updateMap(true);
-        await waitingOnLocks(1);
-        const rerun = rerunEnrichment("similarity");
-        await waitingOnLocks(2);
-        release();
-        await blocker;
-        await Promise.all([layout, rerun]);
-        const stored = await prisma.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM matching_map`;
-        const state = await prisma.matchingState.findUnique({ where: { id: "default" } });
-        expect({ stored: stored[0].n, state }).toEqual({ stored: 0, state: null });
-        await buildMatching();
-        expect((await updateMap(true)).laidOut).toBeGreaterThan(0);
-    }, 120_000);
-});
-
 describe("the ranking pass", () => {
     const seedId = trackId(0, 0, 0);
 
@@ -604,4 +544,113 @@ describe("rebuilding when the inputs change", () => {
         expect(Math.abs(row.valence - v)).toBeLessThan(1e-5);
         expect(Math.abs(row.arousal - a)).toBeLessThan(1e-5);
     });
+});
+
+// Last in the file: these re-runs clear the library's state (and its sound vectors) for every test after them.
+describe("a re-run while the map is being laid out", () => {
+    it("never lets the layout it overtook store the old map over the reset", async () => {
+        // Every re-run lays a fresh map (Kevin, 10-10), so no layout computed before it may be left standing. A re-run
+        // from similarity lands here while the worker computes; the layout then finds no state and writes nothing.
+        await buildMatching();
+        await prisma.$executeRaw`DELETE FROM matching_map`;
+        const { rerunEnrichment } = await import("../../enrichmentRestart");
+        let overtook = false;
+        mockBeforeWorker.run = async () => {
+            mockBeforeWorker.run = null;
+            overtook = true;
+            await rerunEnrichment("similarity");
+        };
+        const outcome = await updateMap(true).catch((e: Error) => e);
+        const stored = await prisma.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM matching_map`;
+        expect({ stored: stored[0].n, overtook }).toEqual({ stored: 0, overtook: true });
+        expect(outcome).toEqual({ laidOut: 0, placed: 0 });
+        // The next similarity pass builds the state again and lays the library out afresh.
+        await buildMatching();
+        expect((await updateMap(true)).laidOut).toBeGreaterThan(0);
+    });
+
+    it("lets a layout that reached the database first finish, then the re-run clears it: no old map is left", async () => {
+        await buildMatching();
+        await prisma.$executeRaw`DELETE FROM matching_map`;
+        const { rerunEnrichment } = await import("../../enrichmentRestart");
+        // Hold the state row, as a map write already under way does, so the layout and the re-run both queue on it
+        // and reach it in the order they were started: the layout first.
+        let release = () => {};
+        const held = new Promise<void>((resolve) => (release = resolve));
+        const blocker = prisma.$transaction(
+            async (tx) => {
+                await tx.$queryRaw`SELECT id FROM matching_state WHERE id = 'default' FOR UPDATE`;
+                await held;
+            },
+            { timeout: 120_000 },
+        );
+        const waitingOnLocks = async (n: number) => {
+            for (let i = 0; i < 1200; i++) {
+                const [{ c }] = await prisma.$queryRaw<{ c: number }[]>`
+                    SELECT count(*)::int AS c FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+                if (c >= n) return;
+                await new Promise((r) => setTimeout(r, 50));
+            }
+            throw new Error(`${n} sessions never waited on a lock`);
+        };
+        const layout = updateMap(true);
+        let rerun: Promise<unknown> = Promise.resolve();
+        try {
+            await waitingOnLocks(1);
+            rerun = rerunEnrichment("similarity");
+            await waitingOnLocks(2);
+        } finally {
+            release();
+            await blocker;
+        }
+        await Promise.all([layout, rerun]);
+        const stored = await prisma.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM matching_map`;
+        const state = await prisma.matchingState.findUnique({ where: { id: "default" } });
+        expect({ stored: stored[0].n, state }).toEqual({ stored: 0, state: null });
+        await buildMatching();
+        expect((await updateMap(true)).laidOut).toBeGreaterThan(0);
+    }, 120_000);
+
+    it("never deadlocks with a re-run that clears sound vectors, whose deletes reach the stored map", async () => {
+        // Deleting a sound vector deletes its map row, so this re-run touches the map before the state; it must still
+        // take the state row first, as the layout does, or each waits on the other.
+        await buildMatching();
+        await prisma.$executeRaw`DELETE FROM matching_map`;
+        await updateMap(true);
+        const { rerunEnrichment } = await import("../../enrichmentRestart");
+        let release = () => {};
+        const held = new Promise<void>((resolve) => (release = resolve));
+        const blocker = prisma.$transaction(
+            async (tx) => {
+                await tx.$queryRaw`SELECT id FROM matching_state WHERE id = 'default' FOR UPDATE`;
+                await held;
+            },
+            { timeout: 120_000 },
+        );
+        const waitingOnLocks = async (n: number) => {
+            for (let i = 0; i < 1200; i++) {
+                const [{ c }] = await prisma.$queryRaw<{ c: number }[]>`
+                    SELECT count(*)::int AS c FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+                if (c >= n) return;
+                await new Promise((r) => setTimeout(r, 50));
+            }
+            throw new Error(`${n} sessions never waited on a lock`);
+        };
+        // A placement write (the map is laid out; a new vector waits for a place) queues on the state row.
+        await prisma.$executeRaw`DELETE FROM matching_map WHERE track_id = ${trackId(0, 0, 0)}`;
+        const placement = updateMap(true);
+        let rerun: Promise<unknown> = Promise.resolve();
+        try {
+            await waitingOnLocks(1);
+            rerun = rerunEnrichment("vectors");
+            await waitingOnLocks(2);
+        } finally {
+            release();
+            await blocker;
+        }
+        const outcomes = await Promise.allSettled([placement, rerun]);
+        expect(outcomes.map((o) => (o.status === "rejected" ? String(o.reason).slice(0, 120) : "ok"))).toEqual(["ok", "ok"]);
+        const stored = await prisma.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM matching_map`;
+        expect(stored[0].n).toBe(0);
+    }, 120_000);
 });
