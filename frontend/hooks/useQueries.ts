@@ -518,6 +518,29 @@ export function useDeletePlaylistMutation() {
     });
 }
 
+/**
+ * A playlist after moving `itemId` to just after `afterItemId` (the top for null), as the server will store it.
+ * The ids are in stored order; a reversed playlist's cached items are in display order, so the move is made on the
+ * stored order and the list shown reversed again. A copy: the cached list is also `previous`, restored on failure.
+ */
+export function movePlaylistItem<T extends PlaylistCache>(old: T, itemId: string, afterItemId: string | null): T {
+    if (!old || !Array.isArray(old.items)) return old;
+    const reversed = Boolean((old as { reverseOrder?: boolean }).reverseOrder);
+    const items = [...(old.items as Array<Record<string, unknown>>)];
+    if (reversed) items.reverse();
+    const idx = items.findIndex((item) => item.id === itemId);
+    if (idx === -1) return old;
+    const [moved] = items.splice(idx, 1);
+    if (afterItemId) {
+        const afterIdx = items.findIndex((item) => item.id === afterItemId);
+        items.splice(afterIdx !== -1 ? afterIdx + 1 : idx, 0, moved);
+    } else {
+        items.unshift(moved);
+    }
+    if (reversed) items.reverse();
+    return { ...old, items };
+}
+
 export function useMoveTrackInPlaylistMutation() {
     const queryClient = useQueryClient();
 
@@ -532,25 +555,9 @@ export function useMoveTrackInPlaylistMutation() {
             afterItemId: string | null;
         }) => api.moveTrackInPlaylist(playlistId, itemId, afterItemId),
         onMutate: (variables) =>
-            applyOptimisticPlaylistEdit(queryClient, variables.playlistId, (old) => {
-                if (!old || !Array.isArray(old.items)) return old;
-                // A copy: the cached list is also `previous`, restored if the move fails.
-                const items = [...(old.items as Array<Record<string, unknown>>)];
-                const idx = items.findIndex((item) => item.id === variables.itemId);
-                if (idx === -1) return old;
-                const [moved] = items.splice(idx, 1);
-                if (variables.afterItemId) {
-                    const afterIdx = items.findIndex((item) => item.id === variables.afterItemId);
-                    if (afterIdx !== -1) {
-                        items.splice(afterIdx + 1, 0, moved);
-                    } else {
-                        items.splice(idx, 0, moved);
-                    }
-                } else {
-                    items.unshift(moved);
-                }
-                return { ...old, items };
-            }),
+            applyOptimisticPlaylistEdit(queryClient, variables.playlistId, (old) =>
+                movePlaylistItem(old, variables.itemId, variables.afterItemId),
+            ),
         onError: (_err, variables, context) => rollbackPlaylistEdit(queryClient, variables.playlistId, context),
         onSettled: (_, __, variables) => invalidatePlaylist(queryClient, variables.playlistId),
     });
