@@ -197,6 +197,64 @@ router.get("/for-you", requireAuth, async (req, res) => {
     }
 });
 
+const podcastCover = (p: { id: string; localCoverPath: string | null; imageUrl: string | null }) =>
+    p.localCoverPath ? `/podcasts/${p.id}/cover` : p.imageUrl;
+const episodeCover = (e: { id: string; localCoverPath: string | null; imageUrl: string | null }) =>
+    e.localCoverPath ? `/podcasts/episodes/${e.id}/cover` : e.imageUrl;
+
+/**
+ * GET /podcasts/listening — across every followed show: episodes in progress (most recently played first) and
+ * the newest episodes not yet started.
+ */
+router.get("/listening", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const followed = { podcast: { subscriptions: { some: { userId } } } };
+    try {
+        const [inProgress, newEpisodes] = await Promise.all([
+            prisma.podcastProgress.findMany({
+                where: { userId, isFinished: false, currentTime: { gt: 0 }, episode: followed },
+                orderBy: { lastPlayedAt: "desc" },
+                take: 12,
+                include: { episode: { include: { podcast: true } } },
+            }),
+            prisma.podcastEpisode.findMany({
+                where: { ...followed, progress: { none: { userId } } },
+                orderBy: { publishedAt: "desc" },
+                take: 20,
+                include: { podcast: true },
+            }),
+        ]);
+        const row = (
+            ep: (typeof newEpisodes)[number],
+            progress: { currentTime: number; duration: number; isFinished: boolean; lastPlayedAt: Date } | null,
+        ) => ({
+            podcast: { id: ep.podcast.id, title: ep.podcast.title, coverUrl: podcastCover(ep.podcast) },
+            episode: {
+                id: ep.id,
+                title: ep.title,
+                description: ep.description,
+                duration: ep.duration,
+                publishedAt: ep.publishedAt,
+                coverUrl: episodeCover(ep),
+                progress: progress
+                    ? {
+                          currentTime: progress.currentTime,
+                          progress: progress.duration > 0 ? Math.min(100, (progress.currentTime / progress.duration) * 100) : 0,
+                          isFinished: progress.isFinished,
+                          lastPlayedAt: progress.lastPlayedAt,
+                      }
+                    : null,
+            },
+        });
+        res.json({
+            inProgress: inProgress.map((p) => row(p.episode, p)),
+            newEpisodes: newEpisodes.map((ep) => row(ep, null)),
+        });
+    } catch (error) {
+        safeError(res, "Error fetching podcast listening", error);
+    }
+});
+
 /** GET /podcasts/discover/top — the overall chart (kept for clients that ask here). */
 router.get("/discover/top", async (req, res) => {
     const page = pageParams.safeParse(req.query);

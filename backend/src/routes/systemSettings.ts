@@ -115,6 +115,7 @@ const systemSettingsSchema = z.object({
   publicUrl: z.union([z.string().url(), z.literal("")]).optional(),
   registrationOpen: z.boolean().optional(),
   updateChecksEnabled: z.boolean().optional(),
+  podcastChartCountry: z.string().trim().toLowerCase().regex(/^[a-z]{2}$/).optional(),
 });
 
 // GET /system-settings
