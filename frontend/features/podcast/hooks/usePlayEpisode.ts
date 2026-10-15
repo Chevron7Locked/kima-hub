@@ -1,34 +1,49 @@
 "use client";
 
 import { useCallback } from "react";
-import { useAudio } from "@/lib/audio-hooks";
+import { useAudio } from "@/lib/audio-context";
 import type { ListeningRow } from "../types";
 
-/** The player's id for an episode: show and episode together. */
-const keyOf = (row: ListeningRow) => `${row.podcast.id}:${row.episode.id}`;
+type EpisodeToPlay = Parameters<ReturnType<typeof useAudio>["playPodcast"]>[0];
 
-/** Play, pause or resume an episode from a list that spans shows (continue listening, new episodes). */
-export function usePlayEpisode() {
+/**
+ * Pause or resume the episode the player has loaded, or start another; `beforeStart` runs only when one starts (a show
+ * page sets its episode queue there). The player's id for an episode is the show's and the episode's together.
+ */
+export function useEpisodeToggle() {
     const { playPodcast, currentPodcast, isPlaying, pause, resumeWithGesture } = useAudio();
-
-    const toggle = useCallback(
-        (row: ListeningRow) => {
-            const id = keyOf(row);
-            if (currentPodcast?.id === id) {
+    return useCallback(
+        (episode: EpisodeToPlay, beforeStart?: () => void) => {
+            if (currentPodcast?.id === episode.id) {
                 if (isPlaying) pause();
                 else resumeWithGesture();
                 return;
             }
-            playPodcast({
-                id,
+            beforeStart?.();
+            playPodcast(episode);
+        },
+        [currentPodcast?.id, isPlaying, pause, resumeWithGesture, playPodcast],
+    );
+}
+
+const keyOf = (row: ListeningRow) => `${row.podcast.id}:${row.episode.id}`;
+
+/** Play, pause or resume an episode from a list that spans shows (continue listening, new episodes). */
+export function usePlayEpisode() {
+    const { currentPodcast, isPlaying } = useAudio();
+    const toggleEpisode = useEpisodeToggle();
+
+    const toggle = useCallback(
+        (row: ListeningRow) =>
+            toggleEpisode({
+                id: keyOf(row),
                 title: row.episode.title,
                 podcastTitle: row.podcast.title,
                 coverUrl: row.episode.coverUrl || row.podcast.coverUrl || "",
                 duration: row.episode.duration,
                 progress: row.episode.progress ?? null,
-            });
-        },
-        [currentPodcast?.id, isPlaying, pause, resumeWithGesture, playPodcast],
+            }),
+        [toggleEpisode],
     );
 
     const isPlayingRow = useCallback(
