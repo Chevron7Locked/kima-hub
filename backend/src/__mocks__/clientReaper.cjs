@@ -107,3 +107,28 @@ afterAll(async () => {
         await Promise.all(open.map(reap));
     }
 });
+
+// Jest gives each test file its own module registry, so every file that loads utils/db gets
+// its own Prisma client and pool, and a worker kept every finished file's connections open
+// until the run outgrew Postgres. Clients register at birth and close when their file ends.
+const prismaClients = [];
+try {
+    const prismaModule = require('@prisma/client');
+    const Base = prismaModule.PrismaClient;
+    if (!Base.__testReaperPatched) {
+        class TrackedPrismaClient extends Base {
+            constructor(...args) {
+                super(...args);
+                prismaClients.push(this);
+            }
+        }
+        TrackedPrismaClient.__testReaperPatched = true;
+        prismaModule.PrismaClient = TrackedPrismaClient;
+    }
+} catch (err) {
+    // A suite without the generated client has no connections to close.
+}
+
+afterAll(async () => {
+    await Promise.all(prismaClients.splice(0).map((client) => client.$disconnect().catch(() => {})));
+});

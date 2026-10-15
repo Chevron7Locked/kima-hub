@@ -14,6 +14,10 @@ process.env.REDIS_URL ??= REDIS_URL_FALLBACK;
 process.env.SETTINGS_ENCRYPTION_KEY ??= '/pqt6ujDwltWiWSK1uSkpQOfwXQpORT0CWScZ8m66Kg=';
 // Required by config.ts's zod env validation (which process.exit(1)s if missing).
 process.env.MUSIC_PATH ??= '/music';
+// Each worker's Prisma pool. The production default (20) times up to 15 workers is far past
+// Postgres's 100 connections; 5 keeps every worker's open client (clientReaper.cjs closes each
+// file's when it ends) and the global setup under it.
+process.env.DATABASE_POOL_SIZE ??= '5';
 
 // Always redirect each worker onto its own database (`<base>_w<id>`, created by
 // test-global-setup.cjs) and its own Redis database (numbered by worker; Redis
