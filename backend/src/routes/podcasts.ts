@@ -2,7 +2,7 @@ import { Router, Response } from "express";
 import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
-import { prisma } from "../utils/db";
+import { prisma, Prisma } from "../utils/db";
 import { rssParserService } from "../services/rss-parser";
 import { parseRangeHeader } from "../utils/rangeParser";
 import { safeError } from "../utils/errors";
@@ -686,6 +686,19 @@ router.get("/:id/episodes", requireAuth, async (req, res) => {
  * POST /podcasts/subscribe
  * Subscribe to a podcast by RSS feed URL or iTunes ID
  */
+/** Follow a stored show; following it twice is following it once. */
+async function follow(userId: string, podcast: { id: string; title: string }) {
+    const { count } = await prisma.podcastSubscription.createMany({
+        data: [{ userId, podcastId: podcast.id }],
+        skipDuplicates: true,
+    });
+    return {
+        success: true,
+        podcast: { id: podcast.id, title: podcast.title },
+        message: count > 0 ? "Subscribed successfully" : "Already subscribed",
+    };
+}
+
 router.post("/subscribe", requireAuth, async (req, res) => {
     try {
         const { feedUrl, itunesId } = req.body;
@@ -702,85 +715,33 @@ router.post("/subscribe", requireAuth, async (req, res) => {
         logger.debug(`   Feed URL: ${feedUrl || "N/A"}`);
         logger.debug(`   iTunes ID: ${itunesId || "N/A"}`);
 
-        let finalFeedUrl = feedUrl;
+        const appleId = itunesId === undefined || itunesId === null || itunesId === "" ? null : String(itunesId);
+        const userId = req.user!.id;
 
-        // If only iTunes ID provided, fetch feed URL from iTunes API
-        if (!finalFeedUrl && itunesId) {
-            logger.debug(`    Looking up feed URL from iTunes...`);
-            const itunesResponse = await axios.get(
-                "https://itunes.apple.com/lookup",
-                {
-                    params: { id: itunesId, entity: "podcast" },
-                }
-            );
+        // A show already here is followed as it is, found by either of its keys: Apple can give a show a new feed
+        // address, and the preview finds it by its Apple id.
+        const existing = async (url: string | null) =>
+            prisma.podcast.findFirst({
+                where: { OR: [...(url ? [{ feedUrl: url }] : []), ...(appleId ? [{ itunesId: appleId }] : [])] },
+            });
+        let podcast = await existing(feedUrl || null);
+        if (podcast) return res.json(await follow(userId, podcast));
 
-            if (
-                itunesResponse.data.resultCount === 0 ||
-                !itunesResponse.data.results[0].feedUrl
-            ) {
-                return res
-                    .status(404)
-                    .json({ error: "Podcast not found in iTunes" });
-            }
-
-            finalFeedUrl = itunesResponse.data.results[0].feedUrl;
-            logger.debug(`   Found feed URL: ${finalFeedUrl}`);
+        // Only an Apple id given (checked above that one of the two is): Apple names the feed.
+        const finalFeedUrl: string | null = feedUrl || ((await lookupShows([appleId!])).get(appleId!)?.feedUrl ?? null);
+        if (!finalFeedUrl) {
+            return res.status(404).json({ error: "Podcast not found in iTunes" });
         }
+        if (!feedUrl) {
+            podcast = await existing(finalFeedUrl);
+            if (podcast) return res.json(await follow(userId, podcast));
+        }
+        logger.debug(`   Feed URL: ${finalFeedUrl}`);
 
         // SSRF validation: block internal/private addresses
         const ssrfError = await validateUrlForFetch(finalFeedUrl);
         if (ssrfError) {
             return res.status(400).json({ error: `Invalid feed URL: ${ssrfError}` });
-        }
-
-        // Check if podcast already exists in database
-        let podcast = await prisma.podcast.findUnique({
-            where: { feedUrl: finalFeedUrl },
-        });
-
-        if (podcast) {
-            logger.debug(`   Podcast exists in database: ${podcast.title}`);
-
-            // Check if user is already subscribed
-            const existingSubscription =
-                await prisma.podcastSubscription.findUnique({
-                    where: {
-                        userId_podcastId: {
-                            userId: req.user!.id,
-                            podcastId: podcast.id,
-                        },
-                    },
-                });
-
-            if (existingSubscription) {
-                logger.debug(`     User already subscribed`);
-                return res.json({
-                    success: true,
-                    podcast: {
-                        id: podcast.id,
-                        title: podcast.title,
-                    },
-                    message: "Already subscribed",
-                });
-            }
-
-            // Subscribe user to existing podcast
-            await prisma.podcastSubscription.create({
-                data: {
-                    userId: req.user!.id,
-                    podcastId: podcast.id,
-                },
-            });
-
-            logger.debug(`   User subscribed to existing podcast`);
-            return res.json({
-                success: true,
-                podcast: {
-                    id: podcast.id,
-                    title: podcast.title,
-                },
-                message: "Subscribed successfully",
-            });
         }
 
         // Parse RSS feed to get podcast and episodes
@@ -793,29 +754,34 @@ router.post("/subscribe", requireAuth, async (req, res) => {
 
         // Create podcast in database
         logger.debug(`    Saving podcast to database...`);
-        // The column is a string, but iTunes ids arrive as numbers (e.g. from /discover/top).
-        const rawItunesId = itunesId ?? podcastData.itunesId;
-        const finalItunesId =
-            rawItunesId === null || rawItunesId === undefined || rawItunesId === ""
-                ? null
-                : String(rawItunesId);
+        const finalItunesId = appleId ?? (podcastData.itunesId ? String(podcastData.itunesId) : null);
         logger.debug(`   iTunes ID to save: ${finalItunesId || "NONE"}`);
 
-        podcast = await prisma.podcast.create({
-            data: {
-                feedUrl: finalFeedUrl,
-                title: podcastData.title,
-                author: podcastData.author,
-                description: podcastData.description,
-                imageUrl: podcastData.imageUrl,
-                itunesId: finalItunesId,
-                language: podcastData.language,
-                explicit: podcastData.explicit || false,
-                episodeCount: episodes.length,
-                feedEtag: subscribeResult.etag || null,
-                feedLastModified: subscribeResult.lastModified || null,
-            },
-        });
+        try {
+            podcast = await prisma.podcast.create({
+                data: {
+                    feedUrl: finalFeedUrl,
+                    title: podcastData.title,
+                    author: podcastData.author,
+                    description: podcastData.description,
+                    imageUrl: podcastData.imageUrl,
+                    itunesId: finalItunesId,
+                    language: podcastData.language,
+                    explicit: podcastData.explicit || false,
+                    episodeCount: episodes.length,
+                    feedEtag: subscribeResult.etag || null,
+                    feedLastModified: subscribeResult.lastModified || null,
+                },
+            });
+        } catch (error) {
+            // Two follows of a new show at once: the other request stored it first.
+            if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
+            const stored = await prisma.podcast.findFirst({
+                where: { OR: [{ feedUrl: finalFeedUrl }, ...(finalItunesId ? [{ itunesId: finalItunesId }] : [])] },
+            });
+            if (!stored) throw error;
+            return res.json(await follow(userId, stored));
+        }
 
         await assignCategories(podcast.id, finalItunesId, podcastData.categoryNames);
         logger.debug(`   Podcast created: ${podcast.id}`);
@@ -843,24 +809,7 @@ router.post("/subscribe", requireAuth, async (req, res) => {
 
         logger.debug(`   Episodes saved`);
 
-        // Subscribe user
-        await prisma.podcastSubscription.create({
-            data: {
-                userId: req.user!.id,
-                podcastId: podcast.id,
-            },
-        });
-
-        logger.debug(`   User subscribed successfully`);
-
-        res.json({
-            success: true,
-            podcast: {
-                id: podcast.id,
-                title: podcast.title,
-            },
-            message: "Subscribed successfully",
-        });
+        res.json(await follow(userId, podcast));
     } catch (error: any) {
         // A feed that cannot be fetched or parsed is the feed being
         // unavailable, not the server failing. The status-code rule: an
