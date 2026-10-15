@@ -390,26 +390,40 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
                 return { mood: mood!.id };
             });
 
-            await session.step("the window opens on Kevin's note and one list of what's new", async () => {
+            await session.step("the window opens on the newest release, with the older ones before it", async () => {
                 await expect(dialog).toBeVisible({ timeout: 15_000 });
-                await expect(heading).toHaveText("Kima 1.11");
-                await expect(dialog.getByRole("heading", { name: "A note from Kevin" })).toBeVisible();
-                for (const title of ["A play means you listened", "Clean up old play counts", "The new vibe engine", "The new vibe map"]) {
-                    await expect(dialog.locator("[data-item]").filter({ hasText: title }).first()).toBeVisible();
+                await expect(heading).toHaveText("Kima 1.12");
+                for (const key of ["podcasts.browse", "analysis.middle"]) {
+                    await expect(dialog.locator(`[data-item="${key}"]`)).toBeVisible();
                 }
+                await expect(dialog.locator('[data-release="1.11.0"]')).toContainText("a note from Kevin");
+                await expect(dialog.locator('[data-release="1.10.1"]')).toBeVisible();
             });
 
-            await session.step("each line opens its own page, with its links, and comes back", async () => {
+            await session.step("an older release opens as its own page, and its items come back to it", async () => {
+                await dialog.locator('[data-release="1.10.1"]').click();
+                for (const title of ["A play means you listened", "Clean up old play counts"]) {
+                    await expect(dialog.locator("[data-item]").filter({ hasText: title }).first()).toBeVisible();
+                }
                 await dialog.locator('[data-item="plays.repair"]').click();
                 await expect(dialog.getByRole("link", { name: /Open the cleanup/ })).toHaveAttribute("href", "/stats#false-starts");
                 await dialog.locator("[data-back]").click();
                 await expect(dialog.locator('[data-item="plays.repair"]')).toBeFocused();
+                await dialog.locator("[data-back]").click();
+                await expect(dialog.locator('[data-release="1.10.1"]')).toBeFocused();
+
+                await dialog.locator('[data-release="1.11.0"]').click();
+                await expect(dialog.getByRole("heading", { name: "A note from Kevin" })).toBeVisible();
+                for (const title of ["The new vibe engine", "The new vibe map"]) {
+                    await expect(dialog.locator("[data-item]").filter({ hasText: title }).first()).toBeVisible();
+                }
                 // The wipe is offered only to a library enriched before 1.11.
                 const wipe = dialog.locator('[data-item="engine.wipe"]');
                 if (await wipe.count()) {
                     await wipe.click();
                     await expect(fp.getByTestId("wipe-run")).toBeVisible();
                     await dialog.locator("[data-back]").click();
+                    await expect(wipe).toBeFocused();
                 } else {
                     session.noteNotCovered("release window: the wipe item, since this library was enriched by 1.11 already");
                 }
@@ -430,21 +444,33 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
                 const playlist = await freshGet<{ id: string; items: unknown[] }>(`/playlists/${saved.id}`);
                 expect(playlist.items, "the saved playlist should keep its tracks").toHaveLength(saved.trackCount);
                 await dialog.locator("[data-back]").click();
+                await expect(dialog.locator("#whats-new-release")).toHaveText("Kima 1.11");
             });
 
-            await session.step("the GPU answer is kept through closing, and both releases close", async () => {
-                await dialog.locator('[data-item="gpu.accelerate"]').click();
-                const answered = fp.waitForResponse((r) => r.url().includes("/whats-new/1.11.0/choice"));
-                await dialog.getByRole("button", { name: "Turn it on", exact: true }).click();
-                expect((await answered).status()).toBe(200);
-                await expect(dialog.getByRole("button", { name: "Turn it on", exact: true })).toHaveAttribute("aria-pressed", "true");
+            await session.step("the GPU answer is kept through closing, and every release closes", async () => {
+                // The GPU question is asked only where the GPU runtime can exist (linux on x64).
+                const gpuItem = dialog.locator('[data-item="gpu.accelerate"]');
+                const gpuAsked = (await gpuItem.count()) > 0;
+                if (gpuAsked) {
+                    await gpuItem.click();
+                    const answered = fp.waitForResponse((r) => r.url().includes("/whats-new/1.11.0/choice"));
+                    await dialog.getByRole("button", { name: "Turn it on", exact: true }).click();
+                    expect((await answered).status()).toBe(200);
+                    await expect(dialog.getByRole("button", { name: "Turn it on", exact: true })).toHaveAttribute("aria-pressed", "true");
+                } else {
+                    session.noteNotCovered("release window: the GPU question, which this host does not ask (not linux on x64)");
+                }
                 const older = fp.waitForResponse((r) => r.url().includes("/whats-new/1.10.1/dismiss"));
                 const dismissed = fp.waitForResponse((r) => r.url().includes("/whats-new/1.11.0/dismiss"));
+                const newest = fp.waitForResponse((r) => r.url().includes("/whats-new/1.12.0/dismiss"));
                 await fp.getByTestId("whatsnew-done").click();
                 expect((await older).status()).toBe(200);
+                expect((await newest).status()).toBe(200);
                 const body = (await (await dismissed).json()) as { recordedDefaults: unknown[] };
-                expect(JSON.stringify(body.recordedDefaults), "an explicit answer must not be overwritten").not.toContain("gpu.accelerate");
-                expect((await getJson<{ enabled: boolean }>("/system-settings/gpu")).enabled).toBe(true);
+                if (gpuAsked) {
+                    expect(JSON.stringify(body.recordedDefaults), "an explicit answer must not be overwritten").not.toContain("gpu.accelerate");
+                    expect((await getJson<{ enabled: boolean }>("/system-settings/gpu")).enabled).toBe(true);
+                }
                 await expect(dialog).toBeHidden({ timeout: 10_000 });
                 const pending = await freshGet<{ releases: unknown[] }>("/whats-new/pending");
                 expect(pending.releases).toHaveLength(0);
@@ -453,11 +479,12 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
                 await expect(dialog).toBeHidden();
             });
 
-            await session.step("the version number reopens the window, and Escape closes it", async () => {
+            await session.step("with everything read, the version number opens the changelog", async () => {
                 await fp.getByRole("button", { name: /what's new in v/i }).click();
-                await expect(dialog).toBeVisible({ timeout: 10_000 });
-                await fp.keyboard.press("Escape");
-                await expect(dialog).toBeHidden({ timeout: 10_000 });
+                await fp.waitForURL(/\/changelog$/, { timeout: 10_000 });
+                await expect(dialog).toBeHidden();
+                await expect(fp.locator('[id="cl-1.12.0"]')).toBeVisible({ timeout: 10_000 });
+                await expect(fp.locator("main")).toContainText(/podcast browser/i);
             });
         } finally {
             session.setActivePage(page);
