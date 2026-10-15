@@ -16,6 +16,7 @@ import { formatDate } from "../utils";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Button } from "@/components/ui/Button";
 import { CachedImage } from "@/components/ui/CachedImage";
+import { coverArtUrl } from "@/lib/cover-art";
 import { cascadeStyle } from "@/lib/motion";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 
@@ -51,7 +52,8 @@ function EpisodeRow({
     const percent = episode.progress ? clampPercent(episode.progress.progress) : 0;
     const finished = Boolean(episode.progress?.isFinished);
     const hasDescription = Boolean(episode.description?.trim());
-    const cover = episode.imageUrl || fallbackCoverUrl;
+    // Through the cover proxy like every other image: the page's policy lets only a few image hosts load directly.
+    const cover = coverArtUrl(episode.imageUrl || fallbackCoverUrl, 112);
 
     const metaBits = [
         formatDate(episode.publishedAt),
