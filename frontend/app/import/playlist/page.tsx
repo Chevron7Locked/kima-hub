@@ -131,10 +131,12 @@ function ImportPlaylistPageContent() {
     const [isLoading, setIsLoading] = useState(false);
     const [previewJobId, setPreviewJobId] = useState<string | null>(null);
     const [preview, setPreview] = useState<ImportPreview | null>(null);
-    const { canAcquire } = usePublicConfig();
+    const { canAcquire, settled: permissionKnown } = usePublicConfig();
     const [selectedAlbums, setSelectedAlbums] = useState<Set<string>>(
         new Set()
     );
+    // Someone who may not start downloads imports only what the library has.
+    const albumCount = canAcquire ? selectedAlbums.size : 0;
     const [playlistName, setPlaylistName] = useState("");
     const [importJob, setImportJob] = useState<ImportJob | null>(null);
     const [refreshStatusMessage, setRefreshStatusMessage] = useState<
@@ -344,7 +346,7 @@ function ImportPlaylistPageContent() {
             );
 
             setImportJob(pendingImportJob(response.jobId, {
-                albumsTotal: canAcquire ? selectedAlbums.size : 0,
+                albumsTotal: albumCount,
                 tracksMatched: preview.summary.inLibrary,
                 tracksTotal: preview.summary.total,
                 tracksDownloadable: preview.summary.downloadable,
@@ -815,24 +817,22 @@ function ImportPlaylistPageContent() {
                             <Button
                                 variant="primary"
                                 onClick={handleStartImport}
-                                disabled={
-                                    preview.summary.inLibrary === 0 &&
-                                    selectedAlbums.size === 0
-                                }
+                                disabled={!permissionKnown || (preview.summary.inLibrary === 0 && albumCount === 0)}
                                 isLoading={isLoading}
                                 className="flex-1 bg-success hover:bg-success hover:brightness-110"
                             >
                                 {isLoading ? (
                                     "Starting..."
-                                ) : preview.summary.inLibrary > 0 &&
-                                  selectedAlbums.size > 0 ? (
-                                    `Import ${preview.summary.inLibrary} songs + Download ${selectedAlbums.size} albums`
+                                ) : preview.summary.inLibrary > 0 && albumCount > 0 ? (
+                                    `Import ${preview.summary.inLibrary} songs + Download ${albumCount} albums`
                                 ) : preview.summary.inLibrary > 0 ? (
                                     `Import ${preview.summary.inLibrary} songs`
-                                ) : selectedAlbums.size > 0 ? (
-                                    `Download ${selectedAlbums.size} albums`
-                                ) : (
+                                ) : albumCount > 0 ? (
+                                    `Download ${albumCount} albums`
+                                ) : canAcquire ? (
                                     "Select albums to download"
+                                ) : (
+                                    "None of these songs are in your library"
                                 )}
                             </Button>
                         </div>
