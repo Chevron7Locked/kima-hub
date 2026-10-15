@@ -28,7 +28,7 @@ export function SubsonicSection() {
     const [message, setMessage] = useState("");
     const [revoking, setRevoking] = useState<string | null>(null);
     const config = usePublicConfig();
-    const serverUrl = config.publicUrl || (config.loaded && typeof window !== "undefined" ? window.location.origin : "");
+    const serverUrl = config.publicUrl || (config.settled && typeof window !== "undefined" ? window.location.origin : "");
 
     useEffect(() => {
         loadApiKeys();

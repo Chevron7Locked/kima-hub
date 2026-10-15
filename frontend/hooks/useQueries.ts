@@ -382,12 +382,13 @@ export function usePodcastQuery(
  * Until the server answers, downloads read as not allowed: the acquire routes are operator-only by default.
  */
 export function usePublicConfig() {
-    const { data } = useQuery({
+    const { data, isError } = useQuery({
         queryKey: ["system", "public-config"],
         queryFn: () => api.getPublicConfig(),
         staleTime: 5 * 60 * 1000,
     });
-    return { publicUrl: data?.publicUrl ?? "", canAcquire: data?.canAcquire === true, loaded: data !== undefined };
+    // Settled: answered, or failed (and nothing cached to fall back on).
+    return { publicUrl: data?.publicUrl ?? "", canAcquire: data?.canAcquire === true, settled: data !== undefined || isError };
 }
 
 /** Apple's chart for a category, or the overall chart for null. */
