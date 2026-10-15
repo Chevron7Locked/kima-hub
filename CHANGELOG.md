@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Leaving or reopening a page no longer reports errors.** Requests the browser cancels when you leave a page were logged as failures, and a page brought back from the background on a phone could stop reporting real errors at all.
 - **The page after onboarding** no longer starts a second Audiobookshelf sync (or logs errors when Audiobookshelf is off).
 - **Moving a song in a playlist shows at once**, reversed or not, instead of after the page refreshes.
+- **Episode artwork shows on every show page.** Episodes with their own art were drawn straight from the feed's host, which the app's security policy blocks for most hosts, so their art was missing (and errors were logged). It now loads through Kima, like every other image.
 - **Escape in a confirmation closes only the confirmation**, not the window behind it, and focus goes back to the button that opened it.
 - **A show you just followed appears in search right away**, and one you removed disappears.
 - **The artist play queue skips rows it cannot stream.** `play-tracks` now serves only library-owned albums with uncorrupt files still on disk — the same rule the search doors use — so a failed or still-pending download can no longer ride into an iOS queue as a 404. (Live example on the test stack: the endpoint served 413 rows where 410 were playable.)
