@@ -107,6 +107,8 @@ describe("/changelog", () => {
         wipe.mockRejectedValueOnce(new Error("down"));
         await click(container.querySelector<HTMLElement>('[data-testid="wipe-run"]')!);
         expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+        // Drawn at the page's top level, never inside the window or page that asked.
+        expect(container.contains(document.querySelector('[role="dialog"]'))).toBe(false);
         expect(wipe).not.toHaveBeenCalled();
         await click(Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent?.trim() === "Wipe and re-run") as HTMLElement);
         expect(wipe).toHaveBeenCalledTimes(1);

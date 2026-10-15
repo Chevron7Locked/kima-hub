@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
@@ -59,7 +60,9 @@ export function ConfirmDialog({
         onClose();
     };
 
-    return (
+    // Drawn at the page's top level: inside an animated or clipped parent (a window, a panel), a fixed overlay is
+    // sized and cut to that parent instead of the page.
+    const overlay = (
         <div
             className="fixed inset-0 bg-black/75 flex items-center justify-center z-(--z-modal) p-4 transition-opacity duration-200"
             onClick={onClose}
@@ -114,4 +117,5 @@ export function ConfirmDialog({
             </div>
         </div>
     );
+    return typeof document === "undefined" ? overlay : createPortal(overlay, document.body);
 }
