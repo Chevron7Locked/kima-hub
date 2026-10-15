@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 
 const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
+// The dialogs open now, oldest first. Escape belongs to the newest alone.
+const openDialogs: symbol[] = [];
+
 /* Modal dialog behaviour: Escape closes, Tab stays inside the dialog, the page
  * behind does not scroll, and focus returns to whatever opened it. */
 export function useDialog(
@@ -44,14 +47,18 @@ export function useDialog(
             (initialFocusRef?.current ?? focusables()[0] ?? dialogRef.current)?.focus();
         }
 
+        // Escape is caught on its way down to the page, before any other listener, and only the newest open dialog
+        // answers it: the page, a window or a menu behind it, or a dialog under it, never also closes on the same key.
+        const self = Symbol("dialog");
+        openDialogs.push(self);
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key !== "Escape" || openDialogs[openDialogs.length - 1] !== self) return;
+            e.preventDefault();
+            e.stopPropagation();
+            onCloseRef.current();
+        };
+
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape") {
-                // The open dialog alone answers Escape: a window or page behind it never also closes or goes back.
-                e.preventDefault();
-                e.stopPropagation();
-                onCloseRef.current();
-                return;
-            }
             if (e.key !== "Tab") return;
             const items = focusables();
             if (items.length === 0) return;
@@ -68,8 +75,11 @@ export function useDialog(
 
         const overflow = document.body.style.overflow;
         document.body.style.overflow = "hidden";
+        document.addEventListener("keydown", handleEscape, true);
         document.addEventListener("keydown", handleKeyDown);
         return () => {
+            openDialogs.splice(openDialogs.indexOf(self), 1);
+            document.removeEventListener("keydown", handleEscape, true);
             document.removeEventListener("keydown", handleKeyDown);
             document.body.style.overflow = overflow;
             opener?.focus();
