@@ -396,6 +396,11 @@ router.post("/backfill-genres", requireAdmin, async (_req, res) => {
   }
 });
 
+/** An artist as a route names one: by id, by name (any case) or by MusicBrainz id. */
+const artistRef = (idParam: string) => ({
+  OR: [{ id: idParam }, { name: { equals: idParam, mode: "insensitive" as const } }, { mbid: idParam }],
+});
+
 // The play queue for one artist, in one response: what a Play All tap needs
 // and nothing else, in the canonical order clients consume as-given — owned
 // albums by year desc, title asc, disc/track within album (untagged disc =
@@ -406,13 +411,7 @@ router.get("/artists/:id/play-tracks", async (req, res) => {
     const idParam = req.params.id;
 
     const artist = await prisma.artist.findFirst({
-      where: {
-        OR: [
-          { id: idParam },
-          { name: { equals: idParam, mode: "insensitive" } },
-          { mbid: idParam },
-        ],
-      },
+      where: artistRef(idParam),
       select: {
         id: true,
         name: true,
@@ -507,13 +506,7 @@ router.get("/artists/:id", async (req, res) => {
     };
 
     const artist = await prisma.artist.findFirst({
-      where: {
-        OR: [
-          { id: idParam },
-          { name: { equals: idParam, mode: "insensitive" } },
-          { mbid: idParam },
-        ],
-      },
+      where: artistRef(idParam),
       include: artistInclude,
     });
 
