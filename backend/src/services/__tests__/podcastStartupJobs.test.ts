@@ -74,3 +74,33 @@ it("measures cached episodes once, not on every start", async () => {
     expect(await measureCachedEpisodeLengths()).toBe(0);
     expect(parseFile).toHaveBeenCalledTimes(1);
 });
+
+it("tries again, on later starts, only the cached files it could not read", async () => {
+    const dir = path.join(cacheRoot, "podcast-audio");
+    await fs.promises.rm(path.join(dir, ".lengths-measured"), { force: true });
+    await prisma.podcast.create({
+        data: {
+            id: "pod_startup_len2", feedUrl: "https://f.example.invalid/len2", title: "Len2",
+            episodes: { create: [{ id: "pod_startup_ep2", guid: "l2", title: "Ep2", audioUrl: "https://a.invalid/2.mp3", duration: 100, publishedAt: new Date() }] },
+        },
+    });
+    await fs.promises.writeFile(path.join(dir, "pod_startup_ep2.mp3"), "audio");
+    (parseFile as jest.Mock).mockReset();
+    // First start: the earlier episode reads, this one cannot be read.
+    (parseFile as jest.Mock).mockImplementation(async (file: string) =>
+        file.endsWith("pod_startup_ep2.mp3") ? Promise.reject(new Error("busy disk")) : { format: { duration: 5167.6 } },
+    );
+    await measureCachedEpisodeLengths();
+    expect((await prisma.podcastEpisode.findUniqueOrThrow({ where: { id: "pod_startup_ep2" } })).duration).toBe(100);
+
+    // Next start: only that file is tried, and now it reads.
+    (parseFile as jest.Mock).mockReset();
+    (parseFile as jest.Mock).mockResolvedValue({ format: { duration: 130.4 } });
+    expect(await measureCachedEpisodeLengths()).toBe(1);
+    expect((parseFile as jest.Mock).mock.calls.map((c) => path.basename(c[0]))).toEqual(["pod_startup_ep2.mp3"]);
+    expect((await prisma.podcastEpisode.findUniqueOrThrow({ where: { id: "pod_startup_ep2" } })).duration).toBe(130);
+
+    // And after that, nothing is left to try.
+    expect(await measureCachedEpisodeLengths()).toBe(0);
+    expect(parseFile).toHaveBeenCalledTimes(1);
+});

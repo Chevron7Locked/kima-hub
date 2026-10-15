@@ -353,35 +353,49 @@ async function performDownload(
  * fetched, so the feed's itunes:duration is the ad-free length and runs minutes short of the audio.
  * A file whose length cannot be read leaves the stored length as it was.
  */
-export async function recordMeasuredLength(episodeId: string, filePath: string): Promise<boolean> {
+export async function recordMeasuredLength(
+    episodeId: string,
+    filePath: string,
+): Promise<"stored" | "unreadable" | "no-episode"> {
     try {
         const seconds = (await parseFile(filePath)).format.duration;
-        if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return false;
+        if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return "unreadable";
         const { count } = await prisma.podcastEpisode.updateMany({
             where: { id: episodeId },
             data: { duration: Math.round(seconds) },
         });
-        return count > 0;
+        return count > 0 ? "stored" : "no-episode";
     } catch (err) {
         logger.warn(`[PODCAST-DL] Could not read the length of ${filePath}: ${(err as Error).message}`);
-        return false;
+        return "unreadable";
     }
 }
 
-/** Measure every episode already in the cache: files cached before lengths were measured. */
+/**
+ * Measure every episode already in the cache: files cached before lengths were measured. Only files cached before
+ * downloads measured themselves need this, so it runs once; the marker it leaves lists the files that could not be
+ * read then, and later starts try only those.
+ */
 export async function measureCachedEpisodeLengths(): Promise<number> {
     const cacheDir = getPodcastCacheDir();
-    // Only files cached before downloads measured themselves need this; once they have been, startup skips it.
     const marker = path.join(cacheDir, ".lengths-measured");
-    if (await fs.access(marker).then(() => true, () => false)) return 0;
-    const files = await fs.readdir(cacheDir).catch(() => null);
+    const left = await fs.readFile(marker, "utf8").then(
+        (text) => text.split("\n").filter((line) => line.endsWith(".mp3")),
+        () => null,
+    );
+    const files = left ?? (await fs.readdir(cacheDir).catch(() => null));
     if (!files) return 0;
     let measured = 0;
+    const unreadable: string[] = [];
     for (const file of files) {
         if (!file.endsWith(".mp3")) continue;
-        if (await recordMeasuredLength(path.basename(file, ".mp3"), path.join(cacheDir, file))) measured++;
+        const filePath = path.join(cacheDir, file);
+        if (!(await fs.access(filePath).then(() => true, () => false))) continue;
+        const outcome = await recordMeasuredLength(path.basename(file, ".mp3"), filePath);
+        if (outcome === "stored") measured++;
+        if (outcome === "unreadable") unreadable.push(file);
     }
-    await fs.writeFile(marker, `${new Date().toISOString()}\n`).catch((err) => {
+    await fs.writeFile(marker, [new Date().toISOString(), ...unreadable].join("\n") + "\n").catch((err) => {
         logger.warn(`[PODCAST-DL] Could not mark cached lengths measured: ${(err as Error).message}`);
     });
     if (measured > 0) logger.info(`[PODCAST-DL] Measured the length of ${measured} cached episode(s)`);
