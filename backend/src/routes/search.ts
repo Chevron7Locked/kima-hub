@@ -85,6 +85,7 @@ router.get("/", async (req, res) => {
                 query,
                 limit: searchLimit,
                 genre: genre as string | undefined,
+                userId: req.user!.id,
             });
 
             return res.json(transformSearchResults(serviceResults));
@@ -96,6 +97,7 @@ router.get("/", async (req, res) => {
             type: type as string,
             limit: searchLimit,
             genre: genre as string | undefined,
+            userId: req.user!.id,
         });
 
         res.json(transformSearchResults(serviceResults));

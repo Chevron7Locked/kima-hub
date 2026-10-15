@@ -13,6 +13,11 @@ interface SearchOptions {
     offset?: number;
 }
 
+/** Shows and episodes are each user's own: only those of the shows they follow are searched. */
+interface FollowedSearchOptions extends SearchOptions {
+    userId: string;
+}
+
 export interface ArtistSearchResult {
     id: string;
     name: string;
@@ -84,6 +89,7 @@ export interface SearchByTypeOptions {
     limit?: number;
     offset?: number;
     genre?: string;
+    userId: string;
 }
 
 export interface SearchResults {
@@ -394,29 +400,31 @@ export class SearchService {
         query,
         limit = 20,
         offset = 0,
-    }: SearchOptions): Promise<PodcastSearchResult[]> {
+        userId,
+    }: FollowedSearchOptions): Promise<PodcastSearchResult[]> {
         if (!query || query.trim().length === 0) {
             return [];
         }
 
         const tsquery = this.queryToTsquery(query);
         if (!tsquery) {
-            return this.searchPodcasts({ query, limit, offset });
+            return this.searchPodcasts({ query, limit, offset, userId });
         }
 
         try {
             const results = await prisma.$queryRaw<PodcastSearchResult[]>`
         SELECT
-          id,
-          title,
-          author,
-          description,
-          "imageUrl",
-          "episodeCount",
-          ts_rank("searchVector", to_tsquery('english', ${tsquery})) AS rank
-        FROM "Podcast"
-        WHERE "searchVector" @@ to_tsquery('english', ${tsquery})
-        ORDER BY rank DESC, title ASC
+          p.id,
+          p.title,
+          p.author,
+          p.description,
+          p."imageUrl",
+          p."episodeCount",
+          ts_rank(p."searchVector", to_tsquery('english', ${tsquery})) AS rank
+        FROM "Podcast" p
+        JOIN "PodcastSubscription" s ON s."podcastId" = p.id AND s."userId" = ${userId}
+        WHERE p."searchVector" @@ to_tsquery('english', ${tsquery})
+        ORDER BY rank DESC, p.title ASC
         LIMIT ${limit}
         OFFSET ${offset}
       `;
@@ -425,7 +433,7 @@ export class SearchService {
         } catch (error) {
             logger.error("Podcast FTS search error:", error);
             // Fallback to LIKE search
-            return this.searchPodcasts({ query, limit, offset });
+            return this.searchPodcasts({ query, limit, offset, userId });
         }
     }
 
@@ -433,9 +441,11 @@ export class SearchService {
         query,
         limit = 20,
         offset = 0,
-    }: SearchOptions): Promise<EpisodeSearchResult[]> {
+        userId,
+    }: FollowedSearchOptions): Promise<EpisodeSearchResult[]> {
         const results = await prisma.podcastEpisode.findMany({
             where: {
+                podcast: { subscriptions: { some: { userId } } },
                 OR: [
                     {
                         title: {
@@ -489,14 +499,15 @@ export class SearchService {
         query,
         limit = 20,
         offset = 0,
-    }: SearchOptions): Promise<EpisodeSearchResult[]> {
+        userId,
+    }: FollowedSearchOptions): Promise<EpisodeSearchResult[]> {
         if (!query || query.trim().length === 0) {
             return [];
         }
 
         const tsquery = this.queryToTsquery(query);
         if (!tsquery) {
-            return this.searchEpisodesFallback({ query, limit, offset });
+            return this.searchEpisodesFallback({ query, limit, offset, userId });
         }
 
         try {
@@ -512,7 +523,8 @@ export class SearchService {
           p.title as "podcastTitle",
           ts_rank(e."searchVector", to_tsquery('english', ${tsquery})) AS rank
         FROM "PodcastEpisode" e
-        LEFT JOIN "Podcast" p ON e."podcastId" = p.id
+        JOIN "Podcast" p ON e."podcastId" = p.id
+        JOIN "PodcastSubscription" s ON s."podcastId" = p.id AND s."userId" = ${userId}
         WHERE e."searchVector" @@ to_tsquery('english', ${tsquery})
         ORDER BY rank DESC, e."publishedAt" DESC
         LIMIT ${limit}
@@ -522,7 +534,7 @@ export class SearchService {
             return results;
         } catch (error) {
             logger.error("Episode search error:", error);
-            return this.searchEpisodesFallback({ query, limit, offset });
+            return this.searchEpisodesFallback({ query, limit, offset, userId });
         }
     }
 
@@ -642,7 +654,8 @@ export class SearchService {
         query,
         limit = 20,
         offset = 0,
-    }: SearchOptions): Promise<PodcastSearchResult[]> {
+        userId,
+    }: FollowedSearchOptions): Promise<PodcastSearchResult[]> {
         if (!query || query.trim().length === 0) {
             return [];
         }
@@ -650,6 +663,7 @@ export class SearchService {
         try {
             const results = await prisma.podcast.findMany({
                 where: {
+                    subscriptions: { some: { userId } },
                     OR: [
                         {
                             title: {
@@ -697,7 +711,8 @@ export class SearchService {
         query,
         limit = 10,
         genre,
-    }: SearchOptions & { genre?: string }): Promise<SearchResults> {
+        userId,
+    }: FollowedSearchOptions & { genre?: string }): Promise<SearchResults> {
         if (!query || query.trim().length === 0) {
             return {
                 artists: [],
@@ -710,7 +725,7 @@ export class SearchService {
         }
 
         // Check Redis cache first
-        const cacheKey = `search:all:${normalizeCacheQuery(query)}:${limit}:${genre || ""}`;
+        const cacheKey = `search:all:${userId}:${normalizeCacheQuery(query)}:${limit}:${genre || ""}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
@@ -742,9 +757,9 @@ export class SearchService {
                 this.searchArtists({ query, limit }),
                 this.searchAlbums({ query, limit }),
                 this.searchTracks({ query, limit }),
-                this.searchPodcastsFTS({ query, limit }),
+                this.searchPodcastsFTS({ query, limit, userId }),
                 this.searchAudiobooksFTS({ query, limit }),
-                this.searchEpisodes({ query, limit }),
+                this.searchEpisodes({ query, limit, userId }),
             ]);
 
         const results = {
@@ -806,6 +821,7 @@ export class SearchService {
         limit = 20,
         offset = 0,
         genre,
+        userId,
     }: SearchByTypeOptions): Promise<SearchResults> {
         const results: SearchResults = {
             artists: [],
@@ -821,7 +837,9 @@ export class SearchService {
         }
 
         // Check cache
-        const cacheKey = `search:${type}:${normalizeCacheQuery(query)}:${limit}:${offset}:${genre || ""}`;
+        // Shows and episodes depend on who is asking; the library's music does not.
+        const who = type === "podcasts" || type === "episodes" ? userId : "";
+        const cacheKey = `search:${type}:${who}:${normalizeCacheQuery(query)}:${limit}:${offset}:${genre || ""}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
@@ -849,13 +867,13 @@ export class SearchService {
                 break;
             }
             case "podcasts":
-                results.podcasts = await this.searchPodcastsFTS({ query, limit, offset });
+                results.podcasts = await this.searchPodcastsFTS({ query, limit, offset, userId });
                 break;
             case "audiobooks":
                 results.audiobooks = await this.searchAudiobooksFTS({ query, limit, offset });
                 break;
             case "episodes":
-                results.episodes = await this.searchEpisodes({ query, limit, offset });
+                results.episodes = await this.searchEpisodes({ query, limit, offset, userId });
                 break;
         }
 

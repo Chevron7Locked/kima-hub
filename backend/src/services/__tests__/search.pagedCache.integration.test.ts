@@ -12,7 +12,7 @@ const P = "srchpage";
 const NAMES = ["Quillfeather Alpha", "Quillfeather Beta", "Quillfeather Gamma"];
 
 async function clearCache() {
-    const keys = await redisClient.keys("search:artists:quillfeather*");
+    const keys = await redisClient.keys("search:artists:*quillfeather*");
     if (keys.length) await redisClient.del(...keys);
 }
 
@@ -37,8 +37,8 @@ afterAll(async () => {
 });
 
 it("gives the second page its own results after the first page was cached", async () => {
-    const first = await searchService.searchByType({ query: "quillfeather", type: "artists", limit: 1, offset: 0 });
-    const second = await searchService.searchByType({ query: "quillfeather", type: "artists", limit: 1, offset: 1 });
+    const first = await searchService.searchByType({ query: "quillfeather", type: "artists", limit: 1, offset: 0, userId: "any" });
+    const second = await searchService.searchByType({ query: "quillfeather", type: "artists", limit: 1, offset: 1, userId: "any" });
     expect(first.artists).toHaveLength(1);
     expect(second.artists).toHaveLength(1);
     expect(second.artists[0].id).not.toBe(first.artists[0].id);
