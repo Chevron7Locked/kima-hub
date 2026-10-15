@@ -226,7 +226,7 @@ Kima builds on these projects and services:
 - [AcoustID](https://acoustid.org/) for audio-fingerprint identification
 - [Deezer](https://developers.deezer.com/) for similar artists, artwork and playlist browsing, and [Fanart.tv](https://fanart.tv/) for artist images
 - [LRCLIB](https://lrclib.net/) for lyrics
-- [Apple's iTunes Search API](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/) for podcast search
+- [Apple's iTunes Search API](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/) and Apple Podcasts' charts for podcast search and discovery
 - [Odesli](https://odesli.co/) (song.link) for resolving links from other music services during playlist import, and [yt-dlp](https://github.com/yt-dlp/yt-dlp) for reading playlist links
 - [LAION CLAP](https://huggingface.co/laion/clap-htsat-unfused) for the sound model, and [Essentia](https://essentia.upf.edu/) with its MusiCNN models for audio analysis
 - [DEAM](https://cvml.unige.ch/databases/DEAM/) for the human valence and arousal ratings behind the feel part of matching

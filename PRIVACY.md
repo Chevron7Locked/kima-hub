@@ -21,7 +21,7 @@ Kima reaches out to third-party services for features you use, the same way your
 | AcoustID | Identifying files with missing tags | An audio fingerprint of the file plus its claimed name |
 | LRCLIB | Lyrics | Track, artist, album, duration |
 | ListenBrainz | Similar artists and scrobbling | Only if you connect your account; then your plays, to your own account |
-| iTunes | Podcast search | Your search text |
+| Apple Podcasts (iTunes) | Podcast search, charts, categories, show details | Your search text; the chart country set in Settings; the Apple ids of shows Kima lists for you, opens or you follow |
 | Deezer, Spotify, YouTube | Playlist import and previews | Only the playlist links you paste, using credentials you supply |
 | Lidarr, Soulseek, Audiobookshelf | Downloads and audiobooks | Your own servers, your own network |
 

@@ -82,11 +82,11 @@ Spotify playlists are read from their public pages, so you do not need to connec
 
 ## Artwork and identification keys
 
-Under **Settings > AI & Artwork**:
+Under **Settings > Artwork**:
 
 - **Fanart.tv** supplies extra artist artwork. Turn it on and add a key from fanart.tv.
 - **AcoustID** identifies files that have missing tags, by audio fingerprint. Kima has a shared key built in. You can add your own to avoid the shared key's rate limit.
 
 ## Podcasts
 
-Search and subscribe to podcasts from the Podcasts page. Search uses Apple's iTunes Search service, and episodes are streamed from the feeds the shows publish.
+Browse and follow podcasts from the Podcasts page. Discovery comes from Apple Podcasts: its top charts and categories (in the country set under **Settings > Podcasts**), and shows like the ones you follow by their categories. Searching for new shows uses Apple's iTunes Search service; searching your own shows finds their episodes too. Episodes stream from the feeds the shows publish, and a show you have not followed can play its first episode before you decide.

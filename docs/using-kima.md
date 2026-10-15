@@ -50,7 +50,7 @@ A playlist page has a share button. It makes a link that anyone can open without
 
 ## Podcasts and audiobooks
 
-Search for a show on the Podcasts page and subscribe. Episodes stream from the show's own feed, and Kima saves your place so you can carry on from another device.
+The Podcasts page starts with what you are partway through and the newest episode from each show you follow, then shows picked from your shows' categories, every category to browse, and the top charts from Apple Podcasts. Search for a show, play its first episode to get a feel for it, and follow it. Episodes stream from the show's own feed, and Kima saves your place so you can carry on from another device.
 
 Audiobooks come from [Audiobookshelf](integrations.md#audiobookshelf). Your place is saved back to it.
 

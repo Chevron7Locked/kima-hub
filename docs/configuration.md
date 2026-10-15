@@ -10,13 +10,14 @@ Most of Kima is configured in the web app, under **Settings**. Environment varia
 | Native Apps | Subsonic-client tokens and the server address to give a client | Everyone |
 | Playback | Streaming quality, track title format, queue limit | Everyone |
 | Scrobbling | A ListenBrainz user token, to record your plays there | Everyone |
-| Download Preferences | Primary download source, Soulseek concurrent downloads | Admins |
+| Download Preferences | Primary download source, Soulseek concurrent downloads, and Member Downloads (off by default: only admins can start downloads unless it is on) | Admins |
+| Podcasts | The country whose Apple Podcasts charts drive podcast discovery (default United States) | Admins |
 | Download Services | Lidarr | Admins |
 | Media Servers | Audiobookshelf | Admins |
 | P2P Networks | Soulseek | Admins |
-| AI & Artwork | Fanart.tv and AcoustID keys | Admins |
-| Storage | Music and download paths, the server address | Admins |
-| Library Enrichment | The five enrichment steps, worker counts, caches, the NVIDIA GPU switches, wipe and re-run | Admins |
+| Artwork | Fanart.tv and AcoustID keys | Admins |
+| Storage | Music and download paths, the server address, and Check for updates (a daily look at GitHub for a newer release) | Admins |
+| Library Enrichment | The five enrichment steps, worker counts, caches, the NVIDIA GPU switches, re-run from a chosen step, wipe and re-run | Admins |
 | Corrupt Tracks | Files that could not be read | Admins |
 | Users | Create and delete accounts, set roles | Admins |
 
