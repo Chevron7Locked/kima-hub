@@ -105,9 +105,28 @@ export const RELEASES: Release[] = [
         version: "1.12.0",
         title: "Kima 1.12",
         summary:
-            "Per-step enrichment reruns, update pings, and fixes.",
+            "A real podcast browser, analysis that listens to the middle of each song, per-step enrichment reruns, update pings, and fixes.",
         date: "2026-10-13",
         items: [
+            {
+                kind: "note",
+                key: "podcasts.browse",
+                title: "Podcasts, browsed properly",
+                summary:
+                    "Apple Podcasts' charts and categories, the newest episode from each of your shows, and a first-episode sample before you follow.",
+                body:
+                    "The podcasts page works like a podcast app now. It starts with what you're partway through and the newest episode from each show you follow, then rows from the categories your shows are in, every category to browse, and the top charts. Discovery comes from Apple Podcasts' charts and categories instead of keyword searches, and search finds episodes of your shows as well as new shows.\n\nA show you haven't followed opens with its description, categories and latest episodes, and you can play its first episode (usually the one where the hosts explain the show) before deciding.\n\nEpisode lengths are measured from the audio itself, so the clock no longer stops short on episodes with ads stitched in. Operators pick the chart country in Settings → Podcasts.",
+                links: [{ label: "Open podcasts", href: "/podcasts" }],
+            },
+            {
+                kind: "note",
+                key: "analysis.middle",
+                title: "Analysis listens to the middle of each song",
+                summary: "Tempo, key and moods come from the middle 90 seconds instead of the last 90.",
+                body:
+                    "Audio analysis used to read each song's last 90 seconds, so a fade-out or a silent tail could stand in for the whole song. It now reads the middle 90 seconds. Mood mixes, radio stations, and the tempo, key and mood tags you see come from this reading. Song matching and the vibe map don't change: they already sample the whole song.\n\nSongs analysed before 1.12 keep their old readings until audio analysis is re-run from Library Enrichment.",
+                links: [{ label: "Open Library Enrichment settings", href: "/settings#cache" }],
+            },
             {
                 kind: "note",
                 key: "enrichment.rerun",
