@@ -265,10 +265,30 @@ export class MusicScannerService {
             audioFiles.map((f) => path.relative(musicPath, f))
         );
 
+        // The walk lists regular files only, so a file it did not list may still be on
+        // disk (a symlink, a path that normalises differently): those are checked there.
+        const pathCandidates = existingTracks.filter(
+            (t) => !scannedPaths.has(t.filePath)
+        );
+        const existChecks = await Promise.all(
+            pathCandidates.map(async (t) => {
+                const fullPath = path.join(musicPath, t.filePath);
+                try {
+                    await fs.promises.access(fullPath);
+                    return { track: t, exists: true };
+                } catch {
+                    return { track: t, exists: false };
+                }
+            })
+        );
+        const onDisk = new Set(existChecks.filter((c) => c.exists).map((c) => c.track.id));
+
         // Cleared here, not in the per-file upsert: a restored mount can bring a file
-        // back with its old mtime, and the unchanged-file skip would never reach it.
+        // back with its old mtime, and the unchanged-file skip would never reach it. A
+        // flag stays only on a file this scan could not find, so the reconcile below
+        // never retires a track whose file is there.
         const returned = existingTracks.filter(
-            (t) => t.missingSince !== null && scannedPaths.has(t.filePath)
+            (t) => t.missingSince !== null && (scannedPaths.has(t.filePath) || onDisk.has(t.id))
         );
         if (returned.length > 0) {
             const returnedIds = returned.map((t) => t.id);
@@ -284,24 +304,8 @@ export class MusicScannerService {
             );
         }
 
-        const pathCandidates = existingTracks.filter(
-            (t) => !scannedPaths.has(t.filePath)
-        );
-
         if (pathCandidates.length > 0) {
-            // Safety: verify files are truly missing (guard against path normalization issues)
             const beforeCount = pathCandidates.length;
-            const existChecks = await Promise.all(
-                pathCandidates.map(async (t) => {
-                    const fullPath = path.join(musicPath, t.filePath);
-                    try {
-                        await fs.promises.access(fullPath);
-                        return { track: t, exists: true };
-                    } catch {
-                        return { track: t, exists: false };
-                    }
-                })
-            );
             const vanished = existChecks
                 .filter((c) => !c.exists)
                 .map((c) => c.track);

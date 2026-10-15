@@ -117,6 +117,35 @@ describe("scanLibrary in delete mode", () => {
         }
     });
 
+    it("keeps a flagged track whose file is on disk again, even where the folder walk does not list it", async () => {
+        // The walk lists regular files only; a file moved to another disk and linked back is a symlink.
+        const spy = jest.spyOn(config, "music", "get").mockReturnValue({
+            ...config.music, reconcileMode: "delete",
+        });
+        const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "recon-moved-"));
+        try {
+            const scanner = new MusicScannerService();
+            await scanner.scanLibrary(musicDir);
+            fs.unlinkSync(trackFile);
+            const second = await scanner.scanLibrary(musicDir);
+            expect(second.tracksMissing).toBe(1);
+
+            const moved = path.join(elsewhere, "01 - Retired.flac");
+            fs.writeFileSync(moved, "dummy audio bytes");
+            fs.symlinkSync(moved, trackFile);
+            const third = await scanner.scanLibrary(musicDir);
+
+            expect(third.tracksRemoved).toBe(0);
+            const row = await prisma.track.findUnique({ where: { filePath: REL } });
+            expect(row).not.toBeNull();
+            expect(row!.missingSince).toBeNull();
+            expect(await prisma.removalLog.count({ where: { filePath: REL } })).toBe(0);
+        } finally {
+            spy.mockRestore();
+            fs.rmSync(elsewhere, { recursive: true, force: true });
+        }
+    });
+
     it("flag mode (default config) deletes nothing across the same three scans", async () => {
         const scanner = new MusicScannerService();
         await scanner.scanLibrary(musicDir);

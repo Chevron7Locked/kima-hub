@@ -129,7 +129,9 @@ export async function runReconcile(scanStartedAt: Date): Promise<ReconcileResult
     if (config.music.reconcileMode !== "delete") {
         return { removed: 0, artifacts: [], skipped: true };
     }
-    const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt));
+    // Retiring hundreds of tracks cascades through plays, stages and embeddings: Prisma's 5 s default would roll
+    // the sweep back and fail every scan after it. The enrichment re-run allows the same for its wipe.
+    const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt), { timeout: 120_000 });
     await unlinkArtifacts(res.artifacts);
     return { ...res, skipped: false };
 }
