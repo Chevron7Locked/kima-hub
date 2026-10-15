@@ -223,49 +223,10 @@ async function performDownload(
             decompress: false
         });
         
-        const contentLength = upstreamHeaderNumber(response.headers["content-length"]);
-        let expectedBytes = contentLength;
-
-        // If the origin provides Content-Length, treat it as ground truth and persist it.
-        // This prevents us from "accepting" partial caches that later break seeking.
-        if (expectedBytes > 0) {
-            try {
-                const episode = await prisma.podcastEpisode.findUnique({
-                    where: { id: episodeId },
-                    select: { fileSize: true },
-                });
-                const existing = episode?.fileSize || 0;
-                if (!existing) {
-                    await prisma.podcastEpisode.update({
-                        where: { id: episodeId },
-                        data: { fileSize: expectedBytes },
-                    });
-                } else {
-                    const variance = Math.abs(existing - expectedBytes) / existing;
-                    if (variance > 0.01) {
-                        await prisma.podcastEpisode.update({
-                            where: { id: episodeId },
-                            data: { fileSize: expectedBytes },
-                        });
-                    }
-                }
-            } catch {
-                // Non-fatal
-            }
-        } else {
-            // Fallback: use DB fileSize if present (better than nothing)
-            try {
-                const episode = await prisma.podcastEpisode.findUnique({
-                    where: { id: episodeId },
-                    select: { fileSize: true },
-                });
-                if (episode?.fileSize && episode.fileSize > 0) {
-                    expectedBytes = episode.fileSize;
-                }
-            } catch (err) {
-                logger.warn(`[PODCAST-DL] Could not fetch episode fileSize: ${(err as Error).message}`);
-            }
-        }
+        // Only the host's own Content-Length can say a download is incomplete; a feed's declared enclosure length
+        // can belong to another file. Nothing is awaited before the stream's handlers attach below, or a
+        // connection dropped meanwhile would never be noticed.
+        const expectedBytes = upstreamHeaderNumber(response.headers["content-length"]);
 
         logger.debug(
             `[PODCAST-DL] Downloading ${episodeId} (${expectedBytes > 0 ? Math.round(expectedBytes / 1024 / 1024) : 0}MB)`
@@ -337,8 +298,9 @@ async function performDownload(
             }
         }
         
-        // Move temp file to final location
+        // Move temp file to final location; the episode's size is now the size of the copy held.
         await fs.rename(tempPath, finalPath);
+        await prisma.podcastEpisode.updateMany({ where: { id: episodeId }, data: { fileSize: stats.size } });
         await recordMeasuredLength(episodeId, finalPath);
         
         // Record in database
