@@ -437,7 +437,7 @@ class EnrichmentService {
         // Reassign canonical rgMbid via shared helper (handles Album update + OwnedAlbum migration)
         if (data.rgMbid && data.rgMbid.trim() !== "") {
             try {
-                await reassignAlbumRgMbid(albumId, data.rgMbid.trim());
+                await reassignAlbumRgMbid(albumId, data.rgMbid.trim(), { source: "search" });
             } catch (err) {
                 if (err instanceof DuplicateMbidError) {
                     logger.debug(

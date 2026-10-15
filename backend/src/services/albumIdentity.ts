@@ -10,6 +10,7 @@ import { pgCollapseSpace, pgLower, pgTrim, stripNonAlnum } from "./pgTextRules";
 import { LIBRARY_LOCATION } from "./libraryFilters";
 import { musicBrainzService } from "./musicbrainz";
 import { stripAlbumEdition } from "../utils/artistNormalization";
+import { DuplicateMbidError, REPLACEABLE_SOURCES, reassignAlbumRgMbid } from "./mbidReassign";
 
 /**
  * Titles too generic to identify a release group on their own. A cross-artist
@@ -117,7 +118,18 @@ export async function resolveAlbum(
     const identityKey = albumIdentityKey(title) || `untitled-${input.artistId}`;
 
     const byMbid = await db.album.findUnique({ where: { rgMbid } });
-    if (byMbid) return byMbid;
+    if (byMbid) {
+        // A file's tag confirming an id Kima chose makes it the files' own.
+        if (input.rgMbid?.trim() && REPLACEABLE_SOURCES.includes(byMbid.rgMbidSource ?? "")) {
+            // Only while the source is still Kima's: a person's edit meanwhile is kept.
+            await db.album.updateMany({
+                where: { id: byMbid.id, rgMbidSource: { in: [...REPLACEABLE_SOURCES] } },
+                data: { rgMbidSource: "tag" },
+            });
+            return (await db.album.findUnique({ where: { id: byMbid.id } })) ?? byMbid;
+        }
+        return byMbid;
+    }
 
     const existing = await db.album.findUnique({
         where: {
@@ -125,15 +137,18 @@ export async function resolveAlbum(
         },
     });
     if (existing) {
-        if (input.rgMbid?.trim() && existing.rgMbid.startsWith("temp-")) {
+        // The file's own release-group tag replaces a placeholder, or an id Kima chose (the
+        // AcoustID vote, a name search); never one from tags or a person. Rows keyed on the old id
+        // move too, in their own transaction (the scanner passes the global client).
+        const tagged = input.rgMbid?.trim();
+        if (tagged && (existing.rgMbid.startsWith("temp-") || REPLACEABLE_SOURCES.includes(existing.rgMbidSource ?? ""))) {
             try {
-                return await db.album.update({
-                    where: { id: existing.id },
-                    data: { rgMbid: input.rgMbid!.trim() },
-                });
-            } catch (error: any) {
-                if (error?.code !== "P2002") throw error;
+                await reassignAlbumRgMbid(existing.id, tagged, { source: "tag", expectedOld: existing.rgMbid });
+            } catch (error) {
+                if (!(error instanceof DuplicateMbidError)) throw error;
             }
+            // Moved, or changed meanwhile by someone else: either way the row as it is now.
+            return (await db.album.findUnique({ where: { id: existing.id } })) ?? existing;
         }
         return existing;
     }
@@ -166,6 +181,7 @@ export async function resolveAlbum(
                 // The canonical title; a later display override updates sortName itself.
                 sortName: artistSortName(title),
                 rgMbid,
+                rgMbidSource: input.rgMbid?.trim() ? "tag" : null,
                 year: input.year ?? null,
             },
         });

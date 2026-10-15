@@ -10,6 +10,10 @@ datasource db {
 model Album {
   id               String                   @id @default(cuid())
   rgMbid           String                   @unique
+  /// Where rgMbid came from: "tag" (the files), "acoustid" (identification's album vote), "search"
+  /// (the manual album enrich's name search), "editor" (a person). Null on older rows and on
+  /// placeholders, treated as "tag". A file's tag replaces "acoustid" and "search" ids.
+  rgMbidSource     String?
   artistId         String
   title            String
   identityKey      String                   @default("")

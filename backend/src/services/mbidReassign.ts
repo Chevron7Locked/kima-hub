@@ -1,9 +1,9 @@
 /**
- * MBID reassignment shared by the editor routes and enrichment. Unique
- * violations become DuplicateMbidError (409); an unchanged value or a missing
- * row is a no-op.
+ * MBID reassignment shared by the editor routes, enrichment and identification. Unique
+ * violations become DuplicateMbidError (409); an unchanged value or a missing row is a no-op.
  */
 
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 
@@ -24,127 +24,166 @@ export class DuplicateMbidError extends Error {
 }
 
 /**
- * Change an album's rgMbid in one transaction and move the rows keyed on the
- * old string (OwnedAlbum, DiscoveryAlbum) to the new one.
+ * Where an album's rgMbid came from (`Album.rgMbidSource`): the files' tags, identification's
+ * AcoustID vote, the manual album enrich's name search, or a person in the editor.
+ */
+export type RgMbidSource = "tag" | "acoustid" | "search" | "editor";
+
+/** Ids a file's own tag may replace: chosen by Kima, not by the files or a person. */
+export const REPLACEABLE_SOURCES: readonly string[] = ["acoustid", "search"];
+
+/** How much an album's id is to be trusted, by where it came from; no source is a tag (older rows). */
+const sourceStrength = (source: string | null | undefined) =>
+    source === "editor" ? 3 : source == null || source === "tag" ? 2 : 1;
+
+type MoveClient = Pick<Prisma.TransactionClient, "album" | "ownedAlbum" | "discoveryAlbum" | "discoverExclusion">;
+
+/** Which ownership source protects an artist best (dataIntegrity, discover's fix-tagging). */
+const OWNERSHIP_RANK = ["native_scan", "discovery_liked"];
+const ownershipRank = (source: string) => {
+    const rank = OWNERSHIP_RANK.indexOf(source);
+    return rank === -1 ? OWNERSHIP_RANK.length : rank;
+};
+
+/**
+ * Change an album's rgMbid in one transaction, and move every row keyed on the old id with it.
+ * Ownership rows keep their source, whichever artist holds them; a clash keeps the more
+ * protective source; none is created. `expectedOld` makes the change compare-and-set: false
+ * when the album no longer has it, or already has the new id. A taken id throws DuplicateMbidError.
  */
 export async function reassignAlbumRgMbid(
     albumId: string,
-    newRgMbid: string
-): Promise<void> {
-    await prisma.$transaction(async (tx) => {
-        const album = await tx.album.findUnique({
-            where: { id: albumId },
-            select: { rgMbid: true, artistId: true },
+    newRgMbid: string,
+    opts: { source?: RgMbidSource | null; expectedOld?: string } = {}
+): Promise<boolean> {
+    return prisma.$transaction((tx) => moveAlbumRgMbid(tx, albumId, newRgMbid, opts));
+}
+
+async function moveAlbumRgMbid(
+    tx: MoveClient,
+    albumId: string,
+    newRgMbid: string,
+    opts: { source?: RgMbidSource | null; expectedOld?: string }
+): Promise<boolean> {
+    const album = await tx.album.findUnique({ where: { id: albumId }, select: { rgMbid: true, rgMbidSource: true } });
+    if (!album) {
+        logger.warn(`Album ${albumId} not found — skipping rgMbid reassign`);
+        return false;
+    }
+    const oldRgMbid = album.rgMbid;
+    if (oldRgMbid === newRgMbid) {
+        // The same id confirmed by a stronger source (a tag, a person) takes that source.
+        if (opts.source && sourceStrength(opts.source) > sourceStrength(album.rgMbidSource)) {
+            await tx.album.updateMany({
+                where: { id: albumId, rgMbid: newRgMbid, rgMbidSource: album.rgMbidSource },
+                data: { rgMbidSource: opts.source },
+            });
+        }
+        return false;
+    }
+    if (opts.expectedOld !== undefined && oldRgMbid !== opts.expectedOld) return false;
+
+    // Album.rgMbid is @unique, so a duplicate collides here first.
+    try {
+        // Compare-and-set on the id and its source as read: a change meanwhile (a person's edit
+        // included) is never overwritten.
+        const moved = await tx.album.updateMany({
+            where: { id: albumId, rgMbid: oldRgMbid, rgMbidSource: album.rgMbidSource },
+            data: { rgMbid: newRgMbid, rgMbidSource: opts.source ?? null },
         });
+        if (moved.count === 0) return false;
+    } catch (err: any) {
+        if (err.code === "P2002") throw new DuplicateMbidError("album", newRgMbid);
+        throw err;
+    }
 
-        if (!album) {
-            logger.warn(`Album ${albumId} not found — skipping rgMbid reassign`);
-            return;
-        }
+    await moveOwnership(tx, oldRgMbid, newRgMbid);
+    await moveDiscoveryAlbums(tx, oldRgMbid, newRgMbid);
+    await moveDiscoverExclusions(tx, oldRgMbid, newRgMbid);
+    return true;
+}
 
-        if (album.rgMbid === newRgMbid) {
-            return;
-        }
-
-        const oldRgMbid = album.rgMbid;
-        const artistId = album.artistId;
-
-        // Album.rgMbid is @unique, so a duplicate collides here first.
-        try {
-            await tx.album.update({
-                where: { id: albumId },
-                data: { rgMbid: newRgMbid },
-            });
-        } catch (err: any) {
-            if (err.code === "P2002") {
-                throw new DuplicateMbidError("album", newRgMbid);
-            }
-            throw err;
-        }
-
-        try {
-            await tx.ownedAlbum.delete({
-                where: {
-                    artistId_rgMbid: {
-                        artistId,
-                        rgMbid: oldRgMbid,
-                    },
-                },
-            });
-        } catch (err: any) {
-            // Row may not exist (e.g., enrichment-created album without OwnedAlbum)
-            if (err.code !== "P2025") {
-                throw err;
-            }
-        }
-
-        try {
-            await tx.ownedAlbum.upsert({
-                where: {
-                    artistId_rgMbid: {
-                        artistId,
-                        rgMbid: newRgMbid,
-                    },
-                },
-                create: {
-                    artistId,
-                    rgMbid: newRgMbid,
-                    source: "enrichment",
-                },
-                update: {},
-            });
-        } catch (err: any) {
-            if (err.code === "P2002") {
-                throw new DuplicateMbidError("album", newRgMbid);
-            }
-            throw err;
-        }
-
-        // Move DiscoveryAlbum rows to the new rgMbid. Rows whose (userId,
-        // weekStartDate, newRgMbid) slot is taken are left and logged, since a unique
-        // violation would abort the transaction; a racing insert still can, and
-        // identification retries later.
-        const staleRows = await tx.discoveryAlbum.findMany({
-            where: { rgMbid: oldRgMbid },
-            select: { id: true, userId: true, weekStartDate: true },
+/** Every artist's ownership row for the old id moves, keeping its source. */
+async function moveOwnership(tx: MoveClient, oldRgMbid: string, newRgMbid: string): Promise<void> {
+    const rows = await tx.ownedAlbum.findMany({ where: { rgMbid: oldRgMbid } });
+    for (const row of rows) {
+        const clash = await tx.ownedAlbum.findUnique({
+            where: { artistId_rgMbid: { artistId: row.artistId, rgMbid: newRgMbid } },
         });
-        if (staleRows.length > 0) {
-            const takenSlots = await tx.discoveryAlbum.findMany({
-                where: {
-                    rgMbid: newRgMbid,
-                    OR: staleRows.map((r) => ({
-                        userId: r.userId,
-                        weekStartDate: r.weekStartDate,
-                    })),
-                },
-                select: { userId: true, weekStartDate: true },
-            });
-            const taken = new Set(
-                takenSlots.map(
-                    (t) => `${t.userId}|${t.weekStartDate.toISOString()}`
-                )
-            );
-            const movableIds = staleRows
-                .filter(
-                    (r) => !taken.has(`${r.userId}|${r.weekStartDate.toISOString()}`)
-                )
-                .map((r) => r.id);
-            for (const row of staleRows) {
-                if (taken.has(`${row.userId}|${row.weekStartDate.toISOString()}`)) {
-                    logger.warn(
-                        `[rgMbid-reassign] DiscoveryAlbum ${row.id} kept on stale ${oldRgMbid}: ` +
-                            `user ${row.userId} already has a discovery row for ${newRgMbid} in the same week`
-                    );
-                }
-            }
-            if (movableIds.length > 0) {
-                await tx.discoveryAlbum.updateMany({
-                    where: { id: { in: movableIds } },
-                    data: { rgMbid: newRgMbid },
+        if (clash) {
+            if (ownershipRank(row.source) < ownershipRank(clash.source)) {
+                await tx.ownedAlbum.update({
+                    where: { artistId_rgMbid: { artistId: row.artistId, rgMbid: newRgMbid } },
+                    data: { source: row.source },
                 });
             }
+            await tx.ownedAlbum.delete({
+                where: { artistId_rgMbid: { artistId: row.artistId, rgMbid: oldRgMbid } },
+            });
+        } else {
+            await tx.ownedAlbum.updateMany({
+                where: { artistId: row.artistId, rgMbid: oldRgMbid },
+                data: { rgMbid: newRgMbid },
+            });
         }
+    }
+}
+
+/**
+ * DiscoveryAlbum rows move to the new id. Rows whose (userId, weekStartDate, newRgMbid) slot is
+ * taken are left and logged, since a unique violation would abort the transaction; a racing
+ * insert still can, and identification retries later.
+ */
+async function moveDiscoveryAlbums(tx: MoveClient, oldRgMbid: string, newRgMbid: string): Promise<void> {
+    const staleRows = await tx.discoveryAlbum.findMany({
+        where: { rgMbid: oldRgMbid },
+        select: { id: true, userId: true, weekStartDate: true },
     });
+    if (staleRows.length === 0) return;
+    const takenSlots = await tx.discoveryAlbum.findMany({
+        where: {
+            rgMbid: newRgMbid,
+            OR: staleRows.map((r) => ({ userId: r.userId, weekStartDate: r.weekStartDate })),
+        },
+        select: { userId: true, weekStartDate: true },
+    });
+    const taken = new Set(takenSlots.map((t) => `${t.userId}|${t.weekStartDate.toISOString()}`));
+    const movableIds: string[] = [];
+    for (const row of staleRows) {
+        if (taken.has(`${row.userId}|${row.weekStartDate.toISOString()}`)) {
+            logger.warn(
+                `[rgMbid-reassign] DiscoveryAlbum ${row.id} kept on stale ${oldRgMbid}: ` +
+                    `user ${row.userId} already has a discovery row for ${newRgMbid} in the same week`
+            );
+        } else {
+            movableIds.push(row.id);
+        }
+    }
+    if (movableIds.length > 0) {
+        await tx.discoveryAlbum.updateMany({ where: { id: { in: movableIds } }, data: { rgMbid: newRgMbid } });
+    }
+}
+
+/** A user's "don't suggest this album" moves too; a clash keeps the later dates. */
+async function moveDiscoverExclusions(tx: MoveClient, oldRgMbid: string, newRgMbid: string): Promise<void> {
+    const rows = await tx.discoverExclusion.findMany({ where: { albumMbid: oldRgMbid } });
+    for (const row of rows) {
+        const clash = await tx.discoverExclusion.findUnique({
+            where: { userId_albumMbid: { userId: row.userId, albumMbid: newRgMbid } },
+        });
+        if (clash) {
+            await tx.discoverExclusion.update({
+                where: { id: clash.id },
+                data: {
+                    expiresAt: row.expiresAt > clash.expiresAt ? row.expiresAt : clash.expiresAt,
+                    lastSuggestedAt: row.lastSuggestedAt > clash.lastSuggestedAt ? row.lastSuggestedAt : clash.lastSuggestedAt,
+                },
+            });
+            await tx.discoverExclusion.delete({ where: { id: row.id } });
+        } else {
+            await tx.discoverExclusion.update({ where: { id: row.id }, data: { albumMbid: newRgMbid } });
+        }
+    }
 }
 
 /**

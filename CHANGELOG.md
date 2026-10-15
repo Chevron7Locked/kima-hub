@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Songs of one album no longer fail when they save the same new genre at the same moment.** Two songs finishing together both tried to create the genre, and one failed with a duplicate-name error until its retry.
 - **Two songs of one album asked about at once share one MusicBrainz tracklist request** instead of each making its own.
+- **Changing an album's MusicBrainz id no longer drops its ownership protection.** The album editor's id change relabelled the album's "owned" record as coming from enrichment, which could let the nightly integrity check move a library album into Discover; it also created ownership where there was none and left Discover exclusions and compilation ownership behind. Every record keyed on the old id now moves with it, keeping its source.
 
 ## [1.12.0] - 2026-10-14
 

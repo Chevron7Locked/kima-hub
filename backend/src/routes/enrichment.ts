@@ -642,7 +642,7 @@ router.put("/albums/:id/metadata", requireAuth, requireAdmin, async (req, res) =
       const trimmedRgMbid = typeof rgMbid === "string" ? rgMbid.trim() : "";
       if (trimmedRgMbid !== "") {
         try {
-          await reassignAlbumRgMbid(req.params.id, trimmedRgMbid);
+          await reassignAlbumRgMbid(req.params.id, trimmedRgMbid, { source: "editor" });
         } catch (err) {
           if (err instanceof DuplicateMbidError) {
             return res.status(409).json({
