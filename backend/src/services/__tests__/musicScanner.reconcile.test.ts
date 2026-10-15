@@ -1,6 +1,6 @@
 /**
  * The scanner in delete mode: the full scanLibrary path, not the service called in
- * isolation. Proves the plan's Task 3 claims — Step 4b runs (result.tracksRemoved is
+ * isolation. Checks that Step 4b runs (result.tracksRemoved is
  * the scanner's own count), a track is retired only when a SECOND scan still cannot
  * find it (confirmation, no stopwatch), and it runs BEFORE Steps 5-6 so the emptied
  * album and artist cascade free; `flag` mode (default config) never deletes.

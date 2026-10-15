@@ -66,7 +66,7 @@ export function usePodcastData() {
     return unsubscribe;
   }, [refetch, queryClient, podcastId, sortOrder]);
 
-  // State for preview mode, subscription, and similar podcasts
+  // A show not followed yet is read as a preview; similar shows load for both.
   const [previewData, setPreviewData] = useState<PodcastPreview | null>(null);
   const [previewLoadState, setPreviewLoadState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -173,9 +173,6 @@ export function usePodcastData() {
   // The server pages from the end that was asked for; render in the order it arrived.
   const sortedEpisodes = podcast ? [...podcast.episodes] : [];
 
-  // Determine loading state:
-  // - Loading if podcast query is loading
-  // - Loading if podcast query done but no podcast and we haven't tried/finished preview yet
   const needsPreviewLoad = !podcast && previewLoadState === 'idle';
   const isLoadingPreview = previewLoadState === 'loading';
   const isLoading = isPodcastLoading || needsPreviewLoad || isLoadingPreview;

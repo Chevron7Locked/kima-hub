@@ -170,13 +170,6 @@ router.post("/re-decide-everything", requireAuth, requireAdmin, async (_req, res
   }
 });
 
-/**
- * POST /enrichment/rerun
- * Re-run the enrichment from one of its five steps: the step's answers and
- * everything that depends on them are cleared and worked out again, the vibe
- * map laid out fresh (services/enrichmentRestart.ts). Person-decided answers
- * and everything people made stay. Admin only.
- */
 const RERUN_STEPS: Record<RerunStep, string> = {
     identification: "identification",
     artists: "artists",
@@ -185,11 +178,18 @@ const RERUN_STEPS: Record<RerunStep, string> = {
     similarity: "similarity",
 };
 
+/**
+ * POST /enrichment/rerun
+ * Re-run the enrichment from one of its five steps: the step's answers and
+ * everything that depends on them are cleared and worked out again, the vibe
+ * map laid out fresh (services/enrichmentRestart.ts). Person-decided answers
+ * and everything people made stay. Admin only.
+ */
 router.post("/rerun", requireAuth, requireAdmin, async (req, res) => {
   try {
     const step = req.body?.step;
     if (!Object.prototype.hasOwnProperty.call(RERUN_STEPS, step)) {
-      res.status(400).json({ error: "step must be one of: identification, artists, analysis, vectors, similarity" });
+      res.status(400).json({ error: `step must be one of: ${Object.keys(RERUN_STEPS).join(", ")}` });
       return;
     }
     const wiped = await rerunEnrichment(step as RerunStep);

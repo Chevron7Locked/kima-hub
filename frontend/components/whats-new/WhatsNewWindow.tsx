@@ -85,7 +85,7 @@ export function WhatsNewWindow({
     onNavigate?: () => void;
     /** Action items the user has already taken. */
     done?: string[];
-    /** Choices already answered, when a closed release is read again. */
+    /** Choices already answered, shown as answered instead of asked again. */
     answered?: Record<string, boolean>;
 }) {
     const queryClient = useQueryClient();

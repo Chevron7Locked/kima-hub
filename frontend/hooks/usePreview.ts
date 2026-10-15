@@ -4,10 +4,9 @@ import { useAudioController } from "@/lib/audio-controller-context";
 import { useAudioState } from "@/lib/audio-state-context";
 
 /**
- * The page's one song preview. Starting one stops any other and pauses the main player, which resumes
- * when the preview is stopped, ends or fails, never when another preview takes its place; the main player
- * starting ends the preview. The preview lives in a ref, so a quick second click acts on the first before
- * the next render. A preview that failed is not asked again on this page.
+ * The page's one preview: a song, or the start of a podcast episode. Starting one stops any other and pauses the
+ * main player, which resumes when the preview stops, ends or fails (not when another takes its place); the main
+ * player starting ends it. Held in a ref so a quick second click acts on the first; a failed one is not retried.
  */
 export function usePreview() {
     const controller = useAudioController();

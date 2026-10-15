@@ -25,31 +25,21 @@ afterAll(async () => {
     await prisma.systemSettings.deleteMany({});
 });
 
+// The comparison the version chip rides on. GitHub's /releases/latest never returns a draft or a
+// prerelease, so only published release tags reach it.
 describe("compareVersions", () => {
     it.each([
         ["1.12.0", "1.11.0", 1],
         ["v1.12.0", "1.11.0", 1],
         ["1.11.0", "1.11.0", 0],
+        ["1.12.0", "1.12.0", 0],
+        ["v1.12.0", "1.12.0", 0],
         ["1.11.0", "1.12.0", -1],
+        ["1.11.5", "1.12.0", -1],
         ["1.9.0", "1.10.0", -1],
         ["1.11.0.1", "1.11.0", 1],
         ["1.11", "1.11.0", 0],
     ])("%s vs %s -> %d", (a, b, expected) => {
-        expect(Math.sign(compareVersions(a, b))).toBe(expected);
-    });
-});
-
-// Golden table pinning the comparison the version chip rides on.
-/* GitHub /releases/latest never returns prereleases (GitHub behavior, checked 10-13) and
-   nightly publishes with prerelease: false (docker-publish.yml), so rc tags cannot reach
-   this comparison — the pairs below are the bounded input it must keep answering. */
-describe(`compareVersions golden table (1.12 pin)`, () => {
-    it.each([
-        [`1.11.5`, `1.12.0`, -1],
-        [`1.9.0`, `1.10.0`, -1],
-        [`1.12.0`, `1.12.0`, 0],
-        [`v1.12.0`, `1.12.0`, 0],
-    ])(`%s vs %s -> %d`, (a, b, expected) => {
         expect(Math.sign(compareVersions(a, b))).toBe(expected);
     });
 });

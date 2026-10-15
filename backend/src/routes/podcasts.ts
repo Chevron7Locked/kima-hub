@@ -37,8 +37,8 @@ const router = Router();
 
 // Bound the preview RSS fetch so a slow or dead feed returns partial data
 // quickly instead of sitting on the 30s parser timeout and hanging the request.
-// The feed is non-critical for a preview; core data comes from
-// iTunes/Deezer, and both call sites already fall through to partial data.
+// The feed is non-critical for a preview; core data comes from Apple's
+// catalog, and both call sites already fall through to partial data.
 const PREVIEW_RSS_TIMEOUT_MS = 8000;
 
 router.use(requireAuthOrToken);
@@ -335,8 +335,7 @@ router.get("/discover/genre/:genreId", async (req, res) => {
 
 /**
  * GET /podcasts/preview/:itunesId
- * Preview a podcast by iTunes or Deezer ID (for discovery, before subscribing)
- * Deezer IDs are prefixed with "deezer:" -- resolved via Deezer API + iTunes name search
+ * Preview a podcast by its Apple (iTunes) id, before following it
  */
 router.get("/preview/:itunesId", requireAuth, async (req, res) => {
     try {
@@ -1165,10 +1164,6 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
     }
 });
 
-/**
- * POST /podcasts/:podcastId/episodes/:episodeId/progress
- * Update playback progress for a podcast episode
- */
 // Lenient on shape (numbers as strings, no duration) so no client the route already served is refused.
 const progressSchema = z.object({
     currentTime: z.coerce.number().finite().min(0),
@@ -1176,6 +1171,10 @@ const progressSchema = z.object({
     isFinished: z.boolean().optional(),
 });
 
+/**
+ * POST /podcasts/:podcastId/episodes/:episodeId/progress
+ * Update playback progress for a podcast episode
+ */
 router.post("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req, res) => {
     try {
         const { episodeId } = req.params;

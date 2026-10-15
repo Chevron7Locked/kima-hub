@@ -24,7 +24,7 @@ import { safeError } from "../utils/errors";
 
 const router = Router();
 
-// Public (any authenticated user) — returns only the configured server URL
+// Any signed-in user: the server's public address, and whether this user may start downloads.
 router.get("/public-config", requireAuth, async (req, res) => {
   try {
     const settings = await prisma.systemSettings.findUnique({

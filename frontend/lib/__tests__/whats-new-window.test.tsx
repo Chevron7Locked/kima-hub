@@ -1,6 +1,5 @@
 // The release window's layout contract, in jsdom: exactly one active view below `lg`. Both panes may only ever
-// hide below a breakpoint — never both at once at base. This is the test that did not exist when the window drew a
-// blank body for open items of note-bearing releases.
+// hide below a breakpoint — never both at once at base.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -127,7 +126,7 @@ describe("WhatsNewWindow", () => {
         await act(async () => {
             container.querySelector<HTMLButtonElement>('[data-release="1.11.0"]')!.click();
         });
-        check(); // release read page — the view that once drew blank
+        check(); // release read page
         await act(async () => {
             container.querySelector<HTMLButtonElement>("[data-back]")!.click();
         });

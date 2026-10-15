@@ -49,7 +49,6 @@ export function usePodcastActions(podcastId: string, sortedEpisodes?: Episode[])
     const handleRemovePodcast = useCallback(async () => {
         try {
             await api.removePodcast(podcastId);
-            // Invalidate podcasts cache so the list refreshes without the removed podcast
             queryClient.invalidateQueries({ queryKey: queryKeys.podcasts() });
             router.push("/podcasts");
         } catch (error) {
@@ -66,7 +65,7 @@ export function usePodcastActions(podcastId: string, sortedEpisodes?: Episode[])
                 const start = Math.max(0, Math.min(at - 100, around.length - 200));
                 setPodcastEpisodeQueue(around.slice(start, start + 200));
             }
-            
+
             playPodcast({
                 id: `${podcastId}:${episode.id}`,
                 title: episode.title,
@@ -105,7 +104,6 @@ export function usePodcastActions(podcastId: string, sortedEpisodes?: Episode[])
     const handleMarkEpisodeComplete = useCallback(
         async (episodeId: string, duration: number) => {
             try {
-                // Mark episode as complete (set currentTime to duration and isFinished to true)
                 await api.updatePodcastEpisodeProgress(
                     podcastId,
                     episodeId,
@@ -113,10 +111,10 @@ export function usePodcastActions(podcastId: string, sortedEpisodes?: Episode[])
                     duration,
                     true
                 );
-                
+
                 // A fresh read after the write, so the episode shows as played.
                 queryClient.invalidateQueries({ queryKey: queryKeys.podcast(podcastId) });
-                
+
                 dispatchQueryEvent("podcast-progress-updated");
             } catch (error) {
                 notify.error("Couldn't mark the episode as played", { message: error instanceof Error ? error.message : undefined });

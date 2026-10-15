@@ -46,7 +46,7 @@ function closeAll(): void {
 
 const OPEN_EVENT = "kima:whats-new-open";
 
-/** Opens the window on the current release again, closed or not (the version number beside the logo). */
+/** Brings the window up with the current release and its answers so far: unread news, or a window put off by a link. */
 function openWhatsNew(): void {
     window.dispatchEvent(new Event(OPEN_EVENT));
 }
@@ -76,7 +76,7 @@ export function WhatsNewGate() {
     const [wiping, setWiping] = useState(false);
     const [done, setDone] = useState<string[]>([]);
     const [wipeError, setWipeError] = useState<string | null>(null);
-    // What a reopened release already has settled, so the window does not ask again.
+    // Answers the current release already has, so the window shows them instead of asking again.
     const [answered, setAnswered] = useState<Record<string, boolean>>({});
     const reopening = useRef(false);
     const queryClient = useQueryClient();
