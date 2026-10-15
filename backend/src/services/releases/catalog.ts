@@ -106,7 +106,7 @@ export const RELEASES: Release[] = [
         title: "Kima 1.12",
         summary:
             "A real podcast browser, analysis that listens to the middle of each song, per-step enrichment reruns, update pings, and fixes.",
-        date: "2026-10-13",
+        date: "2026-10-14",
         items: [
             {
                 kind: "note",

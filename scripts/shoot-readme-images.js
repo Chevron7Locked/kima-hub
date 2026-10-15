@@ -45,7 +45,7 @@ async function shoot(page, path, file, settle = 2500) {
     const page = await ctx.newPage();
     await login(page);
 
-    // What's-new window opens itself on load (pending 1.11.0) — the hero shot first
+    // What's-new window opens itself on load (an unread release) — the hero shot first
     await page.goto(`${BASE}/library`, { waitUntil: "domcontentloaded" });
     try {
         await page.waitForSelector('[data-testid="whatsnew-done"]', { timeout: 12000 });
