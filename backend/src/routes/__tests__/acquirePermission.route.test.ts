@@ -8,6 +8,9 @@ import { prisma } from "../../utils/db";
 import { requireAuth, requireAcquirePermission, generateToken } from "../../middleware/auth";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import systemSettingsRoutes from "../systemSettings";
+import playlistRoutes from "../playlists";
+import discoverRoutes from "../discover";
+import spotifyRoutes from "../spotify";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const P = "zz-acquire";
@@ -23,6 +26,9 @@ function app() {
         res.json({ acquired: true });
     });
     a.use("/system-settings", systemSettingsRoutes);
+    a.use("/playlists", requireAuth, playlistRoutes);
+    a.use("/discover", requireAuth, discoverRoutes);
+    a.use("/spotify", requireAuth, spotifyRoutes);
     return a;
 }
 
@@ -102,7 +108,23 @@ describe("acquire permission gate (#238)", () => {
         await setToggle(false);
     });
 
-    it("the six acquire routes all carry the gate", async () => {
+    it("the real routes that start downloads refuse a member while the toggle is off", async () => {
+        const member = (path: string, body: object = {}) =>
+            request(app()).post(path).set("Authorization", as(USER, "user")).send(body);
+        for (const res of [
+            await member("/playlists/any/pending/any/retry"),
+            await member("/discover/generate"),
+            await member("/spotify/import", { spotifyPlaylistId: "x", playlistName: "p", albumMbidsToDownload: ["mbid"], previewJobId: "none" }),
+        ]) {
+            expect(res.status).toBe(403);
+            expect(res.body.error).toMatch(/operator-only/);
+        }
+        // Importing without downloading passes the gate (and stops at the missing preview).
+        const matchOnly = await member("/spotify/import", { spotifyPlaylistId: "x", playlistName: "p", albumMbidsToDownload: [], previewJobId: "none" });
+        expect(matchOnly.status).toBe(400);
+    });
+
+    it("the eight acquire routes all carry the gate", async () => {
         // Mount-point audit: each door mounts requireAcquirePermission before
         // its handler. Read from source so a future route refactor fails here.
         const fs = require("fs");
@@ -115,6 +137,8 @@ describe("acquire permission gate (#238)", () => {
             ["playlists.ts", /"\/:id\/pending\/retry-all", requireAcquirePermission/],
             ["releases.ts", /"\/download\/:albumMbid", requireAcquirePermission/],
             ["discover.ts", /"\/retry-unavailable", requireAcquirePermission/],
+            ["discover.ts", /"\/generate", requireAcquirePermission/],
+            ["playlists.ts", /"\/:id\/pending\/:trackId\/retry", requireAcquirePermission/],
         ];
         for (const [file, pattern] of doors) {
             const src = fs.readFileSync(path.join(routesDir, file), "utf8");

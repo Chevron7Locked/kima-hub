@@ -5,6 +5,7 @@ import { createRateLimiter } from "../middleware/rateLimiter";
 import { withRetry } from "../utils/async";
 import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
+import { ACQUIRE_REFUSED, mayAcquire } from "../utils/acquirePermission";
 import { safeError } from "../utils/errors";
 import { z } from "zod";
 import { spotifyService } from "../services/spotify";
@@ -180,6 +181,10 @@ router.post("/import", async (req, res) => {
         const { spotifyPlaylistId, url, playlistName, albumMbidsToDownload, previewJobId } =
             importSchema.parse(req.body);
         const userId = req.user!.id;
+        // Matching the playlist to the library is open to everyone; downloading its missing albums is not.
+        if (albumMbidsToDownload.length > 0 && !(await mayAcquire(req.user!))) {
+            return res.status(403).json({ error: ACQUIRE_REFUSED });
+        }
 
         let preview;
         if (previewJobId) {

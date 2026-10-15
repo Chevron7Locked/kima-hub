@@ -858,7 +858,7 @@ router.post("/:id/pending/retry-all", requireAcquirePermission, async (req, res)
  * Retry downloading a failed/pending track from Soulseek
  * Returns immediately and downloads in background
  */
-router.post("/:id/pending/:trackId/retry", async (req, res) => {
+router.post("/:id/pending/:trackId/retry", requireAcquirePermission, async (req, res) => {
     try {
         const userId = req.user!.id;
         const { id: playlistId, trackId: pendingTrackId } = req.params;

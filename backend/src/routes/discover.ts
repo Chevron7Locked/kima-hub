@@ -201,7 +201,7 @@ router.delete("/batch", async (req, res) => {
     }
 });
 
-router.post("/generate", async (req, res) => {
+router.post("/generate", requireAcquirePermission, async (req, res) => {
     try {
         const userId = req.user!.id;
 

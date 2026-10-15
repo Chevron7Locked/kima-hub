@@ -12,6 +12,7 @@ import {
 } from "../utils/playlistLogger";
 import { notificationService } from "./notificationService";
 import { getSystemSettings } from "../utils/systemSettings";
+import { mayAcquire } from "../utils/acquirePermission";
 import { isLidarrConfigured } from "./lidarrClient";
 import { prisma, Prisma } from "../utils/db";
 import { LIBRARY_ALBUM_WHERE, LIBRARY_LOCATION } from "./libraryFilters";
@@ -3008,10 +3009,12 @@ class SpotifyImportService {
       jobLogger.info(`[Quick Import] Playlist: "${resolvedName}" (${preview.summary.total} tracks)`);
       jobLogger.info(`[Quick Import] Already in library: ${preview.summary.inLibrary}, downloadable: ${preview.summary.downloadable}`);
 
-      // Every downloadable album is selected
-      const albumMbidsToDownload = preview.albumsToDownload.map(
-        (a) => a.albumMbid || a.spotifyAlbumId,
-      );
+      // Every downloadable album is selected, if this user may start downloads; otherwise the playlist is only
+      // matched against the library.
+      const importer = await prisma.user.findUnique({ where: { id: job.userId }, select: { role: true } });
+      const albumMbidsToDownload = importer && (await mayAcquire(importer))
+        ? preview.albumsToDownload.map((a) => a.albumMbid || a.spotifyAlbumId)
+        : [];
 
       if (albumMbidsToDownload.length === 0) {
         jobLogger.info(`[Quick Import] No albums to download, creating playlist from matched tracks`);

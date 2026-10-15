@@ -2,6 +2,7 @@ import { Router } from "express";
 import axios from "axios";
 import { logger } from "../utils/logger";
 import { requireAuth, requireAdmin } from "../middleware/auth";
+import { mayAcquire } from "../utils/acquirePermission";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { z } from "zod";
@@ -28,13 +29,11 @@ router.get("/public-config", requireAuth, async (req, res) => {
   try {
     const settings = await prisma.systemSettings.findUnique({
       where: { id: "default" },
-      select: { publicUrl: true, allowMemberAcquire: true },
+      select: { publicUrl: true },
     });
     // Members need this to know whether to offer download buttons; the
     // server enforces the same rule regardless of what the UI shows.
-    const canAcquire =
-      req.user?.role === "admin" || Boolean(settings?.allowMemberAcquire);
-    res.json({ publicUrl: settings?.publicUrl || "", canAcquire });
+    res.json({ publicUrl: settings?.publicUrl || "", canAcquire: await mayAcquire(req.user!) });
   } catch (error) {
     logger.error("Get public config error:", error);
     res.status(500).json({ error: "Failed to get server config" });

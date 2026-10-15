@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import jwt from "jsonwebtoken";
 import { findApiKeyUser } from "../services/users/apiKeyStore";
+import { ACQUIRE_REFUSED, mayAcquire } from "../utils/acquirePermission";
 
 // JWT_SECRET is required - SESSION_SECRET is used as fallback since docker-entrypoint.sh generates it
 const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET;
@@ -264,10 +265,8 @@ export async function requireAdmin(
     next();
 }
 
-// Acquisition gate (issue #238): downloads cost money, hit peer networks and
-// fill the disk, so they are operator-only by default. A Settings toggle
-// opens them to signed-in members — acquire only. Deleting is never here;
-// every destructive route keeps requireAdmin.
+// The acquisition gate (#238, rule in utils/acquirePermission) on a route. Deleting is never here; every
+// destructive route keeps requireAdmin.
 export async function requireAcquirePermission(
     req: Request,
     res: Response,
@@ -279,18 +278,12 @@ export async function requireAcquirePermission(
         return res.status(401).json({ error: "Not authenticated" });
     }
     req.user = user;
-    if (user.role === "admin") {
-        return next();
-    }
-    const { getSystemSettings } = await import("../utils/systemSettings");
-    const settings = await getSystemSettings();
-    if (!settings?.allowMemberAcquire) {
-        return res.status(403).json({
-            error: "Acquisition is operator-only. An admin can allow member downloads in Settings."
-        });
+    if (!(await mayAcquire(user))) {
+        return res.status(403).json({ error: ACQUIRE_REFUSED });
     }
     next();
 }
+
 
 // For streaming URLs that may use query params or need special handling
 export async function requireAuthOrToken(
