@@ -1,6 +1,7 @@
 import Parser from "rss-parser";
 import axios from "axios";
 import { logger } from "../utils/logger";
+import { guardedAxios } from "../utils/ssrf";
 import { APP_VERSION } from "../config";
 
 interface RSSPodcast {
@@ -98,6 +99,7 @@ class RSSParserService {
             }
 
             const response = await axios.get(feedUrl, {
+                ...guardedAxios,
                 headers,
                 timeout: 30000,
                 maxRedirects: 5,

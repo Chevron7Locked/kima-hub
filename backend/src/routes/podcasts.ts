@@ -6,7 +6,7 @@ import { prisma } from "../utils/db";
 import { rssParserService } from "../services/rss-parser";
 import { parseRangeHeader } from "../utils/rangeParser";
 import { safeError } from "../utils/errors";
-import { validateUrlForFetch } from "../utils/ssrf";
+import { guardedAxios, validateUrlForFetch } from "../utils/ssrf";
 import axios from "axios";
 import { z } from "zod";
 import fs from "fs";
@@ -1143,6 +1143,7 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
         });
         const fetchUpstream = (rangeHeader?: string) =>
             axios.get(episode.audioUrl, {
+                ...guardedAxios,
                 headers: { "User-Agent": USER_AGENT, ...(rangeHeader && { Range: rangeHeader }) },
                 responseType: "stream",
                 decompress: false,

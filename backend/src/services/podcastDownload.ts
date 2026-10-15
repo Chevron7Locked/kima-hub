@@ -6,7 +6,7 @@ import { createWriteStream } from "fs";
 import path from "path";
 import axios from "axios";
 import { parseFile } from "music-metadata";
-import { validateUrlForFetch } from "../utils/ssrf";
+import { guardedAxios, validateUrlForFetch } from "../utils/ssrf";
 import { upstreamHeaderNumber } from "../utils/upstreamHeaders";
 
 /**
@@ -214,6 +214,7 @@ async function performDownload(
 
         // Download the file with longer timeout for large podcasts
         const response = await axios.get(audioUrl, {
+            ...guardedAxios,
             responseType: 'stream',
             timeout: 600000, // 10 minute timeout for large files (3+ hour podcasts)
             headers: {

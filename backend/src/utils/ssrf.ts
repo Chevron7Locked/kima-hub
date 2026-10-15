@@ -1,4 +1,8 @@
+import dns from "dns";
 import { lookup } from "dns/promises";
+import http from "http";
+import https from "https";
+import net from "net";
 import { logger } from "./logger";
 
 /**
@@ -68,4 +72,55 @@ export async function validateUrlForFetch(url: string): Promise<string | null> {
   }
 
   return null;
+}
+
+/** A fetch refused because an address it would reach is internal. */
+export class BlockedAddressError extends Error {
+  name = "BlockedAddressError";
+}
+
+/** A name lookup that refuses internal addresses, so a connection can never reach one whatever led to it. */
+const guardedLookup: net.LookupFunction = (hostname, options, callback) => {
+  dns.lookup(hostname, options, (err, address, family) => {
+    if (err) return callback(err, address, family);
+    const answers = Array.isArray(address) ? address : [{ address, family }];
+    const internal = answers.find((a) => isBlockedIp(a.address));
+    if (internal) {
+      logger.warn(`[SSRF] Refused a connection to ${hostname} (${internal.address})`);
+      return callback(new BlockedAddressError(`Blocked: ${hostname} is an internal address`), address, family);
+    }
+    callback(null, address, family);
+  });
+};
+
+/**
+ * axios options for an address that came from a feed or a user, where validateUrlForFetch checks only the first.
+ * Every connection's address is checked, on each redirect too and after a name changes its answer; a redirect
+ * straight to an internal IP is refused before connecting, since an IP needs no lookup.
+ */
+export const guardedAxios = {
+  httpAgent: new http.Agent({ lookup: guardedLookup }),
+  httpsAgent: new https.Agent({ lookup: guardedLookup }),
+  beforeRedirect: (options: { hostname?: string }) => {
+    const host = (options.hostname ?? "").replace(/^\[|\]$/g, "");
+    if (net.isIP(host) && isBlockedIp(host)) throw new BlockedAddressError(`Blocked: redirect to internal address ${host}`);
+  },
+};
+
+/**
+ * Node's fetch for an address that came from a feed or a user: follows up to five redirects itself and checks
+ * each address first. Unlike guardedAxios it cannot check the connection itself.
+ */
+export async function fetchChecked(url: string, init: RequestInit = {}, maxRedirects = 5): Promise<Response> {
+  let current = url;
+  for (let hop = 0; ; hop++) {
+    const blocked = await validateUrlForFetch(current);
+    if (blocked) throw new BlockedAddressError(`Blocked: ${blocked}`);
+    const response = await fetch(current, { ...init, redirect: "manual" });
+    const location = response.headers.get("location");
+    if (response.status < 300 || response.status >= 400 || !location) return response;
+    await response.body?.cancel();
+    if (hop >= maxRedirects) throw new Error("Too many redirects");
+    current = new URL(location, current).toString();
+  }
 }

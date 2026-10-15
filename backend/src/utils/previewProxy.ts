@@ -2,6 +2,7 @@ import axios from "axios";
 import type { Response } from "express";
 import { logger } from "./logger";
 import { upstreamHeader } from "./upstreamHeaders";
+import { guardedAxios } from "./ssrf";
 
 /**
  * Pipe a Deezer preview to the client as same-origin media, honoring the
@@ -22,6 +23,7 @@ export async function proxyPreviewStream(
     let upstream;
     try {
         upstream = await axios.get(previewUrl, {
+            ...guardedAxios,
             responseType: "stream",
             timeout: 10000,
             headers: rangeHeader ? { Range: rangeHeader } : undefined,

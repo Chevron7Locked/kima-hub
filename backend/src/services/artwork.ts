@@ -7,7 +7,7 @@
 import crypto from "crypto";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
-import { validateUrlForFetch } from "../utils/ssrf";
+import { BlockedAddressError, fetchChecked, validateUrlForFetch } from "../utils/ssrf";
 import { isMbid } from "./artistIdentity";
 import { coverArtService } from "./coverArt";
 import { deezerService } from "./deezer";
@@ -138,15 +138,14 @@ async function firstAnswer<Q>(
 async function addressLoads(url: string): Promise<boolean> {
     if (await validateUrlForFetch(url)) return false;
     try {
-        const response = await fetch(url, {
+        const response = await fetchChecked(url, {
             method: "HEAD",
             headers: { "User-Agent": USER_AGENT },
             signal: AbortSignal.timeout(2500),
-            redirect: "follow",
         });
         return !(response.status === 404 || response.status === 410);
-    } catch {
-        return true;
+    } catch (err) {
+        return !(err instanceof BlockedAddressError);
     }
 }
 

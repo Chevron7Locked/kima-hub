@@ -7,7 +7,7 @@ import { config, USER_AGENT } from "../../config";
 import { findAlbumArtwork } from "../../services/artwork";
 import { musicBrainzService } from "../../services/musicbrainz";
 import { getSystemSettings } from "../../utils/systemSettings";
-import { validateUrlForFetch } from "../../utils/ssrf";
+import { BlockedAddressError, fetchChecked, validateUrlForFetch } from "../../utils/ssrf";
 import {
   extractColorsFromImage,
   FALLBACK_PALETTE,
@@ -325,14 +325,18 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
       headers: { "User-Agent": USER_AGENT },
     };
     try {
-      imageResponse = await fetch(coverUrl, fetchOpts);
+      imageResponse = await fetchChecked(coverUrl, fetchOpts);
     } catch (fetchErr: unknown) {
+      if (fetchErr instanceof BlockedAddressError) {
+        logger.warn(`[COVER-ART] SSRF blocked: ${fetchErr.message} for ${coverUrl.substring(0, 100)}`);
+        return res.status(400).json({ error: "Invalid cover art URL" });
+      }
       const cause = fetchErr instanceof Error && "cause" in fetchErr ? (fetchErr.cause as { code?: string }) : null;
       const code = cause?.code;
       if (code === "ECONNRESET" || code === "ETIMEDOUT" || code === "UND_ERR_SOCKET") {
         logger.warn(`[COVER-ART] Transient error (${code}), retrying once...`);
         await new Promise(r => setTimeout(r, 500));
-        imageResponse = await fetch(coverUrl, fetchOpts);
+        imageResponse = await fetchChecked(coverUrl, fetchOpts);
       } else {
         throw fetchErr;
       }
@@ -486,11 +490,14 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
     }
 
     logger.debug(`[COLORS] Fetching image: ${imageUrl.substring(0, 100)}...`);
-    const imageResponse = await fetch(imageUrl, {
-      headers: {
-        "User-Agent": USER_AGENT,
-      },
-    });
+    let imageResponse: Awaited<ReturnType<typeof fetchChecked>>;
+    try {
+      imageResponse = await fetchChecked(imageUrl, { headers: { "User-Agent": USER_AGENT } });
+    } catch (err) {
+      if (!(err instanceof BlockedAddressError)) throw err;
+      logger.warn(`[COLORS] SSRF blocked: ${err.message} for ${imageUrl.substring(0, 100)}`);
+      return res.status(400).json({ error: "Invalid image URL" });
+    }
 
     if (!imageResponse.ok) {
       logger.error(

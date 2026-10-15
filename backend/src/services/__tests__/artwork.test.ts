@@ -18,6 +18,9 @@ jest.mock("../../utils/logger", () => ({
 }));
 
 jest.mock("../../utils/ssrf", () => ({
+    ...jest.requireActual("../../utils/ssrf"),
+    // Redirect checking has its own test (ssrfRedirects); here the address check is stubbed and fetch is spied.
+    fetchChecked: (url: string, init?: RequestInit) => fetch(url, init),
     validateUrlForFetch: jest.fn().mockResolvedValue(null),
 }));
 
