@@ -135,6 +135,19 @@ export class NetworkError extends Error {
     name = "NetworkError";
 }
 
+// Leaving the page (a reload, a typed address) makes the browser cancel every open request, just after pagehide.
+// Those cancellations are not failures: see the fetch in ApiClient.request.
+let leavingPage = false;
+if (typeof window !== "undefined") {
+    window.addEventListener("pagehide", () => {
+        leavingPage = true;
+    });
+    window.addEventListener("pageshow", () => {
+        leavingPage = false;
+    });
+}
+const pageShown = () => new Promise<void>((shown) => window.addEventListener("pageshow", () => shown(), { once: true }));
+
 // Enrichment engine contract (mirrors backend/src/services/enrichmentState).
 interface EnrichmentState {
     status: "idle" | "running" | "paused" | "stopping" | "failed";
@@ -474,12 +487,23 @@ class ApiClient {
         // All API endpoints are prefixed with /api
         const url = `${getApiBaseUrl()}/api${endpoint}`;
 
-        const response = await fetch(url, {
-            ...fetchOptions,
-            headers,
-            credentials: "include",
-            signal,
-        });
+        let response: Response;
+        try {
+            response = await fetch(url, {
+                ...fetchOptions,
+                headers,
+                credentials: "include",
+                signal,
+            });
+        } catch (err) {
+            if (!leavingPage) throw err;
+            // Cancelled because the page is being left: nothing will read the answer, unless the page comes back
+            // from the back/forward cache. Then a read is asked again; anything else reports the cancellation,
+            // as it may already have reached the server.
+            await pageShown();
+            if ((fetchOptions.method ?? "GET").toUpperCase() === "GET") return this.request<T>(endpoint, options);
+            throw err;
+        }
 
         if (!response.ok) {
             let error: Record<string, unknown>;
