@@ -140,26 +140,52 @@ export async function chart(categoryId: number | null): Promise<CatalogPodcast[]
 export async function lookupShows(itunesIds: string[]): Promise<Map<string, LookupShow>> {
     const out = new Map<string, LookupShow>();
     const ids = [...new Set(itunesIds.filter((id) => /^\d+$/.test(id)))];
+    const missing: string[] = [];
     for (const id of ids) {
-        const show = await cached(`podcasts:lookup:v2:${id}`, 7 * DAY, async (): Promise<LookupShow | null> => {
-            const data = await apple("/lookup", { id, entity: "podcast" });
-            const r = data?.results?.[0];
-            return r
-                ? {
-                      itunesId: String(r.collectionId),
-                      feedUrl: r.feedUrl ?? null,
-                      categoryIds: categoryIdsFrom(r.genreIds),
-                      title: r.collectionName ?? "",
-                      author: r.artistName ?? "",
-                      coverUrl: r.artworkUrl600 || r.artworkUrl100 || null,
-                      episodeCount: r.trackCount || 0,
-                  }
-                : null;
-        });
-        if (show) out.set(id, show);
+        try {
+            const hit = await redisClient.get(lookupKey(id));
+            if (hit) {
+                const show = JSON.parse(hit) as LookupShow | null;
+                if (show) out.set(id, show);
+                continue;
+            }
+        } catch (err) {
+            logger.warn(`[PodcastCatalog] Redis read failed for ${lookupKey(id)}: ${(err as Error).message}`);
+        }
+        missing.push(id);
+    }
+    // Apple answers up to 200 ids in one lookup; ids it does not know are remembered as unknown.
+    for (let i = 0; i < missing.length; i += LOOKUP_BATCH) {
+        const batch = missing.slice(i, i + LOOKUP_BATCH);
+        const data = await rateLimiter.execute("itunes", () => apple("/lookup", { id: batch.join(","), entity: "podcast" }));
+        const found = new Map<string, LookupShow>();
+        for (const r of data?.results ?? []) {
+            if (r?.kind !== "podcast") continue;
+            found.set(String(r.collectionId), {
+                itunesId: String(r.collectionId),
+                feedUrl: r.feedUrl ?? null,
+                categoryIds: categoryIdsFrom(r.genreIds),
+                title: r.collectionName ?? "",
+                author: r.artistName ?? "",
+                coverUrl: r.artworkUrl600 || r.artworkUrl100 || null,
+                episodeCount: r.trackCount || 0,
+            });
+        }
+        for (const id of batch) {
+            const show = found.get(id) ?? null;
+            if (show) out.set(id, show);
+            try {
+                await redisClient.setex(lookupKey(id), 7 * DAY, JSON.stringify(show));
+            } catch (err) {
+                logger.warn(`[PodcastCatalog] Redis write failed for ${lookupKey(id)}: ${(err as Error).message}`);
+            }
+        }
     }
     return out;
 }
+
+const LOOKUP_BATCH = 200;
+const lookupKey = (id: string) => `podcasts:lookup:v3:${id}`;
 
 /** A feed's own `itunes:category` names, mapped onto Apple's ids; names Apple does not use are dropped. */
 export async function categoryIdsForNames(names: string[]): Promise<number[]> {
@@ -277,22 +303,30 @@ export async function forYou(userId: string, rows = 3, perRow = 12): Promise<For
 }
 
 /**
- * Shows like this one: those on the charts of its own categories (most specific first), ranked by how many
- * of those charts they share with it, then by their best chart position.
+ * Shows like this one: those on its categories' charts, closest category list first (categories both carry over
+ * categories either carries, from Apple's full list for each show), then chart order.
  */
 export async function similarShows(show: { itunesId: string | null; categoryIds: number[] }, limit = 12): Promise<DiscoveryItem[]> {
-    const found = new Map<string, { show: CatalogPodcast; shared: number; best: number }>();
-    for (const id of show.categoryIds.slice(0, 3)) {
+    const target = new Set(show.categoryIds);
+    const seen = new Set<string>();
+    const candidates: CatalogPodcast[] = [];
+    for (const id of show.categoryIds) {
         for (const p of await chart(id)) {
-            if (p.itunesId === show.itunesId) continue;
-            const hit = found.get(p.itunesId) ?? { show: p, shared: 0, best: Infinity };
-            hit.shared++;
-            hit.best = Math.min(hit.best, p.chartRank ?? Infinity);
-            found.set(p.itunesId, hit);
+            if (p.itunesId === show.itunesId || seen.has(p.itunesId)) continue;
+            seen.add(p.itunesId);
+            candidates.push(p);
         }
     }
-    const ranked = [...found.values()].sort((a, b) => b.shared - a.shared || a.best - b.best).slice(0, limit);
-    return toDiscoveryItems(ranked.map((r) => r.show));
+    const looked = await lookupShows(candidates.map((p) => p.itunesId));
+    const closeness = (p: CatalogPodcast) => {
+        const own = new Set(looked.get(p.itunesId)?.categoryIds ?? p.categoryIds);
+        const shared = [...own].filter((id) => target.has(id)).length;
+        return shared / new Set([...own, ...target]).size;
+    };
+    const ranked = candidates
+        .map((p, order) => ({ p, order, closeness: closeness(p) }))
+        .sort((a, b) => b.closeness - a.closeness || a.order - b.order);
+    return toDiscoveryItems(ranked.slice(0, limit).map((r) => r.p));
 }
 
 /** The oldest episode in a parsed feed, or none when the feed carries no dated audio. */

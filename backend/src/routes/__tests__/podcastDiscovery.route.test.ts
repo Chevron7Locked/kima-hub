@@ -13,6 +13,7 @@ import path from "path";
 import express from "express";
 import request from "supertest";
 import podcastRoutes from "../podcasts";
+import * as catalog from "../../services/podcastCatalog";
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { startMusicBrainzReplay, type RecordedReplies, type ReplayServer } from "../../__tests__/helpers/musicbrainzReplay";
@@ -93,12 +94,26 @@ it("builds 'for you' from the followed show's category, without the show itself"
     expect(res.body[0].podcasts.length).toBe(12);
 });
 
-it("finds similar shows on the show's own category chart, never the show", async () => {
+it("finds similar shows on the show's own category chart, closest category list first, never the show", async () => {
     const res = await request(app).get(`/podcasts/${SHOW}/similar`);
     expect(res.status).toBe(200);
     expect(res.body.length).toBe(12);
     expect(res.body.some((p: any) => p.itunesId === DND)).toBe(false);
-    expect(res.body[0].genres).toEqual(["Improv"]);
+    // The show is tagged Improv only, so the closest are the shows whose own category list (Apple's, from the
+    // recorded batched lookup) is Improv plus the fewest others: shared categories over all categories.
+    const onChart = (await catalog.chart(1495)).filter((p) => p.itunesId !== DND);
+    const shows = await catalog.lookupShows(onChart.map((p) => p.itunesId));
+    const closeness = (id: string) => {
+        const own = shows.get(id)!.categoryIds;
+        return (own.includes(1495) ? 1 : 0) / new Set([...own, 1495]).size;
+    };
+    const returned = res.body.map((p: any) => closeness(p.itunesId));
+    expect(returned).toEqual([...returned].sort((a, b) => b - a));
+    // Not just the chart's top: a show high on it but tagged with more besides (Not Another D&D Podcast: Games,
+    // Leisure) gives way to closer ones further down.
+    const passedOver = onChart.slice(0, 12).filter((p) => !res.body.some((r: any) => r.itunesId === p.itunesId));
+    expect(passedOver.length).toBeGreaterThan(0);
+    for (const p of passedOver) expect(closeness(p.itunesId)).toBeLessThan(Math.min(...returned));
 });
 
 it("answers 404 for a similar request on a show it does not have", async () => {
