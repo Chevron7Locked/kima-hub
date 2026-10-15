@@ -29,6 +29,17 @@ import { generateSongPath } from "../../songPath";
 import { getVibeMap } from "../../vibeMap";
 import { parseEmbedding } from "../../../utils/embedding";
 
+// The real worker, with a hook a test can run first: what happens while a layout is being computed.
+const mockBeforeWorker: { run: null | (() => Promise<void>) } = { run: null };
+jest.mock("../worker", () => {
+    const actual = jest.requireActual("../worker");
+    return {
+        runInWorker: async (...args: unknown[]) => {
+            if (mockBeforeWorker.run) await mockBeforeWorker.run();
+            return actual.runInWorker(...args);
+        },
+    };
+});
 jest.mock("../../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
 }));
@@ -396,6 +407,30 @@ describe("the vibe map", () => {
         const after = await mapRows();
         for (const [id, row] of before) if (!ids.includes(id)) expect(after.get(id)).toEqual(row);
         for (const id of ids) expect(after.get(id)!.laid_out).toBe(false);
+    });
+});
+
+describe("a re-run while the map is being laid out", () => {
+    it("never lets the layout it overtook store the old map over the reset", async () => {
+        // A re-run deletes the matching state, and a layout's write updates it in the same transaction, so the
+        // overtaken layout rolls back and the next pass lays the library out afresh (Kevin, 10-10: every re-run
+        // lays a fresh map). A fresh layout here, with a re-run from similarity landing while the worker computes.
+        await buildMatching();
+        await prisma.$executeRaw`DELETE FROM matching_map`;
+        const { rerunEnrichment } = await import("../../enrichmentRestart");
+        let overtook = false;
+        mockBeforeWorker.run = async () => {
+            mockBeforeWorker.run = null;
+            overtook = true;
+            await rerunEnrichment("similarity");
+        };
+        const outcome = await updateMap(true).catch((e: Error) => e);
+        const stored = await prisma.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM matching_map`;
+        expect({ stored: stored[0].n, overtook }).toEqual({ stored: 0, overtook: true });
+        expect(outcome).toBeInstanceOf(Error);
+        // The next similarity pass builds the state again and lays the library out afresh.
+        await buildMatching();
+        expect((await updateMap(true)).laidOut).toBeGreaterThan(0);
     });
 });
 
