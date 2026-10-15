@@ -18,6 +18,7 @@ import express from "express";
 import request from "supertest";
 import podcastRoutes from "../podcasts";
 import { prisma } from "../../utils/db";
+import { redisClient, waitForRedisReady } from "../../utils/redis";
 
 const USER = "u_podsub";
 const STORED = "pod_sub_stored";
@@ -36,23 +37,33 @@ const cleanup = async () => {
 };
 
 beforeAll(async () => {
-    feedHost = http.createServer((_req, res) => {
+    feedHost = http.createServer((req, res) => {
+        // The same local server plays Apple: show 555 is the feed at /real.xml.
+        if ((req.url ?? "").startsWith("/lookup")) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ resultCount: 1, results: [{ kind: "podcast", collectionId: 555, feedUrl: `${feedBase}/real.xml`, genreIds: ["1495"] }] }));
+        }
         res.writeHead(200, { "Content-Type": "application/rss+xml" });
         res.end(FEED);
     });
     await new Promise<void>((ok) => feedHost.listen(0, "127.0.0.1", () => ok()));
     feedBase = `http://127.0.0.1:${(feedHost.address() as AddressInfo).port}`;
+    process.env.ITUNES_BASE_URL = feedBase;
+    await waitForRedisReady();
     await prisma.user.upsert({ where: { id: USER }, create: { id: USER, username: USER, passwordHash: "x" }, update: {} });
 });
 
 beforeEach(async () => {
     await cleanup();
+    const keys = await redisClient.keys("podcasts:*");
+    if (keys.length) await redisClient.del(...keys);
     await prisma.podcast.create({
         data: { id: STORED, feedUrl: "https://old-host.example.invalid/feed", title: "Stored Show", itunesId: "1450241676" },
     });
 });
 
 afterAll(async () => {
+    delete process.env.ITUNES_BASE_URL;
     await cleanup();
     await prisma.user.deleteMany({ where: { id: USER } });
     await new Promise<void>((ok) => feedHost.close(() => ok()));
@@ -84,3 +95,17 @@ it("survives two follows of a new show at once: one show stored, both answered",
     expect(await prisma.podcast.count({ where: { feedUrl } })).toBe(1);
     expect(await prisma.podcastSubscription.count({ where: { userId: USER, podcastId: a.body.podcast.id } })).toBe(1);
 });
+
+it("stores an Apple id only when Apple says it names the feed, so no one can claim a real show's id", async () => {
+    // A member pairs their own feed with show 555's Apple id.
+    const impostor = await request(app).post("/podcasts/subscribe").send({ feedUrl: `${feedBase}/impostor.xml`, itunesId: "555" });
+    expect(impostor.status).toBe(200);
+    expect((await prisma.podcast.findUnique({ where: { id: impostor.body.podcast.id } }))?.itunesId).toBeNull();
+
+    // Following show 555 by its id then reaches the real feed, not the impostor.
+    const real = await request(app).post("/podcasts/subscribe").send({ itunesId: "555" });
+    expect(real.status).toBe(200);
+    expect(real.body.podcast.id).not.toBe(impostor.body.podcast.id);
+    const stored = await prisma.podcast.findUnique({ where: { id: real.body.podcast.id } });
+    expect([stored?.feedUrl, stored?.itunesId]).toEqual([`${feedBase}/real.xml`, "555"]);
+}, 30_000);

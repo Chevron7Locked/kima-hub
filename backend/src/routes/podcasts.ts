@@ -684,6 +684,24 @@ async function follow(userId: string, podcast: { id: string; title: string }) {
     };
 }
 
+/** The same feed address, as Apple and a feed write it (scheme, letter case and a trailing slash aside). */
+const sameFeed = (a: string, b: string) => {
+    const key = (url: string) => url.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "").toLowerCase();
+    return key(a) === key(b);
+};
+
+/** `candidate` when Apple says that id names `feedUrl`; null otherwise, or when Apple cannot be asked. */
+async function appleIdFor(candidate: string | null, feedUrl: string): Promise<string | null> {
+    if (!candidate || !/^\d+$/.test(candidate)) return null;
+    try {
+        const show = (await lookupShows([candidate])).get(candidate);
+        return show?.feedUrl && sameFeed(show.feedUrl, feedUrl) ? candidate : null;
+    } catch (error) {
+        logger.warn(`[PODCAST] Could not confirm Apple id ${candidate}; storing the show without it: ${(error as Error).message}`);
+        return null;
+    }
+}
+
 router.post("/subscribe", requireAuth, async (req, res) => {
     try {
         const { feedUrl, itunesId } = req.body;
@@ -737,9 +755,12 @@ router.post("/subscribe", requireAuth, async (req, res) => {
         }
         const { podcast: podcastData, episodes } = subscribeResult;
 
-        // Create podcast in database
+        // Create podcast in database. Apple ids are unique and the preview finds shows by them, so one is stored only
+        // when Apple says it names this feed: the client and the feed itself can each claim any show's id.
         logger.debug(`    Saving podcast to database...`);
-        const finalItunesId = appleId ?? (podcastData.itunesId ? String(podcastData.itunesId) : null);
+        const feedDeclared = podcastData.itunesId ? String(podcastData.itunesId) : null;
+        const finalItunesId =
+            (await appleIdFor(appleId, finalFeedUrl)) ?? (feedDeclared !== appleId ? await appleIdFor(feedDeclared, finalFeedUrl) : null);
         logger.debug(`   iTunes ID to save: ${finalItunesId || "NONE"}`);
 
         try {
