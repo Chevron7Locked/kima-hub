@@ -23,7 +23,9 @@ export default function PodcastCategoryPage() {
     const categoryId = id === "top" ? null : Number(id);
     const valid = categoryId === null || Number.isInteger(categoryId);
 
-    const { data: categories = [], isLoading: loadingCategories } = usePodcastCategoriesQuery(isAuthenticated);
+    const { data: categories = [], isLoading: loadingCategories, isError: categoriesFailed } = usePodcastCategoriesQuery(isAuthenticated);
+    // A chart is asked for only once its category is known to exist; a made-up id gets "no such category".
+    const known = categoryId === null || categories.some((c) => c.id === categoryId);
     const chart = useInfiniteQuery({
         queryKey: queryKeys.podcastChartPages(categoryId),
         queryFn: ({ pageParam }) => api.getPodcastChart(categoryId, PAGE, pageParam),
@@ -32,11 +34,14 @@ export default function PodcastCategoryPage() {
             const loaded = pages.reduce((n, p) => n + p.length, 0);
             return last.length === PAGE && loaded < CHART_MAX ? loaded : undefined;
         },
-        enabled: isAuthenticated && valid,
+        enabled: isAuthenticated && valid && known,
         staleTime: 60 * 60 * 1000,
     });
 
     const category = categories.find((c) => c.id === categoryId);
+    if (categoriesFailed && categoryId !== null) {
+        return <PageMessage title="couldn't reach apple podcasts" description="try again in a minute" action={{ label: "podcasts", href: "/podcasts" }} />;
+    }
     if (!valid || (categoryId !== null && !loadingCategories && !category)) {
         return <PageMessage title="no such category" action={{ label: "podcasts", href: "/podcasts" }} />;
     }
