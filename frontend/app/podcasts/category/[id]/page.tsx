@@ -39,7 +39,8 @@ export default function PodcastCategoryPage() {
     });
 
     const category = categories.find((c) => c.id === categoryId);
-    if (categoriesFailed && categoryId !== null) {
+    // Only with nothing to show: a failed background refresh keeps the list it already has.
+    if (categoriesFailed && categoryId !== null && categories.length === 0) {
         return <PageMessage title="couldn't reach apple podcasts" description="try again in a minute" action={{ label: "podcasts", href: "/podcasts" }} />;
     }
     if (!valid || (categoryId !== null && !loadingCategories && !category)) {
