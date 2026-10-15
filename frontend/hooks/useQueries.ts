@@ -5,7 +5,7 @@
  */
 
 import { useMemo } from "react";
-import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { PlaylistPreview } from "@/features/home/types";
 
@@ -184,6 +184,15 @@ export function useRecommendationsQuery(limit: number = 10) {
     });
 }
 
+/**
+ * After following or removing a show: the shows list, and every search, since searching shows and episodes covers
+ * only the shows you follow.
+ */
+export function refreshFollowedShows(queryClient: QueryClient) {
+    queryClient.invalidateQueries({ queryKey: queryKeys.podcasts() });
+    queryClient.invalidateQueries({ queryKey: ["search"] });
+}
+
 export function useSearchQuery(
     query: string,
     type:
@@ -195,10 +204,13 @@ export function useSearchQuery(
         | "podcasts"
         | "episodes" = "all",
     limit: number = 20,
+    /** Keep the last answer on screen while the next query loads, as a search-as-you-type box does. */
+    keepPrevious = false,
 ) {
     return useQuery({
         queryKey: queryKeys.search(query, type, limit),
         queryFn: ({ signal }) => api.search(query, type, limit, signal),
+        placeholderData: keepPrevious ? keepPreviousData : undefined,
         enabled: query.length >= 2, // Only search if query is at least 2 characters
         staleTime: 5 * 60 * 1000, // 5 minutes
     });
@@ -208,10 +220,13 @@ export function useDiscoverSearchQuery(
     query: string,
     type: "music" | "podcasts" | "all" = "music",
     limit: number = 20,
+    /** Keep the last answer on screen while the next query loads, as a search-as-you-type box does. */
+    keepPrevious = false,
 ) {
     return useQuery({
         queryKey: queryKeys.discoverSearch(query, type, limit),
         queryFn: ({ signal }) => api.discoverSearch(query, type, limit, signal),
+        placeholderData: keepPrevious ? keepPreviousData : undefined,
         enabled: query.length >= 2,
         staleTime: 5 * 60 * 1000, // 5 minutes
     });

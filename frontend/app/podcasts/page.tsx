@@ -11,7 +11,7 @@ import { cn } from "@/lib/cn";
 import { subscribeQueryEvent } from "@/lib/query-events";
 import { scrollMainToTop } from "@/lib/scroll";
 import { coverArtUrl } from "@/lib/cover-art";
-import { usePodcastsQuery, usePodcastCategoriesQuery, usePodcastChartQuery, queryKeys } from "@/hooks/useQueries";
+import { usePodcastsQuery, usePodcastCategoriesQuery, usePodcastChartQuery, queryKeys, refreshFollowedShows } from "@/hooks/useQueries";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { Pagination } from "@/components/ui/Pagination";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -89,7 +89,7 @@ export default function PodcastsPage() {
         try {
             const result = await api.subscribePodcast(url);
             if (result.success && result.podcast?.id) {
-                queryClient.invalidateQueries({ queryKey: queryKeys.podcasts() });
+                refreshFollowedShows(queryClient);
                 router.push(`/podcasts/${result.podcast.id}`);
             }
             setRssUrl("");

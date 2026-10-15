@@ -8,7 +8,7 @@ import { useAudioState } from "@/lib/audio-state-context";
 import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { Podcast, Episode, PodcastPreview } from "../types";
-import { queryKeys } from "@/hooks/useQueries";
+import { queryKeys, refreshFollowedShows } from "@/hooks/useQueries";
 import { dispatchQueryEvent } from "@/lib/query-events";
 import { useEpisodeToggle } from "./usePlayEpisode";
 
@@ -35,7 +35,7 @@ export function usePodcastActions(podcastId: string, sortedEpisodes?: Episode[])
                 );
 
                 if (response.success && response.podcast?.id) {
-                    queryClient.invalidateQueries({ queryKey: queryKeys.podcasts() });
+                    refreshFollowedShows(queryClient);
                     router.push(`/podcasts/${response.podcast.id}`);
                 }
             } catch (error: unknown) {
@@ -50,7 +50,7 @@ export function usePodcastActions(podcastId: string, sortedEpisodes?: Episode[])
     const handleRemovePodcast = useCallback(async () => {
         try {
             await api.removePodcast(podcastId);
-            queryClient.invalidateQueries({ queryKey: queryKeys.podcasts() });
+            refreshFollowedShows(queryClient);
             router.push("/podcasts");
         } catch (error) {
             notify.error("Couldn't remove this podcast", { message: error instanceof Error ? error.message : undefined });

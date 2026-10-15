@@ -42,8 +42,8 @@ export function PodcastSearch() {
         const timer = setTimeout(() => setSearched(query.trim()), 350);
         return () => clearTimeout(timer);
     }, [query]);
-    const showsFound = useDiscoverSearchQuery(searched, "podcasts", 8);
-    const episodesFound = useSearchQuery(searched, "episodes", 6);
+    const showsFound = useDiscoverSearchQuery(searched, "podcasts", 8, true);
+    const episodesFound = useSearchQuery(searched, "episodes", 6, true);
     const shows = ((showsFound.data?.results ?? []) as unknown as ShowResult[]);
     const episodes = (episodesFound.data as { episodes?: EpisodeResult[] } | undefined)?.episodes ?? [];
 
