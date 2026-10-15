@@ -20,9 +20,15 @@ import {
     chart,
     CHART_MAX,
     forYou,
+    lookupShows,
+    oldestEpisode,
+    rememberSnippet,
     similarShows,
+    snippetFor,
     toDiscoveryItems,
+    type Snippet,
 } from "../services/podcastCatalog";
+import { proxyPreviewStream } from "../utils/previewProxy";
 
 const router = Router();
 
@@ -245,87 +251,111 @@ router.get("/preview/:itunesId", requireAuth, async (req, res) => {
             return res.status(404).json({ error: "Podcast not found" });
         }
 
-        logger.debug(`\n [PODCAST PREVIEW] iTunes ID: ${itunesId}`);
-
-        const itunesResponse = await axios.get(
-            "https://itunes.apple.com/lookup",
-            {
-                params: { id: itunesId, entity: "podcast" },
-                timeout: 5000,
-            }
-        );
-
-        if (
-            !itunesResponse.data.results ||
-            itunesResponse.data.results.length === 0
-        ) {
+        const show = (await lookupShows([itunesId])).get(itunesId);
+        if (!show) {
             return res.status(404).json({ error: "Podcast not found" });
         }
 
-        const podcastData = itunesResponse.data.results[0];
-
         const existingPodcast = await prisma.podcast.findFirst({
-            where: {
-                OR: [{ id: itunesId }, { feedUrl: podcastData.feedUrl }],
-            },
+            where: { OR: [{ itunesId }, ...(show.feedUrl ? [{ feedUrl: show.feedUrl }] : [])] },
+            select: { id: true },
         });
-
-        let isSubscribed = false;
-        if (existingPodcast) {
-            const subscription = await prisma.podcastSubscription.findUnique({
-                where: {
-                    userId_podcastId: {
-                        userId: req.user!.id,
-                        podcastId: existingPodcast.id,
-                    },
-                },
-            });
-            isSubscribed = !!subscription;
-        }
+        const isSubscribed = existingPodcast
+            ? !!(await prisma.podcastSubscription.findUnique({
+                  where: { userId_podcastId: { userId: req.user!.id, podcastId: existingPodcast.id } },
+              }))
+            : false;
 
         let description = "";
-        let previewEpisodes: any[] = [];
-        if (podcastData.feedUrl) {
+        let previewEpisodes: Array<{ title: string; publishedAt: Date; duration: number; description: string }> = [];
+        let snippet: Snippet | null = null;
+        if (show.feedUrl) {
             try {
                 const feedResult = await withTimeout(
-                    rssParserService.parseFeed(podcastData.feedUrl),
+                    rssParserService.parseFeed(show.feedUrl),
                     PREVIEW_RSS_TIMEOUT_MS,
                     "RSS preview timed out",
                 );
                 if (feedResult.notModified) throw new Error("Unexpected 304 on preview fetch");
                 description = feedResult.podcast.description || "";
-
-                previewEpisodes = (feedResult.episodes || [])
-                    .slice(0, 3)
-                    .map((episode: any) => ({
-                        title: episode.title,
-                        publishedAt: episode.publishedAt,
-                        duration: episode.duration || 0,
+                previewEpisodes = [...feedResult.episodes]
+                    .sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime())
+                    .slice(0, PREVIEW_EPISODES)
+                    .map((ep) => ({
+                        title: ep.title,
+                        publishedAt: ep.publishedAt,
+                        duration: ep.duration || 0,
+                        description: ep.description || "",
                     }));
-
-                logger.debug(
-                    ` [PODCAST PREVIEW] Fetched description (${description.length} chars) and ${previewEpisodes.length} preview episodes`
-                );
+                snippet = snippetFrom(feedResult.episodes);
+                if (snippet) await rememberSnippet(itunesId, snippet);
             } catch (error) {
                 logger.warn(`  Failed to fetch RSS feed for preview:`, error);
             }
         }
 
+        const names = new Map((await categoryTree()).map((c) => [c.id, c.name]));
+        const categories = show.categoryIds
+            .filter((id) => names.has(id))
+            .map((id) => ({ id, name: names.get(id)! }));
         res.json({
-            itunesId: podcastData.collectionId.toString(),
-            title: podcastData.collectionName,
-            author: podcastData.artistName,
-            description: description,
-            coverUrl: podcastData.artworkUrl600 || podcastData.artworkUrl100,
-            feedUrl: podcastData.feedUrl,
-            genres: podcastData.genres || [],
-            episodeCount: podcastData.trackCount || 0,
-            previewEpisodes: previewEpisodes,
+            itunesId: show.itunesId,
+            title: show.title,
+            author: show.author,
+            description,
+            coverUrl: show.coverUrl,
+            feedUrl: show.feedUrl,
+            genres: categories.map((c) => c.name),
+            categories,
+            episodeCount: show.episodeCount,
+            previewEpisodes,
+            snippet: snippet ? { ...snippet, audioUrl: undefined } : null,
             isSubscribed,
             subscribedPodcastId: isSubscribed ? existingPodcast!.id : null,
         });
     } catch (error) {
         safeError(res, "Error previewing podcast", error);
+    }
+});
+
+/** The newest episodes a preview lists, with their summaries. */
+const PREVIEW_EPISODES = 20;
+
+function snippetFrom(episodes: Array<{ title: string; publishedAt: Date; duration: number; description?: string; audioUrl: string }>): Snippet | null {
+    const ep = oldestEpisode(episodes);
+    return ep
+        ? { title: ep.title, publishedAt: ep.publishedAt.toISOString(), duration: ep.duration || 0, description: ep.description || "", audioUrl: ep.audioUrl }
+        : null;
+}
+
+/**
+ * GET /podcasts/preview/:itunesId/snippet — the show's first episode, streamed through Kima with range support,
+ * so a show can be heard before it is followed. Nothing is stored; the feed (from Apple's record) names the audio.
+ */
+router.get("/preview/:itunesId/snippet", async (req, res) => {
+    const { itunesId } = req.params;
+    if (!/^\d+$/.test(itunesId)) {
+        return res.status(404).json({ error: "Podcast not found" });
+    }
+    try {
+        const snippet = await snippetFor(itunesId, async (feedUrl) => {
+            const feed = await withTimeout(rssParserService.parseFeed(feedUrl), PREVIEW_RSS_TIMEOUT_MS, "RSS snippet timed out");
+            return feed.notModified ? null : snippetFrom(feed.episodes);
+        });
+        if (!snippet) {
+            return res.status(404).json({ error: "This podcast has no episode to sample" });
+        }
+        const ssrfError = await validateUrlForFetch(snippet.audioUrl);
+        if (ssrfError) {
+            return res.status(400).json({ error: `Invalid episode audio URL: ${ssrfError}` });
+        }
+        await proxyPreviewStream(res, snippet.audioUrl, {
+            notFoundMessage: "Episode audio not found",
+            logLabel: "[PODCAST SNIPPET]",
+            rangeHeader: req.headers.range,
+        });
+    } catch (error) {
+        safeError(res, "Error streaming podcast snippet", error);
     }
 });
 

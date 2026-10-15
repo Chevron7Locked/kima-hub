@@ -80,3 +80,10 @@ it("stores a show's categories from Apple, else from its feed", async () => {
     expect((await prisma.podcast.findUniqueOrThrow({ where: { id: P } })).categoryIds).toEqual([1495, 1303, 1502, 1507]);
     expect(await catalog.assignCategories(P, null, ["Fiction", "Comedy Fiction"])).toEqual([1483, 1486]);
 });
+
+it("samples a show by its oldest dated episode with audio", () => {
+    const ep = (title: string, date: string, audioUrl = "https://a.invalid/x.mp3") => ({ title, publishedAt: new Date(date), audioUrl });
+    const feed = [ep("S4 Ep. 15", "2026-10-01"), ep("Ep. 1 - A Man and His Handshake", "2019-02-14"), ep("Season 4 Trailer", "2025-01-01")];
+    expect(catalog.oldestEpisode(feed)?.title).toBe("Ep. 1 - A Man and His Handshake");
+    expect(catalog.oldestEpisode([ep("no date", "not a date"), ep("no audio", "2010-01-01", "")])).toBeNull();
+});

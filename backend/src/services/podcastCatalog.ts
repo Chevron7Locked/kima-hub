@@ -35,10 +35,23 @@ export interface CatalogPodcast {
     isExternal: true;
 }
 
-interface LookupShow {
+export interface LookupShow {
     itunesId: string;
     feedUrl: string | null;
     categoryIds: number[];
+    title: string;
+    author: string;
+    coverUrl: string | null;
+    episodeCount: number;
+}
+
+/** The episode a show is sampled by: its oldest in the feed, where hosts usually say what the show is. */
+export interface Snippet {
+    title: string;
+    publishedAt: string;
+    duration: number;
+    description: string;
+    audioUrl: string;
 }
 
 // ITUNES_BASE_URL points tests at recorded replies (scripts/record-apple-podcasts.ts).
@@ -128,11 +141,19 @@ export async function lookupShows(itunesIds: string[]): Promise<Map<string, Look
     const out = new Map<string, LookupShow>();
     const ids = [...new Set(itunesIds.filter((id) => /^\d+$/.test(id)))];
     for (const id of ids) {
-        const show = await cached(`podcasts:lookup:v1:${id}`, 7 * DAY, async () => {
+        const show = await cached(`podcasts:lookup:v2:${id}`, 7 * DAY, async (): Promise<LookupShow | null> => {
             const data = await apple("/lookup", { id, entity: "podcast" });
             const r = data?.results?.[0];
             return r
-                ? { itunesId: String(r.collectionId), feedUrl: r.feedUrl ?? null, categoryIds: categoryIdsFrom(r.genreIds) }
+                ? {
+                      itunesId: String(r.collectionId),
+                      feedUrl: r.feedUrl ?? null,
+                      categoryIds: categoryIdsFrom(r.genreIds),
+                      title: r.collectionName ?? "",
+                      author: r.artistName ?? "",
+                      coverUrl: r.artworkUrl600 || r.artworkUrl100 || null,
+                      episodeCount: r.trackCount || 0,
+                  }
                 : null;
         });
         if (show) out.set(id, show);
@@ -272,4 +293,40 @@ export async function similarShows(show: { itunesId: string | null; categoryIds:
     }
     const ranked = [...found.values()].sort((a, b) => b.shared - a.shared || a.best - b.best).slice(0, limit);
     return toDiscoveryItems(ranked.map((r) => r.show));
+}
+
+/** The oldest episode in a parsed feed, or none when the feed carries no dated audio. */
+export function oldestEpisode<T extends { publishedAt: Date; audioUrl: string }>(episodes: T[]): T | null {
+    let oldest: T | null = null;
+    for (const ep of episodes) {
+        if (!ep.audioUrl || Number.isNaN(ep.publishedAt.getTime())) continue;
+        if (!oldest || ep.publishedAt < oldest.publishedAt) oldest = ep;
+    }
+    return oldest;
+}
+
+const snippetKey = (itunesId: string) => `podcasts:snippet:v1:${itunesId}`;
+
+/** Keep a show's snippet once a preview has read its feed, so the stream does not read the feed again. */
+export async function rememberSnippet(itunesId: string, snippet: Snippet): Promise<void> {
+    try {
+        await redisClient.setex(snippetKey(itunesId), DAY, JSON.stringify(snippet));
+    } catch (err) {
+        logger.warn(`[PodcastCatalog] Could not keep the snippet for ${itunesId}: ${(err as Error).message}`);
+    }
+}
+
+/** A show's snippet: remembered from its preview, or read from its feed now. */
+export async function snippetFor(itunesId: string, readFeed: (feedUrl: string) => Promise<Snippet | null>): Promise<Snippet | null> {
+    try {
+        const kept = await redisClient.get(snippetKey(itunesId));
+        if (kept) return JSON.parse(kept) as Snippet;
+    } catch (err) {
+        logger.warn(`[PodcastCatalog] Redis read failed for ${snippetKey(itunesId)}: ${(err as Error).message}`);
+    }
+    const feedUrl = (await lookupShows([itunesId])).get(itunesId)?.feedUrl;
+    if (!feedUrl) return null;
+    const snippet = await readFeed(feedUrl);
+    if (snippet) await rememberSnippet(itunesId, snippet);
+    return snippet;
 }
