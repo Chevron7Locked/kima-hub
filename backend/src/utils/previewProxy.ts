@@ -3,13 +3,15 @@ import type { Response } from "express";
 import { logger } from "./logger";
 import { upstreamHeader } from "./upstreamHeaders";
 import { guardedAxios } from "./ssrf";
+import { upstreamFailure } from "./upstream";
 
 /**
  * Pipe a Deezer preview to the client as same-origin media, honoring the
  * client's Range header by forwarding it upstream and mirroring the
- * upstream's 206/416 so seeks land on the right bytes. An upstream 404
- * answers 404 with `notFoundMessage`; any other failure is thrown to the
- * caller.
+ * upstream's 206/416 so seeks land on the right bytes. A host that has no
+ * such preview, or an address the guard refuses, answers 404 with
+ * `notFoundMessage`; a host that is down or throttling answers 502. Anything
+ * else is thrown to the caller.
  */
 export async function proxyPreviewStream(
     res: Response,
@@ -32,9 +34,14 @@ export async function proxyPreviewStream(
                 (status >= 200 && status < 300) || status === 416,
         });
     } catch (error) {
-        // Any 4xx (gone, forbidden, an expired signed link) is the preview being unavailable.
-        if (axios.isAxiosError(error) && error.response && error.response.status < 500) {
+        const failure = upstreamFailure(error);
+        if (failure === "missing") {
             res.status(404).json({ error: notFoundMessage });
+            return;
+        }
+        if (failure === "down") {
+            logger.warn(`${logLabel} preview host did not answer: ${(error as Error).message}`);
+            res.status(502).json({ error: "The preview's host did not answer; try again shortly" });
             return;
         }
         throw error;

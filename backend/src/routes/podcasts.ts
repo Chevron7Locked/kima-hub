@@ -1,6 +1,7 @@
 import { Router, Response } from "express";
 import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
+import { upstreamFailure } from "../utils/upstream";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { prisma, Prisma } from "../utils/db";
 import { rssParserService } from "../services/rss-parser";
@@ -22,7 +23,6 @@ import {
     CHART_MAX,
     forYou,
     lookupShows,
-    AppleReplyError,
     isCategory,
     oldestEpisode,
     rememberSnippet,
@@ -169,19 +169,21 @@ const pageParams = z.object({
 
 /** GET /podcasts/categories — Apple's podcast categories, sub-categories naming their parent. */
 /**
- * Apple's trouble is never Kima's 500: a 4xx from Apple means it has no such chart or show, and an outage or a
- * reply that is not what was asked for is a bad gateway.
+ * An upstream's trouble (Apple, a show's feed or audio host) is never Kima's 500: it has no such thing → 404 with
+ * `missing`; it is down, throttling or answered with something else → 502 with `down` (utils/upstream).
  */
-function appleFailure(res: Response, label: string, error: unknown) {
-    if (axios.isAxiosError(error) && error.response && error.response.status < 500) {
-        return res.status(404).json({ error: "Apple Podcasts has no such chart or show" });
-    }
-    if (error instanceof AppleReplyError || axios.isAxiosError(error)) {
-        logger.warn(`[PODCAST] ${label}: Apple Podcasts did not answer (${(error as Error).message})`);
-        return res.status(502).json({ error: "Apple Podcasts did not answer; try again shortly" });
+function answerUpstreamFailure(res: Response, label: string, error: unknown, missing: string, down: string) {
+    const failure = upstreamFailure(error);
+    if (failure === "missing") return res.status(404).json({ error: missing });
+    if (failure === "down") {
+        logger.warn(`[PODCAST] ${label}: ${(error as Error).message}`);
+        return res.status(502).json({ error: down });
     }
     return safeError(res, label, error);
 }
+
+const appleFailure = (res: Response, label: string, error: unknown) =>
+    answerUpstreamFailure(res, label, error, "Apple Podcasts has no such chart or show", "Apple Podcasts did not answer; try again shortly");
 
 router.get("/categories", async (_req, res) => {
     try {
@@ -396,7 +398,7 @@ router.get("/preview/:itunesId", requireAuth, async (req, res) => {
             subscribedPodcastId: isSubscribed ? existingPodcast!.id : null,
         });
     } catch (error) {
-        safeError(res, "Error previewing podcast", error);
+        appleFailure(res, "Error previewing podcast", error);
     }
 });
 
@@ -437,7 +439,7 @@ router.get("/preview/:itunesId/snippet", async (req, res) => {
             rangeHeader: req.headers.range,
         });
     } catch (error) {
-        safeError(res, "Error streaming podcast snippet", error);
+        answerUpstreamFailure(res, "Error streaming podcast snippet", error, "This podcast has no episode to sample", "The show's feed did not answer; try again shortly");
     }
 });
 
@@ -807,7 +809,7 @@ router.post("/subscribe", requireAuth, async (req, res) => {
                 detail: error.message,
             });
         }
-        safeError(res, "Error subscribing to podcast", error);
+        appleFailure(res, "Error subscribing to podcast", error);
     }
 });
 
@@ -1115,12 +1117,10 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
         });
         pipeUpstream(res, response.data, "RSS stream");
     } catch (error) {
-        // The host refusing or not having the file (a 4xx) is the episode being unavailable, not a server failure.
-        if (!res.headersSent && axios.isAxiosError(error) && error.response && error.response.status < 500) {
-            return res.status(404).json({ error: "This episode is not available from its host" });
-        }
+        // The host refusing or not having the file, or a redirect the guard refuses, is the episode being
+        // unavailable; a host that is down or throttling is a bad gateway. Neither is a server failure.
         if (!res.headersSent) {
-            safeError(res, "Podcast stream error", error);
+            answerUpstreamFailure(res, "Podcast stream error", error, "This episode is not available from its host", "The episode's host did not answer; try again shortly");
         } else {
             logger.error("Podcast stream error (headers already sent):", error);
         }

@@ -2,6 +2,11 @@
  * Reject with a labelled Error when the promise outlives the budget. Callers
  * that tolerate a timeout catch it explicitly.
  */
+/** A wait that ran out; the message says what was being waited for. */
+export class TimeoutError extends Error {
+    name = "TimeoutError";
+}
+
 export async function withTimeout<T>(
     promise: Promise<T>,
     timeoutMs: number,
@@ -9,7 +14,7 @@ export async function withTimeout<T>(
 ): Promise<T> {
     let timer: NodeJS.Timeout | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+        timer = setTimeout(() => reject(new TimeoutError(errorMessage)), timeoutMs);
     });
     try {
         return await Promise.race([promise, timeoutPromise]);

@@ -2,6 +2,7 @@ import Parser from "rss-parser";
 import axios from "axios";
 import { logger } from "../utils/logger";
 import { guardedAxios } from "../utils/ssrf";
+import { UpstreamReplyError } from "../utils/upstream";
 import { APP_VERSION } from "../config";
 
 interface RSSPodcast {
@@ -199,7 +200,9 @@ class RSSParserService {
                 `\n [RSS PARSER] Failed to parse feed:`,
                 error.message
             );
-            throw new Error(`Failed to parse podcast feed: ${error.message}`);
+            // An upstream reply problem, with the cause attached, so a caller can tell a refused or missing feed
+            // from one that is down or unreadable.
+            throw Object.assign(new UpstreamReplyError(`Failed to parse podcast feed: ${error.message}`), { cause: error });
         }
     }
 

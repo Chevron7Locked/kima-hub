@@ -9,6 +9,7 @@ import { rateLimiter } from "./rateLimiter";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { UpstreamReplyError } from "../utils/upstream";
 
 /** Apple's root "Podcasts" genre: every show carries it, so it says nothing. */
 const ROOT_GENRE = 26;
@@ -61,7 +62,7 @@ async function apple<T = any>(pathname: string, params?: Record<string, string |
 }
 
 /** Apple answered, but not with what was asked for (an error page, a throttled empty reply). Never cached. */
-export class AppleReplyError extends Error {
+export class AppleReplyError extends UpstreamReplyError {
     name = "AppleReplyError";
 }
 

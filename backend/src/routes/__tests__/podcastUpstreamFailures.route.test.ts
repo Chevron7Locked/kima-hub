@@ -40,6 +40,8 @@ let base = "";
 const app = express();
 app.use("/podcasts", podcastRoutes);
 app.get("/preview-proxy", (_req, res) => proxyPreviewStream(res, `${base}/forbidden.mp3`, { notFoundMessage: "No preview", logLabel: "t" }));
+app.get("/preview-proxy-busy", (_req, res) => proxyPreviewStream(res, `${base}/busy.mp3`, { notFoundMessage: "No preview", logLabel: "t" }));
+app.get("/preview-proxy-internal", (_req, res) => proxyPreviewStream(res, `${base}/to-internal.mp3`, { notFoundMessage: "No preview", logLabel: "t" }));
 
 beforeAll(async () => {
     host = http.createServer((req, res) => {
@@ -47,6 +49,15 @@ beforeAll(async () => {
         if (path === "/forbidden.mp3") {
             res.writeHead(403);
             return res.end("forbidden");
+        }
+        if (path === "/busy.mp3") {
+            res.writeHead(429);
+            return res.end("slow down");
+        }
+        if (path === "/to-internal.mp3") {
+            // A host sending Kima to the cloud metadata address, written in IPv6 form.
+            res.writeHead(302, { Location: "http://[::ffff:a9fe:a9fe]/latest/meta-data/" });
+            return res.end();
         }
         const queue = replies.get(path) ?? [];
         const r = queue.length > 1 ? queue.shift()! : queue[0] ?? { status: 404, body: "" };
@@ -61,7 +72,13 @@ beforeAll(async () => {
     await prisma.podcast.create({
         data: {
             id: "pod_fail", feedUrl: "https://feeds.example.invalid/fail", title: "Fail Show",
-            episodes: { create: [{ id: "pod_fail_ep", guid: "f1", title: "Ep", audioUrl: `${base}/forbidden.mp3`, duration: 60, publishedAt: new Date() }] },
+            episodes: {
+                create: [
+                    { id: "pod_fail_ep", guid: "f1", title: "Ep", audioUrl: `${base}/forbidden.mp3`, duration: 60, publishedAt: new Date() },
+                    { id: "pod_fail_busy", guid: "f2", title: "Busy", audioUrl: `${base}/busy.mp3`, duration: 60, publishedAt: new Date() },
+                    { id: "pod_fail_internal", guid: "f3", title: "Internal", audioUrl: `${base}/to-internal.mp3`, duration: 60, publishedAt: new Date() },
+                ],
+            },
         },
     });
 });
@@ -115,5 +132,27 @@ describe("routes answer with what happened", () => {
     it("a host refusing an episode or a sample is a 404", async () => {
         expect((await request(app).get("/podcasts/pod_fail/episodes/pod_fail_ep/stream").set("Range", "bytes=0-")).status).toBe(404);
         expect((await request(app).get("/preview-proxy")).status).toBe(404);
+    });
+
+    it("Apple throttling is a 502, not 'no such chart'", async () => {
+        answer("/WebObjects/MZStoreServices.woa/ws/genres", TREE);
+        answer("/us/rss/toppodcasts/limit=200/genre=1495/json", { status: 429, body: "slow down" });
+        expect((await request(app).get("/podcasts/charts?category=1495")).status).toBe(502);
+    }, 60_000); // the rate limiter retries a 429 twice, with growing waits, before giving up
+
+    it("Apple down while previewing a show or its sample is a 502", async () => {
+        answer("/lookup", { status: 503, body: "down" });
+        expect((await request(app).get("/podcasts/preview/12345")).status).toBe(502);
+        expect((await request(app).get("/podcasts/preview/12345/snippet")).status).toBe(502);
+    });
+
+    it("a host throttling an episode or a preview is a 502", async () => {
+        expect((await request(app).get("/podcasts/pod_fail/episodes/pod_fail_busy/stream")).status).toBe(502);
+        expect((await request(app).get("/preview-proxy-busy")).status).toBe(502);
+    });
+
+    it("a host redirecting into the internal network is refused as unavailable, not a 500", async () => {
+        expect((await request(app).get("/podcasts/pod_fail/episodes/pod_fail_internal/stream")).status).toBe(404);
+        expect((await request(app).get("/preview-proxy-internal")).status).toBe(404);
     });
 });
