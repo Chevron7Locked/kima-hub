@@ -11,7 +11,7 @@ jest.mock("dns/promises", () => {
 import http from "http";
 import type { AddressInfo } from "net";
 import axios from "axios";
-import { fetchChecked, guardedAxios } from "../ssrf";
+import { fetchChecked, guardedAxios, isBlockedFetch, isBlockedIp, validateUrlForFetch } from "../ssrf";
 
 let host: http.Server;
 let port = 0;
@@ -21,6 +21,9 @@ beforeAll(async () => {
     host = http.createServer((req, res) => {
         if (req.url === "/to-metadata") {
             res.writeHead(302, { Location: "http://169.254.169.254/latest/meta-data/" });
+        } else if (req.url === "/to-mapped") {
+            // 127.0.0.1 written as an IPv4-mapped IPv6 address, as a URL parser normalises it.
+            res.writeHead(302, { Location: `http://[::ffff:7f00:1]:${port}/secret` });
         } else if (req.url === "/to-name") {
             res.writeHead(302, { Location: `http://localhost:${port}/secret` });
         } else if (req.url === "/secret") {
@@ -50,6 +53,12 @@ describe("guardedAxios", () => {
         await expect(axios.get(`http://127.0.0.1:${port}/to-metadata`, { ...guardedAxios, timeout: 5000 })).rejects.toThrow(
             /Blocked: redirect to internal address 169\.254\.169\.254/,
         );
+    });
+
+    it("refuses a redirect to an internal address written in IPv6 form, and says it refused", async () => {
+        const error = await axios.get(`http://127.0.0.1:${port}/to-mapped`, { ...guardedAxios, timeout: 5000 }).catch((e) => e);
+        expect(reachedSecret).toBe(0);
+        expect(isBlockedFetch(error)).toBe(true);
     });
 
     it("refuses a redirect to a name that resolves to an internal address", async () => {
@@ -93,5 +102,22 @@ describe("fetchChecked", () => {
         expect(res.status).toBe(200);
         expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(["http://allowed.test/cover.jpg", "http://allowed.test/moved.jpg"]);
         expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: "manual" });
+    });
+});
+
+describe("which addresses are internal", () => {
+    it.each([
+        ["127.0.0.1", true], ["10.1.2.3", true], ["172.16.0.1", true], ["172.32.0.1", false], ["192.168.1.1", true],
+        ["169.254.169.254", true], ["100.64.0.1", true], ["0.0.0.0", true], ["224.0.0.1", true], ["8.8.8.8", false],
+        ["::1", true], ["::", true], ["::ffff:7f00:1", true], ["::ffff:127.0.0.1", true], ["::ffff:a9fe:a9fe", true],
+        ["::7f00:1", true], ["fd12:3456::1", true], ["fe80::1", true], ["ff02::1", true],
+        ["64:ff9b::7f00:1", true], ["64:ff9b::808:808", false], ["2606:4700:4700::1111", false], ["not-an-ip", true],
+    ])("%s → %s", (ip, internal) => {
+        expect(isBlockedIp(ip)).toBe(internal);
+    });
+
+    it("checks an address written as the host itself, without a name lookup", async () => {
+        expect(await validateUrlForFetch("http://[::ffff:7f00:1]/")).toMatch(/internal address/);
+        expect(await validateUrlForFetch("http://[2606:4700:4700::1111]/")).toBeNull();
     });
 });

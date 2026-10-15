@@ -5,6 +5,7 @@
  * Images are stored in the covers directory and served directly from disk.
  */
 
+import { fetchChecked } from "../utils/ssrf";
 import fs from "fs";
 import path from "path";
 import { logger } from "../utils/logger";
@@ -62,7 +63,7 @@ export async function downloadAndStoreImage(
     try {
         logger.debug(`[ImageStorage] Downloading ${type} image: ${url.substring(0, 60)}...`);
 
-        const response = await fetch(url, {
+        const response = await fetchChecked(url, {
             headers: {
                 "User-Agent": USER_AGENT,
             },

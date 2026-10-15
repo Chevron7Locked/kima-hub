@@ -3,6 +3,7 @@
  * KIMA_PUBLIC_VIBE=true (config.publicVibe); every request carries
  * `Authorization: Bearer <KIMA_PUBLIC_VIBE_TOKEN>`. All routes are read-only.
  */
+import { fetchChecked } from "../utils/ssrf";
 import { Router, Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 import fs from "fs";
@@ -89,7 +90,7 @@ async function resolveCoverBytes(trackId: string): Promise<CoverBytes | null> {
     }).catch(() => null);
     if (!found?.url) return null;
     if (found.url.startsWith("native:")) return readLocalCover(found.url);
-    const response = await fetch(found.url, {
+    const response = await fetchChecked(found.url, {
         headers: { "User-Agent": USER_AGENT },
         signal: AbortSignal.timeout(COVER_FETCH_TIMEOUT_MS),
     }).catch(() => null);
