@@ -53,7 +53,12 @@ export interface Release {
 }
 
 /** The window shows exactly one of these below `lg`; from `lg` the list stays put and this selects the right column. */
-type WindowView = { pane: "list" } | { pane: "needs" } | { pane: "release"; version: string } | { pane: "item"; key: string };
+// An item opened from an older release's page remembers that release, so going back returns there.
+type WindowView =
+    | { pane: "list" }
+    | { pane: "needs" }
+    | { pane: "release"; version: string }
+    | { pane: "item"; key: string; from?: string };
 
 /** A click that replaces this page: a plain left click. Cmd, ctrl, shift or a middle click opens another tab or window. */
 export function opensHere(e: React.MouseEvent): boolean {
@@ -91,6 +96,7 @@ export function WhatsNewWindow({
     const dialogRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
     // Where the user came from, so going back lands focus on the row they left.
+    const previousView = useRef<WindowView>({ pane: "list" });
     const lastRow = useRef<{ kind: "item" | "release"; key: string } | null>(null);
 
     const release = releases[releases.length - 1];
@@ -121,8 +127,13 @@ export function WhatsNewWindow({
 
     const openItem = (key: string) => {
         lastRow.current = { kind: "item", key };
-        setView({ pane: "item", key });
+        setView(view.pane === "release" ? { pane: "item", key, from: view.version } : { pane: "item", key });
     };
+    // Back from an item opened on an older release's page is that page; from anything else, the list.
+    const goBack = useCallback(
+        () => setView(view.pane === "item" && view.from ? { pane: "release", version: view.from } : { pane: "list" }),
+        [view],
+    );
     const openRelease = (version: string) => {
         lastRow.current = { kind: "release", key: version };
         setView({ pane: "release", version });
@@ -131,14 +142,19 @@ export function WhatsNewWindow({
     // Each view starts at its top, and focus follows: the back button on a page, the row it came from on the way back.
     useEffect(() => {
         contentRef.current?.scrollTo(0, 0);
+        // Leaving a release's page, the list's row to land on is that release's.
+        const leftRelease = previousView.current;
+        previousView.current = view;
+        if (view.pane === "list" && leftRelease.pane === "release") lastRow.current = { kind: "release", key: leftRelease.version };
+        const returning = view.pane === "list" || (view.pane === "release" && lastRow.current?.kind === "item");
         const selector =
-            view.pane === "list"
-                ? lastRow.current
-                    ? lastRow.current.kind === "item"
-                      ? `[data-item="${lastRow.current.key}"]`
-                      : `[data-release="${lastRow.current.key}"]`
-                    : null
-                : "[data-back]";
+            returning && lastRow.current
+                ? lastRow.current.kind === "item"
+                    ? `[data-item="${lastRow.current.key}"]`
+                    : `[data-release="${lastRow.current.key}"]`
+                : view.pane === "list"
+                  ? null
+                  : "[data-back]";
         if (selector) dialogRef.current?.querySelector<HTMLElement>(selector)?.focus();
     }, [view]);
 
@@ -148,12 +164,12 @@ export function WhatsNewWindow({
         const onKey = (e: KeyboardEvent) => {
             if (e.key !== "Escape") return;
             if (document.querySelector("[data-nested-confirm='true']")) return;
-            if (view.pane !== "list") setView({ pane: "list" });
+            if (view.pane !== "list") goBack();
             else void close();
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
-    }, [close, view]);
+    }, [close, goBack, view]);
 
     // The window takes the page on purpose, so it owes the keyboard what ConfirmDialog gives: focus lands inside on
     // open, and Tab stays inside while it is up.
@@ -321,7 +337,7 @@ export function WhatsNewWindow({
         <button
             type="button"
             data-back
-            onClick={() => setView({ pane: "list" })}
+            onClick={goBack}
             className="-ml-2 self-start min-h-9 py-1.5 pl-1 pr-3 rounded-lg flex items-center gap-1 text-sm text-[var(--text-secondary)] hover:text-white hover:bg-white/5 transition-colors"
         >
             <ChevronLeft className="w-4 h-4" />

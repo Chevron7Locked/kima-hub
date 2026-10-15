@@ -98,6 +98,24 @@ describe("WhatsNewWindow", () => {
         expect(container.querySelector('[data-release="1.11.0"]')).not.toBeNull();
     });
 
+    it("returns from an older release's item to that release's page, focused on the item", async () => {
+        await renderWindow([R11, R12]);
+        const click = async (selector: string) =>
+            act(async () => {
+                container.querySelector<HTMLButtonElement>(selector)!.click();
+            });
+        await click('[data-release="1.11.0"]');
+        await click('[data-item="vibe.engine"]');
+        expect(container.querySelector("#whats-new-item")?.textContent).toBe("The new vibe engine");
+        await click("[data-back]");
+        expect(container.querySelector("#whats-new-release")?.textContent).toBe("Kima 1.11");
+        expect(document.activeElement?.getAttribute("data-item")).toBe("vibe.engine");
+        // Back again from the release page is the list.
+        await click("[data-back]");
+        expect(container.querySelector("#whats-new-release")).toBeNull();
+        expect(document.activeElement?.getAttribute("data-release")).toBe("1.11.0");
+    });
+
     it("never hides both panes at once, in any view", async () => {
         await renderWindow([R11, R12]);
         const check = () => {
