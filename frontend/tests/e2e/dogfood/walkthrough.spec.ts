@@ -1165,7 +1165,7 @@ test.describe("Dogfood walkthrough", () => {
 
         try {
             await session.step("browse the podcast directory", async () => {
-                const res = await page.request.get("/api/podcasts/discover/top?limit=5", {
+                const res = await page.request.get("/api/podcasts/charts?limit=5", {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 expect(
@@ -1200,7 +1200,7 @@ test.describe("Dogfood walkthrough", () => {
             }
 
             await session.step("subscribe to it", async () => {
-                const listRes = await page.request.get("/api/podcasts/discover/top?limit=5", {
+                const listRes = await page.request.get("/api/podcasts/charts?limit=5", {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 const body = await listRes.json();
@@ -1375,7 +1375,7 @@ test.describe("Dogfood walkthrough", () => {
 
         try {
             await session.step("subscribe to a podcast from the directory", async () => {
-                const listRes = await page.request.get("/api/podcasts/discover/top?limit=5", {
+                const listRes = await page.request.get("/api/podcasts/charts?limit=5", {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 expect(

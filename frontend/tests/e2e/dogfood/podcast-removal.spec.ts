@@ -9,8 +9,6 @@ const baseUrl = process.env.KIMA_UI_BASE_URL || "http://127.0.0.1:3030";
 const USERNAME = process.env.KIMA_TEST_USERNAME || "";
 const PASSWORD = process.env.KIMA_TEST_PASSWORD || "";
 
-/** Feed is sourced from the app's own discover API at runtime — never hardcoded. */
-let FEED_URL = "";
 
 /**
  * The release-notes dialog opens over the app on a fresh browser context and
@@ -63,20 +61,18 @@ test.describe.serial("Podcast removal", () => {
     });
 
     test("R1. subscribe to a podcast", async () => {
-        // Source the feed the way the UI does: the discover directory.
-        const top = await page.request.get("/api/podcasts/discover/top?limit=5", {
+        // A show from the overall chart the podcasts page shows, followed by its Apple id as the page does.
+        const chart = await page.request.get("/api/podcasts/charts?limit=5", {
             headers: { Authorization: `Bearer ${token}` },
         });
-        expect(top.status(), `discover returned ${top.status()}`).toBe(200);
-        const body = await top.json();
-        const list: Array<{ id?: string; feedUrl?: string; rssUrl?: string; feed?: string; title?: string }> = Array.isArray(body) ? body : (body.podcasts ?? []);
-        const pick = list.find((p) => (p.feedUrl ?? p.rssUrl ?? p.feed ?? "").startsWith("https://"));
-        expect(pick, "discover returned no podcast with an https feed").toBeTruthy();
-        FEED_URL = pick?.feedUrl ?? pick?.rssUrl ?? pick?.feed ?? FEED_URL;
+        expect(chart.status(), `chart returned ${chart.status()}`).toBe(200);
+        const list: Array<{ itunesId?: string; title?: string }> = await chart.json();
+        const pick = list.find((p) => p.itunesId);
+        expect(pick, "the chart returned no show").toBeTruthy();
         podcastTitle = pick?.title ?? podcastTitle;
 
         const res = await page.request.post("/api/podcasts/subscribe", {
-            data: { feedUrl: FEED_URL },
+            data: { itunesId: pick?.itunesId },
             headers: { Authorization: `Bearer ${token}` },
         });
         // The feed fetch is external; a 5xx would be the app failing, a 4xx
@@ -96,11 +92,10 @@ test.describe.serial("Podcast removal", () => {
         test.skip(!podcastId, "R1 did not subscribe");
         await page.goto(baseUrl + "/podcasts");
         await page.waitForTimeout(2500);
-        // Scoped the same way as R3's absence check: the user's library
-        // section, not the iTunes top-charts that share the page.
+        // Scoped to "your shows": the same show can also sit on the charts further down the page.
         const card = page
-            .locator('[data-tv-section="my-podcasts"]')
-            .getByRole("button", { name: new RegExp(escapeRegExp(podcastTitle)) })
+            .locator('[data-tv-section="your-shows"]')
+            .getByRole("link", { name: new RegExp(escapeRegExp(podcastTitle), "i") })
             .first();
         await expect(card).toBeVisible({ timeout: 15_000 });
     });
@@ -108,19 +103,19 @@ test.describe.serial("Podcast removal", () => {
     test("R3. delete it through the real UI", async () => {
         test.skip(!podcastId, "R1 did not subscribe");
         await page
-            .locator("main")
-            .getByRole("button", { name: new RegExp(escapeRegExp(podcastTitle)) })
+            .locator('[data-tv-section="your-shows"]')
+            .getByRole("link", { name: new RegExp(escapeRegExp(podcastTitle), "i") })
             .first()
             .click();
         await page.waitForURL(/\/podcasts\/[^/]+/, { timeout: 15_000 });
         await page.waitForTimeout(2500);
 
         // The Remove control (PodcastActionBar: shows only when subscribed).
-        const remove = page.getByRole("button", { name: /^Remove$/ });
+        const remove = page.getByRole("button", { name: "remove podcast" });
         await expect(remove).toBeVisible({ timeout: 15_000 });
         await remove.click();
-        // Inline confirmation: the question is text, the buttons are Confirm/Cancel.
-        const confirm = page.getByRole("button", { name: /^Confirm$/ });
+        // Inline confirmation: the question is text, the buttons are confirm and cancel.
+        const confirm = page.getByRole("button", { name: "confirm removing this podcast" });
         await expect(confirm).toBeVisible({ timeout: 10_000 });
         await confirm.click();
 
@@ -139,12 +134,10 @@ test.describe.serial("Podcast removal", () => {
                 return list.filter((p) => p.id === podcastId).length;
             }, { timeout: 30_000 })
             .toBe(0);
-        // The card is gone from the user's library. Scope to the
-        // "my-podcasts" section: the page also renders iTunes' top-charts
-        // below it, and the same podcast can legitimately appear there.
+        // Gone from "your shows"; it can still appear on the charts further down.
         await expect(
-            page.locator('[data-tv-section="my-podcasts"]')
-                .getByRole("button", { name: new RegExp(escapeRegExp(podcastTitle)) }),
+            page.locator('[data-tv-section="your-shows"]')
+                .getByRole("link", { name: new RegExp(escapeRegExp(podcastTitle), "i") }),
         ).toHaveCount(0, { timeout: 30_000 });
     });
 
