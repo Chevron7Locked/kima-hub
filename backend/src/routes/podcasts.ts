@@ -1,4 +1,4 @@
-import { Router, Request, Response } from "express";
+import { Router, Response } from "express";
 import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
@@ -7,7 +7,6 @@ import { rssParserService } from "../services/rss-parser";
 import { parseRangeHeader } from "../utils/rangeParser";
 import { safeError } from "../utils/errors";
 import { validateUrlForFetch } from "../utils/ssrf";
-import { deezerService, mergeAndDedupePodcasts } from "../services/deezer";
 import axios from "axios";
 import { z } from "zod";
 import fs from "fs";
@@ -15,7 +14,15 @@ import type { OutgoingHttpHeaders } from "http";
 import type { Readable } from "stream";
 import { resolveCorsOrigin } from "./audiobooks";
 import { upstreamHeader, upstreamHeaderNumber } from "../utils/upstreamHeaders";
-import { assignCategories } from "../services/podcastCatalog";
+import {
+    assignCategories,
+    categoryTree,
+    chart,
+    CHART_MAX,
+    forYou,
+    similarShows,
+    toDiscoveryItems,
+} from "../services/podcastCatalog";
 
 const router = Router();
 
@@ -26,35 +33,6 @@ const router = Router();
 const PREVIEW_RSS_TIMEOUT_MS = 8000;
 
 router.use(requireAuthOrToken);
-
-function mapItunesPodcast(podcast: any) {
-    return {
-        id: podcast.collectionId.toString(),
-        title: podcast.collectionName,
-        author: podcast.artistName,
-        coverUrl: podcast.artworkUrl600 || podcast.artworkUrl100,
-        feedUrl: podcast.feedUrl,
-        genres: podcast.genres || [],
-        episodeCount: podcast.trackCount || 0,
-        // A string, like the column it is saved into.
-        itunesId: podcast.collectionId?.toString() ?? null,
-        isExternal: true,
-    };
-}
-
-function mapDeezerPodcast(dp: Awaited<ReturnType<typeof deezerService.searchPodcasts>>[number]) {
-    return {
-        id: `deezer:${dp.id}`,
-        title: dp.title,
-        author: "",
-        coverUrl: dp.pictureUrl,
-        feedUrl: null,
-        genres: [] as string[],
-        episodeCount: 0,
-        itunesId: null,
-        isExternal: true,
-    };
-}
 
 function corsHeaders(corsOrigin: string | null) {
     return corsOrigin
@@ -175,183 +153,78 @@ router.get("/", requireAuth, async (req, res) => {
     }
 });
 
-/**
- * GET /podcasts/discover/top
- * Get top podcasts from Deezer charts + iTunes search
- */
-router.get("/discover/top", requireAuthOrToken, async (req, res) => {
-    const start = Date.now();
+const pageParams = z.object({
+    limit: z.coerce.number().int().min(1).max(CHART_MAX).default(20),
+    offset: z.coerce.number().int().min(0).max(CHART_MAX).default(0),
+});
+
+/** GET /podcasts/categories — Apple's podcast categories, sub-categories naming their parent. */
+router.get("/categories", async (_req, res) => {
     try {
-        const { limit = "20" } = req.query;
-        const podcastLimit = Math.min(parseInt(limit as string, 10), 50);
-
-        logger.debug(`\n[TOP PODCASTS] Request (limit: ${podcastLimit})`);
-
-        const [itunesResult, deezerResult] = await Promise.allSettled([
-            axios.get("https://itunes.apple.com/search", {
-                params: { term: "podcast", media: "podcast", entity: "podcast", limit: podcastLimit },
-                timeout: 5000,
-            }).then((resp) => resp.data.results || []),
-            deezerService.getTopPodcasts(podcastLimit),
-        ]);
-
-        const itunesPodcasts = itunesResult.status === "fulfilled" ? itunesResult.value : [];
-        const deezerPodcasts = deezerResult.status === "fulfilled" ? deezerResult.value : [];
-
-        if (itunesResult.status === "rejected") {
-            logger.warn("[TOP PODCASTS] iTunes failed:", (itunesResult.reason as any)?.message || itunesResult.reason);
-        }
-
-        const itunesMapped = itunesPodcasts.map(mapItunesPodcast);
-
-        const deezerMapped = deezerPodcasts.map(mapDeezerPodcast);
-
-        const podcasts = mergeAndDedupePodcasts(itunesMapped, deezerMapped);
-
-        logger.debug(`   Found ${podcasts.length} podcasts (iTunes: ${itunesPodcasts.length}, Deezer: ${deezerPodcasts.length})`);
-        res.json(podcasts.slice(0, podcastLimit));
+        res.json(await categoryTree());
     } catch (error) {
-        safeError(res, "Error fetching top podcasts", error);
-    } finally {
-        const elapsed = Date.now() - start;
-        logger.info(`GET /podcasts/discover/top completed in ${elapsed}ms`);
+        safeError(res, "Error fetching podcast categories", error);
     }
 });
 
-/**
- * GET /podcasts/discover/genres
- * Get podcasts by specific genres/topics - using simple iTunes search like the search bar
- */
-router.get("/discover/genres", async (req, res) => {
+/** GET /podcasts/charts?category=<id>&limit&offset — Apple's chart for a category, the overall chart without one. */
+router.get("/charts", async (req, res) => {
+    const page = pageParams.safeParse(req.query);
+    const category = req.query.category === undefined ? null : Number(req.query.category);
+    if (!page.success || (category !== null && !Number.isInteger(category))) {
+        return res.status(400).json({ error: "category must be a category id; limit 1-200; offset 0-200" });
+    }
     try {
-        const { genres } = req.query; // Comma-separated genre IDs
+        const shows = (await chart(category)).slice(page.data.offset, page.data.offset + page.data.limit);
+        res.json(await toDiscoveryItems(shows));
+    } catch (error) {
+        safeError(res, "Error fetching podcast chart", error);
+    }
+});
 
-        logger.debug(`\n[GENRE PODCASTS] Request (genres: ${genres})`);
+/** GET /podcasts/for-you — rows from the categories of the shows this user follows. */
+router.get("/for-you", requireAuth, async (req, res) => {
+    try {
+        res.json(await forYou(req.user!.id));
+    } catch (error) {
+        safeError(res, "Error building podcast recommendations", error);
+    }
+});
 
-        if (!genres || typeof genres !== "string") {
-            return res.status(400).json({
-                error: "genres parameter required (comma-separated genre IDs)",
-            });
-        }
+/** GET /podcasts/discover/top — the overall chart (kept for clients that ask here). */
+router.get("/discover/top", async (req, res) => {
+    const page = pageParams.safeParse(req.query);
+    if (!page.success) return res.status(400).json({ error: "limit must be 1-200" });
+    try {
+        res.json(await toDiscoveryItems((await chart(null)).slice(0, page.data.limit)));
+    } catch (error) {
+        safeError(res, "Error fetching top podcasts", error);
+    }
+});
 
-        const genreIds = genres.split(",").map((id) => parseInt(id.trim(), 10));
-
-        // Map genre IDs to search terms - same approach as the working search!
-        const genreSearchTerms: { [key: number]: string } = {
-            1303: "comedy podcast", // Comedy
-            1324: "society culture podcast", // Society & Culture
-            1489: "news podcast", // News
-            1488: "true crime podcast", // True Crime
-            1321: "business podcast", // Business
-            1545: "sports podcast", // Sports
-            1502: "gaming hobbies podcast", // Leisure (Gaming & Hobbies)
-        };
-
-        const genreFetchPromises = genreIds.map(async (genreId) => {
-            const searchTerm = genreSearchTerms[genreId] || "podcast";
-            logger.debug(`    Searching for "${searchTerm}"...`);
-
-            try {
-                const [itunesResult, deezerResult] = await Promise.allSettled([
-                    axios.get("https://itunes.apple.com/search", {
-                        params: { term: searchTerm, media: "podcast", entity: "podcast", limit: 10 },
-                        timeout: 5000,
-                    }).then((resp) => resp.data.results || []),
-                    deezerService.searchPodcasts(searchTerm, 10),
-                ]);
-
-                const itunesPodcasts = itunesResult.status === "fulfilled" ? itunesResult.value : [];
-                const deezerPodcasts = deezerResult.status === "fulfilled" ? deezerResult.value : [];
-
-                const itunesMapped = itunesPodcasts.map(mapItunesPodcast);
-
-                const deezerMapped = deezerPodcasts.map(mapDeezerPodcast);
-
-                const podcasts = mergeAndDedupePodcasts(itunesMapped, deezerMapped);
-
-                logger.debug(`      Found ${podcasts.length} podcasts for genre ${genreId}`);
-                return { genreId, podcasts: podcasts.slice(0, 10) };
-            } catch (error: any) {
-                logger.error(`       Error searching for ${searchTerm}:`, error.message);
-                return { genreId, podcasts: [] };
-            }
-        });
-
-        // Wait for all genre searches to complete in parallel
-        const genreResults = await Promise.all(genreFetchPromises);
-
-        // Convert array of results to object keyed by genreId
-        const results: any = {};
-        for (const { genreId, podcasts } of genreResults) {
-            results[genreId] = podcasts;
-        }
-
-        logger.debug(
-            `   Fetched podcasts for ${genreIds.length} genres (parallel)`
-        );
-        res.json(results);
+/** GET /podcasts/discover/genres?genres=a,b — the first ten of each category's chart, keyed by category id. */
+router.get("/discover/genres", async (req, res) => {
+    const ids = typeof req.query.genres === "string" ? req.query.genres.split(",").map((g) => Number(g.trim())) : [];
+    if (ids.length === 0 || ids.some((id) => !Number.isInteger(id))) {
+        return res.status(400).json({ error: "genres parameter required (comma-separated genre IDs)" });
+    }
+    try {
+        const out: Record<number, unknown> = {};
+        for (const id of ids) out[id] = await toDiscoveryItems((await chart(id)).slice(0, 10));
+        res.json(out);
     } catch (error) {
         safeError(res, "Error fetching genre podcasts", error);
     }
 });
 
-/**
- * GET /podcasts/discover/genre/:genreId
- * Get paginated podcasts for a specific genre with offset support
- */
+/** GET /podcasts/discover/genre/:genreId?limit&offset — one category's chart, paged. */
 router.get("/discover/genre/:genreId", async (req, res) => {
+    const page = pageParams.safeParse(req.query);
+    const id = Number(req.params.genreId);
+    if (!page.success || !Number.isInteger(id)) return res.status(400).json({ error: "genreId must be a category id" });
     try {
-        const { genreId } = req.params;
-        const { limit = "20", offset = "0" } = req.query;
-
-        const podcastLimit = Math.min(parseInt(limit as string, 10), 50);
-        const podcastOffset = parseInt(offset as string, 10);
-
-        logger.debug(
-            `\n[GENRE PAGINATED] Request (genre: ${genreId}, limit: ${podcastLimit}, offset: ${podcastOffset})`
-        );
-
-        // Map genre IDs to search terms
-        const genreSearchTerms: { [key: string]: string } = {
-            "1303": "comedy podcast",
-            "1324": "society culture podcast",
-            "1489": "news podcast",
-            "1488": "true crime podcast",
-            "1321": "business podcast",
-            "1545": "sports podcast",
-            "1502": "gaming hobbies podcast",
-        };
-
-        const searchTerm = genreSearchTerms[genreId] || "podcast";
-        logger.debug(
-            `    Searching for "${searchTerm}" (offset: ${podcastOffset})...`
-        );
-
-        const totalToFetch = podcastOffset + podcastLimit;
-
-        const [itunesResult, deezerResult] = await Promise.allSettled([
-            axios.get("https://itunes.apple.com/search", {
-                params: { term: searchTerm, media: "podcast", entity: "podcast", limit: Math.min(totalToFetch, 200) },
-                timeout: 5000,
-            }).then((resp) => resp.data.results || []),
-            deezerService.searchPodcasts(searchTerm, Math.min(totalToFetch, 50)),
-        ]);
-
-        const itunesPodcasts = itunesResult.status === "fulfilled" ? itunesResult.value : [];
-        const deezerPodcasts = deezerResult.status === "fulfilled" ? deezerResult.value : [];
-
-        const itunesMapped = itunesPodcasts.map(mapItunesPodcast);
-
-        const deezerMapped = deezerPodcasts.map(mapDeezerPodcast);
-
-        const allPodcasts = mergeAndDedupePodcasts(itunesMapped, deezerMapped);
-
-        const podcasts = allPodcasts.slice(podcastOffset, podcastOffset + podcastLimit);
-
-        logger.debug(
-            `   Found ${podcasts.length} podcasts (total available: ${allPodcasts.length})`
-        );
-        res.json(podcasts);
+        const shows = (await chart(id)).slice(page.data.offset, page.data.offset + page.data.limit);
+        res.json(await toDiscoveryItems(shows));
     } catch (error) {
         safeError(res, "Error fetching paginated genre podcasts", error);
     }
@@ -366,12 +239,8 @@ router.get("/preview/:itunesId", requireAuth, async (req, res) => {
     try {
         const { itunesId } = req.params;
 
-        if (itunesId.startsWith("deezer:")) {
-            return await previewDeezerPodcast(req, res, itunesId.slice(7));
-        }
-
-        // iTunes ids are numeric; anything else (such as our own record id, which the
-        // podcast page falls back to) is a 404, not an upstream error.
+        // iTunes ids are numeric; anything else (our own record id, which the podcast page falls
+        // back to, or a Deezer id an older client kept) is a 404, not an upstream error.
         if (!/^\d+$/.test(itunesId)) {
             return res.status(404).json({ error: "Podcast not found" });
         }
@@ -459,90 +328,6 @@ router.get("/preview/:itunesId", requireAuth, async (req, res) => {
         safeError(res, "Error previewing podcast", error);
     }
 });
-
-async function previewDeezerPodcast(req: Request, res: Response, deezerId: string) {
-    logger.debug(`\n [PODCAST PREVIEW] Deezer ID: ${deezerId}`);
-
-    let deezerData: any;
-    try {
-        const resp = await axios.get(`https://api.deezer.com/podcast/${deezerId}`, { timeout: 5000 });
-        deezerData = resp.data;
-    } catch {
-        return res.status(404).json({ error: "Podcast not found on Deezer" });
-    }
-
-    if (!deezerData?.id || deezerData.error) {
-        return res.status(404).json({ error: "Podcast not found on Deezer" });
-    }
-
-    let feedUrl: string | null = null;
-    let resolvedItunesId: string | null = null;
-
-    try {
-        const itunesResp = await axios.get("https://itunes.apple.com/search", {
-            params: { term: deezerData.title, media: "podcast", entity: "podcast", limit: 5 },
-            timeout: 5000,
-        });
-        const match = (itunesResp.data.results || []).find((p: any) => {
-            const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-            return norm(p.collectionName) === norm(deezerData.title);
-        });
-        if (match) {
-            feedUrl = match.feedUrl;
-            resolvedItunesId = match.collectionId.toString();
-            logger.debug(`[PODCAST PREVIEW] Resolved Deezer "${deezerData.title}" to iTunes ${resolvedItunesId}`);
-        }
-    } catch (err: any) {
-        logger.warn("[PODCAST PREVIEW] iTunes resolution for Deezer podcast failed:", err.message);
-    }
-
-    const existingPodcast = feedUrl ? await prisma.podcast.findFirst({ where: { feedUrl } }) : null;
-    let isSubscribed = false;
-    if (existingPodcast) {
-        const subscription = await prisma.podcastSubscription.findUnique({
-            where: { userId_podcastId: { userId: req.user!.id, podcastId: existingPodcast.id } },
-        });
-        isSubscribed = !!subscription;
-    }
-
-    let description = deezerData.description || "";
-    let previewEpisodes: any[] = [];
-
-    if (feedUrl) {
-        try {
-            const feedResult = await withTimeout(
-                rssParserService.parseFeed(feedUrl),
-                PREVIEW_RSS_TIMEOUT_MS,
-                "RSS preview timed out",
-            );
-            if (!feedResult.notModified) {
-                description = feedResult.podcast.description || description;
-                previewEpisodes = (feedResult.episodes || []).slice(0, 3).map((ep: any) => ({
-                    title: ep.title,
-                    publishedAt: ep.publishedAt,
-                    duration: ep.duration || 0,
-                }));
-            }
-        } catch {
-            logger.warn("[PODCAST PREVIEW] RSS feed fetch failed for resolved Deezer podcast");
-        }
-    }
-
-    res.json({
-        itunesId: resolvedItunesId,
-        deezerId: deezerData.id.toString(),
-        title: deezerData.title,
-        author: "",
-        description,
-        coverUrl: deezerData.picture_big || deezerData.picture_medium || deezerData.picture || null,
-        feedUrl,
-        genres: [],
-        episodeCount: 0,
-        previewEpisodes,
-        isSubscribed,
-        subscribedPodcastId: isSubscribed ? existingPodcast!.id : null,
-    });
-}
 
 /**
  * POST /podcasts/refresh-all
@@ -1481,119 +1266,18 @@ router.delete("/:podcastId/episodes/:episodeId/progress", requireAuth, async (re
     }
 });
 
-/**
- * GET /podcasts/:id/similar
- * Get similar podcasts using iTunes Search API (free, no auth required)
- */
+/** GET /podcasts/:id/similar — shows on its own categories' charts (see similarShows). */
 router.get("/:id/similar", async (req, res) => {
     try {
-        const { id } = req.params;
-
         const podcast = await prisma.podcast.findUnique({
-            where: { id },
+            where: { id: req.params.id },
+            select: { itunesId: true, categoryIds: true },
         });
-
         if (!podcast) {
             return res.status(404).json({ error: "Podcast not found" });
         }
-
-        logger.debug(`\n [SIMILAR PODCASTS] Request for: ${podcast.title}`);
-
-        try {
-            // Check cache first
-            const cachedRecommendations =
-                await prisma.podcastRecommendation.findMany({
-                    where: {
-                        podcastId: id,
-                        expiresAt: { gt: new Date() },
-                    },
-                    orderBy: { score: "desc" },
-                    take: 10,
-                });
-
-            if (cachedRecommendations.length > 0) {
-                logger.debug(
-                    `   Using ${cachedRecommendations.length} cached recommendations`
-                );
-                return res.json(
-                    cachedRecommendations.map((rec) => ({
-                        id: rec.recommendedId,
-                        title: rec.title,
-                        author: rec.author,
-                        description: rec.description,
-                        coverUrl: rec.coverUrl,
-                        episodeCount: rec.episodeCount,
-                        feedUrl: rec.feedUrl,
-                        itunesId: rec.itunesId,
-                        isExternal: true,
-                        score: rec.score,
-                    }))
-                );
-            }
-
-            // Fetch from iTunes Search API
-            logger.debug(`    Fetching from iTunes Search API...`);
-            const { itunesService } = await import("../services/itunes");
-            const recommendations = await itunesService.getSimilarPodcasts(
-                podcast.title,
-                podcast.description ?? undefined,
-                podcast.author ?? undefined
-            );
-
-            logger.debug(`   Found ${recommendations.length} similar podcasts`);
-
-            if (recommendations.length > 0) {
-                // Cache recommendations
-                const expiresAt = new Date();
-                expiresAt.setDate(expiresAt.getDate() + 30); // 30 days cache
-
-                await prisma.podcastRecommendation.deleteMany({
-                    where: { podcastId: id },
-                });
-
-                await prisma.podcastRecommendation.createMany({
-                    data: recommendations.map((rec, index) => ({
-                        podcastId: id,
-                        recommendedId: rec.collectionId.toString(),
-                        title: rec.collectionName,
-                        author: rec.artistName,
-                        description: "",
-                        coverUrl: rec.artworkUrl600 || rec.artworkUrl100,
-                        episodeCount: rec.trackCount || 0,
-                        feedUrl: rec.feedUrl,
-                        itunesId: rec.collectionId.toString(),
-                        score: recommendations.length - index,
-                        cachedAt: new Date(),
-                        expiresAt,
-                    })),
-                });
-
-                logger.debug(
-                    `   Cached ${recommendations.length} recommendations`
-                );
-
-                return res.json(
-                    recommendations.map((rec, index) => ({
-                        id: rec.collectionId.toString(),
-                        title: rec.collectionName,
-                        author: rec.artistName,
-                        description: "",
-                        coverUrl: rec.artworkUrl600 || rec.artworkUrl100,
-                        episodeCount: rec.trackCount || 0,
-                        feedUrl: rec.feedUrl,
-                        itunesId: rec.collectionId?.toString() ?? null,
-                        isExternal: true,
-                        score: recommendations.length - index,
-                    }))
-                );
-            }
-        } catch (error: any) {
-            logger.warn("    iTunes search failed:", error.message);
-        }
-
-        // No recommendations available
-        logger.debug(`    No recommendations found`);
-        res.json([]);
+        const shows = await similarShows(podcast);
+        res.json(shows.map((show, i) => ({ ...show, score: shows.length - i })));
     } catch (error) {
         safeError(res, "Error fetching similar podcasts", error);
     }

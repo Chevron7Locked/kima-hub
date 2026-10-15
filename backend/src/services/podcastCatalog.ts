@@ -180,3 +180,96 @@ export async function assignMissingCategories(): Promise<number> {
     if (filled > 0) logger.info(`[PodcastCatalog] Categories filled for ${filled} podcast(s)`);
     return filled;
 }
+
+/** A show as the discovery endpoints answer it; the older fields stay so existing clients keep decoding. */
+export interface DiscoveryItem {
+    id: string;
+    itunesId: string;
+    title: string;
+    author: string;
+    description: string;
+    coverUrl: string | null;
+    feedUrl: string | null;
+    genres: string[];
+    categoryIds: number[];
+    episodeCount: number;
+    chartRank: number | null;
+    isExternal: true;
+}
+
+export async function toDiscoveryItems(shows: CatalogPodcast[]): Promise<DiscoveryItem[]> {
+    const names = new Map((await categoryTree()).map((c) => [c.id, c.name]));
+    return shows.map((p) => ({
+        id: p.itunesId,
+        itunesId: p.itunesId,
+        title: p.title,
+        author: p.author,
+        description: p.description,
+        coverUrl: p.coverUrl,
+        feedUrl: null,
+        genres: p.categoryIds.map((id) => names.get(id)).filter((n): n is string => Boolean(n)),
+        categoryIds: p.categoryIds,
+        episodeCount: 0,
+        chartRank: p.chartRank,
+        isExternal: true,
+    }));
+}
+
+export interface ForYouRow {
+    category: PodcastCategory;
+    /** The followed shows that put this category here. */
+    because: string[];
+    podcasts: DiscoveryItem[];
+}
+
+/**
+ * Rows built from what the user follows: the categories their shows carry (sub-categories and each show's
+ * primary category weigh most), each row that category's chart minus shows already followed.
+ */
+export async function forYou(userId: string, rows = 3, perRow = 12): Promise<ForYouRow[]> {
+    const subs = await prisma.podcastSubscription.findMany({
+        where: { userId },
+        select: { podcast: { select: { title: true, itunesId: true, categoryIds: true } } },
+    });
+    const tree = await categoryTree();
+    const byId = new Map(tree.map((c) => [c.id, c]));
+    const weight = new Map<number, { score: number; because: string[] }>();
+    for (const { podcast } of subs) {
+        podcast.categoryIds.forEach((id, position) => {
+            const category = byId.get(id);
+            if (!category) return;
+            const w = weight.get(id) ?? { score: 0, because: [] };
+            w.score += (category.parentId !== null ? 2 : 1) / (position + 1);
+            w.because.push(podcast.title);
+            weight.set(id, w);
+        });
+    }
+    const followed = new Set(subs.map((s) => s.podcast.itunesId).filter(Boolean));
+    const picked = [...weight.entries()].sort((a, b) => b[1].score - a[1].score).slice(0, rows);
+    const out: ForYouRow[] = [];
+    for (const [id, w] of picked) {
+        const shows = (await chart(id)).filter((p) => !followed.has(p.itunesId)).slice(0, perRow);
+        if (shows.length === 0) continue;
+        out.push({ category: byId.get(id)!, because: [...new Set(w.because)].slice(0, 2), podcasts: await toDiscoveryItems(shows) });
+    }
+    return out;
+}
+
+/**
+ * Shows like this one: those on the charts of its own categories (most specific first), ranked by how many
+ * of those charts they share with it, then by their best chart position.
+ */
+export async function similarShows(show: { itunesId: string | null; categoryIds: number[] }, limit = 12): Promise<DiscoveryItem[]> {
+    const found = new Map<string, { show: CatalogPodcast; shared: number; best: number }>();
+    for (const id of show.categoryIds.slice(0, 3)) {
+        for (const p of await chart(id)) {
+            if (p.itunesId === show.itunesId) continue;
+            const hit = found.get(p.itunesId) ?? { show: p, shared: 0, best: Infinity };
+            hit.shared++;
+            hit.best = Math.min(hit.best, p.chartRank ?? Infinity);
+            found.set(p.itunesId, hit);
+        }
+    }
+    const ranked = [...found.values()].sort((a, b) => b.shared - a.shared || a.best - b.best).slice(0, limit);
+    return toDiscoveryItems(ranked.map((r) => r.show));
+}

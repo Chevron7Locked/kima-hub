@@ -12,7 +12,7 @@ import { musicBrainzService } from "../services/musicbrainz";
 import { searchService, normalizeCacheQuery, type SearchResults } from "../services/search";
 import axios from "axios";
 import { redisClient } from "../utils/redis";
-import { deezerService, mergeAndDedupePodcasts } from "../services/deezer";
+import { categoryIdsFrom } from "../services/podcastCatalog";
 import { failureCause } from "../utils/outcome";
 
 const router = Router();
@@ -215,53 +215,28 @@ router.get("/discover", async (req, res) => {
 
         if (type === "podcasts" || type === "all") {
             promiseMap.podcasts = (async () => {
-                const [itunesResult, deezerResult] = await Promise.allSettled([
-                    axios.get("https://itunes.apple.com/search", {
+                try {
+                    const resp = await axios.get("https://itunes.apple.com/search", {
                         params: { term: query, media: "podcast", entity: "podcast", limit: searchLimit },
                         timeout: 5000,
-                    }).then((resp) => resp.data.results || []),
-                    deezerService.searchPodcasts(query, searchLimit),
-                ]);
-
-                const itunesPodcasts = itunesResult.status === "fulfilled" ? itunesResult.value : [];
-                const deezerPodcasts = deezerResult.status === "fulfilled" ? deezerResult.value : [];
-
-                if (itunesResult.status === "rejected") {
-                    logger.warn("[SEARCH DISCOVER] iTunes podcast search failed:", itunesResult.reason?.message || itunesResult.reason);
+                    });
+                    return (resp.data.results || []).map((podcast: any) => ({
+                        type: "podcast",
+                        id: podcast.collectionId,
+                        name: podcast.collectionName,
+                        artist: podcast.artistName,
+                        description: podcast.description,
+                        coverUrl: podcast.artworkUrl600 || podcast.artworkUrl100,
+                        feedUrl: podcast.feedUrl,
+                        genres: (podcast.genres || []).filter((g: string) => g !== "Podcasts"),
+                        categoryIds: categoryIdsFrom(podcast.genreIds),
+                        trackCount: podcast.trackCount,
+                    }));
+                } catch (err: any) {
+                    logger.warn("[SEARCH DISCOVER] iTunes podcast search failed:", err?.message || err);
                     cacheable = false;
+                    return [];
                 }
-                if (deezerResult.status === "rejected") {
-                    logger.warn("[SEARCH DISCOVER] Deezer podcast search failed:", deezerResult.reason?.message || deezerResult.reason);
-                    cacheable = false;
-                }
-
-                const itunesMapped = itunesPodcasts.map((podcast: any) => ({
-                    type: "podcast",
-                    id: podcast.collectionId,
-                    name: podcast.collectionName,
-                    artist: podcast.artistName,
-                    description: podcast.description,
-                    coverUrl: podcast.artworkUrl600 || podcast.artworkUrl100,
-                    feedUrl: podcast.feedUrl,
-                    genres: podcast.genres || [],
-                    trackCount: podcast.trackCount,
-                }));
-
-                const deezerMapped = deezerPodcasts.map((dp) => ({
-                    type: "podcast",
-                    id: `deezer:${dp.id}`,
-                    name: dp.title,
-                    artist: "",
-                    description: dp.description,
-                    coverUrl: dp.pictureUrl,
-                    feedUrl: null,
-                    genres: [] as string[],
-                    trackCount: 0,
-                }));
-
-                const results = mergeAndDedupePodcasts(itunesMapped, deezerMapped);
-
-                return results.slice(0, searchLimit);
             })();
         }
 

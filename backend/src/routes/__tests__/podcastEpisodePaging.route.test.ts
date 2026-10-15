@@ -21,7 +21,6 @@ jest.mock('../../middleware/auth', () => ({
 }));
 
 jest.mock('../../services/rss-parser', () => ({ rssParserService: {} }));
-jest.mock('../../services/deezer', () => ({ deezerService: {}, mergeAndDedupePodcasts: jest.fn() }));
 jest.mock('../../utils/ssrf', () => ({ validateUrlForFetch: jest.fn() }));
 jest.mock('axios', () => ({ default: { get: jest.fn() }, get: jest.fn() }));
 

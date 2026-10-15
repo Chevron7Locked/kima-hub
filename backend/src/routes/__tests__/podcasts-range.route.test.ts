@@ -50,11 +50,6 @@ jest.mock('../../services/rss-parser', () => ({
 }));
 
 
-jest.mock('../../services/deezer', () => ({
-    deezerService: { searchPodcasts: jest.fn() },
-    mergeAndDedupePodcasts: jest.fn().mockReturnValue([]),
-}));
-
 jest.mock('../../utils/ssrf', () => ({
     validateUrlForFetch: jest.fn().mockResolvedValue(null),
 }));

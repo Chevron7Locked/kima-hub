@@ -995,26 +995,6 @@ model WebhookEvent {
   @@index([source, eventType])
 }
 
-model PodcastRecommendation {
-  id            String   @id @default(cuid())
-  podcastId     String
-  recommendedId String
-  title         String
-  author        String?
-  description   String?
-  coverUrl      String?
-  episodeCount  Int      @default(0)
-  feedUrl       String?
-  itunesId      String?
-  score         Float    @default(0)
-  cachedAt      DateTime @default(now())
-  expiresAt     DateTime
-
-  @@index([expiresAt])
-  @@index([podcastId, expiresAt])
-  @@map("podcast_recommendations")
-}
-
 model TrackEmbedding {
   track_id      String                @id
   embedding     Unsupported("vector")
