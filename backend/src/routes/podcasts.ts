@@ -41,6 +41,23 @@ const router = Router();
 // catalog, and both call sites already fall through to partial data.
 const PREVIEW_RSS_TIMEOUT_MS = 8000;
 
+/** A show's or episode's cover: the cached copy when there is one, the feed's image otherwise. */
+const podcastCover = (p: { id: string; localCoverPath: string | null; imageUrl: string | null }) =>
+    p.localCoverPath ? `/podcasts/${p.id}/cover` : p.imageUrl;
+const episodeCover = (e: { id: string; localCoverPath: string | null; imageUrl: string | null }) =>
+    e.localCoverPath ? `/podcasts/episodes/${e.id}/cover` : e.imageUrl;
+
+/** How far a listener is through an episode, as every route reports it; the percent is capped at 100. */
+const progressOf = (p: { currentTime: number; duration: number; isFinished: boolean; lastPlayedAt: Date } | null | undefined) =>
+    p
+        ? {
+              currentTime: p.currentTime,
+              progress: p.duration > 0 ? Math.min(100, (p.currentTime / p.duration) * 100) : 0,
+              isFinished: p.isFinished,
+              lastPlayedAt: p.lastPlayedAt,
+          }
+        : null;
+
 router.use(requireAuthOrToken);
 
 function corsHeaders(corsOrigin: string | null) {
@@ -124,9 +141,7 @@ router.get("/", requireAuth, async (req, res) => {
                 title: podcast.title,
                 author: podcast.author,
                 description: podcast.description,
-                coverUrl: podcast.localCoverPath
-                    ? `/podcasts/${podcast.id}/cover`
-                    : podcast.imageUrl, // Fallback to original URL if not cached
+                coverUrl: podcastCover(podcast),
                 episodeCount: podcast.episodeCount,
                 autoDownloadEpisodes: false,
                 episodes: podcast.episodes.map((ep) => ({
@@ -135,23 +150,8 @@ router.get("/", requireAuth, async (req, res) => {
                     description: ep.description,
                     duration: ep.duration,
                     publishedAt: ep.publishedAt,
-                    coverUrl: ep.localCoverPath
-                        ? `/podcasts/episodes/${ep.id}/cover`
-                        : ep.imageUrl, // Fallback to original URL
-                    progress: ep.progress[0]
-                        ? {
-                              currentTime: ep.progress[0].currentTime,
-                              progress:
-                                  ep.progress[0].duration > 0
-                                      ? Math.min(
-                                            100,
-                                            (ep.progress[0].currentTime / ep.progress[0].duration) * 100,
-                                        )
-                                      : 0,
-                              isFinished: ep.progress[0].isFinished,
-                              lastPlayedAt: ep.progress[0].lastPlayedAt,
-                          }
-                        : null,
+                    coverUrl: episodeCover(ep),
+                    progress: progressOf(ep.progress[0]),
                 })),
             };
         });
@@ -230,10 +230,6 @@ async function namedCategories(ids: number[]): Promise<Array<{ id: number; name:
     }
 }
 
-const podcastCover = (p: { id: string; localCoverPath: string | null; imageUrl: string | null }) =>
-    p.localCoverPath ? `/podcasts/${p.id}/cover` : p.imageUrl;
-const episodeCover = (e: { id: string; localCoverPath: string | null; imageUrl: string | null }) =>
-    e.localCoverPath ? `/podcasts/episodes/${e.id}/cover` : e.imageUrl;
 
 /**
  * GET /podcasts/listening — across every followed show: episodes in progress (most recently played first) and,
@@ -274,14 +270,7 @@ router.get("/listening", requireAuth, async (req, res) => {
                 duration: ep.duration,
                 publishedAt: ep.publishedAt,
                 coverUrl: episodeCover(ep),
-                progress: progress
-                    ? {
-                          currentTime: progress.currentTime,
-                          progress: progress.duration > 0 ? Math.min(100, (progress.currentTime / progress.duration) * 100) : 0,
-                          isFinished: progress.isFinished,
-                          lastPlayedAt: progress.lastPlayedAt,
-                      }
-                    : null,
+                progress: progressOf(progress),
             },
         });
         res.json({
@@ -586,20 +575,7 @@ router.get("/:id", requireAuth, async (req, res) => {
             season: episode.season,
             imageUrl: episode.imageUrl,
             isDownloaded: episode.downloads.length > 0,
-            progress: episode.progress[0]
-                ? {
-                      currentTime: episode.progress[0].currentTime,
-                      progress:
-                          episode.progress[0].duration > 0
-                              ? Math.min(
-                                    100,
-                                    (episode.progress[0].currentTime / episode.progress[0].duration) * 100,
-                                )
-                              : 0,
-                      isFinished: episode.progress[0].isFinished,
-                      lastPlayedAt: episode.progress[0].lastPlayedAt,
-                  }
-                : null,
+            progress: progressOf(episode.progress[0]),
         }));
 
         const categories = await namedCategories(podcast.categoryIds);
@@ -678,20 +654,7 @@ router.get("/:id/episodes", requireAuth, async (req, res) => {
                 season: episode.season,
                 imageUrl: episode.imageUrl,
                 isDownloaded: episode.downloads.length > 0,
-                progress: episode.progress[0]
-                    ? {
-                          currentTime: episode.progress[0].currentTime,
-                          progress:
-                              episode.progress[0].duration > 0
-                                  ? Math.min(
-                                        100,
-                                        (episode.progress[0].currentTime / episode.progress[0].duration) * 100,
-                                    )
-                                  : 0,
-                          isFinished: episode.progress[0].isFinished,
-                          lastPlayedAt: episode.progress[0].lastPlayedAt,
-                      }
-                    : null,
+                progress: progressOf(episode.progress[0]),
             })),
             total,
             offset,
@@ -1221,14 +1184,7 @@ router.post("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req,
 
         res.json({
             success: true,
-            progress: {
-                currentTime: progress.currentTime,
-                progress:
-                    progress.duration > 0
-                        ? Math.min(100, (progress.currentTime / progress.duration) * 100)
-                        : 0,
-                isFinished: progress.isFinished,
-            },
+            progress: progressOf(progress),
         });
     } catch (error) {
         safeError(res, "Error updating progress", error);
