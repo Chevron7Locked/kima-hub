@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mic2, Search } from "lucide-react";
-import { api } from "@/lib/api";
+import { useDiscoverSearchQuery, useSearchQuery } from "@/hooks/useQueries";
 import { CachedImage } from "@/components/ui/CachedImage";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { coverArtUrl } from "@/lib/cover-art";
@@ -28,39 +28,24 @@ interface EpisodeResult {
 const MIN_QUERY = 2;
 
 /**
- * Search shows (Apple's catalogue, to open or follow) and episodes (the shows on this server) in one box; results
- * open the show's page. Requests superseded by newer typing are cancelled.
+ * Search shows (Apple's catalogue, to open or follow) and episodes (the shows you follow) in one box; results open the
+ * show's page. It searches once typing pauses; a search the typing has moved past is dropped.
  */
 export function PodcastSearch() {
     const router = useRouter();
     const [query, setQuery] = useState("");
-    const [shows, setShows] = useState<ShowResult[]>([]);
-    const [episodes, setEpisodes] = useState<EpisodeResult[]>([]);
-    const [searching, setSearching] = useState(false);
+    const [searched, setSearched] = useState("");
     const [open, setOpen] = useState(false);
     const box = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        const q = query.trim();
-        if (q.length < MIN_QUERY) return;
-        const controller = new AbortController();
-        const timer = setTimeout(async () => {
-            setSearching(true);
-            const [found, eps] = await Promise.allSettled([
-                api.discoverSearch(q, "podcasts", 8, controller.signal),
-                api.search(q, "episodes", 6, controller.signal),
-            ]);
-            if (controller.signal.aborted) return;
-            setShows(found.status === "fulfilled" ? (found.value.results as unknown as ShowResult[]) : []);
-            setEpisodes(eps.status === "fulfilled" ? ((eps.value as { episodes?: EpisodeResult[] }).episodes ?? []) : []);
-            setSearching(false);
-            setOpen(true);
-        }, 350);
-        return () => {
-            clearTimeout(timer);
-            controller.abort();
-        };
+        const timer = setTimeout(() => setSearched(query.trim()), 350);
+        return () => clearTimeout(timer);
     }, [query]);
+    const showsFound = useDiscoverSearchQuery(searched, "podcasts", 8);
+    const episodesFound = useSearchQuery(searched, "episodes", 6);
+    const shows = ((showsFound.data?.results ?? []) as unknown as ShowResult[]);
+    const episodes = (episodesFound.data as { episodes?: EpisodeResult[] } | undefined)?.episodes ?? [];
 
     useEffect(() => {
         const close = (e: MouseEvent) => {
@@ -75,7 +60,10 @@ export function PodcastSearch() {
         router.push(href);
     };
     const hasQuery = query.trim().length >= MIN_QUERY;
+    const searching = hasQuery && (searched !== query.trim() || showsFound.isFetching || episodesFound.isFetching);
     const nothing = !searching && shows.length === 0 && episodes.length === 0;
+    // The box opens with typing but shows only once there is an answer for what was typed.
+    const answered = hasQuery && (shows.length > 0 || episodes.length > 0 || !searching);
 
     return (
         <div ref={box} className="relative w-full sm:w-96">
@@ -84,12 +72,15 @@ export function PodcastSearch() {
                 type="text"
                 enterKeyHint="search"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => {
+                    setQuery(e.target.value);
+                    setOpen(true);
+                }}
                 onFocus={() => hasQuery && setOpen(true)}
                 onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
                 placeholder="search shows and episodes"
                 role="combobox"
-                aria-expanded={open && hasQuery}
+                aria-expanded={open && answered}
                 aria-controls="podcast-search-results"
                 aria-label="search shows and episodes"
                 className="w-full rounded-lg border-2 border-white/10 bg-[var(--bg-primary)] py-2.5 pl-10 pr-10 text-sm text-white placeholder:text-[var(--text-muted)] focus:border-brand/50 focus:outline-none"
@@ -99,7 +90,7 @@ export function PodcastSearch() {
                     <GradientSpinner size="sm" />
                 </span>
             )}
-            {open && hasQuery && (
+            {open && answered && (
                 <div
                     id="podcast-search-results"
                     role="listbox"

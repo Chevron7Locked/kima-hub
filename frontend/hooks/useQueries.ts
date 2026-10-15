@@ -192,7 +192,8 @@ export function useSearchQuery(
         | "albums"
         | "tracks"
         | "audiobooks"
-        | "podcasts" = "all",
+        | "podcasts"
+        | "episodes" = "all",
     limit: number = 20,
 ) {
     return useQuery({
