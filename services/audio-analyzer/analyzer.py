@@ -592,8 +592,8 @@ class AudioAnalyzer:
             ).astype(np.float32)
             _, _, integrated, loudness_range = self.loudness_ebu(pair)
             integrated, loudness_range = self._plausible_loudness(integrated, loudness_range, file_path)
-            result['loudness'] = round(float(integrated), 2)
-            result['dynamicRange'] = round(float(loudness_range), 2)
+            result['loudness'] = round(integrated, 2) if integrated is not None else None
+            result['dynamicRange'] = round(loudness_range, 2) if loudness_range is not None else None
 
             # The models' answers: moods, valence/arousal, danceability. A failure fails the
             # track and it is retried, never stored with anything in their place.

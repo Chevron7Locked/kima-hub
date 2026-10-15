@@ -5,6 +5,8 @@ audio — and nulls only what the meter or a decode got wrong; a warning names t
 file either way."""
 import math
 
+import numpy as np
+
 import analyzer
 from analyzer import AudioAnalyzer
 
@@ -43,3 +45,34 @@ def test_quiet_real_audio_passes_even_when_the_window_was_wrong():
 def test_range_beyond_whole_scale_is_nulled():
     # R128 is defined over the audible scale; a range past 60 LU is the meter lost
     assert gate(-9.0, 61.0) == (None, None)
+
+
+
+def _analyze_with_meter(monkeypatch, integrated, loudness_range):
+    """The real analyze(), with every measurement stubbed except the loudness gate and the fields it fills."""
+    monkeypatch.setattr(analyzer, "ESSENTIA_AVAILABLE", True)
+    a = object.__new__(AudioAnalyzer)
+    a.enhanced_mode = True
+    t = np.arange(10 * 44100) / 44100
+    a.load_audio = lambda path, max_duration=None: (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)[np.newaxis, :]
+    a.rhythm_extractor = lambda audio: (120.0, [0.5, 1.0], None, None, None)
+    a.key_extractor = lambda audio: ("A", "minor", 0.8)
+    a.rms = lambda frame: 0.1
+    a.loudness_ebu = lambda pair: (None, None, integrated, loudness_range)
+    a.resampler = lambda audio: audio
+    a._extract_ml_features = lambda audio: {"valence": 0.5, "arousal": 0.5}
+    a._generate_mood_tags = lambda result: []
+    return a.analyze("/music/test.flac")
+
+
+def test_an_implausible_reading_is_stored_as_none_and_the_analysis_stands(monkeypatch):
+    result = _analyze_with_meter(monkeypatch, 2868.2, 47.06)
+    assert "_error" not in result
+    assert (result["loudness"], result["dynamicRange"]) == (None, None)
+    assert (result["bpm"], result["analysisMode"]) == (120.0, "enhanced")
+
+
+def test_a_real_reading_is_stored_rounded(monkeypatch):
+    result = _analyze_with_meter(monkeypatch, -9.123, 11.267)
+    assert "_error" not in result
+    assert (result["loudness"], result["dynamicRange"]) == (-9.12, 11.27)
