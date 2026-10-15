@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+### Fixed
+
+- **Songs of one album no longer fail when they save the same new genre at the same moment.** Two songs finishing together both tried to create the genre, and one failed with a duplicate-name error until its retry.
+
 ## [1.12.0] - 2026-10-14
 
 **Upgrading.** Coming from 1.10, read 1.11.0 below first: its one-time wipe and re-run of enrichment is still needed, and that one run also analyses every song the 1.12 way (the middle 90 seconds, see Changed). Already re-ran under 1.11? Re-run from audio analysis in Settings → Library Enrichment to get the new readings.

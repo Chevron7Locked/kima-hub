@@ -116,21 +116,25 @@ class TrackIdentityService {
         }
     }
 
-    /** The track's genres are its identified recording's: this set replaces whatever an earlier answer left. */
+    /**
+     * The track's genres are its identified recording's: this set replaces whatever an earlier answer left.
+     * Songs of one album finish together with the same new genres: inserts skip duplicates, waiting for a
+     * genre another song is creating, and go in name order so two songs never wait on each other.
+     */
     async populateTrackGenres(trackId: string, genreNames: string[]): Promise<void> {
+        const names = [...new Set(genreNames)].sort();
         await prisma.$transaction(async (tx) => {
-            const ids: string[] = [];
-            for (const name of genreNames) {
-                const genre = await tx.genre.upsert({
-                    where: { name },
-                    create: { name },
-                    update: {},
-                });
-                ids.push(genre.id);
-                await tx.trackGenre.upsert({
-                    where: { trackId_genreId: { trackId, genreId: genre.id } },
-                    create: { trackId, genreId: genre.id },
-                    update: {},
+            if (names.length > 0) {
+                await tx.genre.createMany({ data: names.map((name) => ({ name })), skipDuplicates: true });
+            }
+            const genres = names.length > 0
+                ? await tx.genre.findMany({ where: { name: { in: names } }, select: { id: true } })
+                : [];
+            const ids = genres.map((g) => g.id);
+            if (ids.length > 0) {
+                await tx.trackGenre.createMany({
+                    data: ids.map((genreId) => ({ trackId, genreId })),
+                    skipDuplicates: true,
                 });
             }
             await tx.trackGenre.deleteMany({ where: { trackId, genreId: { notIn: ids } } });
