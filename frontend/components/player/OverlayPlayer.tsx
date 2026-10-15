@@ -113,6 +113,8 @@ export function OverlayPlayer() {
     return (
         <div
             className="fixed inset-0 bg-gradient-to-b from-[#141210] via-[#0a0a0a] to-[#000000] z-(--z-overlay) flex flex-col overflow-hidden"
+            role="region"
+            aria-label="now playing"
         >
             <div
                 className="flex items-center justify-between px-4 py-3 flex-shrink-0"

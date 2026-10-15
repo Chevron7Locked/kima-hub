@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Untagged albums get their real MusicBrainz id.** An album whose files carry no MusicBrainz album id is now identified once from all its songs' AcoustID answers: the album more than half of its songs agree on, under its own title (edition words like "Deluxe" aside, but "Live" kept apart), becomes its id. It then gets Cover Art Archive covers, Lidarr ownership, Discover's "already owned" check and its year, label and genres, and its songs take their details from one album request. Library albums only; generic titles ("Greatest Hits") and albums the votes can't settle are left alone, and a file's own album tag always replaces an id chosen this way. On a 9,151-song test library, 331 of 489 untagged albums would be identified; with the tags of 426 tagged albums hidden, the vote named 373 of the 374 it decided exactly as their tags do.
+- **The player is a named "now playing" region**, so a screen reader can jump straight to it.
 
 ### Changed
 

@@ -79,7 +79,7 @@ export function FullPlayer() {
 
     return (
         <>
-        <div className="relative flex-shrink-0">
+        <div className="relative flex-shrink-0" role="region" aria-label="now playing">
             <div className="bg-black border-t border-white/[0.08] h-24">
                 <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-brand/40 to-transparent" />
                 <div className="flex items-center h-full px-6 gap-6">

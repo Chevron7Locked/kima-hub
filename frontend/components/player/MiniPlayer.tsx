@@ -190,6 +190,8 @@ export function MiniPlayer() {
         return (
             <div
                 className="fixed left-2 right-2 z-(--z-player)"
+                role="region"
+                aria-label="now playing"
                 style={{
                     bottom: "calc(var(--nav-h) + var(--standalone-safe-area-bottom, 0px) + 8px)",
                     transform: `translateX(${swipeOffset}px)`,
@@ -361,7 +363,7 @@ export function MiniPlayer() {
     }
 
     return (
-        <div className="relative">
+        <div className="relative" role="region" aria-label="now playing">
             <div className="bg-gradient-to-t from-[#080808] via-[#0c0c0c] to-[#0a0a0a] border-t border-white/[0.08] relative">
                 <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-brand/40 to-transparent" />
 
