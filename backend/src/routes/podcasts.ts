@@ -15,6 +15,7 @@ import type { OutgoingHttpHeaders } from "http";
 import type { Readable } from "stream";
 import { resolveCorsOrigin } from "./audiobooks";
 import { upstreamHeader, upstreamHeaderNumber } from "../utils/upstreamHeaders";
+import { assignCategories } from "../services/podcastCatalog";
 
 const router = Router();
 
@@ -925,6 +926,7 @@ router.post("/subscribe", requireAuth, async (req, res) => {
             },
         });
 
+        await assignCategories(podcast.id, finalItunesId, podcastData.categoryNames);
         logger.debug(`   Podcast created: ${podcast.id}`);
         logger.debug(`   iTunes ID saved: ${podcast.itunesId || "NONE"}`);
 
@@ -1751,6 +1753,9 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
             feedLastModified: result.lastModified || null,
         },
     });
+    if (podcast.categoryIds.length === 0) {
+        await assignCategories(podcastId, podcast.itunesId, result.podcast.categoryNames);
+    }
 
     // Batch fetch all existing GUIDs to avoid N+1 queries
     const feedGuids = result.episodes.map(e => e.guid).filter(Boolean);

@@ -563,6 +563,11 @@ async function main() {
         .catch((err) => {
             logger.error("Measuring cached podcast episode lengths failed:", err);
         });
+    import("./services/podcastCatalog")
+        .then(({ assignMissingCategories }) => assignMissingCategories())
+        .catch((err) => {
+            logger.error("Filling podcast categories failed:", err);
+        });
 
     // Schedule daily cleanup (every 24 hours)
     podcastCleanupInterval = setInterval(() => {

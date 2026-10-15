@@ -11,6 +11,8 @@ interface RSSPodcast {
     language?: string;
     explicit?: boolean;
     itunesId?: string;
+    /** The feed's own `itunes:category` names, top-level and nested. */
+    categoryNames: string[];
 }
 
 interface RSSEpisode {
@@ -120,6 +122,7 @@ class RSSParserService {
                 language: feed.language || undefined,
                 explicit: this.parseExplicit((feed as any).itunesExplicit),
                 itunesId: this.extractItunesId(feed),
+                categoryNames: this.extractCategoryNames(xml),
             };
 
             logger.debug(`   Podcast: ${podcast.title}`);
@@ -320,6 +323,14 @@ class RSSParserService {
         }
 
         return undefined;
+    }
+
+    /** `itunes:category` is channel-level only, possibly nested; its name is the `text` attribute. */
+    private extractCategoryNames(xml: string): string[] {
+        const names = [...xml.matchAll(/<itunes:category\s+text="([^"]+)"/g)].map((m) =>
+            m[1].replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").trim()
+        );
+        return [...new Set(names.filter(Boolean))];
     }
 }
 

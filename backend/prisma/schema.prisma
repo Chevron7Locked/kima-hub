@@ -522,6 +522,8 @@ model Podcast {
   imageUrl         String?
   localCoverPath   String?
   itunesId         String?                  @unique
+  /// Apple podcast category ids (podcasts.apple.com genre ids), most specific first.
+  categoryIds      Int[]                    @default([])
   language         String?
   explicit         Boolean                  @default(false)
   episodeCount     Int                      @default(0)
@@ -706,6 +708,8 @@ model SystemSettings {
   /// Daily anonymous check against GitHub releases so the UI can flag a newer
   /// server. Off suits air-gapped installs; nothing else changes.
   updateChecksEnabled         Boolean  @default(true)
+  /// Country whose Apple podcast charts the podcasts page shows (ISO 3166 alpha-2, lowercase).
+  podcastChartCountry         String   @default("us")
   lastUpdateCheck             DateTime?
   latestKnownVersion          String?
 }
@@ -1201,7 +1205,7 @@ model RemovalLog {
   title      String
   artistName String
   albumTitle String
-  reason     String   @default("file-missing-grace")
+  reason     String   @default("file-missing-confirmed")
   /// [{table: "TranscodedFile", path: "<absolute>"}] — server-side artifacts the
   /// sweep unlinks after the transaction, so a crash gap stays reconcilable.
   artifacts  Json?
