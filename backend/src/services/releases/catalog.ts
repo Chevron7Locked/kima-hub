@@ -124,8 +124,11 @@ export const RELEASES: Release[] = [
                 title: "Analysis listens to the middle of each song",
                 summary: "Tempo, key and moods come from the middle 90 seconds instead of the last 90.",
                 body:
-                    "Audio analysis used to read each song's last 90 seconds, so a fade-out or a silent tail could stand in for the whole song. It now reads the middle 90 seconds. Mood mixes, radio stations, and the tempo, key and mood tags you see come from this reading. Song matching and the vibe map don't change: they already sample the whole song.\n\nSongs analysed before 1.12 keep their old readings until audio analysis is re-run from Library Enrichment.",
-                links: [{ label: "Open Library Enrichment settings", href: "/settings#cache" }],
+                    "Audio analysis used to read each song's last 90 seconds, so a fade-out or a silent tail could stand in for the whole song. It now reads the middle 90 seconds. Mood mixes, radio stations, and the tempo, key and mood tags you see come from this reading. Song matching and the vibe map don't change: they already sample the whole song.\n\nSongs analysed before 1.12 keep their old readings until they are analysed again. If your library hasn't had 1.11's wipe and re-run yet, that is the one to do: it re-runs everything, this analysis included. If it has, an admin can re-run from audio analysis in Library Enrichment.",
+                links: [
+                    { label: "1.11's wipe and re-run", href: "/changelog#1.11.0" },
+                    { label: "Open Library Enrichment settings", href: "/settings#cache" },
+                ],
             },
             {
                 kind: "note",
@@ -153,7 +156,7 @@ export const RELEASES: Release[] = [
                 summary:
                     "Operator-only downloads, reverse playlist order, touch-screen controls, preview streams everywhere, a right-sized play queue for iOS, and security fixes.",
                 body:
-                    "- Only operators can start downloads unless they turn on Member Downloads in Settings → Download Preferences; deleting stays operator-only\n- Playlists can play in reverse order: a toggle beside shuffle, remembered per playlist\n- Every release's note now stays on the changelog page, newest first; anything a release still needs from you stays listed there until it's done\n- Opt-in for operators: Kima can remove songs whose files are gone once two scans in a row confirm it, logging each one first (server setting RECONCILE_MODE=delete)\n- Touch screens (artist and album pages): reveal-on-hover controls now show on tap too\n- Preview streams play on every client (the range headers were missing)\n- The release window says \"What's new\" everywhere, not \"Kevin's note\" on wide screens\n- An ordered play queue for iOS that doesn't drag the full artist payload\n- The collection page hides delete buttons from non-admins\n- Three HIGH-severity CVEs closed in the CLAP stack (transformers model-loading path)\n- Empty Subsonic search3 queries return the library instead of nothing, so apps that sync this way see your whole library",
+                    "- Only operators can start downloads unless they turn on Member Downloads in Settings → Download Preferences; deleting stays operator-only\n- Playlists can play in reverse order: a toggle beside shuffle, remembered per playlist\n- Every release's note now stays on the changelog page, newest first; anything a release still needs from you stays listed there until it's done\n- Opt-in for operators: Kima can remove songs whose files are gone once two scans in a row confirm it, logging each one first (server setting RECONCILE_MODE=delete)\n- Touch screens (artist and album pages): reveal-on-hover controls now show on tap too\n- Preview streams play on every client (the range headers were missing)\n- The release window says \"What's new\" everywhere, not \"Kevin's note\" on wide screens\n- An ordered play queue for iOS that doesn't drag the full artist payload\n- The collection page hides delete buttons from non-admins\n- Podcast episodes from hosts that don't state a file size now download and stay cached\n- Lidarr's webhook check reports Kima's version instead of \"unknown\"\n- Three HIGH-severity CVEs closed in the CLAP stack (transformers model-loading path)\n- Empty Subsonic search3 queries return the library instead of nothing, so apps that sync this way see your whole library",
             },
         ],
     },
