@@ -3,6 +3,7 @@
 import { ExternalLink, Trash2, Plus, Play, Pause, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/Button";
+import { formatDuration } from "@/lib/format";
 
 interface PodcastActionBarProps {
     isSubscribed: boolean;
@@ -17,6 +18,10 @@ interface PodcastActionBarProps {
     onPause?: () => void;
     onRefresh?: () => Promise<unknown>;
     isRefreshing?: boolean;
+    /** The show's first episode, offered before following. */
+    snippet?: { title: string; duration: number } | null;
+    onToggleSnippet?: () => void;
+    snippetPlaying?: boolean;
 }
 
 export function PodcastActionBar({
@@ -32,9 +37,31 @@ export function PodcastActionBar({
     onPause,
     onRefresh,
     isRefreshing,
+    snippet,
+    onToggleSnippet,
+    snippetPlaying,
 }: PodcastActionBarProps) {
     return (
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+            {!isSubscribed && snippet && onToggleSnippet && (
+                <button
+                    onClick={onToggleSnippet}
+                    aria-label={snippetPlaying ? "stop the first episode" : `play the first episode, ${snippet.title}`}
+                    className="flex min-w-0 items-center gap-3 rounded-full bg-[var(--color-brand)] py-2 pl-2 pr-5 text-left text-[var(--color-on-brand)] transition-transform hover:scale-[1.02] active:scale-95"
+                >
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-black/15">
+                        {snippetPlaying ? <Pause className="size-4 fill-current" /> : <Play className="size-4 fill-current ml-0.5" />}
+                    </span>
+                    <span className="min-w-0">
+                        <span className="block text-sm font-semibold">{snippetPlaying ? "playing the first episode" : "play the first episode"}</span>
+                        <span className="block max-w-[16rem] truncate text-xs opacity-80">
+                            {snippet.title}
+                            {snippet.duration > 0 && ` · ${formatDuration(snippet.duration)}`}
+                        </span>
+                    </span>
+                </button>
+            )}
+
             {isSubscribed && onPlayLatest && (
                 <button
                     onClick={isPlayingPodcast ? onPause : onPlayLatest}
@@ -63,14 +90,14 @@ export function PodcastActionBar({
 
             {!isSubscribed && (
                 <Button
-                    variant="primary"
+                    variant={snippet ? "secondary" : "primary"}
                     onClick={onSubscribe}
                     isLoading={isSubscribing}
                 >
-                    {isSubscribing ? "Subscribing" : (
+                    {isSubscribing ? "following" : (
                         <>
                             <Plus className="w-4 h-4" />
-                            Subscribe
+                            follow
                         </>
                     )}
                 </Button>

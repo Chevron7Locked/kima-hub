@@ -61,15 +61,15 @@ export function usePreview() {
 
     useEffect(() => () => end(true), [end]);
 
-    /** Start the preview `id` from `url`, or stop it when it is the one playing. */
+    /** Start the preview `id` from `url`, or stop it when it is the one playing; `what` names it in messages. */
     const toggle = useCallback(
-        (id: string, url: string) => {
+        (id: string, url: string, what = "song") => {
             if (current.current?.id === id) {
                 end(true);
                 return;
             }
             if (failed.current.has(id)) {
-                notify.info("No preview for this song");
+                notify.info(`No preview for this ${what}`);
                 return;
             }
             end(false);
@@ -91,7 +91,7 @@ export function usePreview() {
                 if (isCurrent()) end(true);
             };
             audio.onerror = () => {
-                if (isCurrent()) fail("No preview for this song");
+                if (isCurrent()) fail(`No preview for this ${what}`);
             };
             // A preview stopped before it started rejects too; only the current one is a failure.
             audio.play().then(

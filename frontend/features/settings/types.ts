@@ -56,6 +56,7 @@ export interface SystemSettings {
     // Server
     publicUrl: string;
     updateChecksEnabled: boolean;
+    podcastChartCountry: string;
 }
 
 export interface ConnectionTestResult {

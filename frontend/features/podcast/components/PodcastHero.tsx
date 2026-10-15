@@ -3,12 +3,14 @@
 import type { ReactNode } from "react";
 import type { ColorPalette } from "@/hooks/useImageColor";
 import { SpokenHero, type SpokenHeroDetail } from "@/features/spoken/SpokenHero";
+import type { CategoryRef } from "../types";
 
 interface PodcastHeroProps {
     title: string;
     author: string;
     description?: string;
     genres?: string[];
+    categories?: CategoryRef[];
     heroImage: string | null;
     colors: ColorPalette | null;
     episodeCount: number;
@@ -21,6 +23,7 @@ export function PodcastHero({
     author,
     description,
     genres,
+    categories,
     heroImage,
     colors,
     episodeCount,
@@ -41,7 +44,11 @@ export function PodcastHero({
             author={author}
             description={description}
             details={details}
-            tags={(genres ?? []).slice(0, 4).map((label) => ({ label }))}
+            tags={
+                categories && categories.length > 0
+                    ? categories.slice(0, 4).map((c) => ({ label: c.name, href: `/podcasts/category/${c.id}` }))
+                    : (genres ?? []).slice(0, 4).map((label) => ({ label }))
+            }
             heroImage={heroImage}
             colors={colors}
         >

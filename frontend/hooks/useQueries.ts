@@ -56,8 +56,7 @@ export const queryKeys = {
 
     podcasts: () => ["podcasts"] as const,
     podcast: (id: string) => ["podcast", id] as const,
-    topPodcasts: (limit?: number, genreId?: number) =>
-        ["podcasts", "top", limit, genreId] as const,
+    topPodcasts: (limit?: number) => ["podcasts", "top", limit] as const,
 
     // Browse (Deezer playlists)
     browseAll: () => ["browse", "all"] as const,
@@ -372,10 +371,10 @@ export function usePodcastQuery(
     };
 }
 
-export function useTopPodcastsQuery(limit: number = 20, genreId?: number) {
+export function useTopPodcastsQuery(limit: number = 20) {
     return useQuery({
-        queryKey: queryKeys.topPodcasts(limit, genreId),
-        queryFn: () => api.getTopPodcasts(limit, genreId),
+        queryKey: queryKeys.topPodcasts(limit),
+        queryFn: () => api.getPodcastChart(null, limit),
         staleTime: 10 * 60 * 1000, // 10 minutes
     });
 }

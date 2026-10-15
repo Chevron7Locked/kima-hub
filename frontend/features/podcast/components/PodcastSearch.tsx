@@ -1,0 +1,158 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Mic2, Search } from "lucide-react";
+import { api } from "@/lib/api";
+import { CachedImage } from "@/components/ui/CachedImage";
+import { GradientSpinner } from "@/components/ui/GradientSpinner";
+import { coverArtUrl } from "@/lib/cover-art";
+import { formatDate } from "../utils";
+
+interface ShowResult {
+    id: number | string;
+    name: string;
+    artist?: string;
+    coverUrl?: string;
+    genres?: string[];
+}
+
+interface EpisodeResult {
+    id: string;
+    title: string;
+    podcastId: string;
+    podcastTitle: string | null;
+    publishedAt: string;
+}
+
+const MIN_QUERY = 2;
+
+/**
+ * Search shows (Apple's catalogue, to open or follow) and episodes (the shows on this server) in one box; results
+ * open the show's page. Requests superseded by newer typing are cancelled.
+ */
+export function PodcastSearch() {
+    const router = useRouter();
+    const [query, setQuery] = useState("");
+    const [shows, setShows] = useState<ShowResult[]>([]);
+    const [episodes, setEpisodes] = useState<EpisodeResult[]>([]);
+    const [searching, setSearching] = useState(false);
+    const [open, setOpen] = useState(false);
+    const box = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const q = query.trim();
+        if (q.length < MIN_QUERY) return;
+        const controller = new AbortController();
+        const timer = setTimeout(async () => {
+            setSearching(true);
+            const [found, eps] = await Promise.allSettled([
+                api.discoverSearch(q, "podcasts", 8, controller.signal),
+                api.search(q, "episodes", 6, controller.signal),
+            ]);
+            if (controller.signal.aborted) return;
+            setShows(found.status === "fulfilled" ? (found.value.results as unknown as ShowResult[]) : []);
+            setEpisodes(eps.status === "fulfilled" ? ((eps.value as { episodes?: EpisodeResult[] }).episodes ?? []) : []);
+            setSearching(false);
+            setOpen(true);
+        }, 350);
+        return () => {
+            clearTimeout(timer);
+            controller.abort();
+        };
+    }, [query]);
+
+    useEffect(() => {
+        const close = (e: MouseEvent) => {
+            if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener("mousedown", close);
+        return () => document.removeEventListener("mousedown", close);
+    }, []);
+
+    const go = (href: string) => {
+        setOpen(false);
+        router.push(href);
+    };
+    const hasQuery = query.trim().length >= MIN_QUERY;
+    const nothing = !searching && shows.length === 0 && episodes.length === 0;
+
+    return (
+        <div ref={box} className="relative w-full sm:w-96">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--text-muted)]" />
+            <input
+                type="text"
+                enterKeyHint="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onFocus={() => hasQuery && setOpen(true)}
+                onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
+                placeholder="search shows and episodes"
+                role="combobox"
+                aria-expanded={open && hasQuery}
+                aria-controls="podcast-search-results"
+                aria-label="search shows and episodes"
+                className="w-full rounded-lg border-2 border-white/10 bg-[var(--bg-primary)] py-2.5 pl-10 pr-10 text-sm text-white placeholder:text-[var(--text-muted)] focus:border-brand/50 focus:outline-none"
+            />
+            {searching && hasQuery && (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <GradientSpinner size="sm" />
+                </span>
+            )}
+            {open && hasQuery && (
+                <div
+                    id="podcast-search-results"
+                    role="listbox"
+                    aria-label="search results"
+                    className="absolute left-0 top-full z-(--z-dropdown) mt-2 max-h-[28rem] w-full overflow-y-auto rounded-lg border-2 border-white/10 bg-[var(--bg-secondary)]"
+                >
+                    {shows.length > 0 && <p className="px-3 pt-3 pb-1 text-xs font-semibold text-[var(--text-muted)]">shows</p>}
+                    {shows.map((s) => {
+                        const cover = coverArtUrl(s.coverUrl, 80);
+                        return (
+                            <button
+                                key={`show-${s.id}`}
+                                type="button"
+                                role="option"
+                                aria-selected={false}
+                                onClick={() => go(`/podcasts/${s.id}`)}
+                                className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-white/5 focus-visible:bg-white/5 focus-visible:outline-none"
+                            >
+                                <span className="relative size-10 shrink-0 overflow-hidden rounded-md bg-[var(--bg-primary)]">
+                                    {cover ? (
+                                        <CachedImage src={cover} alt="" fill sizes="40px" className="object-cover" />
+                                    ) : (
+                                        <Mic2 className="absolute inset-0 m-auto size-4 text-[var(--text-muted)]" />
+                                    )}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-sm font-semibold text-white">{s.name}</span>
+                                    <span className="block truncate text-xs text-[var(--text-muted)]">
+                                        {[s.artist, s.genres?.[0]].filter(Boolean).join(" · ")}
+                                    </span>
+                                </span>
+                            </button>
+                        );
+                    })}
+                    {episodes.length > 0 && <p className="px-3 pt-3 pb-1 text-xs font-semibold text-[var(--text-muted)]">episodes</p>}
+                    {episodes.map((ep) => (
+                        <button
+                            key={`ep-${ep.id}`}
+                            type="button"
+                            role="option"
+                            aria-selected={false}
+                            onClick={() => go(`/podcasts/${ep.podcastId}`)}
+                            className="block w-full px-3 py-2 text-left transition-colors hover:bg-white/5 focus-visible:bg-white/5 focus-visible:outline-none"
+                        >
+                            <span className="block truncate text-sm text-white">{ep.title}</span>
+                            <span className="block truncate text-xs tabular-nums text-[var(--text-muted)]">
+                                {[ep.podcastTitle, formatDate(ep.publishedAt)].filter(Boolean).join(" · ")}
+                            </span>
+                        </button>
+                    ))}
+                    {nothing && <p className="p-4 text-center text-xs text-[var(--text-muted)]">nothing found for “{query.trim()}”</p>}
+                </div>
+            )}
+        </div>
+    );
+}

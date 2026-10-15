@@ -6,7 +6,7 @@ import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { queryKeys, usePodcastQuery } from "@/hooks/useQueries";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
-import { Podcast, PodcastPreview, SimilarPodcast, Episode } from "../types";
+import type { Podcast, PodcastPreview, DiscoveryPodcast, Episode } from "../types";
 import { subscribeQueryEvent } from "@/lib/query-events";
 
 export function usePodcastData() {
@@ -70,7 +70,7 @@ export function usePodcastData() {
   const [previewData, setPreviewData] = useState<PodcastPreview | null>(null);
   const [previewLoadState, setPreviewLoadState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [similarPodcasts, setSimilarPodcasts] = useState<SimilarPodcast[]>([]);
+  const [similarPodcasts, setSimilarPodcasts] = useState<DiscoveryPodcast[]>([]);
 
   // Reset preview/error state when navigating between podcasts so a previous
   // page's error UI does not sticky-state into the next podcast's view.
@@ -88,14 +88,20 @@ export function usePodcastData() {
   // Separate URL with token for color extraction (CORS access for canvas)
   const colorExtractionImage = rawCoverUrl ? api.getCoverArtUrl(rawCoverUrl, 300, true) : null;
 
+  // A followed show's neighbours come from its categories' charts (server side); a previewed show's from the
+  // chart of its first category, without itself.
+  const firstCategory = previewData?.categories?.[0] ?? null;
+  const previewItunesId = previewData?.itunesId ?? null;
   useEffect(() => {
-    if (!podcast?.id || !isAuthenticated) return;
+    if (!isAuthenticated || (!podcast?.id && !firstCategory)) return;
 
     let cancelled = false;
 
     async function loadSimilarPodcasts() {
       try {
-        const similar = await api.getSimilarPodcasts(podcastId);
+        const similar = podcast?.id
+          ? await api.getSimilarPodcasts(podcastId)
+          : (await api.getPodcastChart(firstCategory!.id, 13)).filter((p) => p.itunesId !== previewItunesId).slice(0, 12);
         if (!cancelled) setSimilarPodcasts(similar);
       } catch (error) {
         if (!cancelled) console.error("Failed to load similar podcasts:", error);
@@ -104,7 +110,8 @@ export function usePodcastData() {
 
     loadSimilarPodcasts();
     return () => { cancelled = true; };
-  }, [podcast?.id, isAuthenticated, podcastId]);
+  }, [podcast?.id, isAuthenticated, podcastId, firstCategory, previewItunesId]);
+  const similarTitle = podcast ? "more like this" : firstCategory ? `more in ${firstCategory.name}` : "";
 
   // An unsubscribed podcast is shown from its directory preview instead.
   useEffect(() => {
@@ -184,6 +191,7 @@ export function usePodcastData() {
     heroImage,
     colorExtractionImage,
     similarPodcasts,
+    similarTitle,
     sortOrder,
     setSortOrder,
     inProgressEpisodes,

@@ -38,6 +38,7 @@ const defaultSystemSettings: SystemSettings = {
     // Server
     publicUrl: "",
     updateChecksEnabled: true,
+    podcastChartCountry: "us",
 };
 
 export function useSystemSettings() {

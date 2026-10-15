@@ -2,6 +2,7 @@
 
 import { ArrowLeft, Book, Mic2 } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ColorPalette } from "@/hooks/useImageColor";
 import { HeroBackdrop } from "@/components/ui/HeroBackdrop";
@@ -43,6 +44,7 @@ export interface SpokenHeroDetail {
 interface SpokenHeroTag {
     label: string;
     accent?: boolean;
+    href?: string;
 }
 
 interface SpokenHeroProps {
@@ -134,18 +136,23 @@ export function SpokenHero({
                         </div>
 
                         {tags.length > 0 && (
-                            <div className="hidden md:flex flex-wrap gap-1.5 mt-3">
-                                {tags.map(({ label: tag, accent }) => (
-                                    <span
-                                        key={tag}
-                                        className={cn(
-                                            "px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-xs tabular-nums",
-                                            accent ? "text-brand" : "text-[var(--text-secondary)]",
-                                        )}
-                                    >
-                                        {tag}
-                                    </span>
-                                ))}
+                            // Linked tags are navigation, so they show on phones too; plain ones are detail.
+                            <div className={cn("flex-wrap gap-1.5 mt-3", tags.some((t) => t.href) ? "flex" : "hidden md:flex")}>
+                                {tags.map(({ label: tag, accent, href }) => {
+                                    const look = cn(
+                                        "px-2.5 py-0.5 bg-white/5 border border-white/10 rounded text-xs tabular-nums",
+                                        accent ? "text-brand" : "text-[var(--text-secondary)]",
+                                    );
+                                    return href ? (
+                                        <Link key={tag} href={href} className={cn(look, "transition-colors hover:border-white/25 hover:text-white")}>
+                                            {tag}
+                                        </Link>
+                                    ) : (
+                                        <span key={tag} className={look}>
+                                            {tag}
+                                        </span>
+                                    );
+                                })}
                             </div>
                         )}
                     </div>

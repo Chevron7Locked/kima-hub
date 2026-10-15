@@ -1,4 +1,5 @@
 import type { MapTrack } from "@/features/vibe/types";
+import type { DiscoveryPodcast, ForYouRow, ListeningRow, PodcastCategory } from "@/features/podcast/types";
 import { backendUrl } from "@/lib/backend-url";
 
 const AUTH_TOKEN_KEY = "auth_token";
@@ -1403,28 +1404,31 @@ class ApiClient {
         );
     }
 
+    async getPodcastCategories() {
+        return this.request<PodcastCategory[]>("/podcasts/categories");
+    }
+
+    /** Apple's chart for a category, or the overall chart for `null`. */
+    async getPodcastChart(category: number | null, limit = 24, offset = 0) {
+        const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+        if (category !== null) params.set("category", String(category));
+        return this.request<DiscoveryPodcast[]>(`/podcasts/charts?${params}`);
+    }
+
+    async getPodcastsForYou() {
+        return this.request<ForYouRow[]>("/podcasts/for-you");
+    }
+
+    async getPodcastListening() {
+        return this.request<{ inProgress: ListeningRow[]; newEpisodes: ListeningRow[] }>("/podcasts/listening");
+    }
+
+    getPodcastSnippetUrl(itunesId: string): string {
+        return this.tokenizedUrl(`/api/podcasts/preview/${encodeURIComponent(itunesId)}/snippet`);
+    }
+
     async getSimilarPodcasts(podcastId: string) {
-        return this.request<ApiData[]>(`/podcasts/${podcastId}/similar`);
-    }
-
-    async getTopPodcasts(limit = 20, genreId?: number) {
-        const params = new URLSearchParams({ limit: limit.toString() });
-        if (genreId) params.append("genreId", genreId.toString());
-        return this.request<ApiData[]>(
-            `/podcasts/discover/top?${params.toString()}`
-        );
-    }
-
-    async getPodcastsByGenre(genreIds: number[]) {
-        return this.request<ApiData>(
-            `/podcasts/discover/genres?genres=${genreIds.join(",")}`
-        );
-    }
-
-    async getPodcastsByGenrePaginated(genreId: number, limit = 20, offset = 0) {
-        return this.request<ApiData[]>(
-            `/podcasts/discover/genre/${genreId}?limit=${limit}&offset=${offset}`
-        );
+        return this.request<DiscoveryPodcast[]>(`/podcasts/${podcastId}/similar`);
     }
 
     async subscribePodcast(feedUrl: string, itunesId?: string) {
@@ -1510,7 +1514,8 @@ class ApiClient {
             | "albums"
             | "tracks"
             | "audiobooks"
-            | "podcasts" = "all",
+            | "podcasts"
+            | "episodes" = "all",
         limit: number = 20,
         signal?: AbortSignal
     ) {

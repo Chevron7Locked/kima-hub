@@ -20,6 +20,7 @@ import { SubsonicSection } from "@/features/settings/components/sections/Subsoni
 import { PlaybackSection } from "@/features/settings/components/sections/PlaybackSection";
 import { ScrobblingSection } from "@/features/settings/components/sections/ScrobblingSection";
 import { DownloadPreferencesSection } from "@/features/settings/components/sections/DownloadPreferencesSection";
+import { PodcastsSection } from "@/features/settings/components/sections/PodcastsSection";
 import { LidarrSection } from "@/features/settings/components/sections/LidarrSection";
 import { AudiobookshelfSection } from "@/features/settings/components/sections/AudiobookshelfSection";
 import { SoulseekSection } from "@/features/settings/components/sections/SoulseekSection";
@@ -36,6 +37,7 @@ const sidebarItems: SidebarItem[] = [
     { id: "playback", label: "Playback" },
     { id: "scrobbling", label: "Scrobbling" },
     { id: "download-preferences", label: "Download Preferences", adminOnly: true },
+    { id: "podcasts", label: "Podcasts", adminOnly: true },
     { id: "lidarr", label: "Download Services", adminOnly: true },
     { id: "audiobookshelf", label: "Media Servers", adminOnly: true },
     { id: "soulseek", label: "P2P Networks", adminOnly: true },
@@ -229,6 +231,8 @@ export default function SettingsPage() {
                             settings={systemSettings}
                             onUpdate={updateSystemSettings}
                         />
+
+                        <PodcastsSection settings={systemSettings} onUpdate={updateSystemSettings} />
 
                         <LidarrSection
                             settings={systemSettings}

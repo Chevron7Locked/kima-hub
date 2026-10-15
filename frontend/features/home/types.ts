@@ -30,7 +30,7 @@ export interface Podcast {
     id: string;
     title: string;
     author?: string;
-    coverUrl?: string;
+    coverUrl?: string | null;
     coverArt?: string;
     imageUrl?: string;
 }

@@ -3,6 +3,7 @@
 import DOMPurify from "dompurify";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { useImageColor } from "@/hooks/useImageColor";
+import { usePreview } from "@/hooks/usePreview";
 import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import type { Episode } from "@/features/podcast/types";
@@ -16,7 +17,7 @@ import { PodcastActionBar } from "@/features/podcast/components/PodcastActionBar
 import { ContinueListening } from "@/features/podcast/components/ContinueListening";
 import { EpisodeList } from "@/features/podcast/components/EpisodeList";
 import { PreviewEpisodes } from "@/features/podcast/components/PreviewEpisodes";
-import { SimilarPodcasts } from "@/features/podcast/components/SimilarPodcasts";
+import { PodcastShelf } from "@/features/podcast/components/PodcastShelf";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { PageMessage } from "@/components/ui/PageMessage";
 
@@ -32,6 +33,7 @@ export default function PodcastDetailPage() {
         heroImage,
         colorExtractionImage,
         similarPodcasts,
+        similarTitle,
         sortOrder,
         setSortOrder,
         inProgressEpisodes,
@@ -43,6 +45,7 @@ export default function PodcastDetailPage() {
     } = usePodcastData();
 
     const { colors } = useImageColor(colorExtractionImage);
+    const preview = usePreview();
 
     const {
         isSubscribing,
@@ -63,9 +66,9 @@ export default function PodcastDetailPage() {
     if (previewLoadState === "error") {
         return (
             <PageMessage
-                title="Couldn't load this podcast"
+                title="couldn't load this podcast"
                 description={previewError || undefined}
-                action={{ label: "Podcasts", href: "/podcasts" }}
+                action={{ label: "podcasts", href: "/podcasts" }}
             />
         );
     }
@@ -75,9 +78,7 @@ export default function PodcastDetailPage() {
     }
 
     if (!podcast && !previewData) {
-        return (
-            <PageMessage title="Podcast not found" action={{ label: "Podcasts", href: "/podcasts" }} />
-        );
+        return <PageMessage title="podcast not found" action={{ label: "podcasts", href: "/podcasts" }} />;
     }
 
     if (!displayData) {
@@ -88,6 +89,8 @@ export default function PodcastDetailPage() {
     const episodeCount = podcast
         ? podcast.episodeTotal ?? podcast.episodes.length
         : previewData?.episodeCount || 0;
+    const categories = podcast?.categories ?? previewData?.categories;
+    const snippetId = previewData?.itunesId ? `snippet:${previewData.itunesId}` : null;
 
     // The most recent unfinished episode, or the latest; the list shown oldest
     // first holds the oldest page, so the newest is asked for.
@@ -103,7 +106,6 @@ export default function PodcastDetailPage() {
         }
     };
 
-    // Check if any episode from this podcast is currently playing
     const isPlayingPodcast = sortedEpisodes.some((ep) => isEpisodePlaying(ep.id)) && isPlaying;
 
     return (
@@ -113,6 +115,7 @@ export default function PodcastDetailPage() {
                 author={displayData.author}
                 description={displayData.description}
                 genres={displayData.genres}
+                categories={categories}
                 heroImage={heroImage}
                 colors={colors}
                 episodeCount={episodeCount}
@@ -131,6 +134,13 @@ export default function PodcastDetailPage() {
                     onPause={pause}
                     onRefresh={handleRefresh}
                     isRefreshing={isRefreshing}
+                    snippet={previewData?.snippet ?? null}
+                    snippetPlaying={snippetId !== null && preview.previewId === snippetId && preview.playing}
+                    onToggleSnippet={
+                        snippetId && previewData?.itunesId
+                            ? () => preview.toggle(snippetId, api.getPodcastSnippetUrl(previewData.itunesId!), "episode")
+                            : undefined
+                    }
                 />
             </PodcastHero>
 
@@ -146,22 +156,22 @@ export default function PodcastDetailPage() {
                                 isEpisodePlaying={isEpisodePlaying}
                                 isPlaying={isPlaying}
                                 onPlayEpisode={(episode) => handlePlayEpisode(episode, podcast)}
-                                onPlayPause={(episode) =>
-                                    handlePlayPauseEpisode(episode, podcast)
-                                }
+                                onPlayPause={(episode) => handlePlayPauseEpisode(episode, podcast)}
                             />
                         </div>
                     )}
 
-                    {!podcast && previewData && (
-                        <div>
-                            <PreviewEpisodes
-                                previewData={previewData}
-                                isSubscribing={isSubscribing}
-                                onSubscribe={() => handleSubscribe(previewData)}
+                    {displayData.description && (
+                        <section>
+                            <SectionHeader title="about" type="podcast" />
+                            <div
+                                className="prose prose-invert prose-sm max-w-[70ch] text-sm leading-relaxed text-[var(--text-secondary)]"
+                                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(displayData.description) }}
                             />
-                        </div>
+                        </section>
                     )}
+
+                    {!podcast && previewData && <PreviewEpisodes previewData={previewData} />}
 
                     {podcast && (
                         <div>
@@ -171,9 +181,7 @@ export default function PodcastDetailPage() {
                                 onSortOrderChange={setSortOrder}
                                 isEpisodePlaying={isEpisodePlaying}
                                 isPlaying={isPlaying}
-                                onPlayPause={(episode) =>
-                                    handlePlayPauseEpisode(episode, podcast)
-                                }
+                                onPlayPause={(episode) => handlePlayPauseEpisode(episode, podcast)}
                                 onMarkComplete={handleMarkEpisodeComplete}
                                 fallbackCoverUrl={podcast?.coverUrl}
                                 total={episodeCount}
@@ -184,24 +192,11 @@ export default function PodcastDetailPage() {
                         </div>
                     )}
 
-                    {podcast?.description && (
-                        <div>
-                            <SectionHeader title="About" type="podcast" />
-                            <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[var(--bg-primary)] p-5">
-                                <div
-                                    className="prose prose-invert prose-sm max-w-none text-[var(--text-secondary)] max-w-3xl text-sm leading-relaxed"
-                                    dangerouslySetInnerHTML={{
-                                        __html: DOMPurify.sanitize(podcast.description),
-                                    }}
-                                />
-                            </div>
-                        </div>
-                    )}
-
                     {similarPodcasts.length > 0 && (
-                        <div>
-                            <SimilarPodcasts podcasts={similarPodcasts} />
-                        </div>
+                        <section>
+                            <SectionHeader title={similarTitle} type="podcast" />
+                            <PodcastShelf podcasts={similarPodcasts} />
+                        </section>
                     )}
                 </div>
             </div>
