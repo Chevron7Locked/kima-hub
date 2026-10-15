@@ -7,82 +7,52 @@
  * it only runs what the item itself offers. Deep links: /changelog#1.11.0 lands on that release.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { refreshOpenCount } from "@/components/whats-new/useVersionChip";
-import { useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
-import { ArrowRight, Check, ChevronDown, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, ChevronDown, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { notify } from "@/lib/notify";
+import { shortVersion } from "@/lib/format";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/cn";
 import { ReleaseBody } from "@/components/whats-new/ReleaseBody";
+import { ReleaseLinks } from "@/components/whats-new/ReleaseLinks";
+import { WipeAction } from "@/components/whats-new/WipeAction";
+import type { Release, ReleaseItem } from "@/components/whats-new/types";
 
-interface ChangelogItem {
-    key: string;
-    kind: "note" | "action" | "choice";
-    title: string;
-    summary: string;
-    body: string;
-    cta?: string;
-    run?: "wipeEnrichment";
-    confirmTitle?: string;
-    confirmMessage?: string;
-    confirmLabel?: string;
-    ifClosed?: string;
-    discloses?: string;
-    links?: Array<{ label: string; href: string }>;
-    answer?: { enabled: boolean; decidedBy: string };
-    done?: boolean;
-    open?: boolean;
-}
+/** A release item as the changelog reads it: the window's item plus what the server knows about it now. */
+type ChangelogItem = ReleaseItem & { answer?: { enabled: boolean; decidedBy: string }; done?: boolean; open?: boolean };
+type ChangelogRelease = Omit<Release, "items"> & { dismissed: boolean; items: ChangelogItem[] };
 
-interface ChangelogRelease {
-    version: string;
-    title: string;
-    summary: string;
-    date: string;
-    note?: { from: string; body: string };
-    dismissed: boolean;
-    items: ChangelogItem[];
-}
-
-const shortVersion = (v: string) => v.split(".").slice(0, 2).join(".");
 const niceDate = (d: string) =>
     new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 
 export default function ChangelogPage() {
-    const queryClient = useQueryClient();
     const [data, setData] = useState<{ releases: ChangelogRelease[] } | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [openItems, setOpenItems] = useState<Set<string>>(new Set());
-    const [confirm, setConfirm] = useState<{ version: string; item: ChangelogItem } | null>(null);
-    const [running, setRunning] = useState(false);
     const [doneKeys, setDoneKeys] = useState<Set<string>>(new Set());
-    const firstTarget = useRef<HTMLElement | null>(null);
 
     useEffect(() => {
         let cancelled = false;
         api
             .get<{ releases: ChangelogRelease[] }>("/whats-new/changelog")
-            .then((r) => !cancelled && setData(r))
+            .then((r) => {
+                if (cancelled) return;
+                setData(r);
+                // A deep link like /changelog#1.11.0 opens that release's items.
+                const hash = decodeURIComponent(window.location.hash.slice(1));
+                if (hash) setOpenItems(new Set(collectItemKeys(r.releases, hash)));
+            })
             .catch(() => !cancelled && setError("Couldn't load the changelog."));
         return () => {
             cancelled = true;
         };
     }, []);
 
-    // A deep link like /changelog#1.11.0: open that release's items and land on it.
+    // ...and lands on it once it is drawn.
     useEffect(() => {
         const hash = decodeURIComponent(window.location.hash.slice(1));
-        if (!hash || !data) return;
-        const target = document.getElementById(hash);
-        if (target) {
-            firstTarget.current = target;
-            setOpenItems((s) => new Set([...s, ...collectItemKeys(data.releases, hash)]));
-            requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "start" }));
-        }
+        const target = hash && data ? document.getElementById(hash) : null;
+        if (target) requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "start" }));
     }, [data]);
 
     const toggle = (key: string) =>
@@ -92,22 +62,6 @@ export default function ChangelogPage() {
             else next.add(key);
             return next;
         });
-
-    const runWipe = async () => {
-        if (!confirm) return;
-        setConfirm(null);
-        setRunning(true);
-        try {
-            await api.wipeAndRerunEnrichment();
-            setDoneKeys((d) => new Set([...d, confirm.item.key]));
-            refreshOpenCount(queryClient);
-            notify.info("Wiped. Your library is running through the engine in the background.");
-        } catch {
-            notify.error("Couldn't start it. Try again, or use Settings, under Library Enrichment.");
-        } finally {
-            setRunning(false);
-        }
-    };
 
     if (error) {
         return (
@@ -197,35 +151,17 @@ export default function ChangelogPage() {
                                             {item.kind === "choice" && !item.answer && <p className="text-xs text-[var(--text-muted)]">You haven&apos;t answered. It stays off.</p>}
                                             {item.kind === "action" && item.open && (
                                                 <div className="flex flex-col gap-2">
-                                                    {item.run === "wipeEnrichment" &&
-                                                        (doneKeys.has(item.key) || item.done ? (
-                                                            <p className="text-sm text-success flex items-center gap-2">
-                                                                <Loader2 className="w-4 h-4 animate-spin" />
-                                                                Wiped. Your library is running through the engine in the background.
-                                                            </p>
-                                                        ) : (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setConfirm({ version: r.version, item })}
-                                                                disabled={running}
-                                                                className="self-start min-h-11 py-2.5 px-4 rounded-lg bg-brand hover:bg-brand-hover text-black text-sm font-semibold transition-colors disabled:opacity-60"
-                                                            >
-                                                                {item.cta}
-                                                            </button>
-                                                        ))}
+                                                    {item.run === "wipeEnrichment" && (
+                                                        <WipeAction
+                                                            item={item}
+                                                            done={doneKeys.has(item.key) || !!item.done}
+                                                            onDone={() => setDoneKeys((d) => new Set([...d, item.key]))}
+                                                        />
+                                                    )}
                                                     {item.ifClosed && <p className="text-xs text-[var(--text-muted)] max-w-[62ch]">{item.ifClosed}</p>}
                                                 </div>
                                             )}
-                                            {item.links && item.links.length > 0 && (
-                                                <div className="flex flex-wrap gap-2">
-                                                    {item.links.map((link) => (
-                                                        <Link key={link.href} href={link.href} className="min-h-11 py-2.5 px-4 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-white text-sm font-medium flex items-center gap-2 transition-colors">
-                                                            {link.label}
-                                                            <ArrowRight className="w-4 h-4" />
-                                                        </Link>
-                                                    ))}
-                                                </div>
-                                            )}
+                                            {item.links && <ReleaseLinks links={item.links} />}
                                         </div>
                                     )}
                                 </li>
@@ -235,18 +171,6 @@ export default function ChangelogPage() {
                 ))}
             </div>
 
-            {confirm && (
-                <ConfirmDialog
-                    isOpen={true}
-                    onClose={() => setConfirm(null)}
-                    onConfirm={runWipe}
-                    title={confirm.item.confirmTitle ?? "Wipe and re-run enrichment?"}
-                    message={confirm.item.confirmMessage ?? ""}
-                    confirmText={confirm.item.confirmLabel ?? confirm.item.cta ?? "Run it"}
-                    cancelText="Not now"
-                    variant="warning"
-                />
-            )}
         </div>
     );
 }

@@ -92,4 +92,32 @@ describe("/changelog", () => {
         const run = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Wipe and re-run")!;
         expect(run).toBeTruthy();
     });
+
+    it("asks before wiping, then says the run started; a failure says so and leaves the button", async () => {
+        const { api } = await import("@/lib/api");
+        const wipe = vi.mocked(api.wipeAndRerunEnrichment);
+        await render();
+        const button = (text: string) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.trim() === text);
+        const click = async (el: HTMLElement | undefined) =>
+            act(async () => {
+                el!.click();
+            });
+        await click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Wipe and re-run enrichment")));
+
+        wipe.mockRejectedValueOnce(new Error("down"));
+        await click(container.querySelector<HTMLElement>('[data-testid="wipe-run"]')!);
+        expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+        expect(wipe).not.toHaveBeenCalled();
+        await click(Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent?.trim() === "Wipe and re-run") as HTMLElement);
+        expect(wipe).toHaveBeenCalledTimes(1);
+        expect(container.textContent).toContain("Couldn't start it.");
+        expect(container.querySelector('[data-testid="wipe-run"]')).not.toBeNull();
+
+        await click(container.querySelector<HTMLElement>('[data-testid="wipe-run"]')!);
+        await click(Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent?.trim() === "Wipe and re-run") as HTMLElement);
+        expect(wipe).toHaveBeenCalledTimes(2);
+        expect(container.querySelector('[data-testid="wipe-started"]')).not.toBeNull();
+        expect(container.querySelector('[data-testid="wipe-run"]')).toBeNull();
+        expect(button("Not now")).toBeUndefined();
+    });
 });

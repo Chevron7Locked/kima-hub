@@ -14,7 +14,8 @@ vi.mock("next/link", () => ({
         React.createElement("a", { href, ...rest }, children),
 }));
 
-import { WhatsNewWindow, type Release } from "@/components/whats-new/WhatsNewWindow";
+import { WhatsNewWindow } from "@/components/whats-new/WhatsNewWindow";
+import type { Release } from "@/components/whats-new/types";
 
 const R11: Release = {
     version: "1.11.0",

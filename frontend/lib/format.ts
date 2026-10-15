@@ -89,3 +89,8 @@ export function normalizeNFC(str: string): string {
 export function plural(n: number, word: string): string {
     return `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
 }
+
+/** A version as people say it: 1.12.0 → 1.12. */
+export function shortVersion(version: string): string {
+    return version.split(".").slice(0, 2).join(".");
+}

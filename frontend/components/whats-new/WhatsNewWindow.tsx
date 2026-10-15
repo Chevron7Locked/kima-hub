@@ -10,47 +10,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { refreshOpenCount } from "./useVersionChip";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { X, Check, Loader2, ChevronLeft, ChevronRight, ArrowRight } from "lucide-react";
+import { X, Check, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
+import { shortVersion } from "@/lib/format";
 import { ReleaseBody } from "./ReleaseBody";
-
-interface ReleaseLink {
-    label: string;
-    href: string;
-}
-
-interface ItemBase {
-    key: string;
-    title: string;
-    summary: string;
-    body: string;
-    links?: ReleaseLink[];
-}
-
-type ReleaseItem =
-    | (ItemBase & { kind: "note" })
-    | (ItemBase & {
-          kind: "action";
-          cta: string;
-          run?: "wipeEnrichment";
-          confirmTitle?: string;
-          confirmMessage?: string;
-          confirmLabel?: string;
-          /** What closing without acting means for this item; said in the footer. */
-          ifClosed?: string;
-          requires?: "savedMoodMix" | "retiredMoodMix" | "admin";
-      })
-    | (ItemBase & { kind: "choice"; defaultValue: false; discloses?: string; requires?: "admin" });
-
-export interface Release {
-    version: string;
-    title: string;
-    summary: string;
-    date: string;
-    note?: { from: string; body: string };
-    items: ReleaseItem[];
-}
+import { ReleaseLinks } from "./ReleaseLinks";
+import type { Release, ReleaseItem } from "./types";
 
 /** The window shows exactly one of these below `lg`; from `lg` the list stays put and this selects the right column. */
 // An item opened from an older release's page remembers that release, so going back returns there.
@@ -103,7 +69,6 @@ export function WhatsNewWindow({
     const older = releases.slice(0, -1).reverse();
     const items = releases.flatMap((r) => r.items);
     const versionOf = (key: string) => releases.find((r) => r.items.some((i) => i.key === key))?.version ?? release.version;
-    const shortVersion = (version: string) => version.split(".").slice(0, 2).join(".");
 
     const opened = view.pane === "item" ? (items.find((i) => i.key === view.key) ?? null) : null;
     const readRelease = view.pane === "release" ? (releases.find((r) => r.version === view.version) ?? null) : null;
@@ -344,6 +309,33 @@ export function WhatsNewWindow({
         </button>
     );
 
+    // An item's own controls, the same on its page and on the needs-you page.
+    const controls = (item: ReleaseItem) => (
+        <>
+            {item.kind === "choice" && (
+                <div className="flex flex-col gap-3">
+                    {item.discloses && (
+                        <p className="text-sm leading-relaxed text-[var(--text-secondary)] max-w-[62ch]">
+                            <span className="text-white">What leaves your server: </span>
+                            {item.discloses}
+                        </p>
+                    )}
+                    <div className="flex gap-2">
+                        <ChoiceButton selected={choices[item.key] === true} onClick={() => answer(item.key, true)} label="Turn it on" />
+                        <ChoiceButton selected={choices[item.key] === false} onClick={() => answer(item.key, false)} label="No thanks" />
+                    </div>
+                    {choices[item.key] === undefined && (
+                        <p className="text-sm text-[var(--text-muted)] max-w-[62ch]">If you don&apos;t answer, it stays off.</p>
+                    )}
+                </div>
+            )}
+            {item.kind === "action" && renderAction?.(item)}
+            {item.kind === "action" && item.ifClosed && !done.includes(item.key) && (
+                <p className="text-sm text-[var(--text-muted)] max-w-[62ch]">{item.ifClosed}</p>
+            )}
+        </>
+    );
+
     const needsPage = (
         <section aria-labelledby="whats-new-needs-page" className="flex flex-col gap-5 max-w-prose">
             {back}
@@ -354,27 +346,7 @@ export function WhatsNewWindow({
                 <div key={item.key} className="flex flex-col gap-3 pt-5 border-t border-white/10">
                     <h4 className="text-base font-semibold text-white">{item.title}</h4>
                     <ReleaseBody size="window" text={item.body} />
-                    {item.kind === "choice" && (
-                        <div className="flex flex-col gap-3">
-                            {item.discloses && (
-                                <p className="text-sm leading-relaxed text-[var(--text-secondary)] max-w-[62ch]">
-                                    <span className="text-white">What leaves your server: </span>
-                                    {item.discloses}
-                                </p>
-                            )}
-                            <div className="flex gap-2">
-                                <ChoiceButton selected={choices[item.key] === true} onClick={() => answer(item.key, true)} label="Turn it on" />
-                                <ChoiceButton selected={choices[item.key] === false} onClick={() => answer(item.key, false)} label="No thanks" />
-                            </div>
-                            {choices[item.key] === undefined && (
-                                <p className="text-sm text-[var(--text-muted)]">If you don&apos;t answer, it stays off.</p>
-                            )}
-                        </div>
-                    )}
-                    {item.kind === "action" && renderAction?.(item)}
-                    {item.kind === "action" && item.ifClosed && !done.includes(item.key) && (
-                        <p className="text-sm text-[var(--text-muted)] max-w-[62ch]">{item.ifClosed}</p>
-                    )}
+                    {controls(item)}
                 </div>
             ))}
         </section>
@@ -398,43 +370,14 @@ export function WhatsNewWindow({
                 {item.title}
             </h3>
             <ReleaseBody size="window" text={item.body} />
-            {item.kind === "choice" && (
-                <div className="flex flex-col gap-3">
-                    {item.discloses && (
-                        <p className="text-sm leading-relaxed text-[var(--text-secondary)] max-w-[62ch]">
-                            <span className="text-white">What leaves your server: </span>
-                            {item.discloses}
-                        </p>
-                    )}
-                    <div className="flex gap-2">
-                        <ChoiceButton selected={choices[item.key] === true} onClick={() => answer(item.key, true)} label="Turn it on" />
-                        <ChoiceButton selected={choices[item.key] === false} onClick={() => answer(item.key, false)} label="No thanks" />
-                    </div>
-                </div>
-            )}
-            {item.kind === "action" && renderAction?.(item)}
-            {item.kind === "choice" && choices[item.key] === undefined && (
-                <p className="text-sm text-[var(--text-muted)] max-w-[62ch]">If you don&apos;t answer, it stays off.</p>
-            )}
-            {item.kind === "action" && item.ifClosed && !done.includes(item.key) && (
-                <p className="text-sm text-[var(--text-muted)] max-w-[62ch]">{item.ifClosed}</p>
-            )}
-            {item.links && item.links.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                    {item.links.map((link) => (
-                        <Link
-                            key={link.href}
-                            href={link.href}
-                            onClick={(e) => {
-                                if (opensHere(e)) onNavigate?.();
-                            }}
-                            className="min-h-11 py-2.5 px-4 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-white text-sm font-medium flex items-center gap-2 transition-colors"
-                        >
-                            {link.label}
-                            <ArrowRight className="w-4 h-4" />
-                        </Link>
-                    ))}
-                </div>
+            {controls(item)}
+            {item.links && (
+                <ReleaseLinks
+                    links={item.links}
+                    onFollow={(e) => {
+                        if (opensHere(e)) onNavigate?.();
+                    }}
+                />
             )}
         </section>
     );

@@ -7,13 +7,13 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { useAuth } from "@/lib/auth-context";
-import { WhatsNewWindow, type Release } from "./WhatsNewWindow";
+import { WhatsNewWindow } from "./WhatsNewWindow";
+import { WipeAction } from "./WipeAction";
+import type { Release } from "./types";
 import { MoodMixChoice } from "./MoodMixChoice";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { refreshOpenCount } from "./useVersionChip";
 
@@ -72,10 +72,7 @@ export function WhatsNewGate() {
     const [, setDeferredNow] = useState(0);
     const deferred =
         deferKey !== null && typeof window !== "undefined" && window.sessionStorage.getItem(deferKey) === "1";
-    const [confirming, setConfirming] = useState(false);
-    const [wiping, setWiping] = useState(false);
     const [done, setDone] = useState<string[]>([]);
-    const [wipeError, setWipeError] = useState<string | null>(null);
     // Answers the current release already has, so the window shows them instead of asking again.
     const [answered, setAnswered] = useState<Record<string, boolean>>({});
     const reopening = useRef(false);
@@ -121,24 +118,6 @@ export function WhatsNewGate() {
     }, [deferKey]);
 
     if (queue.length === 0 || deferred) return null;
-    const wipe = queue.flatMap((r) => r.items).find((i) => i.kind === "action" && i.run === "wipeEnrichment");
-
-    const runWipe = async () => {
-        if (!wipe) return;
-        setConfirming(false);
-        setWiping(true);
-        setWipeError(null);
-        try {
-            await api.wipeAndRerunEnrichment();
-            setDone((d) => [...d, wipe.key]);
-            refreshOpenCount(queryClient);
-        } catch {
-            setWipeError("Couldn't start it. Try again, or use Settings, under Library Enrichment.");
-        } finally {
-            setWiping(false);
-        }
-    };
-
     // Done closes every pending release in the queue, not just the heading's:
     // a window that shows two releases must record both closings.
     const dismissAll = async () => {
@@ -167,44 +146,11 @@ export function WhatsNewGate() {
                         // to users who have that kind of saved mix.
                         <MoodMixChoice onNavigate={defer} />
                     ) : item.run === "wipeEnrichment" ? (
-                        <div className="flex flex-col gap-2">
-                            {done.includes(item.key) ? (
-                                <p className="text-sm text-success flex items-center gap-2" data-testid="wipe-started">
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                    Wiped. Your library is running through the new engine in the background.
-                                </p>
-                            ) : (
-                                <button
-                                    type="button"
-                                    onClick={() => setConfirming(true)}
-                                    disabled={wiping}
-                                    data-testid="wipe-run"
-                                    className="self-start min-h-11 py-2.5 px-4 rounded-lg bg-brand hover:bg-brand-hover text-black text-sm font-semibold flex items-center gap-2 transition-colors disabled:opacity-60"
-                                >
-                                    {wiping ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                                    {wiping ? "Starting..." : item.cta}
-                                </button>
-                            )}
-                            {wipeError && <p className="text-sm text-danger-light">{wipeError}</p>}
-                        </div>
+                        <WipeAction item={item} done={done.includes(item.key)} onDone={() => setDone((d) => [...d, item.key])} />
                     ) : null
                 }
             />
 
-            {confirming && wipe && wipe.kind === "action" && (
-                <div data-nested-confirm="true">
-                    <ConfirmDialog
-                        isOpen={true}
-                        onClose={() => setConfirming(false)}
-                        onConfirm={runWipe}
-                        title={wipe.confirmTitle ?? "Wipe and re-run enrichment?"}
-                        message={wipe.confirmMessage ?? ""}
-                        confirmText={wipe.confirmLabel ?? wipe.cta}
-                        cancelText="Not now"
-                        variant="warning"
-                    />
-                </div>
-            )}
         </>
     );
 }
