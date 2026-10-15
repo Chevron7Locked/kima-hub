@@ -11,8 +11,9 @@ import type { ReleaseItem } from "./types";
 type WipeItem = Extract<ReleaseItem, { kind: "action" }>;
 
 // The request in flight, shared by every copy of the control: one closed and opened again while it runs shows it
-// running instead of offering a second wipe.
-let inFlight: Promise<unknown> | null = null;
+// running instead of offering a second wipe, and learns how it ended. It never rejects: true when the wipe started.
+let inFlight: Promise<boolean> | null = null;
+const FAILED = "Couldn't start it. Try again, or use Settings, under Library Enrichment.";
 
 /**
  * The wipe-and-re-run item's control, wherever a release is read: it asks first, starts the run, then says it is
@@ -24,10 +25,14 @@ export function WipeAction({ item, done, onDone }: { item: WipeItem; done: boole
     const [starting, setStarting] = useState(() => inFlight !== null);
     const [error, setError] = useState<string | null>(null);
 
-    // Opened while an earlier copy's request runs: wait for it here too.
+    // Opened while an earlier copy's request runs: wait for it here too, and say so if it failed.
     useEffect(() => {
         let mounted = true;
-        inFlight?.finally(() => mounted && setStarting(false));
+        inFlight?.then((started) => {
+            if (!mounted) return;
+            setStarting(false);
+            if (!started) setError(FAILED);
+        });
         return () => {
             mounted = false;
         };
@@ -38,17 +43,19 @@ export function WipeAction({ item, done, onDone }: { item: WipeItem; done: boole
         setConfirming(false);
         setStarting(true);
         setError(null);
-        const request = api.wipeAndRerunEnrichment();
+        const request = api.wipeAndRerunEnrichment().then(
+            () => true,
+            () => false,
+        );
         inFlight = request;
-        try {
-            await request;
+        const started = await request;
+        inFlight = null;
+        setStarting(false);
+        if (started) {
             onDone();
             refreshOpenCount(queryClient);
-        } catch {
-            setError("Couldn't start it. Try again, or use Settings, under Library Enrichment.");
-        } finally {
-            inFlight = null;
-            setStarting(false);
+        } else {
+            setError(FAILED);
         }
     };
 

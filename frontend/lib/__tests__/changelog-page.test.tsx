@@ -151,4 +151,27 @@ describe("/changelog", () => {
         await act(async () => finish());
         expect(container.querySelector('[data-testid="wipe-started"]')).not.toBeNull();
     });
+
+    it("tells a reopened wipe control that the request failed, and offers it again", async () => {
+        const { api } = await import("@/lib/api");
+        const wipe = vi.mocked(api.wipeAndRerunEnrichment);
+        wipe.mockClear();
+        let fail = () => {};
+        wipe.mockImplementationOnce(() => new Promise((_, reject) => (fail = () => reject(new Error("down")))));
+        await render();
+        const item = () => Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Wipe and re-run enrichment"));
+        const click = async (el: Element | null | undefined) =>
+            act(async () => {
+                (el as HTMLElement).click();
+            });
+        await click(item());
+        await click(container.querySelector('[data-testid="wipe-run"]'));
+        await click(Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent?.trim() === "Wipe and re-run"));
+        await click(item());
+        await click(item());
+        await act(async () => fail());
+        expect(container.textContent).toContain("Couldn't start it.");
+        const run = container.querySelector<HTMLButtonElement>('[data-testid="wipe-run"]')!;
+        expect(run.disabled).toBe(false);
+    });
 });
