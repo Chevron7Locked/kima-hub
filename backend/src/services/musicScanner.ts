@@ -117,7 +117,7 @@ interface ScanProgress {
     errors: Array<{ file: string; error: string }>;
 }
 
-interface ScanResult {
+export interface ScanResult {
     tracksAdded: number;
     tracksUpdated: number;
     /** Tracks newly flagged missing this scan (file gone from disk). Never deletions. */

@@ -1,6 +1,6 @@
 import type { Job } from "bullmq";
 import { logger } from "../../utils/logger";
-import { MusicScannerService } from "../../services/musicScanner";
+import { MusicScannerService, type ScanResult } from "../../services/musicScanner";
 import { config } from "../../config";
 import { eventBus } from "../../services/eventBus";
 import { notificationService } from "../../services/notificationService";
@@ -16,19 +16,12 @@ export interface ScanJobData {
     spotifyImportJobId?: string; // Optional: Spotify Import job ID
 }
 
-export interface ScanJobResult {
-    tracksAdded: number;
-    tracksUpdated: number;
-    tracksMissing: number;
-    tracksRemoved: number;
-    tracksCorrupt: number;
-    errors: Array<{ file: string; error: string }>;
-    duration: number;
-}
 
 const SCAN_RESULT_KEY = "library-scan";
 
-function scanSummary(r: { tracksAdded: number; tracksUpdated: number; tracksMissing: number; tracksRemoved: number; tracksCorrupt: number }): string {
+type ScanCounts = Pick<ScanResult, "tracksAdded" | "tracksUpdated" | "tracksMissing" | "tracksRemoved" | "tracksCorrupt">;
+
+function scanSummary(r: ScanCounts): string {
     const parts = [
         r.tracksAdded > 0 && `${r.tracksAdded} added`,
         r.tracksUpdated > 0 && `${r.tracksUpdated} updated`,
@@ -41,7 +34,7 @@ function scanSummary(r: { tracksAdded: number; tracksUpdated: number; tracksMiss
 
 export async function processScan(
     job: Job<ScanJobData>
-): Promise<ScanJobResult> {
+): Promise<ScanResult> {
     const {
         userId,
         musicPath,
@@ -109,7 +102,7 @@ export async function processScan(
                 userId,
                 payload: {
                     jobId: String(job.id),
-                    result: { tracksAdded: result.tracksAdded, tracksUpdated: result.tracksUpdated, tracksMissing: result.tracksMissing, tracksRemoved: result.tracksRemoved, tracksCorrupt: result.tracksCorrupt },
+                    result: { tracksAdded: result.tracksAdded, tracksUpdated: result.tracksUpdated, tracksMissing: result.tracksMissing, tracksRemoved: result.tracksRemoved, tracksCorrupt: result.tracksCorrupt } satisfies ScanCounts,
                 },
             });
             if (manual) {
