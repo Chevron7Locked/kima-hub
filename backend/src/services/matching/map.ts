@@ -135,6 +135,20 @@ async function mapStatus(): Promise<{ laidOut: boolean; complete: boolean }> {
     return { laidOut, complete: laidOut && Number(counts?.unplaced ?? 0) === 0 };
 }
 
+/**
+ * Writes map rows only while the state they were computed from still stands. The state row is locked first, and a
+ * re-run deletes that row before the stored map, so the two queue on the one row: a re-run that came first leaves
+ * nothing to lock and the write is dropped; a write that came first finishes, and the re-run then clears it.
+ */
+async function writeWhileStateStands(write: (tx: Prisma.TransactionClient) => Promise<void>): Promise<boolean> {
+    return prisma.$transaction(async (tx) => {
+        const state = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM matching_state WHERE id = 'default' FOR UPDATE`;
+        if (state.length === 0) return false;
+        await write(tx);
+        return true;
+    });
+}
+
 async function update(inputsSettled: boolean): Promise<MapUpdate> {
     const state = await loadMatchingState();
     if (!state) return { laidOut: 0, placed: 0 };
@@ -163,7 +177,7 @@ async function update(inputsSettled: boolean): Promise<MapUpdate> {
     if (!meta) return { laidOut: 0, placed: 0 };
     if (rows.length === 1) {
         if (!inputsSettled || (rows[0].x !== null && meta.mapVersion === MAP_VERSION)) return { laidOut: 0, placed: 0 };
-        await prisma.$transaction(async (tx) => {
+        const written = await writeWhileStateStands(async (tx) => {
             await tx.$executeRaw`DELETE FROM matching_map`;
             await writeRows(tx, rows, new Float64Array(3), Float64Array.of(0.5), true);
             await tx.matchingState.update({
@@ -171,7 +185,7 @@ async function update(inputsSettled: boolean): Promise<MapUpdate> {
                 data: { mapVersion: MAP_VERSION, mapFrame: Prisma.DbNull, mapUpdatedAt: new Date() },
             });
         });
-        return { laidOut: 1, placed: 0 };
+        return { laidOut: written ? 1 : 0, placed: 0 };
     }
     const unplaced = rows.filter((r) => r.x === null);
     const laidOutRows = rows.filter((r) => r.laidOut === true);
@@ -187,7 +201,7 @@ async function update(inputsSettled: boolean): Promise<MapUpdate> {
             state.genreWeight,
         ]);
         const frame: StoredFrame = { colour: map.frame, maxScore: map.maxScore };
-        await prisma.$transaction(async (tx) => {
+        const written = await writeWhileStateStands(async (tx) => {
             await tx.$executeRaw`DELETE FROM matching_map`;
             await writeRows(tx, rows, map.positions, map.colour, true);
             await tx.matchingState.update({
@@ -199,7 +213,7 @@ async function update(inputsSettled: boolean): Promise<MapUpdate> {
                 },
             });
         });
-        return { laidOut: rows.length, placed: 0 };
+        return { laidOut: written ? rows.length : 0, placed: 0 };
     }
 
     if (unplaced.length === 0) return { laidOut: 0, placed: 0 };
@@ -215,12 +229,12 @@ async function update(inputsSettled: boolean): Promise<MapUpdate> {
         frame.colour,
         frame.maxScore,
     ]);
-    await prisma.$transaction(async (tx) => {
+    const written = await writeWhileStateStands(async (tx) => {
         await writeRows(tx, unplaced, placed.positions, placed.colour, false);
         await tx.matchingState.update({
             where: { id: "default" },
             data: { mapUpdatedAt: new Date() },
         });
     });
-    return { laidOut: 0, placed: unplaced.length };
+    return { laidOut: 0, placed: written ? unplaced.length : 0 };
 }

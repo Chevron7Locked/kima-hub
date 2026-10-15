@@ -120,10 +120,12 @@ async function resetVectors(tx: Tx): Promise<number> {
     return vectors;
 }
 
-function resetSimilarity(tx: Tx): Promise<unknown> {
-    // Deleting the state and every stored position is what makes the next
-    // similarity pass lay the map out again from scratch.
-    return tx.$executeRaw`DELETE FROM matching_map`;
+async function resetSimilarity(tx: Tx): Promise<void> {
+    // Deleting the state and every stored position is what makes the next similarity pass lay the map out again from
+    // scratch. The state goes first: a map write locks that row before touching the map (matching/map.ts), so a
+    // layout in flight either finishes before this clears it or finds no state and writes nothing.
+    await tx.$executeRaw`DELETE FROM matching_state`;
+    await tx.$executeRaw`DELETE FROM matching_map`;
 }
 
 export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> {
@@ -160,7 +162,6 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
                 await tx.$executeRaw`DELETE FROM "EnrichmentFailure" WHERE "entityType" = 'vibe'`;
             }
             await resetSimilarity(tx);
-            await tx.$executeRaw`DELETE FROM matching_state`;
             // A file that is gone cannot be re-run; its records wait for a scan to find it.
             if (trackWork) await closeStagesForMissingTracks(tx);
             return { artists, tracks, vectors };
