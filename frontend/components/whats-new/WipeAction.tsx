@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -10,6 +10,10 @@ import type { ReleaseItem } from "./types";
 
 type WipeItem = Extract<ReleaseItem, { kind: "action" }>;
 
+// The request in flight, shared by every copy of the control: one closed and opened again while it runs shows it
+// running instead of offering a second wipe.
+let inFlight: Promise<unknown> | null = null;
+
 /**
  * The wipe-and-re-run item's control, wherever a release is read: it asks first, starts the run, then says it is
  * running. The confirm sits in a nested-confirm wrapper, so Escape closes it before the window around it.
@@ -17,20 +21,33 @@ type WipeItem = Extract<ReleaseItem, { kind: "action" }>;
 export function WipeAction({ item, done, onDone }: { item: WipeItem; done: boolean; onDone: () => void }) {
     const queryClient = useQueryClient();
     const [confirming, setConfirming] = useState(false);
-    const [starting, setStarting] = useState(false);
+    const [starting, setStarting] = useState(() => inFlight !== null);
     const [error, setError] = useState<string | null>(null);
 
+    // Opened while an earlier copy's request runs: wait for it here too.
+    useEffect(() => {
+        let mounted = true;
+        inFlight?.finally(() => mounted && setStarting(false));
+        return () => {
+            mounted = false;
+        };
+    }, []);
+
     const run = async () => {
+        if (inFlight) return;
         setConfirming(false);
         setStarting(true);
         setError(null);
+        const request = api.wipeAndRerunEnrichment();
+        inFlight = request;
         try {
-            await api.wipeAndRerunEnrichment();
+            await request;
             onDone();
             refreshOpenCount(queryClient);
         } catch {
             setError("Couldn't start it. Try again, or use Settings, under Library Enrichment.");
         } finally {
+            inFlight = null;
             setStarting(false);
         }
     };

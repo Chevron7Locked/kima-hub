@@ -122,4 +122,33 @@ describe("/changelog", () => {
         expect(container.querySelector('[data-testid="wipe-run"]')).toBeNull();
         expect(button("Not now")).toBeUndefined();
     });
+
+    it("shows a wipe still starting after the item is closed and opened again, and never sends a second", async () => {
+        const { api } = await import("@/lib/api");
+        const wipe = vi.mocked(api.wipeAndRerunEnrichment);
+        wipe.mockClear();
+        let finish: (v: unknown) => void = () => {};
+        wipe.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+        await render();
+        const item = () => Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Wipe and re-run enrichment"));
+        const click = async (el: Element | null | undefined) =>
+            act(async () => {
+                (el as HTMLElement).click();
+            });
+        await click(item());
+        await click(container.querySelector('[data-testid="wipe-run"]'));
+        await click(Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent?.trim() === "Wipe and re-run"));
+        expect(wipe).toHaveBeenCalledTimes(1);
+
+        await click(item());
+        await click(item());
+        const run = container.querySelector<HTMLButtonElement>('[data-testid="wipe-run"]')!;
+        expect(run.disabled).toBe(true);
+        expect(run.textContent).toContain("Starting");
+        await click(run);
+        expect(wipe).toHaveBeenCalledTimes(1);
+
+        await act(async () => finish({}));
+        expect(container.querySelector('[data-testid="wipe-started"]')).not.toBeNull();
+    });
 });
