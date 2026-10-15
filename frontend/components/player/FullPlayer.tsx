@@ -45,8 +45,6 @@ export function FullPlayer() {
         currentIndex,
         isPlaying,
         isBuffering,
-        canSeek,
-        downloadProgress,
         audioError,
         duration,
         displayTime,
@@ -344,9 +342,7 @@ export function FullPlayer() {
                                 progress={progress}
                                 duration={duration}
                                 onSeek={seek}
-                                canSeek={canSeek}
                                 hasMedia={hasMedia}
-                                downloadProgress={downloadProgress}
                                 variant="default"
                                 className="flex-1"
                             />

@@ -44,8 +44,6 @@ export function MiniPlayer() {
         activeOperation,
         isPlaying,
         isBuffering,
-        canSeek,
-        downloadProgress,
         audioError,
         duration,
         progress,
@@ -371,9 +369,7 @@ export function MiniPlayer() {
                     progress={progress}
                     duration={duration}
                     onSeek={seek}
-                    canSeek={canSeek}
                     hasMedia={hasMedia}
-                    downloadProgress={downloadProgress}
                     variant="minimal"
                     className="absolute top-0 left-0 right-0"
                 />

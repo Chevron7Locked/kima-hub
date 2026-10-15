@@ -24,7 +24,7 @@ export function usePlayerControls() {
         currentIndex,
     } = useAudioState();
 
-    const { isPlaying, isBuffering, canSeek, downloadProgress, audioError } = useAudioPlayback();
+    const { isPlaying, isBuffering, audioError } = useAudioPlayback();
 
     const { duration, displayTime, progress } = usePlaybackProgress();
 
@@ -58,8 +58,6 @@ export function usePlayerControls() {
         currentIndex,
         isPlaying,
         isBuffering,
-        canSeek,
-        downloadProgress,
         audioError,
         duration,
         displayTime,

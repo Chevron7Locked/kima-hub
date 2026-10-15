@@ -10,12 +10,8 @@ interface SeekSliderProps {
     duration: number;
     /** Callback when seeking to a new position */
     onSeek: (time: number) => void;
-    /** Whether seeking is enabled */
-    canSeek: boolean;
     /** Whether the slider has media loaded */
     hasMedia: boolean;
-    /** Download progress (0-100) if downloading */
-    downloadProgress?: number | null;
     /** Custom class name for the container */
     className?: string;
     /** Whether to show the drag handle on hover/drag */
@@ -28,9 +24,7 @@ export function SeekSlider({
     progress,
     duration,
     onSeek,
-    canSeek,
     hasMedia,
-    downloadProgress,
     className,
     showHandle = true,
     variant = "default",
@@ -50,8 +44,6 @@ export function SeekSlider({
 
     const handleTouchStart = useCallback(
         (e: React.TouchEvent<HTMLDivElement>) => {
-            if (!canSeek) return;
-
             // Store the touch identifier to track this specific touch
             const touch = e.touches[0];
             touchIdentifierRef.current = touch.identifier;
@@ -64,12 +56,12 @@ export function SeekSlider({
             e.preventDefault();
             e.stopPropagation();
         },
-        [canSeek, calculateProgress]
+        [calculateProgress]
     );
 
     const handleTouchMove = useCallback(
         (e: React.TouchEvent<HTMLDivElement>) => {
-            if (!isDragging || !canSeek) return;
+            if (!isDragging) return;
 
             const touch = Array.from(e.touches).find(
                 (t) => t.identifier === touchIdentifierRef.current
@@ -84,12 +76,12 @@ export function SeekSlider({
             e.preventDefault();
             e.stopPropagation();
         },
-        [isDragging, canSeek, calculateProgress]
+        [isDragging, calculateProgress]
     );
 
     const handleTouchEnd = useCallback(
         (e: React.TouchEvent<HTMLDivElement>) => {
-            if (!isDragging || !canSeek) return;
+            if (!isDragging) return;
 
             const touchEnded = !Array.from(e.touches).some(
                 (t) => t.identifier === touchIdentifierRef.current
@@ -109,32 +101,30 @@ export function SeekSlider({
             // Stop propagation to prevent parent swipe handlers
             e.stopPropagation();
         },
-        [isDragging, canSeek, previewProgress, duration, onSeek]
+        [isDragging, previewProgress, duration, onSeek]
     );
 
     const handleMouseDown = useCallback(
         (e: React.MouseEvent<HTMLDivElement>) => {
-            if (!canSeek) return;
-
             setIsDragging(true);
             const newProgress = calculateProgress(e.clientX);
             setPreviewProgress(newProgress);
         },
-        [canSeek, calculateProgress]
+        [calculateProgress]
     );
 
     const handleMouseMove = useCallback(
         (e: MouseEvent) => {
-            if (!isDragging || !canSeek) return;
+            if (!isDragging) return;
 
             const newProgress = calculateProgress(e.clientX);
             setPreviewProgress(newProgress);
         },
-        [isDragging, canSeek, calculateProgress]
+        [isDragging, calculateProgress]
     );
 
     const handleMouseUp = useCallback(() => {
-        if (!isDragging || !canSeek) return;
+        if (!isDragging) return;
 
         if (previewProgress !== null) {
             const newTime = (previewProgress / 100) * duration;
@@ -143,19 +133,17 @@ export function SeekSlider({
 
         setIsDragging(false);
         setPreviewProgress(null);
-    }, [isDragging, canSeek, previewProgress, duration, onSeek]);
+    }, [isDragging, previewProgress, duration, onSeek]);
 
     const handleClick = useCallback(
         (e: React.MouseEvent<HTMLDivElement>) => {
             // Don't handle click if we just finished dragging
             if (isDragging) return;
-            if (!canSeek) return;
-
             const newProgress = calculateProgress(e.clientX);
             const newTime = (newProgress / 100) * duration;
             onSeek(newTime);
         },
-        [isDragging, canSeek, calculateProgress, duration, onSeek]
+        [isDragging, calculateProgress, duration, onSeek]
     );
 
     useEffect(() => {
@@ -172,15 +160,10 @@ export function SeekSlider({
 
     const displayProgress =
         previewProgress !== null ? previewProgress : progress;
-    const isActive = canSeek && hasMedia;
+    const isActive = hasMedia;
 
     const getTooltipText = () => {
         if (!hasMedia) return undefined;
-        if (!canSeek) {
-            return downloadProgress !== null
-                ? `downloading ${downloadProgress}%... seek will be available when cached`
-                : "downloading... seeking will be available when cached";
-        }
         return isDragging ? "release to seek" : "click or drag to seek";
     };
 

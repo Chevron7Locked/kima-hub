@@ -3,7 +3,6 @@ Found in the wild on real files: +2868.2 LUFS and a 47.06 LU range from corrupt
 decodes. The gate lets every real reading through — including genuinely quiet
 audio — and nulls only what the meter or a decode got wrong; a warning names the
 file either way."""
-import math
 
 import numpy as np
 

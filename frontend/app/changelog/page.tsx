@@ -54,7 +54,7 @@ const niceDate = (d: string) =>
 
 export default function ChangelogPage() {
     const queryClient = useQueryClient();
-    const [data, setData] = useState<{ releases: ChangelogRelease[]; openCount: number } | null>(null);
+    const [data, setData] = useState<{ releases: ChangelogRelease[] } | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [openItems, setOpenItems] = useState<Set<string>>(new Set());
     const [confirm, setConfirm] = useState<{ version: string; item: ChangelogItem } | null>(null);
@@ -65,7 +65,7 @@ export default function ChangelogPage() {
     useEffect(() => {
         let cancelled = false;
         api
-            .get<{ releases: ChangelogRelease[]; openCount: number }>("/whats-new/changelog")
+            .get<{ releases: ChangelogRelease[] }>("/whats-new/changelog")
             .then((r) => !cancelled && setData(r))
             .catch(() => !cancelled && setError("Couldn't load the changelog."));
         return () => {

@@ -21,14 +21,10 @@ interface AudioPlaybackContextType {
     currentTime: number;
     duration: number;
     isBuffering: boolean;
-    canSeek: boolean;
-    downloadProgress: number | null;
     audioError: string | null;
     setCurrentTime: (time: number) => void;
     setCurrentTimeFromEngine: (time: number) => void;
     setDuration: (duration: number) => void;
-    setCanSeek: (canSeek: boolean) => void;
-    setDownloadProgress: (progress: number | null) => void;
 }
 
 const AudioPlaybackContext = createContext<AudioPlaybackContextType | undefined>(undefined);
@@ -38,8 +34,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
     const [isBuffering, setIsBuffering] = useState(false);
-    const [canSeek, setCanSeek] = useState(true);
-    const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
     const [audioError, setAudioError] = useState<string | null>(null);
     const [isHydrated] = useState(() => typeof window !== "undefined");
 
@@ -195,22 +189,16 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             currentTime,
             duration,
             isBuffering,
-            canSeek,
-            downloadProgress,
             audioError,
             setCurrentTime: setCurrentTimeWithSeekMark,
             setCurrentTimeFromEngine,
             setDuration,
-            setCanSeek,
-            setDownloadProgress,
         }),
         [
             isPlaying,
             currentTime,
             duration,
             isBuffering,
-            canSeek,
-            downloadProgress,
             audioError,
             setCurrentTimeWithSeekMark,
             setCurrentTimeFromEngine,

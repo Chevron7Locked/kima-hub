@@ -38,7 +38,6 @@ export interface DiscoveryPodcast {
     description: string;
     coverUrl: string | null;
     genres: string[];
-    categoryIds: number[];
     chartRank: number | null;
 }
 
@@ -60,7 +59,6 @@ export interface Podcast {
     author: string;
     description?: string;
     coverUrl: string;
-    autoDownloadEpisodes: boolean;
     genres?: string[];
     categories?: CategoryRef[];
     itunesId?: string | null;
@@ -88,5 +86,5 @@ export interface PodcastPreview {
         description?: string;
     }>;
     /** The show's first episode, playable before following. */
-    snippet?: { title: string; publishedAt: string; duration: number; description: string } | null;
+    snippet?: { title: string; duration: number } | null;
 }

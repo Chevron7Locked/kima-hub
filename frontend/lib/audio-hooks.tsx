@@ -35,8 +35,6 @@ export function useAudio() {
         currentTime: playback.currentTime,
         duration: playback.duration,
         isBuffering: playback.isBuffering,
-        canSeek: playback.canSeek,
-        downloadProgress: playback.downloadProgress,
         audioError: playback.audioError,
 
         // Controls

@@ -77,8 +77,8 @@ export function WhatsNewWindow({
     /** Every release the user has not closed, oldest first. */
     releases: Release[];
     onClose: () => void;
-    /** Records the closing server-side; by default every release in the window is closed. */
-    onDismiss?: () => Promise<void>;
+    /** Records the closing server-side. */
+    onDismiss: () => Promise<void>;
     /** An `action` item supplies its own controls; the window only frames them. */
     renderAction?: (item: Extract<ReleaseItem, { kind: "action" }>) => React.ReactNode;
     /** A link to a page in the app was followed. */
@@ -115,15 +115,14 @@ export function WhatsNewWindow({
         setClosing(true);
         setCloseError(null);
         try {
-            if (onDismiss) await onDismiss();
-            else for (const r of releases) await api.post(`/whats-new/${r.version}/dismiss`, {});
+            await onDismiss();
         } catch {
             setClosing(false);
             setCloseError("Couldn't save. Try again.");
             return;
         }
         onClose();
-    }, [releases, onDismiss, onClose, closing]);
+    }, [onDismiss, onClose, closing]);
 
     const openItem = (key: string) => {
         lastRow.current = { kind: "item", key };

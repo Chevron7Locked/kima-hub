@@ -43,8 +43,6 @@ export function OverlayPlayer() {
         activeOperation,
         isPlaying,
         isBuffering,
-        canSeek,
-        downloadProgress,
         audioError,
         duration,
         displayTime,
@@ -247,9 +245,7 @@ export function OverlayPlayer() {
                             progress={progress}
                             duration={duration}
                             onSeek={seek}
-                            canSeek={canSeek}
                             hasMedia={hasMedia}
-                            downloadProgress={downloadProgress}
                             variant="overlay"
                             showHandle={false}
                             className="mb-2"

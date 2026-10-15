@@ -1398,25 +1398,6 @@ class ApiClient {
         return this.tokenizedUrl(`/api/podcasts/${podcastId}/episodes/${episodeId}/stream`);
     }
 
-    /**
-     * Check if a podcast episode is cached locally
-     * Returns { cached: boolean, downloading: boolean, downloadProgress: number | null }
-     */
-    async getPodcastEpisodeCacheStatus(
-        podcastId: string,
-        episodeId: string
-    ): Promise<{
-        cached: boolean;
-        downloading: boolean;
-        downloadProgress: number | null;
-    }> {
-        return this.request<{
-            cached: boolean;
-            downloading: boolean;
-            downloadProgress: number | null;
-        }>(`/podcasts/${podcastId}/episodes/${episodeId}/cache-status`);
-    }
-
     async updatePodcastEpisodeProgress(
         podcastId: string,
         episodeId: string,
@@ -1429,15 +1410,6 @@ class ApiClient {
             {
                 method: "POST",
                 body: JSON.stringify({ currentTime, duration, isFinished }),
-            }
-        );
-    }
-
-    async deletePodcastEpisodeProgress(podcastId: string, episodeId: string) {
-        return this.request<ApiData>(
-            `/podcasts/${podcastId}/episodes/${episodeId}/progress`,
-            {
-                method: "DELETE",
             }
         );
     }
