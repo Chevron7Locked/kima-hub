@@ -8,7 +8,8 @@ interface ArtistActionBarProps {
     source: ArtistSource | null;
     onPlayAll: () => void;
     onShuffle: () => void;
-    onDownloadAll: () => void;
+    /** Absent for someone who may not start downloads: no download button then. */
+    onDownloadAll?: () => void;
     onStartRadio: () => void;
     isPendingDownload: boolean;
     isPlaying: boolean;
@@ -31,7 +32,7 @@ export function ArtistActionBar({
     const availableAlbums = albums.filter(
         (album) => album.availability !== "unavailable"
     );
-    const showDownloadAll = source === "discovery" || availableAlbums.length > 0;
+    const showDownloadAll = Boolean(onDownloadAll) && (source === "discovery" || availableAlbums.length > 0);
     const showPause = isPlaying && isPlayingThisArtist;
     const showRadio = source === "library";
 

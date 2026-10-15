@@ -1,5 +1,6 @@
 "use client";
 
+import { usePublicConfig } from "@/hooks/useQueries";
 import { useState, useEffect, useRef, Suspense, type CSSProperties } from "react";
 import { formatTime, plural } from "@/lib/format";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -130,6 +131,7 @@ function ImportPlaylistPageContent() {
     const [isLoading, setIsLoading] = useState(false);
     const [previewJobId, setPreviewJobId] = useState<string | null>(null);
     const [preview, setPreview] = useState<ImportPreview | null>(null);
+    const { canAcquire } = usePublicConfig();
     const [selectedAlbums, setSelectedAlbums] = useState<Set<string>>(
         new Set()
     );
@@ -335,13 +337,14 @@ function ImportPlaylistPageContent() {
                     spotifyPlaylistId: preview.playlist.id,
                     url,
                     playlistName: playlistName || preview.playlist.name,
-                    albumMbidsToDownload: Array.from(selectedMbids),
+                    // Someone who may not start downloads imports what matches the library and downloads nothing.
+                    albumMbidsToDownload: canAcquire ? Array.from(selectedMbids) : [],
                     previewJobId: previewJobId ?? undefined,
                 }
             );
 
             setImportJob(pendingImportJob(response.jobId, {
-                albumsTotal: selectedAlbums.size,
+                albumsTotal: canAcquire ? selectedAlbums.size : 0,
                 tracksMatched: preview.summary.inLibrary,
                 tracksTotal: preview.summary.total,
                 tracksDownloadable: preview.summary.downloadable,
@@ -586,7 +589,7 @@ function ImportPlaylistPageContent() {
                                     {preview.summary.downloadable}
                                 </div>
                                 <div className="text-xs text-[var(--text-muted)]">
-                                    To Download
+                                    {canAcquire ? "To Download" : "Not in Library"}
                                 </div>
                             </div>
                             <div className="animate-rise text-center py-3 bg-success/10 rounded-lg" style={{ "--i": 3 } as CSSProperties}>
@@ -668,7 +671,13 @@ function ImportPlaylistPageContent() {
                             </div>
                         )}
 
-                        {preview.albumsToDownload.filter((a) => a.albumMbid)
+                        {!canAcquire && preview.summary.downloadable > 0 && (
+                            <p className="text-sm text-[var(--text-muted)]">
+                                Songs not in your library are left out: downloads are operator-only here. An admin can allow members in settings.
+                            </p>
+                        )}
+
+                        {canAcquire && preview.albumsToDownload.filter((a) => a.albumMbid)
                             .length > 0 && (
                             <div className="bg-white/5 rounded-lg overflow-hidden">
                                 <button

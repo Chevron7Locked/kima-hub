@@ -9,7 +9,7 @@ import { useAudioState, useAudioPlayback, useAudioControls, Track as AudioTrack 
 import { cn } from "@/lib/cn";
 import { shuffleArray } from "@/lib/shuffle";
 import { formatTime, plural } from "@/lib/format";
-import { queryKeys, usePlaylistQuery, useRemoveFromPlaylistMutation, useDeletePlaylistMutation, useUpdatePlaylistMutation, useSetPlaylistReverseMutation, useMoveTrackInPlaylistMutation } from "@/hooks/useQueries";
+import { queryKeys, usePlaylistQuery, useRemoveFromPlaylistMutation, useDeletePlaylistMutation, useUpdatePlaylistMutation, useSetPlaylistReverseMutation, useMoveTrackInPlaylistMutation, usePublicConfig } from "@/hooks/useQueries";
 import { usePreview } from "@/hooks/usePreview";
 import { useQueryClient } from "@tanstack/react-query";
 import { notify } from "@/lib/notify";
@@ -278,6 +278,7 @@ export default function PlaylistDetailPage() {
     };
 
     const reverseOrder = Boolean(playlist?.reverseOrder);
+    const { canAcquire } = usePublicConfig();
 
     const handleToggleReverse = async () => {
         if (!playlist?.isOwner) return;
@@ -593,7 +594,7 @@ export default function PlaylistDetailPage() {
                             )}>
                                 {isMissing ? "Missing from disk" : "Failed"}
                             </span>
-                            {!isMissing && (
+                            {!isMissing && canAcquire && (
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation();
@@ -1188,6 +1189,7 @@ export default function PlaylistDetailPage() {
                                     download
                                 </span>
                             </div>
+                            {canAcquire && (
                             <button
                                 onClick={handleRetryAllPending}
                                 disabled={retryingAll}
@@ -1196,6 +1198,7 @@ export default function PlaylistDetailPage() {
                                 <RefreshCw className={cn("w-3 h-3", retryingAll && "animate-spin")} />
                                 Retry All
                             </button>
+                            )}
                         </div>
                     )}
 

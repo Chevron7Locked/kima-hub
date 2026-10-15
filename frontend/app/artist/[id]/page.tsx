@@ -1,5 +1,6 @@
 "use client";
 
+import { usePublicConfig } from "@/hooks/useQueries";
 import {
     useAudioState,
     useAudioPlayback,
@@ -46,6 +47,7 @@ export default function ArtistPage() {
 
     const { playAll, shufflePlay } = useArtistActions();
     const { downloadArtist, downloadAlbum } = useDownloadActions();
+    const { canAcquire } = usePublicConfig();
     const preview = usePreview();
 
     const ownedAlbums = albums.filter((a) => a.owned);
@@ -172,7 +174,7 @@ export default function ArtistPage() {
                     source={source}
                     onPlayAll={() => playAll(artist, albums)}
                     onShuffle={() => shufflePlay(artist, albums)}
-                    onDownloadAll={() => downloadArtist(artist)}
+                    onDownloadAll={canAcquire ? () => downloadArtist(artist) : undefined}
                     onStartRadio={handleStartRadio}
                     isPendingDownload={isPendingByMbid(artist.mbid || "")}
                     isPlaying={isPlaying}
@@ -225,7 +227,7 @@ export default function ArtistPage() {
                     <AvailableAlbums
                         albums={availableAlbums}
                         source={source}
-                        onDownloadAlbum={handleDownloadAlbum}
+                        onDownloadAlbum={canAcquire ? handleDownloadAlbum : undefined}
                         isPendingDownload={isPendingByMbid}
                     />
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { usePublicConfig } from "@/hooks/useQueries";
 import { useState, useEffect, type ReactNode } from "react";
 import { Calendar, Clock, Download, Disc, ArrowRight, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -39,6 +40,7 @@ export default function ReleasesPage() {
     const [data, setData] = useState<ReleaseRadarData | null>(null);
     const [loading, setLoading] = useState(true);
     const [downloadingId, setDownloadingId] = useState<string | number | null>(null);
+    const { canAcquire } = usePublicConfig();
     const [error, setError] = useState<string | null>(null);
 
     const fetchReleases = async () => {
@@ -127,7 +129,7 @@ export default function ReleasesPage() {
                         title="Coming Soon"
                         releases={data.upcoming}
                         formatDate={formatDate}
-                        onDownload={handleDownload}
+                        onDownload={canAcquire ? handleDownload : undefined}
                         downloadingId={downloadingId}
                     />
                 )}
@@ -138,7 +140,7 @@ export default function ReleasesPage() {
                         title="Just Dropped"
                         releases={data.recent}
                         formatDate={formatDate}
-                        onDownload={handleDownload}
+                        onDownload={canAcquire ? handleDownload : undefined}
                         downloadingId={downloadingId}
                     />
                 )}
@@ -172,7 +174,7 @@ function ReleaseSection({
     title: string;
     releases: ReleaseItem[];
     formatDate: (date: string) => string;
-    onDownload: (albumMbid: string, releaseId: string | number) => void;
+    onDownload?: (albumMbid: string, releaseId: string | number) => void;
     downloadingId: string | number | null;
 }) {
     return (
@@ -206,7 +208,7 @@ function ReleaseCard({
 }: {
     release: ReleaseItem;
     formatDate: (date: string) => string;
-    onDownload: (albumMbid: string, releaseId: string | number) => void;
+    onDownload?: (albumMbid: string, releaseId: string | number) => void;
     isDownloading: boolean;
 }) {
     const isUpcoming = release.status === "upcoming";
@@ -231,10 +233,10 @@ function ReleaseCard({
             }
             corner={hasIt && <CheckCircle2 className="w-5 h-5 text-success" aria-label="In library" />}
             action={
-                release.canDownload && !hasIt
+                onDownload && release.canDownload && !hasIt
                     ? {
                           icon: Download,
-                          label: "Download",
+                          label: "download",
                           onClick: () => onDownload(release.albumMbid, release.id),
                           busy: isDownloading,
                       }

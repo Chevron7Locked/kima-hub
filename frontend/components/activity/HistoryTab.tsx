@@ -9,10 +9,12 @@ import { GradientSpinner } from "../ui/GradientSpinner";
 import { cn } from "@/lib/cn";
 import { useDownloadHistory, type DownloadHistoryItem } from "@/hooks/useNotifications";
 import { DownloadRow, RowAction } from "./DownloadRow";
+import { usePublicConfig } from "@/hooks/useQueries";
 
 export function HistoryTab() {
     const queryClient = useQueryClient();
     const { history, isLoading: loading } = useDownloadHistory();
+    const { canAcquire } = usePublicConfig();
     const [retrying, setRetrying] = useState<Set<string>>(new Set());
     const [retryFailed, setRetryFailed] = useState<Record<string, string>>({});
 
@@ -101,13 +103,15 @@ export function HistoryTab() {
                                 notice={retryFailed[item.id]}
                                 actions={
                                     <>
-                                        <RowAction
-                                            label={`Retry ${item.subject}`}
-                                            onClick={() => handleRetry(item.id)}
-                                            disabled={retrying.has(item.id)}
-                                        >
-                                            <RotateCcw className={cn("size-4", retrying.has(item.id) && "animate-spin")} />
-                                        </RowAction>
+                                        {canAcquire && (
+                                            <RowAction
+                                                label={`Retry ${item.subject}`}
+                                                onClick={() => handleRetry(item.id)}
+                                                disabled={retrying.has(item.id)}
+                                            >
+                                                <RotateCcw className={cn("size-4", retrying.has(item.id) && "animate-spin")} />
+                                            </RowAction>
+                                        )}
                                         <RowAction label={`Remove ${item.subject} from history`} onClick={() => handleClear(item.id)} danger>
                                             <Trash2 className="size-4" />
                                         </RowAction>

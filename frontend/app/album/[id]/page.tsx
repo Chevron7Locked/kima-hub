@@ -5,7 +5,7 @@ import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-c
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { useImageColor } from "@/hooks/useImageColor";
 import { api } from "@/lib/api";
-import { useAddToPlaylistMutation } from "@/hooks/useQueries";
+import { useAddToPlaylistMutation, usePublicConfig } from "@/hooks/useQueries";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 import { useDownloadContext } from "@/lib/download-context";
 
@@ -29,6 +29,7 @@ interface AlbumPageProps {
 export default function AlbumPage({ params }: AlbumPageProps) {
     const { id } = use(params);
     const addToPlaylist = useAddToPlaylistMutation();
+    const { canAcquire } = usePublicConfig();
     // Split hooks avoid re-renders from currentTime updates.
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();
@@ -191,7 +192,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                     source={source || "discovery"}
                     onPlayAll={() => playAlbum(album, 0)}
                     onShuffle={() => shufflePlay(album)}
-                    onDownloadAlbum={() => downloadAlbum(album)}
+                    onDownloadAlbum={canAcquire ? () => downloadAlbum(album) : undefined}
                     onAddToPlaylist={handleAddAlbumToPlaylist}
                     isPendingDownload={isPendingByMbid(
                         album?.mbid || album?.rgMbid || ""

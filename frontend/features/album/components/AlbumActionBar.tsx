@@ -8,7 +8,8 @@ interface AlbumActionBarProps {
     source: AlbumSource;
     onPlayAll: () => void;
     onShuffle: () => void;
-    onDownloadAlbum: () => void;
+    /** Absent for someone who may not start downloads: no download button then. */
+    onDownloadAlbum?: () => void;
     onAddToPlaylist: () => void;
     isPendingDownload: boolean;
     isPlaying: boolean;
@@ -29,7 +30,7 @@ export function AlbumActionBar({
     onPause,
 }: AlbumActionBarProps) {
     const isOwned = album.owned !== undefined ? album.owned : source === "library";
-    const showDownload = !isOwned && (album.mbid || album.rgMbid);
+    const showDownload = !isOwned && (album.mbid || album.rgMbid) && onDownloadAlbum;
     const showPause = isPlaying && isPlayingThisAlbum;
 
     const handlePlayPauseClick = () => {

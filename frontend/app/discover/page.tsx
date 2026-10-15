@@ -10,6 +10,7 @@ import { useAudioState, useAudioPlayback } from "@/lib/audio-context";
 import { useDiscoverData } from "@/features/discover/hooks/useDiscoverData";
 import { useDiscoverActions } from "@/features/discover/hooks/useDiscoverActions";
 import { usePreview } from "@/hooks/usePreview";
+import { usePublicConfig } from "@/hooks/useQueries";
 import { DiscoverHero } from "@/features/discover/components/DiscoverHero";
 import { DiscoverActionBar } from "@/features/discover/components/DiscoverActionBar";
 import { TrackList } from "@/features/discover/components/TrackList";
@@ -29,6 +30,7 @@ export default function DiscoverWeeklyPage() {
     const { isPlaying } = useAudioPlayback();
     const { setSettingsContent, settingsOwner } = useActivityPanelSettings();
     const queryClient = useQueryClient();
+    const { canAcquire } = usePublicConfig();
 
     // Custom hooks - single source of truth for batch status from useDiscoverData
     const { playlist, config, setConfig, loading, loadError, reloadData, batchStatus, refreshBatchStatus, setPendingGeneration, markGenerationStart, updateTrackLiked, isGenerating } = useDiscoverData();
@@ -209,7 +211,7 @@ export default function DiscoverWeeklyPage() {
                                         onTogglePreview={(albumId, artistName, title) =>
                                             preview.toggle(albumId, api.getTrackPreviewStreamUrl(artistName, title))
                                         }
-                                        onRetryAll={handleRetryUnavailable}
+                                        onRetryAll={canAcquire ? handleRetryUnavailable : undefined}
                                         isRetrying={retryingUnavailable}
                                     />
                                 </section>
@@ -271,29 +273,35 @@ export default function DiscoverWeeklyPage() {
                                         </div>
                                     </div>
 
-                                    <button
-                                        onClick={handleGenerate}
-                                        disabled={isGenerating}
-                                        aria-label={isGenerating ? "Playlist generation in progress" : "Build this week's playlist"}
-                                        className={cn(
-                                            "w-full py-4 px-6 border-2 rounded-lg font-bold text-sm transition-all duration-300 min-h-[52px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2",
-                                            isGenerating
-                                                ? "border-white/20 bg-white/5 text-[var(--text-muted)] cursor-not-allowed"
-                                                : "border-[var(--color-brand)] bg-[var(--color-brand)] text-black hover:bg-[var(--color-brand-hover)] hover:border-[var(--color-brand-hover)] hover:scale-[1.02]"
-                                        )}
-                                    >
-                                        {isGenerating ? (
-                                            <span className="flex items-center justify-center gap-3">
-                                                <GradientSpinner size="sm" />
-                                                {getProgressLabel()}
-                                            </span>
-                                        ) : (
-                                            <span className="flex items-center justify-center gap-3">
-                                                <RefreshCw className="w-4 h-4" />
-                                                Build This Week&apos;s Playlist
-                                            </span>
-                                        )}
-                                    </button>
+                                    {canAcquire ? (
+                                        <button
+                                            onClick={handleGenerate}
+                                            disabled={isGenerating}
+                                            aria-label={isGenerating ? "Playlist generation in progress" : "Build this week's playlist"}
+                                            className={cn(
+                                                "w-full py-4 px-6 border-2 rounded-lg font-bold text-sm transition-all duration-300 min-h-[52px] focus-visible:outline-2 focus-visible:outline-[var(--color-brand)] focus-visible:outline-offset-2",
+                                                isGenerating
+                                                    ? "border-white/20 bg-white/5 text-[var(--text-muted)] cursor-not-allowed"
+                                                    : "border-[var(--color-brand)] bg-[var(--color-brand)] text-black hover:bg-[var(--color-brand-hover)] hover:border-[var(--color-brand-hover)] hover:scale-[1.02]"
+                                            )}
+                                        >
+                                            {isGenerating ? (
+                                                <span className="flex items-center justify-center gap-3">
+                                                    <GradientSpinner size="sm" />
+                                                    {getProgressLabel()}
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center justify-center gap-3">
+                                                    <RefreshCw className="w-4 h-4" />
+                                                    Build This Week&apos;s Playlist
+                                                </span>
+                                            )}
+                                        </button>
+                                    ) : (
+                                        <p className="text-sm text-[var(--text-muted)]">
+                                            Building this playlist downloads albums, and downloads are operator-only here. An admin can allow members in settings.
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         )}

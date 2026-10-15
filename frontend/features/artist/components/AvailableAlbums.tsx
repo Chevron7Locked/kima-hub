@@ -11,7 +11,8 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 interface AvailableAlbumsProps {
     albums: Album[];
     source: ArtistSource | null;
-    onDownloadAlbum: (album: Album) => void;
+    /** Absent for someone who may not start downloads: the cards offer no download then. */
+    onDownloadAlbum?: (album: Album) => void;
     isPendingDownload: (mbid: string) => boolean;
 }
 
@@ -25,7 +26,7 @@ function LazyAlbumCard({
 }: {
     album: Album;
     source: ArtistSource | null;
-    onDownloadAlbum: (album: Album) => void;
+    onDownloadAlbum?: (album: Album) => void;
     isPendingDownload: (mbid: string) => boolean;
     index: number;
 }) {
@@ -83,12 +84,14 @@ function LazyAlbumCard({
             fallbackIcon={Disc3}
             type="album"
             index={index}
-            action={{
-                icon: Download,
-                label: "Download",
-                onClick: () => onDownloadAlbum(album),
-                busy: isPendingDownload(albumMbid),
-            }}
+            action={
+                onDownloadAlbum && {
+                    icon: Download,
+                    label: "download",
+                    onClick: () => onDownloadAlbum(album),
+                    busy: isPendingDownload(albumMbid),
+                }
+            }
         />
     );
 }
