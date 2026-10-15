@@ -37,6 +37,11 @@ jest.mock("../audioCompletionSubscriber", () => ({
     resumeVibeQueuing: jest.fn(),
 }));
 jest.mock("../../services/enrichmentState", () => ({ enrichmentStateService: {} }));
+// The AcoustID batch asked before dispatch is not what this tests, and must never reach the network.
+jest.mock("../../services/acoustidIdentification", () => ({
+    ...jest.requireActual("../../services/acoustidIdentification"),
+    prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
+}));
 jest.mock("../../services/enrichmentFailureService", () => ({ enrichmentFailureService: {} }));
 jest.mock("ioredis", () => jest.fn().mockImplementation(() => ({
     on: jest.fn(), publish: jest.fn(), subscribe: jest.fn(), quit: jest.fn(),

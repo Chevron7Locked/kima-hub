@@ -118,6 +118,7 @@ jest.mock("../../services/musicbrainz", () => ({
 const mockIdentify = jest.fn();
 const mockReadTags = jest.fn();
 jest.mock("../../services/acoustidIdentification", () => ({
+    prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
     identifyTrackByAcoustid: (...a: unknown[]) => mockIdentify(...a),
     persistAcoustidFingerprint: jest.fn().mockResolvedValue(undefined),
     readIdentityTags: (...a: unknown[]) => mockReadTags(...a),

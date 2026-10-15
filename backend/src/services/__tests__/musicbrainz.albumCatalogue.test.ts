@@ -71,6 +71,17 @@ beforeEach(() => {
 });
 
 describe("getAlbumCatalogue on real MusicBrainz responses", () => {
+    it("two songs of one album asked at once share one fetch of its tracklist", async () => {
+        const [first, second] = await Promise.all([
+            musicBrainzService.getAlbumCatalogue(RG_MBID),
+            musicBrainzService.getAlbumCatalogue(RG_MBID),
+        ]);
+
+        expect(first).toEqual(second);
+        // One release-group request and one release request, not two of each.
+        expect(mockGet).toHaveBeenCalledTimes(2);
+    });
+
     it("extracts the earliest release, its year, label, genres, and the full tracklist", async () => {
         const out = await musicBrainzService.getAlbumCatalogue(RG_MBID);
 

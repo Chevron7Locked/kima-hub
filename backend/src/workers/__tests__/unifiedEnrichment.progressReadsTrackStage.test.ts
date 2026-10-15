@@ -107,6 +107,7 @@ jest.mock("../../services/musicbrainz", () => ({
 }));
 
 jest.mock("../../services/acoustidIdentification", () => ({
+    prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
     identifyTrackByAcoustid: jest.fn().mockResolvedValue(null),
     persistAcoustidFingerprint: jest.fn().mockResolvedValue(undefined),
 }));

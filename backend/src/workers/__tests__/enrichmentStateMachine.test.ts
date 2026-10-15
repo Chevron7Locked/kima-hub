@@ -128,6 +128,12 @@ const mockPrismaTrackUpdateMany = jest.fn().mockResolvedValue({ count: 0 });
 const mockPrismaTrackCount = jest.fn().mockResolvedValue(0);
 const mockQueryRaw = jest.fn();
 
+// The AcoustID batch asked before dispatch is not what this tests, and must never reach the network.
+jest.mock("../../services/acoustidIdentification", () => ({
+    ...jest.requireActual("../../services/acoustidIdentification"),
+    prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
+}));
+
 jest.mock("../../utils/db", () => ({
     prisma: {
         artist: {

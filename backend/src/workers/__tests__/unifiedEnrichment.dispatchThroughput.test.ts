@@ -107,6 +107,7 @@ jest.mock("../../services/musicbrainz", () => ({
 }));
 
 jest.mock("../../services/acoustidIdentification", () => ({
+    prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
     identifyTrackByAcoustid: jest.fn().mockResolvedValue(null),
     persistAcoustidFingerprint: jest.fn().mockResolvedValue(undefined),
 }));
@@ -143,10 +144,12 @@ import { prisma } from "../../utils/db";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import {
     executeAudioPhase,
+    executeIdentificationPhase,
     executeVibePhase,
     inFlightCap,
     STAGE_IN_FLIGHT_CAP,
 } from "../../workers/unifiedEnrichment";
+import { prefetchAcoustidReplies } from "../../services/acoustidIdentification";
 
 const PREFIX = "dthr";
 const id = (n: string) => `${PREFIX}_${n}`;
@@ -354,5 +357,29 @@ describe("in-flight caps keep queues inside the record's patience", () => {
         expect(queued).toBe(cap);
         expect(mockQueueAdd).toHaveBeenCalledTimes(cap);
         expect(await workingCount("embedding")).toBe(cap);
+    });
+});
+
+describe("identification asks AcoustID ahead of the dispatch", () => {
+    it("asks about the next 100 songs and hands out no more than 20", async () => {
+        await seedTracks(150, [["fingerprint", "done"]]);
+
+        const queued = await executeIdentificationPhase();
+
+        const asked = (prefetchAcoustidReplies as jest.Mock).mock.calls[0][0] as Array<{ id: string }>;
+        expect(asked).toHaveLength(100);
+        expect(queued).toBeGreaterThan(0);
+        expect(queued).toBeLessThanOrEqual(20);
+        expect(await workingCount("recording")).toBe(queued);
+    });
+
+    it("hands the songs out even when asking AcoustID fails", async () => {
+        await seedTracks(30, [["fingerprint", "done"]]);
+        (prefetchAcoustidReplies as jest.Mock).mockRejectedValueOnce(new Error("AcoustID unreachable"));
+
+        const queued = await executeIdentificationPhase();
+
+        expect(queued).toBeGreaterThan(0);
+        expect(await workingCount("recording")).toBe(queued);
     });
 });

@@ -122,6 +122,7 @@ jest.mock("../../services/musicbrainz", () => ({
 // entry point it reaches — including the tag reader. The jest.fn lives IN
 // the factory (jest hoists it above any const), so call tracking works.
 jest.mock("../../services/acoustidIdentification", () => ({
+    prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
     identifyTrackByAcoustid: jest.fn().mockResolvedValue({
         kind: "permanent",
         error: { code: "NO_FINGERPRINT", message: "mocked: no fingerprint" },

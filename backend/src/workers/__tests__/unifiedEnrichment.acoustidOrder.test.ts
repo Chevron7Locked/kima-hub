@@ -1,9 +1,11 @@
 /**
  * enrichSingleTrack identifies a recording in this order: the file's recording id
- * tag (no network), its ISRC, the album's MusicBrainz tracklist, the name search,
- * then AcoustID for the remainder, storing the fingerprint even on a no-match.
- * Every candidate must be this track before it is accepted. The identification
- * services are mocked; the order, the fallbacks and the agreement check are tested.
+ * tag (no network), AcoustID by the sound, the album's MusicBrainz tracklist (the
+ * album row's own, else the album AcoustID lists under this album's title), the
+ * file's ISRC, then the name search; the fingerprint is stored even on a no-match.
+ * Every MusicBrainz candidate must be this track before it is accepted. The
+ * identification services are mocked; the order, the fallbacks and the agreement
+ * check are tested.
  */
 
 // ── Mocks (must be before imports) ──────────────────────────────────
@@ -45,6 +47,7 @@ const mockReadTags = jest.fn();
 const mockIdentifyTrackByAcoustid = jest.fn();
 const mockPersistAcoustidFingerprint = jest.fn().mockResolvedValue(undefined);
 jest.mock("../../services/acoustidIdentification", () => ({
+    prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
     readIdentityTags: (...args: unknown[]) => mockReadTags(...args),
     identifyTrackByAcoustid: (...args: unknown[]) =>
         mockIdentifyTrackByAcoustid(...args),
@@ -276,7 +279,7 @@ describe("enrichSingleTrack: the identification order", () => {
         expect(stageWrittenDone("file_tag")).toBe(true);
     });
 
-    it("runs the name search before AcoustID, with the track's title, artist and length", async () => {
+    it("asks AcoustID before the name search, which gets the track's title, artist and length", async () => {
         await enrichSingleTrack(TRACK_ID);
 
         expect(mockIdentifyRecording).toHaveBeenCalledWith({
@@ -285,21 +288,27 @@ describe("enrichSingleTrack: the identification order", () => {
             durationSec: 218,
         });
         expect(mockIdentifyTrackByAcoustid).toHaveBeenCalled();
-        expect(mockIdentifyRecording.mock.invocationCallOrder[0]).toBeLessThan(
-            mockIdentifyTrackByAcoustid.mock.invocationCallOrder[0],
+        expect(mockIdentifyTrackByAcoustid.mock.invocationCallOrder[0]).toBeLessThan(
+            mockIdentifyRecording.mock.invocationCallOrder[0],
         );
     });
 
-    it("never asks AcoustID for a track the name search answered", async () => {
-        mockIdentifyRecording.mockResolvedValue(answeredWith({ id: MB_TRACK, title: "Cheerleader Effect", lengthMs: 218000, artists: ["Carpenter Brut"] }));
+    it("never runs the name search for a track AcoustID answered", async () => {
+        mockIdentifyTrackByAcoustid.mockResolvedValue(
+            answeredWith({ source: "acoustid", recordingMbid: MB_TRACK, releaseGroups: [], candidates: [MB_TRACK] }),
+        );
+        mockGetRecordingIsrc.mockResolvedValue(answeredWith("FRX451500123"));
+        mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [{ name: "synthwave", count: 2 }] }));
 
         const result = await enrichSingleTrack(TRACK_ID);
 
         expect(result).toBe("identified");
-        expect(mockIdentifyTrackByAcoustid).not.toHaveBeenCalled();
+        expect(mockIdentifyRecording).not.toHaveBeenCalled();
+        expect(mockLookupRecordingsByIsrc).not.toHaveBeenCalled();
         expect(mockTrackUpdate).toHaveBeenCalledWith(
             expect.objectContaining({ data: expect.objectContaining({ recordingMbid: MB_TRACK }) }),
         );
+        expect(stageWrittenDone("acoustid")).toBe(true);
     });
 
     it("stores the fingerprint and answers the question as Absent when nothing matches", async () => {
@@ -347,7 +356,10 @@ describe("enrichSingleTrack: the identification order", () => {
         expect(result).toBe("identified");
         expect(mockGetAlbumCatalogue).toHaveBeenCalledWith(RG_MBID);
         expect(mockIdentifyRecording).not.toHaveBeenCalled();
-        expect(mockIdentifyTrackByAcoustid).not.toHaveBeenCalled();
+        // AcoustID was asked first and knew nothing; the tracklist then named the recording.
+        expect(mockIdentifyTrackByAcoustid.mock.invocationCallOrder[0]).toBeLessThan(
+            mockGetAlbumCatalogue.mock.invocationCallOrder[0],
+        );
         expect(mockGetRecordingIsrc).not.toHaveBeenCalled();
         expect(mockGetRecordingGenres).not.toHaveBeenCalled();
         // The ISRC and the genres come from the tracklist row; the album row gets
@@ -400,10 +412,9 @@ describe("enrichSingleTrack: the identification order", () => {
         const result = await enrichSingleTrack(TRACK_ID);
 
         // MusicBrainz failing outright defers with the real cause; the rest of
-        // the ladder is not asked while the source is down.
+        // the MusicBrainz ladder is not asked while the source is down.
         expect(result).toBe("deferred");
         expect(mockIdentifyRecording).not.toHaveBeenCalled();
-        expect(mockIdentifyTrackByAcoustid).not.toHaveBeenCalled();
         expect(mockTrackUpdate).not.toHaveBeenCalled();
     });
 
@@ -640,5 +651,269 @@ describe("AcoustID paused", () => {
         expect(writes.some((sql) => sql.includes(`INSERT INTO "TrackStage"`) && sql.includes("'RATE_LIMITED'"))).toBe(true);
         expect(writes.some((sql) => sql.includes("SET status = 'failed'"))).toBe(false);
         pause.mockRestore();
+    });
+});
+
+describe("AcoustID first, and the album it names", () => {
+    // Real ids and titles from a recorded AcoustID batch reply and the MusicBrainz release
+    // (services/__tests__/fixtures/acoustid/batch-lookup-3.json, fixtures/mb/release-dangerous-days.json):
+    // AcoustID lists a compilation first and the album the file is on third.
+    const FUTURE_CLUB = "ac559309-3f00-4db6-95ce-1c1dca916677";
+    const DANGEROUS_DAYS = "f765fa78-96b2-4a72-b8c7-c1d7eecbae92";
+    const ACOUSTID_ALBUMS = [
+        { id: "e6482892-aa9c-43da-bd31-b4d0a617bb53", title: "Discoteka 2018 Synthwave Dance Music" },
+        { id: "51bf5516-af54-4668-b9a4-0bb1f36661f9", title: "Hotline Miami 2: Wrong Number" },
+        { id: DANGEROUS_DAYS, title: "Dangerous Days" },
+    ];
+    const dangerousDays = (rows: Array<{ recordingId: string; title: string }>) =>
+        answeredWith({
+            releaseMbid: "95353672-acb7-4bb4-ad41-a5e52e51bdc6",
+            originalYear: 2014,
+            label: "Blood Music",
+            genres: [],
+            recordings: rows.map((r) => ({
+                ...r,
+                durationMs: 289000,
+                isrcs: ["TCABW1462862"],
+                genres: [{ name: "electronic", count: 3 }, { name: "synthwave", count: 3 }],
+                artists: ["Perturbator"],
+            })),
+        });
+    const seedFutureClub = (rgMbid = "temp-1693-abc") =>
+        mockTrackFindUnique.mockResolvedValue({
+            id: TRACK_ID,
+            title: "Future Club",
+            filePath: "Perturbator/Dangerous Days/04 Future Club.mp3",
+            duration: 289,
+            isrc: null,
+            isrcSource: null,
+            acoustidFingerprint: FINGERPRINT,
+            album: { id: "album-dd", title: "Dangerous Days", artist: { name: "Perturbator" }, rgMbid, year: null, label: null, genres: null },
+        });
+    const acoustidAnswers = (candidates: string[]) =>
+        mockIdentifyTrackByAcoustid.mockResolvedValue(
+            answeredWith({ source: "acoustid", recordingMbid: candidates[0], releaseGroups: ACOUSTID_ALBUMS, candidates }),
+        );
+
+    it("an untagged album: the tracklist of the album AcoustID lists under this album's title, not its first", async () => {
+        seedFutureClub();
+        acoustidAnswers([FUTURE_CLUB]);
+        mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club" }]));
+
+        const result = await enrichSingleTrack(TRACK_ID);
+
+        expect(result).toBe("identified");
+        expect(mockGetAlbumCatalogue).toHaveBeenCalledTimes(1);
+        expect(mockGetAlbumCatalogue).toHaveBeenCalledWith(DANGEROUS_DAYS);
+        // ISRC and genres come from the tracklist row: no per-song MusicBrainz request.
+        expect(mockGetRecordingIsrc).not.toHaveBeenCalled();
+        expect(mockGetRecordingGenres).not.toHaveBeenCalled();
+        expect(mockIdentifyRecording).not.toHaveBeenCalled();
+        expect(mockPopulateTrackGenres).toHaveBeenCalledWith(TRACK_ID, ["electronic", "synthwave"]);
+        expect(mockTrackUpdate).toHaveBeenCalledWith({
+            where: { id: TRACK_ID },
+            data: { isrc: "TCABW1462862", isrcSource: "musicbrainz" },
+        });
+        // The album row is left alone: AcoustID named that album, the row did not.
+        expect(mockAlbumUpdate).not.toHaveBeenCalled();
+        expect(stageWrittenDone("acoustid")).toBe(true);
+    });
+
+    it("takes AcoustID's candidate that is on this album's tracklist", async () => {
+        seedFutureClub();
+        acoustidAnswers(["compilation-recording", FUTURE_CLUB]);
+        mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club" }]));
+
+        await enrichSingleTrack(TRACK_ID);
+
+        expect(mockTrackUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: FUTURE_CLUB }) }),
+        );
+    });
+
+    it("keeps AcoustID's recording when it is not on the tracklist, and fetches its details", async () => {
+        seedFutureClub();
+        acoustidAnswers(["remaster-recording"]);
+        mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club" }]));
+        mockGetRecordingIsrc.mockResolvedValue(noData);
+        mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [{ name: "synthwave", count: 1 }] }));
+
+        const result = await enrichSingleTrack(TRACK_ID);
+
+        expect(result).toBe("identified");
+        expect(mockTrackUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "remaster-recording" }) }),
+        );
+        expect(mockGetRecordingGenres).toHaveBeenCalledWith("remaster-recording");
+    });
+
+    it("no album of AcoustID's carries this album's title: no tracklist is fetched", async () => {
+        seedFutureClub();
+        mockTrackFindUnique.mockResolvedValue({
+            ...(await mockTrackFindUnique()),
+            album: { id: "album-x", title: "Some Bootleg", artist: { name: "Perturbator" }, rgMbid: "temp-2", year: null, label: null, genres: null },
+        });
+        acoustidAnswers([FUTURE_CLUB]);
+        mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [] }));
+
+        await enrichSingleTrack(TRACK_ID);
+
+        expect(mockGetAlbumCatalogue).not.toHaveBeenCalled();
+        expect(mockGetRecordingGenres).toHaveBeenCalledWith(FUTURE_CLUB);
+    });
+
+    it("the album row's own id wins over AcoustID's albums, and that album is filled", async () => {
+        seedFutureClub(DANGEROUS_DAYS);
+        acoustidAnswers([FUTURE_CLUB]);
+        mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club" }]));
+
+        await enrichSingleTrack(TRACK_ID);
+
+        expect(mockGetAlbumCatalogue).toHaveBeenCalledWith(DANGEROUS_DAYS);
+        expect(mockAlbumUpdate).toHaveBeenCalledWith({
+            where: { id: "album-dd" },
+            data: { year: 2014, label: "Blood Music" },
+        });
+    });
+
+    it("the album row's own tracklist fills the album even when AcoustID's recording is not on it", async () => {
+        seedFutureClub(DANGEROUS_DAYS);
+        acoustidAnswers(["remaster-recording"]);
+        mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club" }]));
+        mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [{ name: "synthwave", count: 1 }] }));
+
+        await enrichSingleTrack(TRACK_ID);
+
+        expect(mockTrackUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "remaster-recording" }) }),
+        );
+        expect(mockAlbumUpdate).toHaveBeenCalledWith({
+            where: { id: "album-dd" },
+            data: { year: 2014, label: "Blood Music" },
+        });
+    });
+
+    it("an AcoustID pick with only the track's length goes last: the tracklist's name match wins", async () => {
+        seedFutureClub(DANGEROUS_DAYS);
+        mockIdentifyTrackByAcoustid.mockResolvedValue(
+            answeredWith({ source: "acoustid", recordingMbid: "studio-not-live", releaseGroups: ACOUSTID_ALBUMS, candidates: ["studio-not-live"], titleAgrees: false }),
+        );
+        mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club" }]));
+
+        await enrichSingleTrack(TRACK_ID);
+
+        expect(mockTrackUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: FUTURE_CLUB }) }),
+        );
+        expect(mockTrackUpdate).not.toHaveBeenCalledWith(
+            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "studio-not-live" }) }),
+        );
+    });
+
+    it("an AcoustID pick with only the track's length is taken when nothing else names the recording", async () => {
+        mockIdentifyTrackByAcoustid.mockResolvedValue(
+            answeredWith({ source: "acoustid", recordingMbid: "length-only", releaseGroups: [], candidates: ["length-only"], titleAgrees: false }),
+        );
+        mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [] }));
+
+        const result = await enrichSingleTrack(TRACK_ID);
+
+        expect(result).toBe("identified");
+        expect(mockIdentifyRecording.mock.invocationCallOrder[0]).toBeLessThan(mockTrackUpdate.mock.invocationCallOrder[0]);
+        expect(mockTrackUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "length-only" }) }),
+        );
+        expect(stageWrittenDone("acoustid")).toBe(true);
+    });
+
+    it("the album row is not filled when neither this track's recording nor its name is on the tracklist", async () => {
+        seedFutureClub(DANGEROUS_DAYS);
+        acoustidAnswers(["remaster-recording"]);
+        mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: "other-song", title: "Sentient" }]));
+        mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [] }));
+
+        await enrichSingleTrack(TRACK_ID);
+
+        expect(mockAlbumUpdate).not.toHaveBeenCalled();
+    });
+
+    it("a length-only AcoustID pick loses to the file's ISRC", async () => {
+        seedTrack({ isrc: "USRC17607839" });
+        mockIdentifyTrackByAcoustid.mockResolvedValue(
+            answeredWith({ source: "acoustid", recordingMbid: "length-only", releaseGroups: [], candidates: ["length-only"], titleAgrees: false }),
+        );
+        mockLookupRecordingsByIsrc.mockResolvedValue(
+            answeredWith([{ id: "studio", title: "Cheerleader Effect", lengthMs: 218400, artists: ["Carpenter Brut"] }]),
+        );
+
+        await enrichSingleTrack(TRACK_ID);
+
+        expect(mockTrackUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "studio" }) }),
+        );
+    });
+
+    it("a MusicBrainz failure defers the track instead of taking a length-only AcoustID pick", async () => {
+        mockIdentifyTrackByAcoustid.mockResolvedValue(
+            answeredWith({ source: "acoustid", recordingMbid: "length-only", releaseGroups: [], candidates: ["length-only"], titleAgrees: false }),
+        );
+        mockIdentifyRecording.mockResolvedValue({
+            kind: "transient",
+            error: { code: "NETWORK", message: "boom", retryable: true, retryAfterMs: 60_000 },
+        });
+
+        expect(await enrichSingleTrack(TRACK_ID)).toBe("deferred");
+        expect(mockTrackUpdate).not.toHaveBeenCalled();
+    });
+
+    it("a length-only pick on the fetched tracklist takes its ISRC and genres from it", async () => {
+        seedFutureClub(DANGEROUS_DAYS);
+        mockIdentifyTrackByAcoustid.mockResolvedValue(
+            answeredWith({ source: "acoustid", recordingMbid: FUTURE_CLUB, releaseGroups: ACOUSTID_ALBUMS, candidates: [FUTURE_CLUB], titleAgrees: false }),
+        );
+        // The tracklist row's title is not the file's, so the name match finds nothing.
+        mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club (Extended)" }]));
+
+        const result = await enrichSingleTrack(TRACK_ID);
+
+        expect(result).toBe("identified");
+        expect(mockTrackUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: FUTURE_CLUB }) }),
+        );
+        expect(mockGetRecordingGenres).not.toHaveBeenCalled();
+        expect(mockGetRecordingIsrc).not.toHaveBeenCalled();
+        // Its recording is on the album row's own tracklist: the album is filled.
+        expect(mockAlbumUpdate).toHaveBeenCalledWith({
+            where: { id: "album-dd" },
+            data: { year: 2014, label: "Blood Music" },
+        });
+    });
+
+    it("AcoustID failing does not stop MusicBrainz from answering", async () => {
+        mockIdentifyTrackByAcoustid.mockResolvedValue({
+            kind: "transient",
+            error: { code: "REQUEST_FAILED", message: "503", retryable: true, retryAfterMs: 60_000 },
+        });
+        mockIdentifyRecording.mockResolvedValue(answeredWith({ id: MB_TRACK, title: "Cheerleader Effect", lengthMs: 218000, artists: ["Carpenter Brut"] }));
+
+        const result = await enrichSingleTrack(TRACK_ID);
+
+        expect(result).toBe("identified");
+        expect(mockTrackUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: MB_TRACK }) }),
+        );
+    });
+
+    it("AcoustID failing and MusicBrainz knowing nothing: the record waits for AcoustID", async () => {
+        mockIdentifyTrackByAcoustid.mockResolvedValue({
+            kind: "transient",
+            error: { code: "REQUEST_FAILED", message: "503", retryable: true, retryAfterMs: 60_000 },
+        });
+
+        const result = await enrichSingleTrack(TRACK_ID);
+
+        expect(result).toBe("deferred");
+        expect(mockIdentifyRecording).toHaveBeenCalled();
+        expect(mockTrackUpdate).not.toHaveBeenCalled();
     });
 });

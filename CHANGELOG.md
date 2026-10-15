@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+### Changed
+
+- **Songs are identified by their sound first.** A file whose tags don't say which recording it is now goes to AcoustID (audio fingerprints) before any MusicBrainz search, ten songs per request, and each reply is kept so no song is asked twice. Its ISRCs and genres then come from one MusicBrainz request per album (the album AcoustID lists under your album's title, or the album your tags name) instead of one request per song; songs AcoustID doesn't recognise, or matches only by length and not by title, still get the MusicBrainz name search first.
+
 ### Fixed
 
 - **Songs of one album no longer fail when they save the same new genre at the same moment.** Two songs finishing together both tried to create the genre, and one failed with a duplicate-name error until its retry.
+- **Two songs of one album asked about at once share one MusicBrainz tracklist request** instead of each making its own.
 
 ## [1.12.0] - 2026-10-14
 

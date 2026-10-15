@@ -74,6 +74,24 @@ function toCandidate(rec: any): CandidateRecording {
 const ANSWERED_TTL = 30 * 24 * 3600;
 const ABSENT_TTL = 7 * 24 * 3600;
 
+/** One release of an album group with its tracklist: what `getAlbumCatalogue` answers. */
+export interface AlbumCatalogue {
+    releaseMbid: string;
+    originalYear: number | null;
+    label: string | null;
+    genres: { name: string; count: number }[];
+    recordings: Array<{
+        recordingId: string;
+        title: string;
+        position: number | null;
+        durationMs: number | null;
+        isrcs: string[];
+        genres: { name: string; count: number }[];
+        /** Every name the track is credited to (`creditNames`). */
+        artists: string[];
+    }>;
+}
+
 interface CacheEnvelope {
     __outcome: "answered" | "absent";
     value?: unknown;
@@ -85,6 +103,8 @@ type StrategyError = { code: string; message: string };
 
 class MusicBrainzService {
     private client: AxiosInstance;
+    /** Album tracklist fetches under way, so songs of one album asked at once share one fetch. */
+    private tracklistsInFlight = new Map<string, Promise<Outcome<AlbumCatalogue>>>();
 
     constructor() {
         this.client = axios.create({
@@ -440,26 +460,21 @@ class MusicBrainzService {
      * chosen release's tracklist (each track's credit, ISRCs and genres) and label. Cached 30 days.
      * Matching files to `recordings` is the caller's job.
      */
-    async getAlbumCatalogue(
-        rgMbid: string
-    ): Promise<
-        Outcome<{
-            releaseMbid: string;
-            originalYear: number | null;
-            label: string | null;
-            genres: { name: string; count: number }[];
-            recordings: Array<{
-                recordingId: string;
-                title: string;
-                position: number | null;
-                durationMs: number | null;
-                isrcs: string[];
-                genres: { name: string; count: number }[];
-                /** Every name the track is credited to (`creditNames`). */
-                artists: string[];
-            }>;
-        }>
-    > {
+    async getAlbumCatalogue(rgMbid: string): Promise<Outcome<AlbumCatalogue>> {
+        // Every caller asks at background priority, so waiting on a fetch already under way
+        // is never slower than asking again.
+        const running = this.tracklistsInFlight.get(rgMbid);
+        if (running) return running;
+        const pending = this.fetchAlbumCatalogue(rgMbid);
+        this.tracklistsInFlight.set(rgMbid, pending);
+        try {
+            return await pending;
+        } finally {
+            this.tracklistsInFlight.delete(rgMbid);
+        }
+    }
+
+    private async fetchAlbumCatalogue(rgMbid: string): Promise<Outcome<AlbumCatalogue>> {
         const cacheKey = `mb:album:tracklist:${rgMbid}`;
         return this.cachedOutcome(cacheKey, async () => {
             try {

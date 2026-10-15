@@ -41,8 +41,10 @@ import { trackIdentityService } from "../services/trackIdentity";
 import {
     identifyTrackByAcoustid,
     persistAcoustidFingerprint,
+    prefetchAcoustidReplies,
     readIdentityTags,
 } from "../services/acoustidIdentification";
+import { titlesAgree } from "../services/albumIdentity";
 import { fpcalcService } from "../services/fpcalc";
 import { resolveWithinMusicRoot } from "../routes/library/trackPath";
 import { buildMatching, matchingProgress } from "../services/matching/state";
@@ -1824,13 +1826,15 @@ type AlbumCatalogue = Extract<
 type CatalogueRecording = AlbumCatalogue["recordings"][number];
 type CatalogueGenre = AlbumCatalogue["genres"][number];
 
-/** What the album chain answered: this track's row plus the album-level answers. */
-type CatalogueAnswer = {
-    entry: CatalogueRecording;
+/** What one tracklist fetch says about the album itself. */
+type AlbumFacts = {
     albumGenres: CatalogueGenre[];
     originalYear: number | null;
     label: string | null;
 };
+
+/** What the album chain answered: this track's row plus the album-level answers. */
+type CatalogueAnswer = AlbumFacts & { entry: CatalogueRecording };
 
 /**
  * Find our file in its album's tracklist: title, version and length must agree (`recordingAgrees`). A row
@@ -1864,7 +1868,7 @@ function matchCatalogueRecording(
  * still blank, so scan tags and manual edits are never overwritten. */
 async function fillAlbumFromCatalogue(
     album: { id: string; year: number | null; label: string | null; genres: Prisma.JsonValue },
-    answer: CatalogueAnswer,
+    answer: AlbumFacts,
 ): Promise<void> {
     const data: {
         year?: number;
@@ -1908,11 +1912,14 @@ export async function enrichSingleTrack(
         throw entityGoneError("Track", trackId);
     }
 
-    // Identification ladder: the file's own recording id; the album's tracklist (one
-    // cached fetch answers every track on the album, the file's ISRC matched within it);
-    // the file's ISRC alone; the name search; then AcoustID. Every candidate must be this
-    // track (`recordingAgrees`) before it is accepted. A source that fails to answer
-    // stops the ladder: the record defers with the real cause.
+    // Identification ladder: the file's own recording id; AcoustID, by the sound (a reply
+    // saved when the dispatch asked for a batch of songs, else asked here); the album's
+    // tracklist, which names the recording when nothing has yet and otherwise gives the
+    // ISRCs and genres of an answer that is on it; the file's ISRC; the name search. Every
+    // MusicBrainz candidate must be this track (`recordingAgrees`) before it is accepted.
+    // A MusicBrainz failure stops the ladder: the record defers with the real cause.
+    // AcoustID failing or paused does not stop MusicBrainz from answering; the record waits
+    // for AcoustID only when MusicBrainz has no answer either.
     const timeoutMs = getStageTimeoutMs("recording");
     const trackRef = {
         id: track.id,
@@ -1936,6 +1943,20 @@ export async function enrichSingleTrack(
     // for good (AcoustID cannot be asked about this file), or the source is paused until
     // a time (it can be asked then).
     let acoustidSkipped: { reason: "fingerprint-closed" } | { reason: "paused"; until: Date } | null = null;
+    // AcoustID failing to answer: kept, and the cause of the deferral only when no other
+    // source names the recording.
+    let acoustidFailure: FailureOutcome | null = null;
+    // AcoustID's albums for its answer, and the recordings it would also accept, best first.
+    let acoustidAlbums: { id: string; title: string }[] = [];
+    let acoustidCandidates: string[] = [];
+    // An AcoustID pick whose title is not the track's (only its length is): asked last, as
+    // before, once the tracklist, the ISRC and the name search have had their turn.
+    let acoustidLengthOnly: { candidates: string[]; fingerprintFrom?: string } | null = null;
+    // The album row's own tracklist, with this track on it (its recording or its name): the
+    // album's year, label and genres, for the row.
+    let rowAlbum: AlbumFacts | null = null;
+    // The tracklist fetched, kept for the length-only pick to take its row from.
+    let tracklist: AlbumCatalogue | null = null;
     // Set when the album's tracklist answered: the identity, the ISRCs, the
     // genres and the album-level answers all come from that one fetch.
     let catalogueAnswer: CatalogueAnswer | null = null;
@@ -1946,18 +1967,79 @@ export async function enrichSingleTrack(
         answerSource = "file_tag";
     }
 
-    if (isMbid(track.album.rgMbid)) {
+    // AcoustID first for a file whose tags do not name its recording. The prerequisite
+    // gate guarantees the fingerprint question is settled: use the stored fingerprint, or
+    // skip and record the skip when it closed as a permanent failure.
+    if (!recordingMbid) {
+        const pause = await sourcePauseController.getPause("acoustid");
+        if (!track.acoustidFingerprint && (await fingerprintStageSettledFailed(track.id))) {
+            acoustidSkipped = { reason: "fingerprint-closed" };
+        } else if (pause) {
+            acoustidSkipped = { reason: "paused", until: pause.until };
+        } else {
+            asked.push("acoustid");
+            const identified = await askWithinBudget(
+                () =>
+                    identifyTrackByAcoustid(
+                        trackRef,
+                        tags,
+                        // The fingerprint stage's stored answer: never a second fpcalc run.
+                        track.acoustidFingerprint ? { fingerprint: track.acoustidFingerprint } : null,
+                    ),
+                timeoutMs,
+                `Timeout asking AcoustID: ${track.title}`,
+            );
+            if (identified.kind === "answered") {
+                fingerprintToStore = identified.value.fingerprint ?? fingerprintToStore;
+                acoustidAlbums = identified.value.releaseGroups ?? [];
+                if (identified.value.titleAgrees === false) {
+                    acoustidLengthOnly = {
+                        candidates: identified.value.candidates ?? [identified.value.recordingMbid],
+                        fingerprintFrom: identified.value.fingerprintFrom,
+                    };
+                } else {
+                    recordingMbid = identified.value.recordingMbid;
+                    answerSource = identified.value.source;
+                    evidenceFromAcoustid = { fingerprintFrom: identified.value.fingerprintFrom };
+                    acoustidCandidates = identified.value.candidates ?? [identified.value.recordingMbid];
+                }
+            } else if (identified.kind === "absent") {
+                // Asked and nothing matched — an answer, not a failure. The
+                // dedupe column still wants the fingerprint.
+                const fp = identified.evidence["fingerprint"];
+                if (typeof fp === "string") fingerprintToStore = fp;
+            } else {
+                acoustidFailure = identified;
+            }
+        }
+    }
+
+    // The album's tracklist: the album row's own release group, else the album AcoustID
+    // lists under this album's title. Only an album the row itself names gets its year,
+    // label and genres filled (`rowAlbum`), and only when this track is on it.
+    const albumFromRow = isMbid(track.album.rgMbid) ? track.album.rgMbid : null;
+    const albumRg =
+        albumFromRow ??
+        acoustidAlbums.find((rg) => rg.title && titlesAgree(rg.title, track.album.title))?.id ??
+        null;
+    if (albumRg) {
         asked.push("album-catalogue");
         const chain = await askWithinBudget(
-            () => musicBrainzService.getAlbumCatalogue(track.album.rgMbid!),
+            () => musicBrainzService.getAlbumCatalogue(albumRg),
             timeoutMs,
             `Timeout fetching MB album: ${track.album.title}`,
         );
         if (chain.kind === "answered") {
-            // A file-tag answer takes its ISRCs and genres from its row in the tracklist.
-            const entry = recordingMbid
-                ? chain.value.recordings.find((rec) => rec.recordingId === recordingMbid) ?? null
-                : matchCatalogueRecording(chain.value.recordings, expected, isrc);
+            tracklist = chain.value;
+            const row = (id: string) => chain.value.recordings.find((rec) => rec.recordingId === id) ?? null;
+            // An answer already found takes its ISRCs and genres from its row: AcoustID's
+            // best candidate that is on this album, the file tag's own row. Nothing found
+            // yet: the tracklist names the recording.
+            const entry = !recordingMbid
+                ? matchCatalogueRecording(chain.value.recordings, expected, isrc)
+                : answerSource === "acoustid"
+                  ? acoustidCandidates.map(row).find((rec) => rec !== null) ?? null
+                  : row(recordingMbid);
             if (entry) {
                 catalogueAnswer = {
                     entry,
@@ -1966,6 +2048,12 @@ export async function enrichSingleTrack(
                     label: chain.value.label,
                 };
                 recordingMbid = entry.recordingId;
+            }
+            // The album row is filled only when this track is on its tracklist: by its recording,
+            // or, for an AcoustID recording that is not, by its name.
+            const onAlbum = entry ?? matchCatalogueRecording(chain.value.recordings, expected, isrc);
+            if (albumRg === albumFromRow && onAlbum) {
+                rowAlbum = { albumGenres: chain.value.genres, originalYear: chain.value.originalYear, label: chain.value.label };
             }
         } else if (chain.kind !== "absent" && !recordingMbid) {
             failedAsk = { source: "musicbrainz", outcome: chain };
@@ -2005,43 +2093,23 @@ export async function enrichSingleTrack(
         }
     }
 
-    // AcoustID for whatever is still unidentified. The prerequisite gate guarantees
-    // the fingerprint question is settled: use the stored fingerprint, or skip and
-    // record the skip when it closed as a permanent failure. A rate limit pauses
-    // the asking, not the sweep.
-    if (!recordingMbid && !failedAsk) {
-        const pause = await sourcePauseController.getPause("acoustid");
-        if (!track.acoustidFingerprint && (await fingerprintStageSettledFailed(track.id))) {
-            acoustidSkipped = { reason: "fingerprint-closed" };
-        } else if (pause) {
-            acoustidSkipped = { reason: "paused", until: pause.until };
-        } else {
-            asked.push("acoustid");
-            const identified = await askWithinBudget(
-                () =>
-                    identifyTrackByAcoustid(
-                        trackRef,
-                        tags,
-                        // The fingerprint stage's stored answer: never a second fpcalc run.
-                        track.acoustidFingerprint ? { fingerprint: track.acoustidFingerprint } : null,
-                    ),
-                timeoutMs,
-                `Timeout asking AcoustID: ${track.title}`,
-            );
-            if (identified.kind === "answered") {
-                recordingMbid = identified.value.recordingMbid;
-                answerSource = identified.value.source;
-                fingerprintToStore = identified.value.fingerprint ?? fingerprintToStore;
-                evidenceFromAcoustid = { fingerprintFrom: identified.value.fingerprintFrom };
-            } else if (identified.kind === "absent") {
-                // Asked and nothing matched — an answer, not a failure. The
-                // dedupe column still wants the fingerprint.
-                const fp = identified.evidence["fingerprint"];
-                if (typeof fp === "string") fingerprintToStore = fp;
-            } else {
-                failedAsk = { source: "acoustid", outcome: identified };
-            }
+    if (!recordingMbid && !failedAsk && acoustidLengthOnly) {
+        const { candidates } = acoustidLengthOnly;
+        // A candidate on the fetched tracklist brings its ISRCs and genres with it.
+        const entry = tracklist
+            ? candidates.map((id) => tracklist!.recordings.find((rec) => rec.recordingId === id)).find((rec) => rec !== undefined) ?? null
+            : null;
+        if (entry && tracklist) {
+            catalogueAnswer = { entry, albumGenres: tracklist.genres, originalYear: tracklist.originalYear, label: tracklist.label };
+            if (albumRg === albumFromRow) rowAlbum = catalogueAnswer;
         }
+        recordingMbid = entry?.recordingId ?? candidates[0];
+        answerSource = "acoustid";
+        evidenceFromAcoustid = { fingerprintFrom: acoustidLengthOnly.fingerprintFrom, match: "length only: AcoustID's title is not the track's" };
+    }
+
+    if (!recordingMbid && !failedAsk && acoustidFailure) {
+        failedAsk = { source: "acoustid", outcome: acoustidFailure };
     }
 
     if (fingerprintToStore && fingerprintToStore !== track.acoustidFingerprint) {
@@ -2112,14 +2180,18 @@ export async function enrichSingleTrack(
             const topGenres = topVoted(catalogueAnswer.entry.genres, 5);
             await trackIdentityService.populateTrackGenres(track.id, topGenres);
             // The same fetch answers the album: original year, label, and genres,
-            // filled only where the row is still blank.
-            await fillAlbumFromCatalogue(track.album, catalogueAnswer);
-            await recordStageSuccess(track.id, "recording", answerSource === "file_tag" ? "file_tag" : "musicbrainz", {
+            // filled only where the row is still blank, and only for the album the row names.
+            if (rowAlbum) await fillAlbumFromCatalogue(track.album, rowAlbum);
+            await recordStageSuccess(track.id, "recording", answerSource, {
                 recordingMbid: mbid,
                 reason: answerSource === "file_tag"
                     ? "the file's own recording id, found in the album's tracklist"
-                    : "identified from the album's tracklist",
+                    : answerSource === "acoustid"
+                      ? "AcoustID's recording, found in the album's tracklist"
+                      : "identified from the album's tracklist",
+                album: rowAlbum ? "the album's own id" : "the album AcoustID named",
                 tags: topGenres,
+                ...evidenceFromAcoustid,
             }, jobId);
             return "identified";
         } catch (err) {
@@ -2151,6 +2223,9 @@ export async function enrichSingleTrack(
                 timeoutMs,
                 `Timeout fetching MB genres: ${track.title}`,
             ));
+        // The album row's own tracklist answered though this recording is not on it: the
+        // album is still filled from that fetch.
+        if (rowAlbum) await fillAlbumFromCatalogue(track.album, rowAlbum);
         const evidence = { recordingMbid: mbid, reason: `identified via ${answerSource}`, ...evidenceFromAcoustid };
         if (genres.kind === "answered") {
             const topGenres = topVoted(genres.value.genres, 5);
@@ -2559,10 +2634,33 @@ async function dispatchStageWork(
     return queued;
 }
 
+/** How far ahead of the dispatch AcoustID is asked, so its batches fill up (10 songs per request). */
+const ACOUSTID_LOOKAHEAD = 100;
+
 /** The `recording` question (identity and genres), offered from the records in its own window. */
 export async function executeIdentificationPhase(): Promise<number> {
-    const work = await getNextWork(TRACK_BATCH_SIZE, "recording");
-    return dispatchStageWork("recording", work, STAGE_PRODUCERS.recording);
+    const upcoming = await getNextWork(ACOUSTID_LOOKAHEAD, "recording");
+    await prefetchAcoustidForWork(upcoming);
+    return dispatchStageWork("recording", upcoming.slice(0, TRACK_BATCH_SIZE), STAGE_PRODUCERS.recording);
+}
+
+/**
+ * Ask AcoustID about the songs coming up in batches before their jobs run (AcoustID's limit
+ * is per app key, shared by every install on it). Never holds the dispatch back: a failure
+ * here only means each job asks for itself.
+ */
+async function prefetchAcoustidForWork(work: StageWork[]): Promise<void> {
+    if (work.length === 0) return;
+    try {
+        const tracks = await prisma.track.findMany({
+            where: { id: { in: work.map((w) => w.trackId) } },
+            select: { id: true, title: true, filePath: true, duration: true, acoustidFingerprint: true },
+        });
+        const asked = await prefetchAcoustidReplies(tracks);
+        if (asked > 0) logger.debug(`[Enrichment] Asked AcoustID about ${asked} track(s) in batches`);
+    } catch (err) {
+        logger.warn(`[Enrichment] AcoustID batch lookup skipped: ${(err as Error).message}`);
+    }
 }
 
 /**

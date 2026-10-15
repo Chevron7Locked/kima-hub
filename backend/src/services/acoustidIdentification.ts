@@ -1,6 +1,6 @@
 /**
  * The file's own identity tags, and AcoustID with the tagged or stored
- * fingerprint: the first and last steps of track identification. fpcalc never
+ * fingerprint: the first two steps of track identification. fpcalc never
  * runs here. An `acoustid_id` tag names a fingerprint cluster, not a recording,
  * so it is never a recordingMbid.
  */
@@ -46,7 +46,12 @@ export interface TrackIdentification {
     /** The matched recording MBID (only reachable via `answered`). */
     recordingMbid: string;
     artistMbid?: string;
-    releaseGroupMbid?: string;
+    /** For an AcoustID answer: every album AcoustID lists for the recording. */
+    releaseGroups?: { id: string; title: string }[];
+    /** For an AcoustID answer: the recordings it would also accept, best first. */
+    candidates?: string[];
+    /** For an AcoustID answer: false when only the length, not the title, is the track's. */
+    titleAgrees?: boolean;
     /** The fingerprint behind the answer, when one was available. */
     fingerprint?: string;
 }
@@ -64,7 +69,9 @@ function toIdentification(
     return {
         recordingMbid: result.recordingMbid,
         artistMbid: result.artistMbid || undefined,
-        releaseGroupMbid: result.releaseGroupMbid || undefined,
+        releaseGroups: result.releaseGroups,
+        candidates: result.candidates,
+        titleAgrees: result.titleAgrees,
     };
 }
 
@@ -114,8 +121,9 @@ export async function readIdentityTags(
 }
 
 /**
- * AcoustID for a track the tags and name search could not identify, using the
- * tagged or stored (`Track.acoustidFingerprint`) fingerprint. `permanent` means
+ * AcoustID for a track whose tags do not name its recording, using the tagged or
+ * stored (`Track.acoustidFingerprint`) fingerprint; a reply saved by
+ * `prefetchAcoustidReplies` answers without a request. `permanent` means
  * no fingerprint or no client key; the stage gate normally keeps the question
  * open until a fingerprint exists.
  */
@@ -226,4 +234,42 @@ export async function persistAcoustidFingerprint(
         where: { id: trackId },
         data: { acoustidFingerprint: fingerprint },
     });
+}
+
+/** Tracks whose tags name their recording: never asked about, and their files not read again. */
+const namedByTags = new Set<string>();
+/** Tracks whose reply a batch saved, under whichever fingerprint the file gave: not read again. */
+const answeredInBatch = new Set<string>();
+
+/**
+ * Ask AcoustID about a batch of songs before their identification jobs run, so each job
+ * answers from the saved reply instead of a request of its own. Uses the fingerprint and
+ * length `identifyTrackByAcoustid` will use (the file's fingerprint tag, else the stored
+ * one). A song already answered, or whose tags name its recording, is skipped without
+ * reading its file again. Returns how many were asked.
+ */
+export async function prefetchAcoustidReplies(
+    tracks: Array<IdentifiableTrack & { acoustidFingerprint: string | null }>
+): Promise<number> {
+    // A paused source, no key or a batch that just failed: nothing is read or asked.
+    if (!(await acoustidService.mayAskInBatches())) return 0;
+    const entries: { trackId: string; duration: number; fingerprint: string }[] = [];
+    for (const track of tracks) {
+        if (namedByTags.has(track.id) || answeredInBatch.has(track.id)) continue;
+        if (track.acoustidFingerprint && (await acoustidService.hasSavedReply(track.duration, track.acoustidFingerprint))) continue;
+        const tags = await readIdentityTags(track);
+        if (tags?.recordingMbid) {
+            namedByTags.add(track.id);
+            continue;
+        }
+        const fingerprint = tags?.fingerprint ?? track.acoustidFingerprint;
+        const duration = tags ? tags.duration : track.duration;
+        if (fingerprint && duration > 0) entries.push({ trackId: track.id, duration, fingerprint });
+    }
+    if (entries.length === 0) return 0;
+    const asked = await acoustidService.lookupMany(entries);
+    for (const entry of entries) {
+        if (await acoustidService.hasSavedReply(entry.duration, entry.fingerprint)) answeredInBatch.add(entry.trackId);
+    }
+    return asked;
 }

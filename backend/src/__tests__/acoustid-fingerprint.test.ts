@@ -300,7 +300,7 @@ describe("AcoustID: the fingerprint is the fingerprint stage's stored answer", (
         expect(record.evidence.reason).toBe(
             "no source has a recording that is this track",
         );
-        expect(record.evidence.asked).toEqual(["album-catalogue", "mb-search", "acoustid"]);
+        expect(record.evidence.asked).toEqual(["acoustid", "album-catalogue", "mb-search"]);
     });
 
     it("no stored fingerprint anywhere: the step refuses — no fpcalc, no fake answer", async () => {
@@ -340,10 +340,10 @@ describe("AcoustID: a matched recording is stored in Track.recordingMbid", () =>
             answeredWith({
                 recordingMbid: RECORDING,
                 artistMbid: "artist-mbid",
-                releaseGroupMbid: "rg-mbid",
+                releaseGroups: [{ id: "rg-mbid", title: "Test Album" }],
+                candidates: [RECORDING],
                 title: "Test Track",
                 artist: "Test Artist",
-                album: "Test Album",
             }),
         );
         mockGetRecordingIsrc.mockResolvedValue(answeredWith("USX112345678"));
@@ -439,7 +439,7 @@ describe("AcoustID: the identification order", () => {
         expect(record.source).toBe("musicbrainz");
     });
 
-    it("asks AcoustID only for the track the name search could not answer", async () => {
+    it("asks AcoustID first, with the tag's fingerprint, and skips the name search once it answers", async () => {
         mockParseFile.mockResolvedValue({
             common: { acoustid_fingerprint: TAGGED_FINGERPRINT },
             format: { duration: 200 },
@@ -449,20 +449,20 @@ describe("AcoustID: the identification order", () => {
             answeredWith({
                 recordingMbid: RECORDING,
                 artistMbid: "artist-mbid",
-                releaseGroupMbid: "rg-mbid",
+                releaseGroups: [{ id: "rg-mbid", title: "Test Album" }],
+                candidates: [RECORDING],
                 title: "Test Track",
                 artist: "Test Artist",
-                album: "Test Album",
             }),
         );
         await putTrack({ isrc: null });
 
         await enrichSingleTrack(id("t1"));
 
-        // Tags had no recording id → search ran and missed → only now the
-        // fingerprint path runs, and it uses the tag's fingerprint instead
-        // of running fpcalc again.
-        expect(mockSearchRecording).toHaveBeenCalled();
+        // Tags had no recording id → AcoustID is asked first, with the tag's
+        // fingerprint instead of running fpcalc again, and its answer ends the
+        // search for the recording.
+        expect(mockSearchRecording).not.toHaveBeenCalled();
         expect(mockFingerprintFile).not.toHaveBeenCalled();
         expect(mockLookup).toHaveBeenCalledWith(200, TAGGED_FINGERPRINT, { title: "Test Track" });
 

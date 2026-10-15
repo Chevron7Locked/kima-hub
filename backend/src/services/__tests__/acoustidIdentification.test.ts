@@ -23,11 +23,19 @@ jest.mock("../fpcalc", () => ({
 }));
 
 const mockLookup = jest.fn();
+const mockLookupMany = jest.fn().mockResolvedValue(0);
+const mockHasSavedReply = jest.fn().mockResolvedValue(false);
+const mockMayAskInBatches = jest.fn().mockResolvedValue(true);
 jest.mock("../acoustidService", () => ({
-    acoustidService: { lookup: (...a: unknown[]) => mockLookup(...a) },
+    acoustidService: {
+        lookup: (...a: unknown[]) => mockLookup(...a),
+        lookupMany: (...a: unknown[]) => mockLookupMany(...a),
+        hasSavedReply: (...a: unknown[]) => mockHasSavedReply(...a),
+        mayAskInBatches: (...a: unknown[]) => mockMayAskInBatches(...a),
+    },
 }));
 
-import { identifyTrackByAcoustid } from "../acoustidIdentification";
+import { identifyTrackByAcoustid, prefetchAcoustidReplies } from "../acoustidIdentification";
 import { answered } from "../../utils/outcome";
 
 const RECORDING = "8f3471b5-7e6a-48da-86a9-c1c07a0f47ae";
@@ -45,10 +53,10 @@ beforeEach(() => {
             {
                 recordingMbid: RECORDING,
                 artistMbid: "",
-                releaseGroupMbid: "",
+                releaseGroups: [],
+                candidates: [RECORDING],
                 title: "Song",
                 artist: "",
-                album: "",
             },
             { score: 0.9 },
         ),
@@ -176,5 +184,72 @@ describe("identifyTrackByAcoustid: the stored fingerprint", () => {
         if (out.kind === "transient") {
             expect(out.error.message).toBe("ECONNREFUSED");
         }
+    });
+});
+
+describe("prefetchAcoustidReplies: what the batch asks about", () => {
+    it("asks with the file's fingerprint tag, else the stored fingerprint, and skips files that name their recording", async () => {
+        mockParseFile.mockImplementation(async (file: string) =>
+            file.endsWith("tagged.flac")
+                ? tags({ musicbrainz_recordingid: RECORDING })
+                : file.endsWith("own-fp.flac")
+                  ? tags({ acoustid_fingerprint: "TAG-FP" })
+                  : tags({}),
+        );
+
+        await prefetchAcoustidReplies([
+            { ...track("a/tagged.flac"), id: "a-tagged", acoustidFingerprint: "STORED-1" },
+            { ...track("a/own-fp.flac"), id: "a-own-fp", acoustidFingerprint: "STORED-2" },
+            { ...track("a/plain.flac"), id: "a-plain", acoustidFingerprint: "STORED-3" },
+            { ...track("a/none.flac"), id: "a-none", acoustidFingerprint: null },
+        ]);
+
+        expect(mockLookupMany).toHaveBeenCalledTimes(1);
+        expect(mockLookupMany).toHaveBeenCalledWith([
+            { trackId: "a-own-fp", duration: 200, fingerprint: "TAG-FP" },
+            { trackId: "a-plain", duration: 200, fingerprint: "STORED-3" },
+        ]);
+    });
+
+    it("never reads the file of a song already answered, or of one whose tags named its recording before", async () => {
+        mockHasSavedReply.mockImplementation(async (_d: number, fp: string) => fp === "STORED-SAVED");
+        mockParseFile.mockImplementation(async (file: string) =>
+            file.endsWith("named.flac") ? tags({ musicbrainz_recordingid: RECORDING }) : tags({}),
+        );
+        const named = { ...track("b/named.flac"), id: "named", acoustidFingerprint: "STORED-N" };
+
+        await prefetchAcoustidReplies([{ ...track("b/saved.flac"), id: "saved", acoustidFingerprint: "STORED-SAVED" }, named]);
+        await prefetchAcoustidReplies([named]);
+
+        const opened = mockParseFile.mock.calls.map(([file]) => String(file));
+        expect(opened.filter((f) => f.endsWith("saved.flac"))).toHaveLength(0);
+        expect(opened.filter((f) => f.endsWith("named.flac"))).toHaveLength(1);
+        expect(mockLookupMany).not.toHaveBeenCalled();
+    });
+
+    it("never reads a file again once a batch saved its reply, even under a fingerprint other than the stored one", async () => {
+        mockParseFile.mockResolvedValue(tags({ acoustid_fingerprint: "TAG-FP-D" }));
+        mockHasSavedReply.mockImplementation(async (_d: number, fp: string) => fp === "TAG-FP-D" && mockLookupMany.mock.calls.length > 0);
+        mockLookupMany.mockResolvedValue(1);
+        const song = { ...track("d/own-tag.flac"), id: "d-own-tag", acoustidFingerprint: "STORED-D" };
+
+        await prefetchAcoustidReplies([song]);
+        await prefetchAcoustidReplies([song]);
+
+        expect(mockLookupMany).toHaveBeenCalledTimes(1);
+        expect(mockParseFile).toHaveBeenCalledTimes(1);
+    });
+
+    it("reads no file at all while AcoustID cannot be asked in batches (paused, no key, a batch just failed)", async () => {
+        mockMayAskInBatches.mockResolvedValueOnce(false);
+
+        expect(await prefetchAcoustidReplies([{ ...track("c/any.flac"), id: "c-any", acoustidFingerprint: "STORED-C" }])).toBe(0);
+        expect(mockParseFile).not.toHaveBeenCalled();
+        expect(mockLookupMany).not.toHaveBeenCalled();
+    });
+
+    it("asks nothing when no song has a fingerprint to ask with", async () => {
+        expect(await prefetchAcoustidReplies([{ ...track("a/none.flac"), acoustidFingerprint: null }])).toBe(0);
+        expect(mockLookupMany).not.toHaveBeenCalled();
     });
 });

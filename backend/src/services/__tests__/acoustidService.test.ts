@@ -95,10 +95,12 @@ describe("acoustidService.lookup", () => {
             expect(res.value).toEqual({
                 recordingMbid: RECORDING,
                 artistMbid: ARTIST,
-                releaseGroupMbid: RG,
+                releaseGroups: [{ id: RG, title: "Album" }],
+                candidates: [RECORDING],
+                // No title was given to compare, so only the length agreed.
+                titleAgrees: false,
                 title: "Song",
                 artist: "Artist",
-                album: "Album",
             });
             expect(res.evidence).toMatchObject({ score: 0.92 });
         }
@@ -113,7 +115,7 @@ describe("acoustidService.lookup", () => {
         );
         const res = await acoustidService.lookup(200, "fp");
         if (res.kind === "answered") {
-            expect(res.value.releaseGroupMbid).toBe(RG);
+            expect(res.value.releaseGroups).toEqual([{ id: RG, title: "Album" }]);
         } else {
             throw new Error(`expected answered, got ${res.kind}`);
         }
