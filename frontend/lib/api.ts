@@ -136,17 +136,31 @@ export class NetworkError extends Error {
 }
 
 // Leaving the page (a reload, a typed address) makes the browser cancel every open request, just after pagehide.
-// Those cancellations are not failures: see the fetch in ApiClient.request.
+// Those cancellations are not failures: see the fetch in ApiClient.request. A page that comes back shows itself
+// with pageshow, or, for a phone or installed app resumed from the background, by becoming visible again.
 let leavingPage = false;
+const isBack = (e: Event) => e.type === "pageshow" || document.visibilityState === "visible";
 if (typeof window !== "undefined") {
     window.addEventListener("pagehide", () => {
         leavingPage = true;
     });
-    window.addEventListener("pageshow", () => {
-        leavingPage = false;
-    });
+    const back = (e: Event) => {
+        if (isBack(e)) leavingPage = false;
+    };
+    window.addEventListener("pageshow", back);
+    document.addEventListener("visibilitychange", back);
 }
-const pageShown = () => new Promise<void>((shown) => window.addEventListener("pageshow", () => shown(), { once: true }));
+const pageBack = () =>
+    new Promise<void>((resume) => {
+        const onEvent = (e: Event) => {
+            if (!isBack(e)) return;
+            window.removeEventListener("pageshow", onEvent);
+            document.removeEventListener("visibilitychange", onEvent);
+            resume();
+        };
+        window.addEventListener("pageshow", onEvent);
+        document.addEventListener("visibilitychange", onEvent);
+    });
 
 // Enrichment engine contract (mirrors backend/src/services/enrichmentState).
 interface EnrichmentState {
@@ -498,9 +512,9 @@ class ApiClient {
         } catch (err) {
             if (!leavingPage) throw err;
             // Cancelled because the page is being left: nothing will read the answer, unless the page comes back
-            // from the back/forward cache. Then a read is asked again; anything else reports the cancellation,
-            // as it may already have reached the server.
-            await pageShown();
+            // (the back/forward cache, a resumed app). Then a read is asked again; anything else reports the
+            // cancellation, as it may already have reached the server.
+            await pageBack();
             if ((fetchOptions.method ?? "GET").toUpperCase() === "GET") return this.request<T>(endpoint, options);
             throw err;
         }

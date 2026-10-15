@@ -46,3 +46,16 @@ it("does not reject a write cancelled by leaving the page, and reports it withou
     await expect(write).rejects.toThrow("Failed to fetch");
     expect(fetchMock).toHaveBeenCalledTimes(1);
 });
+
+it("treats an app resumed from the background (visible again, no pageshow) as back", async () => {
+    const fetchMock = vi.fn().mockImplementationOnce(cancelled).mockResolvedValueOnce(ok({ resumed: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    window.dispatchEvent(new Event("pagehide"));
+    const read = api.request("/podcasts/x/similar");
+    expect(await settledSoon(read)).toBe(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+    await expect(read).resolves.toEqual({ resumed: true });
+    // And the page is no longer treated as leaving: a later real failure rejects.
+    vi.stubGlobal("fetch", vi.fn(cancelled));
+    await expect(api.request("/podcasts/x/similar")).rejects.toThrow("Failed to fetch");
+});
