@@ -22,7 +22,7 @@ interface SoulseekBrowserProps {
     downloadingFiles: Set<string>;
     onDownload: (result: SoulseekResult) => void;
     onBulkDownload: (results: SoulseekResult[]) => void;
-    canAcquire?: boolean;
+    canAcquire: boolean;
 }
 
 const PAGE_SIZE = 100;
@@ -60,7 +60,7 @@ export function SoulseekBrowser({
     downloadingFiles,
     onDownload,
     onBulkDownload,
-    canAcquire = true,
+    canAcquire,
 }: SoulseekBrowserProps) {
     const [formatFilters, setFormatFilters] = useState<Set<SoulseekFormatFilter>>(new Set(["all"]));
     const [sortField, setSortField] = useState<SoulseekSortField>("quality");
@@ -284,7 +284,7 @@ export function SoulseekBrowser({
                         variant="primary"
                         onClick={handleBulkDownloadClick}
                         disabled={!canAcquire}
-                        title={canAcquire ? undefined : "Downloads are operator-only — an admin can allow members in Settings"}
+                        title={canAcquire ? undefined : "downloads are operator-only — an admin can allow members in settings"}
                         className="ml-auto"
                     >
                         <Download className="w-4 h-4" />
@@ -452,8 +452,8 @@ function ResultRow({
                 <button
                     onClick={() => onDownload(result)}
                     disabled={isDownloading || !canAcquire}
-                    title={canAcquire ? undefined : "Downloads are operator-only — an admin can allow members in Settings"}
-                    aria-label={canAcquire ? "Download from Soulseek" : "Downloads are operator-only"}
+                    title={canAcquire ? undefined : "downloads are operator-only — an admin can allow members in settings"}
+                    aria-label={canAcquire ? "download from soulseek" : "downloads are operator-only"}
                     className={cn(
                         "p-1.5 rounded-full transition-colors",
                         isDownloading

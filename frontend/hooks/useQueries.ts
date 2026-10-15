@@ -371,6 +371,19 @@ export function usePodcastQuery(
     };
 }
 
+/**
+ * What any signed-in user may know about the server: its public address, and whether they may start downloads.
+ * Until the server answers, downloads read as not allowed: the acquire routes are operator-only by default.
+ */
+export function usePublicConfig() {
+    const { data } = useQuery({
+        queryKey: ["system", "public-config"],
+        queryFn: () => api.getPublicConfig(),
+        staleTime: 5 * 60 * 1000,
+    });
+    return { publicUrl: data?.publicUrl ?? "", canAcquire: data?.canAcquire === true, loaded: data !== undefined };
+}
+
 export function useTopPodcastsQuery(limit: number = 20) {
     return useQuery({
         queryKey: queryKeys.topPodcasts(limit),

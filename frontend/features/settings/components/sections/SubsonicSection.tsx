@@ -8,6 +8,7 @@ import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
 import { Button } from "@/components/ui/Button";
 import { copyText } from "@/lib/clipboard";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { usePublicConfig } from "@/hooks/useQueries";
 
 interface ApiKey {
     id: string;
@@ -26,19 +27,10 @@ export function SubsonicSection() {
     const [status, setStatus] = useState<StatusType>("idle");
     const [message, setMessage] = useState("");
     const [revoking, setRevoking] = useState<string | null>(null);
-    const [serverUrl, setServerUrl] = useState("");
+    const config = usePublicConfig();
+    const serverUrl = config.publicUrl || (config.loaded && typeof window !== "undefined" ? window.location.origin : "");
 
     useEffect(() => {
-        api.get<{ publicUrl: string }>("/system-settings/public-config")
-            .then((data) => {
-                setServerUrl(data.publicUrl || (typeof window !== "undefined" ? window.location.origin : ""));
-            })
-            .catch(() => {
-                if (typeof window !== "undefined") {
-                    setServerUrl(window.location.origin);
-                }
-            });
-
         loadApiKeys();
     }, []);
 

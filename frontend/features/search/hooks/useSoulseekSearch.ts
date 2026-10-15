@@ -5,6 +5,7 @@ import { notify } from "@/lib/notify";
 import { searchResultStore } from "@/lib/search-result-store";
 import type { SoulseekResult } from "../types";
 import { openActivityPanel } from "@/hooks/useActivityPanel";
+import { usePublicConfig } from "@/hooks/useQueries";
 
 interface UseSoulseekSearchProps {
     query: string;
@@ -32,23 +33,7 @@ export function useSoulseekSearch({
     const [downloadingFiles, setDownloadingFiles] = useState<Set<string>>(new Set());
     const [isComplete, setIsComplete] = useState(false);
     const [hasActiveSearch, setHasActiveSearch] = useState(false);
-    // False until the server answers: the acquire doors are operator-only by
-    // default, so a button is only offered once the server says it can work.
-    const [canAcquire, setCanAcquire] = useState(false);
-
-    useEffect(() => {
-        let cancelled = false;
-        api.getPublicConfig()
-            .then((c) => {
-                if (!cancelled) setCanAcquire(!!c?.canAcquire);
-            })
-            .catch(() => {
-                if (!cancelled) setCanAcquire(false);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, []);
+    const { canAcquire } = usePublicConfig();
 
     const searchIdRef = useRef<string | null>(null);
 
