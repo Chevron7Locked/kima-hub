@@ -3,9 +3,19 @@
  * every hop pass the same check. A real local server plays the host; 127.0.0.1 and localhost are internal addresses.
  */
 jest.mock("dns/promises", () => {
-    // allowed.test stands for a public host; everything else resolves for real.
+    // allowed.test and rebind.test stand for public hosts when checked; everything else resolves for real.
     const actual = jest.requireActual("dns/promises");
-    return { ...actual, lookup: (host: string, ...rest: unknown[]) => (host === "allowed.test" ? Promise.resolve({ address: "93.184.216.34", family: 4 }) : actual.lookup(host, ...rest)) };
+    const publicHost = (host: string) => host === "allowed.test" || host === "rebind.test";
+    return { ...actual, lookup: (host: string, ...rest: unknown[]) => (publicHost(host) ? Promise.resolve({ address: "93.184.216.34", family: 4 }) : actual.lookup(host, ...rest)) };
+});
+jest.mock("dns", () => {
+    // ...but rebind.test answers this machine when the connection is made: a name that changes its answer.
+    const actual = jest.requireActual("dns");
+    const lookup = (host: string, options: any, callback: any) =>
+        host === "rebind.test"
+            ? (options?.all ? callback(null, [{ address: "127.0.0.1", family: 4 }]) : callback(null, "127.0.0.1", 4))
+            : actual.lookup(host, options, callback);
+    return { ...actual, __esModule: true, default: { ...actual, lookup }, lookup };
 });
 
 import http from "http";
@@ -92,6 +102,11 @@ describe("fetchChecked", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it("refuses a name that passes the check, then answers an internal address when the connection is made", async () => {
+        await expect(fetchChecked(`http://rebind.test:${port}/secret`)).rejects.toThrow(/rebind\.test is an internal address/);
+        expect(reachedSecret).toBe(0);
+    });
+
     it("follows a redirect between allowed addresses", async () => {
         const fetchMock = jest
             .fn()
@@ -112,6 +127,9 @@ describe("which addresses are internal", () => {
         ["::1", true], ["::", true], ["::ffff:7f00:1", true], ["::ffff:127.0.0.1", true], ["::ffff:a9fe:a9fe", true],
         ["::7f00:1", true], ["fd12:3456::1", true], ["fe80::1", true], ["ff02::1", true],
         ["64:ff9b::7f00:1", true], ["64:ff9b::808:808", false], ["2606:4700:4700::1111", false], ["not-an-ip", true],
+        ["2002:7f00:1::", true], ["2002:a9fe:a9fe::1", true], ["2002:808:808::", false], ["2001:0:4136:e378:8000:63bf:3fff:fdd2", true],
+        ["::ffff:0:7f00:1", true], ["::ffff:0:127.0.0.1", true], ["fec0::1", true], ["192.0.0.1", true], ["198.18.0.1", true],
+        ["198.19.255.1", true], ["198.20.0.1", false], ["192.0.2.10", true],
     ])("%s → %s", (ip, internal) => {
         expect(isBlockedIp(ip)).toBe(internal);
     });

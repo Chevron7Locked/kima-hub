@@ -3,6 +3,7 @@ import { lookup } from "dns/promises";
 import http from "http";
 import https from "https";
 import net from "net";
+import { Agent } from "undici";
 import { logger } from "./logger";
 
 /**
@@ -13,12 +14,14 @@ import { logger } from "./logger";
 const BLOCKED = new net.BlockList();
 for (const [range, bits] of [
   ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16],
-  ["172.16.0.0", 12], ["192.168.0.0", 16], ["224.0.0.0", 4], ["240.0.0.0", 4],
+  ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.0.2.0", 24], ["192.88.99.0", 24], ["192.168.0.0", 16],
+  ["198.18.0.0", 15], ["198.51.100.0", 24], ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4],
 ] as const) BLOCKED.addSubnet(range, bits, "ipv4");
 for (const [range, bits] of [
   ["::", 96], // unspecified, loopback and the old IPv4-compatible form (::a.b.c.d)
   ["64:ff9b:1::", 48], // local-use NAT64
-  ["fc00::", 7], ["fe80::", 10], ["ff00::", 8],
+  ["2001::", 32], // Teredo, whose IPv4 endpoints are hidden in the address
+  ["fc00::", 7], ["fe80::", 10], ["fec0::", 10], ["ff00::", 8],
 ] as const) BLOCKED.addSubnet(range, bits, "ipv6");
 
 /** The eight 16-bit groups of a valid IPv6 address. */
@@ -41,11 +44,13 @@ export function isBlockedIp(ip: string): boolean {
   const family = net.isIP(ip);
   if (family === 4) return BLOCKED.check(ip, "ipv4");
   if (family !== 6) return true;
-  // The well-known NAT64 prefix reaches the IPv4 address in its last 32 bits; judge that address.
+  // Forms that carry an IPv4 address reach that address, so it is the one judged: the well-known NAT64 prefix and
+  // the IPv4-translated form (::ffff:0:a.b.c.d) in their last 32 bits, 6to4 (2002::/16) in the 32 after the prefix.
   const g = ipv6Groups(ip);
-  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) {
-    return BLOCKED.check([g[6] >> 8, g[6] & 255, g[7] >> 8, g[7] & 255].join("."), "ipv4");
-  }
+  const v4 = (hi: number, lo: number) => BLOCKED.check([hi >> 8, hi & 255, lo >> 8, lo & 255].join("."), "ipv4");
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return v4(g[6], g[7]);
+  if (g.slice(0, 4).every((x) => x === 0) && g[4] === 0xffff && g[5] === 0) return v4(g[6], g[7]);
+  if (g[0] === 0x2002) return v4(g[1], g[2]);
   return BLOCKED.check(ip, "ipv6");
 }
 
@@ -98,10 +103,15 @@ export class BlockedAddressError extends Error {
   name = "BlockedAddressError";
 }
 
-/** Whether a fetch failed because the guard refused an address, however the HTTP client wrapped the refusal. */
+/**
+ * Whether a fetch failed because the guard refused an address, however the HTTP client wrapped the refusal: axios
+ * keeps the error as a cause; undici (Node's fetch) re-creates it as a plain error named by its message.
+ */
 export function isBlockedFetch(error: unknown): boolean {
   for (let e = error, depth = 0; e && depth < 5; e = (e as { cause?: unknown }).cause, depth++) {
     if (e instanceof BlockedAddressError) return true;
+    const message = (e as { message?: unknown }).message;
+    if (typeof message === "string" && message.startsWith("BlockedAddressError: ")) return true;
   }
   return false;
 }
@@ -134,17 +144,26 @@ export const guardedAxios = {
   },
 };
 
+/** Node's fetch connecting only through guardedLookup, so a name that answers differently after the check is refused. */
+const guardedDispatcher = new Agent({ connect: { lookup: guardedLookup } });
+
 /**
  * Node's fetch for an address that came from a feed, a user or a metadata source: follows up to five redirects
- * itself and checks each address first; past five, the last redirect is the answer (not ok, so callers treat it as
- * a failed fetch). Unlike guardedAxios it cannot check the connection itself.
+ * itself and checks each address first, and every connection's address is checked again as it is made; past five
+ * redirects, the last redirect is the answer (not ok, so callers treat it as a failed fetch).
  */
 export async function fetchChecked(url: string, init: RequestInit = {}, maxRedirects = 5): Promise<Response> {
   let current = url;
   for (let hop = 0; ; hop++) {
     const blocked = await validateUrlForFetch(current);
     if (blocked) throw new BlockedAddressError(`Blocked: ${blocked}`);
-    const response = await fetch(current, { ...init, redirect: "manual" });
+    let response: Response;
+    try {
+      response = await fetch(current, { ...init, redirect: "manual", dispatcher: guardedDispatcher } as unknown as RequestInit);
+    } catch (error) {
+      if (isBlockedFetch(error)) throw new BlockedAddressError(`Blocked: ${new URL(current).hostname} is an internal address`);
+      throw error;
+    }
     const location = response.headers.get("location");
     if (response.status < 300 || response.status >= 400 || !location) return response;
     if (hop >= maxRedirects) return response;
