@@ -18,6 +18,23 @@ interface FollowedSearchOptions extends SearchOptions {
     userId: string;
 }
 
+/**
+ * Drop one person's cached searches. What their shows and episodes searches find depends on the shows they follow, so
+ * following or removing a show must not leave an older answer cached.
+ */
+export async function forgetSearchesOf(userId: string): Promise<void> {
+    const keys: string[] = [];
+    for (const prefix of [`search:all:${userId}:`, `search:podcasts:${userId}:`, `search:episodes:${userId}:`]) {
+        let cursor = "0";
+        do {
+            const [next, batch] = await redisClient.scan(cursor, "MATCH", `${prefix}*`, "COUNT", 500);
+            cursor = next;
+            keys.push(...batch);
+        } while (cursor !== "0");
+    }
+    if (keys.length > 0) await redisClient.del(...keys);
+}
+
 export interface ArtistSearchResult {
     id: string;
     name: string;

@@ -1,6 +1,7 @@
 import { Router, Response } from "express";
 import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
+import { forgetSearchesOf } from "../services/search";
 import { upstreamFailure } from "../utils/upstream";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { prisma, Prisma } from "../utils/db";
@@ -667,16 +668,13 @@ router.get("/:id/episodes", requireAuth, async (req, res) => {
     }
 });
 
-/**
- * POST /podcasts/subscribe
- * Subscribe to a podcast by RSS feed URL or iTunes ID
- */
 /** Follow a stored show; following it twice is following it once. */
 async function follow(userId: string, podcast: { id: string; title: string }) {
     const { count } = await prisma.podcastSubscription.createMany({
         data: [{ userId, podcastId: podcast.id }],
         skipDuplicates: true,
     });
+    if (count > 0) await forgetSearches(userId);
     return {
         success: true,
         podcast: { id: podcast.id, title: podcast.title },
@@ -702,6 +700,15 @@ async function appleIdFor(candidate: string | null, feedUrl: string): Promise<st
     }
 }
 
+/** A follow or removal must not leave a search answer from before it cached; a cache failure never fails either. */
+async function forgetSearches(userId: string) {
+    await forgetSearchesOf(userId).catch((error) => logger.warn(`[PODCAST] Could not clear cached searches: ${error.message}`));
+}
+
+/**
+ * POST /podcasts/subscribe
+ * Subscribe to a podcast by RSS feed URL or iTunes ID
+ */
 router.post("/subscribe", requireAuth, async (req, res) => {
     try {
         const { feedUrl, itunesId } = req.body;
@@ -881,6 +888,7 @@ router.delete("/:id/unsubscribe", requireAuth, async (req, res) => {
         });
 
         logger.debug(`   Unsubscribed successfully`);
+        await forgetSearches(req.user!.id);
 
         res.json({
             success: true,
