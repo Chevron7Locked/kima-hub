@@ -215,13 +215,18 @@ const episodeCover = (e: { id: string; localCoverPath: string | null; imageUrl: 
     e.localCoverPath ? `/podcasts/episodes/${e.id}/cover` : e.imageUrl;
 
 /**
- * GET /podcasts/listening — across every followed show: episodes in progress (most recently played first) and
- * the newest episodes not yet started.
+ * GET /podcasts/listening — across every followed show: episodes in progress (most recently played first) and,
+ * like a podcast app's "up next", each show's newest episode while it is still unplayed, newest first.
  */
 router.get("/listening", requireAuth, async (req, res) => {
     const userId = req.user!.id;
     const followed = { podcast: { subscriptions: { some: { userId } } } };
     try {
+        const newestPerShow = await prisma.$queryRaw<{ id: string }[]>`
+            SELECT DISTINCT ON (e."podcastId") e.id
+            FROM "PodcastEpisode" e
+            JOIN "PodcastSubscription" s ON s."podcastId" = e."podcastId" AND s."userId" = ${userId}
+            ORDER BY e."podcastId", e."publishedAt" DESC, e.id`;
         const [inProgress, newEpisodes] = await Promise.all([
             prisma.podcastProgress.findMany({
                 where: { userId, isFinished: false, currentTime: { gt: 0 }, episode: followed },
@@ -230,7 +235,7 @@ router.get("/listening", requireAuth, async (req, res) => {
                 include: { episode: { include: { podcast: true } } },
             }),
             prisma.podcastEpisode.findMany({
-                where: { ...followed, progress: { none: { userId } } },
+                where: { id: { in: newestPerShow.map((r) => r.id) }, progress: { none: { userId } } },
                 orderBy: { publishedAt: "desc" },
                 take: 20,
                 include: { podcast: true },
