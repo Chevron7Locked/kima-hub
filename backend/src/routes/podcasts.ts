@@ -2,7 +2,7 @@ import { Router, Response } from "express";
 import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
 import { forgetSearchesOf } from "../services/search";
-import { upstreamFailure } from "../utils/upstream";
+import { upstreamFailure, upstreamUnreachable } from "../utils/upstream";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { prisma, Prisma } from "../utils/db";
 import { rssParserService } from "../services/rss-parser";
@@ -682,9 +682,16 @@ async function follow(userId: string, podcast: { id: string; title: string }) {
     };
 }
 
-/** The same feed address, as Apple and a feed write it (scheme, letter case and a trailing slash aside). */
+/** The same feed address, as Apple and a feed write it: scheme, the host's letter case and a trailing slash aside. */
 const sameFeed = (a: string, b: string) => {
-    const key = (url: string) => url.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "").toLowerCase();
+    const key = (url: string) => {
+        try {
+            const u = new URL(url.trim());
+            return `${u.host}${u.pathname.replace(/\/+$/, "")}${u.search}`;
+        } catch {
+            return url.trim();
+        }
+    };
     return key(a) === key(b);
 };
 
@@ -824,10 +831,15 @@ router.post("/subscribe", requireAuth, async (req, res) => {
 
         res.json(await follow(userId, podcast));
     } catch (error: any) {
-        // A feed that cannot be fetched or parsed is the feed being
-        // unavailable, not the server failing. The status-code rule: an
-        // upstream 4xx surfaces as a 4xx here, never a 500 — a dead URL and a
-        // broken database must not look the same to the client.
+        // A feed or Apple failing is never the server failing (utils/upstream): nothing there → 404; the host or Apple
+        // not answering → 502; a host that answered with something that is not a feed → 422.
+        const failure = upstreamFailure(error);
+        if (failure === "missing") {
+            return res.status(404).json({ error: "Nothing was found at that feed address" });
+        }
+        if (failure === "down" && upstreamUnreachable(error)) {
+            return res.status(502).json({ error: "The show's feed or Apple Podcasts did not answer; try again shortly" });
+        }
         if (
             error instanceof Error &&
             error.message.startsWith("Failed to parse podcast feed")

@@ -33,3 +33,15 @@ export function upstreamFailure(error: unknown): "missing" | "down" | null {
     }
     return upstream ? "down" : null;
 }
+
+/** Whether the upstream never gave a usable answer at all: unreachable, timed out, throttled or a 5xx. */
+export function upstreamUnreachable(error: unknown): boolean {
+    for (const e of chain(error)) {
+        if (e instanceof TimeoutError) return true;
+        if (axios.isAxiosError(e)) {
+            const status = e.response?.status;
+            return !status || status >= 500 || status === 429;
+        }
+    }
+    return false;
+}

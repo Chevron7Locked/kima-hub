@@ -43,6 +43,18 @@ beforeAll(async () => {
             res.writeHead(200, { "Content-Type": "application/json" });
             return res.end(JSON.stringify({ resultCount: 1, results: [{ kind: "podcast", collectionId: 555, feedUrl: `${feedBase}/real.xml`, genreIds: ["1495"] }] }));
         }
+        if (req.url === "/down.xml") {
+            res.writeHead(503);
+            return res.end("maintenance");
+        }
+        if (req.url === "/gone.xml") {
+            res.writeHead(404);
+            return res.end("not here");
+        }
+        if (req.url === "/page.xml") {
+            res.writeHead(200, { "Content-Type": "text/html" });
+            return res.end("<html><body>a web page, not a feed</body></html>");
+        }
         res.writeHead(200, { "Content-Type": "application/rss+xml" });
         res.end(FEED);
     });
@@ -109,3 +121,8 @@ it("stores an Apple id only when Apple says it names the feed, so no one can cla
     const stored = await prisma.podcast.findUnique({ where: { id: real.body.podcast.id } });
     expect([stored?.feedUrl, stored?.itunesId]).toEqual([`${feedBase}/real.xml`, "555"]);
 }, 30_000);
+
+it("answers a feed that is not there 404, a host that is down 502, and a page that is not a feed 422", async () => {
+    const follow = (path: string) => request(app).post("/podcasts/subscribe").send({ feedUrl: `${feedBase}${path}` });
+    expect([(await follow("/gone.xml")).status, (await follow("/down.xml")).status, (await follow("/page.xml")).status]).toEqual([404, 502, 422]);
+});
