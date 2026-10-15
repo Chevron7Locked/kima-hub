@@ -127,8 +127,8 @@ describe("/changelog", () => {
         const { api } = await import("@/lib/api");
         const wipe = vi.mocked(api.wipeAndRerunEnrichment);
         wipe.mockClear();
-        let finish: (v: unknown) => void = () => {};
-        wipe.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+        let finish = () => {};
+        wipe.mockImplementationOnce(() => new Promise((resolve) => (finish = () => resolve({ artists: 0, tracks: 0, vectors: 0 }))));
         await render();
         const item = () => Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Wipe and re-run enrichment"));
         const click = async (el: Element | null | undefined) =>
@@ -148,7 +148,7 @@ describe("/changelog", () => {
         await click(run);
         expect(wipe).toHaveBeenCalledTimes(1);
 
-        await act(async () => finish({}));
+        await act(async () => finish());
         expect(container.querySelector('[data-testid="wipe-started"]')).not.toBeNull();
     });
 });
