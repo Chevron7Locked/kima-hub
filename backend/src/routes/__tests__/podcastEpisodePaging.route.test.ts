@@ -66,7 +66,7 @@ describe('podcast episode paging', () => {
     it('asks the database for a bounded page, not every episode', async () => {
         (prisma.podcast.findUnique as jest.Mock).mockResolvedValue({
             id: 'p1', title: 'The Daily', author: 'NYT', description: '',
-            imageUrl: null, feedUrl: 'https://x/rss', episodes: episodes(50),
+            imageUrl: null, itunesId: null, categoryIds: [], feedUrl: 'https://x/rss', episodes: episodes(50),
         });
 
         await request(app).get('/podcasts/p1');
@@ -80,7 +80,7 @@ describe('podcast episode paging', () => {
     it('reports the true total so a client knows there is more', async () => {
         (prisma.podcast.findUnique as jest.Mock).mockResolvedValue({
             id: 'p1', title: 'The Daily', author: 'NYT', description: '',
-            imageUrl: null, feedUrl: 'https://x/rss', episodes: episodes(50),
+            imageUrl: null, itunesId: null, categoryIds: [], feedUrl: 'https://x/rss', episodes: episodes(50),
         });
 
         const res = await request(app).get('/podcasts/p1');
@@ -95,7 +95,7 @@ describe('podcast episode paging', () => {
     it('clamps an oversized limit instead of rejecting it', async () => {
         (prisma.podcast.findUnique as jest.Mock).mockResolvedValue({
             id: 'p1', title: 'x', author: '', description: '',
-            imageUrl: null, feedUrl: '', episodes: episodes(200),
+            imageUrl: null, itunesId: null, categoryIds: [], feedUrl: '', episodes: episodes(200),
         });
 
         const res = await request(app).get('/podcasts/p1?limit=99999');
@@ -108,7 +108,7 @@ describe('podcast episode paging', () => {
     it('falls back to the default for a nonsense limit', async () => {
         (prisma.podcast.findUnique as jest.Mock).mockResolvedValue({
             id: 'p1', title: 'x', author: '', description: '',
-            imageUrl: null, feedUrl: '', episodes: episodes(50),
+            imageUrl: null, itunesId: null, categoryIds: [], feedUrl: '', episodes: episodes(50),
         });
 
         await request(app).get('/podcasts/p1?limit=banana&offset=-5');
@@ -136,7 +136,7 @@ describe('podcast episode paging', () => {
     it('pages from the oldest end when asked, on both endpoints', async () => {
         (prisma.podcast.findUnique as jest.Mock).mockResolvedValue({
             id: 'p1', title: 'x', author: '', description: '',
-            imageUrl: null, feedUrl: '', episodes: episodes(50),
+            imageUrl: null, itunesId: null, categoryIds: [], feedUrl: '', episodes: episodes(50),
         });
         (prisma.podcastEpisode.findMany as jest.Mock).mockResolvedValue(episodes(50));
 
@@ -152,7 +152,7 @@ describe('podcast episode paging', () => {
     it('keeps newest-first as the default order', async () => {
         (prisma.podcast.findUnique as jest.Mock).mockResolvedValue({
             id: 'p1', title: 'x', author: '', description: '',
-            imageUrl: null, feedUrl: '', episodes: episodes(50),
+            imageUrl: null, itunesId: null, categoryIds: [], feedUrl: '', episodes: episodes(50),
         });
 
         await request(app).get('/podcasts/p1');

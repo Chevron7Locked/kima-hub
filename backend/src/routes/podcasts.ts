@@ -197,6 +197,18 @@ router.get("/for-you", requireAuth, async (req, res) => {
     }
 });
 
+/** Category ids with Apple's names; a show page still answers when Apple's list cannot be read. */
+async function namedCategories(ids: number[]): Promise<Array<{ id: number; name: string }>> {
+    if (ids.length === 0) return [];
+    try {
+        const names = new Map((await categoryTree()).map((c) => [c.id, c.name]));
+        return ids.filter((id) => names.has(id)).map((id) => ({ id, name: names.get(id)! }));
+    } catch (err) {
+        logger.warn(`[PODCAST] Category names unavailable: ${(err as Error).message}`);
+        return [];
+    }
+}
+
 const podcastCover = (p: { id: string; localCoverPath: string | null; imageUrl: string | null }) =>
     p.localCoverPath ? `/podcasts/${p.id}/cover` : p.imageUrl;
 const episodeCover = (e: { id: string; localCoverPath: string | null; imageUrl: string | null }) =>
@@ -352,10 +364,7 @@ router.get("/preview/:itunesId", requireAuth, async (req, res) => {
             }
         }
 
-        const names = new Map((await categoryTree()).map((c) => [c.id, c.name]));
-        const categories = show.categoryIds
-            .filter((id) => names.has(id))
-            .map((id) => ({ id, name: names.get(id)! }));
+        const categories = await namedCategories(show.categoryIds);
         res.json({
             itunesId: show.itunesId,
             title: show.title,
@@ -567,6 +576,7 @@ router.get("/:id", requireAuth, async (req, res) => {
                 : null,
         }));
 
+        const categories = await namedCategories(podcast.categoryIds);
         res.json({
             id: podcast.id,
             title: podcast.title,
@@ -574,7 +584,9 @@ router.get("/:id", requireAuth, async (req, res) => {
             description: podcast.description,
             coverUrl: podcast.imageUrl,
             feedUrl: podcast.feedUrl,
-            genres: [],
+            genres: categories.map((c) => c.name),
+            categories,
+            itunesId: podcast.itunesId,
             autoDownloadEpisodes: false,
             // `episodes` keeps its name and stays newest-first, so a client
             // that predates paging still renders -- it sees the first page
