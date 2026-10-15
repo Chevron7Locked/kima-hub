@@ -6,8 +6,7 @@ import { z } from "zod";
 import { staleJobCleanupService } from "../services/staleJobCleanup";
 import { defaultUserSettingsFor } from "../utils/userSettingsDefaults";
 import { encryptField } from "../utils/encryption";
-import { config } from "../config";
-import { publicUserId, setLiveHidden } from "../services/liveListening";
+import { isPublicListener, setLiveHidden } from "../services/liveListening";
 
 const router = Router();
 
@@ -23,11 +22,6 @@ const settingsSchema = z.object({
     listenbrainzToken: z.string().min(1).nullable().optional(),
     shareLiveListening: z.boolean().optional(),
 });
-
-/** Whether this user is the one whose listening KIMA_PUBLIC_VIBE shares. */
-async function isPublicListener(userId: string): Promise<boolean> {
-    return Boolean(config.publicVibe) && userId === (await publicUserId());
-}
 
 /** Strip write-only secrets from a row before it goes to the client. */
 function publicSettings(

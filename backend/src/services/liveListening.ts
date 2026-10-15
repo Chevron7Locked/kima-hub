@@ -81,6 +81,11 @@ export async function publicUserId(): Promise<string | null> {
     return publicUser.id;
 }
 
+/** Whether this user's listening is the public one: the public vibe is on and they are its user. */
+export async function isPublicListener(userId: string): Promise<boolean> {
+    return Boolean(config.publicVibe) && userId === (await publicUserId());
+}
+
 export function subscribeLive(listener: (event: LiveEvent) => void): () => void {
     listeners.add(listener);
     return () => listeners.delete(listener);

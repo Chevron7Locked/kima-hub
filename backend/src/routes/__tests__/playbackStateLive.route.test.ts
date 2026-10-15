@@ -15,8 +15,13 @@ jest.mock("../../middleware/auth", () => ({
         next();
     },
 }));
+// The public listener is "public-user" while the (mocked) config has the public vibe on; the
+// check itself is tested in liveListening.test.ts.
 jest.mock("../../services/liveListening", () => ({
-    publicUserId: jest.fn().mockResolvedValue("public-user"),
+    isPublicListener: jest.fn(
+        async (userId: string) =>
+            Boolean(jest.requireMock<{ config: { publicVibe: unknown } }>("../../config").config.publicVibe) && userId === "public-user",
+    ),
     reportLive: jest.fn(),
 }));
 
@@ -24,7 +29,7 @@ import express from "express";
 import request from "supertest";
 import playbackStateRouter from "../playbackState";
 import { config } from "../../config";
-import { reportLive } from "../../services/liveListening";
+import { isPublicListener, reportLive } from "../../services/liveListening";
 
 const app = express();
 app.use(express.json());
@@ -56,6 +61,13 @@ describe("POST /api/playback-state/live", () => {
     it("answers 404 to any other user", async () => {
         const res = await request(app).post("/api/playback-state/live").set("x-user", "someone").send(BODY);
         expect(res.status).toBe(404);
+        expect(reportLive).not.toHaveBeenCalled();
+    });
+
+    it("a failed lookup is a 500, never the 404 that would silence the player", async () => {
+        (isPublicListener as jest.Mock).mockRejectedValueOnce(new Error("connection terminated"));
+        const res = await request(app).post("/api/playback-state/live").send(BODY);
+        expect(res.status).toBe(500);
         expect(reportLive).not.toHaveBeenCalled();
     });
 

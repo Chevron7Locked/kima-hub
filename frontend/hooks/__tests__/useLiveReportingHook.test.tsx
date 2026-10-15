@@ -40,8 +40,8 @@ class FakeEngine {
     }
 }
 
-function Probe(props: { engine: FakeEngine; track: { id: string; duration: number } | null; queue: LiveQueueEntry[] }) {
-    useLiveReporting(props.engine, props.track, props.queue);
+function Probe(props: { engine: FakeEngine; track: { id: string; duration: number } | null; queue: LiveQueueEntry[]; enabled: boolean }) {
+    useLiveReporting(props.engine, props.track, props.queue, props.enabled);
     return null;
 }
 
@@ -50,8 +50,8 @@ let engine: FakeEngine;
 const A = { id: "ca", duration: 200 };
 const B = { id: "cb", duration: 100 };
 
-function render(track: typeof A | null, queue: LiveQueueEntry[] = []) {
-    act(() => root.render(<Probe engine={engine} track={track} queue={queue} />));
+function render(track: typeof A | null, queue: LiveQueueEntry[] = [], enabled = true) {
+    act(() => root.render(<Probe engine={engine} track={track} queue={queue} enabled={enabled} />));
 }
 
 const sent = () => reportLive.mock.calls.map(([r]) => `${r.status} ${r.trackId} ${r.position}`);
@@ -73,6 +73,24 @@ afterEach(() => {
 const settle = () => act(() => vi.advanceTimersByTime(400));
 
 describe("useLiveReporting", () => {
+    it("sends nothing at all where live reporting is off (any user but the instance's public one)", () => {
+        render(A, [], false);
+        act(() => engine.set("playing", "ca"));
+        act(() => engine.seek(30));
+        act(() => engine.set("paused"));
+        settle();
+        expect(reportLive).not.toHaveBeenCalled();
+    });
+
+    it("reports what is already playing the moment reporting turns on", () => {
+        render(A, [], false);
+        act(() => engine.set("playing", "ca"));
+        expect(reportLive).not.toHaveBeenCalled();
+
+        render(A, [], true);
+        expect(sent()).toEqual(["playing ca 0"]);
+    });
+
     it("says nothing for a restored track that is only paused", () => {
         engine.set("paused", "ca");
         render(A);

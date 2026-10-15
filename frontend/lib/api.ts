@@ -1054,8 +1054,8 @@ class ApiClient {
     }
 
     // System Features
-    async getFeatures(): Promise<{ musicCNN: boolean; vibeEmbeddings: boolean; audiobookshelfEnabled: boolean }> {
-        return this.request<{ musicCNN: boolean; vibeEmbeddings: boolean; audiobookshelfEnabled: boolean }>(
+    async getFeatures(): Promise<{ musicCNN: boolean; vibeEmbeddings: boolean; audiobookshelfEnabled: boolean; liveReporting?: boolean }> {
+        return this.request<{ musicCNN: boolean; vibeEmbeddings: boolean; audiobookshelfEnabled: boolean; liveReporting?: boolean }>(
             "/system/features"
         );
     }
@@ -1495,7 +1495,7 @@ class ApiClient {
         });
     }
 
-    /** Play, pause, seek and up-next changes for the public live trip; 404 for everyone but its user. */
+    /** Play, pause, seek and up-next changes for the public live trip; sent only when `liveReporting` is on. */
     async reportLive(report: {
         status: "playing" | "paused" | "stopped";
         trackId: string;

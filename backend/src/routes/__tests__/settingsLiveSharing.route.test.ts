@@ -25,8 +25,11 @@ jest.mock("../../middleware/auth", () => ({
     requireAdmin: (_req: any, _res: any, next: any) => next(),
 }));
 jest.mock("../../services/staleJobCleanup", () => ({ staleJobCleanupService: {} }));
+// The public listener is "public-user" while the (mocked) config has the public vibe on; the
+// check itself is tested in liveListening.test.ts.
 jest.mock("../../services/liveListening", () => ({
-    publicUserId: jest.fn().mockResolvedValue("public-user"),
+    isPublicListener: async (userId: string) =>
+        Boolean(jest.requireMock<{ config: { publicVibe: unknown } }>("../../config").config.publicVibe) && userId === "public-user",
     setLiveHidden: jest.fn(),
 }));
 

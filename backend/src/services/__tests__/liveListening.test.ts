@@ -5,8 +5,12 @@
 jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
+const LISTENER = { token: "t".repeat(32), username: "listener" };
+const mockConfig: { publicVibe: typeof LISTENER | null } = { publicVibe: LISTENER };
 jest.mock("../../config", () => ({
-    config: { publicVibe: { token: "t".repeat(32), username: "listener" } },
+    get config() {
+        return mockConfig;
+    },
 }));
 const findUnique = jest.fn();
 jest.mock("../../utils/db", () => ({ prisma: { user: { findUnique: (...a: unknown[]) => findUnique(...a) } } }));
@@ -14,6 +18,7 @@ jest.mock("../../utils/db", () => ({ prisma: { user: { findUnique: (...a: unknow
 import {
     LiveEvent,
     getLiveState,
+    isPublicListener,
     publicUserId,
     reportLive,
     resetLive,
@@ -32,6 +37,7 @@ beforeEach(() => {
     events = [];
     subscribeLive((e) => events.push(e));
     findUnique.mockReset();
+    mockConfig.publicVibe = LISTENER;
 });
 
 afterEach(() => {
@@ -184,5 +190,19 @@ describe("live listening", () => {
             where: { username: "listener" },
             select: { id: true, settings: { select: { shareLiveListening: true } } },
         });
+    });
+});
+
+describe("isPublicListener", () => {
+    it("is the public user, and nobody else", async () => {
+        findUnique.mockResolvedValue({ id: "u1" });
+        expect(await isPublicListener("u1")).toBe(true);
+        expect(await isPublicListener("u2")).toBe(false);
+    });
+
+    it("is nobody on an instance without the public vibe, whatever the database holds", async () => {
+        mockConfig.publicVibe = null;
+        findUnique.mockResolvedValue({ id: "u1" });
+        expect(await isPublicListener("u1")).toBe(false);
     });
 });

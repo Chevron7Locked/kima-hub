@@ -2,8 +2,7 @@ import express from "express";
 import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { requireAuth } from "../middleware/auth";
-import { config } from "../config";
-import { LiveQueueEntry, publicUserId, reportLive } from "../services/liveListening";
+import { LiveQueueEntry, isPublicListener, reportLive } from "../services/liveListening";
 
 const router = express.Router();
 
@@ -166,25 +165,31 @@ function millis(value: unknown): number | null {
     return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
 }
 
-// The web player's play/pause/seek/track changes, for the public live trip.
-// 404 for everyone but the public user, so other players stop reporting.
+// The web player's play/pause/seek/track changes, for the public live trip. Players only send
+// them when /system/features says so; anyone else still gets a 404, which silences them.
 router.post("/live", requireAuth, async (req, res) => {
-    if (!config.publicVibe || req.user!.id !== (await publicUserId())) {
-        return res.status(404).json({ error: "Not available" });
+    try {
+        if (!(await isPublicListener(req.user!.id))) {
+            return res.status(404).json({ error: "Not available" });
+        }
+        const { status, trackId, position, duration, queue } = req.body ?? {};
+        const positionMs = millis(position);
+        const durationMs = millis(duration);
+        if (!LIVE_STATUSES.has(status) || typeof trackId !== "string" || !trackId || positionMs === null || durationMs === null) {
+            return res.status(400).json({ error: "status, trackId, position and duration are required" });
+        }
+        const upNext: LiveQueueEntry[] = Array.isArray(queue)
+            ? queue
+                .filter((e: any) => e && typeof e.trackId === "string" && millis(e.duration) !== null)
+                .map((e: any) => ({ trackId: e.trackId, duration: millis(e.duration)! }))
+            : [];
+        reportLive({ status, trackId, position: positionMs, duration: durationMs, queue: upNext });
+        res.json({ ok: true });
+    } catch (error) {
+        // Not a 404: that would silence the player for the session over one failed lookup.
+        logger.error("Live playback report error:", error);
+        res.status(500).json({ error: "Failed to report live playback" });
     }
-    const { status, trackId, position, duration, queue } = req.body ?? {};
-    const positionMs = millis(position);
-    const durationMs = millis(duration);
-    if (!LIVE_STATUSES.has(status) || typeof trackId !== "string" || !trackId || positionMs === null || durationMs === null) {
-        return res.status(400).json({ error: "status, trackId, position and duration are required" });
-    }
-    const upNext: LiveQueueEntry[] = Array.isArray(queue)
-        ? queue
-            .filter((e: any) => e && typeof e.trackId === "string" && millis(e.duration) !== null)
-            .map((e: any) => ({ trackId: e.trackId, duration: millis(e.duration)! }))
-        : [];
-    reportLive({ status, trackId, position: positionMs, duration: durationMs, queue: upNext });
-    res.json({ ok: true });
 });
 
 // Clear playback state (when user stops playback completely)
