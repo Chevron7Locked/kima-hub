@@ -32,19 +32,19 @@ const length = async () =>
 
 it("stores the audio's own length in place of the feed's", async () => {
     (parseFile as jest.Mock).mockResolvedValueOnce({ format: { duration: 5344.2 } });
-    await recordMeasuredLength(`${P}-ep`, "/cache/ep.mp3");
+    expect(await recordMeasuredLength(`${P}-ep`, "/cache/ep.mp3")).toBe(true);
     expect(await length()).toBe(5344);
 });
 
 it("leaves the stored length when the file's length cannot be read", async () => {
     (parseFile as jest.Mock).mockResolvedValueOnce({ format: {} });
-    await recordMeasuredLength(`${P}-ep`, "/cache/ep.mp3");
+    expect(await recordMeasuredLength(`${P}-ep`, "/cache/ep.mp3")).toBe(false);
     (parseFile as jest.Mock).mockRejectedValueOnce(new Error("not an audio file"));
-    await recordMeasuredLength(`${P}-ep`, "/cache/ep.mp3");
+    expect(await recordMeasuredLength(`${P}-ep`, "/cache/ep.mp3")).toBe(false);
     expect(await length()).toBe(4844);
 });
 
 it("does nothing for an episode that no longer exists", async () => {
     (parseFile as jest.Mock).mockResolvedValueOnce({ format: { duration: 100 } });
-    await expect(recordMeasuredLength("no_such_episode", "/cache/x.mp3")).resolves.toBeUndefined();
+    await expect(recordMeasuredLength("no_such_episode", "/cache/x.mp3")).resolves.toBe(false);
 });

@@ -236,6 +236,11 @@ export async function assignMissingCategories(): Promise<number> {
         where: { categoryIds: { isEmpty: true }, itunesId: { not: null } },
         select: { id: true, itunesId: true },
     });
+    // One batched lookup (200 shows a request) fills the cache each assignment then reads; if Apple fails here,
+    // each assignment asks again and copes on its own.
+    await lookupShows(shows.map((s) => s.itunesId!)).catch((err) =>
+        logger.warn(`[PodcastCatalog] Batched lookup for the category backfill failed: ${(err as Error).message}`),
+    );
     let filled = 0;
     for (const s of shows) {
         if ((await assignCategories(s.id, s.itunesId)).length > 0) filled++;

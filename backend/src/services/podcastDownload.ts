@@ -353,29 +353,37 @@ async function performDownload(
  * fetched, so the feed's itunes:duration is the ad-free length and runs minutes short of the audio.
  * A file whose length cannot be read leaves the stored length as it was.
  */
-export async function recordMeasuredLength(episodeId: string, filePath: string): Promise<void> {
+export async function recordMeasuredLength(episodeId: string, filePath: string): Promise<boolean> {
     try {
         const seconds = (await parseFile(filePath)).format.duration;
-        if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return;
-        await prisma.podcastEpisode.updateMany({
+        if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return false;
+        const { count } = await prisma.podcastEpisode.updateMany({
             where: { id: episodeId },
             data: { duration: Math.round(seconds) },
         });
+        return count > 0;
     } catch (err) {
         logger.warn(`[PODCAST-DL] Could not read the length of ${filePath}: ${(err as Error).message}`);
+        return false;
     }
 }
 
 /** Measure every episode already in the cache: files cached before lengths were measured. */
 export async function measureCachedEpisodeLengths(): Promise<number> {
     const cacheDir = getPodcastCacheDir();
-    const files = await fs.readdir(cacheDir).catch(() => [] as string[]);
+    // Only files cached before downloads measured themselves need this; once they have been, startup skips it.
+    const marker = path.join(cacheDir, ".lengths-measured");
+    if (await fs.access(marker).then(() => true, () => false)) return 0;
+    const files = await fs.readdir(cacheDir).catch(() => null);
+    if (!files) return 0;
     let measured = 0;
     for (const file of files) {
         if (!file.endsWith(".mp3")) continue;
-        await recordMeasuredLength(path.basename(file, ".mp3"), path.join(cacheDir, file));
-        measured++;
+        if (await recordMeasuredLength(path.basename(file, ".mp3"), path.join(cacheDir, file))) measured++;
     }
+    await fs.writeFile(marker, `${new Date().toISOString()}\n`).catch((err) => {
+        logger.warn(`[PODCAST-DL] Could not mark cached lengths measured: ${(err as Error).message}`);
+    });
     if (measured > 0) logger.info(`[PODCAST-DL] Measured the length of ${measured} cached episode(s)`);
     return measured;
 }
