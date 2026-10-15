@@ -4,7 +4,7 @@
  * and audio position moves, and a bare instance fails instead of skipping.
  */
 import { test, expect, devices, Browser, Page, BrowserContext, Locator } from "@playwright/test";
-import { DogfoodSession, navigateByClick, firstAlbumCard, openAlbumsTab } from "./session";
+import { DogfoodSession, navigateByClick, firstAlbumCard, openAlbumWithSongs, openAlbumsTab, playableRows } from "./session";
 import { readLibraryFacts, assertReady, coverageGaps, LibraryFacts } from "./preflight";
 import { PLAYER, escapeRegExp, readPlayer, settle, softwareWebGL } from "../fixtures/shared";
 
@@ -188,10 +188,7 @@ test.describe("Dogfood walkthrough", () => {
         });
 
         await session.step("open an album", async () => {
-            if (!(await firstAlbumCard(page).isVisible().catch(() => false))) {
-                await openAlbumsTab(page);
-            }
-            // Journey 3 queues a second track, so prefer an album with two rows.
+            // Journey 3 queues a second song, so the album needs two the library can play.
             // Search results live in component state and are lost on back, so
             // candidate hrefs are collected first and visited in turn.
             const collect = async (): Promise<string[]> => {
@@ -215,24 +212,19 @@ test.describe("Dogfood walkthrough", () => {
                     }
                     await page.waitForURL(/\/album\//, { timeout: 10_000 });
                     await settle(page, 800);
-                    if ((await page.locator("[data-track-row]").count()) >= 2) {
+                    if ((await playableRows(page).count()) >= 2) {
                         return true;
                     }
                 }
                 return false;
             };
 
-            let opened = await tryPool(await collect(), true);
-            if (!opened) {
-                // The search results held only singles; widen to the
-                // collection's album grid, which spans the whole catalogue.
+            const onSearch = await firstAlbumCard(page).isVisible().catch(() => false);
+            if (!(onSearch && (await tryPool(await collect(), true)))) {
+                // The search results held no album with two songs; the collection's album grid has more.
                 await openAlbumsTab(page);
-                opened = await tryPool(await collect(), true);
+                await openAlbumWithSongs(page, 2);
             }
-            expect(
-                opened,
-                "no album with two or more tracks found in search results or the collection grid",
-            ).toBe(true);
             await settle(page, 1200);
             return { album: new URL(page.url()).pathname };
         });
@@ -281,7 +273,7 @@ test.describe("Dogfood walkthrough", () => {
 
         await session.step("add a track to the queue", async () => {
             const before = await queueLength(page);
-            const row = page.locator("[data-track-row]").nth(1);
+            const row = playableRows(page).nth(1);
             await row.waitFor({ state: "visible", timeout: 10_000 });
             await row.hover();
             await row.getByLabel("Add to queue").click();
@@ -355,17 +347,13 @@ test.describe("Dogfood walkthrough", () => {
         await session.step("start playing and queue two more tracks", async () => {
             await page.goto("/collection?tab=albums");
             await settle(page, 1500);
-            const album = firstAlbumCard(page);
-            await album.waitFor({ state: "visible", timeout: 12_000 });
-            await album.click();
-            await page.waitForURL(/\/album\//, { timeout: 10_000 });
-            await settle(page, 1200);
+            await openAlbumWithSongs(page, 3);
 
             await page.getByLabel("Play all").click();
             await page.getByTitle("pause", { exact: true }).waitFor({ timeout: 15_000 });
 
             for (const n of [1, 2]) {
-                const row = page.locator("[data-track-row]").nth(n);
+                const row = playableRows(page).nth(n);
                 await row.hover();
                 await row.getByLabel("Add to queue").click();
             }
@@ -491,11 +479,7 @@ test.describe("Dogfood walkthrough", () => {
         await session.step("start playing again", async () => {
             await page.goto("/collection?tab=albums");
             await settle(page, 1500);
-            const album = firstAlbumCard(page);
-            await album.waitFor({ state: "visible", timeout: 12_000 });
-            await album.click();
-            await page.waitForURL(/\/album\//, { timeout: 10_000 });
-            await settle(page, 1200);
+            await openAlbumWithSongs(page, 2);
             await page.getByLabel("Play all").click();
             await page.getByTitle("pause", { exact: true }).waitFor({ timeout: 15_000 });
             return { playing: true };
@@ -600,7 +584,8 @@ test.describe("Dogfood walkthrough", () => {
             expect(total, "albums fit on one page despite the preflight count").toBeGreaterThanOrEqual(2);
 
             const cards = page.locator('[data-tv-section="library-albums"] [data-tv-card]');
-            for (let want = 2; want <= Math.min(3, total); want++) {
+            const last = Math.min(3, total);
+            for (let want = 2; want <= last; want++) {
                 await pager.getByRole("button", { name: "Next page" }).click();
                 await expect(label).toContainText(`Page ${want} of`, { timeout: 15_000 });
                 expect(page.url()).toContain(`page=${want}`);
@@ -608,7 +593,7 @@ test.describe("Dogfood walkthrough", () => {
             }
 
             await page.goBack();
-            await expect(label).toContainText("Page 2 of", { timeout: 15_000 });
+            await expect(label).toContainText(`Page ${last - 1} of`, { timeout: 15_000 });
         });
 
         await test.step("a page number past the end lands on the last page", async () => {
@@ -673,12 +658,9 @@ test.describe("Dogfood walkthrough", () => {
 
         await session.step("add a track to it from an album", async () => {
             await openAlbumsTab(page);
-            const album = firstAlbumCard(page);
-            await album.click();
-            await page.waitForURL(/\/album\//, { timeout: 10_000 });
-            await settle(page, 1000);
+            await openAlbumWithSongs(page, 1);
 
-            const row = page.locator("[data-track-row]").first();
+            const row = playableRows(page).first();
             await row.waitFor({ state: "visible", timeout: 10_000 });
             await row.hover();
             await row.getByLabel("Add to playlist").click();
@@ -745,11 +727,8 @@ test.describe("Dogfood walkthrough", () => {
 
             for (const n of [0, 1]) {
                 await openAlbumsTab(page);
-                const album = firstAlbumCard(page);
-                await album.click();
-                await page.waitForURL(/\/album\//, { timeout: 10_000 });
-                await settle(page, 1000);
-                const row = page.locator("[data-track-row]").nth(n);
+                await openAlbumWithSongs(page, 2);
+                const row = playableRows(page).nth(n);
                 await row.waitFor({ state: "visible", timeout: 10_000 });
                 await row.hover();
                 await row.getByLabel("Add to playlist").click();
@@ -1262,17 +1241,16 @@ test.describe("Dogfood walkthrough", () => {
                 await page.waitForURL(/\/podcasts\/[^/]+/, { timeout: 15_000 });
                 await settle(page, 3000);
 
-                const rows = page.locator("[data-track-index]");
+                const rows = page.locator("[data-episode-row]");
                 await expect(rows.first()).toBeVisible({ timeout: 20_000 });
                 episodeCount = await rows.count();
                 expect(episodeCount, "the podcast page listed no episodes").toBeGreaterThan(0);
                 return { episodes: episodeCount };
             });
 
-            // Episodes start on a double click, which is how the list distinguishes playing
-            // from selecting.
+            // An episode plays from the play button on its artwork.
             await session.step("play an episode and hear it advance", async () => {
-                await page.locator("[data-track-index]").first().dblclick();
+                await page.locator("[data-episode-row]").first().getByLabel(/^play /i).click();
                 await page.getByTitle("pause", { exact: true }).waitFor({ timeout: 30_000 });
 
                 const read = () =>
@@ -1453,11 +1431,13 @@ test.describe("Dogfood walkthrough", () => {
 
                 const episodeId = episodes[0].id ?? episodes[0].episodeId ?? "";
                 expect(episodeId, "episode list returned entries without an id").toBeTruthy();
+                const duration = Number(episodes[0].duration) || 0;
 
+                // The body the app's "mark as complete" sends: at the end, finished.
                 const progressRes = await page.request.post(
                     `/api/podcasts/${podcastId}/episodes/${episodeId}/progress`,
                     {
-                        data: { progress: 30 },
+                        data: { currentTime: duration, duration, isFinished: true },
                         headers: { Authorization: `Bearer ${token}` },
                     },
                 );
@@ -1465,6 +1445,15 @@ test.describe("Dogfood walkthrough", () => {
                     progressRes.status(),
                     `mark-as-played returned ${progressRes.status()}`,
                 ).toBe(200);
+
+                // A 200 is not the episode being played: read the list back.
+                const again = await page.request.get(`/api/podcasts/${podcastId}/episodes`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const againBody = await again.json();
+                const marked = ((againBody.episodes ?? againBody) as Array<{ id: string; progress?: { isFinished?: boolean } | null }>)
+                    .find((e) => e.id === episodeId);
+                expect(marked?.progress?.isFinished, "the episode marked as played does not read back as finished").toBe(true);
                 return { episodeId, markedPlayed: true };
             });
 
@@ -2060,13 +2049,9 @@ test.describe("Dogfood walkthrough", () => {
         });
 
         await session.step("remove the user again", async () => {
-            // DOM: row > left-col > text-container > text-div[username].
-            // getByText matches text-div, so three hops reach the row.
-            const textEl = page.locator("main").getByText(userName, { exact: true }).first();
-            const row = textEl.locator("xpath=ancestor::div[contains(@class, 'justify-between')][1]");
-            const deleteBtn = row.locator("button").filter({ has: page.locator("svg") }).first();
-            await deleteBtn.click({ timeout: 10_000 });
-            const confirm = page.getByRole("button", { name: "Delete" });
+            // Each row's delete button is labelled with its user's name; the dialog's button is "Delete".
+            await page.locator("main").getByRole("button", { name: `delete ${userName}`, exact: true }).click({ timeout: 10_000 });
+            const confirm = page.getByRole("button", { name: "Delete", exact: true });
             await expect(confirm).toBeVisible({ timeout: 8_000 });
             await confirm.click();
             await page.waitForTimeout(2000);
@@ -2321,11 +2306,15 @@ test.describe("Dogfood walkthrough", () => {
 
                 await other.goto("/");
                 await settle(other, 6000);
-                const chromeText = ((await other.locator("body").innerText()) ?? "").replace(/\s+/g, " ");
-                expect(
-                    chromeText.includes(title),
-                    `the first tab is playing "${title}" but the second device never learned it`,
-                ).toBe(true);
+                // Only the player's title counts: the home page's rows, or the player's own artist
+                // line, can carry the same words. Matched on the page's text, not its lowercased display.
+                const shown = other
+                    .getByRole("region", { name: "now playing" })
+                    .getByRole("heading", { name: title, exact: true });
+                await expect(
+                    shown.first(),
+                    `the first tab is playing "${title}" but the second device's player never showed it`,
+                ).toBeVisible({ timeout: 15_000 });
                 return { agreedOn: title };
             });
 

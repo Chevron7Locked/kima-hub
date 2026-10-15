@@ -6,6 +6,7 @@
 import { expect, Page, Response } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
+import { settle } from "../fixtures/shared";
 
 interface Violation {
     /** Which step was executing when this happened. */
@@ -399,6 +400,38 @@ export async function navigateByClick(page: Page, href: string, timeoutMs = 10_0
  */
 export function firstAlbumCard(page: Page) {
     return page.locator('main a[href^="/album/"]').first();
+}
+
+/**
+ * An album page's rows for songs the library has. A song the album should have but the library
+ * lacks is a preview-only row with no queue or playlist buttons.
+ */
+export function playableRows(page: Page) {
+    return page.locator("[data-track-row]").filter({ has: page.getByLabel("Add to queue") });
+}
+
+/**
+ * From the albums page, opens the first album with at least `min` songs the library has. One-song
+ * albums are ordinary in a real library, so a journey that needs several rows has to choose one.
+ * Only the page on screen is searched; an album that never shows a playable row counts as too short.
+ */
+export async function openAlbumWithSongs(page: Page, min: number, timeoutMs = 12_000): Promise<void> {
+    const cards = page.locator('main a[href^="/album/"]');
+    await cards.first().waitFor({ state: "visible", timeout: timeoutMs });
+    const hrefs = [...new Set(await cards.evaluateAll((els) => els.map((el) => el.getAttribute("href") ?? "")))];
+    for (const href of hrefs) {
+        await page.locator(`main a[href="${href}"]`).first().click();
+        await page.waitForURL(/\/album\//, { timeout: 10_000 });
+        const rows = playableRows(page);
+        const shown = await rows.first().waitFor({ state: "visible", timeout: timeoutMs }).then(() => true, () => false);
+        if (shown) {
+            await settle(page, 1200);
+            if ((await rows.count()) >= min) return;
+        }
+        await page.goBack();
+        await cards.first().waitFor({ state: "visible", timeout: timeoutMs });
+    }
+    throw new Error(`no album on this albums page has ${min} or more songs the library can play`);
 }
 
 /**

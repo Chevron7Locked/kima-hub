@@ -63,6 +63,7 @@ function EpisodeRow({
 
     return (
         <div
+            data-episode-row
             className={cn(
                 "group rounded-xl transition-colors animate-rise [animation-delay:calc(var(--i)*var(--stagger))]",
                 isCurrentEpisode ? "bg-white/[0.06]" : "hover:bg-white/[0.03]",
