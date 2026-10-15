@@ -89,9 +89,10 @@ export function WhatsNewWindow({
         onClose();
     }, [onDismiss, onClose, closing]);
 
-    const openItem = (key: string) => {
+    // `from` is the older release whose page the row was on; rows in the list have none, whatever is open beside it.
+    const openItem = (key: string, from?: string) => {
         lastRow.current = { kind: "item", key };
-        setView(view.pane === "release" ? { pane: "item", key, from: view.version } : { pane: "item", key });
+        setView(from ? { pane: "item", key, from } : { pane: "item", key });
     };
     // Back from an item opened on an older release's page is that page; from anything else, the list.
     const goBack = useCallback(
@@ -191,7 +192,7 @@ export function WhatsNewWindow({
         return null;
     };
 
-    const itemList = (list: ReleaseItem[]) => (
+    const itemList = (list: ReleaseItem[], from?: string) => (
         <ul className="-mx-3 flex flex-col">
             {list.map((item) => {
                 const tag = status(item);
@@ -202,7 +203,7 @@ export function WhatsNewWindow({
                             type="button"
                             data-item={item.key}
                             aria-current={current ? "true" : undefined}
-                            onClick={() => openItem(item.key)}
+                            onClick={() => openItem(item.key, from)}
                             className={`group w-full rounded-lg px-3 py-3 flex items-center gap-3 text-left transition-colors hover:bg-white/[0.06] ${current ? "bg-white/[0.13] ring-1 ring-inset ring-white/[0.07]" : ""}`}
                         >
                             <span className="min-w-0 flex-1">
@@ -220,13 +221,13 @@ export function WhatsNewWindow({
         </ul>
     );
 
-    const group = (id: string, label: string, list: ReleaseItem[]) =>
+    const group = (id: string, label: string, list: ReleaseItem[], from?: string) =>
         list.length > 0 && (
             <div className="flex flex-col gap-1">
                 <h4 id={id} tabIndex={-1} className="text-sm font-medium text-[var(--text-secondary)] outline-none">
                     {label}
                 </h4>
-                {itemList(list)}
+                {itemList(list, from)}
             </div>
         );
 
@@ -359,7 +360,7 @@ export function WhatsNewWindow({
                 {r.title}
             </h3>
             {r.note && noteSection(r)}
-            {group(`whats-new-${r.version}-changed`, "What changed", r.items)}
+            {group(`whats-new-${r.version}-changed`, "What changed", r.items, r.version)}
         </section>
     );
 

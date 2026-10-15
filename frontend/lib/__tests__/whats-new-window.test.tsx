@@ -116,6 +116,21 @@ describe("WhatsNewWindow", () => {
         expect(document.activeElement?.getAttribute("data-release")).toBe("1.11.0");
     });
 
+    it("returns from an item picked in the list to the list, even with an older release open beside it", async () => {
+        await renderWindow([R11, R12]);
+        const click = async (selector: string) =>
+            act(async () => {
+                container.querySelector<HTMLButtonElement>(selector)!.click();
+            });
+        await click('[data-release="1.11.0"]');
+        // Wide screens show the list beside the release page; pick the newest release's item from the list.
+        await click('[data-item="enrichment.rerun"]');
+        expect(container.querySelector("#whats-new-item")?.textContent).toBe("Rerun from any step");
+        await click("[data-back]");
+        expect(container.querySelector("#whats-new-release")).toBeNull();
+        expect(document.activeElement?.getAttribute("data-item")).toBe("enrichment.rerun");
+    });
+
     it("never hides both panes at once, in any view", async () => {
         await renderWindow([R11, R12]);
         const check = () => {
