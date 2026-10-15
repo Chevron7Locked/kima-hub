@@ -22,8 +22,8 @@ import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { useActivityPanelOpen } from "@/hooks/useActivityPanel";
 import { useAuth } from "@/lib/auth-context";
 import { APP_VERSION } from "@/lib/version";
-import { useUpdateStatus } from "@/hooks/useUpdateStatus";
-import { openWhatsNewOrChangelog, fetchOpenCount } from "@/components/whats-new/WhatsNewGate";
+import { openWhatsNewOrChangelog } from "@/components/whats-new/WhatsNewGate";
+import { useVersionChip } from "@/components/whats-new/useVersionChip";
 import { KimaMark } from "@/components/ui/KimaMark";
 
 const scanEnded = (status?: string) => status === "completed" || status === "failed";
@@ -32,17 +32,12 @@ export function TopBar() {
     const pathname = usePathname();
     const router = useRouter();
     const { logout } = useAuth();
-    const updateStatus = useUpdateStatus();
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;
     const [searchQuery, setSearchQuery] = useState("");
     const [scanJobId, setScanJobId] = useState<string | null>(null);
-    const [openCount, setOpenCount] = useState(0);
-
-    useEffect(() => {
-        void fetchOpenCount().then(setOpenCount);
-    }, []);
+    const chip = useVersionChip();
     const isActivityPanelOpen = useActivityPanelOpen();
     const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -277,13 +272,13 @@ export function TopBar() {
                         <button
                             type="button"
                             onClick={() => void openWhatsNewOrChangelog((href) => router.push(href))}
-                            aria-label={`what's new in v${APP_VERSION}${updateStatus?.hasUpdate && updateStatus.latest ? ` — update available: v${updateStatus.latest}` : ""}${openCount > 0 ? ` — ${openCount} open` : ""}`}
-                            title={updateStatus?.hasUpdate && updateStatus.latest ? `update available: v${updateStatus.latest}` : `what's new in v${APP_VERSION}`}
+                            aria-label={chip.label}
+                            title={chip.title}
                             className="relative ml-2 px-1.5 py-0.5 text-micro font-medium text-brand/80 bg-brand/[0.06] rounded border border-brand/25 transition-colors hover:text-brand hover:bg-brand/10 hover:border-brand/50 focus-visible:outline-2 focus-visible:outline-brand"
                         >
                             v{APP_VERSION}
-                            {openCount > 0 && <span className="ml-1 text-brand">· {openCount} open</span>}
-                            {updateStatus?.hasUpdate && updateStatus.latest && (
+                            {chip.openCount > 0 && <span className="ml-1 text-brand">· {chip.openCount} open</span>}
+                            {chip.update && (
                                 <span
                                     aria-hidden
                                     className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-warning ring-2 ring-[var(--bg-primary)]"

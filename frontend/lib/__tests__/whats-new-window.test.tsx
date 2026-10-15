@@ -2,6 +2,7 @@
 // hide below a breakpoint — never both at once at base. This is the test that did not exist when the window drew a
 // blank body for open items of note-bearing releases.
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import React, { act } from "react";
@@ -54,7 +55,11 @@ async function renderWindow(releases: Release[]) {
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-        root.render(<WhatsNewWindow releases={releases} onClose={() => {}} onDismiss={async () => {}} />);
+        root.render(
+            <QueryClientProvider client={new QueryClient()}>
+                <WhatsNewWindow releases={releases} onClose={() => {}} onDismiss={async () => {}} />
+            </QueryClientProvider>,
+        );
     });
 }
 

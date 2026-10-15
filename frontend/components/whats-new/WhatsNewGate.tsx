@@ -1,10 +1,9 @@
 "use client";
 
 /**
- * Shows every release the user has not closed in one window, the newest note
- * first and every pending item oldest first, and the current release again on
- * request (the version number beside the logo). The server decides what is
- * pending; nothing is recorded locally, so a second device still asks.
+ * Shows every release the user has not closed in one window, the newest note first and every pending item oldest
+ * first. The version number beside the logo opens it while something is unread, and the changelog otherwise. The
+ * server decides what is pending; nothing is recorded locally, so a second device still asks.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -15,6 +14,8 @@ import { useAuth } from "@/lib/auth-context";
 import { WhatsNewWindow, type Release } from "./WhatsNewWindow";
 import { MoodMixChoice } from "./MoodMixChoice";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useQueryClient } from "@tanstack/react-query";
+import { refreshOpenCount } from "./useVersionChip";
 
 // One pending fetch per app session, shared across remounts (the layout switching
 // between phone, desktop and TV), so a remount neither refetches nor replaces the
@@ -60,25 +61,6 @@ export async function openWhatsNewOrChangelog(push: (href: string) => void): Pro
     }
 }
 
-let openCountFetch: Promise<number> | null = null;
-let openCountKey: string | null = null;
-
-/** Open requirements the server cannot yet see done — one fetch per session, per user. */
-export function fetchOpenCount(): Promise<number> {
-    const key = typeof window === "undefined" ? "ssr" : localStorage.getItem("auth_token") ?? "";
-    if (!openCountFetch || openCountKey !== key) {
-        openCountKey = key;
-        openCountFetch = api
-            .get<{ count: number }>("/whats-new/open")
-            .then((r) => r.count)
-            .catch(() => {
-                openCountFetch = null;
-                return 0;
-            });
-    }
-    return openCountFetch;
-}
-
 export function WhatsNewGate() {
     const [queue, setQueue] = useState<Release[]>([]);
     // Following a link to a page defers the window for this user in this tab, so it
@@ -97,6 +79,7 @@ export function WhatsNewGate() {
     // What a reopened release already has settled, so the window does not ask again.
     const [answered, setAnswered] = useState<Record<string, boolean>>({});
     const reopening = useRef(false);
+    const queryClient = useQueryClient();
 
     useEffect(() => {
         let cancelled = false;
@@ -148,6 +131,7 @@ export function WhatsNewGate() {
         try {
             await api.wipeAndRerunEnrichment();
             setDone((d) => [...d, wipe.key]);
+            refreshOpenCount(queryClient);
         } catch {
             setWipeError("Couldn't start it. Try again, or use Settings, under Library Enrichment.");
         } finally {
@@ -173,7 +157,7 @@ export function WhatsNewGate() {
                 releases={queue}
                 answered={answered}
                 onDismiss={dismissAll}
-                onClose={() => { closeAll(); setQueue([]); }}
+                onClose={() => { closeAll(); setQueue([]); refreshOpenCount(queryClient); }}
                 onNavigate={defer}
                 done={done}
                 renderAction={(item) =>

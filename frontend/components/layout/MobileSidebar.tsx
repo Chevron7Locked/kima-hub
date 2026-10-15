@@ -10,8 +10,8 @@ import { useAuth } from "@/lib/auth-context";
 import { notify } from "@/lib/notify";
 import { KimaMark } from "@/components/ui/KimaMark";
 import { APP_VERSION } from "@/lib/version";
-import { useUpdateStatus } from "@/hooks/useUpdateStatus";
-import { openWhatsNewOrChangelog, fetchOpenCount } from "@/components/whats-new/WhatsNewGate";
+import { openWhatsNewOrChangelog } from "@/components/whats-new/WhatsNewGate";
+import { useVersionChip } from "@/components/whats-new/useVersionChip";
 
 interface MobileSidebarProps {
     isOpen: boolean;
@@ -22,12 +22,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
     const pathname = usePathname();
     const router = useRouter();
     const { logout } = useAuth();
-    const updateStatus = useUpdateStatus();
-    const [openCount, setOpenCount] = useState(0);
-
-    useEffect(() => {
-        void fetchOpenCount().then(setOpenCount);
-    }, []);
+    const chip = useVersionChip();
     const [isSyncing, setIsSyncing] = useState(false);
     const isFirstRender = useRef(true);
     const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -227,14 +222,14 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             onClose();
                             void openWhatsNewOrChangelog((href) => router.push(href));
                         }}
-                        aria-label={`what's new in v${APP_VERSION}${openCount > 0 ? ` — ${openCount} open` : ""}`}
-                        title={updateStatus?.hasUpdate && updateStatus.latest ? `update available: v${updateStatus.latest}` : `what's new in v${APP_VERSION}`}
+                        aria-label={chip.label}
+                        title={chip.title}
                         className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 transition-colors duration-200"
                     >
                         <span className="relative text-sm">
                             What&apos;s new in <span className="text-brand/80">v{APP_VERSION}</span>
-                            {openCount > 0 && <span className="ml-1 text-brand/80">· {openCount} open</span>}
-                            {updateStatus?.hasUpdate && updateStatus.latest && (
+                            {chip.openCount > 0 && <span className="ml-1 text-brand/80">· {chip.openCount} open</span>}
+                            {chip.update && (
                                 <span
                                     aria-hidden
                                     className="absolute -top-1 -right-3 w-2 h-2 rounded-full bg-warning"

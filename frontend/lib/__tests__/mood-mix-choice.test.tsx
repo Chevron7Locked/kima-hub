@@ -3,6 +3,7 @@
  * what the user sees after each answer, including save-then-rebuild and that
  * a failed call never looks like it worked.
  */
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import React, { act } from "react";
@@ -34,7 +35,7 @@ const q = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HT
 
 async function render() {
     await act(async () => {
-        root.render(<MoodMixChoice />);
+        root.render(<QueryClientProvider client={new QueryClient()}><MoodMixChoice /></QueryClientProvider>);
     });
 }
 

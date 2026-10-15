@@ -1,6 +1,7 @@
 // The changelog page renders the ledger honestly: notes verbatim, open stays open, dismissed looks dismissed,
 // and answered says who answered. The API is canned here; the live contract is pinned server-side.
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import React, { act } from "react";
@@ -56,7 +57,7 @@ beforeEach(() => {
 async function render() {
     root = createRoot(container);
     await act(async () => {
-        root.render(<ChangelogPage />);
+        root.render(<QueryClientProvider client={new QueryClient()}><ChangelogPage /></QueryClientProvider>);
     });
 }
 

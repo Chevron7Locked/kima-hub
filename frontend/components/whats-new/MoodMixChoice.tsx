@@ -7,6 +7,8 @@
  */
 
 import { useEffect, useState } from "react";
+import { refreshOpenCount } from "./useVersionChip";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { Check, Loader2 } from "lucide-react";
 import { api, type MoodMixDecision, type MoodMixReleaseState } from "@/lib/api";
@@ -16,6 +18,7 @@ type Busy = "save" | MoodMixDecision | null;
 
 /** `onNavigate` puts the window off for this tab when the user follows the playlist link, as the window's own links do. */
 export function MoodMixChoice({ onNavigate }: { onNavigate?: () => void }) {
+    const queryClient = useQueryClient();
     const [state, setState] = useState<MoodMixReleaseState | null>(null);
     const [loadFailed, setLoadFailed] = useState(false);
     const [busy, setBusy] = useState<Busy>(null);
@@ -50,6 +53,7 @@ export function MoodMixChoice({ onNavigate }: { onNavigate?: () => void }) {
         setError(null);
         try {
             const saved = await api.saveMoodMixAsPlaylist(mix.id);
+            refreshOpenCount(queryClient);
             setState((s) => s && { ...s, playlist: { id: saved.id, name: saved.name } });
         } catch {
             setError("Couldn't save as a playlist");
@@ -63,6 +67,7 @@ export function MoodMixChoice({ onNavigate }: { onNavigate?: () => void }) {
         setError(null);
         try {
             await api.decideMoodMixes(next);
+            refreshOpenCount(queryClient);
             if (next === "remove") setRemovedRetired(true);
             setState((s) => s && { ...s, decision: next === "keep" ? "keep" : "rebuild", mix: next === "keep" ? s.mix : null });
         } catch {

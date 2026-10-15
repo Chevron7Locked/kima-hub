@@ -8,6 +8,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { refreshOpenCount } from "@/components/whats-new/useVersionChip";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { ArrowRight, Check, ChevronDown, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -51,6 +53,7 @@ const niceDate = (d: string) =>
     new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 
 export default function ChangelogPage() {
+    const queryClient = useQueryClient();
     const [data, setData] = useState<{ releases: ChangelogRelease[]; openCount: number } | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [openItems, setOpenItems] = useState<Set<string>>(new Set());
@@ -97,6 +100,7 @@ export default function ChangelogPage() {
         try {
             await api.wipeAndRerunEnrichment();
             setDoneKeys((d) => new Set([...d, confirm.item.key]));
+            refreshOpenCount(queryClient);
             notify.info("Wiped. Your library is running through the engine in the background.");
         } catch {
             notify.error("Couldn't start it. Try again, or use Settings, under Library Enrichment.");

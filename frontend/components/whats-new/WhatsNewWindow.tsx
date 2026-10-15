@@ -7,6 +7,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { refreshOpenCount } from "./useVersionChip";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { X, Check, Loader2, ChevronLeft, ChevronRight, ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
@@ -81,6 +83,7 @@ export function WhatsNewWindow({
     /** Choices already answered, when a closed release is read again. */
     answered?: Record<string, boolean>;
 }) {
+    const queryClient = useQueryClient();
     const [choices, setChoices] = useState<Record<string, boolean>>(answered ?? {});
     const [closing, setClosing] = useState(false);
     const [closeError, setCloseError] = useState<string | null>(null);
@@ -186,6 +189,7 @@ export function WhatsNewWindow({
         setChoices((c) => ({ ...c, [key]: enabled }));
         try {
             await api.post(`/whats-new/${versionOf(key)}/choice`, { key, enabled });
+            refreshOpenCount(queryClient);
         } catch {
             setChoices((c) => {
                 const n = { ...c };
