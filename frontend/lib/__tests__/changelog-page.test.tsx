@@ -174,4 +174,27 @@ describe("/changelog", () => {
         const run = container.querySelector<HTMLButtonElement>('[data-testid="wipe-run"]')!;
         expect(run.disabled).toBe(false);
     });
+
+    it("Escape closes only the wipe confirm, and focus goes back to the button that opened it", async () => {
+        await render();
+        await act(async () => {
+            Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Wipe and re-run enrichment"))!.click();
+        });
+        const run = container.querySelector<HTMLButtonElement>('[data-testid="wipe-run"]')!;
+        run.focus();
+        await act(async () => {
+            run.click();
+        });
+        const dialog = document.querySelector('[role="dialog"]')!;
+        expect(dialog).not.toBeNull();
+        const behind = vi.fn();
+        window.addEventListener("keydown", behind);
+        await act(async () => {
+            (document.activeElement ?? dialog).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        });
+        window.removeEventListener("keydown", behind);
+        expect(document.querySelector('[role="dialog"]')).toBeNull();
+        expect(behind).not.toHaveBeenCalled();
+        expect(document.activeElement).toBe(container.querySelector('[data-testid="wipe-run"]'));
+    });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 
 const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -16,8 +16,12 @@ export function useDialog(
     }, [onClose]);
 
     /* Recorded while closed, because an autoFocus field inside the dialog takes
-     * focus before effects run. */
-    const openerRef = useRef<HTMLElement | null>(null);
+     * focus before effects run; a dialog that mounts already open records it at
+     * its first render, before anything inside it can take focus. */
+    const [mountedWithFocusOn] = useState(() =>
+        typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null),
+    );
+    const openerRef = useRef<HTMLElement | null>(mountedWithFocusOn);
     useEffect(() => {
         if (isOpen) return;
         const track = (e: FocusEvent) => {
@@ -42,7 +46,9 @@ export function useDialog(
 
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === "Escape") {
+                // The open dialog alone answers Escape: a window or page behind it never also closes or goes back.
                 e.preventDefault();
+                e.stopPropagation();
                 onCloseRef.current();
                 return;
             }
