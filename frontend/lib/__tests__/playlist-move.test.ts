@@ -21,6 +21,22 @@ it("moves to the bottom of the screen in a reversed playlist without flashing to
     expect(ids(movePlaylistItem(list(["A", "B", "C"], true), "B", null))).toEqual(["A", "C", "B"]);
 });
 
+it("moves the merged list the page draws too, after the anchor and ahead of a song still downloading", () => {
+    // Stored: A, B, (P pending), C. Move C after A: the server ranks it between A and the next entry, B.
+    const before = {
+        reverseOrder: false,
+        items: ["A", "B", "C"].map((id) => ({ id })),
+        mergedItems: ["A", "B", "P", "C"].map((id) => ({ id })),
+    };
+    const after = movePlaylistItem(before, "C", "A");
+    expect((after.mergedItems as Array<{ id: string }>).map((i) => i.id)).toEqual(["A", "C", "B", "P"]);
+    // Reversed, shown C, P, B, A (stored A, B, P, C): B after P stores A, P, B, C, shown C, B, P, A.
+    const reversed = { ...before, reverseOrder: true, items: ["C", "B", "A"].map((id) => ({ id })), mergedItems: ["C", "P", "B", "A"].map((id) => ({ id })) };
+    const moved = movePlaylistItem(reversed, "B", "P");
+    expect((moved.mergedItems as Array<{ id: string }>).map((i) => i.id)).toEqual(["C", "B", "P", "A"]);
+    expect(ids(moved as ReturnType<typeof list>)).toEqual(["C", "B", "A"]);
+});
+
 it("leaves the cached list itself untouched", () => {
     const before = list(["A", "B", "C"], true);
     movePlaylistItem(before, "C", "B");

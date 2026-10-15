@@ -550,26 +550,38 @@ export function useDeletePlaylistMutation() {
 }
 
 /**
- * A playlist after moving `itemId` to just after `afterItemId` (the top for null), as the server will store it.
- * The ids are in stored order; a reversed playlist's cached items are in display order, so the move is made on the
- * stored order and the list shown reversed again. A copy: the cached list is also `previous`, restored on failure.
+ * `list` (cached, so in display order) with `itemId` moved to just after `afterItemId` in stored order, or to the
+ * top for null, which is where the server ranks it: directly after the anchor, ahead of whatever followed it. Null
+ * when the item is not in the list.
+ */
+function moveAfter(list: Array<Record<string, unknown>>, itemId: string, afterItemId: string | null, reversed: boolean) {
+    const stored = reversed ? [...list].reverse() : [...list];
+    const idx = stored.findIndex((entry) => entry.id === itemId);
+    if (idx === -1) return null;
+    const [moved] = stored.splice(idx, 1);
+    if (afterItemId) {
+        const afterIdx = stored.findIndex((entry) => entry.id === afterItemId);
+        stored.splice(afterIdx !== -1 ? afterIdx + 1 : idx, 0, moved);
+    } else {
+        stored.unshift(moved);
+    }
+    return reversed ? stored.reverse() : stored;
+}
+
+/**
+ * A playlist after moving `itemId` to just after `afterItemId` (the top for null), as the server will store it. The
+ * page draws `mergedItems` (songs and songs still downloading, in one order) when the server sends it, so both lists
+ * move. A copy: the cached list is also `previous`, restored on failure.
  */
 export function movePlaylistItem<T extends PlaylistCache>(old: T, itemId: string, afterItemId: string | null): T {
     if (!old || !Array.isArray(old.items)) return old;
     const reversed = Boolean((old as { reverseOrder?: boolean }).reverseOrder);
-    const items = [...(old.items as Array<Record<string, unknown>>)];
-    if (reversed) items.reverse();
-    const idx = items.findIndex((item) => item.id === itemId);
-    if (idx === -1) return old;
-    const [moved] = items.splice(idx, 1);
-    if (afterItemId) {
-        const afterIdx = items.findIndex((item) => item.id === afterItemId);
-        items.splice(afterIdx !== -1 ? afterIdx + 1 : idx, 0, moved);
-    } else {
-        items.unshift(moved);
-    }
-    if (reversed) items.reverse();
-    return { ...old, items };
+    const items = moveAfter(old.items as Array<Record<string, unknown>>, itemId, afterItemId, reversed);
+    if (!items) return old;
+    const merged = Array.isArray(old.mergedItems)
+        ? moveAfter(old.mergedItems as Array<Record<string, unknown>>, itemId, afterItemId, reversed)
+        : null;
+    return { ...old, items, ...(merged && { mergedItems: merged }) };
 }
 
 export function useMoveTrackInPlaylistMutation() {
