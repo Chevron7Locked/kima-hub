@@ -1,15 +1,20 @@
 "use client";
 
-import DOMPurify from "dompurify";
 import { PodcastPreview } from "../types";
 import { formatDuration } from "@/lib/format";
 import { formatDate } from "../utils";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 
-/** Feed summaries carry markup; the list shows their words only. */
-function plain(html: string | undefined): string {
+/**
+ * Feed summaries carry markup; the list shows their words only. Read from a parsed document, not sanitised
+ * markup, which still holds escapes (&amp;, &nbsp;) that would show as text. Parsed documents run no scripts;
+ * script and style contents are dropped so their code never shows as words.
+ */
+export function plain(html: string | undefined): string {
     if (!html) return "";
-    return DOMPurify.sanitize(html, { ALLOWED_TAGS: [] }).replace(/\s+/g, " ").trim();
+    const body = new DOMParser().parseFromString(html, "text/html").body;
+    body.querySelectorAll("script, style, noscript, template").forEach((el) => el.remove());
+    return (body.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
 /** A show's newest episodes before following: titles, dates, lengths and what each is about. */

@@ -158,7 +158,7 @@ export default function ChangelogPage() {
                             </h2>
                             <p className="text-xs text-[var(--text-muted)]">
                                 {niceDate(r.date)}
-                                {r.dismissed ? "" : " · you haven&apos;t read it yet"}
+                                {r.dismissed ? "" : " · you haven't read it yet"}
                             </p>
                         </header>
                         <p className="mt-1 text-sm leading-relaxed text-[var(--text-secondary)]">{r.summary}</p>
