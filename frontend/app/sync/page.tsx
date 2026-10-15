@@ -32,7 +32,6 @@ export default function SyncPage() {
     const router = useRouter();
     const [initError, setInitError] = useState("");
     const [initFailed, setInitFailed] = useState(false);
-    const [postScanDone, setPostScanDone] = useState(false);
     const [scanJobId, setScanJobId] = useState<string | null>(null);
     const handledRef = useRef(false);
 
@@ -98,8 +97,8 @@ export default function SyncPage() {
 
         if (scanStatus?.status === "completed") {
             return {
-                progress: postScanDone ? 100 : 90,
-                message: postScanDone ? "All set! Redirecting..." : "Syncing audiobooks...",
+                progress: 100,
+                message: "All set! Redirecting...",
                 completedSteps: ["tracks", "library", "albums", "indexes"],
                 syncing: true,
                 error: "",
@@ -124,7 +123,7 @@ export default function SyncPage() {
             syncing: true,
             error: "",
         };
-    }, [scanStatus, postScanDone, initFailed, initError]);
+    }, [scanStatus, initFailed, initError]);
 
     useEffect(() => {
         let mounted = true;
@@ -149,26 +148,17 @@ export default function SyncPage() {
         return () => { mounted = false; };
     }, [queryClient]);
 
-    // Handle post-scan side effects (audiobook sync, redirect)
+    // Once the scan is done, go home. Audiobooks need nothing here: finishing onboarding already started their
+    // sync on the server when Audiobookshelf is on.
     useEffect(() => {
         if (!scanStatus || handledRef.current) return;
         if (scanStatus.status !== "completed") return;
 
         handledRef.current = true;
-
-        (async () => {
-            try {
-                await api.post("/audiobooks/sync");
-            } catch (audiobookError) {
-                console.error("Audiobook sync failed:", audiobookError);
-            }
-
-            setPostScanDone(true);
-            setTimeout(() => {
-                void queryClient.invalidateQueries();
-                router.push("/");
-            }, 1500);
-        })();
+        setTimeout(() => {
+            void queryClient.invalidateQueries();
+            router.push("/");
+        }, 1500);
     }, [scanStatus, queryClient, router]);
 
     const handleSkip = () => {
