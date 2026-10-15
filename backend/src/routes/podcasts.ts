@@ -13,7 +13,8 @@ import fs from "fs";
 import type { OutgoingHttpHeaders } from "http";
 import type { Readable } from "stream";
 import { resolveCorsOrigin } from "./audiobooks";
-import { upstreamHeader, upstreamHeaderNumber } from "../utils/upstreamHeaders";
+import { upstreamHeader } from "../utils/upstreamHeaders";
+import { USER_AGENT } from "../config";
 import {
     assignCategories,
     categoryTree,
@@ -1130,137 +1131,56 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
             return res.status(400).json({ error: "Invalid audio URL" });
         }
 
-        // Stream from RSS URL
+        // Stream from the feed's host with the size it states for the copy it sends: a feed's declared enclosure
+        // length can belong to another file, and the browser derives the episode's length from the size. Asked as
+        // Kima, like the background download, because hosts that stitch ads in send each identity its own copy, so
+        // the copy played is the copy cached and measured.
         logger.debug(`   Streaming from RSS: ${episode.audioUrl}`);
-
-        // Get file size first for proper range handling
-        let fileSize = episode.fileSize;
-        if (!fileSize) {
-            try {
-                const headResponse = await axios.head(episode.audioUrl);
-                fileSize = upstreamHeaderNumber(headResponse.headers["content-length"]);
-                if (Number.isFinite(fileSize) && fileSize > 0) {
-                    await prisma.podcastEpisode.update({
-                        where: { id: episode.id },
-                        data: { fileSize },
-                    });
-                }
-            } catch (err) {
-                logger.warn("    Could not get file size via HEAD request");
-            }
-        }
-
-        if (range && fileSize) {
-            const parsed = parseRangeHeader(range, fileSize);
-            if (!parsed.ok && parsed.reason !== "multi") {
-                res.status(416).set({
-                    "Content-Range": `bytes */${fileSize}`,
-                });
-                res.end();
-                return;
-            }
-            // Multi-range falls through to the full-file stream below.
-            if (parsed.ok) {
-                const { start, end } = parsed;
-
-                logger.debug(
-                    `    Range request: bytes=${start}-${end}/${fileSize}`
-                );
-
-                const controller = new AbortController();
-                res.on("close", () => {
-                    controller.abort();
-                });
-
-                try {
-                    const response = await axios.get(episode.audioUrl, {
-                        headers: { Range: `bytes=${start}-${end}` },
-                        responseType: "stream",
-                        validateStatus: (status) =>
-                            status === 206 || status === 200,
-                        timeout: 30000,
-                        signal: controller.signal,
-                    });
-
-                    // An upstream that ignored Range answers 200; wrapping that in a 206 would confuse the browser.
-                    if (response.status === 200) {
-                        logger.debug(
-                            `    Upstream returned 200 OK (ignored Range), streaming full response`
-                        );
-                        res.writeHead(200, {
-                            ...baseHeaders,
-                            "Content-Length":
-                                upstreamHeader(response.headers["content-length"]) || fileSize,
-                        });
-                    } else {
-                        res.writeHead(206, {
-                            ...baseHeaders,
-                            "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-                            "Content-Length": end - start + 1,
-                        });
-                    }
-
-                    pipeUpstream(res, response.data, "RSS stream");
-                    return;
-                } catch (rangeError: any) {
-                    if (axios.isCancel(rangeError)) {
-                        logger.debug("    Request aborted by client");
-                        return;
-                    }
-                    // Many podcast CDNs reject range requests; stream the whole file and the browser seeks locally.
-                    logger.debug(
-                        `    Range request failed (${
-                            rangeError.response?.status || rangeError.message
-                        }), falling back to full stream`
-                    );
-
-                    const response = await axios.get(episode.audioUrl, {
-                        responseType: "stream",
-                        timeout: 60000,
-                        signal: controller.signal,
-                    });
-
-                    const contentLength = upstreamHeader(response.headers["content-length"]);
-
-                    res.writeHead(200, {
-                        ...baseHeaders,
-                        ...(contentLength && { "Content-Length": contentLength }),
-                    });
-
-                    pipeUpstream(res, response.data, "RSS fallback stream");
-                    return;
-                }
-            }
-        }
-
-        logger.debug(`    Streaming full file`);
 
         const controller = new AbortController();
         res.on("close", () => {
             controller.abort();
         });
-
-        try {
-            const response = await axios.get(episode.audioUrl, {
+        const fetchUpstream = (rangeHeader?: string) =>
+            axios.get(episode.audioUrl, {
+                headers: { "User-Agent": USER_AGENT, ...(rangeHeader && { Range: rangeHeader }) },
                 responseType: "stream",
+                decompress: false,
+                validateStatus: (status) => status === 200 || status === 206 || status === 416,
+                timeout: 30000,
                 signal: controller.signal,
             });
 
-            const contentLength = upstreamHeader(response.headers["content-length"]);
-
-            res.writeHead(200, {
-                ...baseHeaders,
-                ...(contentLength && { "Content-Length": contentLength }),
-            });
-
-            pipeUpstream(res, response.data, "RSS full stream");
+        // One range is passed on as asked; several at once are answered with the whole file (RFC 9110).
+        const singleRange = range && /^bytes=(\d+-\d*|-\d+)$/.test(range) ? range : undefined;
+        let response;
+        try {
+            response = await fetchUpstream(singleRange);
         } catch (error: any) {
             if (axios.isCancel(error)) {
                 logger.debug("    Request aborted by client");
                 return;
             }
-            throw error;
+            if (!singleRange) throw error;
+            // Some podcast CDNs refuse range requests outright; the whole file still plays.
+            logger.debug(`    Range request failed (${error.response?.status || error.message}), streaming the whole file`);
+            response = await fetchUpstream();
         }
+
+        const contentRange = upstreamHeader(response.headers["content-range"]);
+        if (response.status === 416) {
+            response.data.destroy();
+            res.status(416).set({ ...corsHeaders(corsOrigin), ...(contentRange && { "Content-Range": contentRange }) });
+            res.end();
+            return;
+        }
+        const contentLength = upstreamHeader(response.headers["content-length"]);
+        res.writeHead(response.status, {
+            ...baseHeaders,
+            ...(contentLength && { "Content-Length": contentLength }),
+            ...(response.status === 206 && contentRange && { "Content-Range": contentRange }),
+        });
+        pipeUpstream(res, response.data, "RSS stream");
     } catch (error) {
         if (!res.headersSent) {
             safeError(res, "Podcast stream error", error);
