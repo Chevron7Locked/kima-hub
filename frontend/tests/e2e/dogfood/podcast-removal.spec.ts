@@ -114,8 +114,8 @@ test.describe.serial("Podcast removal", () => {
         const remove = page.getByRole("button", { name: "remove podcast" });
         await expect(remove).toBeVisible({ timeout: 15_000 });
         await remove.click();
-        // Inline confirmation: the question is text, the buttons are confirm and cancel.
-        const confirm = page.getByRole("button", { name: "confirm removing this podcast" });
+        // The shared confirm dialog asks first.
+        const confirm = page.getByRole("dialog").getByRole("button", { name: "remove", exact: true });
         await expect(confirm).toBeVisible({ timeout: 10_000 });
         await confirm.click();
 

@@ -158,17 +158,17 @@ export default function PodcastsPage() {
                                 {!isSubscribingRss && <Plus className="size-4" />}
                                 follow
                             </Button>
-                            <button
+                            <Button
+                                variant="icon"
                                 onClick={() => {
                                     setShowRssInput(false);
                                     setRssUrl("");
                                     setRssError(null);
                                 }}
                                 aria-label="cancel"
-                                className="rounded-lg p-2.5 text-[var(--text-muted)] transition-colors hover:bg-white/5 hover:text-white"
                             >
                                 <X className="size-4" />
-                            </button>
+                            </Button>
                         </div>
                         {rssError && <p className="mt-1 text-xs text-danger-light">{rssError}</p>}
                     </div>
@@ -198,15 +198,17 @@ export default function PodcastsPage() {
                             count={podcasts.length}
                             action={
                                 <div className="flex items-center gap-2">
-                                    <button
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
                                         onClick={handleRefreshAll}
                                         disabled={isRefreshingAll}
-                                        className="flex items-center gap-2 rounded-lg border border-transparent px-3 py-1.5 text-xs text-[var(--text-muted)] transition-colors hover:border-white/10 hover:bg-white/5 hover:text-white disabled:opacity-50"
                                         title="check every show for new episodes"
+                                        aria-label="check every show for new episodes"
                                     >
                                         <RefreshCw className={cn("size-3.5", isRefreshingAll && "animate-spin")} />
                                         <span className="hidden md:inline">{isRefreshingAll ? "checking" : "check for new episodes"}</span>
-                                    </button>
+                                    </Button>
                                     <select
                                         value={sortBy}
                                         onChange={(e) => {
