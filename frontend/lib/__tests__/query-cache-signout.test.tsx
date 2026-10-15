@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createRoot } from "react-dom/client";
-import React, { act } from "react";
+import React, { act, useEffect } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 const auth: { user: { id: string } | null } = { user: null };
@@ -12,8 +12,12 @@ import { QueryProvider } from "@/lib/query-client";
 describe("the query cache across sign-ins", () => {
     it("keeps answers through the first sign-in, and empties when that person signs out or another signs in", async () => {
         let client: QueryClient | undefined;
+        const keep = (c: QueryClient) => (client = c);
         const Grab = () => {
-            client = useQueryClient();
+            const c = useQueryClient();
+            useEffect(() => {
+                keep(c);
+            }, [c]);
             return null;
         };
         const root = createRoot(document.createElement("div"));
