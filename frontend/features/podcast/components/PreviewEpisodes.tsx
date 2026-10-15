@@ -14,6 +14,12 @@ export function plain(html: string | undefined): string {
     if (!html) return "";
     const body = new DOMParser().parseFromString(html, "text/html").body;
     body.querySelectorAll("script, style, noscript, template").forEach((el) => el.remove());
+    // Text from separate blocks and lines stays separate words; inline markup adds no space.
+    body.querySelectorAll("br").forEach((el) => el.replaceWith(" "));
+    body.querySelectorAll("p, div, ul, ol, li, dl, dt, dd, h1, h2, h3, h4, h5, h6, blockquote, pre, table, tr, td, th, hr").forEach((el) => {
+        el.prepend(" ");
+        el.append(" ");
+    });
     return (body.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
