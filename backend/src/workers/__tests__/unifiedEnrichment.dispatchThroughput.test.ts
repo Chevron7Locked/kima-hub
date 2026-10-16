@@ -85,7 +85,7 @@ jest.mock("../../services/enrichmentFailureService", () => ({
 }));
 
 jest.mock("../../services/featureDetection", () => ({
-    featureDetection: {
+    featureDetection: { analyzerRunning: jest.fn().mockResolvedValue(false), clapRunning: jest.fn().mockResolvedValue(false),
         getFeatures: jest.fn().mockResolvedValue({
             vibeEmbeddings: true, podcastSupport: false, fpcalc: true,
         }),

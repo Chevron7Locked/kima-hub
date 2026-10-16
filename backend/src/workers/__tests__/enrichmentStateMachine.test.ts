@@ -42,7 +42,7 @@ jest.mock("../../services/enrichmentFailureService", () => ({
 }));
 
 jest.mock("../../services/featureDetection", () => ({
-    featureDetection: {
+    featureDetection: { analyzerRunning: jest.fn().mockResolvedValue(false), clapRunning: jest.fn().mockResolvedValue(false),
         getFeatures: jest.fn().mockResolvedValue({
             vibeEmbeddings: true,
             podcastSupport: false,
@@ -498,9 +498,9 @@ describe("Enrichment State Machine", () => {
             );
         });
 
-        it("embeds a ready track while another track's analysis is still owed", async () => {
-            // Only the ready track's embedding record is due; the other is
-            // gated by its own unfinished analysis, not by a global count.
+        it("with no analyzer running, embeds a ready track while another track's analysis is still owed", async () => {
+            // Only the ready track's embedding record is due; the other is gated by its own unfinished analysis.
+            // A running analyzer holds every vector until analysis is done (unifiedEnrichment.oneHeavyModel.test.ts).
             claimOneStage("embedding", ["ready"]);
             // A track still sits at analysisStatus 'pending'; that must not
             // hold back the embedding phase.

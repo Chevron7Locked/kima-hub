@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Audio analysis and sound vectors take turns.** Sound vectors start once audio analysis has no songs left, instead of running beside it, so the two heavy models never share the processor and the GPU. New songs are analysed first, then given vectors. Songs added during a vector run wait for the songs CLAP is working on, then go first. An analyzer that has stopped holds nothing back.
 - **Songs are identified by their sound first.** A file whose tags don't say which recording it is now goes to AcoustID (audio fingerprints) before any MusicBrainz search, ten songs per request, and each reply is kept so no song is asked twice. Its ISRCs and genres then come from one MusicBrainz request per album (the album AcoustID lists under your album's title, or the album your tags name) instead of one request per song; songs AcoustID doesn't recognise, or matches only by length and not by title, still get the MusicBrainz name search first.
 - **Your shows can be sorted by latest episode.** The podcasts page's "episodes" sort ordered shows by how many episodes they have; it is now "latest episode", the show that published most recently first. `GET /api/podcasts` gives each show's `latestEpisodeAt`.
 - **"More like this" on a show you haven't followed** ranks shows by the categories they share, as it does for a followed show, instead of listing its first category's chart. New endpoint: `GET /api/podcasts/preview/:itunesId/similar`.

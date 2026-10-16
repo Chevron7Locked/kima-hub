@@ -114,9 +114,9 @@ export const PREREQUISITE_STAGE: Record<StageName, StagePrerequisite | null> = {
     recording: { stage: "fingerprint", wait: "settled" },
     // Reads only the audio file (the Essentia analyzer decodes it itself).
     analysis: null,
-    // The sound vector follows the analysis, so the two heavy
-    // models take turns on a track. Only a done analysis unblocks it; a closed
-    // one closes this record too, and a later answer reopens it.
+    // The sound vector reads the track's analysis: only a done analysis unblocks it; a closed one closes this
+    // record too, and a later answer reopens it. Across the library the two heavy models run one at a time
+    // (analysisStillRunning).
     embedding: { stage: "analysis", wait: "output" },
     // Reads only the audio file (fpcalc on the local binary).
     fingerprint: null,
@@ -163,6 +163,48 @@ const STAGE_CLAIM_LEASE_MS = 15 * 60 * 1000;
 const STAGE_REDELIVERY_CAP = 3;
 
 /**
+ * MusiCNN and CLAP run one at a time across the library, never side by side, so each has the machine (CPU and
+ * GPU) to itself. Sound vectors start once no track's analysis is owed, due a retry or in flight; an analyzer that
+ * is paused or not running holds nothing back, and an analysis waiting out a retry delay does not hold the vectors.
+ */
+export async function analysisStillRunning(now: Date): Promise<boolean> {
+    if (await sourcePauseController.isPaused(STAGE_SOURCE.analysis, now)) return false;
+    if (!(await featureDetection.analyzerRunning())) return false;
+    const [row] = await prisma.$queryRaw<Array<{ open: boolean }>>`
+        SELECT EXISTS (
+            SELECT 1 FROM "Track" t
+              LEFT JOIN "TrackStage" ts ON ts."trackId" = t.id AND ts.stage = 'analysis'
+             WHERE t."missingSince" IS NULL
+               AND t."filePath" IS NOT NULL
+               AND (ts.id IS NULL
+                    OR ts.status IN ('pending', 'working')
+                    OR (ts.status = 'failed' AND ts.retryable = true
+                        AND (ts."nextRetryAt" IS NULL OR ts."nextRetryAt" <= ${now})))
+        ) AS open
+    `;
+    return row.open;
+}
+
+/**
+ * The other half of one at a time: analysis that comes due while sound vectors are being made (songs added
+ * mid-run, a retry whose delay ran out) waits for the tracks CLAP holds a live claim on, then goes first again. A
+ * CLAP analyzer that is not running holds nothing back.
+ */
+export async function vectorsInFlight(): Promise<boolean> {
+    if (!(await featureDetection.clapRunning())) return false;
+    const [row] = await prisma.$queryRaw<Array<{ busy: boolean }>>`
+        SELECT EXISTS (
+            SELECT 1 FROM "TrackStage"
+             WHERE stage = 'embedding' AND status = 'working'
+               -- A live claim. One whose lease ran out is an attempt that died; it holds nothing, and the
+               -- embedding stage re-offers it once analysis is done.
+               AND "nextRetryAt" > ${new Date()}
+        ) AS busy
+    `;
+    return row.busy;
+}
+
+/**
  * The work owed for each stage: records with no answer or a due retry, whose
  * prerequisite has answered for the same track. Selection reads TrackStage,
  * never Track status columns, so one failed track cannot hold the rest back.
@@ -198,6 +240,15 @@ export async function getNextWork(
             logger.debug(
                 "[Enrichment] 'embedding' deferred: GPU runtime installing",
             );
+            continue;
+        }
+
+        if (stage === "embedding" && (await analysisStillRunning(now))) {
+            logger.debug("[Enrichment] 'embedding' waits: audio analysis has tracks left");
+            continue;
+        }
+        if (stage === "analysis" && (await vectorsInFlight())) {
+            logger.debug("[Enrichment] 'analysis' waits: sound vectors are being made");
             continue;
         }
 

@@ -54,6 +54,16 @@ class FeatureDetectionService {
         return !isNaN(timestamp) && Date.now() - timestamp < HEARTBEAT_TTL;
     }
 
+    /** The Essentia analyzer process is running now (its heartbeat is fresh), not merely installed. */
+    async analyzerRunning(): Promise<boolean> {
+        return this.workerAlive("audio:worker:heartbeat");
+    }
+
+    /** The CLAP analyzer process is running now (its heartbeat is fresh), not merely installed. */
+    async clapRunning(): Promise<boolean> {
+        return this.workerAlive("clap:worker:heartbeat");
+    }
+
     private async checkMusicCNN(): Promise<boolean> {
         try {
             // Analyzer script bundled in image = feature is available
