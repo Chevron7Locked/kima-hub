@@ -10,7 +10,7 @@ import { pgCollapseSpace, pgLower, pgTrim, stripNonAlnum } from "./pgTextRules";
 import { LIBRARY_LOCATION } from "./libraryFilters";
 import { musicBrainzService } from "./musicbrainz";
 import { stripAlbumEdition } from "../utils/artistNormalization";
-import { DuplicateMbidError, REPLACEABLE_SOURCES, reassignAlbumRgMbid } from "./mbidReassign";
+import { DuplicateMbidError, REPLACEABLE_SOURCES, isKimaChosen, reassignAlbumRgMbid } from "./mbidReassign";
 
 /**
  * Titles too generic to identify a release group on their own. A cross-artist
@@ -120,7 +120,7 @@ export async function resolveAlbum(
     const byMbid = await db.album.findUnique({ where: { rgMbid } });
     if (byMbid) {
         // A file's tag confirming an id Kima chose makes it the files' own.
-        if (input.rgMbid?.trim() && REPLACEABLE_SOURCES.includes(byMbid.rgMbidSource ?? "")) {
+        if (input.rgMbid?.trim() && isKimaChosen(byMbid.rgMbidSource)) {
             // Only while the source is still Kima's: a person's edit meanwhile is kept.
             await db.album.updateMany({
                 where: { id: byMbid.id, rgMbidSource: { in: [...REPLACEABLE_SOURCES] } },
@@ -141,7 +141,7 @@ export async function resolveAlbum(
         // AcoustID vote, a name search); never one from tags or a person. Rows keyed on the old id
         // move too, in their own transaction (the scanner passes the global client).
         const tagged = input.rgMbid?.trim();
-        if (tagged && (existing.rgMbid.startsWith("temp-") || REPLACEABLE_SOURCES.includes(existing.rgMbidSource ?? ""))) {
+        if (tagged && (existing.rgMbid.startsWith("temp-") || isKimaChosen(existing.rgMbidSource))) {
             try {
                 await reassignAlbumRgMbid(existing.id, tagged, { source: "tag", expectedOld: existing.rgMbid });
             } catch (error) {

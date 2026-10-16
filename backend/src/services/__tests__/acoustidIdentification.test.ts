@@ -41,7 +41,8 @@ import { answered } from "../../utils/outcome";
 const RECORDING = "8f3471b5-7e6a-48da-86a9-c1c07a0f47ae";
 const ACOUSTID_TRACK = "9ff43b6a-4f16-427c-93c2-92307ca505e0";
 
-const track = (filePath: string) => ({ id: "t1", title: "Song", filePath, duration: 200 });
+const FILE_MODIFIED = new Date("2026-10-01T00:00:00Z");
+const track = (filePath: string) => ({ id: "t1", title: "Song", filePath, duration: 200, fileModified: FILE_MODIFIED });
 const tags = (common: Record<string, unknown>) => ({ common, format: { duration: 200 } });
 
 beforeEach(() => {
@@ -227,7 +228,7 @@ describe("prefetchAcoustidReplies: what the batch asks about", () => {
         expect(mockLookupMany).not.toHaveBeenCalled();
     });
 
-    it("never reads a file again once a batch saved its reply, even under a fingerprint other than the stored one", async () => {
+    it("never asks again once a batch saved its reply, even under a fingerprint other than the stored one", async () => {
         mockParseFile.mockResolvedValue(tags({ acoustid_fingerprint: "TAG-FP-D" }));
         mockHasSavedReply.mockImplementation(async (_d: number, fp: string) => fp === "TAG-FP-D" && mockLookupMany.mock.calls.length > 0);
         mockLookupMany.mockResolvedValue(1);
@@ -237,7 +238,35 @@ describe("prefetchAcoustidReplies: what the batch asks about", () => {
         await prefetchAcoustidReplies([song]);
 
         expect(mockLookupMany).toHaveBeenCalledTimes(1);
+    });
+
+    it("reads a file again once it changed: a recording tag removed since means it is asked about", async () => {
+        mockParseFile.mockResolvedValue(tags({ musicbrainz_recordingid: RECORDING }));
+        const song = { ...track("e/retagged.flac"), id: "e-retagged", acoustidFingerprint: "STORED-E" };
+        await prefetchAcoustidReplies([song]);
+        await prefetchAcoustidReplies([song]);
         expect(mockParseFile).toHaveBeenCalledTimes(1);
+        expect(mockLookupMany).not.toHaveBeenCalled();
+
+        mockParseFile.mockResolvedValue(tags({}));
+        await prefetchAcoustidReplies([{ ...song, fileModified: new Date("2026-10-02T00:00:00Z") }]);
+
+        expect(mockParseFile).toHaveBeenCalledTimes(2);
+        expect(mockLookupMany).toHaveBeenCalledWith([{ trackId: "e-retagged", duration: 200, fingerprint: "STORED-E" }]);
+    });
+
+    it("asks again once a batch's saved reply has expired", async () => {
+        mockParseFile.mockResolvedValue(tags({ acoustid_fingerprint: "TAG-FP-F" }));
+        mockLookupMany.mockResolvedValue(1);
+        const song = { ...track("f/expired.flac"), id: "f-expired", acoustidFingerprint: null };
+
+        await prefetchAcoustidReplies([song]);
+        // The saved reply's lifetime ran out: nothing is saved under the fingerprint any more.
+        mockHasSavedReply.mockResolvedValue(false);
+        await prefetchAcoustidReplies([song]);
+
+        expect(mockLookupMany).toHaveBeenCalledTimes(2);
+        expect(mockLookupMany).toHaveBeenLastCalledWith([{ trackId: "f-expired", duration: 200, fingerprint: "TAG-FP-F" }]);
     });
 
     it("reads no file at all while AcoustID cannot be asked in batches (paused, no key, a batch just failed)", async () => {

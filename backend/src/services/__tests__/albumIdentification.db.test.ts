@@ -262,12 +262,13 @@ describe("identifyAlbumsBySound", () => {
         expect(mockPost).toHaveBeenCalledTimes(2);
     });
 
-    it("reaches an album through the backlog when none of its songs is coming up", async () => {
+    it("reaches an album through the backlog in one round when none of its songs is coming up", async () => {
+        // A round that reaches the end of the backlog starts the next one from the top, wherever
+        // earlier tests left it: with this album not yet there, the next round starts at the top.
+        await identifyAlbumsBySound([]);
         await seedAlbum();
 
-        let assigned = await identifyAlbumsBySound([]);
-        // The backlog resumes where the last round stopped; at the end of the list it starts over.
-        if (!assigned.includes(id("alb"))) assigned = await identifyAlbumsBySound([]);
+        const assigned = await identifyAlbumsBySound([]);
 
         expect(assigned).toContain(id("alb"));
         expect((await album())?.rgMbid).toBe(DANGEROUS_DAYS);

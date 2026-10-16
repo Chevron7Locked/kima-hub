@@ -9,7 +9,7 @@ import { parseEmbedding } from "../../utils/embedding";
 import { feelVector, unit, type MatchTrack } from "./formula";
 import type { LaidOutMap, PlacedTracks } from "./mapCompute";
 import type { ColourFrame } from "./mapLayout";
-import { MATCHING_MODEL, PROBE_ID, STATE_VERSION, loadMatchingState, type MatchingState } from "./state";
+import { MAP_WRITE_TIMEOUT_MS, MATCHING_MODEL, PROBE_ID, STATE_VERSION, loadMatchingState, type MatchingState } from "./state";
 import { runInWorker } from "./worker";
 
 /** Raise when the layout arithmetic changes, so every library is laid out again. */
@@ -149,7 +149,7 @@ async function writeWhileStateStands(write: (tx: Prisma.TransactionClient) => Pr
             return true;
         },
         // Long enough to wait out a re-run holding the state row (enrichmentRestart.ts).
-        { timeout: 8 * 60 * 1000, maxWait: 8 * 60 * 1000 },
+        { timeout: MAP_WRITE_TIMEOUT_MS, maxWait: MAP_WRITE_TIMEOUT_MS },
     );
 }
 

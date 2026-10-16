@@ -15,8 +15,9 @@ import { albumIdentityKey, editionlessKey, isGenericAlbumTitle } from "./albumId
 import { findAlbumArtwork } from "./artwork";
 import { LIBRARY_LOCATION } from "./libraryFilters";
 import { DuplicateMbidError, reassignAlbumRgMbid } from "./mbidReassign";
-import { musicBrainzService } from "./musicbrainz";
+import { musicBrainzService, type AlbumCatalogue } from "./musicbrainz";
 import { sourcePauseController } from "./sourcePauseController";
+import { askedAgain } from "./stageReopen";
 
 /** One song of the album: AcoustID's pick for it, or null when AcoustID has none. */
 export interface AlbumSongAnswer {
@@ -84,6 +85,10 @@ export type AlbumFacts = {
     label: string | null;
 };
 
+export function albumFactsOf(catalogue: AlbumCatalogue): AlbumFacts {
+    return { albumGenres: catalogue.genres, originalYear: catalogue.originalYear, label: catalogue.label };
+}
+
 /** Fill the album's original year, label and top five genres, each only where
  * still blank, so scan tags and manual edits are never overwritten. */
 export async function fillAlbumFromCatalogue(
@@ -103,7 +108,9 @@ export async function fillAlbumFromCatalogue(
 }
 
 /** Albums worked on per round (asked about or voted on; an album already decided does not count),
- * and the time a round may take before it stops at the next album. */
+ * and the time a round may take before it stops at the next album. These bounds and the two
+ * put-aside times below are chosen limits, not measured ones: they decide how long work waits,
+ * never which album an id names. */
 const ALBUMS_PER_ROUND = 10;
 const ROUND_BUDGET_MS = 20_000;
 /** A verdict is remembered this long (an unmatched AcoustID reply's lifetime), unless the songs change. */
@@ -115,6 +122,15 @@ const MISSING_REPLY_TTL = 2 * 60;
 /** How many backlog albums one round looks through, and where the next round resumes. */
 const BACKLOG_PAGE = ALBUMS_PER_ROUND * 5;
 let backlogCursor = "";
+
+/** The song signature a remembered verdict was made for; an unreadable memo is no memo. */
+function memoSignature(memo: string): string | undefined {
+    try {
+        return (JSON.parse(memo) as { signature?: string }).signature;
+    } catch {
+        return undefined;
+    }
+}
 
 interface CandidateAlbum {
     id: string;
@@ -222,7 +238,7 @@ async function identifyAlbum(album: CandidateAlbum): Promise<AlbumOutcome> {
         .digest("hex");
     const memoKey = `acoustid:album-vote:${album.id}`;
     const memo = await redisClient.get(memoKey).catch(() => null);
-    if (memo && (JSON.parse(memo) as { signature?: string }).signature === signature) return "already-decided";
+    if (memo && memoSignature(memo) === signature) return "already-decided";
     const remember = (outcome: string, ttl = VERDICT_TTL) =>
         redisClient
             .setex(memoKey, ttl, JSON.stringify({ signature, outcome, at: new Date().toISOString() }))
@@ -301,11 +317,7 @@ async function identifyAlbum(album: CandidateAlbum): Promise<AlbumOutcome> {
         return "decided-none";
     }
 
-    await fillAlbumFromCatalogue(album, {
-        albumGenres: catalogue.value.genres,
-        originalYear: catalogue.value.originalYear,
-        label: catalogue.value.label,
-    });
+    await fillAlbumFromCatalogue(album, albumFactsOf(catalogue.value));
     if (!album.coverUrl) {
         try {
             const found = await findAlbumArtwork({ rgMbid: verdict.releaseGroupId, artistName: album.artist, albumTitle: album.title });
@@ -317,8 +329,7 @@ async function identifyAlbum(album: CandidateAlbum): Promise<AlbumOutcome> {
     // Songs that found no recording before can now be named from the album's tracklist.
     await prisma.$executeRaw`
         UPDATE "TrackStage" ts
-           SET status = 'pending', failures = 0, redelivered = 0, retryable = true, "nextRetryAt" = NULL,
-               evidence = jsonb_build_object('reason', 'album identified'), "startedAt" = NULL, "finishedAt" = NULL
+           SET ${askedAgain}, evidence = jsonb_build_object('reason', 'album identified')
           FROM "Track" t
          WHERE ts."trackId" = t.id AND t."albumId" = ${album.id}
            AND ts.stage = 'recording' AND ts.status = 'done'

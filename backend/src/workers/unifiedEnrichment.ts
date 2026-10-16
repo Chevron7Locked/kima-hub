@@ -32,9 +32,10 @@ import {
 } from "./audioCompletionSubscriber";
 import { enrichmentStateService, type EnrichmentPhase } from "../services/enrichmentState";
 import { STAGE_RETRY_CAP, computeStageRetryWaitMs } from "./stageRetry";
+import { ASKED_AGAIN_SQL } from "../services/stageReopen";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { featureDetection } from "../services/featureDetection";
-import { musicBrainzService } from "../services/musicbrainz";
+import { musicBrainzService, type AlbumCatalogue } from "../services/musicbrainz";
 import { topVoted } from "../utils/votes";
 import { trackIdentityService } from "../services/trackIdentity";
 import {
@@ -43,7 +44,7 @@ import {
     prefetchAcoustidReplies,
     readIdentityTags,
 } from "../services/acoustidIdentification";
-import { fillAlbumFromCatalogue, identifyAlbumsBySound, type AlbumFacts } from "../services/albumIdentification";
+import { albumFactsOf, fillAlbumFromCatalogue, identifyAlbumsBySound, type AlbumFacts } from "../services/albumIdentification";
 import { fpcalcService } from "../services/fpcalc";
 import { resolveWithinMusicRoot } from "../routes/library/trackPath";
 import { buildMatching, matchingProgress } from "../services/matching/state";
@@ -462,10 +463,7 @@ export async function recordStageSuccess(
     if (dependents.length > 0) {
         await prisma.$executeRawUnsafe(
             `UPDATE "TrackStage"
-                SET status = 'pending', failures = 0, redelivered = 0, retryable = true,
-                    "nextRetryAt" = NULL, "startedAt" = NULL, "finishedAt" = NULL,
-                    "lastErrorCode" = NULL, "lastErrorMessage" = NULL, "failureClass" = NULL,
-                    evidence = jsonb_build_object('reason', 'dependency answered')
+                SET ${ASKED_AGAIN_SQL}, evidence = jsonb_build_object('reason', 'dependency answered')
               WHERE "trackId" = $1 AND stage = ANY($2::text[])
                 AND status = 'failed' AND "failureClass" = 'DEPENDENCY_CLOSED'`,
             trackId,
@@ -1235,6 +1233,7 @@ async function runFingerprintStageWork(item: StageWork): Promise<void> {
                 reason: "fingerprint already stored",
                 characters: track.acoustidFingerprint.length,
             }, item.jobId);
+            await reopenRecordingThatNeverAskedAcoustid(item.trackId);
             return;
         }
 
@@ -1259,6 +1258,7 @@ async function runFingerprintStageWork(item: StageWork): Promise<void> {
             characters: fingerprint.fingerprint.length,
             duration: fingerprint.duration,
         }, item.jobId);
+        await reopenRecordingThatNeverAskedAcoustid(item.trackId);
     } catch (err) {
         logger.debug(
             `[Enrichment] Fingerprint failed for ${item.trackId}: ${(err as Error).message}`,
@@ -1347,50 +1347,41 @@ export async function executeFingerprintPhase(): Promise<number> {
     return dispatchStageWork("fingerprint", work, STAGE_PRODUCERS.fingerprint);
 }
 
+/** Evidence on a recording no-match that could not ask AcoustID: the file had no fingerprint. */
+const ACOUSTID_NOT_ASKED = "not asked: the file's fingerprint question closed";
+
 /**
- * Reopen recording records that answered no-match without asking AcoustID
- * (their evidence carries the skip marker), so a new fingerprint can be asked.
- * A no-match that did ask AcoustID stays closed, and the attempt count is left
- * as is: one more ask, then it closes again.
+ * A fingerprint just landed: a recording no-match that closed without asking AcoustID,
+ * for want of one, can ask now.
  */
-async function reopenRecordingsThatNeverAskedAcoustid(): Promise<number> {
-    const reopened = await prisma.$executeRawUnsafe(
-        `UPDATE "TrackStage" ts
-            SET status = 'pending',
-                retryable = true,
-                "nextRetryAt" = NULL,
-                "startedAt" = NULL
-          WHERE ts.stage = 'recording'
-            AND ts.status = 'failed'
-            AND ts.retryable = false
-            AND ts.evidence ->> 'acoustid' = 'skipped'
-            -- Only where a fingerprint can still arrive: one that failed for good would
-            -- skip AcoustID again and close the record exactly as before.
-            AND NOT EXISTS (
-                SELECT 1 FROM "TrackStage" fp
-                 WHERE fp."trackId" = ts."trackId" AND fp.stage = 'fingerprint'
-                   AND fp.status = 'failed' AND fp.retryable = false
-            )`,
-    );
-    if (reopened > 0) {
-        logger.info(
-            `[Enrichment] Re-opened ${reopened} recording stage(s) that never asked AcoustID`,
+async function reopenRecordingThatNeverAskedAcoustid(trackId: string): Promise<void> {
+    try {
+        const reopened = await prisma.$executeRawUnsafe(
+            `UPDATE "TrackStage"
+                SET ${ASKED_AGAIN_SQL}, evidence = jsonb_build_object('reason', 'fingerprint landed')
+              WHERE "trackId" = $1
+                AND stage = 'recording'
+                AND status = 'done'
+                AND evidence ->> 'acoustid' = $2`,
+            trackId,
+            ACOUSTID_NOT_ASKED,
         );
+        if (reopened > 0) {
+            logger.debug(`[Enrichment] Fingerprint landed for ${trackId}: its recording question asks AcoustID now`);
+        }
+    } catch (err) {
+        // The fingerprint is answered either way; this only leaves the recording closed as it was.
+        logger.warn(`[Enrichment] Could not reopen the recording question for ${trackId}: ${(err as Error).message}`);
     }
-    return reopened;
 }
 
 /**
  * "Retry failed and blocked": offer every record that is owed or due a retry.
- * Nothing is reset; `done` and terminal answers stay closed. Recording no-matches
- * that never asked AcoustID are reopened first, and the fingerprint gate holds
- * them until the retried fingerprint lands.
+ * Nothing is reset; `done` and terminal answers stay closed.
  */
 export async function retryFailedAndBlocked(
     limit = TRACK_BATCH_SIZE,
 ): Promise<StageWork[]> {
-    await reopenRecordingsThatNeverAskedAcoustid();
-
     // Each stage gets its own window, so one press reopens every owed question.
     const work: StageWork[] = [];
     for (const stage of STAGE_ORDER) {
@@ -1413,17 +1404,7 @@ export async function redecideEverything(): Promise<{ reopened: number }> {
     for (const stage of STAGE_ORDER) {
         reopened += await prisma.$executeRawUnsafe(
             `UPDATE "TrackStage" ts
-                SET status = 'pending',
-                    failures = 0,
-                    "lastErrorCode" = NULL,
-                    "lastErrorMessage" = NULL,
-                    "failureClass" = NULL,
-                    retryable = true,
-                    "nextRetryAt" = NULL,
-                    "startedAt" = NULL,
-                    "finishedAt" = NULL,
-                    "decidedAt" = NULL,
-                    "decidedBy" = NULL
+                SET ${ASKED_AGAIN_SQL}, "decidedAt" = NULL, "decidedBy" = NULL
                FROM "Track" t
               WHERE ts.stage = $1
                 AND t.id = ts."trackId"
@@ -1433,9 +1414,6 @@ export async function redecideEverything(): Promise<{ reopened: number }> {
         );
     }
 
-    // Reopening fingerprints makes no-matches that never asked AcoustID stale;
-    // reopen those too, including tracks the loop skipped for having an MBID.
-    reopened += await reopenRecordingsThatNeverAskedAcoustid();
     reopened -= await closeStagesForMissingTracks(prisma);
 
     // Mirror the reopen onto the Track columns the analyzer claims and the UI reads;
@@ -1818,10 +1796,6 @@ async function fingerprintStageSettledFailed(trackId: string): Promise<boolean> 
     return !!row && row.status === "failed" && !row.retryable;
 }
 
-type AlbumCatalogue = Extract<
-    Awaited<ReturnType<typeof musicBrainzService.getAlbumCatalogue>>,
-    { kind: "answered" }
->["value"];
 type CatalogueRecording = AlbumCatalogue["recordings"][number];
 
 /** What the album chain answered: this track's row plus the album-level answers. */
@@ -1995,26 +1969,21 @@ export async function enrichSingleTrack(
             // An answer already found takes its ISRCs and genres from its row: AcoustID's
             // best candidate that is on this album, the file tag's own row. Nothing found
             // yet: the tracklist names the recording.
+            const byName = () => matchCatalogueRecording(chain.value.recordings, expected, isrc);
             const entry = !recordingMbid
-                ? matchCatalogueRecording(chain.value.recordings, expected, isrc)
+                ? byName()
                 : answerSource === "acoustid"
                   ? acoustidCandidates.map(row).find((rec) => rec !== null) ?? null
                   : row(recordingMbid);
+            const facts = albumFactsOf(chain.value);
             if (entry) {
-                catalogueAnswer = {
-                    entry,
-                    albumGenres: chain.value.genres,
-                    originalYear: chain.value.originalYear,
-                    label: chain.value.label,
-                };
+                catalogueAnswer = { entry, ...facts };
                 recordingMbid = entry.recordingId;
             }
             // The album row is filled only when this track is on its tracklist: by its recording,
-            // or, for an AcoustID recording that is not, by its name.
-            const onAlbum = entry ?? matchCatalogueRecording(chain.value.recordings, expected, isrc);
-            if (onAlbum) {
-                rowAlbum = { albumGenres: chain.value.genres, originalYear: chain.value.originalYear, label: chain.value.label };
-            }
+            // or, for a recording found elsewhere that is not, by its name (with none found, the
+            // name was the match just tried).
+            if (entry || (recordingMbid && byName())) rowAlbum = facts;
         } else if (chain.kind !== "absent" && !recordingMbid) {
             failedAsk = { source: "musicbrainz", outcome: chain };
         }
@@ -2060,7 +2029,7 @@ export async function enrichSingleTrack(
             ? candidates.map((id) => tracklist!.recordings.find((rec) => rec.recordingId === id)).find((rec) => rec !== undefined) ?? null
             : null;
         if (entry && tracklist) {
-            catalogueAnswer = { entry, albumGenres: tracklist.genres, originalYear: tracklist.originalYear, label: tracklist.label };
+            catalogueAnswer = { entry, ...albumFactsOf(tracklist) };
             rowAlbum = catalogueAnswer;
         }
         recordingMbid = entry?.recordingId ?? candidates[0];
@@ -2114,7 +2083,7 @@ export async function enrichSingleTrack(
         await recordStageAbsent(track.id, "recording", "acoustid", {
             reason: "no source has a recording that is this track",
             asked,
-            ...(acoustidSkipped ? { acoustid: "not asked: the file's fingerprint question closed" } : {}),
+            ...(acoustidSkipped ? { acoustid: ACOUSTID_NOT_ASKED } : {}),
         }, jobId);
         return "no_match";
     }
@@ -2643,7 +2612,7 @@ async function prefetchAcoustidForWork(work: StageWork[]): Promise<void> {
     try {
         const tracks = await prisma.track.findMany({
             where: { id: { in: work.map((w) => w.trackId) } },
-            select: { id: true, title: true, filePath: true, duration: true, acoustidFingerprint: true },
+            select: { id: true, title: true, filePath: true, duration: true, acoustidFingerprint: true, fileModified: true },
         });
         const asked = await prefetchAcoustidReplies(tracks);
         if (asked > 0) logger.debug(`[Enrichment] Asked AcoustID about ${asked} track(s) in batches`);

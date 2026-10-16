@@ -113,7 +113,7 @@ jest.mock("../../services/albumIdentification", () => ({
 }));
 jest.mock("../../services/acoustidIdentification", () => ({
     prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
-    identifyTrackByAcoustid: jest.fn().mockResolvedValue(null),
+    identifyTrackByAcoustid: jest.fn().mockResolvedValue({ kind: "absent", evidence: { mocked: true } }),
     persistAcoustidFingerprint: jest.fn().mockResolvedValue(undefined),
 }));
 

@@ -100,7 +100,9 @@ beforeAll(async () => {
     await prisma.trackStage.create({
         data: {
             id: `${P}asking__recording`, trackId: `${P}asking`, stage: "recording", status: "working",
-            attempt: 4, retryable: true, startedAt: new Date(),
+            attempt: 4, retryable: true, startedAt: new Date(), failures: 2,
+            // What the attempt before this one failed with.
+            lastErrorCode: "TIMEOUT", lastErrorMessage: "MusicBrainz did not answer", failureClass: "TRANSIENT",
         },
     });
     await prisma.track.create({
@@ -143,7 +145,10 @@ describe("wiping the enrichment", () => {
     it("reopens an identification claimed when the wipe came, along with dropping its queued job", async () => {
         expect(await trackQueue.getJob(`${P}asking-recording-4-r0`)).toBeUndefined();
         const stage = await prisma.trackStage.findUniqueOrThrow({ where: { id: `${P}asking__recording` } });
-        expect(stage).toMatchObject({ status: "pending", attempt: 4, startedAt: null });
+        expect(stage).toMatchObject({
+            status: "pending", attempt: 4, startedAt: null,
+            failures: 0, lastErrorCode: null, lastErrorMessage: null, failureClass: null,
+        });
     });
 
     it("clears sound vectors, feel, the map and the library statistics", async () => {

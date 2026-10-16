@@ -9,6 +9,7 @@ import { startEnrichmentNow, recordStageSuccess, recordStageFailure } from "../w
 import os from "os";
 import { isInternalSecret } from "../utils/internalSecret";
 import { reopenable } from "../services/missingFileStages";
+import { ASKED_AGAIN_SQL } from "../services/stageReopen";
 
 /**
  * Whether an analyzer is running, from the heartbeat timestamp it writes to
@@ -403,17 +404,7 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             // new one lands.
             await prisma.$executeRawUnsafe(
                 `UPDATE "TrackStage"
-                    SET status = 'pending',
-                        failures = 0,
-                        "lastErrorCode" = NULL,
-                        "lastErrorMessage" = NULL,
-                        "failureClass" = NULL,
-                        retryable = true,
-                        "nextRetryAt" = NULL,
-                        "startedAt" = NULL,
-                        "finishedAt" = NULL,
-                        "decidedAt" = NULL,
-                        "decidedBy" = NULL
+                    SET ${ASKED_AGAIN_SQL}, "decidedAt" = NULL, "decidedBy" = NULL
                   WHERE stage = 'embedding'
                     AND ${reopenable('"TrackStage"')}`,
             );
@@ -425,16 +416,7 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             // stage queue offers them. Gating reads the analysis record, not the column.
             await prisma.$executeRawUnsafe(
                 `UPDATE "TrackStage" ts
-                    SET status = 'pending',
-                        "lastErrorCode" = NULL,
-                        "lastErrorMessage" = NULL,
-                        "failureClass" = NULL,
-                        retryable = true,
-                        "nextRetryAt" = NULL,
-                        "startedAt" = NULL,
-                        "finishedAt" = NULL,
-                        "decidedAt" = NULL,
-                        "decidedBy" = NULL
+                    SET ${ASKED_AGAIN_SQL}, "decidedAt" = NULL, "decidedBy" = NULL
                    FROM "TrackStage" a, "Track" t
                   WHERE ts.stage = 'embedding'
                     AND a."trackId" = ts."trackId" AND a.stage = 'analysis' AND a.status = 'done'

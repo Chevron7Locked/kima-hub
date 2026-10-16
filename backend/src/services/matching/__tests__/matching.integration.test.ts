@@ -239,6 +239,18 @@ afterAll(async () => {
     await prisma.$disconnect();
 });
 
+
+/** Waits (up to a minute) until n sessions of this database are waiting on a row lock. */
+async function waitingOnLocks(n: number): Promise<void> {
+    for (let i = 0; i < 1200; i++) {
+        const [{ c }] = await prisma.$queryRaw<{ c: number }[]>`
+            SELECT count(*)::int AS c FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+        if (c >= n) return;
+        await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error(`${n} sessions never waited on a lock`);
+}
+
 describe("the similarity step", () => {
     it("computes feel for every sound vector of the probe's model and builds the state", async () => {
         const modelVectors = Object.keys(ARTISTS).length * ALBUMS_PER_ARTIST * TRACKS_PER_ALBUM + 1;
@@ -584,15 +596,6 @@ describe("a re-run while the map is being laid out", () => {
             },
             { timeout: 120_000 },
         );
-        const waitingOnLocks = async (n: number) => {
-            for (let i = 0; i < 1200; i++) {
-                const [{ c }] = await prisma.$queryRaw<{ c: number }[]>`
-                    SELECT count(*)::int AS c FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
-                if (c >= n) return;
-                await new Promise((r) => setTimeout(r, 50));
-            }
-            throw new Error(`${n} sessions never waited on a lock`);
-        };
         const layout = updateMap(true);
         let rerun: Promise<unknown> = Promise.resolve();
         try {
@@ -627,15 +630,6 @@ describe("a re-run while the map is being laid out", () => {
             },
             { timeout: 120_000 },
         );
-        const waitingOnLocks = async (n: number) => {
-            for (let i = 0; i < 1200; i++) {
-                const [{ c }] = await prisma.$queryRaw<{ c: number }[]>`
-                    SELECT count(*)::int AS c FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
-                if (c >= n) return;
-                await new Promise((r) => setTimeout(r, 50));
-            }
-            throw new Error(`${n} sessions never waited on a lock`);
-        };
         // A placement write (the map is laid out; a new vector waits for a place) queues on the state row.
         await prisma.$executeRaw`DELETE FROM matching_map WHERE track_id = ${trackId(0, 0, 0)}`;
         const placement = updateMap(true);
@@ -668,15 +662,6 @@ describe("a re-run while the map is being laid out", () => {
             },
             { timeout: 120_000 },
         );
-        const waitingOnLocks = async (n: number) => {
-            for (let i = 0; i < 1200; i++) {
-                const [{ c }] = await prisma.$queryRaw<{ c: number }[]>`
-                    SELECT count(*)::int AS c FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
-                if (c >= n) return;
-                await new Promise((r) => setTimeout(r, 50));
-            }
-            throw new Error(`${n} sessions never waited on a lock`);
-        };
         await prisma.$executeRaw`UPDATE track_embeddings SET analyzed_at = analyzed_at + interval '1 second'`;
         const build = buildMatching();
         try {
@@ -712,15 +697,6 @@ describe("a re-run while the map is being laid out", () => {
             },
             { timeout: 120_000 },
         );
-        const waitingOnLocks = async (n: number) => {
-            for (let i = 0; i < 1200; i++) {
-                const [{ c }] = await prisma.$queryRaw<{ c: number }[]>`
-                    SELECT count(*)::int AS c FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
-                if (c >= n) return;
-                await new Promise((r) => setTimeout(r, 50));
-            }
-            throw new Error(`${n} sessions never waited on a lock`);
-        };
         const rerun = rerunEnrichment("vectors");
         try {
             await waitingOnLocks(1);

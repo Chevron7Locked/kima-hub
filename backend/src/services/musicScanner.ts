@@ -21,6 +21,7 @@ import { findLocalArtistImage } from "./imageStorage";
 import { LIBRARY_LOCATION } from "./libraryFilters";
 import { closeStagesForMissingTracks } from "./missingFileStages";
 import { runReconcile } from "./libraryReconcile";
+import { askedAgain } from "./stageReopen";
 
 /**
  * The MusicBrainz id of a credit's primary artist, from the same tag the name came
@@ -40,18 +41,9 @@ function primaryArtistMbid(ids: readonly string[] | undefined, credit: ParsedCre
 async function reopenStagesForChangedFile(trackId: string): Promise<void> {
     const reopened = await prisma.$executeRaw`
         UPDATE "TrackStage"
-           SET status = 'pending',
-               failures = 0,
-               redelivered = 0,
-               "nextRetryAt" = NULL,
-               "startedAt" = NULL,
-               "finishedAt" = NULL,
+           SET ${askedAgain},
                "decidedAt" = NULL,
                "decidedBy" = NULL,
-               "lastErrorCode" = NULL,
-               "lastErrorMessage" = NULL,
-               "failureClass" = NULL,
-               retryable = true,
                evidence = jsonb_build_object('reason', 'file changed')
          WHERE "trackId" = ${trackId}
            AND status IN ('done', 'failed', 'pending', 'working')`;
@@ -73,17 +65,7 @@ async function reopenStagesForReturnedTracks(
     if (trackIds.length === 0) return;
     const reopened = await client.$executeRaw`
         UPDATE "TrackStage"
-           SET status = 'pending',
-               failures = 0,
-               redelivered = 0,
-               "nextRetryAt" = NULL,
-               "startedAt" = NULL,
-               "finishedAt" = NULL,
-               "lastErrorCode" = NULL,
-               "lastErrorMessage" = NULL,
-               "failureClass" = NULL,
-               retryable = true,
-               evidence = jsonb_build_object('reason', 'file returned')
+           SET ${askedAgain}, evidence = jsonb_build_object('reason', 'file returned')
          WHERE "trackId" = ANY(${trackIds}::text[])
            AND status = 'failed'
            AND NOT retryable

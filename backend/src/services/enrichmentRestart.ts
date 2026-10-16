@@ -12,6 +12,8 @@ import { redisClient } from "../utils/redis";
 import { trackQueue, vibeQueue } from "../workers/enrichmentQueues";
 import { STAGE_QUEUES } from "../workers/unifiedEnrichment";
 import { closeStagesForMissingTracks } from "./missingFileStages";
+import { askedAgain } from "./stageReopen";
+import { RERUN_TIMEOUT_MS } from "./matching/state";
 
 export type RerunStep = "identification" | "artists" | "analysis" | "vectors" | "similarity";
 
@@ -56,8 +58,7 @@ function resetRecording(tx: Tx): Promise<unknown> {
     return tx.$executeRaw`
         WITH reopened AS (
             UPDATE "TrackStage"
-            SET status = 'pending', failures = 0, redelivered = 0, retryable = true, "nextRetryAt" = NULL,
-                evidence = jsonb_build_object('reason', 'enrichment wiped'), "startedAt" = NULL, "finishedAt" = NULL
+            SET ${askedAgain}, evidence = jsonb_build_object('reason', 'enrichment wiped')
             WHERE stage = 'recording' AND status IN ('done', 'working') AND "decidedAt" IS NULL
             RETURNING "trackId"
         ), cleared AS (
@@ -89,9 +90,7 @@ async function resetAnalysis(tx: Tx): Promise<number> {
     `;
     await tx.$executeRaw`
         UPDATE "TrackStage"
-        SET status = 'pending', failures = 0, redelivered = 0, "lastErrorCode" = NULL,
-            "lastErrorMessage" = NULL, "failureClass" = NULL, retryable = true, "nextRetryAt" = NULL,
-            evidence = NULL, "startedAt" = NULL, "finishedAt" = NULL
+        SET ${askedAgain}, evidence = NULL
         WHERE stage = 'analysis' AND "decidedAt" IS NULL
     `;
     return tracks;
@@ -112,9 +111,7 @@ async function resetVectors(tx: Tx): Promise<number> {
     `;
     await tx.$executeRaw`
         UPDATE "TrackStage"
-        SET status = 'pending', failures = 0, redelivered = 0, "lastErrorCode" = NULL,
-            "lastErrorMessage" = NULL, "failureClass" = NULL, retryable = true, "nextRetryAt" = NULL,
-            evidence = NULL, "startedAt" = NULL, "finishedAt" = NULL
+        SET ${askedAgain}, evidence = NULL
         WHERE stage = 'embedding' AND "decidedAt" IS NULL
     `;
     return vectors;
@@ -140,9 +137,6 @@ function lockStages(tx: Tx, stages: string[]): Promise<unknown> {
         SELECT count(*) FROM (SELECT 1 FROM "TrackStage" WHERE stage = ANY(${stages}) AND "decidedAt" IS NULL FOR UPDATE) locked
     `;
 }
-
-// Long enough to wait out a similarity build holding the state row (matching/state.ts, five minutes at most).
-const RERUN_TIMEOUT_MS = 7 * 60 * 1000;
 
 function resetSimilarity(tx: Tx): Promise<unknown> {
     // With the state gone (above), deleting every stored position makes the next similarity pass lay the map out

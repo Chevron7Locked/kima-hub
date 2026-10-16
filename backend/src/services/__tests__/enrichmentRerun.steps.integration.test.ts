@@ -1,5 +1,5 @@
 /**
- * A re-run from any of the five steps redoes that step and everything that
+ * A re-run from each of the five steps redoes that step and everything that
  * depends on it -- and nothing else. The vibe map is always laid out again;
  * person-decided answers and everything people made stay.
  */
@@ -171,6 +171,36 @@ describe("an analysis re-run", () => {
         ))[0].n).toBe(0);
         const recordingStage = await prisma.trackStage.findUniqueOrThrow({ where: { id: `${P}trk__recording` } });
         expect(recordingStage.status).toBe("done");
+        expect(await mapAndStateGone()).toBe(true);
+    });
+});
+
+describe("an identification re-run", () => {
+    it("asks every recording again and redoes everything after it, keeping a person's decision and a file's ISRC", async () => {
+        await prisma.track.update({ where: { id: `${P}trk` }, data: { isrc: "GBAYE0601498", isrcSource: "musicbrainz" } });
+        await seedEnrichedTrack(`${P}tagged`, false);
+        await prisma.track.update({ where: { id: `${P}tagged` }, data: { isrc: "USRC17607839", isrcSource: "id3" } });
+        await seedEnrichedTrack(`${P}chosen`, false);
+        await prisma.trackStage.update({
+            where: { id: `${P}chosen__recording` },
+            data: { status: "blocked", decidedAt: new Date(), decidedBy: "resolved-via-failures-api" },
+        });
+
+        await rerunEnrichment("identification");
+
+        const asked = await prisma.track.findUniqueOrThrow({ where: { id: `${P}trk` } });
+        expect(asked).toMatchObject({ recordingMbid: null, isrc: null, isrcSource: null, analysisStatus: "pending", vibeAnalysisStatus: "pending" });
+        expect((await prisma.trackStage.findUniqueOrThrow({ where: { id: `${P}trk__recording` } })).status).toBe("pending");
+
+        const tagged = await prisma.track.findUniqueOrThrow({ where: { id: `${P}tagged` } });
+        expect(tagged).toMatchObject({ recordingMbid: null, isrc: "USRC17607839", isrcSource: "id3" });
+
+        const chosen = await prisma.track.findUniqueOrThrow({ where: { id: `${P}chosen` } });
+        expect(chosen.recordingMbid).toBe(`${P}-rec`);
+        expect((await prisma.trackStage.findUniqueOrThrow({ where: { id: `${P}chosen__recording` } })).status).toBe("blocked");
+
+        const a = await prisma.artist.findUniqueOrThrow({ where: { id: `${P}art` } });
+        expect(a.enrichmentStatus).toBe("pending");
         expect(await mapAndStateGone()).toBe(true);
     });
 });

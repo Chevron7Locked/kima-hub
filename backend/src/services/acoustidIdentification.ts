@@ -14,6 +14,7 @@ import {
     Outcome,
     answered,
     absent,
+    permanent,
 } from "../utils/outcome";
 import { acoustidService, AcoustIDResult } from "./acoustidService";
 
@@ -172,13 +173,7 @@ export async function identifyTrackByAcoustid(
 /** A refusal, not an answer: nothing to ask AcoustID with. */
 function noFingerprint(): Outcome<TrackIdentification> {
     acoustidTrackIdentityTotal.inc({ path: "no_fingerprint", outcome: "refused" });
-    return {
-        kind: "permanent",
-        error: {
-            code: "NO_FINGERPRINT",
-            message: "No fingerprint in the tags and none stored — cannot ask AcoustID",
-        },
-    };
+    return permanent("NO_FINGERPRINT", "No fingerprint in the tags and none stored — cannot ask AcoustID");
 }
 
 /**
@@ -233,40 +228,37 @@ export async function persistAcoustidFingerprint(
     });
 }
 
-/** Tracks whose tags name their recording: never asked about, and their files not read again. */
-const namedByTags = new Set<string>();
-/** Tracks whose reply a batch saved, under whichever fingerprint the file gave: not read again. */
-const answeredInBatch = new Set<string>();
+/** Tracks whose tags name their recording, by the file's modified time: never asked about while the file is unchanged. */
+const namedByTags = new Map<string, number>();
 
 /**
  * Ask AcoustID about a batch of songs before their identification jobs run, so each job
  * answers from the saved reply instead of a request of its own. Uses the fingerprint and
  * length `identifyTrackByAcoustid` will use (the file's fingerprint tag, else the stored
- * one). A song already answered, or whose tags name its recording, is skipped without
- * reading its file again. Returns how many were asked.
+ * one). A song with a saved reply, or whose tags name its recording, is not asked about;
+ * an unchanged file that names its recording is not read again. Returns how many were asked.
  */
 export async function prefetchAcoustidReplies(
-    tracks: Array<IdentifiableTrack & { acoustidFingerprint: string | null }>
+    tracks: Array<IdentifiableTrack & { acoustidFingerprint: string | null; fileModified: Date }>
 ): Promise<number> {
     // A paused source, no key or a batch that just failed: nothing is read or asked.
     if (!(await acoustidService.mayAskInBatches())) return 0;
     const entries: { trackId: string; duration: number; fingerprint: string }[] = [];
     for (const track of tracks) {
-        if (namedByTags.has(track.id) || answeredInBatch.has(track.id)) continue;
         if (track.acoustidFingerprint && (await acoustidService.hasSavedReply(track.duration, track.acoustidFingerprint))) continue;
+        const modified = track.fileModified.getTime();
+        if (namedByTags.get(track.id) === modified) continue;
         const tags = await readIdentityTags(track);
         if (tags?.recordingMbid) {
-            namedByTags.add(track.id);
+            namedByTags.set(track.id, modified);
             continue;
         }
         const fingerprint = tags?.fingerprint ?? track.acoustidFingerprint;
         const duration = tags ? tags.duration : track.duration;
-        if (fingerprint && duration > 0) entries.push({ trackId: track.id, duration, fingerprint });
+        if (!fingerprint || !(duration > 0)) continue;
+        if ((fingerprint !== track.acoustidFingerprint || duration !== track.duration) && (await acoustidService.hasSavedReply(duration, fingerprint))) continue;
+        entries.push({ trackId: track.id, duration, fingerprint });
     }
     if (entries.length === 0) return 0;
-    const asked = await acoustidService.lookupMany(entries);
-    for (const entry of entries) {
-        if (await acoustidService.hasSavedReply(entry.duration, entry.fingerprint)) answeredInBatch.add(entry.trackId);
-    }
-    return asked;
+    return acoustidService.lookupMany(entries);
 }

@@ -1,8 +1,8 @@
 /**
  * Recording waits on the fingerprint question through PREREQUISITE_STAGE. Once
  * it is done, AcoustID reuses the stored fingerprint; once it closes as
- * permanent, AcoustID is skipped and the skip recorded. Reopening the
- * fingerprint reopens recordings that never ran AcoustID. Real test database.
+ * permanent, AcoustID is skipped and the skip recorded. A fingerprint that lands
+ * later reopens the recording that could not ask AcoustID. Real test database.
  */
 
 // ── Queues + Redis + network services: observe, never hit the wire ──────
@@ -127,7 +127,9 @@ jest.mock("../../services/acoustidIdentification", () => ({
         kind: "permanent",
         error: { code: "NO_FINGERPRINT", message: "mocked: no fingerprint" },
     }),
-    persistAcoustidFingerprint: jest.fn().mockResolvedValue(undefined),
+    // The real write: the fingerprint stage stores what fpcalc answered.
+    persistAcoustidFingerprint: (trackId: string, fingerprint: string) =>
+        jest.requireActual("../../services/acoustidIdentification").persistAcoustidFingerprint(trackId, fingerprint),
     readIdentityTags: jest.fn().mockResolvedValue(null),
 }));
 
@@ -182,6 +184,7 @@ import {
     retryFailedAndBlocked,
     redecideEverything,
     waitForFingerprintWork,
+    executeFingerprintPhase,
     invalidateEnrichmentProgress,
     getEnrichmentProgress,
 } from "../../workers/unifiedEnrichment";
@@ -423,89 +426,69 @@ describe("only the fingerprint → recording edge settles on a closed failure", 
     });
 });
 
-describe("re-opening the fingerprint stage re-opens the no-match-without-AcoustID recordings", () => {
-    it("re-decide everything: re-opens both, and the recording waits for the fingerprint to settle again", async () => {
-        await seedTrack(id("redec"), { recording: "failed" });
-        await putStage(id("redec"), "recording", "failed", {
-            retryable: false,
-            nextRetryAt: null,
-            evidence: { acoustid: "skipped", error: 'No recording identified for "Track …"' },
-        });
-        await putStage(id("redec"), "fingerprint", "failed", { retryable: false, nextRetryAt: null });
+describe("a fingerprint that lands reopens the recording that could not ask AcoustID", () => {
+    const { enrichmentFailureService: realFailures } = jest.requireActual<
+        typeof import("../../services/enrichmentFailureService")
+    >("../../services/enrichmentFailureService");
+
+    /** A track whose fingerprint failed for good, its recording closed through the real path. */
+    async function closedWithoutAcoustid(trackId: string): Promise<void> {
+        await seedTrack(trackId, { recording: "pending" });
+        await putStage(trackId, "fingerprint", "failed", { retryable: false, nextRetryAt: null });
+        jest.mocked(identifyTrackByAcoustid).mockResolvedValue({ kind: "absent", evidence: {} });
+        expect(await enrichSingleTrack(trackId)).toBe("no_match");
+        const recording = await stageRow(trackId, "recording");
+        expect(recording?.status).toBe("done");
+        expect(recording?.evidence?.["acoustid"]).toBe("not asked: the file's fingerprint question closed");
+    }
+
+    it("the failures screen's fingerprint retry: once fpcalc answers, the recording asks AcoustID", async () => {
+        await closedWithoutAcoustid(id("rfs"));
+        // A no-match that did ask AcoustID is a different answer and stays closed.
+        await seedTrack(id("asked"), { recording: "done", fingerprint: "done", acoustidFingerprint: "AQSEE_ASKED" });
+
+        expect(await realFailures.retryStageFailures([`${id("rfs")}__fingerprint`])).toBe(1);
+        // Still closed while the fingerprint is being asked again.
+        expect((await stageRow(id("rfs"), "recording"))?.status).toBe("done");
+
+        await executeFingerprintPhase();
+        await waitForFingerprintWork();
+
+        expect((await stageRow(id("rfs"), "fingerprint"))?.status).toBe("done");
+        expect((await prisma.track.findUnique({ where: { id: id("rfs") } }))?.acoustidFingerprint).toBe("AQSEEFPFPCALC");
+        expect((await stageRow(id("rfs"), "recording"))?.status).toBe("pending");
+        const work = await getNextWork(50);
+        expect(work.some((w) => w.trackId === id("rfs") && w.stage === "recording")).toBe(true);
+        expect(work.some((w) => w.trackId === id("asked") && w.stage === "recording")).toBe(false);
+
+        // Asked this time, with the new fingerprint.
+        jest.mocked(identifyTrackByAcoustid).mockClear();
+        await enrichSingleTrack(id("rfs"));
+        expect(identifyTrackByAcoustid).toHaveBeenCalledTimes(1);
+        const [, , stored] = jest.mocked(identifyTrackByAcoustid).mock.calls[0];
+        expect(stored).toEqual({ fingerprint: "AQSEEFPFPCALC" });
+    });
+
+    it("re-decide everything: both reopen, and the recording waits for the fingerprint to settle again", async () => {
+        await closedWithoutAcoustid(id("redec"));
 
         await redecideEverything();
 
         expect((await stageRow(id("redec"), "fingerprint"))?.status).toBe("pending");
         expect((await stageRow(id("redec"), "recording"))?.status).toBe("pending");
-
-        // The recording question is open but BLOCKED again, not owed: while
-        // the fingerprint is being re-asked the recording stage must not
-        // burn MusicBrainz searches per cycle.
-        let work = await getNextWork(50);
+        // Open but blocked: no MusicBrainz searches per cycle while the fingerprint is re-asked.
+        const work = await getNextWork(50);
         expect(work.some((w) => w.trackId === id("redec") && w.stage === "recording")).toBe(false);
-
-        // Once the re-asked fingerprint settles, the recording stage runs —
-        // and can finally use the fingerprint it was waiting for.
-        await putStage(id("redec"), "fingerprint", "done");
-        await prisma.track.update({
-            where: { id: id("redec") },
-            data: { acoustidFingerprint: "AQSEE_REDECIDED" },
-        });
-        work = await getNextWork(50);
-        expect(work.some((w) => w.trackId === id("redec") && w.stage === "recording")).toBe(true);
     });
 
-    it("retry failed and blocked: a due fingerprint retry re-opens the recording that never asked AcoustID", async () => {
-        // Fingerprint failed transiently and its backoff has elapsed — the
-        // retry control hands it out again.
-        await seedTrack(id("rfb"), { recording: "failed" });
-        await putStage(id("rfb"), "recording", "failed", {
-            retryable: false,
-            nextRetryAt: null,
-            evidence: { acoustid: "skipped", error: 'No recording identified for "Track …"' },
-        });
-        await putStage(id("rfb"), "fingerprint", "failed", {
-            retryable: true,
-            nextRetryAt: new Date(Date.now() - 60_000),
-        });
-        // A recording whose no-match DID run AcoustID (the fingerprint
-        // existed, the lookup missed) is a different answer: it does not get
-        // re-opened by the fingerprint retry.
-        await seedTrack(id("asked"), { recording: "failed" });
-        await putStage(id("asked"), "recording", "failed", {
-            retryable: false,
-            nextRetryAt: null,
-            evidence: { paths: ["mb-search", "acoustid"], error: "No recording identified" },
-        });
-        await putStage(id("asked"), "fingerprint", "done");
-        await prisma.track.update({
-            where: { id: id("asked") },
-            data: { acoustidFingerprint: "AQSEE_ASKED" },
-        });
+    it("retry failed and blocked leaves it closed: its fingerprint failed for good and is not retried", async () => {
+        await closedWithoutAcoustid(id("nofp"));
 
         const work = await retryFailedAndBlocked(50);
-        expect(work.some((w) => w.trackId === id("rfb") && w.stage === "fingerprint")).toBe(true);
 
-        // The recording that never asked AcoustID is re-opened alongside the
-        // fingerprint question, so it can use the new fingerprint once the
-        // retry lands. It is NOT offered yet — the fingerprint is still open.
-        expect((await stageRow(id("rfb"), "recording"))?.status).toBe("pending");
-        let next = await getNextWork(50);
-        expect(next.some((w) => w.trackId === id("rfb") && w.stage === "recording")).toBe(false);
-
-        // The no-match that DID ask AcoustID stays closed.
-        expect((await stageRow(id("asked"), "recording"))?.status).toBe("failed");
-        expect((await stageRow(id("asked"), "recording"))?.retryable).toBe(false);
-
-        // When the retried fingerprint lands, the re-opened recording is due.
-        await waitForFingerprintWork();
-        await putStage(id("rfb"), "fingerprint", "done");
-        await prisma.track.update({
-            where: { id: id("rfb") },
-            data: { acoustidFingerprint: "AQSEE_RETRIED" },
-        });
-        next = await getNextWork(50);
-        expect(next.some((w) => w.trackId === id("rfb") && w.stage === "recording")).toBe(true);
+        expect(work.some((w) => w.trackId === id("nofp") && (w.stage === "recording" || w.stage === "fingerprint"))).toBe(false);
+        expect((await stageRow(id("nofp"), "recording"))?.status).toBe("done");
+        expect((await stageRow(id("nofp"), "fingerprint"))?.status).toBe("failed");
     });
 });
 
@@ -523,23 +506,5 @@ describe("progress: a recording stage parked on an unsettled fingerprint is wait
         expect(progress.trackTags.waiting).toBe(1);
         // Core completion must not be declared while a question is parked.
         expect(progress.coreComplete).toBe(false);
-    });
-
-    it("retry failed and blocked: leaves closed a recording whose fingerprint failed for good", async () => {
-        // No fingerprint can ever arrive, so asking again would skip AcoustID and
-        // close the record exactly as before.
-        await seedTrack(id("nofp"), { recording: "failed" });
-        await putStage(id("nofp"), "recording", "failed", {
-            retryable: false,
-            nextRetryAt: null,
-            evidence: { acoustid: "skipped", error: 'No recording identified for "Track …"' },
-        });
-        await putStage(id("nofp"), "fingerprint", "failed", { retryable: false, nextRetryAt: null });
-
-        await retryFailedAndBlocked(50);
-
-        const recording = await stageRow(id("nofp"), "recording");
-        expect(recording?.status).toBe("failed");
-        expect(recording?.retryable).toBe(false);
     });
 });

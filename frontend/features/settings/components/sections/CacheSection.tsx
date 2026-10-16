@@ -245,48 +245,42 @@ function EnrichmentFailuresList({ active = false }: { active?: boolean }) {
 type QueueResult = "retry" | "everything" | "wipe" | "rerun";
 type ConfirmTarget = "retryFailedAndBlocked" | "redecideEverything" | "wipeAndRerun" | null;
 
-/** The five steps a re-run can start from, and what each one redoes. */
-const RERUN_STEPS: {
-    value: EnrichmentRerunStep;
-    label: string;
-    message: string;
-}[] = [
-    {
-        value: "similarity",
+/** What each step a re-run can start from redoes; a step added to the API must be described here. */
+const RERUN_STEPS: Record<EnrichmentRerunStep, { label: string; message: string }> = {
+    similarity: {
         label: "similarity + map",
         message:
             "Rebuilds the feel, the library statistics and the vibe map from scratch. " +
             "Nothing about your tracks is measured again, so this is the quickest one.",
     },
-    {
-        value: "vectors",
+    vectors: {
         label: "sound vectors",
         message:
             "Re-runs sound vectors for every track, then rebuilds the vibe map. " +
             "Audio analysis and identification are kept.",
     },
-    {
-        value: "analysis",
+    analysis: {
         label: "audio analysis",
         message:
             "Re-runs audio analysis for every track, then sound vectors and the vibe map. " +
             "Identification (which recording each track is) is kept.",
     },
-    {
-        value: "artists",
+    artists: {
         label: "artists",
         message:
             "Re-runs artist bios, genres and similar artists, then rebuilds the vibe map " +
             "(its formula reads artist genres). Audio analysis and sound vectors are kept.",
     },
-    {
-        value: "identification",
+    identification: {
         label: "identification (everything)",
         message:
             "Same as wiping and re-running everything: identification, artists, audio analysis, " +
             "sound vectors and the vibe map, all from the start.",
     },
-];
+};
+
+/** The order the steps are offered in, as written above: quickest first. */
+const RERUN_ORDER = Object.keys(RERUN_STEPS) as EnrichmentRerunStep[];
 
 const WIPE_MESSAGE =
     "Clears what Kima worked out about your music: which recording each track is, audio analysis, vibe data, the vibe map, " +
@@ -874,9 +868,9 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                         className="h-9 rounded-lg border border-white/10 bg-surface px-2 text-xs text-[var(--text-primary)] focus:border-[var(--color-brand)] focus:outline-none"
                                         data-testid="enrichment-rerun-select"
                                     >
-                                        {RERUN_STEPS.map((s) => (
-                                            <option key={s.value} value={s.value}>
-                                                {s.label}
+                                        {RERUN_ORDER.map((step) => (
+                                            <option key={step} value={step}>
+                                                {RERUN_STEPS[step].label}
                                             </option>
                                         ))}
                                     </select>
@@ -1271,9 +1265,9 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                         setRerunConfirmStep(null);
                         void execRerunStep(step);
                     }}
-                    title={`Re-run from ${RERUN_STEPS.find((s) => s.value === rerunConfirmStep)?.label}?`}
+                    title={`Re-run from ${RERUN_STEPS[rerunConfirmStep].label}?`}
                     message={
-                        (RERUN_STEPS.find((s) => s.value === rerunConfirmStep)?.message ?? "") +
+                        RERUN_STEPS[rerunConfirmStep].message +
                         " The vibe map is laid out again when it finishes. Your music, playlists, plays, likes and edits stay."
                     }
                     confirmText="Re-run"

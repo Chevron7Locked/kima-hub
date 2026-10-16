@@ -334,12 +334,10 @@ class AcoustIDService {
         } catch (error: any) {
             const message = error?.response?.status || error?.message;
             if (await sourcePauseController.handleRateLimit("acoustid", error)) {
-                logger.warn(
-                    `[AcoustID] Rate limited; source 'acoustid' paused until ${
-                        (await sourcePauseController.getPause("acoustid"))?.until?.toISOString() ?? "?"
-                    }`
-                );
                 const pause = await sourcePauseController.getPause("acoustid");
+                logger.warn(
+                    `[AcoustID] Rate limited; source 'acoustid' paused until ${pause?.until?.toISOString() ?? "?"}`
+                );
                 return rateLimited(
                     pause?.until ?? new Date(Date.now() + 30_000),
                     { reason: "rate-limited", error: String(message) }

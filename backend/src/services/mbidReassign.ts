@@ -30,7 +30,11 @@ export class DuplicateMbidError extends Error {
 export type RgMbidSource = "tag" | "acoustid" | "search" | "editor";
 
 /** Ids a file's own tag may replace: chosen by Kima, not by the files or a person. */
-export const REPLACEABLE_SOURCES: readonly string[] = ["acoustid", "search"];
+export const REPLACEABLE_SOURCES: readonly RgMbidSource[] = ["acoustid", "search"];
+
+/** Whether an album's id came from Kima's own choice, so the files' tag may replace it. */
+export const isKimaChosen = (source: string | null | undefined): boolean =>
+    (REPLACEABLE_SOURCES as readonly string[]).includes(source ?? "");
 
 /** How much an album's id is to be trusted, by where it came from; no source is a tag (older rows). */
 const sourceStrength = (source: string | null | undefined) =>

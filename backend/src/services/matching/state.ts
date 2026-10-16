@@ -28,7 +28,14 @@ export const PROBE_ID = crypto
 
 const PROBE_DIMS = feelProbe.valence.weights.length;
 export const STATE_VERSION = `${FORMULA_VERSION}/${MATCHING_MODEL}/${PROBE_ID}`;
-const BUILD_TIMEOUT_MS = 5 * 60 * 1000;
+/**
+ * How long each writer of the matching state waits on the others. These are chosen limits, not measured ones,
+ * and they must stay in this order: a re-run outwaits a build holding the state row, and a map write outwaits a
+ * re-run, or the later writer gives up while the earlier still holds the row.
+ */
+export const BUILD_TIMEOUT_MS = 5 * 60 * 1000;
+export const RERUN_TIMEOUT_MS = BUILD_TIMEOUT_MS + 2 * 60 * 1000;
+export const MAP_WRITE_TIMEOUT_MS = RERUN_TIMEOUT_MS + 60 * 1000;
 
 /** The comparison the formula was measured with: lower-case letters and digits only. */
 function genreKey(name: string): string {

@@ -66,6 +66,8 @@ beforeEach(async () => {
     jest.clearAllMocks();
     mockIsPaused.mockResolvedValue(false);
     mockHandleRateLimit.mockResolvedValue(false);
+    // A failed batch holds batches off for a minute; each test starts with none held.
+    (acoustidService as any).batchesHeldUntil = 0;
     await clearSavedReplies();
 });
 
@@ -160,7 +162,6 @@ describe("acoustidService.lookupMany", () => {
         expect(await acoustidService.lookupMany(songs)).toBe(0);
         expect(post).toHaveBeenCalledTimes(1);
         expect(await redisClient.keys("acoustid:lookup:*")).toHaveLength(0);
-        (acoustidService as any).batchesHeldUntil = 0;
     });
 
     it("after a failed batch, batches wait a minute instead of failing again every round", async () => {
@@ -172,7 +173,6 @@ describe("acoustidService.lookupMany", () => {
         expect(await acoustidService.lookupMany(songs)).toBe(0);
         expect(post).toHaveBeenCalledTimes(1);
         expect(await acoustidService.mayAskInBatches()).toBe(false);
-        (acoustidService as any).batchesHeldUntil = 0;
     });
 
     it("asks nothing while the source is paused", async () => {

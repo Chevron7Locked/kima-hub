@@ -128,12 +128,12 @@ const mockPrismaTrackUpdateMany = jest.fn().mockResolvedValue({ count: 0 });
 const mockPrismaTrackCount = jest.fn().mockResolvedValue(0);
 const mockQueryRaw = jest.fn();
 
-// The AcoustID batch asked before dispatch is not what this tests, and must never reach the network.
 // The album step before dispatch is not what this tests, and must never reach the network.
 jest.mock("../../services/albumIdentification", () => ({
     ...jest.requireActual("../../services/albumIdentification"),
     identifyAlbumsBySound: jest.fn().mockResolvedValue([]),
 }));
+// The AcoustID batch asked before dispatch is not what this tests, and must never reach the network.
 jest.mock("../../services/acoustidIdentification", () => ({
     ...jest.requireActual("../../services/acoustidIdentification"),
     prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
@@ -293,13 +293,14 @@ describe("Enrichment State Machine", () => {
             // Now simulate a timer tick (no explicit user action)
             mockUpdateState.mockClear();
             mockGetState.mockResolvedValue({ status: "idle" });
+            mockDetectHang.mockClear();
 
             // After the stop landed, a trigger still runs exactly one cycle
             // (the immediate flag); it does not re-arm the engine, so the timer
-            // never auto-restarts a stopped engine.
-            const result2 = await triggerEnrichmentNow();
+            // never auto-restarts a stopped engine. Only a cycle that runs checks for a hang.
+            await triggerEnrichmentNow();
 
-            expect(result2).toBeDefined();
+            expect(mockDetectHang).toHaveBeenCalledTimes(1);
         });
     });
 
@@ -340,12 +341,14 @@ describe("Enrichment State Machine", () => {
 
             // State says "paused"
             simulatePauseViaStateService();
+            mockDetectHang.mockClear();
             const result = await triggerEnrichmentNow();
 
             // The trigger does not clear anything on its own; the cycle's
-            // state sync reads "paused", parks isPaused, and declines.
-            // Result is the empty one because the engine stays paused.
+            // state sync reads "paused", parks isPaused, and declines before
+            // any work (the hang check is the cycle's first step).
             expect(result).toEqual({ artists: 0, tracks: 0, audioQueued: 0 });
+            expect(mockDetectHang).not.toHaveBeenCalled();
         });
 
         it("should reverse-sync when local isPaused is stale", async () => {
@@ -357,11 +360,12 @@ describe("Enrichment State Machine", () => {
 
             // Now state changes to running (user resumed via another path)
             mockGetState.mockResolvedValue({ status: "running" });
+            mockDetectHang.mockClear();
 
-            // Next trigger should detect the mismatch and resume
-            const result = await triggerEnrichmentNow();
-            // Should proceed (not return empty due to stale isPaused)
-            expect(result).toBeDefined();
+            // Next trigger should detect the mismatch and resume: the cycle runs
+            // instead of declining on the stale isPaused.
+            await triggerEnrichmentNow();
+            expect(mockDetectHang).toHaveBeenCalledTimes(1);
         });
     });
 
