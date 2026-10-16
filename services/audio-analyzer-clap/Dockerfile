@@ -134,5 +134,9 @@ USER analyzer
 HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
     CMD python -c "import onnx_backend; print('OK')" || exit 1
 
+# The tokenizer and preprocessor are baked into the cache above at pinned revisions, and the build proved they
+# suffice offline: at runtime nothing is asked of huggingface.co.
+ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+
 ENTRYPOINT ["/app/gpu_env.sh"]
 CMD ["python", "analyzer.py"]

@@ -483,7 +483,7 @@ stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
-environment=DATABASE_URL="postgresql://kima:kima@localhost:5432/kima",REDIS_URL="redis://localhost:6379",MUSIC_PATH="/music",BACKEND_URL="http://localhost:3006",MODEL_IDLE_TIMEOUT="300"
+environment=DATABASE_URL="postgresql://kima:kima@localhost:5432/kima",REDIS_URL="redis://localhost:6379",MUSIC_PATH="/music",BACKEND_URL="http://localhost:3006",MODEL_IDLE_TIMEOUT="300",HF_HUB_OFFLINE="1",TRANSFORMERS_OFFLINE="1"
 priority=60
 EOF
 
