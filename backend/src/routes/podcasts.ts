@@ -1202,6 +1202,9 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
     }
 });
 
+/** How far into an episode it counts as finished: what is left is outro, credits and ads. A chosen limit, not a measured one. */
+const FINISHED_AT = 0.95;
+
 // Lenient on shape (numbers as strings, no duration) so no client the route already served is refused;
 // a missing duration keeps the one stored.
 const progressSchema = z.object({
@@ -1226,6 +1229,10 @@ router.post("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req,
         if (!episode) {
             return res.status(404).json({ error: "Episode not found" });
         }
+        // Past FINISHED_AT of the length the player sent with this save, the episode is finished whatever the
+        // client said. Only that length: a stored or feed length can be minutes short of the audio (ads stitched
+        // in), which would finish an episode early. A save without one is finished only when the client says so.
+        const finished = isFinished === true || (duration !== undefined && duration > 0 && currentTime >= duration * FINISHED_AT);
 
         const progress = await prisma.podcastProgress.upsert({
             where: {
@@ -1239,12 +1246,12 @@ router.post("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req,
                 episodeId: episodeId,
                 currentTime,
                 duration: duration ?? 0,
-                isFinished: isFinished || false,
+                isFinished: finished,
             },
             update: {
                 currentTime,
                 ...(duration !== undefined && { duration }),
-                isFinished: isFinished || false,
+                isFinished: finished,
                 lastPlayedAt: new Date(),
             },
         });

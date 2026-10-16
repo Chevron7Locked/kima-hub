@@ -1458,7 +1458,7 @@ class ApiClient {
         podcastId: string,
         episodeId: string,
         currentTime: number,
-        duration: number,
+        duration: number | undefined,
         isFinished: boolean = false
     ) {
         return this.request<ApiData>(

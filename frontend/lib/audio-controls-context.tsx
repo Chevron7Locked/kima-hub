@@ -1062,22 +1062,27 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             if (isFinished) finishedRef.current = podcast.id;
 
             const currentTime = controllerRef.current?.getCurrentTime() || 0;
-            const duration = controllerRef.current?.getDuration() || podcast.duration;
+            // The audio's own length, once the player knows it; the server judges "nearly done" from it alone.
+            // The feed's length stands in only for the local display.
+            const measured = controllerRef.current?.getDuration() || 0;
+            const duration = measured || podcast.duration;
             if (currentTime <= 0 && !isFinished) return;
 
             try {
                 const [podcastId, episodeId] = podcast.id.split(":");
-                await api.updatePodcastEpisodeProgress(
+                const answer = await api.updatePodcastEpisodeProgress(
                     podcastId,
                     episodeId,
                     isFinished ? duration : currentTime,
-                    duration,
+                    measured || undefined,
                     isFinished
                 );
+                // The server decides "finished" (it also counts the last 5% as finished).
+                const finished = answer?.progress?.isFinished ?? isFinished;
                 const saved = {
                     currentTime: isFinished ? duration : currentTime,
                     progress: duration > 0 ? Math.min(100, ((isFinished ? duration : currentTime) / duration) * 100) : 0,
-                    isFinished,
+                    isFinished: finished,
                     lastPlayedAt: new Date(),
                 };
                 state.setCurrentPodcast((prev) => {
@@ -1089,7 +1094,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                         progress: {
                             currentTime: pos,
                             progress: dur > 0 ? (pos / dur) * 100 : 0,
-                            isFinished,
+                            isFinished: finished,
                             lastPlayedAt: new Date(),
                         },
                     };

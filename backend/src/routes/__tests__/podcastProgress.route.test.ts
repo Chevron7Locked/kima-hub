@@ -64,3 +64,23 @@ it("answers 400 without a position", async () => {
     const res = await request(app).post(url(`${P}-ep`)).send({ duration: 20 });
     expect(res.status).toBe(400);
 });
+
+it("counts an episode finished from 95% of its length on, whatever the client says, and unfinished again when replayed from early on", async () => {
+    const row = () => prisma.podcastProgress.findUniqueOrThrow({ where: { userId_episodeId: { userId: "u_podprog", episodeId: `${P}-ep` } } });
+    const save = (body: Record<string, unknown>) => request(app).post(url(`${P}-ep`)).send(body);
+
+    expect((await save({ currentTime: 560, duration: 600 })).status).toBe(200);
+    expect((await row()).isFinished).toBe(false);
+
+    const near = await save({ currentTime: 570, duration: 600 });
+    expect(near.body.progress.isFinished).toBe(true);
+    expect((await row()).isFinished).toBe(true);
+
+    // No length sent: a stored or feed length may be short of the audio, so nothing is decided from it.
+    await save({ currentTime: 30, duration: 600 });
+    expect((await row()).isFinished).toBe(false);
+    await save({ currentTime: 590 });
+    expect((await row()).isFinished).toBe(false);
+    await save({ currentTime: 600, isFinished: true });
+    expect((await row()).isFinished).toBe(true);
+});
