@@ -23,7 +23,7 @@ const GPU_INSTALL_MS = 25 * 60_000;
 const NEWEST = {
     version: "1.12.0",
     heading: "Kima 1.12",
-    items: ["podcasts.browse", "analysis.middle"],
+    items: ["podcasts.browse", "analysis.middle", "enrichment.rerun", "updates.pings", "fixes.12"],
     changelogText: /podcast browser/i,
 };
 

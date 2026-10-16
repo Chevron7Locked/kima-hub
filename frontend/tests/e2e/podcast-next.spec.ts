@@ -111,3 +111,68 @@ test("the show's newest episode ending stays finished: nothing next, and leaving
         await page.request.delete(`/api/podcasts/${podcastId}/unsubscribe`, { headers: auth });
     }
 });
+
+test("an episode played to 95% of its own length is finished; seeking back and saving makes it unfinished again", async ({ page }) => {
+    test.setTimeout(300_000);
+    await loginAsTestUser(page);
+    const auth = { Authorization: `Bearer ${await getAuthToken(page)}` };
+    const sub = await page.request.post("/api/podcasts/subscribe", { headers: auth, data: { itunesId: "1450241676" } });
+    expect(sub.ok()).toBe(true);
+    const podcastId: string = (await sub.json()).podcast.id;
+    let episodeId = "";
+    const progressOf = async () => {
+        const list = await (await page.request.get(`/api/podcasts/${podcastId}/episodes?order=newest&limit=1`, { headers: auth })).json();
+        return list.episodes[0].progress as { isFinished: boolean; currentTime: number } | null;
+    };
+    const playingAudio = () =>
+        page.waitForFunction(
+            () => Array.from(document.querySelectorAll("audio")).some((a) => !a.paused && !a.seeking && a.currentTime >= 60),
+            null,
+            { timeout: 60_000 },
+        );
+    try {
+        const show = await (await page.request.get(`/api/podcasts/${podcastId}/episodes?order=newest&limit=1`, { headers: auth })).json();
+        const ep: Ep = show.episodes[0];
+        episodeId = ep.id;
+        // Started earlier, so it waits under "continue listening" with a resume control.
+        const started = await page.request.post(`/api/podcasts/${podcastId}/episodes/${ep.id}/progress`, {
+            headers: auth,
+            data: { currentTime: 60, duration: 4000 },
+        });
+        expect(started.ok()).toBe(true);
+        expect((await progressOf())?.isFinished).toBe(false);
+
+        await page.goto("/podcasts");
+        await page.getByRole("button", { name: `resume ${ep.title}` }).click();
+        await playingAudio();
+
+        // Jump to 96% of the audio's own length (not the feed's), then pause: pausing saves progress.
+        const target = await page.evaluate(() => {
+            const a = Array.from(document.querySelectorAll("audio")).find((x) => !x.paused)!;
+            a.currentTime = a.duration * 0.96;
+            return { duration: a.duration, at: a.currentTime };
+        });
+        expect(target.duration).toBeGreaterThan(0);
+        await page.waitForFunction(() => Array.from(document.querySelectorAll("audio")).some((a) => !a.seeking && a.currentTime > 0 && a.duration > 0 && a.currentTime / a.duration >= 0.95));
+        await page.locator('[title="pause"]:visible').first().click();
+        await expect.poll(async () => (await progressOf())?.isFinished, { timeout: 20_000 }).toBe(true);
+        const finished = (await progressOf())!;
+        expect(finished.currentTime).toBeGreaterThanOrEqual(target.duration * 0.95 - 1);
+
+        // Seek back to ~10%, play, and pause again: that save is under 95% of the length, so unfinished.
+        await page.locator('[title="play"]:visible').first().click();
+        await page.waitForFunction(() => Array.from(document.querySelectorAll("audio")).some((a) => !a.paused && a.duration > 0));
+        const back = await page.evaluate(() => {
+            const a = Array.from(document.querySelectorAll("audio")).find((x) => !x.paused)!;
+            a.currentTime = a.duration * 0.1;
+            return { duration: a.duration };
+        });
+        await page.waitForFunction(() => Array.from(document.querySelectorAll("audio")).some((a) => !a.paused && !a.seeking && a.duration > 0 && a.currentTime / a.duration < 0.2));
+        await page.locator('[title="pause"]:visible').first().click();
+        await expect.poll(async () => (await progressOf())?.isFinished, { timeout: 20_000 }).toBe(false);
+        expect((await progressOf())!.currentTime).toBeLessThan(back.duration * 0.5);
+    } finally {
+        if (episodeId) await page.request.delete(`/api/podcasts/${podcastId}/episodes/${episodeId}/progress`, { headers: auth });
+        await page.request.delete(`/api/podcasts/${podcastId}/unsubscribe`, { headers: auth });
+    }
+});
