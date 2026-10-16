@@ -34,10 +34,6 @@ jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: jest.fn().mockResolvedValue({}),
 }));
 
-jest.mock("../../utils/ssrf", () => ({
-    validateUrlForFetch: jest.fn().mockResolvedValue(null),
-}));
-
 jest.mock("../../utils/colorExtractor", () => ({
     extractColorsFromImage: jest.fn().mockResolvedValue(null),
 }));

@@ -1,0 +1,74 @@
+/**
+ * When fetching a cover from its host fails, the cover and colour routes answer with what happened, never a 500: a
+ * refused or malformed address is the request's (400), a host with no such picture a 404, and a host that cannot
+ * be reached (a connection reset twice, a name that does not resolve) a 502. The network fetch is stood in for with
+ * the errors Node's fetch and the address guard really throw; the guard itself is tested in ssrfRedirects.
+ */
+jest.mock("../../utils/logger", () => ({
+    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
+}));
+jest.mock("../../middleware/rateLimiter", () => ({
+    imageLimiter: (_req: any, _res: any, next: any) => next(),
+    apiLimiter: (_req: any, _res: any, next: any) => next(),
+}));
+jest.mock("../../utils/redis", () => ({
+    redisClient: { get: jest.fn().mockResolvedValue(null), setex: jest.fn().mockResolvedValue("OK") },
+}));
+jest.mock("../../utils/systemSettings", () => ({ getSystemSettings: jest.fn().mockResolvedValue({}) }));
+const mockFetchChecked = jest.fn();
+jest.mock("../../utils/ssrf", () => ({
+    ...jest.requireActual("../../utils/ssrf"),
+    fetchChecked: (...a: unknown[]) => mockFetchChecked(...a),
+}));
+
+import express from "express";
+import request from "supertest";
+import libraryCoverArtRoutes from "../library/coverArt";
+import { BlockedAddressError, InvalidAddressError, UnresolvedAddressError } from "../../utils/ssrf";
+
+const app = express();
+app.use("/library", libraryCoverArtRoutes);
+
+const COVER = "https://covers.example.org/a.jpg";
+const cover = () => request(app).get(`/library/cover-art?url=${encodeURIComponent(COVER)}`);
+const colors = () => request(app).get(`/library/cover-art-colors?url=${encodeURIComponent(COVER)}`);
+/** What Node's fetch throws when the host drops the connection. */
+const reset = () => Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } });
+
+beforeEach(() => mockFetchChecked.mockReset());
+
+describe("GET /library/cover-art?url=", () => {
+    it("tries once more after a dropped connection, and answers 502 when that fails too", async () => {
+        mockFetchChecked.mockRejectedValueOnce(reset()).mockRejectedValueOnce(reset());
+        const res = await cover();
+        expect(res.status).toBe(502);
+        expect(mockFetchChecked).toHaveBeenCalledTimes(2);
+    });
+
+    it("answers 400 for an address the guard refuses or that is not an address", async () => {
+        mockFetchChecked.mockRejectedValueOnce(new BlockedAddressError("Blocked: internal address"));
+        expect((await cover()).status).toBe(400);
+        mockFetchChecked.mockRejectedValueOnce(new InvalidAddressError("Invalid URL"));
+        expect((await cover()).status).toBe(400);
+    });
+
+    it("answers 502 for a host name that does not resolve, without trying again", async () => {
+        mockFetchChecked.mockRejectedValueOnce(new UnresolvedAddressError("DNS resolution failed for covers.example.org"));
+        expect((await cover()).status).toBe(502);
+        expect(mockFetchChecked).toHaveBeenCalledTimes(1);
+    });
+
+    it("answers 404 when the host has no such picture", async () => {
+        mockFetchChecked.mockResolvedValueOnce(new Response("nope", { status: 404, statusText: "Not Found" }));
+        expect((await cover()).status).toBe(404);
+    });
+});
+
+describe("GET /library/cover-art-colors?url=", () => {
+    it("answers 502 for a host that cannot be reached and 400 for a refused address", async () => {
+        mockFetchChecked.mockRejectedValueOnce(reset()).mockRejectedValueOnce(reset());
+        expect((await colors()).status).toBe(502);
+        mockFetchChecked.mockRejectedValueOnce(new BlockedAddressError("Blocked: internal address"));
+        expect((await colors()).status).toBe(400);
+    });
+});

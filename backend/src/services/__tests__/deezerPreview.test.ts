@@ -11,7 +11,12 @@ import path from "path";
 
 const mockRateLimitedGet = jest.fn();
 jest.mock("../httpClient", () => ({
-    rateLimitedGet: (...args: unknown[]) => mockRateLimitedGet(...args),
+    // Only the network is stood in for: the reply check runs on the body as the real helper runs it.
+    rateLimitedGet: async (...args: unknown[]) => {
+        const body = await mockRateLimitedGet(...args);
+        (args[3] as ((b: unknown) => void) | undefined)?.(body);
+        return body;
+    },
 }));
 jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },

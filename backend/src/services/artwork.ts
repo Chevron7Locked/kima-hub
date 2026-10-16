@@ -7,7 +7,7 @@
 import crypto from "crypto";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
-import { BlockedAddressError, fetchChecked, validateUrlForFetch } from "../utils/ssrf";
+import { BlockedAddressError, InvalidAddressError, UnresolvedAddressError, fetchChecked } from "../utils/ssrf";
 import { isMbid } from "./artistIdentity";
 import { coverArtService } from "./coverArt";
 import { deezerService } from "./deezer";
@@ -136,7 +136,6 @@ async function firstAnswer<Q>(
  * server error is no answer, so only a clear "not found" counts as no.
  */
 async function addressLoads(url: string): Promise<boolean> {
-    if (await validateUrlForFetch(url)) return false;
     try {
         const response = await fetchChecked(url, {
             method: "HEAD",
@@ -145,7 +144,8 @@ async function addressLoads(url: string): Promise<boolean> {
         });
         return !(response.status === 404 || response.status === 410);
     } catch (err) {
-        return !(err instanceof BlockedAddressError);
+        // Refused, not an address, or a name that does not resolve: it cannot load.
+        return !(err instanceof BlockedAddressError || err instanceof InvalidAddressError || err instanceof UnresolvedAddressError);
     }
 }
 

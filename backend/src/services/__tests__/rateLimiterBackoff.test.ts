@@ -47,4 +47,24 @@ describe('rate limiter backoff', () => {
         await rateLimiter.execute('deezer', requestFn);
         expect(stamps[1] - stamps[0]).toBeGreaterThanOrEqual(1900);
     }, 10000);
+
+    it('closes the breaker once the service answers again, so the next caller does not wait', async () => {
+        // Five calls rate-limited at once open the breaker; their retries, a second later, succeed.
+        const limited = () => Object.assign(new Error('429'), { response: { status: 429, headers: { 'retry-after': '1' } } });
+        const once = () => {
+            let failed = false;
+            return async () => {
+                if (!failed) {
+                    failed = true;
+                    throw limited();
+                }
+                return 'ok';
+            };
+        };
+        await Promise.all(Array.from({ length: 5 }, () => rateLimiter.execute('deezer', once())));
+
+        const started = Date.now();
+        expect(await rateLimiter.execute('deezer', async () => 'next')).toBe('next');
+        expect(Date.now() - started).toBeLessThan(1000);
+    }, 20000);
 });

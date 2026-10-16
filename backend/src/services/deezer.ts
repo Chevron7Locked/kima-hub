@@ -33,6 +33,18 @@ function playableWithTitle<T extends DeezerTrackTitles>(tracks: T[], wanted: str
 
 /** Deezer's error codes that answer "nothing by that id" rather than "the request failed". */
 const DEEZER_NO_DATA = 800;
+/** Deezer's quota reply, sent as a 200 (seen live: {"type":"Exception","message":"Quota limit exceeded","code":4}). */
+const DEEZER_QUOTA = 4;
+
+/**
+ * Deezer's quota was hit: a rate limit, shaped as a 429 so the limiter backs off and retries it. The quota is a
+ * 5-second window (measured 2026-10-16: lifted 4.3 and 5.1 s after a burst), so the limiter is told to wait that out
+ * rather than retry inside it.
+ */
+class DeezerQuotaError extends UpstreamReplyError {
+    name = "DeezerQuotaError";
+    response = { status: 429, headers: { "retry-after": "5" } };
+}
 
 /** An artist's popular songs fetched once and shared by the artist page and the preview fallback. */
 const ARTIST_TOP_COUNT = 50;
@@ -50,7 +62,7 @@ interface DeezerTrack {
 }
 
 /** One of an artist's most popular tracks on Deezer (its /artist/{id}/top). */
-export interface DeezerTopTrack {
+interface DeezerTopTrack {
     title: string;
     artist: string;
     album: string | null;
@@ -116,41 +128,62 @@ class DeezerService {
         this.cache = new CacheWrapper('deezer');
     }
 
+    /** Requests under way, by cache key: callers that miss the cache together share one. */
+    private inFlight = new Map<string, Promise<unknown>>();
+
     /**
      * Redis first; on a miss run `requestFn` (which must call `deezerGet`) and
-     * cache the result, including a null answer.
+     * cache the result, including a null answer. Callers asking for the same key
+     * while it runs share the one request.
      */
-    private async cachedRequest<T>(cacheKey: string, requestFn: () => Promise<T>): Promise<T> {
+    private cachedRequest<T>(cacheKey: string, requestFn: () => Promise<T>): Promise<T> {
+        const running = this.inFlight.get(cacheKey);
+        if (running) return running as Promise<T>;
+        const request = (async () => {
+            const cached = await this.readCache<T>(cacheKey);
+            if (cached.hit) return cached.value;
+            const data = await requestFn();
+            await this.writeCache(cacheKey, data);
+            return data;
+        })().finally(() => this.inFlight.delete(cacheKey));
+        this.inFlight.set(cacheKey, request);
+        return request;
+    }
+
+    private async readCache<T>(cacheKey: string): Promise<{ hit: true; value: T } | { hit: false }> {
         const cached = await this.cache.get<string>(`${this.cachePrefix}${cacheKey}`);
         if (cached !== null) {
             try {
-                return cached === "null" ? (null as T) : (JSON.parse(cached) as T);
+                return { hit: true, value: cached === "null" ? (null as T) : (JSON.parse(cached) as T) };
             } catch {
                 // Stale/incompatible cache entry - fall through and refetch.
             }
         }
+        return { hit: false };
+    }
 
-        const data = await requestFn();
+    private async writeCache(cacheKey: string, data: unknown): Promise<void> {
         await this.cache.set(
             `${this.cachePrefix}${cacheKey}`,
             data === null || data === undefined ? "null" : JSON.stringify(data),
             this.cacheTTL
         );
-        return data;
     }
 
     /**
      * Rate-limited Deezer GET through the global limiter (service key "deezer"). Deezer answers its errors as a
-     * 200 with an `error` object: "no data" is an answer, any other error is a failed request, so it throws instead
-     * of being read (and cached) as an empty result.
+     * 200 with an `error` object: "no data" is an answer; a quota hit is a rate limit the limiter backs off from and
+     * retries; any other error is a failed request, so it throws instead of being read (and cached) as an empty
+     * result.
      */
     private async deezerGet<T = any>(path: string, config?: AxiosRequestConfig): Promise<T> {
-        const body = await rateLimitedGet<any>("deezer", `${DEEZER_API}${path}`, config);
-        const error = body?.error;
-        if (error && Number(error.code) !== DEEZER_NO_DATA) {
-            throw new UpstreamReplyError(`Deezer ${path}: ${error.message ?? "error"} (code ${error.code})`);
-        }
-        return body as T;
+        return rateLimitedGet<any>("deezer", `${DEEZER_API}${path}`, config, (body) => {
+            const error = body?.error;
+            if (!error || Number(error.code) === DEEZER_NO_DATA) return;
+            const why = `Deezer ${path}: ${error.message ?? "error"} (code ${error.code})`;
+            if (Number(error.code) === DEEZER_QUOTA) throw new DeezerQuotaError(why);
+            throw new UpstreamReplyError(why);
+        }) as Promise<T>;
     }
 
     /**
@@ -550,16 +583,19 @@ class DeezerService {
         }
     }
 
+    private async fetchChartPlaylists(limit: number): Promise<DeezerPlaylistPreview[]> {
+        const body = await this.deezerGet<any>("/chart/0/playlists", { params: { limit }, timeout: 10000 });
+        return (body?.data || []).map((playlist: any) => mapPlaylistPreview(playlist, "Deezer", playlist.fans || 0));
+    }
+
+    private async fetchPlaylistSearch(query: string, limit: number): Promise<DeezerPlaylistPreview[]> {
+        const body = await this.deezerGet<any>("/search/playlist", { params: { q: query, limit }, timeout: 10000 });
+        return (body?.data || []).map((playlist: any) => mapPlaylistPreview(playlist, "Unknown", 0));
+    }
+
     async getChartPlaylists(limit: number = 20): Promise<DeezerPlaylistPreview[]> {
         try {
-            const body = await this.deezerGet<any>("/chart/0/playlists", {
-                params: { limit },
-                timeout: 10000,
-            });
-
-            return (body?.data || []).map((playlist: any) =>
-                mapPlaylistPreview(playlist, "Deezer", playlist.fans || 0)
-            );
+            return await this.fetchChartPlaylists(limit);
         } catch (error: any) {
             logger.error("Deezer chart playlists error:", error.message);
             return [];
@@ -568,14 +604,7 @@ class DeezerService {
 
     async searchPlaylists(query: string, limit: number = 20): Promise<DeezerPlaylistPreview[]> {
         try {
-            const body = await this.deezerGet<any>("/search/playlist", {
-                params: { q: query, limit },
-                timeout: 10000,
-            });
-
-            return (body?.data || []).map((playlist: any) =>
-                mapPlaylistPreview(playlist, "Unknown", 0)
-            );
+            return await this.fetchPlaylistSearch(query, limit);
         } catch (error: any) {
             logger.error("Deezer playlist search error:", error.message);
             return [];
@@ -583,57 +612,49 @@ class DeezerService {
     }
 
     /**
-     * Get featured/curated playlists from multiple sources
-     * Combines chart playlists with popular genre-based searches
-     * Cached for 24 hours
+     * Featured playlists: the chart's, topped up from popular genre searches, cached for 24 hours. What answered is
+     * shown even when a request failed, but only a list every request answered is cached.
      */
     async getFeaturedPlaylists(limit: number = 50): Promise<DeezerPlaylistPreview[]> {
         const cacheKey = `playlists:featured:${limit}`;
+        const cached = await this.readCache<DeezerPlaylistPreview[]>(cacheKey);
+        if (cached.hit) return cached.value ?? [];
+
+        const allPlaylists: DeezerPlaylistPreview[] = [];
+        const seenIds = new Set<string>();
+        let complete = true;
+        const take = (playlists: DeezerPlaylistPreview[]) => {
+            for (const p of playlists) {
+                if (!seenIds.has(p.id) && allPlaylists.length < limit) {
+                    seenIds.add(p.id);
+                    allPlaylists.push(p);
+                }
+            }
+        };
 
         try {
-            return await this.cachedRequest(cacheKey, async () => {
-                const allPlaylists: DeezerPlaylistPreview[] = [];
-                const seenIds = new Set<string>();
-
-                logger.debug("Deezer: Fetching chart playlists from API...");
-                const chartPlaylists = await this.getChartPlaylists(Math.min(limit, 99));
-                for (const p of chartPlaylists) {
-                    if (!seenIds.has(p.id)) {
-                        seenIds.add(p.id);
-                        allPlaylists.push(p);
-                    }
-                }
-                logger.debug(`Deezer: Got ${chartPlaylists.length} chart playlists`);
-
-                // Chart playlists are capped at 99; top up from popular genre searches
-                if (allPlaylists.length < limit) {
-                    const genres = ["pop", "rock", "hip hop", "electronic", "r&b", "indie", "jazz", "classical", "metal", "country"];
-
-                    for (const genre of genres) {
-                        if (allPlaylists.length >= limit) break;
-
-                        try {
-                            const genrePlaylists = await this.searchPlaylists(genre, 10);
-                            for (const p of genrePlaylists) {
-                                if (!seenIds.has(p.id) && allPlaylists.length < limit) {
-                                    seenIds.add(p.id);
-                                    allPlaylists.push(p);
-                                }
-                            }
-                        } catch {
-                            // One genre failing must not stop the others
-                        }
-                    }
-                }
-
-                const result = allPlaylists.slice(0, limit);
-                logger.debug(`Deezer: Caching ${result.length} featured playlists`);
-                return result;
-            });
+            take(await this.fetchChartPlaylists(Math.min(limit, 99)));
         } catch (error: any) {
-            logger.error("Deezer featured playlists error:", error.message);
-            return [];
+            complete = false;
+            logger.error("Deezer chart playlists error:", error.message);
         }
+
+        // Chart playlists are capped at 99; top up from popular genre searches. One genre failing does not stop the others.
+        const genres = ["pop", "rock", "hip hop", "electronic", "r&b", "indie", "jazz", "classical", "metal", "country"];
+        for (const genre of genres) {
+            if (allPlaylists.length >= limit) break;
+            try {
+                take(await this.fetchPlaylistSearch(genre, 10));
+            } catch (error: any) {
+                complete = false;
+                logger.error(`Deezer playlist search error (${genre}):`, error.message);
+                // Still over the quota after the limiter waited it out: asking for the rest only adds to it.
+                if (error instanceof DeezerQuotaError) break;
+            }
+        }
+
+        if (complete) await this.writeCache(cacheKey, allPlaylists);
+        return allPlaylists;
     }
 
     /**

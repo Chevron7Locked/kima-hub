@@ -7,7 +7,8 @@ import { config, USER_AGENT } from "../../config";
 import { findAlbumArtwork } from "../../services/artwork";
 import { musicBrainzService } from "../../services/musicbrainz";
 import { getSystemSettings } from "../../utils/systemSettings";
-import { BlockedAddressError, fetchChecked, validateUrlForFetch } from "../../utils/ssrf";
+import { BlockedAddressError, InvalidAddressError, fetchChecked } from "../../utils/ssrf";
+import { upstreamFailure } from "../../utils/upstream";
 import {
   extractColorsFromImage,
   FALLBACK_PALETTE,
@@ -140,6 +141,51 @@ async function serveAudiobookCover(
 }
 
 const router = Router();
+
+type FetchedImage = Awaited<ReturnType<typeof fetchChecked>>;
+
+/** A picture from its host, with one more try after a dropped connection. */
+async function fetchImage(url: string): Promise<FetchedImage> {
+  const opts = { headers: { "User-Agent": USER_AGENT } };
+  try {
+    return await fetchChecked(url, opts);
+  } catch (err) {
+    const code = (err as { cause?: { code?: string } } | null)?.cause?.code;
+    if (code !== "ECONNRESET" && code !== "ETIMEDOUT" && code !== "UND_ERR_SOCKET") throw err;
+    logger.warn(`[COVER-ART] Transient error (${code}), retrying once...`);
+    await new Promise((r) => setTimeout(r, 500));
+    return fetchChecked(url, opts);
+  }
+}
+
+/**
+ * Answers a picture fetch that failed: an address refused or not an address is the request's (400); a host with no
+ * such picture is a 404 and one that does not answer a 502. Anything else is left to the route.
+ */
+function answerImageFetchFailure(
+  res: Response,
+  err: unknown,
+  label: string,
+  url: string,
+  messages: { invalid: string; missing: string },
+): boolean {
+  if (err instanceof BlockedAddressError || err instanceof InvalidAddressError) {
+    logger.warn(`[${label}] refused: ${err.message} for ${url.substring(0, 100)}`);
+    res.status(400).json({ error: messages.invalid });
+    return true;
+  }
+  const failure = upstreamFailure(err);
+  if (failure === "missing") {
+    res.status(404).json({ error: messages.missing });
+    return true;
+  }
+  if (failure === "down") {
+    logger.warn(`[${label}] host did not answer for ${url.substring(0, 100)}: ${(err as Error).message}`);
+    res.status(502).json({ error: "The picture's host did not answer; try again shortly" });
+    return true;
+  }
+  return false;
+}
 
 router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
   try {
@@ -313,33 +359,13 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
       logger.warn("[COVER-ART] Redis cache read error:", cacheError);
     }
 
-    const ssrfError = await validateUrlForFetch(coverUrl);
-    if (ssrfError) {
-      logger.warn(`[COVER-ART] SSRF blocked: ${ssrfError} for ${coverUrl.substring(0, 100)}`);
-      return res.status(400).json({ error: "Invalid cover art URL" });
-    }
-
     logger.debug(`[COVER-ART] Fetching: ${coverUrl.substring(0, 100)}...`);
-    let imageResponse: Awaited<ReturnType<typeof globalThis.fetch>>;
-    const fetchOpts = {
-      headers: { "User-Agent": USER_AGENT },
-    };
+    let imageResponse: FetchedImage;
     try {
-      imageResponse = await fetchChecked(coverUrl, fetchOpts);
+      imageResponse = await fetchImage(coverUrl);
     } catch (fetchErr: unknown) {
-      if (fetchErr instanceof BlockedAddressError) {
-        logger.warn(`[COVER-ART] SSRF blocked: ${fetchErr.message} for ${coverUrl.substring(0, 100)}`);
-        return res.status(400).json({ error: "Invalid cover art URL" });
-      }
-      const cause = fetchErr instanceof Error && "cause" in fetchErr ? (fetchErr.cause as { code?: string }) : null;
-      const code = cause?.code;
-      if (code === "ECONNRESET" || code === "ETIMEDOUT" || code === "UND_ERR_SOCKET") {
-        logger.warn(`[COVER-ART] Transient error (${code}), retrying once...`);
-        await new Promise(r => setTimeout(r, 500));
-        imageResponse = await fetchChecked(coverUrl, fetchOpts);
-      } else {
-        throw fetchErr;
-      }
+      if (answerImageFetchFailure(res, fetchErr, "COVER-ART", coverUrl, { invalid: "Invalid cover art URL", missing: "Cover art not found" })) return;
+      throw fetchErr;
     }
     if (!imageResponse.ok) {
       logger.error(
@@ -483,20 +509,13 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
       logger.warn("[COLORS] Redis cache read error:", cacheError);
     }
 
-    const ssrfError = await validateUrlForFetch(imageUrl);
-    if (ssrfError) {
-      logger.warn(`[COLORS] SSRF blocked: ${ssrfError} for ${imageUrl.substring(0, 100)}`);
-      return res.status(400).json({ error: "Invalid image URL" });
-    }
-
     logger.debug(`[COLORS] Fetching image: ${imageUrl.substring(0, 100)}...`);
-    let imageResponse: Awaited<ReturnType<typeof fetchChecked>>;
+    let imageResponse: FetchedImage;
     try {
-      imageResponse = await fetchChecked(imageUrl, { headers: { "User-Agent": USER_AGENT } });
+      imageResponse = await fetchImage(imageUrl);
     } catch (err) {
-      if (!(err instanceof BlockedAddressError)) throw err;
-      logger.warn(`[COLORS] SSRF blocked: ${err.message} for ${imageUrl.substring(0, 100)}`);
-      return res.status(400).json({ error: "Invalid image URL" });
+      if (answerImageFetchFailure(res, err, "COLORS", imageUrl, { invalid: "Invalid image URL", missing: "Image not found" })) return;
+      throw err;
     }
 
     if (!imageResponse.ok) {

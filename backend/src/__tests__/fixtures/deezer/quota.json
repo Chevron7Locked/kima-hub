@@ -1,0 +1,1 @@
+{"source":"https://api.deezer.com","recordedAt":"2026-10-16T15:28:56.000Z","note":"41 of 100 parallel /search requests from one address answered this, as HTTP 200","status":200,"body":{"error":{"type":"Exception","message":"Quota limit exceeded","code":4}}}

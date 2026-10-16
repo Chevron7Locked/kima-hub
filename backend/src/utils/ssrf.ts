@@ -56,52 +56,72 @@ export function isBlockedIp(ip: string): boolean {
 }
 
 /**
- * Validate a URL is safe to fetch server-side (no SSRF risk).
- * Returns null if safe, or an error string if blocked.
+ * What a fetch may make of an address before connecting: fine; refused (an internal address, or not a web address);
+ * not an address at all; or a name that does not resolve, which is a failed fetch, not a refusal.
  */
-export async function validateUrlForFetch(url: string): Promise<string | null> {
+type AddressCheck = { ok: true } | { ok: false; kind: "blocked" | "invalid" | "unresolved"; reason: string };
+
+async function checkAddress(url: string): Promise<AddressCheck> {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    return "Invalid URL";
+    return { ok: false, kind: "invalid", reason: "Invalid URL" };
   }
 
   // Only allow http/https schemes
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return `Blocked scheme: ${parsed.protocol}`;
+    return { ok: false, kind: "blocked", reason: `Blocked scheme: ${parsed.protocol}` };
   }
 
   // An address written as the host is judged as it stands; a name is resolved first.
   const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
   if (net.isIP(hostname)) {
-    if (!isBlockedIp(hostname)) return null;
+    if (!isBlockedIp(hostname)) return { ok: true };
     logger.warn(`[SSRF] Blocked fetch to ${hostname}`);
-    return "Blocked: internal address";
+    return { ok: false, kind: "blocked", reason: "Blocked: internal address" };
   }
 
   // Block obvious internal hostnames
   if (hostname === "localhost" || hostname === "0.0.0.0") {
-    return "Blocked hostname: localhost";
+    return { ok: false, kind: "blocked", reason: "Blocked hostname: localhost" };
   }
 
   try {
     const { address } = await lookup(hostname);
     if (isBlockedIp(address)) {
       logger.warn(`[SSRF] Blocked fetch to ${hostname} (resolved to ${address})`);
-      return `Blocked: internal address`;
+      return { ok: false, kind: "blocked", reason: "Blocked: internal address" };
     }
   } catch {
-    // DNS resolution failed -- could be a non-existent host
-    return "DNS resolution failed";
+    return { ok: false, kind: "unresolved", reason: `DNS resolution failed for ${hostname}` };
   }
 
-  return null;
+  return { ok: true };
 }
 
-/** A fetch refused because an address it would reach is internal. */
+/**
+ * Validate a URL is safe to fetch server-side (no SSRF risk).
+ * Returns null if safe, or why not (refused, not an address, or a name that does not resolve).
+ */
+export async function validateUrlForFetch(url: string): Promise<string | null> {
+  const check = await checkAddress(url);
+  return check.ok ? null : check.reason;
+}
+
+/** A fetch refused because an address it would reach is internal, or is not a web address. */
 export class BlockedAddressError extends Error {
   name = "BlockedAddressError";
+}
+
+/** A fetch given something that is not an address. */
+export class InvalidAddressError extends Error {
+  name = "InvalidAddressError";
+}
+
+/** A fetch whose host name does not resolve: the upstream cannot be reached, nothing was refused. */
+export class UnresolvedAddressError extends Error {
+  name = "UnresolvedAddressError";
 }
 
 /**
@@ -185,8 +205,12 @@ const guardedDispatcher = new Agent({ connect: { lookup: guardedLookup } });
 export async function fetchChecked(url: string, init: RequestInit = {}, maxRedirects = 5): Promise<Response> {
   let current = url;
   for (let hop = 0; ; hop++) {
-    const blocked = await validateUrlForFetch(current);
-    if (blocked) throw new BlockedAddressError(`Blocked: ${blocked}`);
+    const check = await checkAddress(current);
+    if (!check.ok) {
+      if (check.kind === "blocked") throw new BlockedAddressError(check.reason);
+      if (check.kind === "invalid") throw new InvalidAddressError(check.reason);
+      throw new UnresolvedAddressError(check.reason);
+    }
     let response: Response;
     try {
       response = await fetch(current, { ...init, redirect: "manual", dispatcher: guardedDispatcher } as unknown as RequestInit);

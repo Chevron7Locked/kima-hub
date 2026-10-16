@@ -22,7 +22,17 @@ jest.mock("dns", () => {
 import http from "http";
 import type { AddressInfo } from "net";
 import axios from "axios";
-import { fetchChecked, guardedAxios, isBlockedFetch, isBlockedIp, validateUrlForFetch } from "../ssrf";
+import {
+    BlockedAddressError,
+    InvalidAddressError,
+    UnresolvedAddressError,
+    fetchChecked,
+    guardedAxios,
+    isBlockedFetch,
+    isBlockedIp,
+    validateUrlForFetch,
+} from "../ssrf";
+import { upstreamFailure } from "../upstream";
 import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
 
 let PUBLIC = "";
@@ -112,13 +122,15 @@ describe("fetchChecked", () => {
     const redirect = (to: string) => new Response(null, { status: 302, headers: { Location: to } });
 
     it("checks the first address", async () => {
-        await expect(fetchChecked(`http://127.0.0.1:${port}/`)).rejects.toThrow(/Blocked: Blocked: internal address/);
+        const error = await fetchChecked(`http://127.0.0.1:${port}/`).catch((e) => e);
+        expect(error).toBeInstanceOf(BlockedAddressError);
+        expect(error.message).toBe("Blocked: internal address");
     });
 
     it("checks every address it is redirected to, before fetching it", async () => {
         const fetchMock = jest.fn().mockResolvedValueOnce(redirect("http://169.254.169.254/latest/meta-data/"));
         global.fetch = fetchMock;
-        await expect(fetchChecked("http://allowed.test/cover.jpg")).rejects.toThrow(/Blocked: Blocked: internal address/);
+        await expect(fetchChecked("http://allowed.test/cover.jpg")).rejects.toThrow(/^Blocked: internal address$/);
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
@@ -137,6 +149,27 @@ describe("fetchChecked", () => {
         expect(res.status).toBe(200);
         expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(["http://allowed.test/cover.jpg", "http://allowed.test/moved.jpg"]);
         expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: "manual" });
+    });
+});
+
+describe("what a fetch says when it cannot go ahead", () => {
+    it("a name that does not resolve is an unreachable upstream, not a refusal", async () => {
+        const error = await fetchChecked("http://no-such-host.invalid/cover.jpg").catch((e) => e);
+        expect(error).toBeInstanceOf(UnresolvedAddressError);
+        expect(isBlockedFetch(error)).toBe(false);
+        expect(upstreamFailure(error)).toBe("down");
+    });
+
+    it("something that is not an address is neither", async () => {
+        const error = await fetchChecked("not a url").catch((e) => e);
+        expect(error).toBeInstanceOf(InvalidAddressError);
+        expect(isBlockedFetch(error)).toBe(false);
+    });
+
+    it("a non-web address is refused", async () => {
+        const error = await fetchChecked("file:///etc/passwd").catch((e) => e);
+        expect(error).toBeInstanceOf(BlockedAddressError);
+        expect(error.message).toBe("Blocked scheme: file:");
     });
 });
 

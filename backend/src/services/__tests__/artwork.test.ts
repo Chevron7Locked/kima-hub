@@ -17,12 +17,19 @@ jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
 }));
 
-jest.mock("../../utils/ssrf", () => ({
-    ...jest.requireActual("../../utils/ssrf"),
-    // Redirect checking has its own test (ssrfRedirects); here the address check is stubbed and fetch is spied.
-    fetchChecked: (url: string, init?: RequestInit) => fetch(url, init),
-    validateUrlForFetch: jest.fn().mockResolvedValue(null),
-}));
+jest.mock("../../utils/ssrf", () => {
+    // Address checking has its own test (ssrfRedirects). Here an address written as an internal IP is refused by
+    // the real rule, with no name lookups, and everything else goes to the spied fetch.
+    const actual = jest.requireActual("../../utils/ssrf");
+    return {
+        ...actual,
+        fetchChecked: async (url: string, init?: RequestInit) => {
+            const host = new URL(url).hostname;
+            if (require("net").isIP(host) && actual.isBlockedIp(host)) throw new actual.BlockedAddressError("Blocked: internal address");
+            return fetch(url, init);
+        },
+    };
+});
 
 const deezerAlbum = jest.fn();
 const deezerArtist = jest.fn();
@@ -48,7 +55,6 @@ jest.mock("../fanart", () => ({
 }));
 
 import { findAlbumArtwork, findArtistArtwork, withAlbumArtwork, withArtistArtwork } from "../artwork";
-import { validateUrlForFetch } from "../../utils/ssrf";
 
 const DEEZER_URL = "https://e-cdns-images.dzcdn.net/images/cover/abc/500x500.jpg";
 const ARCHIVE_URL = "https://coverartarchive.org/release-group/10e85e9b-0f07-33d4-a927-18a273f86eca/front-1200.jpg";
@@ -66,7 +72,6 @@ describe("the one door for artwork", () => {
         jest.clearAllMocks();
         mockGet.mockResolvedValue(null);
         mockSetex.mockResolvedValue("OK");
-        (validateUrlForFetch as jest.Mock).mockResolvedValue(null);
         for (const m of [deezerAlbum, deezerArtist, archiveCover, fanartAlbum, fanartArtist]) {
             m.mockResolvedValue(null);
         }
@@ -162,8 +167,6 @@ describe("the one door for artwork", () => {
         });
 
         it("will not check a handed-out address the SSRF guard rejects", async () => {
-            (validateUrlForFetch as jest.Mock).mockResolvedValue("blocked host");
-
             const found = await findAlbumArtwork({
                 ...ALBUM,
                 candidateUrl: "http://169.254.169.254/latest",

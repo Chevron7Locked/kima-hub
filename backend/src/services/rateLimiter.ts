@@ -210,8 +210,11 @@ class GlobalRateLimiter {
                     { priority: options?.priority ?? 0 }
                 );
 
-                // Success - reset failure count
+                // The service answered: it is not rate limiting any more, so a breaker opened while this request
+                // was retrying closes too, or the next caller would sleep out a wait nothing needs.
                 circuit.consecutiveFailures = 0;
+                circuit.isOpen = false;
+                circuit.resetAfterMs = 30000;
                 return result as T;
             } catch (error: any) {
                 lastError = error;

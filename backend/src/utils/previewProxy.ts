@@ -6,12 +6,12 @@ import { guardedAxios } from "./ssrf";
 import { upstreamFailure } from "./upstream";
 
 /**
- * Pipe a Deezer preview to the client as same-origin media, honoring the
- * client's Range header by forwarding it upstream and mirroring the
- * upstream's 206/416 so seeks land on the right bytes. A host that has no
- * such preview, or an address the guard refuses, answers 404 with
- * `notFoundMessage`; a host that is down or throttling answers 502. Anything
- * else is thrown to the caller.
+ * Pipe a preview (a Deezer track preview, a podcast episode snippet) to the
+ * client as same-origin media, honoring the client's Range header by
+ * forwarding it upstream and mirroring the upstream's 206/416 so seeks land
+ * on the right bytes. A host that has no such preview, or an address the
+ * guard refuses, answers 404 with `notFoundMessage`; a host that is down or
+ * throttling answers 502. Anything else is thrown to the caller.
  */
 export async function proxyPreviewStream(
     res: Response,
