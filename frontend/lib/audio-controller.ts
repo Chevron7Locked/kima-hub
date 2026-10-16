@@ -377,7 +377,8 @@ export class AudioController {
                     break;
                 }
                 case "call-pause": {
-                    this.expectingPause = true;
+                    // An element already paused (one that ended, say) fires no "pause" to clear this.
+                    if (!this.audio.paused) this.expectingPause = true;
                     this.audio.pause();
                     break;
                 }
@@ -572,6 +573,9 @@ export class AudioController {
                 this.expectingPause = false;
                 return;
             }
+            // A file playing to its end fires "pause" just before "ended": that is the end, handled by "ended", or
+            // the app would hear a pause first and save the position as not finished.
+            if (el.ended) return;
             // Unexpected pause (earbud, interruption, system) -- dispatch to policy
             this.dispatch({ type: "native-pause", now: Date.now() });
         });
@@ -943,6 +947,11 @@ export class AudioController {
 
     isPlaying(): boolean {
         return !this.audio.paused && !this.audio.ended;
+    }
+
+    /** Whether the file played to its end and has not been moved off it since (a seek back or another load). */
+    hasEnded(): boolean {
+        return this.audio.ended;
     }
 
     get isTransitioning(): boolean {

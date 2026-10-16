@@ -1426,6 +1426,20 @@ class ApiClient {
         return this.tokenizedUrl(`/api/podcasts/${podcastId}/episodes/${episodeId}/stream`);
     }
 
+    /** What plays after an episode: the show's next one by release date not yet finished; null at the show's end. */
+    async getNextPodcastEpisode(podcastId: string, episodeId: string) {
+        return this.request<{
+            podcast?: { id: string; title: string; coverUrl: string | null };
+            episode: {
+                id: string;
+                title: string;
+                duration: number;
+                coverUrl: string | null;
+                progress: { currentTime: number; progress: number; isFinished: boolean; lastPlayedAt: Date } | null;
+            } | null;
+        }>(`/podcasts/${podcastId}/episodes/${episodeId}/next`);
+    }
+
     async updatePodcastEpisodeProgress(
         podcastId: string,
         episodeId: string,

@@ -9,5 +9,4 @@ export const STORAGE_KEYS = {
     PLAYER_MODE: "kima_player_mode",
     VOLUME: "kima_volume",
     IS_MUTED: "kima_muted",
-    PODCAST_EPISODE_QUEUE: "kima_podcast_episode_queue",
 } as const;

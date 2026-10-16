@@ -85,6 +85,8 @@ export function MiniPlayer() {
 
     // Check if controls should be enabled (only for tracks)
     const canSkip = playbackType === "track";
+    // A podcast moves on to the show's next episode.
+    const canNext = canSkip || playbackType === "podcast";
     const shuffle = shuffleState(hasMedia, playbackType, activeOperation.type);
 
     if (isMobileOrTablet) {
@@ -519,15 +521,15 @@ export function MiniPlayer() {
 
                         <button
                             onClick={next}
-                            disabled={!hasMedia || !canSkip}
+                            disabled={!hasMedia || !canNext}
                             className={cn(
                                 "rounded p-1.5 transition-colors",
-                                hasMedia && canSkip
+                                hasMedia && canNext
                                     ? "text-[var(--text-secondary)] hover:text-white"
                                     : "text-[var(--text-muted)] cursor-not-allowed"
                             )}
-                            aria-label="Next track"
-                            title={canSkip ? "next" : "next (music only)"}
+                            aria-label={playbackType === "podcast" ? "next episode" : "Next track"}
+                            title={playbackType === "podcast" ? "next episode" : canNext ? "next" : "next (music and podcasts only)"}
                         >
                             <SkipForward className="w-4 h-4" />
                         </button>

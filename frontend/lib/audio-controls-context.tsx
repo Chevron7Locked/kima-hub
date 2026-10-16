@@ -174,7 +174,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const isShuffleRef = useRef(state.isShuffle);
     const shuffleIndicesRef = useRef(state.shuffleIndices);
     const consecutiveErrorCountRef = useRef(0);
-    const justFinishedRef = useRef(false);
+    // The item last saved as finished. While its file still sits at its end, a later save (a pause the engine
+    // reports after the end, closing the page) would only record it as not finished again, so none is sent.
+    const finishedRef = useRef<string | null>(null);
     const lastManualAdvanceAtRef = useRef(0);
     const lastSaveTimeRef = useRef(0);
     const errorClassifyingRef = useRef(false);
@@ -267,7 +269,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setCurrentTrack(track);
             state.setCurrentAudiobook(null);
             state.setCurrentPodcast(null);
-            state.setPodcastEpisodeQueue(null);
             state.setQueue([track]);
             state.setCurrentIndex(0);
             setCurrentTimeRef.current(0);
@@ -294,7 +295,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setPlaybackType("track");
             state.setCurrentAudiobook(null);
             state.setCurrentPodcast(null);
-            state.setPodcastEpisodeQueue(null);
             state.setQueue(tracks);
             state.setCurrentIndex(startIndex);
             state.setCurrentTrack(tracks[startIndex]);
@@ -328,7 +328,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setPlaybackType("audiobook");
             state.setCurrentTrack(null);
             state.setCurrentPodcast(null);
-            state.setPodcastEpisodeQueue(null);
             state.setQueue([]);
             state.setCurrentIndex(0);
             state.setShuffleIndices([]);
@@ -387,38 +386,38 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         controllerRef.current?.pause();
     }, []);
 
-    const nextPodcastEpisode = useCallback(() => {
-        if (!state.podcastEpisodeQueue || state.podcastEpisodeQueue.length === 0) {
+    // The show's next episode by release date that has not been finished, as the server answers it; at the
+    // show's end the player stops.
+    const nextPodcastEpisode = useCallback(async () => {
+        const playing = currentPodcastRef.current;
+        if (!playing) {
             pause();
             return;
         }
-
-        if (!state.currentPodcast) {
+        const [podcastId, episodeId] = playing.id.split(":");
+        let answer: Awaited<ReturnType<typeof api.getNextPodcastEpisode>>;
+        try {
+            answer = await api.getNextPodcastEpisode(podcastId, episodeId);
+        } catch (err) {
+            console.error("[AudioControls] Couldn't find the next episode:", err);
             pause();
             return;
         }
-
-        const [podcastId, currentEpisodeId] = state.currentPodcast.id.split(":");
-
-        const currentIndex = state.podcastEpisodeQueue.findIndex(
-            (ep) => ep.id === currentEpisodeId
-        );
-
-        if (currentIndex >= 0 && currentIndex < state.podcastEpisodeQueue.length - 1) {
-            const nextEpisode = state.podcastEpisodeQueue[currentIndex + 1];
-            playPodcast({
-                id: `${podcastId}:${nextEpisode.id}`,
-                title: nextEpisode.title,
-                podcastTitle: state.currentPodcast.podcastTitle,
-                coverUrl: state.currentPodcast.coverUrl,
-                duration: nextEpisode.duration,
-                progress: nextEpisode.progress || null,
-            });
-        } else {
+        // Something else started meanwhile: leave it playing.
+        if (currentPodcastRef.current?.id !== playing.id) return;
+        if (!answer.episode || !answer.podcast) {
             pause();
-            state.setPodcastEpisodeQueue(null);
+            return;
         }
-    }, [state, playPodcast, pause]);
+        playPodcast({
+            id: `${answer.podcast.id}:${answer.episode.id}`,
+            title: answer.episode.title,
+            podcastTitle: answer.podcast.title,
+            coverUrl: answer.episode.coverUrl || answer.podcast.coverUrl || "",
+            duration: answer.episode.duration,
+            progress: answer.episode.progress,
+        });
+    }, [playPodcast, pause]);
 
     const loadRestoredState = useCallback(async (): Promise<boolean> => {
         const ctrl = controllerRef.current;
@@ -559,6 +558,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     );
 
     const next = useCallback(() => {
+        if (state.playbackType === "podcast") {
+            void nextPodcastEpisode();
+            return;
+        }
         if (state.queue.length === 0) return;
 
         if (state.repeatMode === "one" && state.repeatOneCount === 0) {
@@ -604,7 +607,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
         const streamUrl = api.getStreamUrl(state.queue[nextIndex].id);
         controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: state.queue[nextIndex].duration });
-    }, [state, seek]);
+    }, [state, seek, nextPodcastEpisode]);
 
     const previous = useCallback(() => {
         if (state.queue.length === 0) return;
@@ -1005,6 +1008,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             const audiobook = currentAudiobookRef.current;
             if (!audiobook) return;
             if (controllerRef.current?.isTransitioning) return;
+            if (!isFinished && finishedRef.current === audiobook.id && controllerRef.current?.hasEnded()) return;
+            if (isFinished) finishedRef.current = audiobook.id;
 
             const trackOffset = audiobook.trackOffset ?? 0;
             const withinTrackTime = controllerRef.current?.getCurrentTime() || 0;
@@ -1053,6 +1058,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             const podcast = currentPodcastRef.current;
             if (!podcast) return;
             if (controllerRef.current?.isTransitioning) return;
+            if (!isFinished && finishedRef.current === podcast.id && controllerRef.current?.hasEnded()) return;
+            if (isFinished) finishedRef.current = podcast.id;
 
             const currentTime = controllerRef.current?.getCurrentTime() || 0;
             const duration = controllerRef.current?.getDuration() || podcast.duration;
@@ -1151,7 +1158,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     }
 
                     if (file && session.isLastFile(file)) {
-                        justFinishedRef.current = true;
                         saveAudiobookProgressRef.current(true);
                         ctrl.pause();
                         return;
@@ -1163,7 +1169,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 ctrl.pause();
                 return;
             } else if (playbackTypeRef.current === "podcast") {
-                justFinishedRef.current = true;
                 savePodcastProgressRef.current(true);
                 nextPodcastEpisodeRef.current();
                 return;
@@ -1470,15 +1475,11 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             } else {
                 // Any non-playing status stops the interval.
                 stop();
-                // For pause-like exits (paused/error/blocked), save progress.
-                // justFinishedRef guards against double-save after natural end.
+                // For pause-like exits (paused/error/blocked), save progress; after a natural end the save
+                // functions send nothing (finishedRef).
                 if (status === "paused" || status === "error" || status === "blocked") {
-                    if (!justFinishedRef.current) {
-                        if (playbackTypeRef.current === "audiobook") saveAudiobookProgressRef.current();
-                        else if (playbackTypeRef.current === "podcast") savePodcastProgressRef.current();
-                    } else {
-                        justFinishedRef.current = false;
-                    }
+                    if (playbackTypeRef.current === "audiobook") saveAudiobookProgressRef.current();
+                    else if (playbackTypeRef.current === "podcast") savePodcastProgressRef.current();
                 }
             }
         });

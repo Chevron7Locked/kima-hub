@@ -4,7 +4,6 @@ import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAudio } from "@/lib/audio-context";
-import { useAudioState } from "@/lib/audio-state-context";
 import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { Podcast, Episode, PodcastPreview } from "../types";
@@ -12,12 +11,11 @@ import { queryKeys, refreshFollowedShows } from "@/hooks/useQueries";
 import { dispatchQueryEvent } from "@/lib/query-events";
 import { useEpisodeToggle } from "./usePlayEpisode";
 
-export function usePodcastActions(podcastId: string, sortedEpisodes?: Episode[]) {
+export function usePodcastActions(podcastId: string) {
     const router = useRouter();
     const queryClient = useQueryClient();
     const { playPodcast, currentPodcast, isPlaying, pause } = useAudio();
     const toggleEpisode = useEpisodeToggle();
-    const { setPodcastEpisodeQueue } = useAudioState();
 
     const [isSubscribing, setIsSubscribing] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
@@ -57,16 +55,6 @@ export function usePodcastActions(podcastId: string, sortedEpisodes?: Episode[])
         }
     }, [podcastId, router, queryClient]);
 
-    // The queue is saved in the browser: 200 episodes around the one played, from the list it was picked from.
-    const queueAround = useCallback(
-        (episode: Episode, around: Episode[] | undefined) => {
-            if (!around || around.length === 0) return;
-            const at = Math.max(0, around.findIndex((e) => e.id === episode.id));
-            const start = Math.max(0, Math.min(at - 100, around.length - 200));
-            setPodcastEpisodeQueue(around.slice(start, start + 200));
-        },
-        [setPodcastEpisodeQueue]
-    );
     const toPlay = useCallback(
         (episode: Episode, podcast: Podcast) => ({
             id: `${podcastId}:${episode.id}`,
@@ -80,17 +68,13 @@ export function usePodcastActions(podcastId: string, sortedEpisodes?: Episode[])
     );
 
     const handlePlayEpisode = useCallback(
-        (episode: Episode, podcast: Podcast, around: Episode[] | undefined = sortedEpisodes) => {
-            queueAround(episode, around);
-            playPodcast(toPlay(episode, podcast));
-        },
-        [queueAround, toPlay, playPodcast, sortedEpisodes]
+        (episode: Episode, podcast: Podcast) => playPodcast(toPlay(episode, podcast)),
+        [toPlay, playPodcast]
     );
 
     const handlePlayPauseEpisode = useCallback(
-        (episode: Episode, podcast: Podcast) =>
-            toggleEpisode(toPlay(episode, podcast), () => queueAround(episode, sortedEpisodes)),
-        [toggleEpisode, toPlay, queueAround, sortedEpisodes]
+        (episode: Episode, podcast: Podcast) => toggleEpisode(toPlay(episode, podcast)),
+        [toggleEpisode, toPlay]
     );
 
     const isEpisodePlaying = useCallback(

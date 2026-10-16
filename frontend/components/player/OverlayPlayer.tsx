@@ -73,6 +73,8 @@ export function OverlayPlayer() {
     if (!currentTrack && !currentAudiobook && !currentPodcast) return null;
 
     const canSkip = playbackType === "track";
+    // A podcast moves on to the show's next episode.
+    const canNext = canSkip || playbackType === "podcast";
     const shuffle = shuffleState(hasMedia, playbackType, activeOperation.type);
 
     // A sideways swipe on the artwork skips the track; the seek bar and other
@@ -98,12 +100,10 @@ export function OverlayPlayer() {
         touchStartY.current = null;
         if (touchStartX.current === null) return;
 
-        if (canSkip) {
-            if (swipeOffset > 60) {
-                previous();
-            } else if (swipeOffset < -60) {
-                next();
-            }
+        if (canSkip && swipeOffset > 60) {
+            previous();
+        } else if (canNext && swipeOffset < -60) {
+            next();
         }
 
         setSwipeOffset(0);
@@ -320,11 +320,12 @@ export function OverlayPlayer() {
                             onClick={next}
                             className={cn(
                                 "text-[var(--text-primary)] hover:text-white transition-all hover:scale-110",
-                                !canSkip &&
+                                !canNext &&
                                     "opacity-30 cursor-not-allowed hover:scale-100"
                             )}
-                            disabled={!canSkip}
-                            title={canSkip ? "next" : "skip only for music"}
+                            disabled={!canNext}
+                            aria-label={playbackType === "podcast" ? "next episode" : "next track"}
+                            title={playbackType === "podcast" ? "next episode" : canNext ? "next" : "next is for music and podcasts"}
                         >
                             <SkipForward className="w-8 h-8" />
                         </button>

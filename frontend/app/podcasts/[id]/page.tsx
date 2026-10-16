@@ -61,7 +61,7 @@ export default function PodcastDetailPage() {
         isEpisodePlaying,
         isPlaying,
         pause,
-    } = usePodcastActions(podcastId, sortedEpisodes);
+    } = usePodcastActions(podcastId);
 
     if (previewLoadState === "error") {
         return (
@@ -100,7 +100,7 @@ export default function PodcastDetailPage() {
             const newest: Episode[] =
                 sortOrder === "newest" ? sortedEpisodes : (await api.getPodcast(podcast.id, { order: "newest", limit: 20 })).episodes;
             const pick = newest.find((ep) => !ep.progress?.isFinished) ?? newest[0];
-            if (pick) handlePlayEpisode(pick, podcast, newest);
+            if (pick) handlePlayEpisode(pick, podcast);
         } catch (error) {
             notify.error("Couldn't load the latest episode", { message: error instanceof Error ? error.message : undefined });
         }

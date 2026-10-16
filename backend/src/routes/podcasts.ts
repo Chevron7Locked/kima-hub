@@ -681,6 +681,51 @@ router.get("/:id/episodes", requireAuth, async (req, res) => {
     }
 });
 
+/**
+ * GET /podcasts/:podcastId/episodes/:episodeId/next — what plays after this episode: the show's next episode by
+ * release date that this user has not finished, or `{ episode: null }` at the end of the show. 404 for an episode
+ * that is not the show's.
+ */
+router.get("/:podcastId/episodes/:episodeId/next", requireAuth, async (req, res) => {
+    try {
+        const { podcastId, episodeId } = req.params;
+        const userId = req.user!.id;
+        const current = await prisma.podcastEpisode.findFirst({
+            where: { id: episodeId, podcastId },
+            select: { id: true, publishedAt: true, podcast: { select: { id: true, title: true, localCoverPath: true, imageUrl: true } } },
+        });
+        if (!current) return res.status(404).json({ error: "Episode not found" });
+
+        const next = await prisma.podcastEpisode.findFirst({
+            where: {
+                podcastId,
+                OR: [
+                    { publishedAt: { gt: current.publishedAt } },
+                    { publishedAt: current.publishedAt, id: { gt: current.id } },
+                ],
+                NOT: { progress: { some: { userId, isFinished: true } } },
+            },
+            orderBy: [{ publishedAt: "asc" }, { id: "asc" }],
+            include: { progress: { where: { userId } } },
+        });
+        if (!next) return res.json({ episode: null });
+
+        res.json({
+            podcast: { id: current.podcast.id, title: current.podcast.title, coverUrl: podcastCover(current.podcast) },
+            episode: {
+                id: next.id,
+                title: next.title,
+                duration: next.duration,
+                publishedAt: next.publishedAt,
+                coverUrl: episodeCover(next),
+                progress: progressOf(next.progress[0]),
+            },
+        });
+    } catch (error) {
+        safeError(res, "Error finding the next episode", error);
+    }
+});
+
 /** Follow a stored show; following it twice is following it once. */
 async function follow(userId: string, podcast: { id: string; title: string }) {
     const { count } = await prisma.podcastSubscription.createMany({

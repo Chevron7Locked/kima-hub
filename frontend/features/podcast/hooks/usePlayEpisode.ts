@@ -7,19 +7,18 @@ import type { ListeningRow } from "../types";
 type EpisodeToPlay = Parameters<ReturnType<typeof useAudio>["playPodcast"]>[0];
 
 /**
- * Pause or resume the episode the player has loaded, or start another; `beforeStart` runs only when one starts (a show
- * page sets its episode queue there). The player's id for an episode is the show's and the episode's together.
+ * Pause or resume the episode the player has loaded, or start another. The player's id for an episode is the show's
+ * and the episode's together.
  */
 export function useEpisodeToggle() {
     const { playPodcast, currentPodcast, isPlaying, pause, resumeWithGesture } = useAudio();
     return useCallback(
-        (episode: EpisodeToPlay, beforeStart?: () => void) => {
+        (episode: EpisodeToPlay) => {
             if (currentPodcast?.id === episode.id) {
                 if (isPlaying) pause();
                 else resumeWithGesture();
                 return;
             }
-            beforeStart?.();
             playPodcast(episode);
         },
         [currentPodcast?.id, isPlaying, pause, resumeWithGesture, playPodcast],

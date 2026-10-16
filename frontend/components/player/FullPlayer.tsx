@@ -241,9 +241,9 @@ export function FullPlayer() {
                             <button
                                 onClick={next}
                                 className="text-[var(--text-secondary)] hover:text-white transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
-                                disabled={!hasMedia || playbackType !== "track"}
-                                aria-label="Next track"
-                                title="next track"
+                                disabled={!hasMedia || (playbackType !== "track" && playbackType !== "podcast")}
+                                aria-label={playbackType === "podcast" ? "next episode" : "Next track"}
+                                title={playbackType === "podcast" ? "next episode" : "next track"}
                             >
                                 <SkipForward className="w-5 h-5" />
                             </button>
