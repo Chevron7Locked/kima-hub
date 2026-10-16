@@ -77,7 +77,11 @@ export function PodcastSearch() {
                     setOpen(true);
                 }}
                 onFocus={() => hasQuery && setOpen(true)}
-                onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
+                onKeyDown={(e) => {
+                    if (e.key !== "Escape" || !open) return;
+                    e.preventDefault();
+                    setOpen(false);
+                }}
                 placeholder="search shows and episodes"
                 role="combobox"
                 aria-expanded={open && answered}

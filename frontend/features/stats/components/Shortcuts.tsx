@@ -30,7 +30,7 @@ export function Shortcuts({
         const onKey = (e: KeyboardEvent) => {
             if (isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
             if (e.key === "?") { e.preventDefault(); setOpen((v) => !v); return; }
-            if (e.key === "Escape" && open) { setOpen(false); return; }
+            if (e.key === "Escape" && open) { e.preventDefault(); setOpen(false); return; }
             const n = Number(e.key);
             if (Number.isInteger(n) && n >= 1 && n <= chapters.length) {
                 e.preventDefault();

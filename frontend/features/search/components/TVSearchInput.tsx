@@ -34,6 +34,8 @@ export function TVSearchInput({ initialQuery = "", onSearch }: TVSearchInputProp
             handleSubmit(e);
         }
         if (e.key === "Escape") {
+            // First Back leaves the field; the next one reaches the tab row.
+            e.preventDefault();
             inputRef.current?.blur();
         }
     };

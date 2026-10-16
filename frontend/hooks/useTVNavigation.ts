@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useIsTV, DPAD_KEYS } from "@/lib/tv-utils";
 
 interface UseTVNavigationOptions {
@@ -30,13 +30,21 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
     // Focus memory: remember last focused card index per section
     const focusMemory = useRef<Map<number, number>>(new Map());
 
-    // Store latest callbacks in refs to avoid stale closures
+    // The latest props, synced before any timer can run, so a pending Back never reads stale ones.
     const onBackRef = useRef(onBack);
     const onSelectRef = useRef(onSelect);
-    useEffect(() => {
+    const enabledRef = useRef(enabled);
+    useLayoutEffect(() => {
         onBackRef.current = onBack;
         onSelectRef.current = onSelect;
+        enabledRef.current = enabled;
     });
+
+    // A Back waiting for the key to reach every listener; dropped if the page goes away first.
+    const pendingBack = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useLayoutEffect(() => () => {
+        if (pendingBack.current) clearTimeout(pendingBack.current);
+    }, []);
 
     const getSections = useCallback(() => {
         if (!containerRef.current) return [];
@@ -94,6 +102,22 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
 
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
         if (!enabled || !isTV) return;
+
+        // Back returns to the tab row from anywhere in the content (TVLayout sends keys here only when the tab row is
+        // not focused), whatever the page is built of and wherever the focus fell: opening a card lands on a page with
+        // nothing focused. Decided once the key has reached every listener: something on the page that used it (a
+        // rename, a popover, a window) marks it handled, wherever its listener sits relative to this one. So Back
+        // cannot cancel Escape's own browser action; the app has none to cancel (no native dialogs or popovers).
+        if (e.key === DPAD_KEYS.BACK) {
+            if (pendingBack.current) clearTimeout(pendingBack.current);
+            pendingBack.current = setTimeout(() => {
+                pendingBack.current = null;
+                if (e.defaultPrevented || !enabledRef.current) return;
+                onBackRef.current?.();
+                setIsContentFocused(false);
+            }, 0);
+            return;
+        }
 
         // If not content focused, ignore - let TVLayout handle it
         if (!isContentFocused) return;
@@ -219,14 +243,6 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
                     // Otherwise trigger onSelect
                     onSelectRef.current?.(focusedElement);
                 }
-                break;
-            }
-
-            case DPAD_KEYS.BACK:
-            case 'Escape': {
-                e.preventDefault();
-                onBackRef.current?.();
-                setIsContentFocused(false);
                 break;
             }
         }

@@ -936,6 +936,8 @@ export default function PlaylistDetailPage() {
                                                     setIsEditingName(false);
                                                 }
                                             } else if (e.key === "Escape") {
+                                                // Used here: page-wide Escape handlers (TV Back) leave a handled key alone.
+                                                e.preventDefault();
                                                 editSaveRef.current = true;
                                                 setIsEditingName(false);
                                             }

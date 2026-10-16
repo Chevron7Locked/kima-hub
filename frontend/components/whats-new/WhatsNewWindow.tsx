@@ -129,6 +129,7 @@ export function WhatsNewWindow({
         const onKey = (e: KeyboardEvent) => {
             if (e.key !== "Escape") return;
             if (document.querySelector("[data-nested-confirm='true']")) return;
+            e.preventDefault();
             if (view.pane !== "list") goBack();
             else void close();
         };

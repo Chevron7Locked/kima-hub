@@ -36,7 +36,10 @@ export function SleepTimer({ size = "md" }: SleepTimerProps) {
         };
 
         const handleKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape") setIsOpen(false);
+            if (e.key !== "Escape") return;
+            // Used here: page-wide Escape handlers (TV Back, the vibe page) leave a handled key alone.
+            e.preventDefault();
+            setIsOpen(false);
         };
 
         document.addEventListener("mousedown", handleClick);

@@ -65,7 +65,9 @@ export function Sidebar() {
 
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
-            if (e.key === "Escape") setIsMobileMenuOpen(false);
+            if (e.key !== "Escape") return;
+            e.preventDefault();
+            setIsMobileMenuOpen(false);
         };
 
         if (isMobileMenuOpen) {
@@ -238,6 +240,7 @@ export function Sidebar() {
                                         if (e.key === "Enter")
                                             handleCreatePlaylist();
                                         if (e.key === "Escape") {
+                                            e.preventDefault();
                                             setShowCreatePlaylist(false);
                                             setNewPlaylistName("");
                                         }

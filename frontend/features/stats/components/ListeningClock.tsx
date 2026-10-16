@@ -70,7 +70,11 @@ export function ListeningClock({ listening, period }: { listening: ListeningStat
     // Escape closes whatever is open, the same as clicking the cell again.
     useEffect(() => {
         if (!open) return;
-        const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(null); };
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key !== "Escape") return;
+            e.preventDefault();
+            setOpen(null);
+        };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
     }, [open]);
