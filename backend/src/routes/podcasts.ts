@@ -936,6 +936,12 @@ router.delete("/:id/unsubscribe", requireAuth, async (req, res) => {
             },
         });
 
+        // What this user was last playing, if it was one of this show's episodes: no device should restore a show
+        // it no longer follows (the restore would only be told "not found").
+        await prisma.playbackState.deleteMany({
+            where: { userId: req.user!.id, playbackType: "podcast", podcastId: { startsWith: `${id}:` } },
+        });
+
         logger.debug(`   Unsubscribed successfully`);
         await forgetSearches(req.user!.id);
 

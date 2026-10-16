@@ -39,6 +39,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+    await prisma.playbackState.deleteMany({ where: { userId: USER } });
     await prisma.podcast.deleteMany({ where: { id: { in: [SHOW, OTHER] } } });
     await prisma.user.deleteMany({ where: { id: USER } });
 });
@@ -65,4 +66,19 @@ it("is none after the show's newest episode", async () => {
 it("answers 404 for an episode that is not the show's", async () => {
     expect((await next("nx_other")).status).toBe(404);
     expect((await next("no_such_episode")).status).toBe(404);
+});
+
+it("unfollowing a show forgets that it was playing, so no device restores it; other playback stays", async () => {
+    await prisma.podcastSubscription.createMany({ data: [{ userId: USER, podcastId: SHOW }, { userId: USER, podcastId: OTHER }], skipDuplicates: true });
+    await prisma.playbackState.upsert({
+        where: { userId: USER },
+        create: { userId: USER, playbackType: "podcast", podcastId: `${SHOW}:nx_15` },
+        update: { playbackType: "podcast", podcastId: `${SHOW}:nx_15` },
+    });
+
+    expect((await request(app).delete(`/podcasts/${OTHER}/unsubscribe`)).status).toBe(200);
+    expect(await prisma.playbackState.findUnique({ where: { userId: USER } })).not.toBeNull();
+
+    expect((await request(app).delete(`/podcasts/${SHOW}/unsubscribe`)).status).toBe(200);
+    expect(await prisma.playbackState.findUnique({ where: { userId: USER } })).toBeNull();
 });
