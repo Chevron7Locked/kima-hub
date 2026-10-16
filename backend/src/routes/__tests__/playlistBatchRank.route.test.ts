@@ -28,7 +28,7 @@ jest.mock('../../services/playlistService', () => ({
 }));
 
 jest.mock('../../middleware/auth', () => ({
-    requireAcquirePermission: (_req: any, _res: any, next: any) => next(),
+    requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
     requireAuthOrToken: (req: any, _res: any, next: any) => {
         req.user = { id: 'user-1', username: 'tester', role: 'user' };
         next();

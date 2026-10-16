@@ -5,7 +5,7 @@
  */
 
 jest.mock("../../middleware/auth", () => ({
-    requireAcquirePermission: (_req: any, _res: any, next: any) => next(),
+    requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
     requireAuth: (req: any, _res: any, next: any) => {
         req.user = { id: "ncr_user", role: "user" };
         next();

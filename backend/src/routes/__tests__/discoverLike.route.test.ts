@@ -34,7 +34,7 @@ jest.mock('../../utils/logger', () => ({
 
 // Inject an authenticated user; the real middleware would 401 without a session.
 jest.mock('../../middleware/auth', () => ({
-    requireAcquirePermission: (_req: any, _res: any, next: any) => next(),
+    requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
     requireAuthOrToken: (req: any, _res: any, next: any) => {
         req.user = { id: 'user-123' };
         next();
