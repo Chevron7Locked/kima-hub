@@ -98,7 +98,12 @@ test.describe("Dogfood walkthrough", () => {
                 console.log(`[dogfood] NOT COVERED -- ${r}`);
             }
         }
-        await context?.close();
+        try {
+            // Anything that went wrong after the last journey's check, or in a journey that stopped before its own.
+            session?.assertNoneLeft();
+        } finally {
+            await context?.close();
+        }
     });
 
     // ----------------------------------------------------------------------------------
@@ -2512,5 +2517,7 @@ test.describe("Dogfood walkthrough", () => {
             ).toBeLessThan(300);
             return { heapGrowthMb: growth };
         });
+
+        session.assertNoneLeft();
     });
 });

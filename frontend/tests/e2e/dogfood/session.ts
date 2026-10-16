@@ -202,17 +202,7 @@ export class DogfoodSession {
         this.currentStep = name;
         const before = this.violations.length;
         const t0 = Date.now();
-
-        let observed: Observed = {};
-        try {
-            const result = await fn();
-            if (result) observed = result;
-        } catch (err) {
-            // test.skip() inside a step throws; it must propagate so the runner marks
-            // the journey skipped, but the gap is already captured via noteNotCovered --
-            // recording it here would fail the run for a deliberate, disclosed skip.
-            const deliberate = String(err).startsWith("Test is skipped") || String(err).startsWith("Error: Test is skipped");
-            if (!deliberate) this.record("assertion", String(err).slice(0, 400));
+        const logStep = (observed: Observed) =>
             this.steps.push({
                 name,
                 journey: this.currentJourney,
@@ -220,19 +210,29 @@ export class DogfoodSession {
                 observed,
                 violations: this.violations.length - before,
             });
-            throw err;
+
+        try {
+            let observed: Observed = {};
+            try {
+                const result = await fn();
+                if (result) observed = result;
+            } catch (err) {
+                // test.skip() inside a step throws; it must propagate so the runner marks
+                // the journey skipped, but the gap is already captured via noteNotCovered --
+                // recording it here would fail the run for a deliberate, disclosed skip.
+                const deliberate = String(err).startsWith("Test is skipped") || String(err).startsWith("Error: Test is skipped");
+                if (!deliberate) this.record("assertion", String(err).slice(0, 400));
+                logStep(observed);
+                throw err;
+            }
+
+            await this.checkLayout();
+            await this.sampleHeap(name);
+            logStep(observed);
+        } finally {
+            // Whatever ends the step, what happens next is not part of it.
+            this.currentStep = "<between steps>";
         }
-
-        await this.checkLayout();
-        await this.sampleHeap(name);
-
-        this.steps.push({
-            name,
-            journey: this.currentJourney,
-            ms: Date.now() - t0,
-            observed,
-            violations: this.violations.length - before,
-        });
     }
 
     /**
@@ -288,9 +288,24 @@ export class DogfoodSession {
         const summary = fresh
             .map((v) => `  [${v.kind}] during "${v.step}": ${v.detail}`)
             .join("\n");
+        const found = fresh.map(({ journey, step, kind, detail }) => ({ journey, step, kind, detail }));
         // Mark as reported so the next journey does not fail for the same violations.
         fresh.forEach((v) => (v.detail = `[reported] ${v.detail}`));
-        expect(fresh, `${journey} produced ${fresh.length} violation(s):\n${summary}`).toHaveLength(0);
+        expect(found, `${journey} produced ${found.length} violation(s):\n${summary}`).toHaveLength(0);
+    }
+
+    /**
+     * Fails on any violation no journey's own check caught: one that arrived after that check ran (a late console
+     * error, a response landing after the last step), or in a journey that stopped before its check. Each is named by
+     * its journey. A failed step's own failure is left out: its test already failed with it.
+     */
+    assertNoneLeft(): void {
+        const left = this.violations.filter((v) => !v.detail.startsWith("[reported]") && v.kind !== "assertion");
+        if (left.length === 0) return;
+        const found = left.map(({ journey, step, kind, detail }) => ({ journey, step, kind, detail }));
+        const summary = found.map((v) => `  [${v.kind}] in ${v.journey}, during "${v.step}": ${v.detail}`).join("\n");
+        left.forEach((v) => (v.detail = `[reported] ${v.detail}`));
+        expect(found, `${found.length} violation(s) no journey's own check caught:\n${summary}`).toHaveLength(0);
     }
 
     /** How many times the event stream was (re)opened. */

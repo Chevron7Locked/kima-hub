@@ -82,8 +82,13 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
                 `[features-dogfood] ${session.steps.length} steps, ${session.violations.length} violations`,
             );
         }
-        await publicApi?.dispose();
-        await context?.close();
+        try {
+            // Anything that went wrong after a journey's own check, or in a journey that stopped before its own.
+            session?.assertNoneLeft();
+        } finally {
+            await publicApi?.dispose();
+            await context?.close();
+        }
     });
 
     test("1. arrive: sign in", async () => {
