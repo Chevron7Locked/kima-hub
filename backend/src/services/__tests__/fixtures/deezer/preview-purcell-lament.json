@@ -1,0 +1,378 @@
+{
+ "recorded": "2026-10-15",
+ "note": "Real Deezer API replies, trimmed to the fields Kima reads.",
+ "replies": [
+  {
+   "path": "/search/track",
+   "params": {
+    "q": "Purcell When I Am Laid in Earth",
+    "limit": 10
+   },
+   "reply": {
+    "data": [
+     {
+      "id": 3438370091,
+      "title": "Purcell: Dido and Aeneas, Z. 626, Act III: When I Am Laid in Earth",
+      "title_short": "Purcell: Dido and Aeneas, Z. 626, Act III: When I Am Laid in Earth",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/3/d/9/0/3d92529205ef2b2ecc1441d29592b396.mp3?hdnea=exp=1792115896~acl=/api/1/1/3/d/9/0/3d92529205ef2b2ecc1441d29592b396.mp3*~data=user_id=0,application_id=42~hmac=66476a2d2915cbd3b18937fc60845c659a89b2451989e96a361c36455b387baa",
+      "duration": 225,
+      "rank": 345205,
+      "artist": {
+       "id": 11258154,
+       "name": "Lea Desandre"
+      },
+      "album": {
+       "title": "Purcell: Dido's Lament \"When I Am Laid in Earth\"",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/79baa3f82ea01098700b34f7f0d5ce01/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/780766471/image"
+      }
+     },
+     {
+      "id": 66167063,
+      "title": "Dido and Aeneas / Act 3 : Purcell: Dido and Aeneas / Act 3: When I Am Laid In Earth - Dido's Lament)",
+      "title_short": "Dido and Aeneas / Act 3 : Purcell: Dido and Aeneas / Act 3: When I Am Laid In Earth - Dido's Lament)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/d/9/0/0/d90475a8ca7abc47f2b858b279cffc33.mp3?hdnea=exp=1792115896~acl=/api/1/1/d/9/0/0/d90475a8ca7abc47f2b858b279cffc33.mp3*~data=user_id=0,application_id=42~hmac=1d2ee498667f9263e531f9de7f51ab0402e8c72ae6365adb4a4d379fd2ca283e",
+      "duration": 245,
+      "rank": 179566,
+      "artist": {
+       "id": 6483,
+       "name": "Andreas Scholl"
+      },
+      "album": {
+       "title": "O Solitude",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/7bf664336f4db4030d13e4105e380d50/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6473517/image"
+      }
+     },
+     {
+      "id": 143178512,
+      "title": "Dido and Aeneas, Z.626 - Arr. for cello and choir : Purcell: Dido and Aeneas, Z.626 - Arr. for cello and choir: When I am laid in earth",
+      "title_short": "Dido and Aeneas, Z.626 - Arr. for cello and choir : Purcell: Dido and Aeneas, Z.626 - Arr. for cello and choir: When I am laid in earth",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/8/1/0/481ccebf04193aaccbc46f5294170856.mp3?hdnea=exp=1792115896~acl=/api/1/1/4/8/1/0/481ccebf04193aaccbc46f5294170856.mp3*~data=user_id=0,application_id=42~hmac=90584982f649f8a62716736862989f8da9ac3073632c58752d4c86760eb9b582",
+      "duration": 226,
+      "rank": 149460,
+      "artist": {
+       "id": 72431,
+       "name": "Henri Demarquette"
+      },
+      "album": {
+       "title": "Vocello",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/6481715f17a9734a1e0b90030b40947c/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/15499264/image"
+      }
+     },
+     {
+      "id": 67343782,
+      "title": "Dido and Aeneas, Act III : Purcell: Dido and Aeneas, Act III: No. 36, Recit. Thy Hand, Belinda – No. 37, Song. When I Am Laid in Earth \"Dido's Lament\"",
+      "title_short": "Dido and Aeneas, Act III : Purcell: Dido and Aeneas, Act III: No. 36, Recit. Thy Hand, Belinda – No. 37, Song. When I Am Laid in Earth \"Dido's Lament\"",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/6/c/9/0/6c9ca6798d66286c86b1b242bfad33b9.mp3?hdnea=exp=1792115896~acl=/api/1/1/6/c/9/0/6c9ca6798d66286c86b1b242bfad33b9.mp3*~data=user_id=0,application_id=42~hmac=b10ddf9eb9f5d1e3a9d6ae56a70d1d5c9259eef9b129d7db05ee9bc375f4837c",
+      "duration": 263,
+      "rank": 100906,
+      "artist": {
+       "id": 524448,
+       "name": "Anne Sofie von Otter"
+      },
+      "album": {
+       "title": "Purcell: Dido and Aeneas",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/d572eb49802da03aac880208d9a09926/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6585168/image"
+      }
+     },
+     {
+      "id": 1536204472,
+      "title": "Dido and Aeneas, Z. 626 : Purcell: Dido and Aeneas, Z. 626: When I am laid in earth \"Dido's Lament\"",
+      "title_short": "Dido and Aeneas, Z. 626 : Purcell: Dido and Aeneas, Z. 626: When I am laid in earth \"Dido's Lament\"",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/5/b/0/b5b85d0b07003007ef86cb66beeee0b5.mp3?hdnea=exp=1792115896~acl=/api/1/1/b/5/b/0/b5b85d0b07003007ef86cb66beeee0b5.mp3*~data=user_id=0,application_id=42~hmac=b5537fce614af671d04fdd06b9722d24c4fb3b4920dd0b06883e36abd46c60e2",
+      "duration": 236,
+      "rank": 162828,
+      "artist": {
+       "id": 131689,
+       "name": "Anna Netrebko"
+      },
+      "album": {
+       "title": "Amata dalle tenebre",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/19b2a4a8ef26d2c41b6ccfca1fa95fcd/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/268972372/image"
+      }
+     },
+     {
+      "id": 3453147961,
+      "title": "Purcell: Dido and Aeneas, Z. 626, Act III: When I Am Laid In Earth (Dido's Lament)",
+      "title_short": "Purcell: Dido and Aeneas, Z. 626, Act III: When I Am Laid In Earth (Dido's Lament)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/7/7/f/0/77f594d47f57267c09eb5568325e35e1.mp3?hdnea=exp=1792115896~acl=/api/1/1/7/7/f/0/77f594d47f57267c09eb5568325e35e1.mp3*~data=user_id=0,application_id=42~hmac=fabf838a183c33d2392dbe484e06f481792164a3ccb7b4b4acb1fdd57b9dea49",
+      "duration": 210,
+      "rank": 114021,
+      "artist": {
+       "id": 8735750,
+       "name": "Maxim Emelyanychev"
+      },
+      "album": {
+       "title": "Purcell: Dido and Aeneas, Z. 626",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/ceedc3ec034c31d930be12b4763371a1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/785836181/image"
+      }
+     },
+     {
+      "id": 66135684,
+      "title": "Dido and Aeneas - Edited Margaret Laurie & Thurston Dart - Act 3 : Purcell: Dido and Aeneas - Edited Margaret Laurie & Thurston Dart - Act 3: When I am laid in earth",
+      "title_short": "Dido and Aeneas - Edited Margaret Laurie & Thurston Dart - Act 3 : Purcell: Dido and Aeneas - Edited Margaret Laurie & Thurston Dart - Act 3: When I am laid in earth",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/f/1/0/4f114f82f50aa98f4b8d75e2e19866ef.mp3?hdnea=exp=1792115896~acl=/api/1/1/4/f/1/0/4f114f82f50aa98f4b8d75e2e19866ef.mp3*~data=user_id=0,application_id=42~hmac=d757799fa5522f0140787a9c6b8edb87381f2f1b749586d1d9128d6ff6a320f0",
+      "duration": 247,
+      "rank": 149973,
+      "artist": {
+       "id": 1463769,
+       "name": "Janet Baker"
+      },
+      "album": {
+       "title": "Baroque Adagios",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/997f3df9d8763a634f38870e8702705f/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6470473/image"
+      }
+     },
+     {
+      "id": 822211,
+      "title": "Purcell / Arr. Stokowski: Dido and Aeneas, Z. 626, Act III: Song. When I Am Laid in Earth",
+      "title_short": "Purcell / Arr. Stokowski: Dido and Aeneas, Z. 626, Act III: Song. When I Am Laid in Earth",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/5/2/a/0/52a787142e1cc4d4531c38c0ea9d6356.mp3?hdnea=exp=1792115896~acl=/api/1/1/5/2/a/0/52a787142e1cc4d4531c38c0ea9d6356.mp3*~data=user_id=0,application_id=42~hmac=bfeb4d4acf8574196bf2710ba0ddbbaf8da08512fc633c743f0df8cdab1ac31f",
+      "duration": 257,
+      "rank": 18490,
+      "artist": {
+       "id": 248857,
+       "name": "Chamber Orchestra of Europe"
+      },
+      "album": {
+       "title": "Music for Strings",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a5b145db0f8fd47f4c92ad75764b553e/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/95260/image"
+      }
+     },
+     {
+      "id": 6960420,
+      "title": "Dido and Aeneas : Purcell: Dido and Aeneas: When I Am Laid In Earth",
+      "title_short": "Dido and Aeneas : Purcell: Dido and Aeneas: When I Am Laid In Earth",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/a/6/0/ca6b0325b39d9c717862a17f81cb34ab.mp3?hdnea=exp=1792115896~acl=/api/1/1/c/a/6/0/ca6b0325b39d9c717862a17f81cb34ab.mp3*~data=user_id=0,application_id=42~hmac=d32193aa0e00c528e65d56250495fa873397de6c3bf6cf9f48a03d68c0fe4cd1",
+      "duration": 230,
+      "rank": 25430,
+      "artist": {
+       "id": 186300,
+       "name": "Edin Karamazov"
+      },
+      "album": {
+       "title": "The Lute Is A Song",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/10dbe1d8a6ac70a8b5b4b7365d6776b1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/642113/image"
+      }
+     },
+     {
+      "id": 1826675127,
+      "title": "Dido and Aeneas, Z. 626 / Act III : Purcell: Dido and Aeneas, Z. 626 / Act III: When I Am Laid in Earth",
+      "title_short": "Dido and Aeneas, Z. 626 / Act III : Purcell: Dido and Aeneas, Z. 626 / Act III: When I Am Laid in Earth",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/7/e/c/0/7ec99f80131e339a88ab3de6984482a7.mp3?hdnea=exp=1792115896~acl=/api/1/1/7/e/c/0/7ec99f80131e339a88ab3de6984482a7.mp3*~data=user_id=0,application_id=42~hmac=6a7b7dc6b7a83c00ab8b2312274a9a216bbf76e9c8f5c2374a5019ecdafeb5e9",
+      "duration": 203,
+      "rank": 48669,
+      "artist": {
+       "id": 1699718,
+       "name": "Dorothee Mields"
+      },
+      "album": {
+       "title": "Henry Purcell: Love's Madness",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/dfc41922e84f2dd32cb8825776a8df72/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/336253717/image"
+      }
+     }
+    ],
+    "total": 104
+   }
+  },
+  {
+   "path": "/search/artist",
+   "params": {
+    "q": "Purcell",
+    "limit": 25
+   },
+   "reply": {
+    "data": [
+     {
+      "id": 4136889,
+      "name": "Purcell",
+      "nb_fan": 694,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/08478a522299630e85dbf0b72048951d/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 5983198,
+      "name": "Purcell Choir",
+      "nb_fan": 135,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/a07e58d4be7c7ff10f0b0e5824c8a407/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 2010541,
+      "name": "Purcell Quartet",
+      "nb_fan": 221,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/ec9c0b9dc13c0f3eb964871beab532fb/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 4666325,
+      "name": "Purcell Consort Of Voices",
+      "nb_fan": 26,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/3ba8c683380352d986310cd06128e180/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 95290962,
+      "name": "Rachel Purcell",
+      "nb_fan": 59,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/fad9d4f3e37ddd9673576d0b508e9830/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 10954,
+      "name": "Henry Purcell",
+      "nb_fan": 12761,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/64e6ae3382e4a10ba0803f36a04278a6/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 1356579,
+      "name": "The Purcell Singers",
+      "nb_fan": 35,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/d97eed3267808ec06fa6b89ff370ba0d/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 4935624,
+      "name": "Jason Purcell",
+      "nb_fan": 20,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/2f9fab65ef32b4345a06dd298807f687/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 10099918,
+      "name": "Purcell & Alphaze",
+      "nb_fan": 4,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 264285091,
+      "name": "The Purcell Band",
+      "nb_fan": 0,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 342182551,
+      "name": "Francis Purcell",
+      "nb_fan": 1,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/2b9e841b2ab4ac5f2fc32fbeba9f6b4e/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 7093479,
+      "name": "Shawn Purcell",
+      "nb_fan": 6,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/b5d355dadbbd2b65ad70525f77638b59/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 9501416,
+      "name": "Kevin Purcell",
+      "nb_fan": 0,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/195d69f087ddaafa0f4e6801adbfbd4e/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 6166822,
+      "name": "Céline Purcell",
+      "nb_fan": 0,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/6199e989dd22344294a7375bc698f347/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 11402776,
+      "name": "Dan Purcell",
+      "nb_fan": 0,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/c5a209e6fd1a85ad1c391d8e96597873/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 176156267,
+      "name": "Cath Purcell",
+      "nb_fan": 0,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/f777cf3a784a1f7f7c714149b66d3a8a/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 13809229,
+      "name": "Patricia Purcell",
+      "nb_fan": 0,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 5237023,
+      "name": "Matt Purcell",
+      "nb_fan": 8,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/f7c144b72c8709c0aab4fe6a7cd0662c/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 304202901,
+      "name": "Gilbert Purcell",
+      "nb_fan": 0,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/d1ad3857448ce0b7f2ccefe16b1f71ca/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 7823452,
+      "name": "Corey Purcell",
+      "nb_fan": 0,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/142b7c1cf7fa2cec9e1358fc6214292b/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 171495007,
+      "name": "Laura Purcell",
+      "nb_fan": 1,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/137e0167accbd4b3a25a534fe8279f05/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 49099721,
+      "name": "Liam Purcell",
+      "nb_fan": 1,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/72c7718b470c4196d5c8715c77410218/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 7041933,
+      "name": "Iván Purcell",
+      "nb_fan": 0,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/9bb4415dd94e8e825eac4dcdba17f443/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 12468070,
+      "name": "Bryson Purcell",
+      "nb_fan": 3,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/1d610fd13eff7ab6141289a63b409ecf/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 1008361,
+      "name": "Randon Purcell",
+      "nb_fan": 4,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/826744411021297425e04fdbe13d1072/1000x1000-000000-80-0-0.jpg"
+     }
+    ],
+    "total": 100
+   }
+  },
+  {
+   "path": "/artist/4136889/top",
+   "params": {
+    "limit": 50
+   },
+   "reply": {
+    "data": [
+     {
+      "id": 4120963861,
+      "title": "Something Worth the Fight",
+      "title_short": "Something Worth the Fight",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/8/7/9/0/8797b3edba2e94305cb8ec582491184e.mp3?hdnea=exp=1792115898~acl=/api/1/1/8/7/9/0/8797b3edba2e94305cb8ec582491184e.mp3*~data=user_id=0,application_id=42~hmac=63af82c86edd5b9f21fed07484b8a3d47157a487484d99903801881ffd061caa",
+      "duration": 275,
+      "rank": 7350,
+      "artist": {
+       "id": 4136889,
+       "name": "Purcell"
+      },
+      "album": {
+       "title": "Something Worth the Fight",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/64e73f16c5c17a3db7cc23650b7c5c12/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/1016931421/image"
+      }
+     }
+    ],
+    "total": 1
+   }
+  }
+ ]
+}

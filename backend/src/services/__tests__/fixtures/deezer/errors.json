@@ -1,0 +1,36 @@
+{
+ "recorded": "2026-10-15",
+ "note": "Real Deezer error replies, each sent with HTTP 200.",
+ "replies": [
+  {
+   "asked": "/search/track?q=",
+   "reply": {
+    "error": {
+     "type": "ParameterException",
+     "message": "empty parameter",
+     "code": 500
+    }
+   }
+  },
+  {
+   "asked": "/nosuchmethod/1",
+   "reply": {
+    "error": {
+     "type": "InvalidQueryException",
+     "message": "Unknown path components : /Invalid class nosuchmethod",
+     "code": 600
+    }
+   }
+  },
+  {
+   "asked": "/artist/abc/top",
+   "reply": {
+    "error": {
+     "type": "DataException",
+     "message": "no data",
+     "code": 800
+    }
+   }
+  }
+ ]
+}

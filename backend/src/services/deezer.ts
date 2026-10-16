@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { CacheWrapper } from "../utils/cacheWrapper";
 import { rateLimitedGet } from "./httpClient";
 import { normalizeString } from "../utils/normalization";
+import { UpstreamReplyError } from "../utils/upstream";
 import type { SimilarArtist } from "./listenBrainz";
 
 /** Fetches images, previews and public playlist data from Deezer's unauthenticated API. */
@@ -19,6 +20,22 @@ function namesAgree(found: string | undefined, wanted: string): boolean {
     if (a === "" || b === "") return found === wanted;
     return a === b;
 }
+
+type DeezerTrackTitles = { title?: string; title_short?: string; preview?: string };
+
+/**
+ * The first track with a preview whose `title` agrees, or whose `title_short` (the title without the version and
+ * credits Deezer splits off: "Get Lucky (feat. …)" is "Get Lucky") agrees.
+ */
+function playableWithTitle<T extends DeezerTrackTitles>(tracks: T[], wanted: string, by: "title" | "title_short"): T | undefined {
+    return tracks.find((t) => Boolean(t?.preview) && namesAgree(t[by], wanted));
+}
+
+/** Deezer's error codes that answer "nothing by that id" rather than "the request failed". */
+const DEEZER_NO_DATA = 800;
+
+/** An artist's popular songs fetched once and shared by the artist page and the preview fallback. */
+const ARTIST_TOP_COUNT = 50;
 
 interface DeezerTrack {
     deezerId: string;
@@ -123,11 +140,35 @@ class DeezerService {
     }
 
     /**
-     * Rate-limited Deezer GET. Routes every request through the global rate
-     * limiter (service key "deezer") instead of calling axios directly.
+     * Rate-limited Deezer GET through the global limiter (service key "deezer"). Deezer answers its errors as a
+     * 200 with an `error` object: "no data" is an answer, any other error is a failed request, so it throws instead
+     * of being read (and cached) as an empty result.
      */
-    private deezerGet<T = any>(path: string, config?: AxiosRequestConfig): Promise<T> {
-        return rateLimitedGet<T>("deezer", `${DEEZER_API}${path}`, config);
+    private async deezerGet<T = any>(path: string, config?: AxiosRequestConfig): Promise<T> {
+        const body = await rateLimitedGet<any>("deezer", `${DEEZER_API}${path}`, config);
+        const error = body?.error;
+        if (error && Number(error.code) !== DEEZER_NO_DATA) {
+            throw new UpstreamReplyError(`Deezer ${path}: ${error.message ?? "error"} (code ${error.code})`);
+        }
+        return body as T;
+    }
+
+    /**
+     * The Deezer artist a name means. Deezer's rank puts namesakes first (an obscure exact "Adele" outranks the
+     * Adele, who sits at position 6) and shared names normalize alike (Emine'm == Eminem), so search wide and let
+     * fan count decide among the names that agree. Null when no name agrees.
+     */
+    private async findArtist(artistName: string): Promise<{ id: number; name: string; picture_xl?: string; picture_big?: string; picture_medium?: string } | null> {
+        const search = await this.deezerGet<any>("/search/artist", {
+            params: { q: artistName, limit: 25 },
+            timeout: 5000,
+        });
+        const hits: any[] = search?.data || [];
+        return (
+            hits
+                .filter((h) => h?.id && namesAgree(h.name, artistName))
+                .sort((a, b) => (Number(b.nb_fan) || 0) - (Number(a.nb_fan) || 0))[0] ?? null
+        );
     }
 
     async getArtistImage(artistName: string): Promise<string | null> {
@@ -135,13 +176,8 @@ class DeezerService {
 
         try {
             return await this.cachedRequest(cacheKey, async () => {
-                const body = await this.deezerGet<any>("/search/artist", {
-                    params: { q: artistName, limit: 1 },
-                    timeout: 5000,
-                });
-
-                const artist = body?.data?.[0];
-                if (!namesAgree(artist?.name, artistName)) {
+                const artist = await this.findArtist(artistName);
+                if (!artist) {
                     logger.debug(
                         `[DEEZER] No verified artist image for "${artistName}"`
                     );
@@ -159,22 +195,16 @@ class DeezerService {
     /**
      * Deezer's related artists for a name, resolved to an id by search. Deezer
      * publishes no similarity score, so `match` falls linearly by position from
-     * 0.9 to 0.5. [] when unresolved; never throws.
+     * 0.9 to 0.5. [] when unresolved; a failed request throws.
      */
     async getRelatedArtists(artistName: string, limit = 30): Promise<SimilarArtist[]> {
         const cacheKey = `related:${artistName.toLowerCase()}:${limit}`;
 
         try {
             return await this.cachedRequest(cacheKey, async () => {
-                const search = await this.deezerGet<any>("/search/artist", {
-                    params: { q: artistName, limit: 1 },
-                    timeout: 5000,
-                });
-                const seed = search?.data?.[0];
-                // Trust the related list only if the seed resolved to the
-                // artist we asked about — otherwise it is some other
-                // artist's neighbours.
-                if (!seed?.id || !namesAgree(seed?.name, artistName)) {
+                // Only the artist asked about: another artist's neighbours are not this one's.
+                const seed = await this.findArtist(artistName);
+                if (!seed) {
                     logger.debug(
                         `[DEEZER] Seed "${artistName}" unresolved or mis-resolved; no related artists`
                     );
@@ -209,55 +239,43 @@ class DeezerService {
     }
 
     /**
-     * An artist's most popular tracks on Deezer (its own rank order), for the
-     * artist page's "Popular" section. The artist is resolved by verified
-     * search (same rule as every Deezer call: a hit counts only when the name
-     * agrees), then `/artist/{id}/top`. [] when unresolved or the artist has
-     * no top list; throws on a transport error so the caller can decide.
+     * Deezer's own track objects for an artist's most popular songs, in its rank order: the artist found by
+     * findArtist, then `/artist/{id}/top`. Cached; [] when no artist has the name; a failed request throws.
+     */
+    private fetchArtistTop(artistName: string): Promise<any[]> {
+        return this.cachedRequest(`artist-top-tracks:${artistName.toLowerCase()}`, async () => {
+            const seed = await this.findArtist(artistName);
+            if (!seed) {
+                logger.debug(`[DEEZER] Seed "${artistName}" unresolved for top tracks`);
+                return [];
+            }
+            const top = await this.deezerGet<any>(`/artist/${seed.id}/top`, {
+                params: { limit: ARTIST_TOP_COUNT },
+                timeout: 5000,
+            });
+            return top?.data || [];
+        });
+    }
+
+    /**
+     * An artist's most popular tracks on Deezer (its own rank order), for the artist page's "Popular" section.
+     * [] when unresolved or the artist has no top list; throws on a transport error so the caller can decide.
      */
     async getArtistTopTracks(artistName: string, limit = 10): Promise<DeezerTopTrack[]> {
-        const cacheKey = `artist-top:${artistName.toLowerCase()}:${limit}`;
-
         try {
-            return await this.cachedRequest(cacheKey, async () => {
-                const search = await this.deezerGet<any>("/search/artist", {
-                    params: { q: artistName, limit: 25 },
-                    timeout: 5000,
-                });
-                const hits: any[] = search?.data || [];
-                // Deezer's rank puts namesakes first (an obscure exact "Adele"
-                // outranks THE Adele, who sits at position 6), and shared
-                // names normalize alike (Emine'm == Eminem). Search wide and
-                // let fan count decide: the artist a library page is about is
-                // never the namesake with a thousand fans.
-                const seed = hits
-                    .filter((h) => h?.id && namesAgree(h.name, artistName))
-                    .sort((a, b) => (Number(b.nb_fan) || 0) - (Number(a.nb_fan) || 0))[0];
-                if (!seed) {
-                    logger.debug(
-                        `[DEEZER] Seed "${artistName}" unresolved for top tracks`
-                    );
-                    return [];
-                }
-
-                const top = await this.deezerGet<any>(`/artist/${seed.id}/top`, {
-                    params: { limit },
-                    timeout: 5000,
-                });
-                const list: any[] = top?.data || [];
-                return list
-                    .filter((t: any) => t?.title)
-                    .slice(0, limit)
-                    .map((t: any) => ({
-                        title: String(t.title),
-                        artist: t.artist?.name || artistName,
-                        album: t.album?.title || null,
-                        coverUrl: t.album?.cover_medium || t.album?.cover || null,
-                        previewUrl: t.preview || null,
-                        durationMs: (Number(t.duration) || 0) * 1000,
-                        rank: Number(t.rank) || 0,
-                    }));
-            });
+            const list = await this.fetchArtistTop(artistName);
+            return list
+                .filter((t: any) => t?.title)
+                .slice(0, limit)
+                .map((t: any) => ({
+                    title: String(t.title),
+                    artist: t.artist?.name || artistName,
+                    album: t.album?.title || null,
+                    coverUrl: t.album?.cover_medium || t.album?.cover || null,
+                    previewUrl: t.preview || null,
+                    durationMs: (Number(t.duration) || 0) * 1000,
+                    rank: Number(t.rank) || 0,
+                }));
         } catch (error: any) {
             logger.warn(`Deezer artist top tracks error for ${artistName}:`, error.message);
             throw error;
@@ -309,29 +327,43 @@ class DeezerService {
     }
 
     /**
-     * Search Deezer and return the first preview URL for a track.
+     * A preview of this artist's song, or null. Deezer no longer honours its structured search (artist:"…" track:"…"
+     * finds nothing), so ask plainly. Covers and remixes of a well-known song can push the original out of a plain
+     * search, so then look among the artist's own popular songs. A full title in either list beats a short one, so a
+     * live or acoustic take in the search never wins over the song itself.
      */
     private async searchTrackPreview(artistName: string, trackName: string): Promise<string | null> {
         const body = await this.deezerGet<any>("/search/track", {
-            params: { q: `artist:"${artistName}" track:"${trackName}"`, limit: 1 },
+            params: { q: `${artistName} ${trackName}`, limit: 10 },
             timeout: 5000,
         });
-
-        const track = body?.data?.[0];
-        if (
-            !namesAgree(track?.artist?.name ?? track?.artist, artistName) ||
-            !namesAgree(track?.title, trackName)
-        ) {
-            logger.debug(
-                `[DEEZER] No verified preview for "${artistName}" - "${trackName}"`
-            );
+        const byArtist = ((body?.data ?? []) as any[]).filter((t) => namesAgree(t?.artist?.name ?? t?.artist, artistName));
+        let preview: string | undefined = playableWithTitle(byArtist, trackName, "title")?.preview;
+        if (!preview) {
+            const popular = await this.fetchArtistTop(artistName);
+            // The popular list is remembered for a day and Deezer's preview links last minutes: a song found there is
+            // asked for again for a link that still plays (none if it has left Deezer since).
+            const tried = new Set<number>();
+            const fromPopular = async (by: "title" | "title_short"): Promise<string | undefined> => {
+                const track = playableWithTitle(popular.filter((t) => !tried.has(t?.id)), trackName, by);
+                if (!track?.id) return undefined;
+                tried.add(track.id);
+                return (await this.deezerGet<any>(`/track/${track.id}`, { timeout: 5000 }))?.preview || undefined;
+            };
+            preview =
+                (await fromPopular("title")) ??
+                playableWithTitle(byArtist, trackName, "title_short")?.preview ??
+                (await fromPopular("title_short"));
+        }
+        if (!preview) {
+            logger.debug(`[DEEZER] No verified preview for "${artistName}" - "${trackName}"`);
             return null;
         }
-        return track?.preview || null;
+        return preview;
     }
 
     async getTrackPreview(artistName: string, trackName: string): Promise<string | null> {
-        const cacheKey = `preview:${artistName.toLowerCase()}:${trackName.toLowerCase()}`;
+        const cacheKey = `track-preview:${artistName.toLowerCase()}:${trackName.toLowerCase()}`;
 
         try {
             return await this.cachedRequest(cacheKey, () => this.searchTrackPreview(artistName, trackName));

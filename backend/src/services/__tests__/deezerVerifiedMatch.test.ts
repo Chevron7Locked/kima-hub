@@ -95,7 +95,7 @@ describe("deezerService.getAlbumCover — verified match only", () => {
 describe("deezerService.getArtistImage — verified match only", () => {
     it("returns null when the first search hit is a different artist", async () => {
         mockRateLimitedGet.mockResolvedValue({
-            data: [{ name: "The Only Ones", picture_xl: "https://deezer/wrong.jpg" }],
+            data: [{ id: 1, name: "The Only Ones", picture_xl: "https://deezer/wrong.jpg" }],
         });
 
         await expect(deezerService.getArtistImage("Someone Else")).resolves.toBeNull();
@@ -103,12 +103,24 @@ describe("deezerService.getArtistImage — verified match only", () => {
 
     it("returns the picture when the search hit is the queried artist", async () => {
         mockRateLimitedGet.mockResolvedValue({
-            data: [{ name: "The Only Ones", picture_xl: "https://deezer/right.jpg" }],
+            data: [{ id: 1, name: "The Only Ones", picture_xl: "https://deezer/right.jpg" }],
         });
 
         await expect(deezerService.getArtistImage("The Only Ones")).resolves.toBe(
             "https://deezer/right.jpg"
         );
+    });
+
+    it("is the most-followed artist of that name, not the namesake Deezer ranks first (recorded reply)", async () => {
+        const recorded = JSON.parse(
+            require("fs").readFileSync(require("path").join(__dirname, "fixtures/deezer/preview-adele-hello.json"), "utf8"),
+        );
+        const search = recorded.replies.find((r: { path: string }) => r.path === "/search/artist").reply;
+        mockRateLimitedGet.mockResolvedValue(search);
+        const adele = search.data.find((a: { id: number }) => a.id === 75798);
+
+        expect(search.data[0].id).not.toBe(75798);
+        await expect(deezerService.getArtistImage("Adele")).resolves.toBe(adele.picture_xl);
     });
 });
 

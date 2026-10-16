@@ -1,0 +1,1157 @@
+{
+ "recorded": "2026-10-15",
+ "note": "Real Deezer API replies, trimmed to the fields Kima reads.",
+ "replies": [
+  {
+   "path": "/search/track",
+   "params": {
+    "q": "Daft Punk Get Lucky",
+    "limit": 10
+   },
+   "reply": {
+    "data": [
+     {
+      "id": 66609426,
+      "title": "Get Lucky (Radio Edit - feat. Pharrell Williams and Nile Rodgers)",
+      "title_short": "Get Lucky",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/b/f/0/1bf80a82992903ff685ba1b7275223f8.mp3?hdnea=exp=1792115894~acl=/api/1/1/1/b/f/0/1bf80a82992903ff685ba1b7275223f8.mp3*~data=user_id=0,application_id=42~hmac=b093ae7ee1cd211d47c0c9b818e77f0674c7d2ba338f5abe0bc75825186e1941",
+      "duration": 248,
+      "rank": 954234,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Get Lucky (Radio Edit - feat. Pharrell Williams and Nile Rodgers)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bc49adb87758e0c8c4e508a9c5cce85d/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6516139/image"
+      }
+     },
+     {
+      "id": 67238735,
+      "title": "Get Lucky (feat. Pharrell Williams and Nile Rodgers)",
+      "title_short": "Get Lucky",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/8/a/0/c8a61130657a2cf58e3ac751e7950617.mp3?hdnea=exp=1792115894~acl=/api/1/1/c/8/a/0/c8a61130657a2cf58e3ac751e7950617.mp3*~data=user_id=0,application_id=42~hmac=f1db8a553f98422b1de6f60f6ca26ee8c4d44d83d4695c28901293f5cd9d0808",
+      "duration": 367,
+      "rank": 877635,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/311bba0fc112d15f72c8b5a65f0456c1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6575789/image"
+      }
+     },
+     {
+      "id": 68265035,
+      "title": "Get Lucky - Tribute to Daft Punk",
+      "title_short": "Get Lucky - Tribute to Daft Punk",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/f/d/f/0/fdfeca52bbb9374fa149dbd06863d644.mp3?hdnea=exp=1792115894~acl=/api/1/1/f/d/f/0/fdfeca52bbb9374fa149dbd06863d644.mp3*~data=user_id=0,application_id=42~hmac=7685abdd1d734ed20f3216768e2c3d0cc35b39ed2e959888f16fb2730dbf80d1",
+      "duration": 248,
+      "rank": 217582,
+      "artist": {
+       "id": 998222,
+       "name": "Get Lucky"
+      },
+      "album": {
+       "title": "Get Lucky - Tribute to Daft Punk",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/f0e7e3de5fb908c344075767a63dc8c2/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6685831/image"
+      }
+     },
+     {
+      "id": 649202962,
+      "title": "Get Lucky (Daft Punk)",
+      "title_short": "Get Lucky (Daft Punk)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/7/2/7/0/727bc495f1e2d4965f2e2fc57e507aff.mp3?hdnea=exp=1792115894~acl=/api/1/1/7/2/7/0/727bc495f1e2d4965f2e2fc57e507aff.mp3*~data=user_id=0,application_id=42~hmac=8e15fd961c0d73b783584bfc2366948f2189d3fc548539ab9888626c19761cde",
+      "duration": 222,
+      "rank": 93580,
+      "artist": {
+       "id": 5584181,
+       "name": "Charlie Parra Del Riego"
+      },
+      "album": {
+       "title": "Rock and Pop hits go metal",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/cd3c005bf59d8cac912731917b60567c/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/90490632/image"
+      }
+     },
+     {
+      "id": 1819285597,
+      "title": "Get Lucky",
+      "title_short": "Get Lucky",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/3/6/7/0/3672c81a13e07879a32770f391036a8d.mp3?hdnea=exp=1792115894~acl=/api/1/1/3/6/7/0/3672c81a13e07879a32770f391036a8d.mp3*~data=user_id=0,application_id=42~hmac=ad67f0d146ade935f7075513764d32aa279faeba508dd3c04a8bc35779c69263",
+      "duration": 204,
+      "rank": 110273,
+      "artist": {
+       "id": 176017197,
+       "name": "Daft Punk Experience"
+      },
+      "album": {
+       "title": "Get Lucky",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/9fd69f0a47ad30d7eba3d18cb5e46741/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/334342767/image"
+      }
+     },
+     {
+      "id": 86694785,
+      "title": "Get Lucky (Backing Track Minus Lead Guitar) [In the style of Daft Punk & Pharrell Williams]",
+      "title_short": "Get Lucky (Backing Track Minus Lead Guitar) [In the style of Daft Punk & Pharrell Williams]",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/f/1/4/0/f14f41950e76d30fedba8a59a12fa6c8.mp3?hdnea=exp=1792115894~acl=/api/1/1/f/1/4/0/f14f41950e76d30fedba8a59a12fa6c8.mp3*~data=user_id=0,application_id=42~hmac=77308c28a4d54791c23b9b518605c8ed52da553f21dff129b90df914cfd8cab1",
+      "duration": 257,
+      "rank": 95404,
+      "artist": {
+       "id": 6448376,
+       "name": "Zoom Entertainments Limited"
+      },
+      "album": {
+       "title": "Backing Tracks for Guitarists, Vol. 15",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/3443db3285c220381c2e15717fc1a2cd/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/8745085/image"
+      }
+     },
+     {
+      "id": 825146922,
+      "title": "Get Lucky (Originally performed by Daft Punk)",
+      "title_short": "Get Lucky",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/8/9/3/0/8935deb346e1270101e12e938dd0d876.mp3?hdnea=exp=1792115894~acl=/api/1/1/8/9/3/0/8935deb346e1270101e12e938dd0d876.mp3*~data=user_id=0,application_id=42~hmac=5c3e51b42cb41b3e4b20819044a3390e9bca3b130c32bd2c31862024d4120513",
+      "duration": 290,
+      "rank": 39260,
+      "artist": {
+       "id": 472973,
+       "name": "Lowland"
+      },
+      "album": {
+       "title": "Classical Trancelations 3 (Live in Helsinki)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/81cc1f76bc22f486406204f7227e8869/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/121675072/image"
+      }
+     },
+     {
+      "id": 87381241,
+      "title": "Get Lucky (Originally by Daft Punk) [Karaoke Version]",
+      "title_short": "Get Lucky (Originally by Daft Punk) [Karaoke Version]",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/d/2/e/0/d2e821510571764782d9be95edf9a18c.mp3?hdnea=exp=1792115894~acl=/api/1/1/d/2/e/0/d2e821510571764782d9be95edf9a18c.mp3*~data=user_id=0,application_id=42~hmac=37d1efff2961adabda2ba5048a6009a5ede3bb7830787b2091c672f164653c06",
+      "duration": 250,
+      "rank": 37961,
+      "artist": {
+       "id": 1547232,
+       "name": "Thematic Pianos"
+      },
+      "album": {
+       "title": "Get Lucky (Originally by Daft Punk) [Karaoke Version]",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bd3d4701817ab7ead6dc7c05967f518e/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/8817401/image"
+      }
+     },
+     {
+      "id": 127409391,
+      "title": "Get Lucky (Lullaby Version of Daft Punk)",
+      "title_short": "Get Lucky (Lullaby Version of Daft Punk)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/2/f/b/0/2fb362f71e538b93a12a875df2f50bd3.mp3?hdnea=exp=1792115894~acl=/api/1/1/2/f/b/0/2fb362f71e538b93a12a875df2f50bd3.mp3*~data=user_id=0,application_id=42~hmac=27c6f531198006e7c37476d247ed83027253618142f692c545a8244f5a73b640",
+      "duration": 222,
+      "rank": 32078,
+      "artist": {
+       "id": 383307,
+       "name": "Twinkle Twinkle Little Rock Star"
+      },
+      "album": {
+       "title": "EDM Baby! Lullaby Versions from the DJ",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/f9fc619a3a70f6d1985acafb56afd633/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/13440513/image"
+      }
+     },
+     {
+      "id": 1862307467,
+      "title": "Daft Punk Medley: One More Time / Harder, Better, Faster, Stronger / Technologic / Get Lucky / Digital Love",
+      "title_short": "Daft Punk Medley: One More Time / Harder, Better, Faster, Stronger / Technologic / Get Lucky / Digital Love",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/2/0/5/0/2050b2aed1e7d896c02675d6a3bdf4c2.mp3?hdnea=exp=1792115894~acl=/api/1/1/2/0/5/0/2050b2aed1e7d896c02675d6a3bdf4c2.mp3*~data=user_id=0,application_id=42~hmac=e1b3d7e83d722ea8a548b95c8e2ade658d9c715c6d1061643cef8b380513b834",
+      "duration": 179,
+      "rank": 40671,
+      "artist": {
+       "id": 73334742,
+       "name": "6erBlas"
+      },
+      "album": {
+       "title": "Gefühlsecht",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/d874bfc15da9fa2e37ff1da93aa768dd/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/345351177/image"
+      }
+     }
+    ],
+    "total": 72
+   }
+  },
+  {
+   "path": "/search/artist",
+   "params": {
+    "q": "Daft Punk",
+    "limit": 25
+   },
+   "reply": {
+    "data": [
+     {
+      "id": 27,
+      "name": "Daft Punk",
+      "nb_fan": 5221709,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/638e69b9caaf9f9f3f8826febea7b543/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 1477045,
+      "name": "Daft Punk - Stardust",
+      "nb_fan": 8616,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 412557421,
+      "name": "Daft Punk",
+      "nb_fan": 0,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 176017197,
+      "name": "Daft Punk Experience",
+      "nb_fan": 63,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/9fd69f0a47ad30d7eba3d18cb5e46741/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 4189975,
+      "name": "Made famous by Daft Punk",
+      "nb_fan": 240,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 212725387,
+      "name": "Daft Punk, Pharrell Williams",
+      "nb_fan": 81,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 212725397,
+      "name": "Daft Punk, Paul Williams",
+      "nb_fan": 29,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 212725377,
+      "name": "Daft Punk, Julian Casablancas",
+      "nb_fan": 55,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 212725407,
+      "name": "Daft Punk, Todd Edwards",
+      "nb_fan": 27,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 212725417,
+      "name": "Daft Punk, Panda Bear",
+      "nb_fan": 34,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 1199887,
+      "name": "Daft Punk's Karaoke Band",
+      "nb_fan": 169,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 212725427,
+      "name": "Daft Punk, Julian Casablancas, The Voidz",
+      "nb_fan": 64,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 50402932,
+      "name": "Daft Punk, Pharrell Williams, Nile Rodgers",
+      "nb_fan": 96,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 365157072,
+      "name": "Daf Punk",
+      "nb_fan": 16,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/5dd2aff49fa01705ef56b55025c54cd3/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 12489314,
+      "name": "Draft Punk",
+      "nb_fan": 42,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/7bd6265007a0526225691e209cb753c3/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 1183073,
+      "name": "Darft Phunk",
+      "nb_fan": 276,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     }
+    ],
+    "total": 16
+   }
+  },
+  {
+   "path": "/artist/27/top",
+   "params": {
+    "limit": 50
+   },
+   "reply": {
+    "data": [
+     {
+      "id": 66609426,
+      "title": "Get Lucky (Radio Edit - feat. Pharrell Williams and Nile Rodgers)",
+      "title_short": "Get Lucky",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/b/f/0/1bf80a82992903ff685ba1b7275223f8.mp3?hdnea=exp=1792116473~acl=/api/1/1/1/b/f/0/1bf80a82992903ff685ba1b7275223f8.mp3*~data=user_id=0,application_id=42~hmac=c78d6e2cf5b46ad7da113b521e697bd06a9afe10f61fdaff6028c32d6a1eba36",
+      "duration": 248,
+      "rank": 954234,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Get Lucky (Radio Edit - feat. Pharrell Williams and Nile Rodgers)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bc49adb87758e0c8c4e508a9c5cce85d/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6516139/image"
+      }
+     },
+     {
+      "id": 67238732,
+      "title": "Instant Crush (feat. Julian Casablancas)",
+      "title_short": "Instant Crush",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/d/6/b/0/d6bc80aadfa1d7625d59a6620f229371.mp3?hdnea=exp=1792116473~acl=/api/1/1/d/6/b/0/d6bc80aadfa1d7625d59a6620f229371.mp3*~data=user_id=0,application_id=42~hmac=b3e4795828c47f271e9e7a291d66b942fbd849cac2c5ab144822c34bc3861726",
+      "duration": 337,
+      "rank": 942491,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/311bba0fc112d15f72c8b5a65f0456c1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6575789/image"
+      }
+     },
+     {
+      "id": 3135553,
+      "title": "One More Time",
+      "title_short": "One More Time",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/f/8/c/0/f8c5dc3837912dba37c9a1ab3170cc3f.mp3?hdnea=exp=1792116473~acl=/api/1/1/f/8/c/0/f8c5dc3837912dba37c9a1ab3170cc3f.mp3*~data=user_id=0,application_id=42~hmac=946cbe9667c24b1a99f8bd841cc3d38116284c4c313387349fc20a7a6fe4216f",
+      "duration": 320,
+      "rank": 896666,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 67238735,
+      "title": "Get Lucky (feat. Pharrell Williams and Nile Rodgers)",
+      "title_short": "Get Lucky",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/8/a/0/c8a61130657a2cf58e3ac751e7950617.mp3?hdnea=exp=1792116473~acl=/api/1/1/c/8/a/0/c8a61130657a2cf58e3ac751e7950617.mp3*~data=user_id=0,application_id=42~hmac=8ea7cee23622cac72a1eef010218c8c8ea8a813c7169f7a1f76ed2b404743e55",
+      "duration": 367,
+      "rank": 877635,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/311bba0fc112d15f72c8b5a65f0456c1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6575789/image"
+      }
+     },
+     {
+      "id": 3135556,
+      "title": "Harder, Better, Faster, Stronger",
+      "title_short": "Harder, Better, Faster, Stronger",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/6/a/2/0/6a2c0a5670afe821e08fc5154909534a.mp3?hdnea=exp=1792116473~acl=/api/1/1/6/a/2/0/6a2c0a5670afe821e08fc5154909534a.mp3*~data=user_id=0,application_id=42~hmac=223090eaf6dd84ff952de2490a708def08d1ede303206eb881f3ee6821f41bbd",
+      "duration": 226,
+      "rank": 810329,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 3135563,
+      "title": "Veridis Quo",
+      "title_short": "Veridis Quo",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/6/4/5/0/6456b666c0b1d4537e34d71e5cbd098c.mp3?hdnea=exp=1792116473~acl=/api/1/1/6/4/5/0/6456b666c0b1d4537e34d71e5cbd098c.mp3*~data=user_id=0,application_id=42~hmac=678cd837dccda5b6e9b1e346f4508cffb2d9f8c0891266a98048d698cbd2048c",
+      "duration": 345,
+      "rank": 917472,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 3129775,
+      "title": "Around the World",
+      "title_short": "Around the World",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/4/7/0/a47dbed01e6d9b0ac4e39a134f745ca2.mp3?hdnea=exp=1792116473~acl=/api/1/1/a/4/7/0/a47dbed01e6d9b0ac4e39a134f745ca2.mp3*~data=user_id=0,application_id=42~hmac=682f6c75fe3f7c5e32ed903f23c61d880d1400f1d4f9bb8f8e25deca71617c34",
+      "duration": 429,
+      "rank": 830730,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Homework",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/b870579c8650cd59b1cce656dde2ef17/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/301775/image"
+      }
+     },
+     {
+      "id": 3135561,
+      "title": "Something About Us",
+      "title_short": "Something About Us",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/f/f/0/cff7c95e11ba9f6ac3ff0401a81df4f5.mp3?hdnea=exp=1792116473~acl=/api/1/1/c/f/f/0/cff7c95e11ba9f6ac3ff0401a81df4f5.mp3*~data=user_id=0,application_id=42~hmac=4f02c3f99afeee76afe9501785c370904c5533af6ac543085422315d2ed926ad",
+      "duration": 232,
+      "rank": 741570,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 67238733,
+      "title": "Lose Yourself to Dance (feat. Pharrell Williams)",
+      "title_short": "Lose Yourself to Dance",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/e/5/3/0/e53185570f71c51bf4903d1e78ed5348.mp3?hdnea=exp=1792116473~acl=/api/1/1/e/5/3/0/e53185570f71c51bf4903d1e78ed5348.mp3*~data=user_id=0,application_id=42~hmac=466a979e453c33d0b1f4b0b6b74414354afe8816b1f64c04dffedd6de5876fb1",
+      "duration": 353,
+      "rank": 809920,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/311bba0fc112d15f72c8b5a65f0456c1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6575789/image"
+      }
+     },
+     {
+      "id": 3135555,
+      "title": "Digital Love",
+      "title_short": "Digital Love",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/e/c/0/1ec8ff31f93acc81ebb93a45c191e219.mp3?hdnea=exp=1792116473~acl=/api/1/1/1/e/c/0/1ec8ff31f93acc81ebb93a45c191e219.mp3*~data=user_id=0,application_id=42~hmac=9e2b622f87661f45c0569697b097de02702e1c1d31fe325fdb7016004674caef",
+      "duration": 301,
+      "rank": 758096,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 3135565,
+      "title": "Face to Face",
+      "title_short": "Face to Face",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/c/5/0/bc5ffa003d9ccf020a633083738c6ae4.mp3?hdnea=exp=1792116473~acl=/api/1/1/b/c/5/0/bc5ffa003d9ccf020a633083738c6ae4.mp3*~data=user_id=0,application_id=42~hmac=c1af96c0fd138c74dea07f2fdbba2b709da946c62561c814e59b4c452f618a71",
+      "duration": 240,
+      "rank": 677230,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 3135562,
+      "title": "Voyager",
+      "title_short": "Voyager",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/c/9/0/bc95bc4a6fdcf3e9b1672229f679eea1.mp3?hdnea=exp=1792116473~acl=/api/1/1/b/c/9/0/bc95bc4a6fdcf3e9b1672229f679eea1.mp3*~data=user_id=0,application_id=42~hmac=47f3c92199ffea7dee1e2a6bb40e8f2c5c2392b9a2c368b20ac5df13d4fe13fb",
+      "duration": 227,
+      "rank": 732191,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 14598354,
+      "title": "Robot Rock",
+      "title_short": "Robot Rock",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/5/e/0/15ea53f50a3a92fa7a976d2045075559.mp3?hdnea=exp=1792116473~acl=/api/1/1/1/5/e/0/15ea53f50a3a92fa7a976d2045075559.mp3*~data=user_id=0,application_id=42~hmac=accda039635eeda370048f568a8bcf274f9dade884cd29818bbe34be8cadb945",
+      "duration": 287,
+      "rank": 367405,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Musique, Vol. 1",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/39e2281a0e9f564e73b4f49dfa06f4ab/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/1343199/image"
+      }
+     },
+     {
+      "id": 67238728,
+      "title": "Give Life Back to Music",
+      "title_short": "Give Life Back to Music",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/f/5/7/0/f57885aeb81258994e3d44d33867e85e.mp3?hdnea=exp=1792116473~acl=/api/1/1/f/5/7/0/f57885aeb81258994e3d44d33867e85e.mp3*~data=user_id=0,application_id=42~hmac=e28a1086abe9b003c169e0638f39041af816701174a5b99645d0132f11da844a",
+      "duration": 274,
+      "rank": 715949,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/311bba0fc112d15f72c8b5a65f0456c1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6575789/image"
+      }
+     },
+     {
+      "id": 3129772,
+      "title": "Da Funk",
+      "title_short": "Da Funk",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/7/6/8/0/76889b34d1906099d7b365b8573e4ea7.mp3?hdnea=exp=1792116473~acl=/api/1/1/7/6/8/0/76889b34d1906099d7b365b8573e4ea7.mp3*~data=user_id=0,application_id=42~hmac=5a7092c91b2c4f319c6a414a5bfc6dfb51db99832cf4cbd6d0ab7f7fc6c66dca",
+      "duration": 328,
+      "rank": 776740,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Homework",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/b870579c8650cd59b1cce656dde2ef17/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/301775/image"
+      }
+     },
+     {
+      "id": 3135554,
+      "title": "Aerodynamic",
+      "title_short": "Aerodynamic",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/6/9/9/0/699d41611cf0280f0a55c8ba4a372c14.mp3?hdnea=exp=1792116473~acl=/api/1/1/6/9/9/0/699d41611cf0280f0a55c8ba4a372c14.mp3*~data=user_id=0,application_id=42~hmac=765b339faa90c7f463d252144b45fe269a87085691ec7b5aa684dfe5994c68cf",
+      "duration": 212,
+      "rank": 765541,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 15734351,
+      "title": "Technologic",
+      "title_short": "Technologic",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/e/f/0/aefba2747c75d1be95839d2ce13ab3ab.mp3?hdnea=exp=1792116473~acl=/api/1/1/a/e/f/0/aefba2747c75d1be95839d2ce13ab3ab.mp3*~data=user_id=0,application_id=42~hmac=76964529d977cb97b754594f2e74fb3387b90d71fd55ddf9ab760330e09c6c3a",
+      "duration": 284,
+      "rank": 269346,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Human After All",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/134d2724ed5b95d597961e554bd0fb5a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/1453848/image"
+      }
+     },
+     {
+      "id": 67238738,
+      "title": "Fragments of Time (feat. Todd Edwards)",
+      "title_short": "Fragments of Time",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/4/0/0/14035d6807f81fd20c5c6c4451be2af2.mp3?hdnea=exp=1792116473~acl=/api/1/1/1/4/0/0/14035d6807f81fd20c5c6c4451be2af2.mp3*~data=user_id=0,application_id=42~hmac=3144842ae44524d1dbb3edced966f104585e9033f69160276ef022bb492384a4",
+      "duration": 279,
+      "rank": 679297,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/311bba0fc112d15f72c8b5a65f0456c1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6575789/image"
+      }
+     },
+     {
+      "id": 67238730,
+      "title": "Giorgio by Moroder",
+      "title_short": "Giorgio by Moroder",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/2/2/6/0/226a352b5354e78a964d5dad5875ded9.mp3?hdnea=exp=1792116473~acl=/api/1/1/2/2/6/0/226a352b5354e78a964d5dad5875ded9.mp3*~data=user_id=0,application_id=42~hmac=fd2a02cd6a8b9fc8391d89c669d48b84034ed949f61e855e8afd95f64e6f6a51",
+      "duration": 544,
+      "rank": 793082,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/311bba0fc112d15f72c8b5a65f0456c1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6575789/image"
+      }
+     },
+     {
+      "id": 2271581097,
+      "title": "Infinity Repeating (2013 Demo) [feat. Julian Casablancas+The Voidz]",
+      "title_short": "Infinity Repeating (2013 Demo) [feat. Julian Casablancas+The Voidz]",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/3/1/f/0/31f7ee31b6a0bb78d7fd940863b887be.mp3?hdnea=exp=1792116473~acl=/api/1/1/3/1/f/0/31f7ee31b6a0bb78d7fd940863b887be.mp3*~data=user_id=0,application_id=42~hmac=a83f9c45a51ebfd52836641731cd67d6088b74586d8723c69381fab529b2833e",
+      "duration": 239,
+      "rank": 644708,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories (10th Anniversary Edition)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/d99e2c9df92886c5098af5973cb9298e/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/438167857/image"
+      }
+     },
+     {
+      "id": 67238729,
+      "title": "The Game of Love",
+      "title_short": "The Game of Love",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/7/5/0/475fc61bd3272b9036d4ba0e3837451b.mp3?hdnea=exp=1792116473~acl=/api/1/1/4/7/5/0/475fc61bd3272b9036d4ba0e3837451b.mp3*~data=user_id=0,application_id=42~hmac=a6c8e8497bb3b11225bdd05b7f730be1369d89fcd2b69576a12b7bc5caa79aef",
+      "duration": 321,
+      "rank": 672439,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/311bba0fc112d15f72c8b5a65f0456c1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6575789/image"
+      }
+     },
+     {
+      "id": 1173629832,
+      "title": "The Son of Flynn",
+      "title_short": "The Son of Flynn",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/0/9/7/0/097d6dd652e04f774adfbf9e21281946.mp3?hdnea=exp=1792116473~acl=/api/1/1/0/9/7/0/097d6dd652e04f774adfbf9e21281946.mp3*~data=user_id=0,application_id=42~hmac=58ca655385034aee9ed83db84c269f5760ab7f3e40c0a4098425d7ef0e9c65f1",
+      "duration": 95,
+      "rank": 572445,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "TRON: Legacy - The Complete Edition (Original Motion Picture Soundtrack)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/313e8a988614445ab1ad508da2805187/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192529232/image"
+      }
+     },
+     {
+      "id": 3135557,
+      "title": "Crescendolls",
+      "title_short": "Crescendolls",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/f/6/0/1f65f58dc3cfa276ac6a1ee6f2ffac20.mp3?hdnea=exp=1792116473~acl=/api/1/1/1/f/6/0/1f65f58dc3cfa276ac6a1ee6f2ffac20.mp3*~data=user_id=0,application_id=42~hmac=7ce095006b2267dae9b48472e95ea56a6bd476198d37f29c17a8fdd357aed3eb",
+      "duration": 211,
+      "rank": 596769,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 1173629942,
+      "title": "End of Line",
+      "title_short": "End of Line",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/7/6/0/0/760dcb19e44e71431728609af07feff7.mp3?hdnea=exp=1792116473~acl=/api/1/1/7/6/0/0/760dcb19e44e71431728609af07feff7.mp3*~data=user_id=0,application_id=42~hmac=021631a90ff974fca134a54c4bc46524ad3595ac3f89252bbb1a15450b23e436",
+      "duration": 156,
+      "rank": 699464,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "TRON: Legacy - The Complete Edition (Original Motion Picture Soundtrack)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/313e8a988614445ab1ad508da2805187/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192529232/image"
+      }
+     },
+     {
+      "id": 2478010351,
+      "title": "Instant Crush (Drumless Edition) (feat. Julian Casablancas)",
+      "title_short": "Instant Crush (Drumless Edition) (feat. Julian Casablancas)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/e/7/b/0/e7b651d551570458fc19006956f12180.mp3?hdnea=exp=1792116473~acl=/api/1/1/e/7/b/0/e7b651d551570458fc19006956f12180.mp3*~data=user_id=0,application_id=42~hmac=fd170e40b0bb65140ef1d27ce5c698b69f37bac370b3355c46a4c51d2ff58501",
+      "duration": 337,
+      "rank": 544135,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories (Drumless Edition)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bb8b5f188ae380ac3a7c876b70556357/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/494309801/image"
+      }
+     },
+     {
+      "id": 3129771,
+      "title": "Revolution 909",
+      "title_short": "Revolution 909",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/0/c/a/0/0cae6c09cd433adc34351962d128c99d.mp3?hdnea=exp=1792116473~acl=/api/1/1/0/c/a/0/0cae6c09cd433adc34351962d128c99d.mp3*~data=user_id=0,application_id=42~hmac=48fd4d18ea33fdcda9718076e851ccaba94eb9135576ea65458555cd6284c8a3",
+      "duration": 335,
+      "rank": 627535,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Homework",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/b870579c8650cd59b1cce656dde2ef17/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/301775/image"
+      }
+     },
+     {
+      "id": 3135560,
+      "title": "High Life",
+      "title_short": "High Life",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/e/e/a/0/eea4fd9467e697d503998dff44ceeaa3.mp3?hdnea=exp=1792116473~acl=/api/1/1/e/e/a/0/eea4fd9467e697d503998dff44ceeaa3.mp3*~data=user_id=0,application_id=42~hmac=e0a3cca0a67da8a2962877ab7abcb5aa71bb266aa567c424e80135998e4dfb97",
+      "duration": 201,
+      "rank": 600960,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 3135566,
+      "title": "Too Long",
+      "title_short": "Too Long",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/8/f/e/0/8fe6827c48cc62fb82fe8e741b0534f4.mp3?hdnea=exp=1792116473~acl=/api/1/1/8/f/e/0/8fe6827c48cc62fb82fe8e741b0534f4.mp3*~data=user_id=0,application_id=42~hmac=8fd0a9893e172f075e1ebf2a4cccac7830530847194936d05bbee92b27b3b811",
+      "duration": 600,
+      "rank": 608394,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 67238731,
+      "title": "Within",
+      "title_short": "Within",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/0/9/0/10972c895bf5b6303939096203323285.mp3?hdnea=exp=1792116473~acl=/api/1/1/1/0/9/0/10972c895bf5b6303939096203323285.mp3*~data=user_id=0,application_id=42~hmac=01a5f66252b05130a5e723c31a6d5eec687b7d9ab079cd511b90042e17d5b7bd",
+      "duration": 228,
+      "rank": 722046,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/311bba0fc112d15f72c8b5a65f0456c1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6575789/image"
+      }
+     },
+     {
+      "id": 15734347,
+      "title": "Make Love",
+      "title_short": "Make Love",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/2/e/b/0/2ebd18e452ac5f81d68b85028aaaf95a.mp3?hdnea=exp=1792116473~acl=/api/1/1/2/e/b/0/2ebd18e452ac5f81d68b85028aaaf95a.mp3*~data=user_id=0,application_id=42~hmac=c99255cbc4ddf28b9e634c5619cf0ad0c8d88309c070f861ac53ccc73670259c",
+      "duration": 289,
+      "rank": 210191,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Human After All",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/134d2724ed5b95d597961e554bd0fb5a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/1453848/image"
+      }
+     },
+     {
+      "id": 3135559,
+      "title": "Superheroes",
+      "title_short": "Superheroes",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/b/c/0/1bc57c07bfaf6a265e06ce9574390e0e.mp3?hdnea=exp=1792116473~acl=/api/1/1/1/b/c/0/1bc57c07bfaf6a265e06ce9574390e0e.mp3*~data=user_id=0,application_id=42~hmac=c7fc13a8df8c9ec1ee06c631aa207dacd50df862578977f7615487248ff15ca4",
+      "duration": 237,
+      "rank": 622611,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 3135558,
+      "title": "Nightvision",
+      "title_short": "Nightvision",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/0/6/0/c063dbb3b8f2af8dac3e88950f2e38b0.mp3?hdnea=exp=1792116473~acl=/api/1/1/c/0/6/0/c063dbb3b8f2af8dac3e88950f2e38b0.mp3*~data=user_id=0,application_id=42~hmac=f6f881ae3e2c6536c9373e342dc346536c50fa1d1116a58dcfd840d44ecee8c3",
+      "duration": 104,
+      "rank": 570133,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 14598347,
+      "title": "Around the World (Radio Edit)",
+      "title_short": "Around the World",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/6/1/7/0/617477bff9132f8cce695df4c53b13a4.mp3?hdnea=exp=1792116473~acl=/api/1/1/6/1/7/0/617477bff9132f8cce695df4c53b13a4.mp3*~data=user_id=0,application_id=42~hmac=02177e0bed4357ff7617e1e21d3316b9ba8d292032bac744a5d1c30a71ddaf24",
+      "duration": 241,
+      "rank": 629139,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Musique, Vol. 1",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/39e2281a0e9f564e73b4f49dfa06f4ab/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/1343199/image"
+      }
+     },
+     {
+      "id": 67238736,
+      "title": "Beyond",
+      "title_short": "Beyond",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/8/8/5/0/885c72be5aa016fb7560aa01cd979850.mp3?hdnea=exp=1792116473~acl=/api/1/1/8/8/5/0/885c72be5aa016fb7560aa01cd979850.mp3*~data=user_id=0,application_id=42~hmac=2e25a2d1f326347bf532e0fbb3514160a47097d59254c60612c83bdf76e7d2cf",
+      "duration": 290,
+      "rank": 624783,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/311bba0fc112d15f72c8b5a65f0456c1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6575789/image"
+      }
+     },
+     {
+      "id": 3157685,
+      "title": "One More Time (Short Radio Edit)",
+      "title_short": "One More Time",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/b/c/0/1bc55617dc98cab4519c938ec781ba7f.mp3?hdnea=exp=1792116473~acl=/api/1/1/1/b/c/0/1bc55617dc98cab4519c938ec781ba7f.mp3*~data=user_id=0,application_id=42~hmac=19ea8cfb68f7308357d66463023a50f8452079dbc77c38003bcc16609cb7410c",
+      "duration": 235,
+      "rank": 692551,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "One More Time",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/07d17f7608a4cbcb60d701faa3c257c8/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/303598/image"
+      }
+     },
+     {
+      "id": 3135564,
+      "title": "Short Circuit",
+      "title_short": "Short Circuit",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/1/3/0/413592fd246163564e5416fb72f8c831.mp3?hdnea=exp=1792116473~acl=/api/1/1/4/1/3/0/413592fd246163564e5416fb72f8c831.mp3*~data=user_id=0,application_id=42~hmac=58c8ecdaa0e42315ea8a3d06d5849086fd8af25e840a6da145894066db0e0941",
+      "duration": 206,
+      "rank": 526415,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Discovery",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/5718f7c81c27e0b2417e2a4c45224f8a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/302127/image"
+      }
+     },
+     {
+      "id": 3167839,
+      "title": "Robot Rock / Oh Yeah",
+      "title_short": "Robot Rock / Oh Yeah",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/9/e/b/0/9ebe4416f2951121d61d9daa34e344b0.mp3?hdnea=exp=1792116473~acl=/api/1/1/9/e/b/0/9ebe4416f2951121d61d9daa34e344b0.mp3*~data=user_id=0,application_id=42~hmac=d80f79f814c89e15e01475622b9b828a5b7b8f346ed131e96d704e183f8543b7",
+      "duration": 387,
+      "rank": 569623,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Alive 2007",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/ad3dda2e1b770ad143d5dbfeb667fa39/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/304193/image"
+      }
+     },
+     {
+      "id": 3167843,
+      "title": "Around the World / Harder, Better, Faster, Stronger",
+      "title_short": "Around the World / Harder, Better, Faster, Stronger",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/0/3/0/c03b2bdb725b92998a9d8da44b616ef4.mp3?hdnea=exp=1792116473~acl=/api/1/1/c/0/3/0/c03b2bdb725b92998a9d8da44b616ef4.mp3*~data=user_id=0,application_id=42~hmac=ebc0978c884ed9be8989f862b5037e7a64eda5391304f32ef60fa1507cc527f4",
+      "duration": 342,
+      "rank": 694738,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Alive 2007",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/ad3dda2e1b770ad143d5dbfeb667fa39/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/304193/image"
+      }
+     },
+     {
+      "id": 3167840,
+      "title": "Touch It / Technologic",
+      "title_short": "Touch It / Technologic",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/4/d/0/b4ddfae6806f06ab47391f3e45e072ec.mp3?hdnea=exp=1792116473~acl=/api/1/1/b/4/d/0/b4ddfae6806f06ab47391f3e45e072ec.mp3*~data=user_id=0,application_id=42~hmac=18ac81a6657580630b39a6dab1becb4b17005ee31bed80f8ba41ba4881078082",
+      "duration": 329,
+      "rank": 584156,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Alive 2007",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/ad3dda2e1b770ad143d5dbfeb667fa39/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/304193/image"
+      }
+     },
+     {
+      "id": 64304393,
+      "title": "End Of Line (feat. TRS-80)",
+      "title_short": "End Of Line (feat. TRS-80)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/c/3/0/1c31de85cfced8470c6956cc1a952fef.mp3?hdnea=exp=1792116473~acl=/api/1/1/1/c/3/0/1c31de85cfced8470c6956cc1a952fef.mp3*~data=user_id=0,application_id=42~hmac=649f09dd35c4e21e3b33a31492b05d23a7997bfbea54ed624e899145c5f328ab",
+      "duration": 282,
+      "rank": 468038,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Sky Sailor EP",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/4f839ed58cefcf4c871dad5a3696e656/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6299813/image"
+      }
+     },
+     {
+      "id": 3167846,
+      "title": "One More Time / Aerodynamic",
+      "title_short": "One More Time / Aerodynamic",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/3/e/a/0/3eab3086d842f99ab710fdefb3a9f3e9.mp3?hdnea=exp=1792116473~acl=/api/1/1/3/e/a/0/3eab3086d842f99ab710fdefb3a9f3e9.mp3*~data=user_id=0,application_id=42~hmac=ce664b251ffaf7b039f398449347ad3a18a838fe9b3548ee9bc8d903965e539f",
+      "duration": 370,
+      "rank": 611851,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Alive 2007",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/ad3dda2e1b770ad143d5dbfeb667fa39/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/304193/image"
+      }
+     },
+     {
+      "id": 67238737,
+      "title": "Motherboard",
+      "title_short": "Motherboard",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/b/f/0/1bffd335a2958cbdace9fc6249a6b78e.mp3?hdnea=exp=1792116473~acl=/api/1/1/1/b/f/0/1bffd335a2958cbdace9fc6249a6b78e.mp3*~data=user_id=0,application_id=42~hmac=a28ccf46f5daaa92abab5ef416f8fbd27ddc39fda63d63d96db50945532f4d5c",
+      "duration": 341,
+      "rank": 620668,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/311bba0fc112d15f72c8b5a65f0456c1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/6575789/image"
+      }
+     },
+     {
+      "id": 1173629902,
+      "title": "The Game Has Changed",
+      "title_short": "The Game Has Changed",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/9/1/0/c91d6d8a7d11229ba10ca6c6cb19ab03.mp3?hdnea=exp=1792116473~acl=/api/1/1/c/9/1/0/c91d6d8a7d11229ba10ca6c6cb19ab03.mp3*~data=user_id=0,application_id=42~hmac=4598f04eed83c7ccfdc4eb42e7f4cb9de4b1eb69b23716fd6f4ea62861e24719",
+      "duration": 205,
+      "rank": 518100,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "TRON: Legacy - The Complete Edition (Original Motion Picture Soundtrack)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/313e8a988614445ab1ad508da2805187/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192529232/image"
+      }
+     },
+     {
+      "id": 1173630032,
+      "title": "TRON Legacy (End Titles)",
+      "title_short": "TRON Legacy (End Titles)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/5/0/0/1506c863f9eadff3b901bac4b1c95e56.mp3?hdnea=exp=1792116473~acl=/api/1/1/1/5/0/0/1506c863f9eadff3b901bac4b1c95e56.mp3*~data=user_id=0,application_id=42~hmac=b2af480fc06e4ccee4e7768dab73e612b65a252d0f89e87350231b6bbd90a640",
+      "duration": 198,
+      "rank": 496384,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "TRON: Legacy - The Complete Edition (Original Motion Picture Soundtrack)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/313e8a988614445ab1ad508da2805187/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192529232/image"
+      }
+     },
+     {
+      "id": 15734348,
+      "title": "The Brainwasher",
+      "title_short": "The Brainwasher",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/a/7/0/ba7312ae721b1c436b58a99498f53d64.mp3?hdnea=exp=1792116473~acl=/api/1/1/b/a/7/0/ba7312ae721b1c436b58a99498f53d64.mp3*~data=user_id=0,application_id=42~hmac=f32367af124dd98e6e2c783864815241961116d30e4fb9352194baa77163bc56",
+      "duration": 248,
+      "rank": 171218,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Human After All",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/134d2724ed5b95d597961e554bd0fb5a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/1453848/image"
+      }
+     },
+     {
+      "id": 15734342,
+      "title": "Human After All",
+      "title_short": "Human After All",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/d/4/2/0/d42c1f67be121930c47ef8bc59e825ec.mp3?hdnea=exp=1792116473~acl=/api/1/1/d/4/2/0/d42c1f67be121930c47ef8bc59e825ec.mp3*~data=user_id=0,application_id=42~hmac=86ba088a6f1b73127ffe4c3c634bb3b2e4ecd4fed383740ba1f3051235e3893a",
+      "duration": 319,
+      "rank": 202203,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Human After All",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/134d2724ed5b95d597961e554bd0fb5a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/1453848/image"
+      }
+     },
+     {
+      "id": 3167841,
+      "title": "Television Rules the Nation / Crescendolls",
+      "title_short": "Television Rules the Nation / Crescendolls",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/5/b/8/0/5b85c90fb1bb0ecf13f1208fcc92ff7a.mp3?hdnea=exp=1792116473~acl=/api/1/1/5/b/8/0/5b85c90fb1bb0ecf13f1208fcc92ff7a.mp3*~data=user_id=0,application_id=42~hmac=c8fe6a27c2366cec302a9caed75c800f3d8dea0d411a7b43388dcc86f2ed3a4e",
+      "duration": 290,
+      "rank": 637334,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Alive 2007",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/ad3dda2e1b770ad143d5dbfeb667fa39/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/304193/image"
+      }
+     },
+     {
+      "id": 3129774,
+      "title": "Fresh",
+      "title_short": "Fresh",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/0/5/b/0/05b2a36d87395c52598042875ab404b5.mp3?hdnea=exp=1792116473~acl=/api/1/1/0/5/b/0/05b2a36d87395c52598042875ab404b5.mp3*~data=user_id=0,application_id=42~hmac=bff11df7b33d93efa33d0c20267afe060ab2fb4a7e844ef548978a0242a5fbc2",
+      "duration": 244,
+      "rank": 504789,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Homework",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/b870579c8650cd59b1cce656dde2ef17/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/301775/image"
+      }
+     },
+     {
+      "id": 2271581077,
+      "title": "Horizon (Japan CD)",
+      "title_short": "Horizon (Japan CD)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/d/1/9/0/d194ef6c3014273602066eb456caf734.mp3?hdnea=exp=1792116473~acl=/api/1/1/d/1/9/0/d194ef6c3014273602066eb456caf734.mp3*~data=user_id=0,application_id=42~hmac=7f1255a0ad3b09da67288efb816260b67c81e962f44aa7804a99aa52e945cd7a",
+      "duration": 262,
+      "rank": 546649,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Random Access Memories (10th Anniversary Edition)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/d99e2c9df92886c5098af5973cb9298e/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/438167857/image"
+      }
+     },
+     {
+      "id": 15734346,
+      "title": "Steam Machine",
+      "title_short": "Steam Machine",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/7/d/2/0/7d237f60988e8dc77e7270a785ffa558.mp3?hdnea=exp=1792116473~acl=/api/1/1/7/d/2/0/7d237f60988e8dc77e7270a785ffa558.mp3*~data=user_id=0,application_id=42~hmac=ca055ce574a5b92dfdd56ce6a3de7b5d7a849aad47e6d3a611e79e6a303393f7",
+      "duration": 321,
+      "rank": 197875,
+      "artist": {
+       "id": 27,
+       "name": "Daft Punk"
+      },
+      "album": {
+       "title": "Human After All",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/134d2724ed5b95d597961e554bd0fb5a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/1453848/image"
+      }
+     }
+    ],
+    "total": 100
+   }
+  }
+ ]
+}

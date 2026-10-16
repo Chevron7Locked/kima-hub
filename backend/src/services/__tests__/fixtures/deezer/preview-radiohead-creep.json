@@ -1,0 +1,1151 @@
+{
+ "recorded": "2026-10-15",
+ "note": "Real Deezer API replies, trimmed to the fields Kima reads.",
+ "replies": [
+  {
+   "path": "/search/track",
+   "params": {
+    "q": "Radiohead Creep",
+    "limit": 10
+   },
+   "reply": {
+    "data": [
+     {
+      "id": 138547415,
+      "title": "Creep",
+      "title_short": "Creep",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/9/c/0/b9c4cde36fbe176cc3e84dc08fc0611b.mp3?hdnea=exp=1792115893~acl=/api/1/1/b/9/c/0/b9c4cde36fbe176cc3e84dc08fc0611b.mp3*~data=user_id=0,application_id=42~hmac=488fa80dac9d6f30cf9698b04646b76c6b338d45f4c82e60f75ed81b49a270c9",
+      "duration": 238,
+      "rank": 978547,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Pablo Honey",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/1dd56fd8824492e1a5106c99a00a85ec/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880711/image"
+      }
+     },
+     {
+      "id": 2215315187,
+      "title": "Creep (Acoustic)",
+      "title_short": "Creep",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/2/a/c/0/2acc0e1b2f4e4d71efc507e409f52ad8.mp3?hdnea=exp=1792115893~acl=/api/1/1/2/a/c/0/2acc0e1b2f4e4d71efc507e409f52ad8.mp3*~data=user_id=0,application_id=42~hmac=a16c6886448b767702ba792ee7e90eceb94aed710ce11f8a0a92d7b3c7891a4d",
+      "duration": 258,
+      "rank": 835810,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Creep EP",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/d06ea246e25c65b3004627ff75e87eb8/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/423524437/image"
+      }
+     },
+     {
+      "id": 138548053,
+      "title": "Blow Out (Remix)",
+      "title_short": "Blow Out",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/e/1/7/0/e17e5334a77668f3b8d88104a3200346.mp3?hdnea=exp=1792115893~acl=/api/1/1/e/1/7/0/e17e5334a77668f3b8d88104a3200346.mp3*~data=user_id=0,application_id=42~hmac=b38ddeb7c85f122278888f714df4432bdb68636ca676d64290d33f83465f850a",
+      "duration": 258,
+      "rank": 212395,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Creep",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/56b47d494d450cae677f30e78653c521/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880783/image"
+      }
+     },
+     {
+      "id": 105083310,
+      "title": "Creep (Cover of Radiohead)",
+      "title_short": "Creep",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/f/e/9/0/fe9055e62f689336234ed02c80d5a0c8.mp3?hdnea=exp=1792115893~acl=/api/1/1/f/e/9/0/fe9055e62f689336234ed02c80d5a0c8.mp3*~data=user_id=0,application_id=42~hmac=8c0a108414f2af74bb31bdb715e7660ce6281ff4560396a1d7c37bec9f7717c4",
+      "duration": 236,
+      "rank": 517553,
+      "artist": {
+       "id": 445137,
+       "name": "Glee Cast"
+      },
+      "album": {
+       "title": "Glee: The Music, The Complete Season Four",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a3c35cdf8c30ee27deaf1b0f65b0724d/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/10943752/image"
+      }
+     },
+     {
+      "id": 138548049,
+      "title": "Million Dollar Question",
+      "title_short": "Million Dollar Question",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/2/d/0/a2deddb81bca02a7c128c166fb68b714.mp3?hdnea=exp=1792115893~acl=/api/1/1/a/2/d/0/a2deddb81bca02a7c128c166fb68b714.mp3*~data=user_id=0,application_id=42~hmac=f377b75ea9d408423a565c5beaf47bc0e7f76b6dff6819ff05da6e3f778c6ab8",
+      "duration": 198,
+      "rank": 198905,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Creep",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/56b47d494d450cae677f30e78653c521/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880783/image"
+      }
+     },
+     {
+      "id": 138548047,
+      "title": "Inside My Head",
+      "title_short": "Inside My Head",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/7/b/4/0/7b4272c6b45b09881cab1e694249cb28.mp3?hdnea=exp=1792115893~acl=/api/1/1/7/b/4/0/7b4272c6b45b09881cab1e694249cb28.mp3*~data=user_id=0,application_id=42~hmac=9708a6c0075e20be20f28785fe51aeb1052bc09fe760b76953df1b2a18c49071",
+      "duration": 191,
+      "rank": 262699,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Creep",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/56b47d494d450cae677f30e78653c521/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880783/image"
+      }
+     },
+     {
+      "id": 138548051,
+      "title": "Yes I Am",
+      "title_short": "Yes I Am",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/9/6/0/a968748a9b7d7deed89c7b86c0319732.mp3?hdnea=exp=1792115893~acl=/api/1/1/a/9/6/0/a968748a9b7d7deed89c7b86c0319732.mp3*~data=user_id=0,application_id=42~hmac=1da5d10ab9d45bc025aa5dcb4b82deb9955013988b90f3dea4665b587c65df79",
+      "duration": 265,
+      "rank": 265281,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Creep",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/56b47d494d450cae677f30e78653c521/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880783/image"
+      }
+     },
+     {
+      "id": 3472538191,
+      "title": "2 + 2 = 5 (Live)",
+      "title_short": "2 + 2 = 5",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/f/a/b/0/fab9d91a10dd4dd5ce0ef30105595d27.mp3?hdnea=exp=1792115893~acl=/api/1/1/f/a/b/0/fab9d91a10dd4dd5ce0ef30105595d27.mp3*~data=user_id=0,application_id=42~hmac=0ed3c4981e625f1e4e3553e4f7527b4218c2c01d56d95c51deb13e8e213f0f4d",
+      "duration": 216,
+      "rank": 355607,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Hail to the Thief (Live Recordings 2003-2009)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/93741fef5a0ab42a872f71da222eccb5/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/792320571/image"
+      }
+     },
+     {
+      "id": 3472538281,
+      "title": "Myxomatosis (Live)",
+      "title_short": "Myxomatosis",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/d/0/0/cd0341eb9277f859993823b1c69a73ad.mp3?hdnea=exp=1792115893~acl=/api/1/1/c/d/0/0/cd0341eb9277f859993823b1c69a73ad.mp3*~data=user_id=0,application_id=42~hmac=b9c6f7935d7ed340d89c62e5ac59f3fb4e8e2dbe8608a8598e91a51c676e5f9e",
+      "duration": 244,
+      "rank": 252928,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Hail to the Thief (Live Recordings 2003-2009)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/93741fef5a0ab42a872f71da222eccb5/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/792320571/image"
+      }
+     },
+     {
+      "id": 3472538251,
+      "title": "The Gloaming (Live)",
+      "title_short": "The Gloaming",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/2/f/0/12f68c6fdae9c20738ee5069db401392.mp3?hdnea=exp=1792115893~acl=/api/1/1/1/2/f/0/12f68c6fdae9c20738ee5069db401392.mp3*~data=user_id=0,application_id=42~hmac=645a8b65d49870337eb08698eaeae5c62943ae166b80313069d7f8ab914b5cd9",
+      "duration": 239,
+      "rank": 267137,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Hail to the Thief (Live Recordings 2003-2009)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/93741fef5a0ab42a872f71da222eccb5/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/792320571/image"
+      }
+     }
+    ],
+    "total": 118
+   }
+  },
+  {
+   "path": "/search/artist",
+   "params": {
+    "q": "Radiohead",
+    "limit": 25
+   },
+   "reply": {
+    "data": [
+     {
+      "id": 399,
+      "name": "Radiohead",
+      "nb_fan": 4105458,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/0d58cfbc90f2e776608bcdc0c45a4711/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 53477202,
+      "name": "DJ Radiohead",
+      "nb_fan": 64,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/b58f051742ef450c20af6219fd4df2f1/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 215702,
+      "name": "Robert Glasper",
+      "nb_fan": 43892,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/64db3f897347fa383ec678cae51ae500/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 12189436,
+      "name": "Radio Head",
+      "nb_fan": 434,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/a5cab3dee726326ea16c7f489c26b766/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 14009761,
+      "name": "Radiohead Tribute Band",
+      "nb_fan": 414,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/f69dea01fc82fac4a64074e71774d053/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 4674537,
+      "name": "Radiodread",
+      "nb_fan": 24,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 82816332,
+      "name": "RADIOFEAR",
+      "nb_fan": 1,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/e528dcba3b9ece499d85b3a5266810dc/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 1103116,
+      "name": "Radioroad West",
+      "nb_fan": 40,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/87dfde0007e8660ddc0d661d10cc3207/1000x1000-000000-80-0-0.jpg"
+     }
+    ],
+    "total": 8
+   }
+  },
+  {
+   "path": "/artist/399/top",
+   "params": {
+    "limit": 50
+   },
+   "reply": {
+    "data": [
+     {
+      "id": 138547415,
+      "title": "Creep",
+      "title_short": "Creep",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/9/c/0/b9c4cde36fbe176cc3e84dc08fc0611b.mp3?hdnea=exp=1792116932~acl=/api/1/1/b/9/c/0/b9c4cde36fbe176cc3e84dc08fc0611b.mp3*~data=user_id=0,application_id=42~hmac=39f621831362c95087e433ff164a2bfc8c43c62741fa5109c9585a27c2108b19",
+      "duration": 238,
+      "rank": 978547,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Pablo Honey",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/1dd56fd8824492e1a5106c99a00a85ec/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880711/image"
+      }
+     },
+     {
+      "id": 138539979,
+      "title": "Let Down",
+      "title_short": "Let Down",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/9/9/1/0/991f911408c85213268ebf001476d6b6.mp3?hdnea=exp=1792116932~acl=/api/1/1/9/9/1/0/991f911408c85213268ebf001476d6b6.mp3*~data=user_id=0,application_id=42~hmac=d6ed3616be3c053f58cc0c72815f1c9dfdadb8050df1bc0d8ee383eea835f510",
+      "duration": 299,
+      "rank": 928986,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "OK Computer",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/05a186e0a859a36f9cd51cdae2158fe1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879699/image"
+      }
+     },
+     {
+      "id": 138546811,
+      "title": "All I Need",
+      "title_short": "All I Need",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/5/9/5/0/5959cc901e473e3ce7592d4a13ce429e.mp3?hdnea=exp=1792116932~acl=/api/1/1/5/9/5/0/5959cc901e473e3ce7592d4a13ce429e.mp3*~data=user_id=0,application_id=42~hmac=9187bdc8252978d120f47aac7f414c58471df207424f19865cd2be759efac25e",
+      "duration": 228,
+      "rank": 824708,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "In Rainbows",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a175af9b7d329bc678cb4d26fc13d6de/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880659/image"
+      }
+     },
+     {
+      "id": 138546819,
+      "title": "Jigsaw Falling Into Place",
+      "title_short": "Jigsaw Falling Into Place",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/e/2/0/4e2164c8d6d409f0131374df9634b941.mp3?hdnea=exp=1792116932~acl=/api/1/1/4/e/2/0/4e2164c8d6d409f0131374df9634b941.mp3*~data=user_id=0,application_id=42~hmac=66c71483f90334486f84a4b999ffc92082537f6445ffd9f49b467f1aaf1ed870",
+      "duration": 248,
+      "rank": 855553,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "In Rainbows",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a175af9b7d329bc678cb4d26fc13d6de/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880659/image"
+      }
+     },
+     {
+      "id": 138539157,
+      "title": "No Surprises",
+      "title_short": "No Surprises",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/f/1/0/1f10e9c9eda91f9331f6c42c0dd077a2.mp3?hdnea=exp=1792116932~acl=/api/1/1/1/f/1/0/1f10e9c9eda91f9331f6c42c0dd077a2.mp3*~data=user_id=0,application_id=42~hmac=4725fce7f90480bcda9bb556d9adb110e8b825a5804ec7517ef2f3cc25fff23f",
+      "duration": 229,
+      "rank": 936980,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "No Surprises",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/7a378976d3ff1b1fd7b21ee0c7f95fa5/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879583/image"
+      }
+     },
+     {
+      "id": 138547587,
+      "title": "Everything In Its Right Place",
+      "title_short": "Everything In Its Right Place",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/6/d/0/c6d663844e6a7451d7e99b10896f5f77.mp3?hdnea=exp=1792116932~acl=/api/1/1/c/6/d/0/c6d663844e6a7451d7e99b10896f5f77.mp3*~data=user_id=0,application_id=42~hmac=b602abd1f647efa253e71936e2ec2172a5da9a7ef1784981ded8047c88ba4974",
+      "duration": 251,
+      "rank": 867837,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Kid A",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/e5925065cdb1cefbc3bd75af4a1f1801/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880741/image"
+      }
+     },
+     {
+      "id": 138539981,
+      "title": "Karma Police",
+      "title_short": "Karma Police",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/1/d/0/41dd34fd7d334b1c55b6970ef6db0d2f.mp3?hdnea=exp=1792116932~acl=/api/1/1/4/1/d/0/41dd34fd7d334b1c55b6970ef6db0d2f.mp3*~data=user_id=0,application_id=42~hmac=e81757671e20dfa8483ca11d0a3907d3c1d7ae5338848bbe84c13266d7713c6c",
+      "duration": 264,
+      "rank": 898957,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "OK Computer",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/05a186e0a859a36f9cd51cdae2158fe1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879699/image"
+      }
+     },
+     {
+      "id": 138539977,
+      "title": "Exit Music (For A Film)",
+      "title_short": "Exit Music (For A Film)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/1/9/0/4190e7b3593fe2674b48d06955a46fb1.mp3?hdnea=exp=1792116932~acl=/api/1/1/4/1/9/0/4190e7b3593fe2674b48d06955a46fb1.mp3*~data=user_id=0,application_id=42~hmac=8ac3065f85946380ee26aa68b1de89cbcf6b23c5dafaae1075f04c0ede401157",
+      "duration": 267,
+      "rank": 947282,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "OK Computer",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/05a186e0a859a36f9cd51cdae2158fe1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879699/image"
+      }
+     },
+     {
+      "id": 138546809,
+      "title": "Weird Fishes / Arpeggi",
+      "title_short": "Weird Fishes / Arpeggi",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/5/a/f/0/5afea1001a936755ae5404c829e1954a.mp3?hdnea=exp=1792116932~acl=/api/1/1/5/a/f/0/5afea1001a936755ae5404c829e1954a.mp3*~data=user_id=0,application_id=42~hmac=2bbf3c47e980906d12e53a2f15d2724c389c1238abecb6f46a04694bcd15990d",
+      "duration": 318,
+      "rank": 843144,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "In Rainbows",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a175af9b7d329bc678cb4d26fc13d6de/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880659/image"
+      }
+     },
+     {
+      "id": 138539973,
+      "title": "Paranoid Android",
+      "title_short": "Paranoid Android",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/e/9/0/0/e906ec366652d0fe7af06d993e959f78.mp3?hdnea=exp=1792116932~acl=/api/1/1/e/9/0/0/e906ec366652d0fe7af06d993e959f78.mp3*~data=user_id=0,application_id=42~hmac=0fca4c3091cf816f59d343b86dc58c2169a9ef5376d2f7170d108786fb76c347",
+      "duration": 387,
+      "rank": 779294,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "OK Computer",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/05a186e0a859a36f9cd51cdae2158fe1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879699/image"
+      }
+     },
+     {
+      "id": 138544263,
+      "title": "Fake Plastic Trees",
+      "title_short": "Fake Plastic Trees",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/2/8/0/c28188edc33af22cb175b30847a4e2c1.mp3?hdnea=exp=1792116932~acl=/api/1/1/c/2/8/0/c28188edc33af22cb175b30847a4e2c1.mp3*~data=user_id=0,application_id=42~hmac=ecd602c9d5aef294f8da356a3cc07e29a38000fd487e9ed1ef98e1c6f974a975",
+      "duration": 290,
+      "rank": 822142,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "The Bends",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/0d2ccaf5f7b35af57f3d9c8f4504a6e6/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880317/image"
+      }
+     },
+     {
+      "id": 138544261,
+      "title": "High and Dry",
+      "title_short": "High and Dry",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/c/7/0/ac7ac397ec5e419d9349fdfaab2c2b94.mp3?hdnea=exp=1792116932~acl=/api/1/1/a/c/7/0/ac7ac397ec5e419d9349fdfaab2c2b94.mp3*~data=user_id=0,application_id=42~hmac=29d5c0556a7fd2ee07d3cef30ff0b2bf9ba5e4e0e24af538845f98dc56ad2b20",
+      "duration": 257,
+      "rank": 776015,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "The Bends",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/0d2ccaf5f7b35af57f3d9c8f4504a6e6/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880317/image"
+      }
+     },
+     {
+      "id": 138546807,
+      "title": "Nude",
+      "title_short": "Nude",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/4/1/0/c419f9ff68961d871ebd386c58ff3722.mp3?hdnea=exp=1792116932~acl=/api/1/1/c/4/1/0/c419f9ff68961d871ebd386c58ff3722.mp3*~data=user_id=0,application_id=42~hmac=bfdaa19d5cb34aa2fb4da190c25b449c23a7d0f77e3e9a0dbc83fb66d3fa4029",
+      "duration": 255,
+      "rank": 770039,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "In Rainbows",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a175af9b7d329bc678cb4d26fc13d6de/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880659/image"
+      }
+     },
+     {
+      "id": 138546803,
+      "title": "15 Step",
+      "title_short": "15 Step",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/5/3/f/0/53faff1741bb65b8ddbc11780555c546.mp3?hdnea=exp=1792116932~acl=/api/1/1/5/3/f/0/53faff1741bb65b8ddbc11780555c546.mp3*~data=user_id=0,application_id=42~hmac=f60725440af2a6324b7b95a619da428e94c38c6b63e2d23a1cdd8c7a059b2e22",
+      "duration": 237,
+      "rank": 695701,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "In Rainbows",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a175af9b7d329bc678cb4d26fc13d6de/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880659/image"
+      }
+     },
+     {
+      "id": 138539975,
+      "title": "Subterranean Homesick Alien",
+      "title_short": "Subterranean Homesick Alien",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/0/e/9/0/0e9ed75adeb0794ce2c32ef29dd3a096.mp3?hdnea=exp=1792116932~acl=/api/1/1/0/e/9/0/0e9ed75adeb0794ce2c32ef29dd3a096.mp3*~data=user_id=0,application_id=42~hmac=54ce7e8ed34391a178b87811717ac3338a7cca6e896237814aefb5fcf981e78e",
+      "duration": 267,
+      "rank": 609398,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "OK Computer",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/05a186e0a859a36f9cd51cdae2158fe1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879699/image"
+      }
+     },
+     {
+      "id": 138546805,
+      "title": "Bodysnatchers",
+      "title_short": "Bodysnatchers",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/3/2/b/0/32bec09ab9b9dae33557e9df089053a1.mp3?hdnea=exp=1792116932~acl=/api/1/1/3/2/b/0/32bec09ab9b9dae33557e9df089053a1.mp3*~data=user_id=0,application_id=42~hmac=d430b46c5983645227cd3f12673b45de939eb265154b0937814fa2724bdc193c",
+      "duration": 242,
+      "rank": 664315,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "In Rainbows",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a175af9b7d329bc678cb4d26fc13d6de/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880659/image"
+      }
+     },
+     {
+      "id": 138544269,
+      "title": "Just",
+      "title_short": "Just",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/5/5/0/a555744063fa81c3d01ae80229d71edb.mp3?hdnea=exp=1792116932~acl=/api/1/1/a/5/5/0/a555744063fa81c3d01ae80229d71edb.mp3*~data=user_id=0,application_id=42~hmac=b44f03193009cc544c14821e4ee63eddfdb6af9f8b3421a7f6427184fb97371c",
+      "duration": 234,
+      "rank": 685243,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "The Bends",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/0d2ccaf5f7b35af57f3d9c8f4504a6e6/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880317/image"
+      }
+     },
+     {
+      "id": 138546815,
+      "title": "Reckoner",
+      "title_short": "Reckoner",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/5/7/7/0/5779653d7f741f3c76001b21148c37f8.mp3?hdnea=exp=1792116932~acl=/api/1/1/5/7/7/0/5779653d7f741f3c76001b21148c37f8.mp3*~data=user_id=0,application_id=42~hmac=59ae87e28c1bacaba5c152af5c035d55457c23ec42f2205683c3b7314691e2f8",
+      "duration": 290,
+      "rank": 752093,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "In Rainbows",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a175af9b7d329bc678cb4d26fc13d6de/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880659/image"
+      }
+     },
+     {
+      "id": 138546817,
+      "title": "House Of Cards",
+      "title_short": "House Of Cards",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/3/2/8/0/3282e9ef0848e4c2c64c929587acfa48.mp3?hdnea=exp=1792116932~acl=/api/1/1/3/2/8/0/3282e9ef0848e4c2c64c929587acfa48.mp3*~data=user_id=0,application_id=42~hmac=f5149f6a3e713815175b02858dc26c705a2b9f6f3d164c5d445d4acb9c0a8922",
+      "duration": 328,
+      "rank": 643012,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "In Rainbows",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a175af9b7d329bc678cb4d26fc13d6de/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880659/image"
+      }
+     },
+     {
+      "id": 138544275,
+      "title": "Black Star",
+      "title_short": "Black Star",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/3/b/3/0/3b3aa489d13e416480d58b4f4840da3b.mp3?hdnea=exp=1792116932~acl=/api/1/1/3/b/3/0/3b3aa489d13e416480d58b4f4840da3b.mp3*~data=user_id=0,application_id=42~hmac=068b63df501386d09cd3c26e04236af075d49dbd8b744440b8e86b3e524b9332",
+      "duration": 247,
+      "rank": 625138,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "The Bends",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/0d2ccaf5f7b35af57f3d9c8f4504a6e6/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880317/image"
+      }
+     },
+     {
+      "id": 138540291,
+      "title": "There, There",
+      "title_short": "There, There",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/a/5/0/ba53fb74b4a2d5a215d5273c8663038b.mp3?hdnea=exp=1792116932~acl=/api/1/1/b/a/5/0/ba53fb74b4a2d5a215d5273c8663038b.mp3*~data=user_id=0,application_id=42~hmac=7cc56af94ca50491f88a980b0dd76e088af9e48308912782106550b4a9a18374",
+      "duration": 323,
+      "rank": 649066,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Hail To the Thief",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/d3d9e1f53d60c5d2c764b20870aab69e/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879739/image"
+      }
+     },
+     {
+      "id": 138540337,
+      "title": "Pyramid Song",
+      "title_short": "Pyramid Song",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/3/3/0/c33f521db354b2d3b7425050f73e42e1.mp3?hdnea=exp=1792116932~acl=/api/1/1/c/3/3/0/c33f521db354b2d3b7425050f73e42e1.mp3*~data=user_id=0,application_id=42~hmac=41051b9d099770f4bd852edf63ae78794901424c1bada4c3f35db35923424eeb",
+      "duration": 288,
+      "rank": 687398,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Amnesiac",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/d611b9ef9d7ce87a74c697d74be5ae15/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879749/image"
+      }
+     },
+     {
+      "id": 2215315187,
+      "title": "Creep (Acoustic)",
+      "title_short": "Creep",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/2/a/c/0/2acc0e1b2f4e4d71efc507e409f52ad8.mp3?hdnea=exp=1792116932~acl=/api/1/1/2/a/c/0/2acc0e1b2f4e4d71efc507e409f52ad8.mp3*~data=user_id=0,application_id=42~hmac=9df4fa48ea0942cead99a9a777337dfa7c5171aa3870515a1c210f0be7d8cb84",
+      "duration": 258,
+      "rank": 835810,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Creep EP",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/d06ea246e25c65b3004627ff75e87eb8/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/423524437/image"
+      }
+     },
+     {
+      "id": 138539993,
+      "title": "The Tourist",
+      "title_short": "The Tourist",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/f/6/e/0/f6e0d3a706058af667f53d230d6b9c97.mp3?hdnea=exp=1792116932~acl=/api/1/1/f/6/e/0/f6e0d3a706058af667f53d230d6b9c97.mp3*~data=user_id=0,application_id=42~hmac=9ff7f3b26206f00b870090b3ad708ffcc52707eebd8b962379b7dfdb2caeae0c",
+      "duration": 326,
+      "rank": 559740,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "OK Computer",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/05a186e0a859a36f9cd51cdae2158fe1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879699/image"
+      }
+     },
+     {
+      "id": 138540791,
+      "title": "Burn the Witch",
+      "title_short": "Burn the Witch",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/5/e/0/0/5e01c45bb81c62470baa54bbb779f1a8.mp3?hdnea=exp=1792116932~acl=/api/1/1/5/e/0/0/5e01c45bb81c62470baa54bbb779f1a8.mp3*~data=user_id=0,application_id=42~hmac=db5378525cc1e9924cfae32b8afdb221cb8ced1c52bf4012d10a2674e3364d77",
+      "duration": 220,
+      "rank": 596913,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "A Moon Shaped Pool",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/e9232e4391ed1206cc0bd6ab17822177/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879823/image"
+      }
+     },
+     {
+      "id": 138546821,
+      "title": "Videotape",
+      "title_short": "Videotape",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/f/4/9/0/f498987d69eae84f80772b7c32c4e603.mp3?hdnea=exp=1792116932~acl=/api/1/1/f/4/9/0/f498987d69eae84f80772b7c32c4e603.mp3*~data=user_id=0,application_id=42~hmac=1e052477fbe017817c342f932fc2b550038bcdebb93dc4e94af352674f1d3e4a",
+      "duration": 279,
+      "rank": 622569,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "In Rainbows",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a175af9b7d329bc678cb4d26fc13d6de/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880659/image"
+      }
+     },
+     {
+      "id": 138544279,
+      "title": "Street Spirit (Fade Out)",
+      "title_short": "Street Spirit (Fade Out)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/0/a/3/0/0a38ba04b6fed75bc1e660e1f34e2587.mp3?hdnea=exp=1792116932~acl=/api/1/1/0/a/3/0/0a38ba04b6fed75bc1e660e1f34e2587.mp3*~data=user_id=0,application_id=42~hmac=b180618cb2838a622334760ed9e075a8d2446ea71109b1cc597dea0c50c2aa2b",
+      "duration": 253,
+      "rank": 769683,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "The Bends",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/0d2ccaf5f7b35af57f3d9c8f4504a6e6/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880317/image"
+      }
+     },
+     {
+      "id": 138546813,
+      "title": "Faust Arp",
+      "title_short": "Faust Arp",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/4/d/0/14d03938c72bf09d15525b73b325381c.mp3?hdnea=exp=1792116932~acl=/api/1/1/1/4/d/0/14d03938c72bf09d15525b73b325381c.mp3*~data=user_id=0,application_id=42~hmac=7ba3c779a290f0d796663c3a091adbe32a33d0c2dd5bc72e306352296f248b13",
+      "duration": 129,
+      "rank": 599987,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "In Rainbows",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a175af9b7d329bc678cb4d26fc13d6de/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880659/image"
+      }
+     },
+     {
+      "id": 138544273,
+      "title": "Bullet Proof ... I Wish I Was",
+      "title_short": "Bullet Proof ... I Wish I Was",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/0/3/0/a032918c09ed6f709cb2878a7fbeffdc.mp3?hdnea=exp=1792116932~acl=/api/1/1/a/0/3/0/a032918c09ed6f709cb2878a7fbeffdc.mp3*~data=user_id=0,application_id=42~hmac=f92374e0a73c8f07febfe4fa7c8ab74793551b9976e7137fd93b787becf7d4be",
+      "duration": 208,
+      "rank": 581655,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "The Bends",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/0d2ccaf5f7b35af57f3d9c8f4504a6e6/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880317/image"
+      }
+     },
+     {
+      "id": 138539991,
+      "title": "Lucky",
+      "title_short": "Lucky",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/f/c/9/0/fc9b82fb77c1301d1669afb38dd7fe4d.mp3?hdnea=exp=1792116932~acl=/api/1/1/f/c/9/0/fc9b82fb77c1301d1669afb38dd7fe4d.mp3*~data=user_id=0,application_id=42~hmac=581ce73d4d8b43e1b06ba7236be6780d2f8db249533ea06e79a57ec2c4a06a92",
+      "duration": 258,
+      "rank": 615223,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "OK Computer",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/05a186e0a859a36f9cd51cdae2158fe1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879699/image"
+      }
+     },
+     {
+      "id": 138544271,
+      "title": "My Iron Lung",
+      "title_short": "My Iron Lung",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/5/4/c/0/54c22de7a3a1a3a42a537161354f6e19.mp3?hdnea=exp=1792116932~acl=/api/1/1/5/4/c/0/54c22de7a3a1a3a42a537161354f6e19.mp3*~data=user_id=0,application_id=42~hmac=ff16e7daf078da1899d0d02fbb7cfe1ab36f4a73be2d6895cc1a3ee61b409f8a",
+      "duration": 276,
+      "rank": 619501,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "The Bends",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/0d2ccaf5f7b35af57f3d9c8f4504a6e6/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880317/image"
+      }
+     },
+     {
+      "id": 138539971,
+      "title": "Airbag",
+      "title_short": "Airbag",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/0/3/e/0/03e8e4bba953f552380f0e8476e9394c.mp3?hdnea=exp=1792116932~acl=/api/1/1/0/3/e/0/03e8e4bba953f552380f0e8476e9394c.mp3*~data=user_id=0,application_id=42~hmac=b831a9e5232387439f53095421a905ffdfa29b6aac26b0411d1d4acbf9b18add",
+      "duration": 287,
+      "rank": 597984,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "OK Computer",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/05a186e0a859a36f9cd51cdae2158fe1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879699/image"
+      }
+     },
+     {
+      "id": 138546129,
+      "title": "Go Slowly",
+      "title_short": "Go Slowly",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/7/d/1/0/7d1d7bc3b6b74b0fe82f5dee2b06e7e4.mp3?hdnea=exp=1792116932~acl=/api/1/1/7/d/1/0/7d1d7bc3b6b74b0fe82f5dee2b06e7e4.mp3*~data=user_id=0,application_id=42~hmac=dc8404ba869323d557dc84c2f57ed9d7690d20b5457e99c79da6f6196374d9aa",
+      "duration": 228,
+      "rank": 632575,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "In Rainbows (Disk 2)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/353aed6e5bf61cd59943eecedc16b2f2/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880561/image"
+      }
+     },
+     {
+      "id": 138539987,
+      "title": "Climbing Up the Walls",
+      "title_short": "Climbing Up the Walls",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/8/1/6/0/8163f604a588bcc202370a2b1c6339c2.mp3?hdnea=exp=1792116932~acl=/api/1/1/8/1/6/0/8163f604a588bcc202370a2b1c6339c2.mp3*~data=user_id=0,application_id=42~hmac=35255f34018aed11bb9cb0db4a56f799e8ed42364b1f6c512ef56b8b6400129d",
+      "duration": 285,
+      "rank": 611025,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "OK Computer",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/05a186e0a859a36f9cd51cdae2158fe1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879699/image"
+      }
+     },
+     {
+      "id": 138547413,
+      "title": "You",
+      "title_short": "You",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/4/c/0/a4cae1355eb6a94f7d8abb74c2298828.mp3?hdnea=exp=1792116932~acl=/api/1/1/a/4/c/0/a4cae1355eb6a94f7d8abb74c2298828.mp3*~data=user_id=0,application_id=42~hmac=7fa66847d872186a734058aadb3409fb4311e6695cbbe67b48f8889c105c6a98",
+      "duration": 208,
+      "rank": 533617,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Pablo Honey",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/1dd56fd8824492e1a5106c99a00a85ec/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880711/image"
+      }
+     },
+     {
+      "id": 138540793,
+      "title": "Daydreaming",
+      "title_short": "Daydreaming",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/7/5/d/0/75d41035ef25f59e5c7bedd19eae5050.mp3?hdnea=exp=1792116932~acl=/api/1/1/7/5/d/0/75d41035ef25f59e5c7bedd19eae5050.mp3*~data=user_id=0,application_id=42~hmac=298eca801422b6f8a18ba37694f59c824d8146609567027c96f413376d8c42f0",
+      "duration": 384,
+      "rank": 671725,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "A Moon Shaped Pool",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/e9232e4391ed1206cc0bd6ab17822177/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879823/image"
+      }
+     },
+     {
+      "id": 138544255,
+      "title": "Separator",
+      "title_short": "Separator",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/6/3/8/0/638bd8e979436a90c61a19e8d422680e.mp3?hdnea=exp=1792116932~acl=/api/1/1/6/3/8/0/638bd8e979436a90c61a19e8d422680e.mp3*~data=user_id=0,application_id=42~hmac=1c83c8e75a456b942f989854dba9f4f0cb8a44292d29c971ff80af0c600b4035",
+      "duration": 319,
+      "rank": 454534,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "The King Of Limbs",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a8ce38894d6a4a08e8559bb3b8c22fc3/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880315/image"
+      }
+     },
+     {
+      "id": 138540285,
+      "title": "Where I End and You Begin",
+      "title_short": "Where I End and You Begin",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/f/3/0/bf3b54c3e351555599b31a94ca3fcf6b.mp3?hdnea=exp=1792116932~acl=/api/1/1/b/f/3/0/bf3b54c3e351555599b31a94ca3fcf6b.mp3*~data=user_id=0,application_id=42~hmac=22d4ecef7a19211d7306d3624cb31c7a2312bc8f2ddc8d07682f48be63063b79",
+      "duration": 269,
+      "rank": 519373,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Hail To the Thief",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/d3d9e1f53d60c5d2c764b20870aab69e/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879739/image"
+      }
+     },
+     {
+      "id": 138544249,
+      "title": "Lotus Flower",
+      "title_short": "Lotus Flower",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/1/e/0/c1e5ad0971c4b7c8d02e1a157c0bb89f.mp3?hdnea=exp=1792116932~acl=/api/1/1/c/1/e/0/c1e5ad0971c4b7c8d02e1a157c0bb89f.mp3*~data=user_id=0,application_id=42~hmac=e7a258ab33ccf4e4f5e38a17b79d47a42c96ca5a9378301995fca4d2dc6ea6f5",
+      "duration": 300,
+      "rank": 546752,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "The King Of Limbs",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a8ce38894d6a4a08e8559bb3b8c22fc3/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880315/image"
+      }
+     },
+     {
+      "id": 138540811,
+      "title": "True Love Waits",
+      "title_short": "True Love Waits",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/9/4/8/0/948c5ac2a9a1948a05fcf3a6e3e57148.mp3?hdnea=exp=1792116932~acl=/api/1/1/9/4/8/0/948c5ac2a9a1948a05fcf3a6e3e57148.mp3*~data=user_id=0,application_id=42~hmac=a2d1ca2ba563061c018707b49d40151da403ba3ad77e71b548051af064096feb",
+      "duration": 283,
+      "rank": 588521,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "A Moon Shaped Pool",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/e9232e4391ed1206cc0bd6ab17822177/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879823/image"
+      }
+     },
+     {
+      "id": 138544253,
+      "title": "Give Up The Ghost",
+      "title_short": "Give Up The Ghost",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/4/b/0/44bea5b66816f624aac88619a351a89e.mp3?hdnea=exp=1792116932~acl=/api/1/1/4/4/b/0/44bea5b66816f624aac88619a351a89e.mp3*~data=user_id=0,application_id=42~hmac=5ee4ff9b66c470445aa8576f8697e44b086c9281fad8f48eb170ceacfbd84523",
+      "duration": 290,
+      "rank": 436563,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "The King Of Limbs",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a8ce38894d6a4a08e8559bb3b8c22fc3/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880315/image"
+      }
+     },
+     {
+      "id": 138540343,
+      "title": "I Might Be Wrong",
+      "title_short": "I Might Be Wrong",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/3/8/0/a38343db885ea790d22f27992537ac19.mp3?hdnea=exp=1792116932~acl=/api/1/1/a/3/8/0/a38343db885ea790d22f27992537ac19.mp3*~data=user_id=0,application_id=42~hmac=ba1c02fbdc3f082e6995366436eb7b0de7e056127bacd50f5edc6f755b213a7b",
+      "duration": 293,
+      "rank": 641823,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Amnesiac",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/d611b9ef9d7ce87a74c697d74be5ae15/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879749/image"
+      }
+     },
+     {
+      "id": 138539985,
+      "title": "Electioneering",
+      "title_short": "Electioneering",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/7/7/0/47730331b132d1841622d090723886a0.mp3?hdnea=exp=1792116932~acl=/api/1/1/4/7/7/0/47730331b132d1841622d090723886a0.mp3*~data=user_id=0,application_id=42~hmac=1129ab5764f53574d0a76a3c6d0ce8b49dfdbcda969b1f601e3fde36d35ff99d",
+      "duration": 230,
+      "rank": 576369,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "OK Computer",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/05a186e0a859a36f9cd51cdae2158fe1/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879699/image"
+      }
+     },
+     {
+      "id": 138544259,
+      "title": "The Bends",
+      "title_short": "The Bends",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/1/4/0/41456eab6705cc97225ffc2d245ee16c.mp3?hdnea=exp=1792116932~acl=/api/1/1/4/1/4/0/41456eab6705cc97225ffc2d245ee16c.mp3*~data=user_id=0,application_id=42~hmac=7e17f321b378cff62ccf7ad08ceaf8f5716abfdfd4d6bf4e4500f44a938fc48f",
+      "duration": 246,
+      "rank": 584051,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "The Bends",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/0d2ccaf5f7b35af57f3d9c8f4504a6e6/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880317/image"
+      }
+     },
+     {
+      "id": 138547601,
+      "title": "Idioteque",
+      "title_short": "Idioteque",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/3/b/0/0/3b06fc2d390b464ef632fe51bf65d905.mp3?hdnea=exp=1792116932~acl=/api/1/1/3/b/0/0/3b06fc2d390b464ef632fe51bf65d905.mp3*~data=user_id=0,application_id=42~hmac=9afff1964e4a2ba06e993551ef53abcec3be83a4d485c4a05c76a7cd4d548f78",
+      "duration": 309,
+      "rank": 644837,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Kid A",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/e5925065cdb1cefbc3bd75af4a1f1801/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880741/image"
+      }
+     },
+     {
+      "id": 138540345,
+      "title": "Knives Out",
+      "title_short": "Knives Out",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/e/f/6/0/ef6bef3376a5c9a48ff0f2b64dfc6f8b.mp3?hdnea=exp=1792116932~acl=/api/1/1/e/f/6/0/ef6bef3376a5c9a48ff0f2b64dfc6f8b.mp3*~data=user_id=0,application_id=42~hmac=7bc6e8836442bceca310f18161d9b095cb1577c1afc95796a03bb5cdd3666405",
+      "duration": 254,
+      "rank": 565270,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Amnesiac",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/d611b9ef9d7ce87a74c697d74be5ae15/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879749/image"
+      }
+     },
+     {
+      "id": 138544251,
+      "title": "Codex",
+      "title_short": "Codex",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/2/6/7/0/267c03a2f653f3aaea7d5d2725834479.mp3?hdnea=exp=1792116932~acl=/api/1/1/2/6/7/0/267c03a2f653f3aaea7d5d2725834479.mp3*~data=user_id=0,application_id=42~hmac=c6cffb45138744ee3082dff0e7b5f952bb6c00ca707fa5f730a25a410a2a207b",
+      "duration": 287,
+      "rank": 503701,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "The King Of Limbs",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a8ce38894d6a4a08e8559bb3b8c22fc3/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880315/image"
+      }
+     },
+     {
+      "id": 138540697,
+      "title": "Talk Show Host",
+      "title_short": "Talk Show Host",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/1/c/0/a1c52780d1023ae874efca2e321009ed.mp3?hdnea=exp=1792116932~acl=/api/1/1/a/1/c/0/a1c52780d1023ae874efca2e321009ed.mp3*~data=user_id=0,application_id=42~hmac=48f5c2ab0f9c3ace42e67a985197d3ac580344f86a0f9fa714e011eebbdb926b",
+      "duration": 281,
+      "rank": 619081,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Street Spirit (Fade Out)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/0701900337b4864f6e5e9882051a47ce/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879807/image"
+      }
+     },
+     {
+      "id": 138540795,
+      "title": "Decks Dark",
+      "title_short": "Decks Dark",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/0/9/9/0/0991edec60d87db3de63dd34502dba94.mp3?hdnea=exp=1792116932~acl=/api/1/1/0/9/9/0/0991edec60d87db3de63dd34502dba94.mp3*~data=user_id=0,application_id=42~hmac=fa47c022badb7857c1bfdf5512c7b78721ae1bd4feed26dab92d2f5147f9d773",
+      "duration": 281,
+      "rank": 679575,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "A Moon Shaped Pool",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/e9232e4391ed1206cc0bd6ab17822177/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14879823/image"
+      }
+     },
+     {
+      "id": 138547591,
+      "title": "The National Anthem",
+      "title_short": "The National Anthem",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/8/7/0/a8741176d64bfabad447cc69d1fb33a4.mp3?hdnea=exp=1792116932~acl=/api/1/1/a/8/7/0/a8741176d64bfabad447cc69d1fb33a4.mp3*~data=user_id=0,application_id=42~hmac=0150f4baa865bbbee817f340954f0c1ec4ed51fbdb8e634995ea256652d13e6b",
+      "duration": 351,
+      "rank": 568168,
+      "artist": {
+       "id": 399,
+       "name": "Radiohead"
+      },
+      "album": {
+       "title": "Kid A",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/e5925065cdb1cefbc3bd75af4a1f1801/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/14880741/image"
+      }
+     }
+    ],
+    "total": 100
+   }
+  },
+  {
+   "path": "/track/138547415",
+   "params": null,
+   "reply": {
+    "id": 138547415,
+    "title": "Creep",
+    "title_short": "Creep",
+    "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/9/c/0/b9c4cde36fbe176cc3e84dc08fc0611b.mp3?hdnea=exp=1792116933~acl=/api/1/1/b/9/c/0/b9c4cde36fbe176cc3e84dc08fc0611b.mp3*~data=user_id=0,application_id=42~hmac=f2ed0b8ab250824a93dfcdf2859fecfa709c99aa60e290d64f4470d89e7a09af",
+    "duration": 238,
+    "rank": 978547,
+    "artist": {
+     "id": 399,
+     "name": "Radiohead"
+    },
+    "album": {
+     "title": "Pablo Honey",
+     "cover_medium": "https://cdn-images.dzcdn.net/images/cover/1dd56fd8824492e1a5106c99a00a85ec/250x250-000000-80-0-0.jpg",
+     "cover": "https://api.deezer.com/album/14880711/image"
+    }
+   }
+  },
+  {
+   "path": "/track/2215315187",
+   "params": null,
+   "reply": {
+    "id": 2215315187,
+    "title": "Creep (Acoustic)",
+    "title_short": "Creep",
+    "preview": "https://cdnt-preview.dzcdn.net/api/1/1/2/a/c/0/2acc0e1b2f4e4d71efc507e409f52ad8.mp3?hdnea=exp=1792117388~acl=/api/1/1/2/a/c/0/2acc0e1b2f4e4d71efc507e409f52ad8.mp3*~data=user_id=0,application_id=42~hmac=f3627a142bfd5b19e95f0d4c4cea7d240261eac9d26dbd57d581c0964c16bf33",
+    "duration": 258,
+    "rank": 835810,
+    "artist": {
+     "id": 399,
+     "name": "Radiohead"
+    },
+    "album": {
+     "title": "Creep EP",
+     "cover_medium": "https://cdn-images.dzcdn.net/images/cover/d06ea246e25c65b3004627ff75e87eb8/250x250-000000-80-0-0.jpg",
+     "cover": "https://api.deezer.com/album/423524437/image"
+    }
+   }
+  }
+ ]
+}

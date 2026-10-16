@@ -1,0 +1,1232 @@
+{
+ "recorded": "2026-10-15",
+ "note": "Real Deezer API replies, trimmed to the fields Kima reads.",
+ "replies": [
+  {
+   "path": "/search/track",
+   "params": {
+    "q": "Adele Hello",
+    "limit": 10
+   },
+   "reply": {
+    "data": [
+     {
+      "id": 117935730,
+      "title": "Hello (Reggae Cover)",
+      "title_short": "Hello (Reggae Cover)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/5/f/0/b5f187ae7bdbf9b3fbad38dbaf6547c2.mp3?hdnea=exp=1792115895~acl=/api/1/1/b/5/f/0/b5f187ae7bdbf9b3fbad38dbaf6547c2.mp3*~data=user_id=0,application_id=42~hmac=37a90f41eeecf9d71378e7ddf9a447f047d1aeb187109399feefc5f389ee4750",
+      "duration": 238,
+      "rank": 472915,
+      "artist": {
+       "id": 253980,
+       "name": "Conkarah"
+      },
+      "album": {
+       "title": "Hello (Reggae Cover)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/8a0ffa48010ef96caf6d7ef3c984ddff/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/12248276/image"
+      }
+     },
+     {
+      "id": 786244052,
+      "title": "Hello (Adele Remix)",
+      "title_short": "Hello (Adele Remix)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/e/3/d/0/e3da2187450a242884cb51f112d25952.mp3?hdnea=exp=1792115895~acl=/api/1/1/e/3/d/0/e3da2187450a242884cb51f112d25952.mp3*~data=user_id=0,application_id=42~hmac=038cc7acbd5441645002fc1495b2427cad539271243722853ee45bac11c9666f",
+      "duration": 145,
+      "rank": 209589,
+      "artist": {
+       "id": 10365806,
+       "name": "FJ OUTLAW"
+      },
+      "album": {
+       "title": "Lyrical Narcan (The Mixtape)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/f850409a73e1a97302326a36bf065b02/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/116426542/image"
+      }
+     },
+     {
+      "id": 376730901,
+      "title": "Someone Like You",
+      "title_short": "Someone Like You",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/d/d/b/0/ddb3ed3236ebbb0d6b533cc967d59e11.mp3?hdnea=exp=1792115895~acl=/api/1/1/d/d/b/0/ddb3ed3236ebbb0d6b533cc967d59e11.mp3*~data=user_id=0,application_id=42~hmac=e501b4e654949063b9d92f245ef1bddb2979453881b7fdd003223eb732ff2327",
+      "duration": 286,
+      "rank": 144407,
+      "artist": {
+       "id": 12258842,
+       "name": "Hello I'm Adele"
+      },
+      "album": {
+       "title": "Someone Like You",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/35becca9e8a8ea0267ff467f7832d214/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/43639051/image"
+      }
+     },
+     {
+      "id": 130822908,
+      "title": "Say Hello to Adele",
+      "title_short": "Say Hello to Adele",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/e/4/0/ae440b58441e99097ed3317dd2b9fae7.mp3?hdnea=exp=1792115895~acl=/api/1/1/a/e/4/0/ae440b58441e99097ed3317dd2b9fae7.mp3*~data=user_id=0,application_id=42~hmac=e19e37dae3ea6ddf101b3660d9a2f52ebc4cf82e272e1236575c519a73643c52",
+      "duration": 236,
+      "rank": 151456,
+      "artist": {
+       "id": 5942214,
+       "name": "Joyner Lucas"
+      },
+      "album": {
+       "title": "Say Hello to Adele",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/1f7dc83d6a152fe4251fb0e74a2bd45b/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/13885862/image"
+      }
+     },
+     {
+      "id": 125011740,
+      "title": "Hello (Adele Extended Fitness Version Dance Remix)",
+      "title_short": "Hello (Adele Extended Fitness Version Dance Remix)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/f/b/0/cfba4fcd548386c2883b66bbdeb4ec43.mp3?hdnea=exp=1792115895~acl=/api/1/1/c/f/b/0/cfba4fcd548386c2883b66bbdeb4ec43.mp3*~data=user_id=0,application_id=42~hmac=c0750be99a9715ae5b9d71098b40278f87c1bfaf0c324850008bf0d64e2eb9fc",
+      "duration": 305,
+      "rank": 164623,
+      "artist": {
+       "id": 10386868,
+       "name": "Dance Guru vol 1"
+      },
+      "album": {
+       "title": "Best Of The Best Remixes",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/ee62ebb336ccfb3f0bee29d10e7757b0/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/13140884/image"
+      }
+     },
+     {
+      "id": 120726068,
+      "title": "Adele Medley (Someone Like You / Hello / Set Fire to the Rain / Rolling in the Deep)",
+      "title_short": "Adele Medley (Someone Like You / Hello / Set Fire to the Rain / Rolling in the Deep)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/7/f/f/0/7ff8c717722356f77c5d58bf79adf8b6.mp3?hdnea=exp=1792115895~acl=/api/1/1/7/f/f/0/7ff8c717722356f77c5d58bf79adf8b6.mp3*~data=user_id=0,application_id=42~hmac=344a65aac4d439267c917da6ca7535fc5d1ae1662a439cf8ca56016d354afb60",
+      "duration": 253,
+      "rank": 76490,
+      "artist": {
+       "id": 1133264,
+       "name": "KO"
+      },
+      "album": {
+       "title": "Adele Medley (Someone Like You / Hello / Set Fire to the Rain / Rolling in the Deep)",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/04828eaac6790278ad9be601dc004246/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/12598234/image"
+      }
+     },
+     {
+      "id": 346975901,
+      "title": "Rolling In The Deep",
+      "title_short": "Rolling In The Deep",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/2/3/0/b23d2c7aeb558832f807ac0a1e5d6283.mp3?hdnea=exp=1792115895~acl=/api/1/1/b/2/3/0/b23d2c7aeb558832f807ac0a1e5d6283.mp3*~data=user_id=0,application_id=42~hmac=e01829af62cbe325e371af2b0db8093ffe570b29f5fb8253ae874f281ff9985a",
+      "duration": 228,
+      "rank": 129635,
+      "artist": {
+       "id": 12258842,
+       "name": "Hello I'm Adele"
+      },
+      "album": {
+       "title": "Rolling In The Deep",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/66a4bf0751de50d0e76640eaf55570d7/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/39507061/image"
+      }
+     },
+     {
+      "id": 119148304,
+      "title": "Hello (Originally Performed by Adele) [Piano Version]",
+      "title_short": "Hello (Originally Performed by Adele) [Piano Version]",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/0/e/4/0/0e41819774efef67e50bb558183a29b2.mp3?hdnea=exp=1792115895~acl=/api/1/1/0/e/4/0/0e41819774efef67e50bb558183a29b2.mp3*~data=user_id=0,application_id=42~hmac=54614ea492c029a62d60185f1209dd6f2a0560afb3ec3d0c7a5955f3ddf2d6f9",
+      "duration": 253,
+      "rank": 105179,
+      "artist": {
+       "id": 9732498,
+       "name": "Piano Learning Tracks"
+      },
+      "album": {
+       "title": "Hello (Originally Performed by Adele) [Piano Version]",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/4745c68bfaa88984b2533c94dfe3cfac/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/12403626/image"
+      }
+     },
+     {
+      "id": 128446811,
+      "title": "Hello (Remix to Adele)",
+      "title_short": "Hello",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/d/3/8/0/d38ac89fca75e657f1cc2e6c1d39bf49.mp3?hdnea=exp=1792115895~acl=/api/1/1/d/3/8/0/d38ac89fca75e657f1cc2e6c1d39bf49.mp3*~data=user_id=0,application_id=42~hmac=7a6fac2a3d031f8a12026cf979bf28f4e1bb1713e53ae496e36f758e4b465a79",
+      "duration": 253,
+      "rank": 71047,
+      "artist": {
+       "id": 5468135,
+       "name": "Cvdb"
+      },
+      "album": {
+       "title": "On the Dancefloor",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/6f97ed3304cb1eed87d5fb04a583472e/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/13567435/image"
+      }
+     },
+     {
+      "id": 116241950,
+      "title": "Hello (Originally Performed by Adele) [Karaoke Instrumental] (Karaoke Instrumental)",
+      "title_short": "Hello (Originally Performed by Adele) [Karaoke Instrumental] (Karaoke Instrumental)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/6/d/1/0/6d172f36b33af7766a1a5ce8a1573e44.mp3?hdnea=exp=1792115895~acl=/api/1/1/6/d/1/0/6d172f36b33af7766a1a5ce8a1573e44.mp3*~data=user_id=0,application_id=42~hmac=710d3ef6d61535d0aa4d2f0de68de68877b837cc39d78c8ca8519aefa4719fdd",
+      "duration": 300,
+      "rank": 85893,
+      "artist": {
+       "id": 9587260,
+       "name": "Delayed Karma"
+      },
+      "album": {
+       "title": "25 Karaoke Tribute to Adele",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/9a0b5857a69ae450b99151627f147ccf/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/12039262/image"
+      }
+     }
+    ],
+    "total": 298
+   }
+  },
+  {
+   "path": "/search/artist",
+   "params": {
+    "q": "Adele",
+    "limit": 25
+   },
+   "reply": {
+    "data": [
+     {
+      "id": 61817012,
+      "name": "Adele",
+      "nb_fan": 335,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/5e22b1d2569cf1ea763b09ff3c978a50/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 75798,
+      "name": "Adele",
+      "nb_fan": 15495107,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/e5fc443d2abc03b487234ba4de65a001/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 76152522,
+      "name": "Adele & Andy",
+      "nb_fan": 304,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/8f0bbf6b248516374309ef29a8f072cc/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 69171232,
+      "name": "Adèle & Robin",
+      "nb_fan": 3731,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/60cf720ba6f2a96820d8b69bcea61f36/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 5673798,
+      "name": "Adele",
+      "nb_fan": 12436,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/ed5666c7c1a7115190d5115d04084f80/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 5203567,
+      "name": "Adèle & Zalem",
+      "nb_fan": 1834,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/67a8bd3b465446fc8098631c85d3c8a2/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 76792372,
+      "name": "Adele & The Chandeliers",
+      "nb_fan": 676,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/36375832e640b98193b6df6519f7e13f/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 4027733,
+      "name": "A. Dele",
+      "nb_fan": 17,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/8264a61a19173ddb973a92de6ec158c1/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 2710031,
+      "name": "Adele & Glenn",
+      "nb_fan": 148,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/59e07cfd1be3d4c1a384c31a3250a454/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 7016369,
+      "name": "Adele",
+      "nb_fan": 639,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/ebe5c9b1c2251562765baa1330bc0a18/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 55936502,
+      "name": "Adèle Castillon",
+      "nb_fan": 89500,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/74c39750c11bd54df230b4dc12b31586/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 51991422,
+      "name": "Mortelle Adèle",
+      "nb_fan": 64079,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/cebad0f1bc6a0e0b2c353ff6d62731fe/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 306607671,
+      "name": "ADÉLA",
+      "nb_fan": 23873,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/4101eb12e685a7ea1979071c71011ced/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 47247052,
+      "name": "Adele Parks",
+      "nb_fan": 73,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/f4623fc0f391606506040dd442801bcf/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 11705915,
+      "name": "Adèle Charvet",
+      "nb_fan": 498,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/9d99377ac193fc8dabd6c038a724a71a/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 7177852,
+      "name": "Robyn Adele Anderson",
+      "nb_fan": 12980,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/911e1236e5a24a0810c93834a8ee1cb3/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 1485893,
+      "name": "Adele Anthony",
+      "nb_fan": 287,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/b6d09044e4697bced489c500e04f5ce0/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 171474667,
+      "name": "Adèle Viret",
+      "nb_fan": 121,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/79e1efd9d236b82c4c7e016ff971a311/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 180115117,
+      "name": "Adele-Hörbücher",
+      "nb_fan": 115,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/be103a027f03ce5e7b148306ca829488/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 171453,
+      "name": "Adele Harley",
+      "nb_fan": 639,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/e71559cc5da5e37c2f5bd8ef72c99b1a/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 221888035,
+      "name": "Adèle Luisa",
+      "nb_fan": 61,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/41a5a41d20e29985adb3c637e14316be/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 203438387,
+      "name": "Adele Geschichten",
+      "nb_fan": 41,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/a5ed2f47bcadb6eb16005f5deaa7440e/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 380004381,
+      "name": "Adèle Louise",
+      "nb_fan": 13,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/18ecddaa84cfab236ecec20d49805195/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 11150830,
+      "name": "Adele Roberts",
+      "nb_fan": 262,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/1d5f8881302c55d6ca29b16f5b1fb3a1/1000x1000-000000-80-0-0.jpg"
+     },
+     {
+      "id": 262783011,
+      "name": "Kayo Adele",
+      "nb_fan": 52,
+      "picture_xl": "https://cdn-images.dzcdn.net/images/artist/a34117652ddcffb4113823bc1eb33562/1000x1000-000000-80-0-0.jpg"
+     }
+    ],
+    "total": 102
+   }
+  },
+  {
+   "path": "/artist/75798/top",
+   "params": {
+    "limit": 50
+   },
+   "reply": {
+    "data": [
+     {
+      "id": 1174602992,
+      "title": "Rolling in the Deep",
+      "title_short": "Rolling in the Deep",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/d/8/7/0/d87d2d1789c1b4d96992d8079a29360b.mp3?hdnea=exp=1792115896~acl=/api/1/1/d/8/7/0/d87d2d1789c1b4d96992d8079a29360b.mp3*~data=user_id=0,application_id=42~hmac=763c23a5fc4ef042554b0a2f4b44e5073721ffbad326690e42bccf52f0138ce9",
+      "duration": 228,
+      "rank": 745639,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "21",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/dc1ce848d830ecc93521be5a78350364/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713382/image"
+      }
+     },
+     {
+      "id": 1174603032,
+      "title": "Set Fire to the Rain",
+      "title_short": "Set Fire to the Rain",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/8/9/d/0/89d33940ac8fd32e481a6f7ac7fa891a.mp3?hdnea=exp=1792115896~acl=/api/1/1/8/9/d/0/89d33940ac8fd32e481a6f7ac7fa891a.mp3*~data=user_id=0,application_id=42~hmac=dade670f1c162c3a018e689b220ee899fbbf7e0a08e18cb1793ec399e04e6968",
+      "duration": 242,
+      "rank": 755366,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "21",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/dc1ce848d830ecc93521be5a78350364/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713382/image"
+      }
+     },
+     {
+      "id": 1174605122,
+      "title": "Love In The Dark",
+      "title_short": "Love In The Dark",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/6/0/9/0/6097afbe6d3e7f8c355afe46ea63071b.mp3?hdnea=exp=1792115896~acl=/api/1/1/6/0/9/0/6097afbe6d3e7f8c355afe46ea63071b.mp3*~data=user_id=0,application_id=42~hmac=c2f7b0341cce080c5f0a823dabe9d0721811a17211720a7bca600a611802bb37",
+      "duration": 285,
+      "rank": 650515,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "25",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/eaeadce7932a97533fe495881d2fcd7a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713912/image"
+      }
+     },
+     {
+      "id": 1174604652,
+      "title": "Hello",
+      "title_short": "Hello",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/9/9/f/0/99f3f9045f87708fcc0518dea2a60ac9.mp3?hdnea=exp=1792115896~acl=/api/1/1/9/9/f/0/99f3f9045f87708fcc0518dea2a60ac9.mp3*~data=user_id=0,application_id=42~hmac=61918e2bb495f6305dee4f473de817caf9f0713e33002c4f1b5c0db758ee9ada",
+      "duration": 295,
+      "rank": 698953,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "Hello",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/55a45989edf6f4ed46793986d5a0b190/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713772/image"
+      }
+     },
+     {
+      "id": 1522223672,
+      "title": "Easy On Me",
+      "title_short": "Easy On Me",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/d/0/0/bd0cab61ff8ce6402747fe852fc37815.mp3?hdnea=exp=1792115896~acl=/api/1/1/b/d/0/0/bd0cab61ff8ce6402747fe852fc37815.mp3*~data=user_id=0,application_id=42~hmac=2ceaa68f3875f2819c625b47be2959a8b6c6211ba95836f4c2577aacde6ba706",
+      "duration": 224,
+      "rank": 920837,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "Easy On Me",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/a87ee7c212c7b0f9ae687c378f260324/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/265655342/image"
+      }
+     },
+     {
+      "id": 82715364,
+      "title": "Skyfall",
+      "title_short": "Skyfall",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/e/2/6/0/e26bc2264f5f33f2587b0f5cc0b3b54e.mp3?hdnea=exp=1792115896~acl=/api/1/1/e/2/6/0/e26bc2264f5f33f2587b0f5cc0b3b54e.mp3*~data=user_id=0,application_id=42~hmac=65e594f2e2fb5e053e37d4a2ed0a380ac100ce3add5fa625159b4458b733ae93",
+      "duration": 286,
+      "rank": 954166,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "Skyfall",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/81e6d7baa7f47b804704922412e7a014/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/8307448/image"
+      }
+     },
+     {
+      "id": 1174603082,
+      "title": "Lovesong",
+      "title_short": "Lovesong",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/5/9/a/0/59a13a394852f873470c7c76c435b208.mp3?hdnea=exp=1792115896~acl=/api/1/1/5/9/a/0/59a13a394852f873470c7c76c435b208.mp3*~data=user_id=0,application_id=42~hmac=9e9de6d88ac6a00e135cacaaffb9ea4a843c2869b5dd1f117a407ecbc34b404a",
+      "duration": 316,
+      "rank": 555607,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "21",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/dc1ce848d830ecc93521be5a78350364/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713382/image"
+      }
+     },
+     {
+      "id": 1174603002,
+      "title": "Rumour Has It",
+      "title_short": "Rumour Has It",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/4/d/0/b4d2f187fac83bf248cdbab59d87e2a7.mp3?hdnea=exp=1792115896~acl=/api/1/1/b/4/d/0/b4d2f187fac83bf248cdbab59d87e2a7.mp3*~data=user_id=0,application_id=42~hmac=9bd08d9d8096d780f3d47c2e26c18f74d955520982b5a95c270be8da54061411",
+      "duration": 223,
+      "rank": 519608,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "21",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/dc1ce848d830ecc93521be5a78350364/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713382/image"
+      }
+     },
+     {
+      "id": 1174605062,
+      "title": "Send My Love (To Your New Lover)",
+      "title_short": "Send My Love (To Your New Lover)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/d/e/f/0/defb1190ef88308afa927167cfa7d2f0.mp3?hdnea=exp=1792115896~acl=/api/1/1/d/e/f/0/defb1190ef88308afa927167cfa7d2f0.mp3*~data=user_id=0,application_id=42~hmac=63f70e569fd417ed9c5bb011dedc2d2a2ef56952a7e3167054535fed1b155bf9",
+      "duration": 223,
+      "rank": 650631,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "25",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/eaeadce7932a97533fe495881d2fcd7a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713912/image"
+      }
+     },
+     {
+      "id": 1557137132,
+      "title": "Oh My God",
+      "title_short": "Oh My God",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/1/c/0/41cdf97d4867be29af435b9474c6f008.mp3?hdnea=exp=1792115896~acl=/api/1/1/4/1/c/0/41cdf97d4867be29af435b9474c6f008.mp3*~data=user_id=0,application_id=42~hmac=fda4e8fb9507613fa44976eb9805d731784f6ec250cb1ddd7e273a4d2a8bba19",
+      "duration": 225,
+      "rank": 813212,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "30",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bfaa6999939ce7236b339f875a132f62/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/273425942/image"
+      }
+     },
+     {
+      "id": 1174605082,
+      "title": "When We Were Young",
+      "title_short": "When We Were Young",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/8/4/8/0/8483132ee5f5ffb4a80cb8efbac4dfe1.mp3?hdnea=exp=1792115896~acl=/api/1/1/8/4/8/0/8483132ee5f5ffb4a80cb8efbac4dfe1.mp3*~data=user_id=0,application_id=42~hmac=e104235077eeb363ae55758059185d82ddd3f460acfadc67c3c1c8c42c1f9ce1",
+      "duration": 290,
+      "rank": 637806,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "25",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/eaeadce7932a97533fe495881d2fcd7a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713912/image"
+      }
+     },
+     {
+      "id": 1174605152,
+      "title": "Sweetest Devotion",
+      "title_short": "Sweetest Devotion",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/e/a/4/0/ea476e5fe5fb377a1108027fd048b6ed.mp3?hdnea=exp=1792115896~acl=/api/1/1/e/a/4/0/ea476e5fe5fb377a1108027fd048b6ed.mp3*~data=user_id=0,application_id=42~hmac=e7c0cb12039962691dd085366c3a07015ae8965efb9f47cb59f2160b85bf3477",
+      "duration": 251,
+      "rank": 336888,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "25",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/eaeadce7932a97533fe495881d2fcd7a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713912/image"
+      }
+     },
+     {
+      "id": 512575552,
+      "title": "Chasing Pavements",
+      "title_short": "Chasing Pavements",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/9/d/7/0/9d7001604d8e62ef52b0050855cd9358.mp3?hdnea=exp=1792115896~acl=/api/1/1/9/d/7/0/9d7001604d8e62ef52b0050855cd9358.mp3*~data=user_id=0,application_id=42~hmac=17c43d1a432fe5b4f1c434a530ae57b72bc0309ae1b45a1d257df5ca421644af",
+      "duration": 210,
+      "rank": 537591,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "19",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c396bb2d73c016d7a1ffdaca77b5c255/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728092/image"
+      }
+     },
+     {
+      "id": 512575642,
+      "title": "Hometown Glory",
+      "title_short": "Hometown Glory",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/d/9/a/0/d9a4cabc77dbfbd54afce91138b23e3b.mp3?hdnea=exp=1792115896~acl=/api/1/1/d/9/a/0/d9a4cabc77dbfbd54afce91138b23e3b.mp3*~data=user_id=0,application_id=42~hmac=e75af032bcc65c25b57c92ef2d2db34d84b74d45695af6737adb0141be01a161",
+      "duration": 271,
+      "rank": 555484,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "19",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c396bb2d73c016d7a1ffdaca77b5c255/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728092/image"
+      }
+     },
+     {
+      "id": 1174605102,
+      "title": "Water Under the Bridge",
+      "title_short": "Water Under the Bridge",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/7/d/0/47d0a59aeaf8ec411ba996dfe2782e19.mp3?hdnea=exp=1792115896~acl=/api/1/1/4/7/d/0/47d0a59aeaf8ec411ba996dfe2782e19.mp3*~data=user_id=0,application_id=42~hmac=df8f866e6ce5d52b9715a55ac503c8fead9f922e2a9cc8a4bdcca47f44d88232",
+      "duration": 240,
+      "rank": 608557,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "25",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/eaeadce7932a97533fe495881d2fcd7a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713912/image"
+      }
+     },
+     {
+      "id": 1174605142,
+      "title": "All I Ask",
+      "title_short": "All I Ask",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/2/1/0/1215bb50890570154afc30bb708d780a.mp3?hdnea=exp=1792115896~acl=/api/1/1/1/2/1/0/1215bb50890570154afc30bb708d780a.mp3*~data=user_id=0,application_id=42~hmac=fd08b1d62dfc650c83a772974c1973e3a8300710c4389e61cc7bbaa942415123",
+      "duration": 271,
+      "rank": 521657,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "25",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/eaeadce7932a97533fe495881d2fcd7a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713912/image"
+      }
+     },
+     {
+      "id": 1557137152,
+      "title": "I Drink Wine",
+      "title_short": "I Drink Wine",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/e/f/5/0/ef545302ec65c9021dbce9164705c8bc.mp3?hdnea=exp=1792115896~acl=/api/1/1/e/f/5/0/ef545302ec65c9021dbce9164705c8bc.mp3*~data=user_id=0,application_id=42~hmac=9f8bc0811dc91806f8b3d93528bf425838c8f6ab6f64a5c5108802662645edc1",
+      "duration": 376,
+      "rank": 744260,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "30",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bfaa6999939ce7236b339f875a132f62/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/273425942/image"
+      }
+     },
+     {
+      "id": 1174603022,
+      "title": "Don't You Remember",
+      "title_short": "Don't You Remember",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/0/3/1/0/0314e8777c7d48cce3cfee97cb9b6a8b.mp3?hdnea=exp=1792115896~acl=/api/1/1/0/3/1/0/0314e8777c7d48cce3cfee97cb9b6a8b.mp3*~data=user_id=0,application_id=42~hmac=ebbe246f90e0f55857a2147898a088392a148d9e872a6945b97c4cc2a35a0e09",
+      "duration": 243,
+      "rank": 515404,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "21",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/dc1ce848d830ecc93521be5a78350364/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713382/image"
+      }
+     },
+     {
+      "id": 1174603012,
+      "title": "Turning Tables",
+      "title_short": "Turning Tables",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/8/4/0/0/8405eeaa5361b80e96c0c5892342e582.mp3?hdnea=exp=1792115896~acl=/api/1/1/8/4/0/0/8405eeaa5361b80e96c0c5892342e582.mp3*~data=user_id=0,application_id=42~hmac=4501a1bd84fd706452528d538aad1ae71e68a8bd1b41aedd4c437163588dbd3f",
+      "duration": 250,
+      "rank": 567920,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "21",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/dc1ce848d830ecc93521be5a78350364/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713382/image"
+      }
+     },
+     {
+      "id": 1174603042,
+      "title": "He Won't Go",
+      "title_short": "He Won't Go",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/0/b/7/0/0b7189926f572a025891120147fee4af.mp3?hdnea=exp=1792115896~acl=/api/1/1/0/b/7/0/0b7189926f572a025891120147fee4af.mp3*~data=user_id=0,application_id=42~hmac=f38a8fcce8e71255b258d6ef94dceaa4ed3019e3db152c7095aa60ca92c7da22",
+      "duration": 278,
+      "rank": 481300,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "21",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/dc1ce848d830ecc93521be5a78350364/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713382/image"
+      }
+     },
+     {
+      "id": 1174605132,
+      "title": "Million Years Ago",
+      "title_short": "Million Years Ago",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/8/8/b/0/88b49c4d421ea764daf5070b0804d794.mp3?hdnea=exp=1792115896~acl=/api/1/1/8/8/b/0/88b49c4d421ea764daf5070b0804d794.mp3*~data=user_id=0,application_id=42~hmac=bb5307f50f202f2a1edc093e2736ffbf6545f0be721b80ce47f3637b1c130c09",
+      "duration": 227,
+      "rank": 436730,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "25",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/eaeadce7932a97533fe495881d2fcd7a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713912/image"
+      }
+     },
+     {
+      "id": 1557137142,
+      "title": "Can I Get It",
+      "title_short": "Can I Get It",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/3/1/4/0/314ada60077e9535561420eb200fe5db.mp3?hdnea=exp=1792115896~acl=/api/1/1/3/1/4/0/314ada60077e9535561420eb200fe5db.mp3*~data=user_id=0,application_id=42~hmac=95ab6c81d6a0f94ce4e6dc8c42beeba1e06bce1036ff35614764f2e87144456c",
+      "duration": 210,
+      "rank": 658261,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "30",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bfaa6999939ce7236b339f875a132f62/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/273425942/image"
+      }
+     },
+     {
+      "id": 1174603062,
+      "title": "I'll Be Waiting",
+      "title_short": "I'll Be Waiting",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/f/e/1/0/fe172e21920e194d26dd2a5b2b407794.mp3?hdnea=exp=1792115896~acl=/api/1/1/f/e/1/0/fe172e21920e194d26dd2a5b2b407794.mp3*~data=user_id=0,application_id=42~hmac=3df2a4818cb600fc9a83fa9bf750f419f6f318673dfb77ce68f7949676160c53",
+      "duration": 241,
+      "rank": 419451,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "21",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/dc1ce848d830ecc93521be5a78350364/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713382/image"
+      }
+     },
+     {
+      "id": 1174605112,
+      "title": "River Lea",
+      "title_short": "River Lea",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/b/a/7/0/ba79f76ec57798d5f05cf31f477bc1bd.mp3?hdnea=exp=1792115896~acl=/api/1/1/b/a/7/0/ba79f76ec57798d5f05cf31f477bc1bd.mp3*~data=user_id=0,application_id=42~hmac=1a335634fe9e0ec5f229859d7fb528963e90473685b2bf789e8a6d72ee20c908",
+      "duration": 225,
+      "rank": 342017,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "25",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/eaeadce7932a97533fe495881d2fcd7a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713912/image"
+      }
+     },
+     {
+      "id": 1557137162,
+      "title": "All Night Parking (with Erroll Garner) Interlude",
+      "title_short": "All Night Parking (with Erroll Garner) Interlude",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/2/a/b/0/2abe4b38edbdbdb419d93074a5899c23.mp3?hdnea=exp=1792115896~acl=/api/1/1/2/a/b/0/2abe4b38edbdbdb419d93074a5899c23.mp3*~data=user_id=0,application_id=42~hmac=8880d7cd2038fde786ba7a294f0d51ad3a037ee62ba5bbe2a6bfcf7b7ab0612e",
+      "duration": 161,
+      "rank": 544074,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "30",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bfaa6999939ce7236b339f875a132f62/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/273425942/image"
+      }
+     },
+     {
+      "id": 1174603072,
+      "title": "One And Only",
+      "title_short": "One And Only",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/f/b/1/0/fb185649172bce60bd735ac66934e926.mp3?hdnea=exp=1792115896~acl=/api/1/1/f/b/1/0/fb185649172bce60bd735ac66934e926.mp3*~data=user_id=0,application_id=42~hmac=94655212f8f6261e03aefa00c6324ed6b3da3e681d28ac06e2ea37626e087b93",
+      "duration": 348,
+      "rank": 556332,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "21",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/dc1ce848d830ecc93521be5a78350364/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713382/image"
+      }
+     },
+     {
+      "id": 1557137202,
+      "title": "Love Is A Game",
+      "title_short": "Love Is A Game",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/7/c/3/0/7c3ecde0b450bd9b3899b99c9ff989cc.mp3?hdnea=exp=1792115896~acl=/api/1/1/7/c/3/0/7c3ecde0b450bd9b3899b99c9ff989cc.mp3*~data=user_id=0,application_id=42~hmac=fdd33d068b165bc58a7c9ca6503a894a74fae6f1a5615fe4ae6e1b5bbe4cbbaf",
+      "duration": 403,
+      "rank": 516084,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "30",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bfaa6999939ce7236b339f875a132f62/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/273425942/image"
+      }
+     },
+     {
+      "id": 1174605092,
+      "title": "Remedy",
+      "title_short": "Remedy",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/d/7/6/0/d76a60fb3ec715fa0bfce46ab64713dc.mp3?hdnea=exp=1792115896~acl=/api/1/1/d/7/6/0/d76a60fb3ec715fa0bfce46ab64713dc.mp3*~data=user_id=0,application_id=42~hmac=90ced328b85c9115214a4bd8bb52b64213727b7d37c20edabda9da7c7d1d0cf9",
+      "duration": 245,
+      "rank": 413263,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "25",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/eaeadce7932a97533fe495881d2fcd7a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713912/image"
+      }
+     },
+     {
+      "id": 512575602,
+      "title": "Right As Rain",
+      "title_short": "Right As Rain",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/2/3/0/1239c88f5d24f2b95d22563b5f5c58e5.mp3?hdnea=exp=1792115896~acl=/api/1/1/1/2/3/0/1239c88f5d24f2b95d22563b5f5c58e5.mp3*~data=user_id=0,application_id=42~hmac=111db8d90ede4117c130f68528dece83e7bf10ce5a074a702688642c4bb742e4",
+      "duration": 197,
+      "rank": 439367,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "19",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c396bb2d73c016d7a1ffdaca77b5c255/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728092/image"
+      }
+     },
+     {
+      "id": 1557137122,
+      "title": "Cry Your Heart Out",
+      "title_short": "Cry Your Heart Out",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/5/b/6/0/5b6c1777fcca8c57a58729b61721e45a.mp3?hdnea=exp=1792115896~acl=/api/1/1/5/b/6/0/5b6c1777fcca8c57a58729b61721e45a.mp3*~data=user_id=0,application_id=42~hmac=4bbd42ca7b226187c167a36ac0759802c1f481cae4af52939b81260718e28c08",
+      "duration": 255,
+      "rank": 525965,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "30",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bfaa6999939ce7236b339f875a132f62/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/273425942/image"
+      }
+     },
+     {
+      "id": 1557137112,
+      "title": "My Little Love",
+      "title_short": "My Little Love",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/2/7/0/0/270055db9c5bd9792adc88547f6bb25e.mp3?hdnea=exp=1792115896~acl=/api/1/1/2/7/0/0/270055db9c5bd9792adc88547f6bb25e.mp3*~data=user_id=0,application_id=42~hmac=2d277f4ea65c6b17de3aff5bffa3bf260e806a8732a05d7b36428e4bcbd0383a",
+      "duration": 389,
+      "rank": 628306,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "30",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bfaa6999939ce7236b339f875a132f62/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/273425942/image"
+      }
+     },
+     {
+      "id": 1174605072,
+      "title": "I Miss You",
+      "title_short": "I Miss You",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/9/8/a/0/98a8f4510ef419908ae0db8a630fc2cd.mp3?hdnea=exp=1792115896~acl=/api/1/1/9/8/a/0/98a8f4510ef419908ae0db8a630fc2cd.mp3*~data=user_id=0,application_id=42~hmac=845391e8412a98a17daf8673e6f5e7e641601dbdbf5689d9f29ccd34fdfa2ea8",
+      "duration": 348,
+      "rank": 384912,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "25",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/eaeadce7932a97533fe495881d2fcd7a/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713912/image"
+      }
+     },
+     {
+      "id": 1557137192,
+      "title": "To Be Loved",
+      "title_short": "To Be Loved",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/8/0/e/0/80e6a3030c4f0f588c5ff544b512af47.mp3?hdnea=exp=1792115896~acl=/api/1/1/8/0/e/0/80e6a3030c4f0f588c5ff544b512af47.mp3*~data=user_id=0,application_id=42~hmac=ff1b33150ced9f5667530e16417ef75a8d3ddc83e7c1880f5587b86f9863ffbd",
+      "duration": 404,
+      "rank": 578667,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "30",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bfaa6999939ce7236b339f875a132f62/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/273425942/image"
+      }
+     },
+     {
+      "id": 1557137182,
+      "title": "Hold On",
+      "title_short": "Hold On",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/c/c/0/4cc704f0cc5b0ff2e00d0efcf3732c81.mp3?hdnea=exp=1792115896~acl=/api/1/1/4/c/c/0/4cc704f0cc5b0ff2e00d0efcf3732c81.mp3*~data=user_id=0,application_id=42~hmac=82812e41218d60911d6199b97602537c0048481888c8722a7fc35bb0f82829b5",
+      "duration": 366,
+      "rank": 597603,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "30",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bfaa6999939ce7236b339f875a132f62/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/273425942/image"
+      }
+     },
+     {
+      "id": 512575562,
+      "title": "Cold Shoulder",
+      "title_short": "Cold Shoulder",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/0/f/b/0/0fb8cb9c40ceafb46eca70f600bd7157.mp3?hdnea=exp=1792115896~acl=/api/1/1/0/f/b/0/0fb8cb9c40ceafb46eca70f600bd7157.mp3*~data=user_id=0,application_id=42~hmac=434eaeff56fad2c72b48c0c2bcbe8ed57c60cd94ce2f4865641a9d706fc78025",
+      "duration": 191,
+      "rank": 343074,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "19",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c396bb2d73c016d7a1ffdaca77b5c255/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728092/image"
+      }
+     },
+     {
+      "id": 512575532,
+      "title": "Daydreamer",
+      "title_short": "Daydreamer",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/3/e/d/0/3ed060781b9d3a7633593496faa18cdf.mp3?hdnea=exp=1792115896~acl=/api/1/1/3/e/d/0/3ed060781b9d3a7633593496faa18cdf.mp3*~data=user_id=0,application_id=42~hmac=05ce166acb2964291a2e43e7cad9e8db1d3f79fa19ba860b7c34406721bb81b1",
+      "duration": 220,
+      "rank": 385925,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "19",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c396bb2d73c016d7a1ffdaca77b5c255/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728092/image"
+      }
+     },
+     {
+      "id": 1174603052,
+      "title": "Take It All",
+      "title_short": "Take It All",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/6/0/8/0/608a0596d4b59b4d61c859bd97f1be65.mp3?hdnea=exp=1792115896~acl=/api/1/1/6/0/8/0/608a0596d4b59b4d61c859bd97f1be65.mp3*~data=user_id=0,application_id=42~hmac=17da03543450db3fcd6477ba8b28a0d19cdd112b691102d8697aa7dae7a59ef1",
+      "duration": 228,
+      "rank": 365703,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "21",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/dc1ce848d830ecc93521be5a78350364/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/192713382/image"
+      }
+     },
+     {
+      "id": 1557137172,
+      "title": "Woman Like Me",
+      "title_short": "Woman Like Me",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/e/0/e/0/e0e4b9da48191e1e05b50d9d544accaf.mp3?hdnea=exp=1792115896~acl=/api/1/1/e/0/e/0/e0e4b9da48191e1e05b50d9d544accaf.mp3*~data=user_id=0,application_id=42~hmac=2969a2d37bf9077c13acc4141f0ca7e84972ae74b8c38b7f2b109dca59ffc3b6",
+      "duration": 300,
+      "rank": 514700,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "30",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bfaa6999939ce7236b339f875a132f62/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/273425942/image"
+      }
+     },
+     {
+      "id": 512575582,
+      "title": "Melt My Heart to Stone",
+      "title_short": "Melt My Heart to Stone",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/e/2/9/0/e29043ccc52a7b0ff2b8b6ca634959b3.mp3?hdnea=exp=1792115896~acl=/api/1/1/e/2/9/0/e29043ccc52a7b0ff2b8b6ca634959b3.mp3*~data=user_id=0,application_id=42~hmac=b81d2e888f8eb68b5c25dbf03e212ccfcb6da8ab813ff10a66123f5a160dd3fe",
+      "duration": 203,
+      "rank": 328436,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "19",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c396bb2d73c016d7a1ffdaca77b5c255/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728092/image"
+      }
+     },
+     {
+      "id": 1557137082,
+      "title": "Strangers By Nature",
+      "title_short": "Strangers By Nature",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/8/f/d/0/8fd050d712df4ab71e894aa947749514.mp3?hdnea=exp=1792115896~acl=/api/1/1/8/f/d/0/8fd050d712df4ab71e894aa947749514.mp3*~data=user_id=0,application_id=42~hmac=479f617c10335ed24d27778e930e2724c922019af24237a89fcac7b38275b852",
+      "duration": 182,
+      "rank": 502664,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "30",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/bfaa6999939ce7236b339f875a132f62/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/273425942/image"
+      }
+     },
+     {
+      "id": 512575542,
+      "title": "Best for Last",
+      "title_short": "Best for Last",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/7/f/e/0/7fe1c5d2d27525ea48906ecc787862f0.mp3?hdnea=exp=1792115896~acl=/api/1/1/7/f/e/0/7fe1c5d2d27525ea48906ecc787862f0.mp3*~data=user_id=0,application_id=42~hmac=1325a7984a1e5dd1b6aaa51ecb20a6152fca1b469292c505950a8488c107ff58",
+      "duration": 258,
+      "rank": 330275,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "19",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c396bb2d73c016d7a1ffdaca77b5c255/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728092/image"
+      }
+     },
+     {
+      "id": 512575572,
+      "title": "Crazy For You",
+      "title_short": "Crazy For You",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/4/4/f/0/44f272480985e37b2c81b41f28744477.mp3?hdnea=exp=1792115896~acl=/api/1/1/4/4/f/0/44f272480985e37b2c81b41f28744477.mp3*~data=user_id=0,application_id=42~hmac=84d874627856fbca9a6f73a3c62e1ed2b3f07dd206ea2bd312220c073aa58811",
+      "duration": 208,
+      "rank": 329934,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "19",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c396bb2d73c016d7a1ffdaca77b5c255/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728092/image"
+      }
+     },
+     {
+      "id": 512575652,
+      "title": "Hometown Glory",
+      "title_short": "Hometown Glory",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/c/1/0/ac1748dac11784d4915644750864ed9b.mp3?hdnea=exp=1792115896~acl=/api/1/1/a/c/1/0/ac1748dac11784d4915644750864ed9b.mp3*~data=user_id=0,application_id=42~hmac=c796458b447f6b76ff3972c3f84a57cc6766932294e9059aeb889f488c27b80e",
+      "duration": 219,
+      "rank": 428365,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "Hometown Glory",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c4610b70b593f71327748111fcc7d28b/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728102/image"
+      }
+     },
+     {
+      "id": 512575632,
+      "title": "Tired",
+      "title_short": "Tired",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/d/5/8/0/d58c5eb821ca1b7fccc200544c065970.mp3?hdnea=exp=1792115896~acl=/api/1/1/d/5/8/0/d58c5eb821ca1b7fccc200544c065970.mp3*~data=user_id=0,application_id=42~hmac=89cc98d6cda8bbe5d494407aa0bdd4d0218cc187f4b03668765269e1a917f4ed",
+      "duration": 258,
+      "rank": 266961,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "19",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c396bb2d73c016d7a1ffdaca77b5c255/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728092/image"
+      }
+     },
+     {
+      "id": 512575592,
+      "title": "First Love",
+      "title_short": "First Love",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/6/4/8/0/6484ab9c76ce74c8187fd6f4b09e6218.mp3?hdnea=exp=1792115896~acl=/api/1/1/6/4/8/0/6484ab9c76ce74c8187fd6f4b09e6218.mp3*~data=user_id=0,application_id=42~hmac=79a34e123cd1c2fb38ac53c7d8617641d27578e4066261261aaf3c11cd7a0408",
+      "duration": 190,
+      "rank": 317540,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "19",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c396bb2d73c016d7a1ffdaca77b5c255/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728092/image"
+      }
+     },
+     {
+      "id": 512575622,
+      "title": "My Same",
+      "title_short": "My Same",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/c/0/1/0/c019883f1b7ecef5392dfe4f40a6279c.mp3?hdnea=exp=1792115896~acl=/api/1/1/c/0/1/0/c019883f1b7ecef5392dfe4f40a6279c.mp3*~data=user_id=0,application_id=42~hmac=31fd1a8d1c6208b10e910a3e6e88135e13f875308f559fddf8556d83148b39c6",
+      "duration": 195,
+      "rank": 289509,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "19",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c396bb2d73c016d7a1ffdaca77b5c255/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728092/image"
+      }
+     },
+     {
+      "id": 54009461,
+      "title": "Make You Feel My Love (Live at WXPN)",
+      "title_short": "Make You Feel My Love (Live at WXPN)",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/7/1/0/1714f440b34689e533f349af1171df43.mp3?hdnea=exp=1792115896~acl=/api/1/1/1/7/1/0/1714f440b34689e533f349af1171df43.mp3*~data=user_id=0,application_id=42~hmac=ea1c631be7a135bda56bef0f17226e2c5f40a769e471394f8bf2fcbe3df31f81",
+      "duration": 246,
+      "rank": 134268,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "Chimes Of Freedom: The Songs Of Bob Dylan Honoring 50 Years Of Amnesty International",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/4663156ed123e4361ed544fb6acc9040/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/5248681/image"
+      }
+     },
+     {
+      "id": 512575662,
+      "title": "Hometown Glory (High Contrast Remix)",
+      "title_short": "Hometown Glory",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/e/a/d/0/eadcd48dfec5d614e52c0537050a5595.mp3?hdnea=exp=1792115896~acl=/api/1/1/e/a/d/0/eadcd48dfec5d614e52c0537050a5595.mp3*~data=user_id=0,application_id=42~hmac=86f1f6e504cd3d017a55afbf55bfd0aa31cf7f403f569c2e38e0a5816880c71d",
+      "duration": 396,
+      "rank": 215007,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "Hometown Glory",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c4610b70b593f71327748111fcc7d28b/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728102/image"
+      }
+     },
+     {
+      "id": 512575742,
+      "title": "Cold Shoulder (Rusko Remix)",
+      "title_short": "Cold Shoulder",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/8/2/f/0/82fcf06725553aece45729d41e1d4659.mp3?hdnea=exp=1792115896~acl=/api/1/1/8/2/f/0/82fcf06725553aece45729d41e1d4659.mp3*~data=user_id=0,application_id=42~hmac=124c6be4223d03fb9ea45d34756ae1511c08293fd052bc525b396eefd4f490af",
+      "duration": 247,
+      "rank": 191361,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "Cold Shoulder",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c30f0fff8263c1b3393c5e4a9f021d19/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728142/image"
+      }
+     },
+     {
+      "id": 512575722,
+      "title": "Cold Shoulder (Basement Jaxx Classic Remix)",
+      "title_short": "Cold Shoulder",
+      "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/d/f/0/adf019e8563dfdbd2651020a208cffe4.mp3?hdnea=exp=1792115896~acl=/api/1/1/a/d/f/0/adf019e8563dfdbd2651020a208cffe4.mp3*~data=user_id=0,application_id=42~hmac=06d1759e18b269a1fbf940d0af0ed107ef5b1a051a251202df725a1e1c9e7eab",
+      "duration": 301,
+      "rank": 154322,
+      "artist": {
+       "id": 75798,
+       "name": "Adele"
+      },
+      "album": {
+       "title": "Cold Shoulder",
+       "cover_medium": "https://cdn-images.dzcdn.net/images/cover/c30f0fff8263c1b3393c5e4a9f021d19/250x250-000000-80-0-0.jpg",
+       "cover": "https://api.deezer.com/album/65728142/image"
+      }
+     }
+    ],
+    "total": 51
+   }
+  },
+  {
+   "path": "/track/1174604652",
+   "params": null,
+   "reply": {
+    "id": 1174604652,
+    "title": "Hello",
+    "title_short": "Hello",
+    "preview": "https://cdnt-preview.dzcdn.net/api/1/1/9/9/f/0/99f3f9045f87708fcc0518dea2a60ac9.mp3?hdnea=exp=1792116933~acl=/api/1/1/9/9/f/0/99f3f9045f87708fcc0518dea2a60ac9.mp3*~data=user_id=0,application_id=42~hmac=9b144ab88b667b8a371bcdf03cb34aa39eac4c749b6f8bcb87e9fd834d0fdff1",
+    "duration": 295,
+    "rank": 698953,
+    "artist": {
+     "id": 75798,
+     "name": "Adele"
+    },
+    "album": {
+     "title": "Hello",
+     "cover_medium": "https://cdn-images.dzcdn.net/images/cover/55a45989edf6f4ed46793986d5a0b190/250x250-000000-80-0-0.jpg",
+     "cover": "https://api.deezer.com/album/192713772/image"
+    }
+   }
+  }
+ ]
+}
