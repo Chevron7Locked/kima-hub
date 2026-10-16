@@ -2,6 +2,9 @@
 // opens it to members — acquire only. On the real database with real tokens;
 // no mocked middleware. Deleting keeps its own requireAdmin and is untouched.
 
+// Only so the Soulseek router can load: its service connects to the network as it is created.
+jest.mock("../../services/soulseek", () => ({ soulseekService: {} }));
+
 import express from "express";
 import request from "supertest";
 import { prisma } from "../../utils/db";
@@ -11,6 +14,10 @@ import systemSettingsRoutes from "../systemSettings";
 import playlistRoutes from "../playlists";
 import discoverRoutes from "../discover";
 import spotifyRoutes from "../spotify";
+import soulseekRoutes from "../soulseek";
+import downloadRoutes from "../downloads";
+import notificationRoutes from "../notifications";
+import releaseRoutes from "../releases";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const P = "zz-acquire";
@@ -124,25 +131,36 @@ describe("acquire permission gate (#238)", () => {
         expect(matchOnly.status).toBe(400);
     });
 
-    it("the eight acquire routes all carry the gate", async () => {
-        // Mount-point audit: each door mounts requireAcquirePermission before
-        // its handler. Read from source so a future route refactor fails here.
-        const fs = require("fs");
-        const path = require("path");
-        const routesDir = path.join(__dirname, "..");
-        const doors: Array<[string, RegExp]> = [
-            ["soulseek.ts", /"\/download"[\s\S]{0,40}requireAcquirePermission/],
-            ["downloads.ts", /router\.post\("\/", requireAcquirePermission/],
-            ["notifications.ts", /"\/downloads\/:id\/retry"[\s\S]{0,40}requireAcquirePermission/],
-            ["playlists.ts", /"\/:id\/pending\/retry-all", requireAcquirePermission/],
-            ["releases.ts", /"\/download\/:albumMbid", requireAcquirePermission/],
-            ["discover.ts", /"\/retry-unavailable", requireAcquirePermission/],
-            ["discover.ts", /"\/generate", requireAcquirePermission/],
-            ["playlists.ts", /"\/:id\/pending\/:trackId\/retry", requireAcquirePermission/],
+    it("exactly these eight routes start downloads behind the gate", () => {
+        // Read from each router's own route table and matched on the gate function itself, so a gate dropped in a
+        // refactor, left in a comment or put on the wrong route fails here, and a new gated route must be listed.
+        // Downloads started outside a route (an import retrying its unmatched songs) are tested where they start.
+        const routers: Array<[string, express.Router]> = [
+            ["soulseek", soulseekRoutes],
+            ["downloads", downloadRoutes],
+            ["notifications", notificationRoutes],
+            ["playlists", playlistRoutes],
+            ["releases", releaseRoutes],
+            ["discover", discoverRoutes],
         ];
-        for (const [file, pattern] of doors) {
-            const src = fs.readFileSync(path.join(routesDir, file), "utf8");
-            expect({ file, gated: pattern.test(src) }).toEqual({ file, gated: true });
-        }
+        // A router layer as Express builds it; its published types leave out a route's methods.
+        type Layer = { route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: unknown }> } };
+        const gated = routers.flatMap(([name, router]) =>
+            (router.stack as Layer[]).flatMap(({ route }) =>
+                route?.stack.some((handler) => handler.handle === requireAcquirePermission)
+                    ? [`${name} ${Object.keys(route.methods).join(",")} ${route.path}`]
+                    : [],
+            ),
+        );
+        expect(gated.sort()).toEqual([
+            "discover post /generate",
+            "discover post /retry-unavailable",
+            "downloads post /",
+            "notifications post /downloads/:id/retry",
+            "playlists post /:id/pending/:trackId/retry",
+            "playlists post /:id/pending/retry-all",
+            "releases post /download/:albumMbid",
+            "soulseek post /download",
+        ]);
     });
 });

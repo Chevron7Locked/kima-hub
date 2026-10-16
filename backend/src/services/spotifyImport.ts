@@ -2082,6 +2082,12 @@ class SpotifyImportService {
     jobLoggers.delete(job.id);
   }
 
+  /** Whether the user an import belongs to may start downloads (#238); a deleted user may not. */
+  private async importerMayAcquire(userId: string): Promise<boolean> {
+    const importer = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    return importer !== null && (await mayAcquire(importer));
+  }
+
   /**
    * Auto-retry unmatched tracks via per-track Soulseek search.
    * Runs in the background after playlist creation. Downloaded tracks
@@ -2098,6 +2104,12 @@ class SpotifyImportService {
     }>,
   ): Promise<void> {
     const jobLogger = jobLoggers.get(job.id);
+
+    // Searching and downloading is acquisition (#238); for anyone else the songs stay pending for an operator to retry.
+    if (!(await this.importerMayAcquire(job.userId))) {
+      jobLogger?.debug(`Auto-retry: this user may not start downloads; ${pendingTracks.length} song(s) stay pending`);
+      return;
+    }
 
     const { soulseekService } = await import("./soulseek");
     if (!soulseekService.isConnected()) {
@@ -2867,7 +2879,14 @@ class SpotifyImportService {
     jobLoggers.set(importJobId, jobLogger);
 
     try {
-      await this.processImport(job, albumMbidsToDownload, preview);
+      // Permission was checked when the import was queued; it may have been withdrawn since (#238).
+      let albums = albumMbidsToDownload;
+      if (albums.length > 0 && !(await this.importerMayAcquire(job.userId))) {
+        jobLogger.info(`[Spotify Import] Downloads are no longer allowed for this user; importing without the ${albums.length} album(s)`);
+        albums = [];
+        job.albumsTotal = 0;
+      }
+      await this.processImport(job, albums, preview);
     } finally {
       jobLoggers.delete(importJobId);
     }
@@ -3011,8 +3030,7 @@ class SpotifyImportService {
 
       // Every downloadable album is selected, if this user may start downloads; otherwise the playlist is only
       // matched against the library.
-      const importer = await prisma.user.findUnique({ where: { id: job.userId }, select: { role: true } });
-      const albumMbidsToDownload = importer && (await mayAcquire(importer))
+      const albumMbidsToDownload = (await this.importerMayAcquire(job.userId))
         ? preview.albumsToDownload.map((a) => a.albumMbid || a.spotifyAlbumId)
         : [];
 
