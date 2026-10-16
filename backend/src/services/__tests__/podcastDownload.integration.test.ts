@@ -1,10 +1,9 @@
 /**
- * Caching an episode, downloaded from a real local host into a temporary cache folder, with the real database.
+ * Caching an episode, downloaded from a real local host (under a public name, through the real address check) into
+ * a temporary cache folder, with the real database.
  * A feed's declared enclosure length is not the size of the file a host sends (Acast declares 106,668,461 bytes
  * for an episode it sends as 70.6 or 82.7 MB), so only the host's own Content-Length can judge a download.
  */
-jest.mock("../../utils/ssrf", () => ({ validateUrlForFetch: jest.fn().mockResolvedValue(null) }));
-
 import fs from "fs";
 import http from "http";
 import os from "os";
@@ -13,6 +12,7 @@ import type { AddressInfo } from "net";
 import { config } from "../../config";
 import { prisma } from "../../utils/db";
 import { downloadInBackground, getCachedFilePath, isDownloading } from "../podcastDownload";
+import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
 
 const P = "pod_dl_size";
 const USER = "u_pod_dl_size";
@@ -40,7 +40,8 @@ beforeAll(async () => {
         }
     });
     await new Promise<void>((ok) => host.listen(0, "127.0.0.1", () => ok()));
-    base = `http://127.0.0.1:${(host.address() as AddressInfo).port}`;
+    routePublicHost();
+    base = publicUrl((host.address() as AddressInfo).port);
     cacheRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "kima-pod-dl-"));
     originalCache = config.music.transcodeCachePath;
     config.music.transcodeCachePath = path.join(cacheRoot, "transcodes");
@@ -65,6 +66,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+    jest.restoreAllMocks();
     config.music.transcodeCachePath = originalCache;
     await prisma.podcast.deleteMany({ where: { id: P } });
     await prisma.user.deleteMany({ where: { id: USER } });

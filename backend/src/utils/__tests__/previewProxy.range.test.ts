@@ -1,7 +1,7 @@
 /**
  * The preview proxy advertises `Accept-Ranges` when the CDN does, so it must
  * also honor the client's Range: forward it upstream and mirror the 206/416.
- * Proven against a real HTTP upstream on localhost, not a mocked socket.
+ * Proven against a real HTTP upstream (a local server under a public name), through the real fetch guard.
  */
 
 import http from "http";
@@ -10,6 +10,7 @@ import request from "supertest";
 import { AddressInfo } from "net";
 import type { Response as SuperAgentResponse } from "superagent";
 import { proxyPreviewStream } from "../previewProxy";
+import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
 
 const BODY = Buffer.from("0123456789");
 
@@ -53,10 +54,12 @@ beforeAll(async () => {
         res.end(slice);
     });
     await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
-    upstreamUrl = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`;
+    routePublicHost();
+    upstreamUrl = publicUrl((upstream.address() as AddressInfo).port);
 });
 
 afterAll(async () => {
+    jest.restoreAllMocks();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
 });
 

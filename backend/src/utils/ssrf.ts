@@ -3,6 +3,7 @@ import { lookup } from "dns/promises";
 import http from "http";
 import https from "https";
 import net from "net";
+import type { Duplex } from "stream";
 import { Agent } from "undici";
 import { logger } from "./logger";
 
@@ -131,17 +132,46 @@ const guardedLookup: net.LookupFunction = (hostname, options, callback) => {
 };
 
 /**
- * axios options for an address that came from a feed or a user, where validateUrlForFetch checks only the first.
- * Every connection's address is checked, on each redirect too and after a name changes its answer; a redirect
- * straight to an internal IP is refused before connecting, since an IP needs no lookup.
+ * Refuses a connection to an internal address written as the host itself: an IP needs no name lookup, so
+ * guardedLookup never sees it.
+ */
+function refuseInternalIp(host: string | null | undefined): BlockedAddressError | null {
+  const ip = (host ?? "").replace(/^\[|\]$/g, "");
+  if (!net.isIP(ip) || !isBlockedIp(ip)) return null;
+  logger.warn(`[SSRF] Refused a connection to ${ip}`);
+  return new BlockedAddressError(`Blocked: ${ip} is an internal address`);
+}
+
+class GuardedHttpAgent extends http.Agent {
+  createConnection(options: http.ClientRequestArgs, callback?: (err: Error | null, stream: Duplex) => void): Duplex | null | undefined {
+    const refused = refuseInternalIp(options.host);
+    if (refused) {
+      callback?.(refused, undefined as unknown as Duplex);
+      return undefined;
+    }
+    return super.createConnection(options, callback);
+  }
+}
+
+class GuardedHttpsAgent extends https.Agent {
+  createConnection(options: http.ClientRequestArgs, callback?: (err: Error | null, stream: Duplex) => void): Duplex | null | undefined {
+    const refused = refuseInternalIp(options.host);
+    if (refused) {
+      callback?.(refused, undefined as unknown as Duplex);
+      return undefined;
+    }
+    return super.createConnection(options, callback);
+  }
+}
+
+/**
+ * axios options for an address that came from a feed or a user. Every connection's address is checked as it is
+ * made, the first one and each redirect's: a name through guardedLookup, also after it changes its answer; an IP
+ * written as the host before connecting.
  */
 export const guardedAxios = {
-  httpAgent: new http.Agent({ lookup: guardedLookup }),
-  httpsAgent: new https.Agent({ lookup: guardedLookup }),
-  beforeRedirect: (options: { hostname?: string }) => {
-    const host = (options.hostname ?? "").replace(/^\[|\]$/g, "");
-    if (net.isIP(host) && isBlockedIp(host)) throw new BlockedAddressError(`Blocked: redirect to internal address ${host}`);
-  },
+  httpAgent: new GuardedHttpAgent({ lookup: guardedLookup }),
+  httpsAgent: new GuardedHttpsAgent({ lookup: guardedLookup }),
 };
 
 /** Node's fetch connecting only through guardedLookup, so a name that answers differently after the check is refused. */

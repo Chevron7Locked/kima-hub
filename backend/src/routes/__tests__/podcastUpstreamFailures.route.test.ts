@@ -2,15 +2,11 @@
  * When Apple or a podcast host misbehaves, Kima answers with what happened, never a 500, and never remembers a bad
  * reply: an Apple 4xx is "not found", an outage or a reply that is not what was asked for is a bad gateway and is
  * not cached, an unknown category is a 404 before Apple is asked, and a host's 4xx on a stream or sample is a 404.
- * Real router, database and Redis; a local server plays Apple and the host.
+ * Real router, database, Redis and address check; a local server plays Apple and the host under a public name.
  */
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (req: any, _res: any, next: any) => { req.user = { id: "u_podfail", username: "t" }; next(); },
     requireAuthOrToken: (req: any, _res: any, next: any) => { req.user = { id: "u_podfail", username: "t" }; next(); },
-}));
-jest.mock("../../utils/ssrf", () => ({
-    ...jest.requireActual("../../utils/ssrf"),
-    validateUrlForFetch: jest.fn().mockResolvedValue(null),
 }));
 jest.mock("../../services/podcastDownload", () => ({
     ...jest.requireActual("../../services/podcastDownload"),
@@ -27,6 +23,7 @@ import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { AppleReplyError, chart, lookupShows } from "../../services/podcastCatalog";
 import { proxyPreviewStream } from "../../utils/previewProxy";
+import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
 
 type Reply = { status: number; body: string; type?: string };
 const replies = new Map<string, Reply[]>();
@@ -65,7 +62,8 @@ beforeAll(async () => {
         res.end(r.body);
     });
     await new Promise<void>((ok) => host.listen(0, "127.0.0.1", () => ok()));
-    base = `http://127.0.0.1:${(host.address() as AddressInfo).port}`;
+    routePublicHost();
+    base = publicUrl((host.address() as AddressInfo).port);
     process.env.ITUNES_BASE_URL = base;
     await waitForRedisReady();
     await prisma.podcast.deleteMany({ where: { id: "pod_fail" } });
@@ -90,6 +88,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+    jest.restoreAllMocks();
     delete process.env.ITUNES_BASE_URL;
     await prisma.podcast.deleteMany({ where: { id: "pod_fail" } });
     await new Promise<void>((ok) => host.close(() => ok()));

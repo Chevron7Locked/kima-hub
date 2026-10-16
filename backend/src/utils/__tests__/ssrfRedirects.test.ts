@@ -1,6 +1,7 @@
 /**
  * validateUrlForFetch checks only the address it is given; a host it allows can redirect elsewhere. The guards make
- * every hop pass the same check. A real local server plays the host; 127.0.0.1 and localhost are internal addresses.
+ * every hop pass the same check. A real local server plays a public host (__tests__/helpers/publicHost); 127.0.0.1
+ * and localhost are internal addresses.
  */
 jest.mock("dns/promises", () => {
     // allowed.test and rebind.test stand for public hosts when checked; everything else resolves for real.
@@ -22,6 +23,9 @@ import http from "http";
 import type { AddressInfo } from "net";
 import axios from "axios";
 import { fetchChecked, guardedAxios, isBlockedFetch, isBlockedIp, validateUrlForFetch } from "../ssrf";
+import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
+
+let PUBLIC = "";
 
 let host: http.Server;
 let port = 0;
@@ -46,33 +50,49 @@ beforeAll(async () => {
     });
     await new Promise<void>((ok) => host.listen(0, "127.0.0.1", () => ok()));
     port = (host.address() as AddressInfo).port;
+    routePublicHost();
+    PUBLIC = publicUrl(port);
 });
 
-afterAll(() => new Promise<void>((ok) => host.close(() => ok())));
+afterAll(() => {
+    jest.restoreAllMocks();
+    return new Promise<void>((ok) => host.close(() => ok()));
+});
 beforeEach(() => {
     reachedSecret = 0;
 });
 
 describe("guardedAxios", () => {
     it("is needed: plain axios follows the redirect to the internal address", async () => {
-        await axios.get(`http://127.0.0.1:${port}/to-name`, { timeout: 5000 });
+        await axios.get(`${PUBLIC}/to-name`, { timeout: 5000 });
         expect(reachedSecret).toBe(1);
     });
 
+    it("refuses a first address written as an internal IP, before connecting", async () => {
+        const error = await axios.get(`http://127.0.0.1:${port}/secret`, { ...guardedAxios, timeout: 5000 }).catch((e) => e);
+        expect(isBlockedFetch(error)).toBe(true);
+        expect(String(error.message)).toMatch(/Blocked: 127\.0\.0\.1 is an internal address/);
+        expect(reachedSecret).toBe(0);
+    });
+
+    it("reaches a public address", async () => {
+        expect((await axios.get(`${PUBLIC}/`, { ...guardedAxios, timeout: 5000 })).status).toBe(200);
+    });
+
     it("refuses a redirect to an internal IP before connecting", async () => {
-        await expect(axios.get(`http://127.0.0.1:${port}/to-metadata`, { ...guardedAxios, timeout: 5000 })).rejects.toThrow(
-            /Blocked: redirect to internal address 169\.254\.169\.254/,
+        await expect(axios.get(`${PUBLIC}/to-metadata`, { ...guardedAxios, timeout: 5000 })).rejects.toThrow(
+            /Blocked: 169\.254\.169\.254 is an internal address/,
         );
     });
 
     it("refuses a redirect to an internal address written in IPv6 form, and says it refused", async () => {
-        const error = await axios.get(`http://127.0.0.1:${port}/to-mapped`, { ...guardedAxios, timeout: 5000 }).catch((e) => e);
+        const error = await axios.get(`${PUBLIC}/to-mapped`, { ...guardedAxios, timeout: 5000 }).catch((e) => e);
         expect(reachedSecret).toBe(0);
         expect(isBlockedFetch(error)).toBe(true);
     });
 
     it("refuses a redirect to a name that resolves to an internal address", async () => {
-        await expect(axios.get(`http://127.0.0.1:${port}/to-name`, { ...guardedAxios, timeout: 5000 })).rejects.toThrow(
+        await expect(axios.get(`${PUBLIC}/to-name`, { ...guardedAxios, timeout: 5000 })).rejects.toThrow(
             /Blocked: localhost is an internal address/,
         );
         expect(reachedSecret).toBe(0);

@@ -1,15 +1,11 @@
 /**
  * POST /podcasts/subscribe finds a stored show by either of its keys (Apple can give a show a new feed address),
  * follows once however often it is asked, and survives two follows of a new show at once. Real router and
- * database; a local server plays the feed, so the address check is stubbed to let 127.0.0.1 through.
+ * database and the real address check; a local server plays the feed under a public name.
  */
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (req: any, _res: any, next: any) => { req.user = { id: "u_podsub", username: "t" }; next(); },
     requireAuthOrToken: (req: any, _res: any, next: any) => { req.user = { id: "u_podsub", username: "t" }; next(); },
-}));
-jest.mock("../../utils/ssrf", () => ({
-    ...jest.requireActual("../../utils/ssrf"),
-    validateUrlForFetch: jest.fn().mockResolvedValue(null),
 }));
 
 import http from "http";
@@ -19,6 +15,7 @@ import request from "supertest";
 import podcastRoutes from "../podcasts";
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
+import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
 
 const USER = "u_podsub";
 const STORED = "pod_sub_stored";
@@ -33,7 +30,7 @@ const FEED = `<?xml version="1.0"?><rss version="2.0"><channel><title>Race Show<
 <enclosure url="https://cdn.example.invalid/1.mp3" length="1000" type="audio/mpeg"/></item></channel></rss>`;
 
 const cleanup = async () => {
-    await prisma.podcast.deleteMany({ where: { OR: [{ id: STORED }, { feedUrl: { startsWith: feedBase || "http://127.0.0.1" } }] } });
+    await prisma.podcast.deleteMany({ where: { OR: [{ id: STORED }, { feedUrl: { startsWith: feedBase || "http://public.test" } }] } });
 };
 
 beforeAll(async () => {
@@ -59,7 +56,8 @@ beforeAll(async () => {
         res.end(FEED);
     });
     await new Promise<void>((ok) => feedHost.listen(0, "127.0.0.1", () => ok()));
-    feedBase = `http://127.0.0.1:${(feedHost.address() as AddressInfo).port}`;
+    routePublicHost();
+    feedBase = publicUrl((feedHost.address() as AddressInfo).port);
     process.env.ITUNES_BASE_URL = feedBase;
     await waitForRedisReady();
     await prisma.user.upsert({ where: { id: USER }, create: { id: USER, username: USER, passwordHash: "x" }, update: {} });
@@ -75,6 +73,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+    jest.restoreAllMocks();
     delete process.env.ITUNES_BASE_URL;
     await cleanup();
     await prisma.user.deleteMany({ where: { id: USER } });
