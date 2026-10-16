@@ -32,6 +32,7 @@ import { songLinkService } from "./songlink";
 import { eventBus } from "./eventBus";
 import { extractPlaylist as ytdlpExtractPlaylist } from "./ytdlp";
 import { M3UEntry } from "./m3uParser";
+import { announcePlaylistChange } from "./playlistEvents";
 import {
   matchTrackToLibrary,
   type MatchCandidate,
@@ -2043,6 +2044,7 @@ class SpotifyImportService {
     }
 
     job.createdPlaylistId = playlist.id;
+    announcePlaylistChange(job.userId, playlist.id);
     job.tracksMatched = uniqueTrackIds.length;
     job.status = "completed";
     job.progress = 100;
@@ -2274,6 +2276,7 @@ class SpotifyImportService {
       await prisma.playlistItem.createMany({
         data: newPlaylistItems.map((item, i) => ({ ...item, rank: ranks[i] })),
       });
+      announcePlaylistChange(job.userId, job.createdPlaylistId);
     }
 
     job.tracksMatched += added;
@@ -2549,6 +2552,7 @@ class SpotifyImportService {
         });
 
         if (playlist) {
+          announcePlaylistChange(playlist.userId, playlist.id);
           const tracksAddedToPlaylist = matchedPendingTrackIds.filter((id) =>
             allPendingTracks.find(
               (pt) => pt.id === id && pt.playlistId === playlistId,
@@ -2845,6 +2849,7 @@ class SpotifyImportService {
     logger.info(
       `[M3U Import] Created playlist "${playlistName}" (${playlist.id}): ${uniqueTrackIds.length}/${entries.length} matched`,
     );
+    announcePlaylistChange(userId, playlist.id);
 
     return {
       playlistId: playlist.id,

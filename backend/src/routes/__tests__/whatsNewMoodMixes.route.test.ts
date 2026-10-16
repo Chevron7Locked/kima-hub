@@ -20,6 +20,7 @@ import request from "supertest";
 import whatsNewRoutes from "../whatsNew";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
+import { eventBus, type SSEEvent } from "../../services/eventBus";
 
 const PREFIX = "whatsnew-moodmix-test";
 const GENERATED_AT = new Date("2026-09-01T12:00:00.000Z");
@@ -222,12 +223,21 @@ describe("save as playlist", () => {
 
     it("saving twice returns the same playlist and adds nothing", async () => {
         const { userId } = await fixture();
-        const first = await as(userId).post("/whats-new/mood-mixes/save", { mixId: MIX_ID });
-        const second = await as(userId).post("/whats-new/mood-mixes/save", { mixId: MIX_ID });
-        expect(second.status).toBe(200);
-        expect(second.body).toMatchObject({ id: first.body.id, trackCount: 3, created: false });
-        expect(await prisma.playlist.count({ where: { userId } })).toBe(1);
-        expect(await items(first.body.id)).toHaveLength(3);
+        const heard: SSEEvent[] = [];
+        const stop = eventBus.subscribe(userId, { send: (event) => (heard.push(event), true) });
+        try {
+            const first = await as(userId).post("/whats-new/mood-mixes/save", { mixId: MIX_ID });
+            // The new playlist reaches the saver's other devices; the second save changes nothing, so it is quiet.
+            expect(heard.map((e) => e.payload)).toEqual([{ playlistId: first.body.id, deleted: false }]);
+            const second = await as(userId).post("/whats-new/mood-mixes/save", { mixId: MIX_ID });
+            expect(second.status).toBe(200);
+            expect(second.body).toMatchObject({ id: first.body.id, trackCount: 3, created: false });
+            expect(heard).toHaveLength(1);
+            expect(await prisma.playlist.count({ where: { userId } })).toBe(1);
+            expect(await items(first.body.id)).toHaveLength(3);
+        } finally {
+            stop();
+        }
     });
 
     it("save then rebuild: the playlist survives, the mix is gone, and a later save is a 404", async () => {

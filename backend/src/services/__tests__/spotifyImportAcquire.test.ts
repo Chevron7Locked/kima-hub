@@ -13,6 +13,7 @@ import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { deezerService } from "../deezer";
 import { soulseekService } from "../soulseek";
+import { eventBus, type SSEEvent } from "../eventBus";
 import { spotifyImportService } from "../spotifyImport";
 
 const MEMBER = "zz-import-member";
@@ -137,12 +138,16 @@ describe("an import whose user is gone", () => {
 
 describe("an import's unmatched songs", () => {
     it("are never searched or downloaded for a member, and stay on the playlist as pending", async () => {
-        await importWithoutAlbums(MEMBER);
+        const heard: SSEEvent[] = [];
+        const stop = eventBus.subscribe(MEMBER, { send: (event) => (heard.push(event), true) });
+        await importWithoutAlbums(MEMBER).finally(stop);
 
         expect(soulseek.searchTrack).not.toHaveBeenCalled();
         expect(soulseek.downloadBestMatch).not.toHaveBeenCalled();
-        const playlist = await prisma.playlist.findFirst({ where: { userId: MEMBER }, select: { pendingTracks: { select: { spotifyTitle: true } } } });
+        const playlist = await prisma.playlist.findFirst({ where: { userId: MEMBER }, select: { id: true, pendingTracks: { select: { spotifyTitle: true } } } });
         expect(playlist?.pendingTracks.map((t) => t.spotifyTitle)).toEqual([UNMATCHED.title]);
+        // The new playlist reaches the importer's open devices.
+        expect(heard.filter((e) => e.type === "playlist:updated").map((e) => e.payload)).toEqual([{ playlistId: playlist?.id, deleted: false }]);
     });
 
     it("are searched for and downloaded for an admin", async () => {

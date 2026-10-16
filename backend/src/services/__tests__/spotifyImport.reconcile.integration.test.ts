@@ -9,8 +9,10 @@ jest.mock("../notificationService", () => ({
 
 import { prisma } from "../../utils/db";
 import { spotifyImportService } from "../spotifyImport";
+import { eventBus, type SSEEvent } from "../eventBus";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
+const heard: SSEEvent[] = [];
 const P = "sprec";
 
 async function cleanup() {
@@ -51,7 +53,8 @@ beforeAll(async () => {
             { playlistId: `${P}pl`, spotifyArtist: "Someone Else", spotifyTitle: "Intro", spotifyAlbum: "Debut", sort: 1, rank: "b" },
         ],
     });
-    await spotifyImportService.reconcilePendingTracks();
+    const stop = eventBus.subscribe(`${P}usr`, { send: (event) => (heard.push(event), true) });
+    await spotifyImportService.reconcilePendingTracks().finally(stop);
 });
 
 afterAll(async () => {
@@ -61,6 +64,10 @@ afterAll(async () => {
 });
 
 describe("reconciling pending Spotify tracks", () => {
+    it("tells the owner's devices the playlist gained songs", () => {
+        expect(heard.filter((e) => e.type === "playlist:updated").map((e) => e.payload)).toEqual([{ playlistId: `${P}pl`, deleted: false }]);
+    });
+
     it("finds a song by a multi-word artist who has many other tracks", async () => {
         const items = await prisma.playlistItem.findMany({ where: { playlistId: `${P}pl` }, include: { track: true } });
         expect(items.map((i) => i.track.title)).toContain("Let It Be");
@@ -71,5 +78,12 @@ describe("reconciling pending Spotify tracks", () => {
         expect(items.map((i) => i.trackId)).not.toContain(`${P}bt0`);
         const pending = await prisma.playlistPendingTrack.findMany({ where: { playlistId: `${P}pl` } });
         expect(pending.map((p) => p.spotifyTitle)).toEqual(["Intro"]);
+    });
+
+    it("tells nobody when a later pass finds nothing new", async () => {
+        const again: SSEEvent[] = [];
+        const stop = eventBus.subscribe(`${P}usr`, { send: (event) => (again.push(event), true) });
+        await spotifyImportService.reconcilePendingTracks().finally(stop);
+        expect(again.filter((e) => e.type === "playlist:updated")).toEqual([]);
     });
 });

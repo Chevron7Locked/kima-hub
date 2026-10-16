@@ -4,6 +4,7 @@ import { allocateAppendRanks, lockPlaylist } from "../../services/playlistServic
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { mapSong, wrap } from "./mappers";
+import { announcePlaylistChange } from "../../services/playlistEvents";
 
 export const playlistRouter = Router();
 
@@ -93,6 +94,13 @@ playlistRouter.all("/getPlaylist.view", wrap(async (req, res) => {
     });
 }));
 
+/** Whether every id names a song in the library: a playlist change naming one that does not is refused whole. */
+async function allSongsExist(ids: string[]): Promise<boolean> {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return true;
+    return (await prisma.track.count({ where: { id: { in: unique } } })) === unique.length;
+}
+
 playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
     const playlistId = req.query.playlistId as string | undefined;
     const name = req.query.name as string | undefined;
@@ -106,8 +114,12 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
             ? [rawSongIds]
             : []
     ).filter(Boolean) as string[];
+    if (!(await allSongsExist(songIds))) {
+        return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
+    }
 
     let resolvedPlaylistId: string;
+    let changed = true;
 
     if (playlistId) {
         const playlist = await prisma.playlist.findUnique({ where: { id: playlistId } });
@@ -118,7 +130,9 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
             return subsonicError(req, res, SubsonicError.NOT_AUTHORIZED, "Access denied");
         }
 
-        await prisma.$transaction([
+        // Replacing rewrites every entry (new ids, even for the same songs): devices are told unless nothing was there
+        // before or after.
+        const written = await prisma.$transaction([
             prisma.playlistItem.deleteMany({ where: { playlistId } }),
             ...(songIds.length > 0 ? [
                 prisma.playlistItem.createMany({
@@ -134,26 +148,29 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
             ] : []),
         ]);
         resolvedPlaylistId = playlistId;
+        changed = written.some((result) => result.count > 0);
     } else if (name) {
+        // One write: the playlist exists with all its songs or not at all. A song named twice is kept once, first.
         const playlist = await prisma.playlist.create({
-            data: { userId, name, isPublic: false },
+            data: {
+                userId,
+                name,
+                isPublic: false,
+                items: {
+                    create: [...new Set(songIds)].map((trackId, index) => ({
+                        trackId,
+                        sort: index,
+                        rank: rankForPosition(index),
+                    })),
+                },
+            },
         });
-
-        if (songIds.length > 0) {
-            await prisma.playlistItem.createMany({
-                data: songIds.map((trackId, index) => ({
-                    playlistId: playlist.id,
-                    trackId,
-                    sort: index,
-                    rank: rankForPosition(index),
-                })),
-                skipDuplicates: true,
-            });
-        }
         resolvedPlaylistId = playlist.id;
     } else {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "playlistId or name is required");
     }
+
+    if (changed) announcePlaylistChange(userId, resolvedPlaylistId);
 
     // Return the full playlist per OpenSubsonic spec (since 1.14.0)
     const created = await prisma.playlist.findUnique({
@@ -220,10 +237,6 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
         updateData.isPublic = publicParam === "true";
     }
 
-    if (Object.keys(updateData).length > 0) {
-        await prisma.playlist.update({ where: { id: playlistId }, data: updateData });
-    }
-
     const rawSongIdsToAdd = req.query.songIdToAdd;
     const songIdsToAdd: string[] = (
         Array.isArray(rawSongIdsToAdd)
@@ -244,47 +257,55 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
         .map((v) => parseInt(v as string, 10))
         .filter((n) => !isNaN(n));
 
-    if (indexesToRemove.length > 0 || songIdsToAdd.length > 0) {
-        await prisma.$transaction(async (tx) => {
-            await lockPlaylist(tx, playlistId);
-
-            if (indexesToRemove.length > 0) {
-                const currentItems = await tx.playlistItem.findMany({
-                    where: { playlistId },
-                    orderBy: { rank: "asc" },
-                    select: { id: true },
-                });
-                const idsToDelete = indexesToRemove
-                    .filter((i) => i >= 0 && i < currentItems.length)
-                    .map((i) => currentItems[i].id);
-                if (idsToDelete.length > 0) {
-                    await tx.playlistItem.deleteMany({ where: { id: { in: idsToDelete } } });
-                }
-            }
-
-            if (songIdsToAdd.length > 0) {
-                const aggregate = await tx.playlistItem.aggregate({
-                    where: { playlistId },
-                    _max: { sort: true },
-                });
-                const maxSort = aggregate._max.sort ?? -1;
-
-                const ranks = await allocateAppendRanks(tx, playlistId, songIdsToAdd.length);
-                const rows = songIdsToAdd.map((trackId, index) => ({
-                    playlistId,
-                    trackId,
-                    sort: maxSort + 1 + index,
-                    rank: ranks[index],
-                }));
-
-                await tx.playlistItem.createMany({
-                    data: rows,
-                    skipDuplicates: true,
-                });
-            }
-        });
+    if (!(await allSongsExist(songIdsToAdd))) {
+        return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
     }
 
+    // One transaction: the name, the visibility and the songs change together or not at all.
+    const changes = await prisma.$transaction(async (tx) => {
+        let count = 0;
+        if (indexesToRemove.length > 0 || songIdsToAdd.length > 0) await lockPlaylist(tx, playlistId);
+
+        if (Object.keys(updateData).length > 0) {
+            await tx.playlist.update({ where: { id: playlistId }, data: updateData });
+            count += 1;
+        }
+
+        if (indexesToRemove.length > 0) {
+            const currentItems = await tx.playlistItem.findMany({
+                where: { playlistId },
+                orderBy: { rank: "asc" },
+                select: { id: true },
+            });
+            const idsToDelete = indexesToRemove
+                .filter((i) => i >= 0 && i < currentItems.length)
+                .map((i) => currentItems[i].id);
+            if (idsToDelete.length > 0) {
+                count += (await tx.playlistItem.deleteMany({ where: { id: { in: idsToDelete } } })).count;
+            }
+        }
+
+        if (songIdsToAdd.length > 0) {
+            const aggregate = await tx.playlistItem.aggregate({
+                where: { playlistId },
+                _max: { sort: true },
+            });
+            const maxSort = aggregate._max.sort ?? -1;
+
+            const ranks = await allocateAppendRanks(tx, playlistId, songIdsToAdd.length);
+            const rows = songIdsToAdd.map((trackId, index) => ({
+                playlistId,
+                trackId,
+                sort: maxSort + 1 + index,
+                rank: ranks[index],
+            }));
+
+            count += (await tx.playlistItem.createMany({ data: rows, skipDuplicates: true })).count;
+        }
+        return count;
+    });
+
+    if (changes > 0) announcePlaylistChange(req.user!.id, playlistId);
     return subsonicOk(req, res);
 }));
 
@@ -303,6 +324,7 @@ playlistRouter.all("/deletePlaylist.view", wrap(async (req, res) => {
     }
 
     await prisma.playlist.delete({ where: { id } });
+    announcePlaylistChange(req.user!.id, id, true);
 
     return subsonicOk(req, res);
 }));

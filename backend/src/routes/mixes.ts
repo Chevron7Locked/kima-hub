@@ -11,6 +11,7 @@ import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { MOOD_MIX_LIMIT, validateSaveTrackIds } from "./mixesValidation";
 import { rankForPosition } from "../utils/lexoRank";
+import { announcePlaylistChange } from "../services/playlistEvents";
 
 const router = Router();
 
@@ -277,39 +278,43 @@ router.post("/:id/save", async (req, res) => {
             });
         }
 
-        // Create playlist
+        // Mixes are cached: a song deleted since the mix was made is left out, in the mix's order otherwise.
+        const mixTrackIds: string[] = [...new Set<string>(mix.trackIds)];
+        const present = new Set(
+            (await prisma.track.findMany({ where: { id: { in: mixTrackIds } }, select: { id: true } })).map((t) => t.id)
+        );
+        const trackIds = mixTrackIds.filter((id) => present.has(id));
+        if (trackIds.length === 0) {
+            return res.status(422).json({ error: "None of this mix's songs are in the library any more" });
+        }
+
+        // One write: the playlist exists with all its songs or not at all. `rank` is unique per playlist, and the
+        // playlist starts empty, so positional ranks are correct.
         const playlist = await prisma.playlist.create({
             data: {
                 userId,
                 mixId: mix.id,
                 name: customName || mix.name,
                 isPublic: false,
+                items: {
+                    create: trackIds.map((trackId, index) => ({
+                        trackId,
+                        sort: index,
+                        rank: rankForPosition(index),
+                    })),
+                },
             },
         });
 
-        // `rank` is unique per playlist, so every item needs its own; the playlist
-        // was just created empty, so positional ranks are correct.
-        const playlistItems = mix.trackIds.map(
-            (trackId: string, index: number) => ({
-                playlistId: playlist.id,
-                trackId,
-                sort: index,
-                rank: rankForPosition(index),
-            })
-        );
-
-        await prisma.playlistItem.createMany({
-            data: playlistItems,
-        });
-
         logger.debug(
-            `[MIXES] Saved mix ${mixId} as playlist ${playlist.id} (${mix.trackIds.length} tracks)`
+            `[MIXES] Saved mix ${mixId} as playlist ${playlist.id} (${trackIds.length} tracks)`
         );
+        announcePlaylistChange(userId, playlist.id);
 
         res.json({
             id: playlist.id,
             name: playlist.name,
-            trackCount: mix.trackIds.length,
+            trackCount: trackIds.length,
         });
     } catch (error) {
         logger.error("Save mix as playlist error:", error);

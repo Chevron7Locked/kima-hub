@@ -9,6 +9,7 @@ import { ChoiceDecidedBy } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { logger } from "../../utils/logger";
+import { announcePlaylistChange } from "../playlistEvents";
 import { moodBucketService, VALID_MOODS, type MoodType } from "../moodBucketService";
 import { addTracks } from "../playlistService";
 
@@ -181,7 +182,8 @@ export async function saveMoodMixAsPlaylist(
         }
     }
 
-    await addTracks(playlist.id, mix.trackIds);
+    const { added } = await addTracks(playlist.id, mix.trackIds);
+    if (created || added > 0) announcePlaylistChange(userId, playlist.id);
     const trackCount = await prisma.playlistItem.count({ where: { playlistId: playlist.id } });
     return { ...playlist, trackCount, created };
 }

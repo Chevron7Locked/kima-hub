@@ -11,11 +11,12 @@ import {
     requirePlaylistReader,
 } from "../middleware/playlistOwner";
 import * as playlistService from "../services/playlistService";
-import { eventBus } from "../services/eventBus";
+import { announcePlaylistChange } from "../services/playlistEvents";
 import { proxyPreviewStream } from "../utils/previewProxy";
 import { soulseekConfigured } from "../utils/soulseekConfigured";
 
 const router = Router();
+
 
 router.use(requireAuthOrToken);
 
@@ -165,6 +166,7 @@ router.post("/", async (req, res) => {
             },
         });
 
+        announcePlaylistChange(userId, playlist.id);
         res.json(playlist);
     } catch (error) {
         if (error instanceof z.ZodError) {
@@ -314,6 +316,7 @@ async function updatePlaylist(req: Request, res: Response) {
             },
         });
 
+        announcePlaylistChange(req.user.id, playlist.id);
         res.json(playlist);
     } catch (error) {
         if (error instanceof z.ZodError) {
@@ -338,15 +341,13 @@ router.post("/:id/hide", requirePlaylistReader, async (req, res) => {
         const userId = req.user.id;
         const playlistId = req.params.id;
 
-        // Create hidden record (upsert to handle re-hiding)
-        await prisma.hiddenPlaylist.upsert({
-            where: {
-                userId_playlistId: { userId, playlistId },
-            },
-            create: { userId, playlistId },
-            update: {},
+        // Re-hiding finds the row already there and changes nothing.
+        const hidden = await prisma.hiddenPlaylist.createMany({
+            data: [{ userId, playlistId }],
+            skipDuplicates: true,
         });
 
+        if (hidden.count > 0) announcePlaylistChange(userId, playlistId);
         res.json({ message: "Playlist hidden", isHidden: true });
     } catch (error) {
         logger.error("Hide playlist error:", error);
@@ -364,10 +365,11 @@ router.delete("/:id/hide", async (req, res) => {
         const playlistId = req.params.id;
 
         // Delete hidden record if exists
-        await prisma.hiddenPlaylist.deleteMany({
+        const unhidden = await prisma.hiddenPlaylist.deleteMany({
             where: { userId, playlistId },
         });
 
+        if (unhidden.count > 0) announcePlaylistChange(userId, playlistId);
         res.json({ message: "Playlist unhidden", isHidden: false });
     } catch (error) {
         logger.error("Unhide playlist error:", error);
@@ -386,6 +388,7 @@ router.delete("/:id", requirePlaylistOwner, async (req, res) => {
             where: { id: req.params.id },
         });
 
+        announcePlaylistChange(req.user.id, req.params.id, true);
         res.json({ message: "Playlist deleted" });
     } catch (error) {
         logger.error("Delete playlist error:", error);
@@ -415,6 +418,7 @@ router.post("/:id/items", requirePlaylistOwner, async (req, res) => {
             });
         }
 
+        if (result.added > 0) announcePlaylistChange(req.user!.id, req.params.id);
         res.json({
             added: result.added,
             duplicated: result.duplicates > 0,
@@ -455,6 +459,7 @@ router.delete("/:id/items", requirePlaylistOwner, async (req, res) => {
                 .status(404)
                 .json({ error: "No matching tracks in playlist" });
         }
+        announcePlaylistChange(req.user!.id, req.params.id);
         res.json({ removed });
     } catch (error) {
         logger.error("Bulk remove from playlist error:", error);
@@ -509,6 +514,7 @@ router.post("/:id/items/batch", async (req, res) => {
             orderBy: { rank: "asc" },
         });
 
+        if (result.added > 0) announcePlaylistChange(userId, req.params.id);
         return res.json({
             added: result.added,
             skippedExisting: result.duplicates,
@@ -536,6 +542,7 @@ router.delete("/:id/items/:trackId", requirePlaylistOwner, async (req, res) => {
         if (removed === 0) {
             return res.status(404).json({ error: "Track not in playlist" });
         }
+        announcePlaylistChange(req.user!.id, req.params.id);
         res.json({ success: true, removed });
     } catch (error) {
         logger.error("Remove track from playlist error:", error);
@@ -561,11 +568,7 @@ router.patch("/:id/items/:itemId/move", requirePlaylistOwner, async (req, res) =
             parsed.data.afterItemId ?? null
         );
 
-        eventBus.emit({
-            type: "playlist:updated",
-            userId: req.user?.id ?? "*",
-            payload: { playlistId: req.params.id },
-        });
+        announcePlaylistChange(req.user!.id, req.params.id);
 
         res.json({ success: true, rank });
     } catch (error: any) {
@@ -611,6 +614,7 @@ router.delete("/:id/pending/:trackId", async (req, res) => {
             where: { id: pendingTrack.id },
         });
 
+        announcePlaylistChange(req.user!.id, playlistId);
         res.json({ message: "Pending track removed" });
     } catch (error: any) {
         if (error.code === "P2025") {
