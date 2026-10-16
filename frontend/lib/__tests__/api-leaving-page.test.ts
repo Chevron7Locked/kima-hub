@@ -67,3 +67,21 @@ it("sends progress saves kept alive, so closing the page does not cancel them", 
     await api.updateAudiobookProgress("b", 120, 600);
     expect(fetchMock.mock.calls.map(([, init]) => (init as RequestInit).keepalive)).toEqual([true, true]);
 });
+
+it("does not reject when leaving the page cuts off an answer whose body was still arriving", async () => {
+    // The answer's headers arrived; leaving the page then fails the body read (measured in Chromium:
+    // "TypeError: Failed to fetch", just after pagehide).
+    let cutOff!: (e: unknown) => void;
+    const answer = {
+        ok: true,
+        status: 200,
+        headers: { entries: () => [] },
+        json: () => new Promise((_ok, fail) => (cutOff = fail)),
+    } as unknown as Response;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answer));
+    const save = api.request("/podcasts/x/episodes/y/progress", { method: "POST", body: "{}" });
+    await new Promise((r) => setTimeout(r, 0));
+    window.dispatchEvent(new Event("pagehide"));
+    cutOff(new TypeError("Failed to fetch"));
+    expect(await settledSoon(save)).toBe(false);
+});

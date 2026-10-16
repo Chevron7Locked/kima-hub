@@ -469,8 +469,8 @@ class ApiClient {
         } catch (error) {
             // Network/fetch failure (TypeError, AbortError): keep tokens intact.
             // Clearing tokens on a transient network failure would log the user
-            // out during a subway ride.
-            console.error("[API] Token refresh network error:", error);
+            // out during a subway ride. A page being left cancels it: not a failure.
+            if (!leavingPage) console.error("[API] Token refresh network error:", error);
             return "network-error";
         }
 
@@ -480,7 +480,14 @@ class ApiClient {
             return "rejected";
         }
 
-        const data = await response.json();
+        let data: { token?: string; refreshToken?: string };
+        try {
+            data = await response.json();
+        } catch (error) {
+            // The answer was cut off on its way in (leaving the page, a dropped connection): as above.
+            if (!leavingPage) console.error("[API] Token refresh network error:", error);
+            return "network-error";
+        }
 
         if (data.token) {
             this.setToken(data.token, data.refreshToken);
@@ -527,6 +534,16 @@ class ApiClient {
         // All API endpoints are prefixed with /api
         const url = `${getApiBaseUrl()}/api${endpoint}`;
 
+        // Cancelled because the page is being left, whether before the answer or while its body was arriving:
+        // nothing will read it, unless the page comes back (the back/forward cache, a resumed app). Then a read is
+        // asked again; anything else reports the cancellation, as it may already have reached the server.
+        const cancelledByLeaving = async (err: unknown): Promise<T> => {
+            if (!leavingPage) throw err;
+            await pageBack();
+            if ((fetchOptions.method ?? "GET").toUpperCase() === "GET") return this.request<T>(endpoint, options);
+            throw err;
+        };
+
         let response: Response;
         try {
             response = await fetch(url, {
@@ -536,13 +553,7 @@ class ApiClient {
                 signal,
             });
         } catch (err) {
-            if (!leavingPage) throw err;
-            // Cancelled because the page is being left: nothing will read the answer, unless the page comes back
-            // (the back/forward cache, a resumed app). Then a read is asked again; anything else reports the
-            // cancellation, as it may already have reached the server.
-            await pageBack();
-            if ((fetchOptions.method ?? "GET").toUpperCase() === "GET") return this.request<T>(endpoint, options);
-            throw err;
+            return cancelledByLeaving(err);
         }
 
         if (!response.ok) {
@@ -612,8 +623,11 @@ class ApiClient {
             throw err;
         }
 
-        const data = await response.json();
-        return data;
+        try {
+            return await response.json();
+        } catch (err) {
+            return cancelledByLeaving(err);
+        }
     }
 
     async post<T = unknown>(endpoint: string, data?: unknown): Promise<T> {
