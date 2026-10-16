@@ -4,6 +4,7 @@ import { withTimeout } from "../utils/timeout";
 import { forgetSearchesOf } from "../services/search";
 import { upstreamFailure, upstreamUnreachable } from "../utils/upstream";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
+import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { prisma, Prisma } from "../utils/db";
 import { FeedReadError, rssParserService } from "../services/rss-parser";
 import { parseRangeHeader } from "../utils/rangeParser";
@@ -1442,6 +1443,8 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
         etag: podcast.feedEtag,
         lastModified: podcast.feedLastModified,
     });
+    // The feed answered, so an earlier failure to read it (a host or network down for a moment) is over.
+    await enrichmentFailureService.resolveByEntity("podcast", podcastId);
 
     if (result.notModified) {
         await prisma.podcast.update({

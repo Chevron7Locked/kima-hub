@@ -650,7 +650,7 @@ class EnrichmentFailureService {
      * Resolve an entity's leftover failure rows after it enriched
      * successfully.
      */
-    async resolveByEntity(entityType: "vibe" | "audio" | "artist", entityId: string): Promise<boolean> {
+    async resolveByEntity(entityType: "vibe" | "audio" | "artist" | "podcast", entityId: string): Promise<boolean> {
         const result = await prisma.enrichmentFailure.updateMany({
             where: {
                 entityType,

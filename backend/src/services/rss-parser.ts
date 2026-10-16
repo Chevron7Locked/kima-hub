@@ -212,7 +212,7 @@ class RSSParserService {
             );
             // An upstream reply problem, with the cause attached, so a caller can tell a refused or missing feed
             // from one that is down or unreadable.
-            throw Object.assign(new FeedReadError(`Failed to parse podcast feed: ${error.message}`), { cause: error });
+            throw Object.assign(new FeedReadError(`Could not read podcast feed: ${error.message}`), { cause: error });
         }
     }
 
