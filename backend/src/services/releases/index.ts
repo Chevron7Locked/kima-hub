@@ -8,7 +8,7 @@
 import { ChoiceDecidedBy } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import { GPU_CHOICE_KEY, RELEASES, choicesIn, findRelease, type Release, type ReleaseItem } from "./catalog";
+import { GPU_CHOICE_KEY, RELEASES, choicesIn, findRelease, isMoodMixItem, type Release, type ReleaseItem } from "./catalog";
 import { gpuSupported } from "../gpuRuntime";
 import { MOOD_MIX_RELEASE, moodMixState, type MoodMixState } from "./moodMixes";
 
@@ -20,10 +20,10 @@ async function isAdminUser(userId: string): Promise<boolean> {
 }
 
 /** Whether the library holds enrichment from before `date`: an install upgraded past a release, not a fresh one. */
-async function libraryEnrichedBefore(date: Date): Promise<boolean> {
+async function libraryEnrichedBefore(date: string): Promise<boolean> {
     const [row] = await prisma.$queryRaw<Array<{ older: boolean }>>`
-        SELECT EXISTS (SELECT 1 FROM track_embeddings WHERE analyzed_at < ${date})
-            OR EXISTS (SELECT 1 FROM "Track" WHERE "analyzedAt" < ${date}) AS older
+        SELECT EXISTS (SELECT 1 FROM track_embeddings WHERE analyzed_at < ${new Date(date)})
+            OR EXISTS (SELECT 1 FROM "Track" WHERE "analyzedAt" < ${new Date(date)}) AS older
     `;
     return row?.older === true;
 }
@@ -36,10 +36,6 @@ export async function pendingReleases(userId: string): Promise<Release[]> {
         select: { version: true },
     });
     const seen = new Set(acked.map((a) => a.version));
-    // Sort oldest-first explicitly rather than trusting the catalog's array
-    // order: the array is edited newest-entry-first by habit, and a reader
-    // who has been away for three versions must meet them in the order they
-    // happened, answering the older consent questions before the newer ones.
     const pending = RELEASES.filter((r) => !seen.has(r.version)).sort(byDate);
     const out = await forUser(userId, pending);
 
@@ -86,7 +82,7 @@ export async function currentReleaseFor(
         answers[GPU_CHOICE_KEY] = settings?.gpuOnnxEnabled ?? false;
     }
     const done: string[] = [];
-    const mixItems = release.items.filter((i) => i.key === "moods.mixes" || i.key === "moods.mixes.retired").map((i) => i.key);
+    const mixItems = release.items.filter(isMoodMixItem).map((i) => i.key);
     if (mixItems.length > 0) {
         const state = await moodMixState(userId);
         if (state.decision !== null || state.playlist !== null) done.push(...mixItems);
@@ -95,7 +91,11 @@ export async function currentReleaseFor(
 }
 
 /** The releases with only the items that apply to this user. */
-async function forUser(userId: string, releases: Release[]): Promise<Release[]> {
+async function forUser(
+    userId: string,
+    releases: Release[],
+    enrichedBefore: (date: string) => Promise<boolean> = enrichedBeforeOnce(),
+): Promise<Release[]> {
     // Items that only apply to some users are dropped for the rest: asking
     // someone with no mood mix to rebuild it would be noise, and asking a
     // non-admin to switch a system-wide setting they cannot change would be
@@ -104,11 +104,6 @@ async function forUser(userId: string, releases: Release[]): Promise<Release[]> 
     const mixState = async () => (state ??= await moodMixState(userId));
     let roleChecked: boolean | undefined;
     const isAdmin = async () => (roleChecked ??= await isAdminUser(userId));
-    const olderLibrary = new Map<string, Promise<boolean>>();
-    const enrichedBefore = (date: string) => {
-        if (!olderLibrary.has(date)) olderLibrary.set(date, libraryEnrichedBefore(new Date(date)));
-        return olderLibrary.get(date)!;
-    };
     const applies = async (item: ReleaseItem, release: Release): Promise<boolean> => {
         if (item.kind === "action" && item.olderLibraryOnly && !(await enrichedBefore(release.date))) return false;
         // The GPU choice is only asked where the CUDA runtime can exist; on
@@ -164,16 +159,30 @@ interface ChangelogRelease {
     items: ChangelogItem[];
 }
 
+/** libraryEnrichedBefore asked at most once per date, for the length of one request. */
+function enrichedBeforeOnce(): (date: string) => Promise<boolean> {
+    const asked = new Map<string, Promise<boolean>>();
+    return (date) => {
+        if (!asked.has(date)) asked.set(date, libraryEnrichedBefore(date));
+        return asked.get(date)!;
+    };
+}
+
 /** Actions whose completion the server can verify from real state. Everything else is informational. */
-async function actionSettled(userId: string, item: ReleaseItem, releaseDate: string): Promise<boolean | undefined> {
+async function actionSettled(
+    userId: string,
+    item: ReleaseItem,
+    releaseDate: string,
+    enrichedBefore: (date: string) => Promise<boolean>,
+): Promise<boolean | undefined> {
     if (item.kind !== "action") return undefined;
     if (item.run === "wipeEnrichment") {
         // Open until no track in the library carries analysis from before the release — i.e. the whole
         // library has been through the new engine. A rerun restamps what it finishes, so this closes
         // itself when the work is truly done.
-        return !(await libraryEnrichedBefore(new Date(releaseDate)));
+        return !(await enrichedBefore(releaseDate));
     }
-    if (item.key === "moods.mixes" || item.key === "moods.mixes.retired") {
+    if (isMoodMixItem(item)) {
         const state = await moodMixState(userId);
         return state.decision !== null || state.playlist !== null;
     }
@@ -186,10 +195,11 @@ async function actionSettled(userId: string, item: ReleaseItem, releaseDate: str
  * actually run, or a quiet "open" until it is. Reading it never writes anything.
  */
 export async function changelogFor(userId: string): Promise<{ releases: ChangelogRelease[]; openCount: number }> {
+    const enrichedBefore = enrichedBeforeOnce();
     const [acks, choices, filtered] = await Promise.all([
         prisma.releaseAcknowledgement.findMany({ where: { userId }, select: { version: true } }),
         prisma.releaseChoice.findMany({ where: { userId } }),
-        forUser(userId, [...RELEASES].sort(byDate).reverse()),
+        forUser(userId, [...RELEASES].sort(byDate).reverse(), enrichedBefore),
     ]);
     const seen = new Set(acks.map((a) => a.version));
     const answers = new Map(choices.map((c) => [c.key, c]));
@@ -228,7 +238,7 @@ export async function changelogFor(userId: string): Promise<{ releases: Changelo
                         if (a) out.answer = { enabled: a.enabled, decidedBy: a.decidedBy };
                     }
                     if (seen.has(r.version)) {
-                        const settled = await actionSettled(userId, i, r.date);
+                        const settled = await actionSettled(userId, i, r.date, enrichedBefore);
                         if (settled !== undefined) {
                             out.done = settled;
                             out.open = !settled;

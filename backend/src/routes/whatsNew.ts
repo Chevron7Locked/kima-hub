@@ -84,10 +84,7 @@ router.get("/open", async (req, res) => {
     }
 });
 
-/**
- * The 1.11 mood-mix question (see services/releases/moodMixes.ts). Registered
- * before the `/:version/...` routes so "mood-mixes" is never read as a version.
- */
+// The 1.11 mood-mix question (services/releases/moodMixes.ts).
 
 /** GET /whats-new/mood-mixes — the user's saved mix, and what they decided. */
 router.get("/mood-mixes", async (req, res) => {

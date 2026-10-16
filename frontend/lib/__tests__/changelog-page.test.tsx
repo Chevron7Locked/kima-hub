@@ -44,6 +44,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import ChangelogPage from "@/app/changelog/page";
+import { api } from "@/lib/api";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -59,6 +60,12 @@ async function render() {
     await act(async () => {
         root.render(<QueryClientProvider client={new QueryClient()}><ChangelogPage /></QueryClientProvider>);
     });
+    // The query hands its answer over on a timer, after the first flush.
+    for (let i = 0; i < 50 && container.textContent?.includes("Loading the changelog"); i++) {
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 10));
+        });
+    }
 }
 
 describe("/changelog", () => {
@@ -196,5 +203,41 @@ describe("/changelog", () => {
         expect(document.querySelector('[role="dialog"]')).toBeNull();
         expect(behind).not.toHaveBeenCalled();
         expect(document.activeElement).toBe(container.querySelector('[data-testid="wipe-run"]'));
+    });
+
+    it("a deep link opens that release's items, and a reload of the list keeps what the reader then closed", async () => {
+        window.history.replaceState(null, "", "/changelog#1.11.0");
+        let client!: QueryClient;
+        root = createRoot(container);
+        await act(async () => {
+            client = new QueryClient();
+            root.render(<QueryClientProvider client={client}><ChangelogPage /></QueryClientProvider>);
+        });
+        for (let i = 0; i < 50 && container.textContent?.includes("Loading the changelog"); i++) {
+            await act(async () => {
+                await new Promise((r) => setTimeout(r, 10));
+            });
+        }
+        const toggleOf = (key: string) =>
+            Array.from(document.getElementById("1.11.0")!.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")).find((b) => b.textContent?.includes(key))!;
+        expect(toggleOf("Wipe and re-run enrichment").getAttribute("aria-expanded")).toBe("true");
+
+        await act(async () => toggleOf("Wipe and re-run enrichment").click());
+        expect(toggleOf("Wipe and re-run enrichment").getAttribute("aria-expanded")).toBe("false");
+
+        // The reload after the wipe settled: the item now says done.
+        const settled = structuredClone(changelog);
+        Object.assign(settled.releases[1].items[0], { open: false, done: true });
+        vi.mocked(api.get).mockResolvedValueOnce(settled);
+        const asked = vi.mocked(api.get).mock.calls.length;
+        await act(async () => {
+            await client.invalidateQueries({ queryKey: ["whats-new", "changelog"] });
+            // The answer reaches the page on a timer.
+            await new Promise((r) => setTimeout(r, 20));
+        });
+        expect(vi.mocked(api.get).mock.calls.length).toBe(asked + 1);
+        expect(toggleOf("Wipe and re-run enrichment").textContent).toContain("done");
+        expect(toggleOf("Wipe and re-run enrichment").getAttribute("aria-expanded")).toBe("false");
+        window.history.replaceState(null, "", "/changelog");
     });
 });

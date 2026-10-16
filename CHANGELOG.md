@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Category rows on the iOS podcasts screen ask Apple only for real categories,** each once, so an unknown or repeated id no longer costs a request to Apple.
 - **The podcast search box no longer claims to be a keyboard-navigable list.** It told screen readers to expect arrow-key movement it never had; its results are now plain buttons, reached with Tab.
 
+- **A What's new choice that fails to save says so** in the notification tray, instead of quietly switching back.
+- **The changelog page shows what you just did.** Answering or running something from the release window now updates `/changelog` straight away, and the page reads the server again on every visit, so an item that finished meanwhile (a re-run of the library) shows as done.
 - **Changing an album's MusicBrainz id no longer drops its ownership protection.** The album editor's id change relabelled the album's "owned" record as coming from enrichment, which could let the nightly integrity check move a library album into Discover; it also created ownership where there was none and left Discover exclusions and compilation ownership behind. Every record keyed on the old id now moves with it, keeping its source.
 
 ## [1.12.0] - 2026-10-14

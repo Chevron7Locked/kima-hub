@@ -352,6 +352,11 @@ export function findRelease(version: string): Release | undefined {
 }
 
 /** Every choice a release asks, flattened — used to resolve a dismissal. */
+/** Whether an item is the mood-mix question, for a saved mix or for one under a removed mood. */
+export function isMoodMixItem(item: ReleaseItem): boolean {
+    return item.kind === "action" && (item.requires === "savedMoodMix" || item.requires === "retiredMoodMix");
+}
+
 export function choicesIn(
     release: Release,
 ): Array<{ key: string; defaultValue: boolean; requires?: "admin" }> {

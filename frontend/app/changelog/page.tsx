@@ -7,7 +7,8 @@
  * it only runs what the item itself offers. Deep links: /changelog#1.11.0 lands on that release.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { shortVersion } from "@/lib/format";
@@ -16,6 +17,7 @@ import { cn } from "@/lib/cn";
 import { ReleaseBody } from "@/components/whats-new/ReleaseBody";
 import { ReleaseLinks } from "@/components/whats-new/ReleaseLinks";
 import { WipeAction } from "@/components/whats-new/WipeAction";
+import { CHANGELOG } from "@/components/whats-new/useVersionChip";
 import type { Release, ReleaseItem } from "@/components/whats-new/types";
 
 /** A release item as the changelog reads it: the window's item plus what the server knows about it now. */
@@ -26,38 +28,37 @@ const niceDate = (d: string) =>
     new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 
 export default function ChangelogPage() {
-    const [data, setData] = useState<{ releases: ChangelogRelease[] } | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [openItems, setOpenItems] = useState<Set<string>>(new Set());
+    // Read again on every visit: an item can settle on the server (a re-run finishing, another device's answer).
+    const changelog = useQuery({
+        queryKey: CHANGELOG,
+        queryFn: () => api.get<{ releases: ChangelogRelease[] }>("/whats-new/changelog"),
+        staleTime: 0,
+    });
+    const data = changelog.data ?? null;
+    const error = changelog.isError && !data ? "Couldn't load the changelog." : null;
     const [doneKeys, setDoneKeys] = useState<Set<string>>(new Set());
 
-    useEffect(() => {
-        let cancelled = false;
-        api
-            .get<{ releases: ChangelogRelease[] }>("/whats-new/changelog")
-            .then((r) => {
-                if (cancelled) return;
-                setData(r);
-                // A deep link like /changelog#1.11.0 opens that release's items.
-                const hash = decodeURIComponent(window.location.hash.slice(1));
-                if (hash) setOpenItems(new Set(collectItemKeys(r.releases, hash)));
-            })
-            .catch(() => !cancelled && setError("Couldn't load the changelog."));
-        return () => {
-            cancelled = true;
-        };
-    }, []);
+    // A deep link like /changelog#1.11.0 opens that release's items until the reader opens or closes one...
+    const [chosen, setChosen] = useState<Set<string> | null>(null);
+    const linkedItems = useMemo(() => {
+        const hash = typeof window === "undefined" ? "" : decodeURIComponent(window.location.hash.slice(1));
+        return new Set(data && hash ? collectItemKeys(data.releases, hash) : []);
+    }, [data]);
+    const openItems = chosen ?? linkedItems;
 
-    // ...and lands on it once it is drawn.
+    // ...and lands on it once it is first drawn; a reload of the list (after an action settles) does not scroll.
+    const landed = useRef(false);
     useEffect(() => {
+        if (!data || landed.current) return;
+        landed.current = true;
         const hash = decodeURIComponent(window.location.hash.slice(1));
-        const target = hash && data ? document.getElementById(hash) : null;
+        const target = hash ? document.getElementById(hash) : null;
         if (target) requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "start" }));
     }, [data]);
 
     const toggle = (key: string) =>
-        setOpenItems((s) => {
-            const next = new Set(s);
+        setChosen((s) => {
+            const next = new Set(s ?? linkedItems);
             if (next.has(key)) next.delete(key);
             else next.add(key);
             return next;
@@ -94,7 +95,7 @@ export default function ChangelogPage() {
                             <li key={`${release.version}:${item.key}`}>
                                 <a
                                     href={`#${release.version}`}
-                                    onClick={() => setOpenItems((s) => new Set([...s, item.key]))}
+                                    onClick={() => setChosen((s) => new Set([...(s ?? linkedItems), item.key]))}
                                     className="flex items-center gap-2 py-2 text-sm text-white hover:underline underline-offset-4 decoration-white/30"
                                 >
                                     <span className="shrink-0 min-[420px]:hidden">•</span>

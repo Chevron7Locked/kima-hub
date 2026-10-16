@@ -92,7 +92,7 @@ export function MoodMixChoice({ onNavigate }: { onNavigate?: () => void }) {
         return (
             <div className="flex flex-col gap-2">
                 {savedNote}
-                <p className="text-sm text-success flex items-center gap-2" data-testid="moodmix-rebuilt">
+                <p className="text-sm text-success flex items-center gap-2" data-testid="moodmix-cleared">
                     <Check className="w-4 h-4" />
                     {decision !== "rebuild"
                         ? "No saved mood mix"

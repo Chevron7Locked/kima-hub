@@ -17,7 +17,7 @@ const FAILED = "Couldn't start it. Try again, or use Settings, under Library Enr
 
 /**
  * The wipe-and-re-run item's control, wherever a release is read: it asks first, starts the run, then says it is
- * running. The confirm sits in a nested-confirm wrapper, so Escape closes it before the window around it.
+ * running. The confirm is a dialog of its own, opened after the window, so Escape closes it before the window.
  */
 export function WipeAction({ item, done, onDone }: { item: WipeItem; done: boolean; onDone: () => void }) {
     const queryClient = useQueryClient();
@@ -80,18 +80,16 @@ export function WipeAction({ item, done, onDone }: { item: WipeItem; done: boole
             )}
             {error && <p className="text-sm text-danger-light">{error}</p>}
             {confirming && (
-                <div data-nested-confirm="true">
-                    <ConfirmDialog
-                        isOpen={true}
-                        onClose={() => setConfirming(false)}
-                        onConfirm={run}
-                        title={item.confirmTitle ?? "Wipe and re-run enrichment?"}
-                        message={item.confirmMessage ?? ""}
-                        confirmText={item.confirmLabel ?? item.cta}
-                        cancelText="Not now"
-                        variant="warning"
-                    />
-                </div>
+                <ConfirmDialog
+                    isOpen={true}
+                    onClose={() => setConfirming(false)}
+                    onConfirm={run}
+                    title={item.confirmTitle ?? "Wipe and re-run enrichment?"}
+                    message={item.confirmMessage ?? ""}
+                    confirmText={item.confirmLabel ?? item.cta}
+                    cancelText="Not now"
+                    variant="warning"
+                />
             )}
         </div>
     );

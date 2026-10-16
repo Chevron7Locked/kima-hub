@@ -7,10 +7,13 @@ import { useUpdateStatus } from "@/hooks/useUpdateStatus";
 import { APP_VERSION } from "@/lib/version";
 
 const OPEN_COUNT = ["whats-new", "open-count"] as const;
+/** The permanent changelog (app/changelog), which shows each item's open or done state. */
+export const CHANGELOG = ["whats-new", "changelog"] as const;
 
-/** After anything that can settle a release's open item, the version chip counts again. */
+/** After anything that can settle a release's open item, the version chip counts again and the changelog reloads. */
 export function refreshOpenCount(queryClient: QueryClient): void {
     void queryClient.invalidateQueries({ queryKey: OPEN_COUNT });
+    void queryClient.invalidateQueries({ queryKey: CHANGELOG });
 }
 
 /** What the version chip shows, in the top bar and the phone menu alike. */

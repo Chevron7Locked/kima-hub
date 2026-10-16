@@ -1,5 +1,6 @@
-// The release window's layout contract, in jsdom: exactly one active view below `lg`. Both panes may only ever
-// hide below a breakpoint — never both at once at base.
+// The release window in jsdom, which applies no CSS: its panes' classes never hide both at every width (the phone
+// layout itself is checked in the browser walkthrough), its pages and the way back, and that Escape belongs to a
+// confirm opened inside it before the window.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -15,6 +16,7 @@ vi.mock("next/link", () => ({
 }));
 
 import { WhatsNewWindow } from "@/components/whats-new/WhatsNewWindow";
+import { WipeAction } from "@/components/whats-new/WipeAction";
 import type { Release } from "@/components/whats-new/types";
 
 const R11: Release = {
@@ -165,5 +167,52 @@ describe("WhatsNewWindow", () => {
         await renderWindow([R12]);
         expect(container.textContent).toContain("Rerun from any step and fixes.");
         expect(container.textContent).not.toContain("A note from");
+    });
+
+    it("gives Escape to a confirm opened inside it first, then leaves the page, then closes", async () => {
+        const R13: Release = {
+            version: "1.13.0",
+            title: "Kima 1.13",
+            summary: "A wipe.",
+            date: "2026-10-20",
+            items: [{ kind: "action", key: "engine.wipe", title: "Run the new engine", summary: "Wipe and re-run.", body: "It takes a while.", cta: "Wipe", run: "wipeEnrichment" }],
+        };
+        const onClose = vi.fn();
+        container = document.createElement("div");
+        document.body.appendChild(container);
+        root = createRoot(container);
+        await act(async () => {
+            root.render(
+                <QueryClientProvider client={new QueryClient()}>
+                    <WhatsNewWindow
+                        releases={[R13]}
+                        onClose={onClose}
+                        onDismiss={async () => {}}
+                        renderAction={(item) => (item.kind === "action" && item.run ? <WipeAction item={item} done={false} onDone={() => {}} /> : null)}
+                    />
+                </QueryClientProvider>,
+            );
+        });
+        const escape = () =>
+            act(async () => {
+                document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+            });
+        const dialogs = () => document.querySelectorAll('[role="dialog"]').length;
+
+        await act(async () => container.querySelector<HTMLButtonElement>('[data-item="engine.wipe"]')!.click());
+        await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="wipe-run"]')!.click());
+        expect(dialogs()).toBe(2);
+
+        await escape();
+        expect(dialogs()).toBe(1);
+        expect(container.querySelector("[data-back]")).not.toBeNull();
+        expect(onClose).not.toHaveBeenCalled();
+
+        await escape();
+        expect(container.querySelector("[data-back]")).toBeNull();
+        expect(onClose).not.toHaveBeenCalled();
+
+        await escape();
+        expect(onClose).toHaveBeenCalledTimes(1);
     });
 });

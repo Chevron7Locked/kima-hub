@@ -31,7 +31,7 @@ const scanEnded = (status?: string) => status === "completed" || status === "fai
 export function TopBar() {
     const pathname = usePathname();
     const router = useRouter();
-    const { logout } = useAuth();
+    const { logout, user } = useAuth();
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;
@@ -271,7 +271,7 @@ export function TopBar() {
                         </Link>
                         <button
                             type="button"
-                            onClick={() => void openWhatsNewOrChangelog((href) => router.push(href))}
+                            onClick={() => void openWhatsNewOrChangelog(user?.id, (href) => router.push(href))}
                             aria-label={chip.label}
                             title={chip.title}
                             className="relative ml-2 px-1.5 py-0.5 text-micro font-medium text-brand/80 bg-brand/[0.06] rounded border border-brand/25 transition-colors hover:text-brand hover:bg-brand/10 hover:border-brand/50 focus-visible:outline-2 focus-visible:outline-brand"

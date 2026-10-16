@@ -17,15 +17,14 @@ import { MoodMixChoice } from "./MoodMixChoice";
 import { useQueryClient } from "@tanstack/react-query";
 import { refreshOpenCount } from "./useVersionChip";
 
-// One pending fetch per app session, shared across remounts (the layout switching
-// between phone, desktop and TV), so a remount neither refetches nor replaces the
-// queue being read. A failed fetch is not cached; the next mount retries.
+// One pending fetch per sign-in, shared across remounts (the layout switching between phone, desktop and TV), so a
+// remount neither refetches nor replaces the queue being read. Keyed to the user and their session: sign out and in
+// again without a reload, as someone else or the same person, and the queue is read afresh. A failed fetch is not
+// kept; the next mount retries.
 let pendingFetch: Promise<Release[]> | null = null;
 let pendingFetchKey: string | null = null;
-function fetchPending(): Promise<Release[]> {
-    // Keyed to the session token: sign out and in as someone else without a
-    // reload, and the new user must not inherit the old user's queue.
-    const key = typeof window === "undefined" ? "ssr" : localStorage.getItem("auth_token") ?? "";
+function fetchPending(userId: string): Promise<Release[]> {
+    const key = `${userId}:${api.getToken() ?? ""}`;
     if (!pendingFetch || pendingFetchKey !== key) {
         pendingFetchKey = key;
         pendingFetch = api
@@ -52,9 +51,9 @@ function openWhatsNew(): void {
 }
 
 /** The version number's door: unread news opens the window; otherwise it opens the permanent /changelog. */
-export async function openWhatsNewOrChangelog(push: (href: string) => void): Promise<void> {
+export async function openWhatsNewOrChangelog(userId: string | undefined, push: (href: string) => void): Promise<void> {
     try {
-        if ((await fetchPending()).length > 0) openWhatsNew();
+        if (userId && (await fetchPending(userId)).length > 0) openWhatsNew();
         else push("/changelog");
     } catch {
         push("/changelog");
@@ -78,11 +77,13 @@ export function WhatsNewGate() {
     const reopening = useRef(false);
     const queryClient = useQueryClient();
 
+    const userId = user?.id;
     useEffect(() => {
+        if (!userId) return;
         let cancelled = false;
         (async () => {
             try {
-                const releases = await fetchPending();
+                const releases = await fetchPending(userId);
                 if (!cancelled) setQueue(releases);
             } catch {
                 // Never block the app on this. Someone who came to listen to
@@ -91,7 +92,7 @@ export function WhatsNewGate() {
             }
         })();
         return () => { cancelled = true; };
-    }, []);
+    }, [userId]);
 
     useEffect(() => {
         const reopen = async () => {
@@ -140,7 +141,7 @@ export function WhatsNewGate() {
                 onNavigate={defer}
                 done={done}
                 renderAction={(item) =>
-                    item.key === "moods.mixes" || item.key === "moods.mixes.retired" ? (
+                    item.kind === "action" && (item.requires === "savedMoodMix" || item.requires === "retiredMoodMix") ? (
                         // Rebuild / keep / save as playlist, or for a mix under a
                         // removed mood, save / remove. The server only sends these
                         // to users who have that kind of saved mix.

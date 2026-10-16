@@ -448,7 +448,7 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
                 const saved = (await (await savedResponse).json()) as { id: string; trackCount: number };
                 await expect(fp.getByTestId("moodmix-saved")).toBeVisible({ timeout: 15_000 });
                 await fp.getByTestId("moodmix-rebuild").click();
-                await expect(fp.getByTestId("moodmix-rebuilt")).toBeVisible({ timeout: 15_000 });
+                await expect(fp.getByTestId("moodmix-cleared")).toBeVisible({ timeout: 15_000 });
                 const state = await freshGet<{ mix: unknown }>("/whats-new/mood-mixes");
                 expect(state.mix, "the rebuilt mix should be gone").toBeNull();
                 // The rebuild clears the mix status, so read the playlist directly.

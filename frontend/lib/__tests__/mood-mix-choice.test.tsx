@@ -1,7 +1,8 @@
 /**
  * The release window's mood-mix question (save as playlist, rebuild, keep):
- * what the user sees after each answer, including save-then-rebuild and that
- * a failed call never looks like it worked.
+ * what the user sees after each answer, including save-then-rebuild, that
+ * a failed call never looks like it worked, and that an answer the server took
+ * makes the version chip count its open items again (a failed one does not).
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -30,12 +31,16 @@ const RETIRED = { id: "your-mood-mix-2", name: "Your Focus Mode Mix", mood: "foc
 
 let container: HTMLDivElement;
 let root: Root;
+let client: QueryClient;
+/** The version chip's count of open items, as useVersionChip keys it for a signed-in user. */
+const OPEN_COUNT = ["whats-new", "open-count", "u1"];
+const countRefreshed = () => client.getQueryState(OPEN_COUNT)?.isInvalidated ?? false;
 
 const q = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
 
 async function render() {
     await act(async () => {
-        root.render(<QueryClientProvider client={new QueryClient()}><MoodMixChoice /></QueryClientProvider>);
+        root.render(<QueryClientProvider client={client}><MoodMixChoice /></QueryClientProvider>);
     });
 }
 
@@ -50,6 +55,8 @@ beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
+    client = new QueryClient();
+    client.setQueryData(OPEN_COUNT, 1);
 });
 
 afterEach(() => {
@@ -74,6 +81,7 @@ describe("MoodMixChoice", () => {
         await render();
         await click("moodmix-keep");
         expect(decide).toHaveBeenCalledWith("keep");
+        expect(countRefreshed()).toBe(true);
         expect(q("moodmix-keep")!.getAttribute("aria-pressed")).toBe("true");
         expect(q("moodmix-name")).not.toBeNull();
         expect(q("moodmix-rebuild")).not.toBeNull();
@@ -87,7 +95,7 @@ describe("MoodMixChoice", () => {
         expect(decide).toHaveBeenCalledWith("rebuild");
         expect(q("moodmix-name")).toBeNull();
         expect(q("moodmix-save")).toBeNull();
-        expect(q("moodmix-rebuilt")!.textContent).toBe("Cleared");
+        expect(q("moodmix-cleared")!.textContent).toBe("Cleared");
     });
 
     it("save then rebuild: the saved playlist is still named after the mix is cleared", async () => {
@@ -98,12 +106,13 @@ describe("MoodMixChoice", () => {
 
         await click("moodmix-save");
         expect(save).toHaveBeenCalledWith("your-mood-mix-1");
+        expect(countRefreshed()).toBe(true);
         expect(q("moodmix-save")).toBeNull();
         expect(q("moodmix-saved")!.querySelector("a")!.getAttribute("href")).toBe("/playlist/pl1");
 
         await click("moodmix-rebuild");
         expect(q("moodmix-saved")).not.toBeNull();
-        expect(q("moodmix-rebuilt")).not.toBeNull();
+        expect(q("moodmix-cleared")).not.toBeNull();
     });
 
     it("a failed save says so and offers the button again", async () => {
@@ -111,6 +120,7 @@ describe("MoodMixChoice", () => {
         save.mockRejectedValue(new Error("404"));
         await render();
         await click("moodmix-save");
+        expect(countRefreshed()).toBe(false);
         expect(q("moodmix-error")!.textContent).toContain("Couldn't save");
         expect(q("moodmix-saved")).toBeNull();
         expect((q("moodmix-save") as HTMLButtonElement).disabled).toBe(false);
@@ -121,8 +131,9 @@ describe("MoodMixChoice", () => {
         decide.mockRejectedValue(new Error("500"));
         await render();
         await click("moodmix-rebuild");
+        expect(countRefreshed()).toBe(false);
         expect(q("moodmix-name")).not.toBeNull();
-        expect(q("moodmix-rebuilt")).toBeNull();
+        expect(q("moodmix-cleared")).toBeNull();
         expect(q("moodmix-error")!.textContent).toBe("Couldn't clear the mix");
     });
 
@@ -132,6 +143,14 @@ describe("MoodMixChoice", () => {
         expect(q("moodmix-keep")!.getAttribute("aria-pressed")).toBe("true");
         expect(q("moodmix-save")).toBeNull();
         expect(q("moodmix-saved")).not.toBeNull();
+    });
+
+    it("says there is no saved mix when the user never had one", async () => {
+        getState.mockResolvedValue({ mix: null, decision: null, playlist: null });
+        await render();
+        expect(q("moodmix-cleared")!.textContent).toBe("No saved mood mix");
+        expect(q("moodmix-save")).toBeNull();
+        expect(q("moodmix-saved")).toBeNull();
     });
 
     it("a current mix offers no Remove", async () => {
@@ -162,7 +181,7 @@ describe("MoodMixChoice", () => {
             await click("moodmix-remove");
             expect(decide).toHaveBeenCalledWith("remove");
             expect(q("moodmix-saved")).not.toBeNull();
-            expect(q("moodmix-rebuilt")!.textContent).toBe("Removed.");
+            expect(q("moodmix-cleared")!.textContent).toBe("Removed.");
         });
 
         it("a failed remove keeps the mix on screen", async () => {

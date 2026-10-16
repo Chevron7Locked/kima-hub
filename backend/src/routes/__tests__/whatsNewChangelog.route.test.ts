@@ -7,6 +7,7 @@ import request from "supertest";
 import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import whatsNewRoutes from "../whatsNew";
+import { RELEASES } from "../../services/releases/catalog";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 // The GPU choice is only shown where CUDA can exist; this ledger test needs the
@@ -30,7 +31,7 @@ const as = (id: string, role: "user" | "admin") => `Bearer ${generateToken({ id,
 async function changelog(role: "user" | "admin" = "admin") {
     const res = await request(app()).get("/whats-new/changelog").set("Authorization", as(role === "admin" ? ADMIN : USER, role));
     expect(res.status).toBe(200);
-    return res.body as { releases: Array<{ version: string; dismissed: boolean; items: Array<{ key: string; open?: boolean; done?: boolean; answer?: { enabled: boolean; decidedBy: string } }> }>; openCount: number };
+    return res.body as { releases: Array<{ version: string; date: string; dismissed: boolean; items: Array<{ key: string; open?: boolean; done?: boolean; answer?: { enabled: boolean; decidedBy: string } }> }>; openCount: number };
 }
 
 const releaseOf = (body: Awaited<ReturnType<typeof changelog>>, version: string) => body.releases.find((r) => r.version === version)!;
@@ -61,8 +62,10 @@ afterAll(async () => {
 it("lists every release newest first, and hides admin-only items from members", async () => {
     const admin = await changelog("admin");
     const versions = admin.releases.map((r) => r.version);
-    expect(new Set(versions)).toEqual(new Set(["1.10.1", "1.11.0", "1.12.0"]));
-    expect(versions).toEqual([...versions].sort((a, b) => (a < b ? 1 : -1)));
+    expect(new Set(versions)).toEqual(new Set(RELEASES.map((r) => r.version)));
+    // Newest first by release date, never by the version's text (which sorts 1.9 after 1.10).
+    const dates = admin.releases.map((r) => r.date);
+    expect(dates).toEqual([...dates].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)));
     expect(releaseOf(admin, "1.11.0").items.some((i) => i.key === "engine.wipe")).toBe(true);
 
     const member = await changelog("user");
@@ -80,8 +83,12 @@ it("keeps a dismissed requirement open until the library verifiably passes throu
     expect(wipe.open).toBe(true);
     expect(wipe.done).toBe(false);
 
+    const libraryAsked = jest.spyOn(prisma, "$queryRaw");
+    const askedAboutLibrary = () => libraryAsked.mock.calls.filter((c) => String(c[0]).includes("track_embeddings")).length;
     const ledger = await request(app()).get("/whats-new/open").set("Authorization", as(ADMIN, "admin"));
     expect(ledger.status).toBe(200);
+    // One request asks about the library once for the release's date, however many of its items depend on it.
+    expect(askedAboutLibrary()).toBe(1);
     expect(ledger.body.items).toEqual([expect.objectContaining({ version: "1.11.0", key: "engine.wipe" })]);
 
     // The rerun stamps the track with today's date; the ledger then closes with no further ceremony.
@@ -90,6 +97,7 @@ it("keeps a dismissed requirement open until the library verifiably passes throu
     const wipeAfter = releaseOf(closed, "1.11.0").items.find((i) => i.key === "engine.wipe");
     expect(wipeAfter === undefined || wipeAfter.open === false).toBe(true);
     expect(closed.openCount).toBe(0);
+    libraryAsked.mockRestore();
 });
 
 it("shows a recorded choice honestly: a dismissal is silence at the default, never consent", async () => {

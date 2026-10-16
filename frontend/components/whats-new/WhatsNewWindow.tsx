@@ -12,6 +12,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { X, Check, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
+import { useDialog } from "@/hooks/useDialog";
 import { Button } from "@/components/ui/Button";
 import { shortVersion } from "@/lib/format";
 import { ReleaseBody } from "./ReleaseBody";
@@ -60,6 +62,7 @@ export function WhatsNewWindow({
     const [closeError, setCloseError] = useState<string | null>(null);
     const [view, setView] = useState<WindowView>({ pane: "list" });
     const dialogRef = useRef<HTMLDivElement>(null);
+    const doneRef = useRef<HTMLButtonElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
     // Where the user came from, so going back lands focus on the row they left.
     const previousView = useRef<WindowView>({ pane: "list" });
@@ -123,49 +126,10 @@ export function WhatsNewWindow({
         if (selector) dialogRef.current?.querySelector<HTMLElement>(selector)?.focus();
     }, [view]);
 
-    // Escape leaves a page first; on the list it closes the window — a real answer, through the same path as the
-    // buttons. While a nested confirm is open, Escape belongs to it alone.
-    useEffect(() => {
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key !== "Escape") return;
-            if (document.querySelector("[data-nested-confirm='true']")) return;
-            e.preventDefault();
-            if (view.pane !== "list") goBack();
-            else void close();
-        };
-        window.addEventListener("keydown", onKey);
-        return () => window.removeEventListener("keydown", onKey);
-    }, [close, goBack, view]);
-
-    // The window takes the page on purpose, so it owes the keyboard what ConfirmDialog gives: focus lands inside on
-    // open, and Tab stays inside while it is up.
-    useEffect(() => {
-        const prev = document.activeElement as HTMLElement | null;
-        dialogRef.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key !== "Tab" || !dialogRef.current) return;
-            const focusable = Array.from(
-                dialogRef.current.querySelectorAll<HTMLElement>(
-                    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-                ),
-            ).filter((el) => !el.hasAttribute("disabled"));
-            if (focusable.length === 0) return;
-            const first = focusable[0];
-            const last = focusable[focusable.length - 1];
-            if (e.shiftKey && document.activeElement === first) {
-                e.preventDefault();
-                last.focus();
-            } else if (!e.shiftKey && document.activeElement === last) {
-                e.preventDefault();
-                first.focus();
-            }
-        };
-        document.addEventListener("keydown", onKey);
-        return () => {
-            document.removeEventListener("keydown", onKey);
-            prev?.focus?.();
-        };
-    }, [release.version]);
+    // A dialog like any other: focus starts on Done, Tab stays inside, and Escape (the newest dialog's alone, so a
+    // confirm opened inside takes it first) leaves a page, or on the list closes the window through the same path as
+    // the buttons.
+    useDialog(dialogRef, true, () => (view.pane !== "list" ? goBack() : void close()), doneRef);
 
     const answer = async (key: string, enabled: boolean) => {
         setChoices((c) => ({ ...c, [key]: enabled }));
@@ -178,6 +142,7 @@ export function WhatsNewWindow({
                 delete n[key];
                 return n;
             });
+            notify.error("couldn't save your choice");
         }
     };
 
@@ -465,7 +430,7 @@ export function WhatsNewWindow({
                             <p className="text-xs text-[var(--text-muted)]">Press Esc to close.</p>
                         )}
                     </div>
-                    <Button variant="primary" onClick={close} disabled={closing} data-autofocus data-testid="whatsnew-done" className="shrink-0">
+                    <Button ref={doneRef} variant="primary" onClick={close} disabled={closing} data-testid="whatsnew-done" className="shrink-0">
                         {closing ? "Saving..." : unanswered > 0 ? "Close" : "Done"}
                     </Button>
                 </footer>

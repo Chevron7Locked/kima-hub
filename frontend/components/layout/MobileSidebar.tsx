@@ -21,7 +21,7 @@ interface MobileSidebarProps {
 export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
     const pathname = usePathname();
     const router = useRouter();
-    const { logout } = useAuth();
+    const { logout, user } = useAuth();
     const chip = useVersionChip();
     const [isSyncing, setIsSyncing] = useState(false);
     const isFirstRender = useRef(true);
@@ -220,7 +220,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                         type="button"
                         onClick={() => {
                             onClose();
-                            void openWhatsNewOrChangelog((href) => router.push(href));
+                            void openWhatsNewOrChangelog(user?.id, (href) => router.push(href));
                         }}
                         aria-label={chip.label}
                         title={chip.title}
