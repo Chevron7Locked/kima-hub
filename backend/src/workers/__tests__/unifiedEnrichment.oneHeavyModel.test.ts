@@ -22,6 +22,7 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { featureDetection } from "../../services/featureDetection";
 import { sourcePauseController } from "../../services/sourcePauseController";
 import { getNextWork } from "../unifiedEnrichment";
+import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 
 const P = "onehm";
 const A = `${P}_a`;
@@ -60,6 +61,17 @@ beforeEach(async () => {
     await prisma.trackStage.deleteMany({ where: { trackId: { in: [A, B] } } });
     await analysis(A, { status: "done" });
 });
+
+const bothAtOnce = async (on: boolean) => {
+    await prisma.systemSettings.upsert({
+        where: { id: "default" },
+        create: { id: "default", analysisAndVectorsTogether: on },
+        update: { analysisAndVectorsTogether: on },
+    });
+    invalidateSystemSettingsCache();
+};
+
+afterEach(() => bothAtOnce(false));
 
 afterAll(async () => {
     await prisma.trackStage.deleteMany({ where: { OR: [{ trackId: { startsWith: P } }, { id: { startsWith: `${P}_ts_` } }] } });
@@ -118,5 +130,15 @@ it("holds analysis while CLAP is working on a track, unless CLAP is not running"
     expect(await offered("analysis")).toEqual([B]);
     (featureDetection.clapRunning as jest.Mock).mockResolvedValue(true);
     await prisma.trackStage.update({ where: { trackId_stage: { trackId: A, stage: "embedding" } }, data: { status: "done" } });
+    expect(await offered("analysis")).toEqual([B]);
+});
+
+it("runs both side by side when an admin chose that", async () => {
+    await bothAtOnce(true);
+    await analysis(B, { status: "pending" });
+    expect(await vectorsOffered()).toEqual([A]);
+    await prisma.trackStage.create({
+        data: { trackId: A, stage: "embedding", status: "working", startedAt: new Date(), nextRetryAt: new Date(Date.now() + 900_000) },
+    });
     expect(await offered("analysis")).toEqual([B]);
 });

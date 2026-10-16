@@ -1937,6 +1937,18 @@ class ApiClient {
         });
     }
 
+    /** Whether audio analysis and sound vectors run side by side (admin). Off: one after the other. */
+    async getAnalysisTogether() {
+        return this.get<{ together: boolean }>("/analysis/together");
+    }
+
+    async setAnalysisTogether(together: boolean) {
+        return this.request<{ together: boolean }>("/analysis/together", {
+            method: "PUT",
+            body: JSON.stringify({ together }),
+        });
+    }
+
     async getGpuStatus() {
         return this.get<GpuRuntimeStatus>("/system-settings/gpu");
     }

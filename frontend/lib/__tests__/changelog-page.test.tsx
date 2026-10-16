@@ -40,7 +40,7 @@ const changelog = {
 };
 
 vi.mock("@/lib/api", () => ({
-    api: { get: vi.fn(async () => changelog), post: vi.fn(async () => ({})), wipeAndRerunEnrichment: vi.fn(async () => ({})) },
+    api: { get: vi.fn(async () => changelog), post: vi.fn(async () => ({})), wipeAndRerunEnrichment: vi.fn(async () => ({})), getAnalysisTogether: vi.fn(async () => ({ together: false })), setAnalysisTogether: vi.fn() },
 }));
 
 import ChangelogPage from "@/app/changelog/page";
@@ -98,6 +98,14 @@ describe("/changelog", () => {
         expect(container.textContent).toContain("Everything the old engine worked out.");
         const run = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Wipe and re-run")!;
         expect(run).toBeTruthy();
+        // Beside the wipe, the choice of running both heavy jobs at once, off until an admin turns it on.
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 0));
+        });
+        const both = container.querySelector<HTMLInputElement>("#whats-new-analysis-together");
+        expect(both).not.toBeNull();
+        expect(both!.checked).toBe(false);
+        expect(container.textContent).toContain("Run audio analysis and sound vectors at the same time");
     });
 
     it("asks before wiping, then says the run started; a failure says so and leaves the button", async () => {

@@ -515,4 +515,43 @@ router.post("/vibe/success", async (req, res) => {
     }
 });
 
+/**
+ * GET /api/analysis/together
+ * Whether audio analysis and sound vectors run side by side (true) or one after the other (false, the default).
+ */
+router.get("/together", requireAuth, requireAdmin, async (_req, res) => {
+    try {
+        const settings = await getSystemSettings();
+        res.json({ together: settings?.analysisAndVectorsTogether === true });
+    } catch (error) {
+        logger.error("Get analysis-and-vectors setting error:", error);
+        res.status(500).json({ error: "Failed to read the setting" });
+    }
+});
+
+/**
+ * PUT /api/analysis/together
+ * Body { together: boolean }. New work follows it from the next claim; work already handed out finishes as it is.
+ */
+router.put("/together", requireAuth, requireAdmin, async (req, res) => {
+    const together = req.body?.together;
+    if (typeof together !== "boolean") {
+        return res.status(400).json({ error: "together (boolean) is required" });
+    }
+    try {
+        // upsert: SystemSettings has no row on a fresh install.
+        await prisma.systemSettings.upsert({
+            where: { id: "default" },
+            create: { id: "default", analysisAndVectorsTogether: together },
+            update: { analysisAndVectorsTogether: together },
+        });
+        invalidateSystemSettingsCache();
+        logger.info(`Audio analysis and sound vectors now run ${together ? "side by side" : "one after the other"}`);
+        res.json({ together });
+    } catch (error) {
+        logger.error("Set analysis-and-vectors setting error:", error);
+        res.status(500).json({ error: "Failed to save the setting" });
+    }
+});
+
 export default router;

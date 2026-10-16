@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { refreshOpenCount } from "./useVersionChip";
+import { BothAtOnceSwitch, BOTH_AT_ONCE_DESCRIPTION, BOTH_AT_ONCE_LABEL } from "@/components/enrichment/BothAtOnceSwitch";
 import type { ReleaseItem } from "./types";
 
 type WipeItem = Extract<ReleaseItem, { kind: "action" }>;
@@ -79,6 +80,13 @@ export function WipeAction({ item, done, onDone }: { item: WipeItem; done: boole
                 </button>
             )}
             {error && <p className="text-sm text-danger-light">{error}</p>}
+            <div className="flex items-start justify-between gap-4 mt-2">
+                <label htmlFor="whats-new-analysis-together" className="text-sm">
+                    <span className="block text-[var(--text-primary)]">{BOTH_AT_ONCE_LABEL}</span>
+                    <span className="block text-xs text-[var(--text-secondary)]">{BOTH_AT_ONCE_DESCRIPTION}</span>
+                </label>
+                <BothAtOnceSwitch id="whats-new-analysis-together" />
+            </div>
             {confirming && (
                 <ConfirmDialog
                     isOpen={true}

@@ -13,6 +13,7 @@ import { useWorkerSetting } from "../../hooks/useWorkerSetting";
 import { useAuth } from "@/lib/auth-context";
 import { useFeatures } from "@/lib/features-context";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { BothAtOnceSwitch, BOTH_AT_ONCE_DESCRIPTION, BOTH_AT_ONCE_LABEL } from "@/components/enrichment/BothAtOnceSwitch";
 import {
     useQueryClient,
     useQuery,
@@ -1139,6 +1140,12 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                         description="CPU workers for CLAP embeddings (vibe similarity)"
                         {...clapWorkers}
                     />
+                )}
+
+                {settings.autoEnrichMetadata && !featuresLoading && musicCNN && vibeEmbeddings && (
+                    <SettingsRow label={BOTH_AT_ONCE_LABEL} description={BOTH_AT_ONCE_DESCRIPTION} htmlFor="analysis-together">
+                        <BothAtOnceSwitch id="analysis-together" />
+                    </SettingsRow>
                 )}
 
                 {/* Each GPU switch row shows only measured state; on hosts the

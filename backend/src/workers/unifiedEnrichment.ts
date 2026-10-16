@@ -162,12 +162,18 @@ const STAGE_CLAIM_LEASE_MS = 15 * 60 * 1000;
  * poison file cannot loop forever. */
 const STAGE_REDELIVERY_CAP = 3;
 
+/** An admin chose to run both heavy models side by side, accepting the load (Settings, Library Enrichment). */
+async function bothAtOnce(): Promise<boolean> {
+    return (await getSystemSettings())?.analysisAndVectorsTogether === true;
+}
+
 /**
  * MusiCNN and CLAP run one at a time across the library, never side by side, so each has the machine (CPU and
  * GPU) to itself. Sound vectors start once no track's analysis is owed, due a retry or in flight; an analyzer that
  * is paused or not running holds nothing back, and an analysis waiting out a retry delay does not hold the vectors.
  */
 export async function analysisStillRunning(now: Date): Promise<boolean> {
+    if (await bothAtOnce()) return false;
     if (await sourcePauseController.isPaused(STAGE_SOURCE.analysis, now)) return false;
     if (!(await featureDetection.analyzerRunning())) return false;
     const [row] = await prisma.$queryRaw<Array<{ open: boolean }>>`
@@ -191,6 +197,7 @@ export async function analysisStillRunning(now: Date): Promise<boolean> {
  * CLAP analyzer that is not running holds nothing back.
  */
 export async function vectorsInFlight(): Promise<boolean> {
+    if (await bothAtOnce()) return false;
     if (!(await featureDetection.clapRunning())) return false;
     const [row] = await prisma.$queryRaw<Array<{ busy: boolean }>>`
         SELECT EXISTS (

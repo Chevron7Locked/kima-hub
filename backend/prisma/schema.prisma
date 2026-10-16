@@ -697,6 +697,9 @@ model SystemSettings {
   acoustidApiKey              String?
   soulseekConcurrentDownloads Int      @default(4)
   clapWorkers                 Int      @default(2)
+  /// Audio analysis and sound vectors run side by side instead of one after the other. Off by default: both share
+  /// the processor and the GPU for the whole run.
+  analysisAndVectorsTogether  Boolean  @default(false)
   gpuOnnxEnabled              Boolean  @default(false)
   /// Runs MusiCNN analysis on the shared GPU runtime; a switch of its own, separate from sound vectors.
   gpuAnalysisEnabled          Boolean  @default(false)
