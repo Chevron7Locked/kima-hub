@@ -1,6 +1,6 @@
 /**
  * The album vote on real AcoustID replies for all 13 songs of Perturbator's "Dangerous Days"
- * (fixtures/acoustid/album-dangerous-days.json, recorded 2026-10-15): AcoustID lists compilations
+ * (fixtures/acoustid/album-dangerous-days.json): AcoustID lists compilations
  * and soundtracks beside the album; the album most songs agree on, under the album's own title,
  * wins. The tie and title rules use small hand-made answers.
  */

@@ -23,7 +23,7 @@ def test_real_readings_pass():
 
 
 def test_the_garbage_found_stored_is_nulled():
-    # the prod rows the audit named
+    # readings far outside any real measurement
     assert gate(2868.2, 47.06) == (None, None)
     assert gate(232.2, 43.64) == (None, None)
     assert gate(15.6, 38.6) == (None, None)

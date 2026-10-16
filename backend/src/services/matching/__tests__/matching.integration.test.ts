@@ -561,7 +561,7 @@ describe("rebuilding when the inputs change", () => {
 // Last in the file: these re-runs clear the library's state (and its sound vectors) for every test after them.
 describe("a re-run while the map is being laid out", () => {
     it("never lets the layout it overtook store the old map over the reset", async () => {
-        // Every re-run lays a fresh map (Kevin, 10-10), so no layout computed before it may be left standing. A re-run
+        // Every re-run lays a fresh map, so no layout computed before it may be left standing. A re-run
         // from similarity lands here while the worker computes; the layout then finds no state and writes nothing.
         await buildMatching();
         await prisma.$executeRaw`DELETE FROM matching_map`;

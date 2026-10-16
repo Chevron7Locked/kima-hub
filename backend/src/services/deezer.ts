@@ -38,7 +38,7 @@ const DEEZER_QUOTA = 4;
 
 /**
  * Deezer's quota was hit: a rate limit, shaped as a 429 so the limiter backs off and retries it. The quota is a
- * 5-second window (measured 2026-10-16: lifted 4.3 and 5.1 s after a burst), so the limiter is told to wait that out
+ * 5-second window (measured: lifted 4.3 and 5.1 s after a burst), so the limiter is told to wait that out
  * rather than retry inside it.
  */
 class DeezerQuotaError extends UpstreamReplyError {

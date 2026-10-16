@@ -1,6 +1,6 @@
 /**
  * Batched AcoustID lookups against a recorded live reply (fixtures/acoustid/batch-lookup-3.json:
- * three songs, one request, 2026-10-15) and the suite's real Redis: one request carries many
+ * three songs, one request) and the suite's real Redis: one request carries many
  * fingerprints, each reply is saved, `lookup` answers from the saved reply without a request,
  * and nothing is asked twice.
  */

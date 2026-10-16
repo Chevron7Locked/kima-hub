@@ -148,7 +148,7 @@ describe('cached-path range policy', () => {
 // ── Uncached: streamed from the host ──────────────────────────────────────────
 
 describe('uncached stream from the host', () => {
-    // Behaves as Acast was measured to (2026-10-14): each identity gets its own stitched copy, and neither matches
+    // Behaves as Acast was measured to: each identity gets its own stitched copy, and neither matches
     // the length the feed declares. Kima's own identity gets the copy the background download caches.
     const KIMA_COPY = Buffer.from(Array.from({ length: 6000 }, (_, i) => i & 0xff));
     const OTHER_COPY = Buffer.from(Array.from({ length: 3500 }, (_, i) => (i * 7) & 0xff));

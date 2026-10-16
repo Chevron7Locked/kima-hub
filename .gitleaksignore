@@ -1,0 +1,7 @@
+# Findings checked and kept, one fingerprint per line (commit:file:rule:line in history, file:rule:line in a tree).
+# encryption.ts:3 is prose in its header comment ("secret and recovery codes: XChaCha20..."), not a key.
+92a416a197b37957dc09a1231cb2e407eb8d076c:backend/src/utils/encryption.ts:generic-api-key:3
+backend/src/utils/encryption.ts:generic-api-key:3
+# The AcoustID key in this test is a made-up value the test saves and reads back.
+0ec803e7dea703a5e2f67ed0bb0fe0488d81f8a8:backend/src/routes/__tests__/systemSettings.acoustid.test.ts:generic-api-key:88
+backend/src/routes/__tests__/systemSettings.acoustid.test.ts:generic-api-key:96

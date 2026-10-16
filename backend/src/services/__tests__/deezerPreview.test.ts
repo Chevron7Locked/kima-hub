@@ -1,5 +1,5 @@
 /**
- * Song previews and an artist's popular songs on Deezer's real replies (fixtures/deezer, recorded 2026-10-15).
+ * Song previews and an artist's popular songs on Deezer's recorded replies (fixtures/deezer).
  * Deezer no longer honours its artist:"…" track:"…" search, so a preview is asked for plainly; a full title beats
  * one that only agrees without Deezer's credits; a well-known song buried under covers is found among its artist's
  * own popular songs, fetched once per artist, and asked for again for a link that still plays (Deezer's last 15

@@ -1888,8 +1888,8 @@ export async function enrichSingleTrack(
     let acoustidFailure: FailureOutcome | null = null;
     // The recordings AcoustID would also accept, best first.
     let acoustidCandidates: string[] = [];
-    // An AcoustID pick whose title is not the track's (only its length is): asked last, as
-    // before, once the tracklist, the ISRC and the name search have had their turn.
+    // An AcoustID pick whose title is not the track's (only its length is): asked last,
+    // once the tracklist, the ISRC and the name search have had their turn.
     let acoustidLengthOnly: { candidates: string[]; fingerprintFrom?: string } | null = null;
     // The album row's own tracklist, with this track on it (its recording or its name): the
     // album's year, label and genres, for the row.

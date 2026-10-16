@@ -90,7 +90,7 @@ SILENCE_PEAK = 10 ** (-80 / 20)
 # A reading outside these bounds is the meter or a corrupt decode failing, never the music:
 # integrated loudness is bounded at +0.5 LUFS, just above digital full scale (0 LUFS); below
 # -70 LUFS is below anything with audible content; a range past 60 LU cannot exist. They catch,
-# at the source, the garbage that was found stored (+2868.2 LUFS); nothing outside the bounds
+# at the source, garbage such as +2868.2 LUFS; nothing outside the bounds
 # reaches the row.
 LOUDNESS_RANGE_OK = (-70.0, 0.5)
 DYNAMIC_RANGE_OK = (0.0, 60.0)
