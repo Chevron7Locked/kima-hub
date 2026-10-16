@@ -9,11 +9,14 @@ import { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { announcePlaylistsChanged, playlistsHoldingTracks, type HeldPlaylist } from "./playlistEvents";
 
 interface ReconcileResult {
     removed: number;
     /** Absolute transcode-cache paths to unlink after the transaction commits. */
     artifacts: string[];
+    /** Playlists that held a retired song (their entries went with it): told after the transaction commits. */
+    playlists: HeldPlaylist[];
 }
 
 /** Cache paths are stored relative (audioStreaming's convention); resolve once, here. */
@@ -42,7 +45,7 @@ export async function reconcileDeletedTracks(
         logger.warn(
             `[RECONCILE] ${missingEver}/${totalTracks} tracks missing at once — mass disappearance looks like a dropped mount, not a deletion; nothing retired`
         );
-        return { removed: 0, artifacts: [] };
+        return { removed: 0, artifacts: [], playlists: [] };
     }
 
     // Confirmed gone: flagged by an earlier scan, still absent this one. Files that
@@ -57,7 +60,7 @@ export async function reconcileDeletedTracks(
             album: { select: { title: true, artist: { select: { name: true } } } },
         },
     });
-    if (missing.length === 0) return { removed: 0, artifacts: [] };
+    if (missing.length === 0) return { removed: 0, artifacts: [], playlists: [] };
 
     const ids = missing.map((t) => t.id);
 
@@ -97,6 +100,7 @@ export async function reconcileDeletedTracks(
         data: { trackId: null },
     });
 
+    const playlists = await playlistsHoldingTracks(tx, { id: { in: ids } });
     await tx.track.deleteMany({ where: { id: { in: ids } } });
 
     // Empty-genre cleanup is library-wide, not sweep-scoped: any Genre row with no tracks
@@ -105,7 +109,7 @@ export async function reconcileDeletedTracks(
     await tx.genre.deleteMany({ where: { trackGenres: { none: {} } } });
 
     logger.info(`[RECONCILE] retired ${ids.length} track(s) confirmed gone by consecutive scans`);
-    return { removed: ids.length, artifacts };
+    return { removed: ids.length, artifacts, playlists };
 }
 
 /** Best-effort artifact unlinking after the transaction commits; failures never block a scan. */
@@ -127,11 +131,12 @@ async function unlinkArtifacts(artifacts: string[]): Promise<void> {
  */
 export async function runReconcile(scanStartedAt: Date): Promise<ReconcileResult & { skipped: boolean }> {
     if (config.music.reconcileMode !== "delete") {
-        return { removed: 0, artifacts: [], skipped: true };
+        return { removed: 0, artifacts: [], playlists: [], skipped: true };
     }
     // Retiring hundreds of tracks cascades through plays, stages and embeddings: Prisma's 5 s default would roll
     // the sweep back and fail every scan after it. The enrichment re-run allows the same for its wipe.
     const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt), { timeout: 120_000 });
     await unlinkArtifacts(res.artifacts);
+    announcePlaylistsChanged(res.playlists);
     return { ...res, skipped: false };
 }

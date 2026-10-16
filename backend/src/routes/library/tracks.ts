@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAdmin } from "../../middleware/auth";
+import { announcePlaylistsChanged, playlistsHoldingTracks } from "../../services/playlistEvents";
 import { prisma, Prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { lrclibService } from "../../services/lrclib";
@@ -594,9 +595,12 @@ router.delete("/tracks/:id", requireAdmin, async (req, res) => {
       }
     }
 
+    // The song's playlist entries go with it: tell those playlists once it is gone.
+    const playlists = await playlistsHoldingTracks(prisma, { id: track.id });
     await prisma.track.delete({
       where: { id: track.id },
     });
+    announcePlaylistsChanged(playlists);
 
     logger.debug(`[DELETE] Deleted track: ${track.title}`);
 

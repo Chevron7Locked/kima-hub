@@ -39,6 +39,8 @@ jest.mock('../../utils/db', () => ({
             findUnique: jest.fn(),
         },
         track: { findMany: jest.fn() },
+        // Which playlists held the album's songs (read before it is deleted): none here.
+        playlistItem: { findMany: jest.fn().mockResolvedValue([]) },
         $transaction: jest.fn(async (fn: (tx: any) => Promise<any[]>) => fn(prisma)),
     },
 }));

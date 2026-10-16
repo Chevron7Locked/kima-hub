@@ -8,6 +8,7 @@
 import { prisma } from "../../utils/db";
 import { config } from "../../config";
 import { reconcileDeletedTracks, transcodeArtifactPath, runReconcile } from "../libraryReconcile";
+import { eventBus, type SSEEvent } from "../eventBus";
 
 const P = "recon";
 const MIN = 60_000;
@@ -191,7 +192,7 @@ describe("reconcileDeletedTracks", () => {
     it("flag mode (default) skips the sweep without touching tracks", async () => {
         await seedTrack(`${P}flag`, { missingMinutesAgo: 999 });
         const res = await runReconcile(scanStartedAt());
-        expect(res).toEqual({ removed: 0, artifacts: [], skipped: true });
+        expect(res).toEqual({ removed: 0, artifacts: [], playlists: [], skipped: true });
         expect(await prisma.track.findUnique({ where: { id: `${P}flag` } })).not.toBeNull();
         expect(await prisma.removalLog.count({ where: { filePath: `/tmp/${P}flag.flac` } })).toBe(0);
     });
@@ -210,6 +211,37 @@ describe("reconcileDeletedTracks", () => {
             expect(await prisma.removalLog.count({ where: { filePath: `/tmp/${P}swp.flac` } })).toBe(1);
         } finally {
             spy.mockRestore();
+        }
+    });
+
+    it("a playlist that held a retired song: its owner is told once, after the sweep commits", async () => {
+        await seedTrack(`${P}held`, { missingMinutesAgo: 5 });
+        const list = await prisma.playlist.create({
+            data: { userId: `${P}user`, name: `${P}list`, items: { create: [{ trackId: `${P}held`, sort: 0, rank: "a" }] } },
+        });
+        const heard: SSEEvent[] = [];
+        const stop = eventBus.subscribe(`${P}user`, { send: (event) => (heard.push(event), true) });
+        const spy = jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "delete" });
+        try {
+            const inside = await prisma.$transaction(async (tx) => {
+                const res = await reconcileDeletedTracks(tx, scanStartedAt());
+                expect(heard).toEqual([]);
+                return res;
+            });
+            expect(inside.playlists).toEqual([{ userId: `${P}user`, playlistId: list.id }]);
+            expect(heard).toEqual([]);
+
+            await seedTrack(`${P}held2`, { missingMinutesAgo: 5 });
+            await prisma.playlistItem.create({ data: { playlistId: list.id, trackId: `${P}held2`, sort: 1, rank: "b" } });
+            await runReconcile(scanStartedAt());
+            expect(heard.filter((e) => e.type === "playlist:updated").map((e) => e.payload)).toEqual([
+                { playlistId: list.id, deleted: false },
+            ]);
+            expect(await prisma.playlistItem.count({ where: { playlistId: list.id } })).toBe(0);
+        } finally {
+            spy.mockRestore();
+            stop();
+            await prisma.playlist.deleteMany({ where: { id: list.id } });
         }
     });
 });

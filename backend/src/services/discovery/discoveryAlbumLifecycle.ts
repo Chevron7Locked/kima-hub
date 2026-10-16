@@ -8,6 +8,7 @@ import { logger } from '../../utils/logger';
 import { updateArtistCounts } from '../artistCountsService';
 import { LIBRARY_LOCATION } from '../libraryFilters';
 import { removeDiscoveryAlbum } from './lidarrRemoval';
+import { announcePlaylistsChanged, playlistsHoldingTracks } from '../playlistEvents';
 
 export interface DiscoveryAlbumInfo {
     id: string;
@@ -82,11 +83,13 @@ export class DiscoveryAlbumLifecycle {
             await removeDiscoveryAlbum(album.lidarrAlbumId, album.rgMbid);
         }
 
-        await prisma.$transaction(async (tx) => {
+        const playlists = await prisma.$transaction(async (tx) => {
             // Only DISCOVER albums: a LIBRARY album with the same rgMbid is never deleted here.
             const dbAlbum = await tx.album.findFirst({
                 where: { rgMbid: album.rgMbid, location: 'DISCOVER' },
             });
+            // The songs' playlist entries go with them: told once the transaction commits.
+            const holding = dbAlbum ? await playlistsHoldingTracks(tx, { albumId: dbAlbum.id }) : [];
             if (dbAlbum) {
                 await tx.track.deleteMany({ where: { albumId: dbAlbum.id } });
                 await tx.album.delete({ where: { id: dbAlbum.id } });
@@ -94,7 +97,9 @@ export class DiscoveryAlbumLifecycle {
             await tx.discoveryTrack.deleteMany({
                 where: { discoveryAlbumId: album.id },
             });
+            return holding;
         });
+        announcePlaylistsChanged(playlists);
 
         logger.debug(
             `[DiscoveryLifecycle] Deleted: ${album.artistName} - ${album.albumTitle}`

@@ -24,6 +24,7 @@ import {
 import { distributedLock } from '../utils/distributedLock';
 import { LIBRARY_LOCATION } from "../services/libraryFilters";
 import { withArtistArtwork } from "../services/artwork";
+import { announcePlaylistsChanged, playlistsHoldingTracks } from "../services/playlistEvents";
 
 const router = Router();
 
@@ -1370,7 +1371,7 @@ router.delete("/clear", async (req, res) => {
 
                     // One transaction for the row deletes, so a crash cannot leave orphans. The
                     // Lidarr and filesystem deletes above stay outside it.
-                    await prisma.$transaction(async (tx) => {
+                    const playlists = await prisma.$transaction(async (tx) => {
                         // Delete DiscoveryTrack records first (foreign key to Track)
                         await tx.discoveryTrack.deleteMany({
                             where: { discoveryAlbumId: album.id },
@@ -1385,16 +1386,19 @@ router.delete("/clear", async (req, res) => {
                             include: { tracks: true },
                         });
 
-                        if (dbAlbum) {
-                            await tx.track.deleteMany({
-                                where: { albumId: dbAlbum.id },
-                            });
+                        if (!dbAlbum) return [];
+                        // The songs' playlist entries go with them: told once the transaction commits.
+                        const holding = await playlistsHoldingTracks(tx, { albumId: dbAlbum.id });
+                        await tx.track.deleteMany({
+                            where: { albumId: dbAlbum.id },
+                        });
 
-                            await tx.album.delete({
-                                where: { id: dbAlbum.id },
-                            });
-                        }
+                        await tx.album.delete({
+                            where: { id: dbAlbum.id },
+                        });
+                        return holding;
                     });
+                    announcePlaylistsChanged(playlists);
 
                     activeDeleted++;
                 } catch (error: any) {
@@ -1542,12 +1546,15 @@ router.delete("/clear", async (req, res) => {
             });
 
             if (!hasDiscoveryRecord && !hasOwnedRecord) {
+                // The songs' playlist entries go with them: tell those playlists once they are gone.
+                const playlists = await playlistsHoldingTracks(prisma, { albumId: orphanAlbum.id });
                 await prisma.track.deleteMany({
                     where: { albumId: orphanAlbum.id },
                 });
                 await prisma.album.delete({
                     where: { id: orphanAlbum.id },
                 });
+                announcePlaylistsChanged(playlists);
                 orphanedAlbumsDeleted++;
                 logger.debug(
                     `    Deleted orphaned album: ${orphanAlbum.artist.name} - ${orphanAlbum.title}`

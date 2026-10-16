@@ -21,6 +21,10 @@ jest.mock('../../../utils/db', () => ({
         track: {
             deleteMany: jest.fn(),
         },
+        // Which playlists held the album's songs (read before they are deleted): none here.
+        playlistItem: {
+            findMany: jest.fn().mockResolvedValue([]),
+        },
         discoveryTrack: {
             deleteMany: jest.fn(),
         },

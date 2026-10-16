@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { normalizeArtistName } from "../../services/artistIdentity";
 import { requireAdmin } from "../../middleware/auth";
+import { announcePlaylistsChanged, playlistsHoldingTracks } from "../../services/playlistEvents";
 import { prisma, Prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { logger } from "../../utils/logger";
@@ -1152,9 +1153,12 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
     logger.debug(
       `[DELETE] Deleting artist from database: ${artist.name} (${artist.id})`,
     );
+    // Its songs' playlist entries go with it: tell those playlists once it is gone.
+    const playlists = await playlistsHoldingTracks(prisma, { album: { artistId: artist.id } });
     await prisma.artist.delete({
       where: { id: artist.id },
     });
+    announcePlaylistsChanged(playlists);
 
     logger.debug(
       `[DELETE] Successfully deleted artist: ${

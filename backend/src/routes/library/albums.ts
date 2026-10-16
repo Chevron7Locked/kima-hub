@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAdmin } from "../../middleware/auth";
+import { announcePlaylistsChanged, playlistsHoldingTracks } from "../../services/playlistEvents";
 import { prisma, Prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { deezerService } from "../../services/deezer";
@@ -259,9 +260,12 @@ router.delete("/albums/:id", requireAdmin, async (req, res) => {
       logger.warn("[DELETE] Could not delete album folder:", err);
     }
 
+    // Its songs' playlist entries go with it: tell those playlists once it is gone.
+    const playlists = await playlistsHoldingTracks(prisma, { albumId: album.id });
     await prisma.album.delete({
       where: { id: album.id },
     });
+    announcePlaylistsChanged(playlists);
 
     logger.debug(
       `[DELETE] Deleted album: ${album.title} (${deletedFiles} files)`,
