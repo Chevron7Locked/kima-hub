@@ -59,3 +59,11 @@ it("treats an app resumed from the background (visible again, no pageshow) as ba
     vi.stubGlobal("fetch", vi.fn(cancelled));
     await expect(api.request("/podcasts/x/similar")).rejects.toThrow("Failed to fetch");
 });
+
+it("sends progress saves kept alive, so closing the page does not cancel them", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ok({}));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.updatePodcastEpisodeProgress("p", "e", 120, 600);
+    await api.updateAudiobookProgress("b", 120, 600);
+    expect(fetchMock.mock.calls.map(([, init]) => (init as RequestInit).keepalive)).toEqual([true, true]);
+});

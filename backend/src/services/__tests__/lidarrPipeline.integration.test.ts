@@ -7,7 +7,7 @@
 
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
-import { loadRecording, startMusicBrainzReplay, type ReplayServer } from "../../__tests__/helpers/musicbrainzReplay";
+import { loadRecording, startReplayServer, type ReplayServer } from "../../__tests__/helpers/replayServer";
 import { loadScenario, startLidarrReplay, type LidarrReplay, type LidarrScenario } from "../../__tests__/helpers/lidarrReplay";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
@@ -33,7 +33,7 @@ let useLidarr: typeof import("../../__tests__/helpers/lidarrSettings").useLidarr
 
 beforeAll(async () => {
     await waitForRedisReady();
-    mb = await startMusicBrainzReplay(loadRecording("lidarr-pipeline"));
+    mb = await startReplayServer(loadRecording("musicbrainz", "lidarr-pipeline"));
     // Read when the MusicBrainz service is built, so it goes in before the pipeline is loaded.
     process.env.MUSICBRAINZ_BASE_URL = mb.url;
     ({ simpleDownloadManager: manager } = await import("../simpleDownloadManager"));

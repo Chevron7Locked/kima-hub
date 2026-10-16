@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 import { z } from "zod";
 import {
     validateMusicConfig,
-    parseMusicOverrides,
+    parseReconcileMode,
     MusicConfig,
 } from "./utils/configValidator";
 import { logger } from "./utils/logger";
@@ -47,13 +47,13 @@ let musicConfig: MusicConfig = {
         process.env.TRANSCODE_CACHE_MAX_GB || "10",
         10
     ),
-    ...parseMusicOverrides(process.env),
+    reconcileMode: parseReconcileMode(process.env),
 };
 
 // Initialize music configuration asynchronously
 export async function initializeMusicConfig() {
     try {
-        musicConfig = await validateMusicConfig();
+        musicConfig = { ...(await validateMusicConfig()), reconcileMode: musicConfig.reconcileMode };
         logger.debug("Music configuration initialized");
     } catch (err: any) {
         logger.error(" Configuration validation failed:", err.message);

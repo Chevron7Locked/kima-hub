@@ -1,7 +1,7 @@
 /**
  * Records MusicBrainz's real replies for tests. Runs Kima's own MusicBrainz service through a local proxy that
  * forwards each request to musicbrainz.org and saves the reply under the exact path and query the service sent;
- * `__tests__/helpers/musicbrainzReplay.ts` serves them back. Each call adds to the fixture file.
+ * `__tests__/helpers/replayServer.ts` serves them back. Each call adds to the fixture file.
  *
  *   npx tsx scripts/record-musicbrainz.ts <fixture-name> <method> '<json arguments array>'
  *   e.g. npx tsx scripts/record-musicbrainz.ts teardrop identifyRecording \

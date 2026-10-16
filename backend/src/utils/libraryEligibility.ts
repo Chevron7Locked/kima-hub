@@ -20,3 +20,6 @@
 
 /** For Prisma `where` clauses on Track. */
 export const NOT_MISSING = { missingSince: null } as const;
+
+/** A track that can be streamed: its file is there and was read. For Prisma `where` clauses on Track. */
+export const PLAYABLE = { ...NOT_MISSING, corrupt: false } as const;

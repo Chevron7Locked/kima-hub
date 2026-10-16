@@ -2,16 +2,12 @@
  * The podcast catalog reads Apple's real replies (recorded by scripts/record-apple-podcasts.ts): the category tree,
  * per-category charts, and each show's categories. Real database and Redis.
  */
-import fs from "fs";
-import path from "path";
-import { startMusicBrainzReplay, type RecordedReplies, type ReplayServer } from "../../__tests__/helpers/musicbrainzReplay";
+import { loadRecording, startReplayServer, type ReplayServer } from "../../__tests__/helpers/replayServer";
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import * as catalog from "../podcastCatalog";
 
-const recording: RecordedReplies = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "..", "..", "__tests__", "fixtures", "apple", "catalog.json"), "utf8")
-);
+const recording = loadRecording("apple", "catalog");
 let replay: ReplayServer;
 
 const DND = "1450241676";
@@ -23,7 +19,7 @@ async function clearCatalogCache() {
 }
 
 beforeAll(async () => {
-    replay = await startMusicBrainzReplay(recording);
+    replay = await startReplayServer(recording);
     process.env.ITUNES_BASE_URL = replay.url;
     await waitForRedisReady();
     await clearCatalogCache();

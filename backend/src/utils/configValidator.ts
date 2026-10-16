@@ -17,29 +17,23 @@ export interface MusicConfig {
 }
 
 /**
- * Parse the reconcile knob. An unknown mode fails loudly at boot: silently
+ * RECONCILE_MODE, read once when the config loads. An unknown mode fails loudly at boot: silently
  * falling back would flip the delete decision on or off without anyone saying so.
  */
-export function parseMusicOverrides(env: Record<string, string | undefined>): Pick<MusicConfig, "reconcileMode"> {
+export function parseReconcileMode(env: Record<string, string | undefined>): MusicConfig["reconcileMode"] {
     const rawMode = env.RECONCILE_MODE;
-    let reconcileMode: "flag" | "delete";
-    if (rawMode === undefined || rawMode === "flag" || rawMode === "delete") {
-        reconcileMode = rawMode ?? "flag";
-    } else {
-        throw new AppError(
-            ErrorCode.INVALID_CONFIG,
-            ErrorCategory.FATAL,
-            `RECONCILE_MODE must be flag|delete, got: ${rawMode}`
-        );
-    }
-
-    return { reconcileMode };
+    if (rawMode === undefined || rawMode === "flag" || rawMode === "delete") return rawMode ?? "flag";
+    throw new AppError(
+        ErrorCode.INVALID_CONFIG,
+        ErrorCategory.FATAL,
+        `RECONCILE_MODE must be flag|delete, got: ${rawMode}`
+    );
 }
 
 /**
- * Validate and load music configuration
+ * Validate and load the music paths (the reconcile mode is read once, by parseReconcileMode, when the config loads).
  */
-export async function validateMusicConfig(): Promise<MusicConfig> {
+export async function validateMusicConfig(): Promise<Omit<MusicConfig, "reconcileMode">> {
     // Get system settings to use configured paths
     const settings = await getSystemSettings();
 
@@ -165,6 +159,5 @@ export async function validateMusicConfig(): Promise<MusicConfig> {
         musicPath,
         transcodeCachePath,
         transcodeCacheMaxGb,
-        ...parseMusicOverrides(process.env),
     };
 }

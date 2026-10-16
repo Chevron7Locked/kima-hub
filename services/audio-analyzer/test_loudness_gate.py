@@ -46,7 +46,6 @@ def test_range_beyond_whole_scale_is_nulled():
     assert gate(-9.0, 61.0) == (None, None)
 
 
-
 def _analyze_with_meter(monkeypatch, integrated, loudness_range):
     """The real analyze(), with every measurement stubbed except the loudness gate and the fields it fills."""
     monkeypatch.setattr(analyzer, "ESSENTIA_AVAILABLE", True)

@@ -192,3 +192,21 @@ describe('search3 empty-query library enumeration', () => {
         expect(list[0].title).toBe(`${MARK} alpha`);
     });
 });
+
+describe('each search endpoint answers under its own key', () => {
+    it.each([
+        ['/search3.view', 'searchResult3'],
+        ['/search2.view', 'searchResult2'],
+        ['/search.view', 'searchResult'],
+    ])('%s answers under %s', async (path, key) => {
+        const res = await request(makeApp())
+            .get(path)
+            .query({ u: 'tester', query: '', songCount: 10, f: 'json' })
+            .expect(200);
+        const answer = res.body['subsonic-response'];
+        expect(Object.keys(answer)).toContain(key);
+        for (const other of ['searchResult3', 'searchResult2', 'searchResult'].filter((k) => k !== key)) {
+            expect(answer[other]).toBeUndefined();
+        }
+    });
+});

@@ -741,7 +741,7 @@ export class SearchService {
             };
         }
 
-        // Check Redis cache first
+        // Check Redis cache first. Per user: the answer includes the shows and episodes they follow.
         const cacheKey = `search:all:${userId}:${normalizeCacheQuery(query)}:${limit}:${genre || ""}`;
         try {
             const cached = await redisClient.get(cacheKey);

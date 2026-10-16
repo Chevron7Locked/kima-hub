@@ -8,19 +8,15 @@ jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (req: any, _res: any, next: any) => { req.user = { id: "u_poddisc", username: "t" }; next(); },
 }));
 
-import fs from "fs";
-import path from "path";
 import express from "express";
 import request from "supertest";
 import podcastRoutes from "../podcasts";
 import * as catalog from "../../services/podcastCatalog";
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
-import { startMusicBrainzReplay, type RecordedReplies, type ReplayServer } from "../../__tests__/helpers/musicbrainzReplay";
+import { loadRecording, startReplayServer, type ReplayServer } from "../../__tests__/helpers/replayServer";
 
-const recording: RecordedReplies = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "..", "..", "__tests__", "fixtures", "apple", "catalog.json"), "utf8")
-);
+const recording = loadRecording("apple", "catalog");
 const app = express();
 app.use(express.json());
 app.use("/podcasts", podcastRoutes);
@@ -31,7 +27,7 @@ const DND = "1450241676";
 let replay: ReplayServer;
 
 beforeAll(async () => {
-    replay = await startMusicBrainzReplay(recording);
+    replay = await startReplayServer(recording);
     process.env.ITUNES_BASE_URL = replay.url;
     await waitForRedisReady();
     const keys = await redisClient.keys("podcasts:*");

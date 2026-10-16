@@ -86,4 +86,19 @@ describe("reconciling pending Spotify tracks", () => {
         await spotifyImportService.reconcilePendingTracks().finally(stop);
         expect(again.filter((e) => e.type === "playlist:updated")).toEqual([]);
     });
+
+    it("reconciling one playlist leaves every other playlist's pending songs alone", async () => {
+        await prisma.user.create({ data: { id: `${P}usr2`, username: `${P}-user2`, passwordHash: "x" } });
+        await prisma.playlist.create({ data: { id: `${P}pl2`, userId: `${P}usr2`, name: "Someone else's" } });
+        await prisma.playlistPendingTrack.create({
+            data: { playlistId: `${P}pl2`, spotifyArtist: "The Beatles", spotifyTitle: "Let It Be", spotifyAlbum: "Let It Be", sort: 0, rank: "a" },
+        });
+
+        await spotifyImportService.reconcilePendingTracks(`${P}pl`);
+        expect(await prisma.playlistItem.count({ where: { playlistId: `${P}pl2` } })).toBe(0);
+        expect(await prisma.playlistPendingTrack.count({ where: { playlistId: `${P}pl2` } })).toBe(1);
+
+        await spotifyImportService.reconcilePendingTracks(`${P}pl2`);
+        expect(await prisma.playlistItem.count({ where: { playlistId: `${P}pl2` } })).toBe(1);
+    });
 });

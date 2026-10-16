@@ -1,6 +1,6 @@
 import { useAudioState } from "@/lib/audio-state-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
-import { clampTime } from "@/lib/format";
+import { clampTime, playbackLength } from "@/lib/format";
 
 /**
  * Duration, display time and progress for every player. Prefers the engine's
@@ -22,11 +22,11 @@ export function usePlaybackProgress() {
 
     const isMultiTrack = playbackType === "audiobook" && (currentAudiobook?.tracks?.length ?? 0) > 1;
 
-    const duration = isMultiTrack
-        ? (currentAudiobook?.duration || playbackDuration || 0)
-        : playbackDuration > 0
-            ? playbackDuration
-            : (currentTrack?.duration || currentAudiobook?.duration || currentPodcast?.duration || 0);
+    const duration = playbackLength({
+        multiFile: isMultiTrack,
+        stored: currentTrack?.duration || currentAudiobook?.duration || currentPodcast?.duration || 0,
+        engine: playbackDuration,
+    });
 
     let time = currentTime;
     if (time <= 0) {

@@ -113,20 +113,17 @@ afterAll(async () => {
 // until the run outgrew Postgres. Clients register at birth on the file's global; the test
 // environment (test-environment.cjs) closes them after the file's own cleanup has run.
 const prismaClients = (globalThis.__prismaClients = globalThis.__prismaClients || []);
-try {
-    const prismaModule = require('@prisma/client');
-    const Base = prismaModule.PrismaClient;
-    if (!Base.__testReaperPatched) {
-        class TrackedPrismaClient extends Base {
-            constructor(...args) {
-                super(...args);
-                prismaClients.push(this);
-            }
+// Not guarded: if this patch stops working, the suite should fail here, not run out of connections later.
+const prismaModule = require('@prisma/client');
+const Base = prismaModule.PrismaClient;
+if (!Base.__testReaperPatched) {
+    class TrackedPrismaClient extends Base {
+        constructor(...args) {
+            super(...args);
+            prismaClients.push(this);
         }
-        TrackedPrismaClient.__testReaperPatched = true;
-        prismaModule.PrismaClient = TrackedPrismaClient;
     }
-} catch (err) {
-    // A suite without the generated client has no connections to close.
+    TrackedPrismaClient.__testReaperPatched = true;
+    prismaModule.PrismaClient = TrackedPrismaClient;
 }
 

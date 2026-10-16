@@ -20,9 +20,11 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
     const albumOffset  = Math.max(0, parseIntParam(req.query.albumOffset  as string | undefined, 0));
     const songOffset   = Math.max(0, parseIntParam(req.query.songOffset   as string | undefined, 0));
 
-    const isSearch3 = req.path.startsWith("/search3");
-    const isLegacySearch = req.path.startsWith("/search.") || req.path.startsWith("/search/") || req.path.startsWith("/search");
-    const responseKey = isSearch3 ? "searchResult3" : isLegacySearch ? "searchResult" : "searchResult2";
+    const responseKey = req.path.startsWith("/search3")
+        ? "searchResult3"
+        : req.path.startsWith("/search2")
+          ? "searchResult2"
+          : "searchResult";
 
     // OpenSubsonic clients (Symfonium, DSub, Substreamer) sync by paginating
     // search3 over an empty query: `query=`, a missing query, or the literal

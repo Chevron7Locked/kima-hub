@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { mapArtist, mapAlbum, mapSong, firstArtistGenre, wrap } from "./mappers";
+import { mapArtist, mapAlbum, mapSong, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
 import { LEADING_ARTICLES } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
+import { PLAYABLE } from "../../utils/libraryEligibility";
 
 export const libraryRouter = Router();
 
@@ -311,14 +312,14 @@ const ALBUM_LIST_SELECT = Prisma.sql`
 // getAlbumList2 is ID3-tagged; getAlbumList is the legacy folder-based alias
 libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req, res) => {
     const type = (req.query.type as string) || "newest";
-    const size = Math.min(parseInt((req.query.size as string) || "10", 10), 500);
-    const offset = parseInt((req.query.offset as string) || "0", 10);
+    const size = clamp(parseIntParam(req.query.size as string | undefined, 10), 0, 500);
+    const offset = Math.max(0, parseIntParam(req.query.offset as string | undefined, 0));
     const userId = req.user!.id;
 
     const albumInclude = {
         artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
         _count: { select: { tracks: true } },
-        tracks: { where: { corrupt: false, missingSince: null }, select: { duration: true } },
+        tracks: { where: PLAYABLE, select: { duration: true } },
     } as const;
 
     let albums: AlbumWithArtist[] = [];

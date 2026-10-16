@@ -13,12 +13,23 @@ import { mocked } from "jest-mock";
 import axios from "axios";
 import { prisma } from "../../utils/db";
 import { compareVersions, getUpdateStatus } from "../updateCheck";
+import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+
+const HOUR = 60 * 60 * 1000;
+/** Settings as a previous check left them. */
+async function checkedBefore(latestKnownVersion: string, hoursAgo: number) {
+    await prisma.systemSettings.create({
+        data: { id: "default", latestKnownVersion, lastUpdateCheck: new Date(Date.now() - hoursAgo * HOUR) },
+    });
+    invalidateSystemSettingsCache();
+}
 
 const get = mocked(axios.get);
 
 beforeEach(async () => {
     jest.clearAllMocks();
     await prisma.systemSettings.deleteMany({});
+    invalidateSystemSettingsCache();
 });
 
 afterAll(async () => {
@@ -77,19 +88,46 @@ describe("getUpdateStatus", () => {
     });
 
     it("stays quiet and keeps the previous version when GitHub cannot be reached", async () => {
+        await checkedBefore("99.0.0", 48);
         get.mockRejectedValue(new Error("offline"));
 
-        const status = await getUpdateStatus({ force: true });
+        const status = await getUpdateStatus();
 
-        expect(status.hasUpdate).toBe(false);
-        expect(status.latest).toBeNull();
-        expect(status.lastCheckedAt).not.toBeNull();
+        expect(get).toHaveBeenCalledTimes(1);
+        expect(status).toMatchObject({ latest: "99.0.0", hasUpdate: true });
+        expect(new Date(status.lastCheckedAt!).getTime()).toBeGreaterThan(Date.now() - HOUR);
+    });
+
+    it("asks again once a day has passed since the last check", async () => {
+        await checkedBefore("1.0.0", 25);
+        get.mockResolvedValue({ status: 200, data: { tag_name: "v99.0.0" } });
+
+        const status = await getUpdateStatus();
+
+        expect(get).toHaveBeenCalledTimes(1);
+        expect(status.latest).toBe("99.0.0");
+    });
+
+    it("shares one request between callers that arrive while it runs", async () => {
+        await checkedBefore("1.0.0", 25);
+        let answer!: (v: unknown) => void;
+        get.mockReturnValue(new Promise((r) => (answer = r)) as never);
+
+        const both = Promise.all([getUpdateStatus(), getUpdateStatus()]);
+        await new Promise((r) => setTimeout(r, 50));
+        answer({ status: 200, data: { tag_name: "v99.0.0" } });
+        const [a, b] = await both;
+
+        expect(get).toHaveBeenCalledTimes(1);
+        expect(a.latest).toBe("99.0.0");
+        expect(b.latest).toBe("99.0.0");
     });
 
     it("answers disabled without any network call", async () => {
         await prisma.systemSettings.create({
             data: { id: "default", updateChecksEnabled: false },
         });
+        invalidateSystemSettingsCache();
 
         const status = await getUpdateStatus({ force: true });
 

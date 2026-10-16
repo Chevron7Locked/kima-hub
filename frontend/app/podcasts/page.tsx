@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { Mic2, Plus, RefreshCw, Rss, X } from "lucide-react";
 import { api } from "@/lib/api";
@@ -11,7 +11,7 @@ import { cn } from "@/lib/cn";
 import { subscribeQueryEvent } from "@/lib/query-events";
 import { scrollMainToTop } from "@/lib/scroll";
 import { coverArtUrl } from "@/lib/cover-art";
-import { usePodcastsQuery, usePodcastCategoriesQuery, usePodcastChartQuery, queryKeys, refreshFollowedShows } from "@/hooks/useQueries";
+import { usePodcastsQuery, usePodcastCategoriesQuery, usePodcastChartQuery, usePodcastListeningQuery, usePodcastsForYouQuery, queryKeys, refreshFollowedShows } from "@/hooks/useQueries";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { Pagination } from "@/components/ui/Pagination";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -33,18 +33,8 @@ export default function PodcastsPage() {
     const queryClient = useQueryClient();
 
     const { data: podcasts = [], isLoading } = usePodcastsQuery();
-    const { data: listening } = useQuery({
-        queryKey: queryKeys.podcastsListening(),
-        queryFn: () => api.getPodcastListening(),
-        enabled: isAuthenticated,
-        staleTime: 30 * 1000,
-    });
-    const { data: forYou = [] } = useQuery({
-        queryKey: queryKeys.podcastsForYou(),
-        queryFn: () => api.getPodcastsForYou(),
-        enabled: isAuthenticated,
-        staleTime: 10 * 60 * 1000,
-    });
+    const { data: listening } = usePodcastListeningQuery(isAuthenticated);
+    const { data: forYou = [] } = usePodcastsForYouQuery(isAuthenticated);
     const { data: categories = [] } = usePodcastCategoriesQuery(isAuthenticated);
     const { data: topShows = [] } = usePodcastChartQuery(null, 24, isAuthenticated);
 

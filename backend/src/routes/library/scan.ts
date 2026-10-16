@@ -6,7 +6,7 @@ import { config } from "../../config";
 import { scanQueue } from "../../workers/queues";
 import { requestScan } from "../../workers/scanRequest";
 import { organizeSingles } from "../../workers/organizeSingles";
-import { parseLimit } from "./paging";
+import { parseLimit, parseOffset } from "./paging";
 
 const router = Router();
 
@@ -136,7 +136,7 @@ router.get("/removals", requireAdmin, async (req, res) => {
     // What the reconcile sweep retired, newest first. Rows outlive the tracks they
     // describe; this is the memory of the library that left.
     const limit = parseLimit(req.query.limit, 100);
-    const offset = Math.max(0, parseInt(req.query.offset as string, 10) || 0);
+    const offset = parseOffset(req.query.offset);
     const [count, removals] = await Promise.all([
       prisma.removalLog.count(),
       prisma.removalLog.findMany({ orderBy: { removedAt: "desc" }, skip: offset, take: limit }),

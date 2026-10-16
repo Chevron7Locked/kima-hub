@@ -13,10 +13,10 @@ import {
 } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
 import { LIBRARY_TRACK_WHERE, LIBRARY_LOCATION } from "../../services/libraryFilters";
-import { NOT_MISSING } from "../../utils/libraryEligibility";
+import { PLAYABLE } from "../../utils/libraryEligibility";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
 import { resolveWithinMusicRoot } from "./trackPath";
-import { parseLimit } from "./paging";
+import { parseLimit, parseOffset } from "./paging";
 import fs from "fs";
 
 const TRACK_SORT_MAP: Record<string, any> = {
@@ -271,7 +271,7 @@ router.get("/tracks", async (req, res) => {
       sortBy = "name",
     } = req.query;
     const limit = parseLimit(limitParam, 100);
-    const offset = parseInt(offsetParam as string, 10) || 0;
+    const offset = parseOffset(offsetParam);
 
     let orderBy: any;
     if (albumId) {
@@ -328,7 +328,7 @@ router.get("/tracks/shuffle", async (req, res) => {
     const { limit: limitParam = "100" } = req.query;
     const limit = parseLimit(limitParam, 100);
 
-    const playable = { ...LIBRARY_TRACK_WHERE, ...NOT_MISSING, corrupt: false };
+    const playable = { ...LIBRARY_TRACK_WHERE, ...PLAYABLE };
     const totalTracks = await prisma.track.count({ where: playable });
 
     if (totalTracks === 0) {
@@ -1176,7 +1176,7 @@ router.get("/radio", async (req, res) => {
 
     // Every station draws only tracks that can play: the file is present and not corrupt.
     const playable = await prisma.track.findMany({
-      where: { id: { in: trackIds }, ...NOT_MISSING, corrupt: false },
+      where: { id: { in: trackIds }, ...PLAYABLE },
       select: { id: true },
     });
     const finalIds = shuffleArray(playable.map((t) => t.id)).slice(0, limitNum);

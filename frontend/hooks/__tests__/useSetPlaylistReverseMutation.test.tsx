@@ -72,13 +72,23 @@ afterEach(() => {
 });
 
 describe("useSetPlaylistReverseMutation", () => {
-    it("flips the cached order optimistically and patches the flag", async () => {
-        updatePlaylistOrder.mockResolvedValue({});
+    it("flips the cached order before the server answers, and patches the flag", async () => {
+        let answer!: (v: unknown) => void;
+        updatePlaylistOrder.mockReturnValue(new Promise((r) => (answer = r)));
         seed();
         await render();
 
+        let done!: Promise<unknown>;
         await act(async () => {
-            await probe.mutate({ playlistId: PLAYLIST_ID, reverseOrder: true });
+            done = probe.mutate({ playlistId: PLAYLIST_ID, reverseOrder: true });
+        });
+        // The server has not answered yet: the screen already shows the flip.
+        expect(cached().reverseOrder).toBe(true);
+        expect(cached().items.map((t: { id: string }) => t.id)).toEqual(["c", "b", "a"]);
+
+        await act(async () => {
+            answer({});
+            await done;
         });
 
         expect(updatePlaylistOrder).toHaveBeenCalledWith(PLAYLIST_ID, true);
@@ -87,15 +97,22 @@ describe("useSetPlaylistReverseMutation", () => {
         expect(cached().mergedItems.map((t: { id: string }) => t.id)).toEqual(["c", "b", "a"]);
     });
 
-    it("rolls the cache back when the persist fails", async () => {
-        updatePlaylistOrder.mockRejectedValueOnce(new Error("network gone"));
+    it("rolls the flip back when the persist fails", async () => {
+        let fail!: (e: unknown) => void;
+        updatePlaylistOrder.mockReturnValue(new Promise((_r, reject) => (fail = reject)));
         seed();
         await render();
 
+        let done!: Promise<unknown>;
         await act(async () => {
-            await expect(
-                probe.mutate({ playlistId: PLAYLIST_ID, reverseOrder: true })
-            ).rejects.toThrow("network gone");
+            done = probe.mutate({ playlistId: PLAYLIST_ID, reverseOrder: true });
+        });
+        // Flipped while the request is out, so the rollback below has something to undo.
+        expect(cached().reverseOrder).toBe(true);
+
+        await act(async () => {
+            fail(new Error("network gone"));
+            await expect(done).rejects.toThrow("network gone");
         });
 
         expect(cached().reverseOrder).toBe(false);

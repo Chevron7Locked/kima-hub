@@ -1374,6 +1374,8 @@ class ApiClient {
         return this.request<ApiData>(`/audiobooks/${id}/progress`, {
             method: "POST",
             body: JSON.stringify({ currentTime, duration, isFinished }),
+            // Sent as the page closes too (pagehide): kept alive, the browser finishes it instead of cancelling it.
+            keepalive: true,
         });
     }
 
@@ -1436,6 +1438,8 @@ class ApiClient {
             {
                 method: "POST",
                 body: JSON.stringify({ currentTime, duration, isFinished }),
+                // Sent as the page closes too (pagehide): kept alive, the browser finishes it instead of cancelling it.
+                keepalive: true,
             }
         );
     }

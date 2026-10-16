@@ -276,7 +276,7 @@ export function MiniPlayer() {
                                         </>
                                     ) : (
                                         <>
-                                            <p className="text-white text-sm font-medium truncate leading-tight">
+                                            <p data-player-title className="text-white text-sm font-medium truncate leading-tight">
                                                 {title}
                                             </p>
                                             <div className="landscape-short:flex landscape-short:min-w-0 landscape-short:items-baseline landscape-short:gap-2">

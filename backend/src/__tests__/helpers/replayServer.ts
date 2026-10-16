@@ -1,9 +1,9 @@
 /**
- * A local web server that answers as MusicBrainz did: it serves the real replies recorded by
- * `scripts/record-musicbrainz.ts` (fixtures under `__tests__/fixtures/musicbrainz/`). Point the service at it
- * with MUSICBRAINZ_BASE_URL before the service is imported. A request with no recorded reply gets a 599 naming
- * it, so a test never runs on an answer nobody recorded. `onRequest` runs before a reply is sent, which lets a
- * test do something while Kima is waiting on MusicBrainz.
+ * A local web server that answers as an outside service did: it serves the real replies recorded by
+ * `scripts/record-musicbrainz.ts` or `scripts/record-apple-podcasts.ts` (fixtures under `__tests__/fixtures/<folder>/`).
+ * Point the service at it (MUSICBRAINZ_BASE_URL, ITUNES_BASE_URL) before the service is imported. A request with no
+ * recorded reply gets a 599 naming it and the service, so a test never runs on an answer nobody recorded.
+ * `onRequest` runs before a reply is sent, which lets a test do something while Kima is waiting on the service.
  */
 import fs from "fs";
 import http from "http";
@@ -16,8 +16,8 @@ export interface RecordedReplies {
     replies: Record<string, { status: number; body: unknown }>;
 }
 
-export function loadRecording(name: string): RecordedReplies {
-    const file = path.join(__dirname, "..", "fixtures", "musicbrainz", `${name}.json`);
+export function loadRecording(folder: "musicbrainz" | "apple", name: string): RecordedReplies {
+    const file = path.join(__dirname, "..", "fixtures", folder, `${name}.json`);
     return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
@@ -28,7 +28,7 @@ export interface ReplayServer {
     close: () => Promise<void>;
 }
 
-export async function startMusicBrainzReplay(recording: RecordedReplies): Promise<ReplayServer> {
+export async function startReplayServer(recording: RecordedReplies): Promise<ReplayServer> {
     const replay: ReplayServer = { url: "", asked: [], onRequest: null, close: async () => undefined };
     const server = http.createServer(async (req, res) => {
         const request = req.url ?? "";
@@ -37,7 +37,7 @@ export async function startMusicBrainzReplay(recording: RecordedReplies): Promis
         const reply = recording.replies[request];
         if (!reply) {
             res.writeHead(599, { "content-type": "text/plain" });
-            res.end(`no recorded MusicBrainz reply for ${request}`);
+            res.end(`no recorded reply from ${recording.source} for ${request}`);
             return;
         }
         res.writeHead(reply.status, { "content-type": "application/json" });

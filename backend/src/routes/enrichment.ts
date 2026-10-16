@@ -26,6 +26,7 @@ import {
   reassignArtistMbid,
 } from "../services/mbidReassign";
 import { artistSortName } from "../services/artistIdentity";
+import { parseLimit, parseOffset } from "./library/paging";
 
 const router = Router();
 
@@ -334,8 +335,8 @@ router.get("/failures", requireAuth, async (req, res) => {
     if (entityType) options.entityType = entityType as string;
     if (includeSkipped === "true") options.includeSkipped = true;
     if (includeResolved === "true") options.includeResolved = true;
-    if (limit) options.limit = parseInt(limit as string);
-    if (offset) options.offset = parseInt(offset as string);
+    if (limit) options.limit = parseLimit(limit, 100);
+    if (offset) options.offset = parseOffset(offset);
 
     const result = await enrichmentFailureService.getFailures(options);
     res.json(result);

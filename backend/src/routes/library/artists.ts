@@ -26,13 +26,14 @@ import { failureCause } from "../../utils/outcome";
 import pLimit from "p-limit";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
 import { resolveWithinMusicRoot } from "./trackPath";
-import { parseLimit } from "./paging";
+import { parseLimit, parseOffset } from "./paging";
 import { findArtistArtwork, withAlbumArtwork } from "../../services/artwork";
 import { listenBrainzService } from "../../services/listenBrainz";
 import { deezerService } from "../../services/deezer";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { editionlessKey } from "../../services/albumIdentity";
 import { getEffectiveYear } from "../../utils/dateFilters";
+import { PLAYABLE } from "../../utils/libraryEligibility";
 
 // Alphabetical sorts use `sortName` (article-stripped, unaccented,
 // lowercased; indexed). `name`/`name-desc` take the raw-SQL branch below,
@@ -178,7 +179,7 @@ router.get("/artists", async (req, res) => {
     } = req.query;
 
     const limit = parseLimit(limitParam, 50);
-    const offset = parseInt(offsetParam as string, 10) || 0;
+    const offset = parseOffset(offsetParam);
 
     const orderBy = ARTIST_SORT_MAP[sortBy as string] ?? {
       sortName: "asc" as const,
@@ -402,11 +403,8 @@ const artistRef = (idParam: string) => ({
   OR: [{ id: idParam }, { name: { equals: idParam, mode: "insensitive" as const } }, { mbid: idParam }],
 });
 
-// The play queue for one artist, in one response: what a Play All tap needs
-// and nothing else, in the canonical order clients consume as-given — owned
-// albums by year desc, title asc, disc/track within album (untagged disc =
-// disc one). Only playable library rows ride the queue, the same predicate
-// the search doors use, so the player never loads a row it cannot stream.
+// One artist's play queue, in the order clients play it as given: owned albums by year desc, then title; disc
+// then track within an album (no disc tag is disc one). Only tracks it can stream.
 router.get("/artists/:id/play-tracks", async (req, res) => {
   try {
     const idParam = req.params.id;
@@ -425,7 +423,7 @@ router.get("/artists/:id/play-tracks", async (req, res) => {
             displayYear: true,
             year: true,
             tracks: {
-              where: { corrupt: false, missingSince: null },
+              where: PLAYABLE,
               select: {
                 id: true,
                 title: true,
@@ -433,7 +431,6 @@ router.get("/artists/:id/play-tracks", async (req, res) => {
                 discNumber: true,
                 duration: true,
               },
-              orderBy: [{ trackNo: Prisma.SortOrder.asc }],
             },
           },
         },

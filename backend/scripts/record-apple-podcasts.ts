@@ -1,7 +1,7 @@
 /**
  * Records Apple's real podcast-catalog replies for tests: each request path is fetched from itunes.apple.com and
  * its reply saved under that exact path, as `services/podcastCatalog.ts` sends it; `__tests__/helpers/
- * musicbrainzReplay.ts` serves them back (it replays any recording). Each call adds to the fixture file.
+ * replayServer.ts` serves them back. Each call adds to the fixture file.
  *
  *   npx tsx scripts/record-apple-podcasts.ts <fixture-name> '<request path>' ['<request path>' ...]
  *   e.g. npx tsx scripts/record-apple-podcasts.ts catalog '/lookup?id=1131414468&entity=podcast'

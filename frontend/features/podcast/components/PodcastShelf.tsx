@@ -50,7 +50,7 @@ export function PodcastCard({
     );
 }
 
-export function RankBadge({ rank }: { rank: number }) {
+function RankBadge({ rank }: { rank: number }) {
     return (
         <span className="min-w-6 h-6 px-1.5 inline-flex items-center justify-center rounded-md bg-black/70 text-xs font-semibold tabular-nums text-white">
             {rank}

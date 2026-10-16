@@ -1153,7 +1153,7 @@ router.post("/:id/pending/:trackId/retry", requireAcquirePermission, async (req,
 
 /**
  * POST /playlists/:id/pending/reconcile
- * Manually trigger reconciliation for a specific playlist
+ * Add this playlist's pending tracks that now match the library (its owner only).
  */
 router.post("/:id/pending/reconcile", async (req, res) => {
     try {
@@ -1177,7 +1177,7 @@ router.post("/:id/pending/reconcile", async (req, res) => {
         const { spotifyImportService } = await import(
             "../services/spotifyImport"
         );
-        const result = await spotifyImportService.reconcilePendingTracks();
+        const result = await spotifyImportService.reconcilePendingTracks(playlistId);
 
         res.json({
             message: "Reconciliation complete",

@@ -88,9 +88,10 @@ MIN_ANALYZE_SECONDS = max(3.0, PATCH_SECONDS)
 CLAIM_IN_JOB_ID = re.compile(r'-(\d+)-r(\d+)$')
 SILENCE_PEAK = 10 ** (-80 / 20)
 # A reading outside these bounds is the meter or a corrupt decode failing, never the music:
-# integrated loudness past 0 LUFS is louder than digital full scale, below -70 LUFS is below
-# anything with audible content, a range past 60 LU cannot exist. They catch, at the source,
-# the garbage that was found stored (+2868.2 LUFS); nothing outside the bounds reaches the row.
+# integrated loudness is bounded at +0.5 LUFS, just above digital full scale (0 LUFS); below
+# -70 LUFS is below anything with audible content; a range past 60 LU cannot exist. They catch,
+# at the source, the garbage that was found stored (+2868.2 LUFS); nothing outside the bounds
+# reaches the row.
 LOUDNESS_RANGE_OK = (-70.0, 0.5)
 DYNAMIC_RANGE_OK = (0.0, 60.0)
 
@@ -482,8 +483,7 @@ class AudioAnalyzer:
     @staticmethod
     def _plausible_loudness(integrated, loudness_range, file_path):
         """An implausible measurement is stored as no measurement: the bounds catch decoder
-        failure and meter garbage (a silent file read +2868 LUFS), and an implausible loudness
-        makes an implausible energy from the same samples. A warning names the file."""
+        failure and meter garbage (a silent file read +2868 LUFS). A warning names the file."""
         if integrated is None or not (LOUDNESS_RANGE_OK[0] <= float(integrated) <= LOUDNESS_RANGE_OK[1]):
             logger.warning(f"Implausible loudness {integrated} LUFS on {file_path}; not stored")
             return None, None

@@ -2404,8 +2404,8 @@ class SpotifyImportService {
     };
   }
 
-  /** After a scan, add any pending tracks of every playlist that now match the library. */
-  async reconcilePendingTracks(): Promise<{
+  /** Add the pending tracks that now match the library: every playlist's after a scan, or one playlist's when named. */
+  async reconcilePendingTracks(playlistId?: string): Promise<{
     playlistsUpdated: number;
     tracksAdded: number;
   }> {
@@ -2414,6 +2414,7 @@ class SpotifyImportService {
     );
 
     const allPendingTracks = await prisma.playlistPendingTrack.findMany({
+      where: playlistId ? { playlistId } : {},
       include: {
         playlist: {
           select: {

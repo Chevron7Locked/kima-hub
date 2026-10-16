@@ -9,7 +9,7 @@ import { useAudioState, useAudioPlayback, useAudioControls, Track as AudioTrack 
 import { cn } from "@/lib/cn";
 import { shuffleArray } from "@/lib/shuffle";
 import { formatTime, plural } from "@/lib/format";
-import { queryKeys, usePlaylistQuery, useRemoveFromPlaylistMutation, useDeletePlaylistMutation, useUpdatePlaylistMutation, useSetPlaylistReverseMutation, useMoveTrackInPlaylistMutation, usePublicConfig } from "@/hooks/useQueries";
+import { anchorForScreenMove, queryKeys, usePlaylistQuery, useRemoveFromPlaylistMutation, useDeletePlaylistMutation, useUpdatePlaylistMutation, useSetPlaylistReverseMutation, useMoveTrackInPlaylistMutation, usePublicConfig } from "@/hooks/useQueries";
 import { usePreview } from "@/hooks/usePreview";
 import { useLeaveDeletedPlaylist } from "@/hooks/useLeaveDeletedPlaylist";
 import { useQueryClient } from "@tanstack/react-query";
@@ -432,24 +432,8 @@ export default function PlaylistDetailPage() {
             handleDragEnd();
             return;
         }
-        const items = playlist?.items ?? [];
-        const targetIndex = items.findIndex(
-            (i: PlaylistItem) => i.id === targetItemId
-        );
-        // "After the target on screen" stores the mirrored position when the
-        // display is reversed: just before the target in rank order.
-        const afterItemId =
-            targetIndex === -1
-                ? targetItemId
-                : reverseOrder
-                  ? targetIndex === items.length - 1
-                    ? null
-                    : items[targetIndex + 1].id
-                  : targetItemId;
-        if (afterItemId === draggedItemId) {
-            handleDragEnd();
-            return;
-        }
+        const shownIds = (playlist?.items ?? []).map((i: PlaylistItem) => i.id);
+        const afterItemId = anchorForScreenMove(shownIds, draggedItemId, targetItemId, reverseOrder);
         try {
             await moveTrack({
                 playlistId,
@@ -466,14 +450,10 @@ export default function PlaylistDetailPage() {
 
     const handleMoveTrackUp = async (itemId: string) => {
         if (!playlist?.items || playlist.items.length < 2) return;
-        const idx = playlist.items.findIndex((i: PlaylistItem) => i.id === itemId);
+        const shownIds = playlist.items.map((i: PlaylistItem) => i.id);
+        const idx = shownIds.indexOf(itemId);
         if (idx <= 0) return;
-        // Reversed display flips the visual move onto the stored ranks.
-        const afterItemId = reverseOrder
-            ? playlist.items[idx - 1].id
-            : idx === 1
-              ? null
-              : playlist.items[idx - 2].id;
+        const afterItemId = anchorForScreenMove(shownIds, itemId, idx >= 2 ? shownIds[idx - 2] : null, reverseOrder);
         try {
             await moveTrack({
                 playlistId,
@@ -487,15 +467,10 @@ export default function PlaylistDetailPage() {
 
     const handleMoveTrackDown = async (itemId: string) => {
         if (!playlist?.items || playlist.items.length < 2) return;
-        const idx = playlist.items.findIndex((i: PlaylistItem) => i.id === itemId);
-        if (idx === -1 || idx >= playlist.items.length - 1) return;
-        const count = playlist.items.length;
-        // Reversed display flips the visual move onto the stored ranks.
-        const afterItemId = reverseOrder
-            ? idx === count - 2
-                ? null
-                : playlist.items[idx + 2].id
-            : playlist.items[idx + 1].id;
+        const shownIds = playlist.items.map((i: PlaylistItem) => i.id);
+        const idx = shownIds.indexOf(itemId);
+        if (idx === -1 || idx >= shownIds.length - 1) return;
+        const afterItemId = anchorForScreenMove(shownIds, itemId, shownIds[idx + 1], reverseOrder);
         try {
             await moveTrack({
                 playlistId,

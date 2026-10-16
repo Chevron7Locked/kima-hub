@@ -34,6 +34,16 @@ export function formatDuration(seconds: number): string {
 }
 
 /**
+ * How long what is playing is, for the progress bar and for seeking alike. A multi-file audiobook is its whole
+ * stored length (the engine sees one file at a time). Anything else is the engine's length once it has one (a feed's
+ * stored length misses stitched-in ads, a tag can be off), and the stored length until then.
+ */
+export function playbackLength({ multiFile, stored, engine }: { multiFile: boolean; stored: number; engine: number }): number {
+    if (multiFile) return stored > 0 ? stored : 0;
+    return engine > 0 ? engine : stored > 0 ? stored : 0;
+}
+
+/**
  * Clamp a time value to be within valid bounds
  * Ensures currentTime never exceeds duration
  */

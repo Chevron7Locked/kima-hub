@@ -53,7 +53,9 @@ beforeAll(async () => {
     });
     await prisma.podcastProgress.createMany({
         data: [
-            { userId: USER, episodeId: "ep_half", currentTime: 300, duration: 600, isFinished: false },
+            { userId: USER, episodeId: "ep_half", currentTime: 300, duration: 600, isFinished: false, lastPlayedAt: new Date(Date.UTC(2026, 9, 13)) },
+            // Played more recently, so it leads the in-progress row.
+            { userId: USER, episodeId: "ep_second_old", currentTime: 60, duration: 600, isFinished: false, lastPlayedAt: new Date(Date.UTC(2026, 9, 14)) },
             { userId: USER, episodeId: "ep_done", currentTime: 600, duration: 600, isFinished: true },
             { userId: USER, episodeId: "ep_caught_latest", currentTime: 600, duration: 600, isFinished: true },
         ],
@@ -68,9 +70,9 @@ afterAll(async () => {
 it("lists what is in progress and what is new, only from followed shows", async () => {
     const res = await request(app).get("/podcasts/listening");
     expect(res.status).toBe(200);
-    expect(res.body.inProgress.map((r: any) => r.episode.id)).toEqual(["ep_half"]);
-    expect(res.body.inProgress[0].episode.progress.progress).toBe(50);
-    expect(res.body.inProgress[0].podcast).toMatchObject({ id: FOLLOWED, title: "Followed Show" });
+    expect(res.body.inProgress.map((r: any) => r.episode.id)).toEqual(["ep_second_old", "ep_half"]);
+    expect(res.body.inProgress[1].episode.progress.progress).toBe(50);
+    expect(res.body.inProgress[1].podcast).toMatchObject({ id: FOLLOWED, title: "Followed Show" });
     // One per show, its newest, newest first; a show whose newest is already played offers nothing older.
     expect(res.body.newEpisodes.map((r: any) => r.episode.id)).toEqual(["ep_second_new", "ep_new"]);
 });

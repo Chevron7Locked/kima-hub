@@ -40,6 +40,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A What's new choice that fails to save says so** in the notification tray, instead of quietly switching back.
 - **The changelog page shows what you just did.** Answering or running something from the release window now updates `/changelog` straight away, and the page reads the server again on every visit, so an item that finished meanwhile (a re-run of the library) shows as done.
+- **Subsonic apps that search with `search2` get results again.** Kima answered `search2` under the old `search` label, so apps that read `searchResult2` found nothing.
+- **A list page asked for a negative or garbled starting point answers normally** instead of with a server error: albums, artists, songs, the removal log, enrichment failures and Subsonic album lists. A Subsonic album list asked for a negative size no longer counts back from the end.
+- **Covers whose host can't be reached say "try again shortly"** instead of a server error, including a connection that drops twice in a row, and a host name that doesn't exist is no longer reported as a refused address.
+- **When Deezer's request limit is reached, Kima waits and asks again.** Deezer answers a quota hit as an ordinary reply, so it was taken as a success and the lookup simply failed; and a failed request no longer leaves Browse's featured playlists empty for a day. Several lookups of the same artist's popular songs at once now share one request. And any outside service (MusicBrainz, Deezer, Apple and the rest) that answers again after a burst of "too many requests" is used again at once, instead of every request waiting out the rest of a minute.
+- **Seeking reaches the end of a song whose file is longer than its tagged length,** as the progress bar already showed.
+- **Reconciling one playlist's waiting songs touches only that playlist.** `POST /api/playlists/:id/pending/reconcile` ran the reconcile over every user's playlists.
+- **The player's song title is no longer a page heading.** The full-screen player added a second top-level heading over the page behind it, and the three players marked the title three different ways.
+- **The last podcast or audiobook position is saved when you close or leave the page.** The save sent as the page closed was cancelled by the browser; it is now sent so the browser finishes it.
 - **Changing an album's MusicBrainz id no longer drops its ownership protection.** The album editor's id change relabelled the album's "owned" record as coming from enrichment, which could let the nightly integrity check move a library album into Discover; it also created ownership where there was none and left Discover exclusions and compilation ownership behind. Every record keyed on the old id now moves with it, keeping its source.
 
 ## [1.12.0] - 2026-10-14

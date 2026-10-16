@@ -69,10 +69,12 @@ async function cleanup() {
     await prisma.artist.deleteMany({ where: { id: { startsWith: `${P}` } } });
 }
 
+const ARTIST_MBID = "6b4a1a3e-2c9b-4f5e-9d7a-1f2e3d4c5b6a";
+
 beforeAll(async () => {
     await cleanup();
     await prisma.artist.create({
-        data: { id: `${P}art`, name: "Play Tracks Artist", identityKey: `${P}-identity` },
+        data: { id: `${P}art`, name: "Play Tracks Artist", identityKey: `${P}-identity`, mbid: ARTIST_MBID },
     });
     // Newest by effective year (displayYear wins over year).
     await makeAlbum(`${P}alb-newest`, "Zea", { year: 2010, displayYear: 2024 });
@@ -92,7 +94,7 @@ beforeAll(async () => {
     // No year at all: sorts last, like iOS treating missing as 0.
     await makeAlbum(`${P}alb-nodate`, "Delta", {});
     await makeTrack(`${P}alb-nodate`, 1);
-    // Discovery-kept album with files: plays today, so it plays here too.
+    // An album kept from Discover: it may be a pending or failed download, so it stays out of the queue.
     await makeAlbum(`${P}alb-disco`, "Epsilon", { year: 2020, location: "DISCOVER" });
     await makeTrack(`${P}alb-disco`, 1);
 });
@@ -158,10 +160,15 @@ describe("GET /library/artists/:id/play-tracks", () => {
         }
     });
 
-    it("finds the artist by name and mbid like the page route does", async () => {
-        const byName = await request(app).get("/artists/play tracks artist/play-tracks");
-        expect(byName.status).toBe(200);
-        expect(byName.body.tracks.length).toBeGreaterThan(0);
+    it("finds the artist by id, by name in any case and by MusicBrainz id, like the page route does", async () => {
+        const byId = await request(app).get(`/artists/${P}art/play-tracks`);
+        expect(byId.status).toBe(200);
+        expect(byId.body.tracks.length).toBeGreaterThan(0);
+        for (const ref of ["Play Tracks Artist", "play tracks artist", ARTIST_MBID]) {
+            const res = await request(app).get(`/artists/${encodeURIComponent(ref)}/play-tracks`);
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual(byId.body);
+        }
     });
 
     it("404s for an unknown artist", async () => {

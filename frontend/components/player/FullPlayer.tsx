@@ -97,14 +97,14 @@ export function FullPlayer() {
                                     href={mediaLink}
                                     className="block hover:underline"
                                 >
-                                    <h4 className="text-white font-semibold truncate text-sm">
+                                    <p data-player-title className="text-white font-semibold truncate text-sm">
                                         {title}
-                                    </h4>
+                                    </p>
                                 </Link>
                             ) : (
-                                <h4 className="text-white font-semibold truncate text-sm">
+                                <p data-player-title className="text-white font-semibold truncate text-sm">
                                     {title}
-                                </h4>
+                                </p>
                             )}
                             {artistLink ? (
                                 <Link

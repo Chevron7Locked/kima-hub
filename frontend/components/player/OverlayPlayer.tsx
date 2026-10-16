@@ -211,14 +211,14 @@ export function OverlayPlayer() {
                                 onClick={returnToPreviousMode}
                                 className="block hover:underline"
                             >
-                                <h1 className="text-xl font-bold text-white mb-1 truncate tracking-tight">
+                                <p data-player-title className="text-xl font-bold text-white mb-1 truncate tracking-tight">
                                     {title}
-                                </h1>
+                                </p>
                             </Link>
                         ) : (
-                            <h1 className="text-xl font-bold text-white mb-1 truncate tracking-tight">
+                            <p data-player-title className="text-xl font-bold text-white mb-1 truncate tracking-tight">
                                 {title}
-                            </h1>
+                            </p>
                         )}
                         {artistLink ? (
                             <Link

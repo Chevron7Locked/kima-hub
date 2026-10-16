@@ -6,7 +6,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { parseMusicOverrides, validateMusicConfig } from "../../utils/configValidator";
+import { parseReconcileMode } from "../../utils/configValidator";
 
 describe("reconcile config", () => {
     const saved = { ...process.env };
@@ -15,25 +15,29 @@ describe("reconcile config", () => {
     });
 
     it("defaults to flag mode", () => {
-        expect(parseMusicOverrides({}).reconcileMode).toBe("flag");
+        expect(parseReconcileMode({})).toBe("flag");
     });
 
     it("parses delete mode from env", () => {
-        expect(parseMusicOverrides({ RECONCILE_MODE: "delete" }).reconcileMode).toBe("delete");
+        expect(parseReconcileMode({ RECONCILE_MODE: "delete" })).toBe("delete");
     });
 
     it("rejects unknown modes loudly", () => {
-        expect(() => parseMusicOverrides({ RECONCILE_MODE: "nuke" })).toThrow();
-        expect(() => parseMusicOverrides({ RECONCILE_MODE: "delete-after-grace" })).toThrow();
+        expect(() => parseReconcileMode({ RECONCILE_MODE: "nuke" })).toThrow();
+        expect(() => parseReconcileMode({ RECONCILE_MODE: "delete-after-grace" })).toThrow();
     });
 
-    it("validateMusicConfig() carries the mode", async () => {
+    it("the loaded config carries the mode read at boot", async () => {
         process.env.RECONCILE_MODE = "delete";
+        jest.resetModules();
+        const { config, initializeMusicConfig } = await import("../../config");
+        expect(config.music.reconcileMode).toBe("delete");
+
+        // Validating the paths later keeps it.
         process.env.MUSIC_PATH = os.tmpdir();
-        process.env.TRANSCODE_CACHE_PATH = fs.mkdtempSync(
-            path.join(os.tmpdir(), "reconcile-cache-")
-        );
-        const cfg = await validateMusicConfig();
-        expect(cfg.reconcileMode).toBe("delete");
+        process.env.TRANSCODE_CACHE_PATH = fs.mkdtempSync(path.join(os.tmpdir(), "reconcile-cache-"));
+        await initializeMusicConfig();
+        expect(config.music.musicPath).toBe(os.tmpdir());
+        expect(config.music.reconcileMode).toBe("delete");
     });
 });

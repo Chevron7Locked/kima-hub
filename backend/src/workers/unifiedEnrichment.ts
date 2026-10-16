@@ -96,7 +96,7 @@ const STAGE_SOURCE: Record<StageName, string> = {
  * "settled": the question only needs closing: `done`, a permanent failure, or set aside by a
  * person (`blocked`); a retryable failure or an open question does not count.
  */
-export type StageWaitKind = "output" | "settled";
+type StageWaitKind = "output" | "settled";
 
 export interface StagePrerequisite {
     stage: StageName;

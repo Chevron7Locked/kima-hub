@@ -416,6 +416,26 @@ export function usePodcastChartQuery(category: number | null, limit: number, ena
     });
 }
 
+/** Episodes in progress across followed shows, and each show's newest unplayed one. */
+export function usePodcastListeningQuery(enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.podcastsListening(),
+        queryFn: () => api.getPodcastListening(),
+        enabled,
+        staleTime: 30 * 1000,
+    });
+}
+
+/** Rows of shows from the categories of the shows this user follows. */
+export function usePodcastsForYouQuery(enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.podcastsForYou(),
+        queryFn: () => api.getPodcastsForYou(),
+        enabled,
+        staleTime: 10 * 60 * 1000,
+    });
+}
+
 /** Apple's podcast categories, as the server names them. */
 export function usePodcastCategoriesQuery(enabled = true) {
     return useQuery({
@@ -622,6 +642,19 @@ function moveAfter(list: Array<Record<string, unknown>>, itemId: string, afterIt
         stored.unshift(moved);
     }
     return reversed ? stored.reverse() : stored;
+}
+
+/**
+ * The move the server takes (`afterItemId` in stored order, null for the first) that shows `itemId` right after
+ * `shownAfterId` on screen, or at the top of the screen for null. `shownIds` is the list as shown; a reversed playlist
+ * is shown in the opposite of its stored order, so "after on screen" is "before" in storage.
+ */
+export function anchorForScreenMove(shownIds: string[], itemId: string, shownAfterId: string | null, reversed: boolean): string | null {
+    if (!reversed) return shownAfterId;
+    const others = shownIds.filter((id) => id !== itemId);
+    if (shownAfterId === null) return others[0] ?? null;
+    const at = others.indexOf(shownAfterId);
+    return at === -1 ? shownAfterId : others[at + 1] ?? null;
 }
 
 /**

@@ -8,7 +8,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 
-export type LiveStatus = "playing" | "paused" | "stopped";
+type LiveStatus = "playing" | "paused" | "stopped";
 
 export interface LiveQueueEntry {
     trackId: string;

@@ -2263,9 +2263,11 @@ test.describe("Dogfood walkthrough", () => {
                 await settle(other, 6000);
                 // Only the player's title counts: the home page's rows, or the player's own artist
                 // line, can carry the same words. Matched on the page's text, not its lowercased display.
+                const exactly = new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
                 const shown = other
                     .getByRole("region", { name: "now playing" })
-                    .getByRole("heading", { name: title, exact: true });
+                    .locator("[data-player-title]")
+                    .filter({ hasText: exactly });
                 await expect(
                     shown.first(),
                     `the first tab is playing "${title}" but the second device's player never showed it`,

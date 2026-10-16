@@ -7,7 +7,7 @@ import { deezerService } from "../../services/deezer";
 import { lidarrService } from "../../services/lidarr";
 import { safeError } from "../../utils/errors";
 import { resolveWithinMusicRoot } from "./trackPath";
-import { parseLimit } from "./paging";
+import { parseLimit, parseOffset } from "./paging";
 import fs from "fs";
 import pLimit from "p-limit";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
@@ -34,7 +34,7 @@ router.get("/albums", async (req, res) => {
       sortBy = "name",
     } = req.query;
     const limit = parseLimit(limitParam, 500);
-    const offset = parseInt(offsetParam as string, 10) || 0;
+    const offset = parseOffset(offsetParam);
 
     const orderBy = ALBUM_SORT_MAP[sortBy as string] ?? {
       sortName: "asc" as const,
