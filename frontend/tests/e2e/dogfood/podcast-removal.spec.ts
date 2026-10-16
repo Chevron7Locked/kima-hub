@@ -4,11 +4,11 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 import { escapeRegExp } from "../fixtures/shared";
+import { outsideFailure } from "./podcastReplies";
 
 const baseUrl = process.env.KIMA_UI_BASE_URL || "http://127.0.0.1:3030";
 const USERNAME = process.env.KIMA_TEST_USERNAME || "";
 const PASSWORD = process.env.KIMA_TEST_PASSWORD || "";
-
 
 /**
  * The release-notes dialog opens over the app on a fresh browser context and
@@ -75,11 +75,10 @@ test.describe.serial("Podcast removal", () => {
             data: { itunesId: pick?.itunesId },
             headers: { Authorization: `Bearer ${token}` },
         });
-        // The feed fetch is external; a 5xx would be the app failing, a 4xx
-        // is the feed being unavailable (recorded, not fatal).
-        expect(res.status(), `subscribe returned ${res.status()}`).toBeLessThan(500);
-        if (!res.ok()) {
-            test.skip(true, `feed unavailable (${res.status()}), removal journey cannot run`);
+        // Only a service outside Kima failing excuses the journey; any other failure is Kima's own.
+        const blocked = await outsideFailure(res, "following the show");
+        if (blocked) {
+            test.skip(true, `${blocked}; the removal journey cannot run`);
             return;
         }
         const created = await res.json();

@@ -391,7 +391,7 @@ router.post("/vibe/failure", async (req, res) => {
  * POST /api/analysis/vibe/start
  * Queue tracks for vibe embedding generation (admin only)
  *
- * @param force - If true, delete all embeddings and re-queue all tracks
+ * @param force - If true, every track's embedding is made again; the old ones stay readable until replaced
  */
 router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
     try {

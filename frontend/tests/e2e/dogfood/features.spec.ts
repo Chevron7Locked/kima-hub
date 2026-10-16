@@ -16,6 +16,17 @@ const vibeToken = process.env.KIMA_PUBLIC_VIBE_TOKEN || "";
 
 const GPU_INSTALL_MS = 25 * 60_000;
 
+/**
+ * The newest release as the release window shows it. Its heading, items and changelog text are content, checked
+ * word for word, so this block is updated with each release; the older releases stay, since the changelog keeps them.
+ */
+const NEWEST = {
+    version: "1.12.0",
+    heading: "Kima 1.12",
+    items: ["podcasts.browse", "analysis.middle"],
+    changelogText: /podcast browser/i,
+};
+
 test.describe.configure({ mode: "serial" });
 
 test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () => {
@@ -286,7 +297,7 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
         session.setJourney("5. GPU runtime");
 
         type Gpu = {
-            enabled: boolean; analysis: boolean; installed: boolean; installing: boolean;
+            supported: boolean; enabled: boolean; analysis: boolean; installed: boolean; installing: boolean;
             effective: boolean; analysisEffective: boolean; status: string; reason: string | null;
         };
         const gpu = () => getJson<Gpu>("/system-settings/gpu");
@@ -392,8 +403,8 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
 
             await session.step("the window opens on the newest release, with the older ones before it", async () => {
                 await expect(dialog).toBeVisible({ timeout: 15_000 });
-                await expect(heading).toHaveText("Kima 1.12");
-                for (const key of ["podcasts.browse", "analysis.middle"]) {
+                await expect(heading).toHaveText(NEWEST.heading);
+                for (const key of NEWEST.items) {
                     await expect(dialog.locator(`[data-item="${key}"]`)).toBeVisible();
                 }
                 await expect(dialog.locator('[data-release="1.11.0"]')).toContainText("a note from Kevin");
@@ -448,9 +459,10 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
             });
 
             await session.step("the GPU answer is kept through closing, and every release closes", async () => {
-                // The GPU question is asked only where the GPU runtime can exist (linux on x64).
+                // The GPU question is asked exactly where the server says the GPU runtime can run (linux on x64).
                 const gpuItem = dialog.locator('[data-item="gpu.accelerate"]');
-                const gpuAsked = (await gpuItem.count()) > 0;
+                const gpuAsked = (await getJson<{ supported: boolean }>("/system-settings/gpu")).supported;
+                await expect(gpuItem, gpuAsked ? "this host supports the GPU but the release never asks" : "this host cannot run the GPU but the release asks").toHaveCount(gpuAsked ? 1 : 0);
                 if (gpuAsked) {
                     await gpuItem.click();
                     const answered = fp.waitForResponse((r) => r.url().includes("/whats-new/1.11.0/choice"));
@@ -458,11 +470,11 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
                     expect((await answered).status()).toBe(200);
                     await expect(dialog.getByRole("button", { name: "Turn it on", exact: true })).toHaveAttribute("aria-pressed", "true");
                 } else {
-                    session.noteNotCovered("release window: the GPU question, which this host does not ask (not linux on x64)");
+                    session.noteNotCovered("release window: answering the GPU question, which this host rightly does not ask (not linux on x64)");
                 }
                 const older = fp.waitForResponse((r) => r.url().includes("/whats-new/1.10.1/dismiss"));
                 const dismissed = fp.waitForResponse((r) => r.url().includes("/whats-new/1.11.0/dismiss"));
-                const newest = fp.waitForResponse((r) => r.url().includes("/whats-new/1.12.0/dismiss"));
+                const newest = fp.waitForResponse((r) => r.url().includes(`/whats-new/${NEWEST.version}/dismiss`));
                 await fp.getByTestId("whatsnew-done").click();
                 expect((await older).status()).toBe(200);
                 expect((await newest).status()).toBe(200);
@@ -483,8 +495,8 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
                 await fp.getByRole("button", { name: /what's new in v/i }).click();
                 await fp.waitForURL(/\/changelog$/, { timeout: 10_000 });
                 await expect(dialog).toBeHidden();
-                await expect(fp.locator('[id="cl-1.12.0"]')).toBeVisible({ timeout: 10_000 });
-                await expect(fp.locator("main")).toContainText(/podcast browser/i);
+                await expect(fp.locator(`[id="cl-${NEWEST.version}"]`)).toBeVisible({ timeout: 10_000 });
+                await expect(fp.locator("main")).toContainText(NEWEST.changelogText);
             });
         } finally {
             session.setActivePage(page);

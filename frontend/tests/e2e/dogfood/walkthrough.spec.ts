@@ -5,6 +5,7 @@
  */
 import { test, expect, devices, Browser, Page, BrowserContext, Locator } from "@playwright/test";
 import { DogfoodSession, navigateByClick, firstAlbumCard, openAlbumWithSongs, openAlbumsTab, playableRows } from "./session";
+import { outsideFailure } from "./podcastReplies";
 import { readLibraryFacts, assertReady, coverageGaps, LibraryFacts } from "./preflight";
 import { PLAYER, escapeRegExp, readPlayer, settle, softwareWebGL } from "../fixtures/shared";
 
@@ -573,7 +574,7 @@ test.describe("Dogfood walkthrough", () => {
             return;
         }
 
-        await test.step("the pager agrees with the URL, forward and back", async () => {
+        await session.step("the pager agrees with the URL, forward and back", async () => {
             await page.goto("/collection?tab=albums");
             const pager = page.locator('nav[aria-label="Albums pagination"]');
             await expect(pager).toBeVisible({ timeout: 15_000 });
@@ -594,9 +595,10 @@ test.describe("Dogfood walkthrough", () => {
 
             await page.goBack();
             await expect(label).toContainText(`Page ${last - 1} of`, { timeout: 15_000 });
+            return { pages: total, walkedTo: last, backTo: last - 1 };
         });
 
-        await test.step("a page number past the end lands on the last page", async () => {
+        await session.step("a page number past the end lands on the last page", async () => {
             await page.goto("/collection?tab=albums&page=99999");
             const pager = page.locator('nav[aria-label="Albums pagination"]');
             await expect(pager).toBeVisible({ timeout: 15_000 });
@@ -610,9 +612,10 @@ test.describe("Dogfood walkthrough", () => {
             await expect(page.locator('[data-tv-section="library-albums"] [data-tv-card]').first()).toBeVisible({
                 timeout: 15_000,
             });
+            return { correctedTo: new URL(page.url()).searchParams.get("page") ?? "" };
         });
 
-        await test.step("the tracks tab pages too, forward and back", async () => {
+        await session.step("the tracks tab pages too, forward and back", async () => {
             if (facts.tracks < 40) {
                 session.gaps.push(`tracks pager leg needs 40+ tracks; instance has ${facts.tracks}`);
                 return;
@@ -625,6 +628,7 @@ test.describe("Dogfood walkthrough", () => {
             await expect(label).toContainText("Page 2 of", { timeout: 15_000 });
             await pager.getByRole("button", { name: "Previous page" }).click();
             await expect(label).toContainText("Page 1 of", { timeout: 15_000 });
+            return { tracksPaged: true };
         });
 
         session.assertClean("Journey 3c (pager)");
@@ -975,17 +979,12 @@ test.describe("Dogfood walkthrough", () => {
         session.setJourney("5. Collect");
         test.setTimeout(4_500_000);
 
-        test.skip(
-            facts.tracks < 10,
-            `only ${facts.tracks} tracks -- too few to say anything about pipeline throughput`,
-        );
-
-        // Wipes and rebuilds embeddings: an old map would pass even with a
-        // broken embedder.
+        // Asks for every song's sound vector to be made again. The old vectors stay readable meanwhile, so the wait
+        // below, for every one to be made afresh, is what proves the embedder ran.
         const before = facts.embeddedTracks;
         let rebuiltIn = 0;
 
-        await session.step("clear the embeddings so the pipeline has real work", async () => {
+        await session.step("ask for every embedding to be made again", async () => {
             const res = await page.request.post("/api/analysis/vibe/start", {
                 data: { force: true },
                 headers: { Authorization: `Bearer ${token}` },
@@ -1117,15 +1116,8 @@ test.describe("Dogfood walkthrough", () => {
         await session.step("the vibe screen renders it", async () => {
             await navigateByClick(page, "/vibe");
             await settle(page, 3500);
-            const canvas = await page.locator("canvas").count();
-            const empty = await page
-                .locator("text=/no tracks|nothing to show|no data/i")
-                .count();
-            expect(
-                empty,
-                "the vibe screen shows an empty state despite a populated map",
-            ).toBe(0);
-            return { canvasPresent: canvas > 0 };
+            await expect(page.getByTestId("vibe-map-field"), "the vibe screen shows no map").toBeVisible({ timeout: 15_000 });
+            return { canvases: await page.locator("canvas").count() };
         });
 
         session.assertClean("Journey 5 (collect)");
@@ -1147,14 +1139,9 @@ test.describe("Dogfood walkthrough", () => {
                 const res = await page.request.get("/api/podcasts/charts?limit=5", {
                     headers: { Authorization: `Bearer ${token}` },
                 });
-                expect(
-                    res.status(),
-                    `podcast discovery returned ${res.status()} -- that is the app failing, ` +
-                        `not the directory being unreachable`,
-                ).toBeLessThan(500);
-
-                if (!res.ok()) {
-                    externalBlocker = `the podcast directory answered ${res.status()}`;
+                const blocked = await outsideFailure(res, "the podcast chart");
+                if (blocked) {
+                    externalBlocker = blocked;
                     return { reachedDirectory: false };
                 }
 
@@ -1196,14 +1183,9 @@ test.describe("Dogfood walkthrough", () => {
                     headers: { Authorization: `Bearer ${token}` },
                 });
 
-                expect(
-                    res.status(),
-                    `subscribing returned ${res.status()} -- a 5xx here is the app breaking, ` +
-                        `not the feed being unavailable`,
-                ).toBeLessThan(500);
-
-                if (!res.ok()) {
-                    externalBlocker = `the feed could not be fetched (${res.status()})`;
+                const blocked = await outsideFailure(res, "following the show");
+                if (blocked) {
+                    externalBlocker = blocked;
                     return { subscribed: false, status: res.status() };
                 }
 
@@ -1356,12 +1338,9 @@ test.describe("Dogfood walkthrough", () => {
                 const listRes = await page.request.get("/api/podcasts/charts?limit=5", {
                     headers: { Authorization: `Bearer ${token}` },
                 });
-                expect(
-                    listRes.status(),
-                    `podcast discovery returned ${listRes.status()}`,
-                ).toBeLessThan(500);
-                if (!listRes.ok()) {
-                    externalBlocker = `the podcast directory answered ${listRes.status()}`;
+                const chartBlocked = await outsideFailure(listRes, "the podcast chart");
+                if (chartBlocked) {
+                    externalBlocker = chartBlocked;
                     return { subscribed: false };
                 }
                 const list = await listRes.json();
@@ -1380,9 +1359,9 @@ test.describe("Dogfood walkthrough", () => {
                         : { feedUrl: candidate.feedUrl },
                     headers: { Authorization: `Bearer ${token}` },
                 });
-                expect(res.status(), `subscribing returned ${res.status()}`).toBeLessThan(500);
-                if (!res.ok()) {
-                    externalBlocker = `the feed could not be fetched (${res.status()})`;
+                const followBlocked = await outsideFailure(res, "following the show");
+                if (followBlocked) {
+                    externalBlocker = followBlocked;
                     return { subscribed: false };
                 }
                 const created = await res.json();
@@ -1478,15 +1457,19 @@ test.describe("Dogfood walkthrough", () => {
                 return { beforeEpisodes: beforeCount, afterEpisodes: afterCount, refreshed: true };
             });
 
-            // Similar podcasts come from the iTunes Search API.
+            // Similar shows come from the show's category charts; an empty list is a fair answer.
             await session.step("find similar podcasts", async () => {
                 const res = await page.request.get(`/api/podcasts/${podcastId}/similar`, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
-                expect(res.status(), `similar podcasts returned ${res.status()}`).toBeLessThan(500);
+                const blocked = await outsideFailure(res, "similar shows");
+                if (blocked) {
+                    session.noteNotCovered(`similar shows: ${blocked}`);
+                    return { similarCount: "not covered" };
+                }
                 const body = await res.json();
-                const similar = body.podcasts ?? body.similar ?? body.results ?? [];
-                return { similarCount: Array.isArray(similar) ? similar.length : 0 };
+                expect(Array.isArray(body), "similar shows is not a list").toBe(true);
+                return { similarCount: body.length };
             });
 
             await session.step("unsubscribe from the podcast", async () => {
@@ -1615,16 +1598,14 @@ test.describe("Dogfood walkthrough", () => {
 
         let queryA = "";
         let queryB = "";
-        let startTrackId = "";
-        let endTrackId = "";
+        let pathLength = 0;
         await session.step("pick two queries that exist in the library", async () => {
-            // Tracks come from vibe search, which reads track_embeddings, so each
-            // has the CLAP embedding the path API needs. Mood words match reliably.
+            // Words that find songs with sound vectors (the path needs them); typed into the path pickers below.
             const candidates = [
                 "rock", "pop", "electronic", "bright", "dark",
                 "sad", "piano", "guitar", "ambient", "driving",
             ];
-            const working: { id: string; title: string; query: string }[] = [];
+            const working: { title: string; query: string }[] = [];
             for (const q of candidates) {
                 if (working.length >= 2) break;
                 try {
@@ -1638,7 +1619,7 @@ test.describe("Dogfood walkthrough", () => {
                     if (!r.ok()) continue;
                     const d = await r.json() as { tracks: Array<{ id: string; title: string }> };
                     if (d.tracks.length > 0) {
-                        working.push({ id: d.tracks[0].id, title: d.tracks[0].title, query: q });
+                        working.push({ title: d.tracks[0].title, query: q });
                     }
                 } catch {
                     // a query that errors or times out is replaced by the next candidate
@@ -1647,9 +1628,7 @@ test.describe("Dogfood walkthrough", () => {
             expect(working.length, "not enough tracks with CLAP embeddings to pick two queries").toBeGreaterThanOrEqual(2);
             queryA = working[0].query;
             queryB = working[1].query;
-            startTrackId = working[0].id;
-            endTrackId = working[1].id;
-            return { queryA, queryB, startTrackId, endTrackId };
+            return { queryA, queryB };
         });
 
         await session.step("open the vibe map", async () => {
@@ -1669,6 +1648,8 @@ test.describe("Dogfood walkthrough", () => {
             await expect(drift).toBeVisible({ timeout: 15_000 });
             await drift.click();
 
+            // Each pick fills its input with "title - artist": what the path must start and end with.
+            const picked: string[] = [];
             for (const [sel, q] of [
                 ["#path-start", queryA],
                 ["#path-end", queryB],
@@ -1681,7 +1662,9 @@ test.describe("Dogfood walkthrough", () => {
                 const option = page.locator(".max-h-40 button").first();
                 await expect(option).toBeVisible({ timeout: 10_000 });
                 await option.click();
+                picked.push(await input.inputValue());
             }
+            expect(picked[0], "both ends of the path are the same song").not.toBe(picked[1]);
 
             const generate = page.getByRole("button", { name: /generate path/i });
             await expect(generate).toBeEnabled({ timeout: 8_000 });
@@ -1689,57 +1672,35 @@ test.describe("Dogfood walkthrough", () => {
             // A song path replaces the queue; when one is already playing the app asks first.
             const replace = page.getByRole("button", { name: /^replace$/i });
             if (await replace.isVisible({ timeout: 2_500 }).catch(() => false)) await replace.click();
-            await page.waitForTimeout(2500);
 
-            // The CLAP search may return a different track than expected (semantic
-            // matching, not exact). Always call the path API directly with the
-            // known track IDs to reliably populate the queue.
-            const pathRes = await Promise.race([
-                page.request.post("/api/vibe/path", {
-                    headers: { Authorization: `Bearer ${token}` },
-                    data: { startTrackId, endTrackId, length: 12, mode: "smooth" },
-                }),
-                new Promise<never>((_, reject) => setTimeout(() => reject(new Error("path API timed out after 60s")), 60_000)),
-            ]);
-            expect(pathRes.ok(), `path API failed: ${await pathRes.text()}`).toBe(true);
-            const pathData = await pathRes.json() as {
-                startTrack: { id: string; title: string; duration: number; albumId: string; albumTitle: string; albumCoverUrl: string | null; artistId: string; artistName: string };
-                endTrack: { id: string; title: string; duration: number; albumId: string; albumTitle: string; albumCoverUrl: string | null; artistId: string; artistName: string };
-                path: Array<{ id: string; title: string; duration: number; albumId: string; albumTitle: string; albumCoverUrl: string | null; artistId: string; artistName: string }>;
-            };
-            const allTracks = [pathData.startTrack, ...pathData.path, pathData.endTrack];
-            expect(allTracks.length, "path API returned no tracks").toBeGreaterThanOrEqual(2);
-            const queueItems = allTracks.map((t) => ({
-                id: t.id,
-                title: t.title,
-                artist: t.artistName,
-                album: t.albumTitle,
-                coverArt: t.albumCoverUrl ?? undefined,
-                duration: t.duration,
-                url: `/api/library/tracks/${t.id}/stream`,
-            }));
-            // Use the playback state API so the queue page (which reads from server) sees the tracks.
-            // Setting localStorage alone doesn't update React state.
-            await page.request.post("/api/playback-state", {
-                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                data: { playbackType: "track", queue: queueItems, currentIndex: 0 },
-            });
+            // The app makes the path the queue it plays and saves that queue on the server. Wait for that queue,
+            // not any queue: an earlier journey's is still there until the app replaces it.
+            type Saved = { queue?: Array<{ title?: string; artist?: { name?: string } | string }> };
+            const label = (t?: { title?: string; artist?: { name?: string } | string }) =>
+                t ? `${t.title} - ${typeof t.artist === "string" ? t.artist : t.artist?.name}` : "";
+            let queue: NonNullable<Saved["queue"]> = [];
+            const ends = () => `the saved queue holds ${queue.length} song(s), from "${label(queue[0])}" to "${label(queue[queue.length - 1])}"`;
+            await expect
+                .poll(
+                    async () => {
+                        const res = await page.request.get("/api/playback-state", { headers: { Authorization: `Bearer ${token}` } });
+                        if (!res.ok()) throw new Error(`reading the saved queue answered ${res.status()}: ${await res.text()}`);
+                        // No saved state at all is an answer too: an empty queue, so keep waiting.
+                        queue = ((await res.json()) as Saved | null)?.queue ?? [];
+                        return queue.length >= 2 && label(queue[0]) === picked[0] && label(queue[queue.length - 1]) === picked[1];
+                    },
+                    { message: `generating a path from "${picked[0]}" to "${picked[1]}" never became the saved queue`, timeout: 60_000 },
+                )
+                .toBe(true)
+                .catch((error: Error) => {
+                    throw new Error(`${error.message}\n${ends()}`);
+                });
 
-            return { path: `${queryA} -> ${queryB}`, trackCount: allTracks.length };
+            pathLength = queue.length;
+            return { path: `${picked[0]} -> ${picked[1]}`, trackCount: queue.length };
         });
 
-        await session.step("the path filled the queue and it plays", async () => {
-            // Check the server-side queue (the queue page reads from server, not localStorage)
-            const stateRes = await page.request.get("/api/playback-state", {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            const state = await stateRes.json() as { queue?: Array<{ id: string }> };
-            const len = (state.queue ?? []).length;
-            expect(
-                len,
-                `Generate Path ran but the queue holds ${len} item(s) -- the vibe pipeline produced no playable output`,
-            ).toBeGreaterThanOrEqual(2);
-
+        await session.step("the path's queue plays", async () => {
             // The path UI may or may not auto-start playback; either way the queue
             // must be playable from the queue page.
             const pause = page.getByTitle("pause", { exact: true });
@@ -1759,7 +1720,7 @@ test.describe("Dogfood walkthrough", () => {
             await page.waitForTimeout(2500);
             const b = (await readPlayer(page)).t;
             expect(b, `the vibe-built queue plays but the position did not advance (${a}s -> ${b}s)`).toBeGreaterThan(a);
-            return { queueFromPath: len, playing: true };
+            return { queueFromPath: pathLength, playing: true };
         });
 
         await session.step("blend panel and the map survive a look", async () => {
@@ -1940,11 +1901,7 @@ test.describe("Dogfood walkthrough", () => {
                 return { probed: false };
             }
             const body = await res.json();
-            const spotify =
-                body?.spotify?.configured ??
-                body?.spotifyClientSecret ??
-                body?.integrations?.spotify ??
-                false;
+            const spotify = Boolean(body?.spotifyClientId && body?.spotifyClientSecret);
             if (!spotify) {
                 session.noteNotCovered("spotify import: not configured on this instance");
                 return { spotify: false };
@@ -1970,15 +1927,13 @@ test.describe("Dogfood walkthrough", () => {
             return { url: new URL(page.url()).pathname };
         });
 
-        // Settings save only on Save Changes, so the test changes, saves, returns
-        // and checks. Fanart.tv is optional, and the finally block restores it.
-        const TOGGLE = "Enable Fanart.tv";
+        // Settings save only on Save Changes, so the test changes, saves, returns and checks. The Fanart.tv switch
+        // is always on an admin's settings screen, and the finally block puts it back.
+        const TOGGLE = "#fanart-enabled";
 
         await session.step("change a setting, save it, and come back", async () => {
-            const toggle = page.getByRole("checkbox", { name: TOGGLE });
-            if ((await toggle.count()) === 0) {
-                return { skipped: `"${TOGGLE}" is not on the settings screen` };
-            }
+            const toggle = page.locator(TOGGLE);
+            await expect(toggle, "the Fanart.tv switch is not on the settings screen").toHaveCount(1, { timeout: 10_000 });
 
             const save = page.getByRole("button", { name: /save changes/i });
             const before = await toggle.isChecked();
@@ -1993,14 +1948,14 @@ test.describe("Dogfood walkthrough", () => {
                 await page.reload();
                 await settle(page, 2500);
 
-                persisted = await page.getByRole("checkbox", { name: TOGGLE }).isChecked();
+                persisted = await page.locator(TOGGLE).isChecked();
                 expect(
                     persisted,
-                    `"${TOGGLE}" was ${before}, was switched to ${!before} and saved, and came ` +
+                    `the Fanart.tv switch was ${before}, was switched to ${!before} and saved, and came ` +
                         `back as ${persisted} after a reload -- the save did not stick`,
                 ).toBe(!before);
             } finally {
-                const restore = page.getByRole("checkbox", { name: TOGGLE });
+                const restore = page.locator(TOGGLE);
                 if ((await restore.count()) > 0 && (await restore.isChecked()) !== before) {
                     await restore.click({ force: true });
                     await page.getByRole("button", { name: /save changes/i }).click();
@@ -2008,7 +1963,7 @@ test.describe("Dogfood walkthrough", () => {
                 }
             }
 
-            return { setting: TOGGLE, was: before, savedAs: !before, cameBackAs: persisted };
+            return { setting: "Fanart.tv", was: before, savedAs: !before, cameBackAs: persisted ?? undefined };
         });
 
         session.assertClean("Journey 6 (adjust)");
@@ -2318,9 +2273,16 @@ test.describe("Dogfood walkthrough", () => {
                 return { agreedOn: title };
             });
 
-            // And the reverse direction, through the event stream: a change made on
-            // device two must reach device one without a reload.
-            await session.step("a playlist created on device two reaches device one live", async () => {
+            // And the reverse direction, through the event stream: a change made on device two reaches device one
+            // without a reload. Device one opens its playlist list first, with its stream connected, and stays put.
+            await session.step("a playlist made, renamed and deleted on device two shows on device one live", async () => {
+                await page.bringToFront().catch(() => {});
+                const streamOpen = page.waitForResponse((r) => r.url().includes("/api/events?"), { timeout: 15_000 });
+                await page.goto("/playlists");
+                await streamOpen;
+                await settle(page, 1500);
+                const deviceOne = page.locator("main");
+
                 await other.goto("/playlists");
                 await settle(other, 1500);
                 await other.locator("main").getByRole("button", { name: "Create" }).first().click();
@@ -2333,19 +2295,29 @@ test.describe("Dogfood walkthrough", () => {
                 secondPlaylistId = new URL(other.url()).pathname.split("/").pop() ?? "";
                 expect(secondPlaylistId, "no playlist id after creating on device two").toBeTruthy();
                 createdPlaylistIds.push(secondPlaylistId);
+                await expect(deviceOne.getByText(name, { exact: true }).first(), `device two made "${name}"; device one never showed it`).toBeVisible({ timeout: 15_000 });
 
-                // The first tab sits on the homepage with its event stream open. The
-                // playlist arriving there without a reload is the SSE pipeline working.
-                await page.bringToFront().catch(() => {});
-                await page.goto("/playlists");
-                await settle(page, 8000);
-                const seen = await page.locator("main").getByText(name, { exact: false }).count();
-                expect(
-                    seen,
-                    `device two created "${name}" but device one never showed it -- ` +
-                        `either the event did not fire or the cache was not updated`,
-                ).toBeGreaterThan(0);
-                return { livePlaylist: name };
+                const renamed = `${name}-renamed`;
+                const rename = await other.request.patch(`/api/playlists/${secondPlaylistId}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    data: { name: renamed },
+                });
+                expect(rename.ok(), `renaming on device two answered ${rename.status()}`).toBe(true);
+                await expect(deviceOne.getByText(renamed, { exact: true }).first(), `device two renamed it; device one never showed "${renamed}"`).toBeVisible({ timeout: 15_000 });
+
+                // Device one opens the playlist (a click keeps its stream); device two deletes it under it.
+                await deviceOne.getByText(renamed, { exact: true }).first().click();
+                await page.waitForURL(new RegExp(`/playlist/${secondPlaylistId}`), { timeout: 15_000 });
+                await settle(page, 1500);
+                const removal = await other.request.delete(`/api/playlists/${secondPlaylistId}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                expect(removal.ok(), `deleting on device two answered ${removal.status()}`).toBe(true);
+                createdPlaylistIds.splice(createdPlaylistIds.indexOf(secondPlaylistId), 1);
+                secondPlaylistId = "";
+                await page.waitForURL((url) => url.pathname === "/playlists", { timeout: 15_000 });
+                await expect(deviceOne.getByText(renamed, { exact: true }), "device two deleted it; device one still lists it").toHaveCount(0, { timeout: 15_000 });
+                return { madeRenamedDeleted: name };
             });
         } finally {
             if (secondPlaylistId) {
@@ -2354,7 +2326,8 @@ test.describe("Dogfood walkthrough", () => {
                         headers: { Authorization: `Bearer ${token}` },
                     })
                     .catch(() => {});
-                createdPlaylistIds.splice(createdPlaylistIds.indexOf(secondPlaylistId), 1);
+                const at = createdPlaylistIds.indexOf(secondPlaylistId);
+                if (at >= 0) createdPlaylistIds.splice(at, 1);
             }
             await otherContext.close();
         }
@@ -2402,6 +2375,16 @@ test.describe("Dogfood walkthrough", () => {
     test("8b. TV mode: the remote arrows drive the app", async () => {
         session.setJourney("8b. TV navigation");
 
+        const readFocus = () =>
+            page.evaluate(() => {
+                const el = document.activeElement;
+                return {
+                    tab: el?.getAttribute("data-tv-tab") ? (el.textContent?.trim() ?? "") : "",
+                    card: el?.getAttribute("data-tv-card") ?? "",
+                    section: el?.getAttribute("data-tv-section") ?? "",
+                };
+            });
+
         await session.step("enter TV mode", async () => {
             await page.goto("/?tv=1");
             await settle(page, 2500);
@@ -2413,16 +2396,6 @@ test.describe("Dogfood walkthrough", () => {
         });
 
         await session.step("arrow keys move the focus", async () => {
-            const readFocus = () =>
-                page.evaluate(() => {
-                    const el = document.activeElement;
-                    return {
-                        tab: el?.getAttribute("data-tv-tab") ? (el.textContent?.trim() ?? "") : "",
-                        card: el?.getAttribute("data-tv-card") ?? "",
-                        section: el?.getAttribute("data-tv-section") ?? "",
-                    };
-                });
-
             await page.locator("[data-tv-tab]").first().focus();
             await page.waitForTimeout(150);
             const start = await readFocus();
@@ -2445,18 +2418,32 @@ test.describe("Dogfood walkthrough", () => {
             return { tabMoved: true, reachedContent: true };
         });
 
-        await session.step("Enter activates and Escape climbs back out", async () => {
-            await page.keyboard.press("Enter");
-            await page.waitForTimeout(2000);
-            const url = new URL(page.url());
-            const navigated = !/\/$/.test(url.pathname);
-            if (navigated) {
-                await page.keyboard.press("Escape");
-                await page.waitForTimeout(1000);
+        // Enter on a focused card that is a link opens it (radio cards are buttons that start a station instead);
+        // Escape sends the focus back to the tab row (TVLayout's onBack).
+        await session.step("Enter opens the focused card and Escape returns to the tabs", async () => {
+            // Down through the sections, as the remote does, until a card that opens a page has the focus. Each press
+            // must move the focus (to the next card down).
+            const onLinkCard = () => page.evaluate(() => document.activeElement?.matches("a[data-tv-card]") ?? false);
+            // Where the focus is, as the element's place in the page: moves to a card, a section or a tab all count.
+            const focusedAt = () =>
+                page.evaluate(() => [...document.querySelectorAll("*")].indexOf(document.activeElement as Element));
+            for (let press = 0; press < 8 && !(await onLinkCard()); press++) {
+                const from = await focusedAt();
+                await page.keyboard.press("ArrowDown");
+                await expect.poll(focusedAt, { message: "ArrowDown did not move the focus on the TV home screen", timeout: 5_000 }).not.toBe(from);
             }
-            await page.goto("/");
+            expect(await onLinkCard(), "arrowing down the TV home screen never reached a card that opens a page").toBe(true);
+            const before = new URL(page.url()).pathname + new URL(page.url()).search;
+            await page.keyboard.press("Enter");
+            await expect
+                .poll(() => new URL(page.url()).pathname + new URL(page.url()).search, { message: "Enter on a focused card did not open it", timeout: 10_000 })
+                .not.toBe(before);
+            const opened = new URL(page.url()).pathname;
             await settle(page, 1500);
-            return { activated: navigated, exited: true };
+
+            await page.keyboard.press("Escape");
+            await expect.poll(async () => (await readFocus()).tab, { message: "Escape did not return the focus to the tab row", timeout: 5_000 }).not.toBe("");
+            return { opened, backTo: (await readFocus()).tab };
         });
 
         session.assertClean("Journey 8b (TV navigation)");
@@ -2477,17 +2464,8 @@ test.describe("Dogfood walkthrough", () => {
             await page.goto("/settings");
             await settle(page, 1500);
 
-            const logout = page
-                .locator('button[title*="out" i], button[aria-label*="out" i]')
-                .first();
-            if (await logout.isVisible({ timeout: 3000 }).catch(() => false)) {
-                await logout.click();
-            } else {
-                // No visible control found -- clear the session directly so the check below
-                // still means something, and say so in the report.
-                await page.evaluate(() => localStorage.removeItem("auth_token"));
-                await page.goto("/collection");
-            }
+            // The top bar's sign-out button; the next step only means something if the app's own sign-out ran.
+            await page.getByRole("button", { name: "Logout", exact: true }).click({ timeout: 10_000 });
             await settle(page, 1500);
             return { url: new URL(page.url()).pathname };
         });
@@ -2511,18 +2489,13 @@ test.describe("Dogfood walkthrough", () => {
     test("10. the session as a whole stayed healthy", async () => {
         session.setJourney("10. Session health");
 
-        // One event stream per page load is normal. A number far above the number of loads
-        // means the stream is dropping and reconnecting, which on a real deployment shows up
-        // as a steadily rising request count against the backend.
-        await session.step("the event stream did not reconnect in a loop", async () => {
+        // A signed-in page opens the event stream once; client-side navigation keeps it. A second opening within one
+        // page means it dropped and reconnected. Nothing on this test stack restarts mid-run, so none is expected.
+        await session.step("the event stream never dropped and reconnected", async () => {
             const opens = session.sseConnectionCount;
-            const loads = session.steps.length;
-            expect(
-                opens,
-                `the event stream opened ${opens} times across ${loads} steps, which suggests ` +
-                    `it is dropping and reconnecting rather than staying up`,
-            ).toBeLessThan(loads * 3);
-            return { streamOpens: opens, steps: loads };
+            const reopens = session.sseReopenCount;
+            expect(reopens, `the event stream reconnected ${reopens} times (${opens} openings in all)`).toBe(0);
+            return { streamOpens: opens, reconnects: reopens };
         });
 
         await session.step("memory did not run away", async () => {

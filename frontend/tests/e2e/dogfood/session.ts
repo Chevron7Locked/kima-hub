@@ -9,7 +9,8 @@ import * as path from "path";
 import { settle } from "../fixtures/shared";
 
 interface Violation {
-    /** Which step was executing when this happened. */
+    /** Which journey and step were executing when this happened. */
+    journey: string;
     step: string;
     kind: "console" | "pageerror" | "http" | "overflow" | "sse" | "assertion";
     detail: string;
@@ -33,18 +34,10 @@ interface StepRecord {
  * one carries its reason.
  */
 const IGNORED_CONSOLE = [
-    /favicon/i,
-    /serviceWorker/i,
     // React DevTools nag, printed once per page load in development builds.
     /Download the React DevTools/i,
     // Next.js prints this for any <img> it would rather have been next/image.
     /Image with src .* has either width or height modified/i,
-    // Navigating away cancels an in-flight position save, logged as "Failed to
-    // fetch"; the next save writes it again. A real outage fails other requests too.
-    /\[AudioState\] Failed to save to server: TypeError: Failed to fetch/,
-    // Same cause: navigating away cancels the position saves and the related-podcasts fetch.
-    /\[AudioControls\] Failed to save (podcast|audiobook) progress: TypeError: Failed to fetch/,
-    /Failed to load similar podcasts: TypeError: Failed to fetch/,
     // Headless Chromium + SwiftShader cannot importScripts inside blob: workers;
     // deck.gl falls back to the main thread and the map still renders.
     /Failed to execute 'importScripts' on 'WorkerGlobalScope'/,
@@ -65,6 +58,7 @@ export class DogfoodSession {
     private currentJourney = "<none>";
     private expectedFailures: ExpectedFailure[] = [];
     private sseRequests = 0;
+    private sseReopens = 0;
     private startedAt = Date.now();
     private heapSamples: Array<{ step: string; mb: number }> = [];
     private notCovered: string[] = [];
@@ -90,6 +84,14 @@ export class DogfoodSession {
      */
     attach(target?: Page): void {
         const page = target ?? this.page;
+        // Streams opened by the page now showing: a new page document (a navigation request in the main frame,
+        // before any of its scripts run) or a sign-out (which closes the stream on purpose) starts the count again.
+        // A second stream within one signed-in page is a reconnect.
+        let streamsThisPage = 0;
+        page.on("request", (req) => {
+            if (req.isNavigationRequest() && req.frame() === page.mainFrame()) streamsThisPage = 0;
+            else if (new URL(req.url()).pathname === "/api/auth/logout") streamsThisPage = 0;
+        });
         page.on("console", (msg) => {
             if (msg.type() !== "error") return;
             const text = msg.text();
@@ -113,7 +115,11 @@ export class DogfoodSession {
 
         page.on("response", (resp: Response) => {
             const url = resp.url();
-            if (url.includes("/api/events")) this.sseRequests++;
+            // The stream itself (GET /api/events?ticket=…), not the ticket request that precedes it.
+            if (new URL(url).pathname === "/api/events") {
+                this.sseRequests++;
+                if (streamsThisPage++ > 0) this.sseReopens++;
+            }
             if (!url.includes("/api/")) return;
 
             const status = resp.status();
@@ -161,6 +167,7 @@ export class DogfoodSession {
 
     private record(kind: Violation["kind"], detail: string): void {
         this.violations.push({
+            journey: this.currentJourney,
             step: this.currentStep,
             kind,
             detail,
@@ -170,6 +177,7 @@ export class DogfoodSession {
 
     setJourney(name: string): void {
         this.currentJourney = name;
+        this.currentStep = "<between steps>";
     }
 
     /**
@@ -272,17 +280,9 @@ export class DogfoodSession {
      * names the journey that caused it rather than surfacing at teardown with no context.
      */
     assertClean(journey: string): void {
-        // Only count violations from steps that belong to this journey.
-        // Earlier journeys that threw before their assertClean may have
-        // left unreported violations that should not penalize the current journey.
-        const currentJourneySteps = this.steps
-            .filter((s) => s.journey === this.currentJourney)
-            .map((s) => s.name);
-        const fresh = this.violations.filter(
-            (v) =>
-                !v.detail.startsWith("[reported]") &&
-                currentJourneySteps.includes(v.step),
-        );
+        // Everything that happened during this journey, inside a step or between steps. An earlier journey
+        // that threw before its own check keeps its problems to itself.
+        const fresh = this.violations.filter((v) => !v.detail.startsWith("[reported]") && v.journey === this.currentJourney);
         if (fresh.length === 0) return;
 
         const summary = fresh
@@ -296,6 +296,11 @@ export class DogfoodSession {
     /** How many times the event stream was (re)opened. */
     get sseConnectionCount(): number {
         return this.sseRequests;
+    }
+
+    /** How many times a page opened the event stream again after its first: each is a dropped stream reconnecting. */
+    get sseReopenCount(): number {
+        return this.sseReopens;
     }
 
     get heapGrowthMb(): number {
