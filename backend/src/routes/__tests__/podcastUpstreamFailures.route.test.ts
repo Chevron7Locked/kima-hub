@@ -27,6 +27,8 @@ import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
 
 type Reply = { status: number; body: string; type?: string };
 const replies = new Map<string, Reply[]>();
+/** How often each path was asked for, since the test began. */
+const hits = new Map<string, number>();
 const answer = (path: string, ...r: Reply[]) => replies.set(path, r);
 const json = (body: unknown): Reply => ({ status: 200, body: JSON.stringify(body), type: "application/json" });
 const TREE = json({ "26": { subgenres: { "1303": { name: "Comedy", subgenres: { "1495": { name: "Improv" } } } } } });
@@ -35,6 +37,7 @@ const entry = (id: string) => ({ id: { attributes: { "im:id": id } }, "im:name":
 let host: http.Server;
 let base = "";
 const app = express();
+app.use(express.json());
 app.use("/podcasts", podcastRoutes);
 app.get("/preview-proxy", (_req, res) => proxyPreviewStream(res, `${base}/forbidden.mp3`, { notFoundMessage: "No preview", logLabel: "t" }));
 app.get("/preview-proxy-busy", (_req, res) => proxyPreviewStream(res, `${base}/busy.mp3`, { notFoundMessage: "No preview", logLabel: "t" }));
@@ -43,6 +46,7 @@ app.get("/preview-proxy-internal", (_req, res) => proxyPreviewStream(res, `${bas
 beforeAll(async () => {
     host = http.createServer((req, res) => {
         const path = (req.url ?? "").split("?")[0];
+        hits.set(path, (hits.get(path) ?? 0) + 1);
         if (path === "/forbidden.mp3") {
             res.writeHead(403);
             return res.end("forbidden");
@@ -83,6 +87,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
     replies.clear();
+    hits.clear();
     const keys = await redisClient.keys("podcasts:*");
     if (keys.length) await redisClient.del(...keys);
 });
@@ -90,7 +95,7 @@ beforeEach(async () => {
 afterAll(async () => {
     jest.restoreAllMocks();
     delete process.env.ITUNES_BASE_URL;
-    await prisma.podcast.deleteMany({ where: { id: "pod_fail" } });
+    await prisma.podcast.deleteMany({ where: { id: { in: ["pod_fail", "pod_refresh_gone", "pod_refresh_page"] } } });
     await new Promise<void>((ok) => host.close(() => ok()));
 });
 
@@ -153,5 +158,48 @@ describe("routes answer with what happened", () => {
     it("a host redirecting into the internal network is refused as unavailable, not a 500", async () => {
         expect((await request(app).get("/podcasts/pod_fail/episodes/pod_fail_internal/stream")).status).toBe(404);
         expect((await request(app).get("/preview-proxy-internal")).status).toBe(404);
+    });
+});
+
+describe("refreshing a followed show answers with what happened", () => {
+    beforeAll(async () => {
+        await prisma.podcast.deleteMany({ where: { id: { in: ["pod_refresh_gone", "pod_refresh_page"] } } });
+        await prisma.podcast.create({ data: { id: "pod_refresh_gone", feedUrl: `${base}/refresh-gone.xml`, title: "Gone Show" } });
+        await prisma.podcast.create({ data: { id: "pod_refresh_page", feedUrl: `${base}/refresh-page.xml`, title: "Page Show" } });
+    });
+
+    it("a feed that is gone is a 404, a page that is not a feed a 502, a show not stored a 404", async () => {
+        const gone = await request(app).get("/podcasts/pod_refresh_gone/refresh");
+        expect(gone.status).toBe(404);
+        expect(gone.body.error).toBe("The show's feed is gone");
+
+        answer("/refresh-page.xml", { status: 200, body: "<html><body>a web page</body></html>" });
+        expect((await request(app).get("/podcasts/pod_refresh_page/refresh")).status).toBe(502);
+
+        const unknown = await request(app).get("/podcasts/pod_refresh_nothing/refresh");
+        expect(unknown.status).toBe(404);
+        expect(unknown.body.error).toBe("Podcast not found");
+    });
+});
+
+describe("several categories at once", () => {
+    it("asks Apple once per real category and leaves out an id that is not one", async () => {
+        answer("/WebObjects/MZStoreServices.woa/ws/genres", TREE);
+        answer("/us/rss/toppodcasts/limit=200/genre=1495/json", json({ feed: { entry: [entry("1")] } }));
+
+        const res = await request(app).get("/podcasts/discover/genres?genres=1495,1495,999999");
+
+        expect(res.status).toBe(200);
+        expect(Object.keys(res.body)).toEqual(["1495"]);
+        expect(hits.get("/us/rss/toppodcasts/limit=200/genre=1495/json")).toBe(1);
+        expect(hits.get("/us/rss/toppodcasts/limit=200/genre=999999/json")).toBeUndefined();
+    });
+});
+
+describe("following a show", () => {
+    it("Apple answering with something that is not a lookup is a 502, not 'the feed could not be read'", async () => {
+        answer("/lookup", json({ errorMessage: "throttled" }));
+        const res = await request(app).post("/podcasts/subscribe").send({ itunesId: "777" });
+        expect(res.status).toBe(502);
     });
 });

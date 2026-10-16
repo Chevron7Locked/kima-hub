@@ -46,9 +46,13 @@ it("saves a position past the stored length", async () => {
     expect(row.currentTime).toBe(650);
 });
 
-it("accepts numbers sent as strings and a missing duration", async () => {
+it("accepts numbers sent as strings, and a missing duration keeps the stored one", async () => {
+    expect((await request(app).post(url(`${P}-ep`)).send({ currentTime: 30, duration: 700 })).status).toBe(200);
     const res = await request(app).post(url(`${P}-ep`)).send({ currentTime: "120" });
     expect(res.status).toBe(200);
+    const row = await prisma.podcastProgress.findUniqueOrThrow({ where: { userId_episodeId: { userId: "u_podprog", episodeId: `${P}-ep` } } });
+    expect(row.currentTime).toBe(120);
+    expect(row.duration).toBe(700);
 });
 
 it("answers 404 for an episode that does not exist", async () => {

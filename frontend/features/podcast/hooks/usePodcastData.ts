@@ -88,12 +88,11 @@ export function usePodcastData() {
   // Separate URL with token for color extraction (CORS access for canvas)
   const colorExtractionImage = rawCoverUrl ? api.getCoverArtUrl(rawCoverUrl, 300, true) : null;
 
-  // A followed show's neighbours come from its categories' charts (server side); a previewed show's from the
-  // chart of its first category, without itself.
-  const firstCategory = previewData?.categories?.[0] ?? null;
+  // A show's neighbours come from its categories' charts, worked out by the server for a followed show and a
+  // previewed one alike.
   const previewItunesId = previewData?.itunesId ?? null;
   useEffect(() => {
-    if (!isAuthenticated || (!podcast?.id && !firstCategory)) return;
+    if (!isAuthenticated || (!podcast?.id && !previewItunesId)) return;
 
     let cancelled = false;
 
@@ -101,7 +100,7 @@ export function usePodcastData() {
       try {
         const similar = podcast?.id
           ? await api.getSimilarPodcasts(podcastId)
-          : (await api.getPodcastChart(firstCategory!.id, 13)).filter((p) => p.itunesId !== previewItunesId).slice(0, 12);
+          : await api.getPreviewSimilarPodcasts(previewItunesId!);
         if (!cancelled) setSimilarPodcasts(similar);
       } catch (error) {
         if (!cancelled) console.error("Failed to load similar podcasts:", error);
@@ -110,8 +109,8 @@ export function usePodcastData() {
 
     loadSimilarPodcasts();
     return () => { cancelled = true; };
-  }, [podcast?.id, isAuthenticated, podcastId, firstCategory, previewItunesId]);
-  const similarTitle = podcast ? "more like this" : firstCategory ? `more in ${firstCategory.name}` : "";
+  }, [podcast?.id, isAuthenticated, podcastId, previewItunesId]);
+  const similarTitle = "more like this";
 
   // An unsubscribed podcast is shown from its directory preview instead.
   useEffect(() => {

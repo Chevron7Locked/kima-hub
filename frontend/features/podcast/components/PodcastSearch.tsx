@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { EpisodeSearchResult, PodcastShowResult } from "@/lib/api";
+import { useClickOutside } from "@/hooks/useClickOutside";
 import { useRouter } from "next/navigation";
 import { Mic2, Search } from "lucide-react";
 import { useDiscoverSearchQuery, useSearchQuery } from "@/hooks/useQueries";
@@ -8,22 +10,6 @@ import { CachedImage } from "@/components/ui/CachedImage";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { coverArtUrl } from "@/lib/cover-art";
 import { formatDate } from "../utils";
-
-interface ShowResult {
-    id: number | string;
-    name: string;
-    artist?: string;
-    coverUrl?: string;
-    genres?: string[];
-}
-
-interface EpisodeResult {
-    id: string;
-    title: string;
-    podcastId: string;
-    podcastTitle: string | null;
-    publishedAt: string;
-}
 
 const MIN_QUERY = 2;
 
@@ -44,16 +30,10 @@ export function PodcastSearch() {
     }, [query]);
     const showsFound = useDiscoverSearchQuery(searched, "podcasts", 8, true);
     const episodesFound = useSearchQuery(searched, "episodes", 6, true);
-    const shows = ((showsFound.data?.results ?? []) as unknown as ShowResult[]);
-    const episodes = (episodesFound.data as { episodes?: EpisodeResult[] } | undefined)?.episodes ?? [];
+    const shows: PodcastShowResult[] = showsFound.data?.results ?? [];
+    const episodes: EpisodeSearchResult[] = episodesFound.data?.episodes ?? [];
 
-    useEffect(() => {
-        const close = (e: MouseEvent) => {
-            if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
-        };
-        document.addEventListener("mousedown", close);
-        return () => document.removeEventListener("mousedown", close);
-    }, []);
+    useClickOutside([box], () => setOpen(false), open);
 
     const go = (href: string) => {
         setOpen(false);
@@ -83,9 +63,6 @@ export function PodcastSearch() {
                     setOpen(false);
                 }}
                 placeholder="search shows and episodes"
-                role="combobox"
-                aria-expanded={open && answered}
-                aria-controls="podcast-search-results"
                 aria-label="search shows and episodes"
                 className="w-full rounded-lg border-2 border-white/10 bg-[var(--bg-primary)] py-2.5 pl-10 pr-10 text-sm text-white placeholder:text-[var(--text-muted)] focus:border-brand/50 focus:outline-none"
             />
@@ -96,8 +73,7 @@ export function PodcastSearch() {
             )}
             {open && answered && (
                 <div
-                    id="podcast-search-results"
-                    role="listbox"
+                    role="region"
                     aria-label="search results"
                     className="absolute left-0 top-full z-(--z-dropdown) mt-2 max-h-[28rem] w-full overflow-y-auto rounded-lg border-2 border-white/10 bg-[var(--bg-secondary)]"
                 >
@@ -108,8 +84,6 @@ export function PodcastSearch() {
                             <button
                                 key={`show-${s.id}`}
                                 type="button"
-                                role="option"
-                                aria-selected={false}
                                 onClick={() => go(`/podcasts/${s.id}`)}
                                 className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-white/5 focus-visible:bg-white/5 focus-visible:outline-none"
                             >
@@ -134,8 +108,6 @@ export function PodcastSearch() {
                         <button
                             key={`ep-${ep.id}`}
                             type="button"
-                            role="option"
-                            aria-selected={false}
                             onClick={() => go(`/podcasts/${ep.podcastId}`)}
                             className="block w-full px-3 py-2 text-left transition-colors hover:bg-white/5 focus-visible:bg-white/5 focus-visible:outline-none"
                         >

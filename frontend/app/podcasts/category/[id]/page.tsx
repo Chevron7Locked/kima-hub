@@ -13,8 +13,6 @@ import { PodcastCard } from "@/features/podcast/components/PodcastShelf";
 import { queryKeys, usePodcastCategoriesQuery } from "@/hooks/useQueries";
 
 const PAGE = 48;
-/** Apple's charts stop at 200 shows. */
-const CHART_MAX = 200;
 
 /** One category's chart (or the overall chart at /podcasts/category/top), with its sub-categories as tabs. */
 export default function PodcastCategoryPage() {
@@ -30,10 +28,8 @@ export default function PodcastCategoryPage() {
         queryKey: queryKeys.podcastChartPages(categoryId),
         queryFn: ({ pageParam }) => api.getPodcastChart(categoryId, PAGE, pageParam),
         initialPageParam: 0,
-        getNextPageParam: (last, pages) => {
-            const loaded = pages.reduce((n, p) => n + p.length, 0);
-            return last.length === PAGE && loaded < CHART_MAX ? loaded : undefined;
-        },
+        // A short page is the chart's end (the server holds where Apple's charts stop).
+        getNextPageParam: (last, pages) => (last.length === PAGE ? pages.reduce((n, p) => n + p.length, 0) : undefined),
         enabled: isAuthenticated && valid && known,
         staleTime: 60 * 60 * 1000,
     });

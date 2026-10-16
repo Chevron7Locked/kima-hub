@@ -23,8 +23,9 @@ import { PodcastShelf } from "@/features/podcast/components/PodcastShelf";
 import { ListeningShelf } from "@/features/podcast/components/ListeningShelf";
 import { NewEpisodes } from "@/features/podcast/components/NewEpisodes";
 import { CategoryChips } from "@/features/podcast/components/CategoryChips";
+import { sortShows, type ShowSort } from "@/features/podcast/utils";
 
-type SortOption = "title" | "author" | "recent";
+type SortOption = ShowSort;
 
 export default function PodcastsPage() {
     const { isAuthenticated } = useAuth();
@@ -101,13 +102,7 @@ export default function PodcastsPage() {
         }
     };
 
-    const sortedPodcasts = useMemo(() => {
-        const sorted = [...podcasts];
-        if (sortBy === "title") sorted.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
-        if (sortBy === "author") sorted.sort((a, b) => (a.author || "").localeCompare(b.author || ""));
-        if (sortBy === "recent") sorted.sort((a, b) => (b.episodeCount || 0) - (a.episodeCount || 0));
-        return sorted;
-    }, [podcasts, sortBy]);
+    const sortedPodcasts = useMemo(() => sortShows(podcasts, sortBy), [podcasts, sortBy]);
     const totalPages = Math.ceil(sortedPodcasts.length / itemsPerPage);
     const pagedPodcasts = sortedPodcasts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     const showPage = (page: number) => {
@@ -220,7 +215,7 @@ export default function PodcastsPage() {
                                     >
                                         <option value="title">title</option>
                                         <option value="author">author</option>
-                                        <option value="recent">episodes</option>
+                                        <option value="latest">latest episode</option>
                                     </select>
                                     {podcasts.length > 25 && (
                                         <select

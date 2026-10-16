@@ -53,6 +53,11 @@ interface FeedNotModifiedResult {
 
 type ParseFeedResult = FeedFetchResult | FeedNotModifiedResult;
 
+/** A feed that could not be fetched or read; its cause says which (utils/upstream tells them apart). */
+export class FeedReadError extends UpstreamReplyError {
+    name = "FeedReadError";
+}
+
 class RSSParserService {
     private parser: Parser;
 
@@ -78,10 +83,11 @@ class RSSParserService {
     }
 
     /**
-     * Parse an RSS podcast feed from a URL with optional conditional GET support.
-     * When etag/lastModified options are provided, sends If-None-Match / If-Modified-Since
-     * headers. Returns { notModified: true } on 304.
+     * Parse an RSS podcast feed from a URL. With etag/lastModified (a refresh), sends If-None-Match /
+     * If-Modified-Since and answers { notModified: true } on a 304; without them no 304 can come back.
      */
+    async parseFeed(feedUrl: string): Promise<FeedFetchResult>;
+    async parseFeed(feedUrl: string, options: FeedFetchOptions): Promise<ParseFeedResult>;
     async parseFeed(feedUrl: string, options?: FeedFetchOptions): Promise<ParseFeedResult> {
         try {
             logger.debug(`[RSS PARSER] Fetching feed: ${feedUrl}`);
@@ -109,6 +115,10 @@ class RSSParserService {
             });
 
             if (response.status === 304) {
+                // Only an answer to a conditional request; anything else is a host breaking the protocol.
+                if (!options?.etag && !options?.lastModified) {
+                    throw new Error("the host answered 304 Not Modified to a request that named no earlier copy");
+                }
                 logger.debug(`   Feed not modified (304)`);
                 return { notModified: true };
             }
@@ -125,7 +135,7 @@ class RSSParserService {
                 language: feed.language || undefined,
                 explicit: this.parseExplicit((feed as any).itunesExplicit),
                 itunesId: this.extractItunesId(feed),
-                categoryNames: this.extractCategoryNames(xml),
+                categoryNames: this.categoryNames(feed),
             };
 
             logger.debug(`   Podcast: ${podcast.title}`);
@@ -202,7 +212,7 @@ class RSSParserService {
             );
             // An upstream reply problem, with the cause attached, so a caller can tell a refused or missing feed
             // from one that is down or unreadable.
-            throw Object.assign(new UpstreamReplyError(`Failed to parse podcast feed: ${error.message}`), { cause: error });
+            throw Object.assign(new FeedReadError(`Failed to parse podcast feed: ${error.message}`), { cause: error });
         }
     }
 
@@ -330,12 +340,12 @@ class RSSParserService {
         return undefined;
     }
 
-    /** `itunes:category` is channel-level only, possibly nested; its name is the `text` attribute. */
-    private extractCategoryNames(xml: string): string[] {
-        const names = [...xml.matchAll(/<itunes:category\s+text="([^"]+)"/g)].map((m) =>
-            m[1].replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").trim()
-        );
-        return [...new Set(names.filter(Boolean))];
+    /** The show's `itunes:category` names, top-level and nested, as the feed library read them. */
+    private categoryNames(feed: { itunes?: { [key: string]: unknown } }): string[] {
+        // The library reads them (rss-parser 3.x) but its types leave `categoriesWithSubs` out.
+        const withSubs = (feed.itunes?.categoriesWithSubs ?? []) as Array<{ name: string; subs: Array<{ name: string }> | null }>;
+        const names = withSubs.flatMap((c) => [c.name, ...(c.subs ?? []).map((sub) => sub.name)]);
+        return [...new Set(names.map((n) => n?.trim()).filter((n): n is string => !!n))];
     }
 }
 

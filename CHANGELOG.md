@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Songs are identified by their sound first.** A file whose tags don't say which recording it is now goes to AcoustID (audio fingerprints) before any MusicBrainz search, ten songs per request, and each reply is kept so no song is asked twice. Its ISRCs and genres then come from one MusicBrainz request per album (the album AcoustID lists under your album's title, or the album your tags name) instead of one request per song; songs AcoustID doesn't recognise, or matches only by length and not by title, still get the MusicBrainz name search first.
+- **Your shows can be sorted by latest episode.** The podcasts page's "episodes" sort ordered shows by how many episodes they have; it is now "latest episode", the show that published most recently first. `GET /api/podcasts` gives each show's `latestEpisodeAt`.
+- **"More like this" on a show you haven't followed** ranks shows by the categories they share, as it does for a followed show, instead of listing its first category's chart. New endpoint: `GET /api/podcasts/preview/:itunesId/similar`.
 
 ### Fixed
 
@@ -30,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A Subsonic app's playlist change naming a song that doesn't exist changes nothing.** A rename sent with it was applied before the song failed, and creating a playlist with such a song left an empty playlist. The whole request is now refused with "not found".
 - **TV mode's Back works on every page, and only when nothing else on the page uses it.** Back (the Escape key) returned to the tab row only on pages built of TV rows, and only with a card focused; on an artist or album page, or once the focus was lost, it did nothing. It now returns to the tab row from anywhere in the page. And Back that closed something (the sleep timer, a playlist rename, the What's new window, the sidebar's menu or new-playlist box, the library filter panel, podcast search results, an open hour on the listening clock, the stats page's shortcut list) or left the TV search box also jumped to the tab row; now it only does the one thing.
 - **A song whose fingerprint was retried asks AcoustID once it has one.** A song whose audio fingerprint failed could only be identified by name, and when retrying it from the failures screen then gave it a fingerprint, its identification stayed closed as "no match" without ever asking AcoustID. It now asks as soon as the fingerprint is stored. A retagged file is also read again before its songs are asked about in a batch, and a batch answer that has expired is asked again.
+- **Checking a show for new episodes says what went wrong.** A feed that is gone answers "not found" and one that doesn't answer (or answers with a web page) "try again shortly", instead of a server error.
+- **A show's categories are read from its feed correctly.** Categories written with single quotes were missed, and a category tag inside an episode was taken as the show's.
+- **Saving podcast progress without a length keeps the length already saved,** instead of setting it to zero.
+- **Category rows on the iOS podcasts screen ask Apple only for real categories,** each once, so an unknown or repeated id no longer costs a request to Apple.
+- **The podcast search box no longer claims to be a keyboard-navigable list.** It told screen readers to expect arrow-key movement it never had; its results are now plain buttons, reached with Tab.
+
 - **Changing an album's MusicBrainz id no longer drops its ownership protection.** The album editor's id change relabelled the album's "owned" record as coming from enrichment, which could let the nightly integrity check move a library album into Discover; it also created ownership where there was none and left Discover exclusions and compilation ownership behind. Every record keyed on the old id now moves with it, keeping its source.
 
 ## [1.12.0] - 2026-10-14

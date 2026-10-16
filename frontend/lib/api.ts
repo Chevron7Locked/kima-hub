@@ -99,6 +99,32 @@ interface ServiceTestResult {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ApiData = any;
 
+/** A show from Apple's catalogue, as /search/discover?type=podcasts answers it (backend routes/search.ts). */
+export interface PodcastShowResult {
+    type: "podcast";
+    id: number;
+    name: string;
+    artist?: string;
+    description?: string;
+    coverUrl?: string;
+    feedUrl?: string;
+    genres: string[];
+    categoryIds: number[];
+    trackCount?: number;
+}
+
+/** An episode of a followed show, as /search?type=episodes answers it (backend services/search.ts). */
+export interface EpisodeSearchResult {
+    id: string;
+    title: string;
+    description: string | null;
+    podcastId: string;
+    podcastTitle: string;
+    publishedAt: string;
+    duration: number;
+    audioUrl: string;
+}
+
 function toSearchParams(params: Record<string, string | number | boolean | undefined>): URLSearchParams {
     const entries: Record<string, string> = {};
     for (const [key, value] of Object.entries(params)) {
@@ -1439,6 +1465,11 @@ class ApiClient {
 
     async getSimilarPodcasts(podcastId: string) {
         return this.request<DiscoveryPodcast[]>(`/podcasts/${podcastId}/similar`);
+    }
+
+    /** Similar shows for a show not followed yet, by its Apple id. */
+    async getPreviewSimilarPodcasts(itunesId: string) {
+        return this.request<DiscoveryPodcast[]>(`/podcasts/preview/${itunesId}/similar`);
     }
 
     async subscribePodcast(feedUrl: string, itunesId?: string) {

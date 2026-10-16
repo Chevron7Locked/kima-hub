@@ -119,3 +119,18 @@ it("finds similar shows on the show's own category chart, closest category list 
 it("answers 404 for a similar request on a show it does not have", async () => {
     expect((await request(app).get("/podcasts/no_such_show/similar")).status).toBe(404);
 });
+
+it("finds similar shows for a show not followed yet, by its Apple id, as for a followed show, never the show", async () => {
+    const res = await request(app).get(`/podcasts/preview/${DND}/similar`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBe(12);
+    expect(res.body.some((p: any) => p.itunesId === DND)).toBe(false);
+    const show = (await catalog.lookupShows([DND])).get(DND)!;
+    expect(show.categoryIds.length).toBeGreaterThan(1);
+    expect(res.body).toEqual(await catalog.similarShows(show));
+});
+
+it("answers 404 for similar shows of an Apple id that is not a number", async () => {
+    expect((await request(app).get("/podcasts/preview/pod_disc_dnd/similar")).status).toBe(404);
+});

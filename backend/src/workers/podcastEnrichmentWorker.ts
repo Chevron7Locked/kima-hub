@@ -3,7 +3,6 @@ import { createWorkerConnection, QUEUE_NAMES } from "./enrichmentQueues";
 import { refreshPodcastFeed } from "../routes/podcasts";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { logger } from "../utils/logger";
-import { prisma } from "../utils/db";
 
 interface PodcastJobData {
     podcastId: string;
@@ -17,12 +16,10 @@ export async function processPodcastJob(job: Job<PodcastJobData>): Promise<void>
     if (!podcastId) {
         throw new Error("[PodcastWorker] Job has no podcastId -- corrupt job data");
     }
-    if (!(await prisma.podcast.findUnique({ where: { id: podcastId }, select: { id: true } }))) {
-        logger.debug(`[PodcastWorker] ${podcastId} (${podcastTitle}) is no longer subscribed; skipping`);
-        return;
-    }
     logger.debug(`[PodcastWorker] Processing ${podcastId} (${podcastTitle})`);
-    await refreshPodcastFeed(podcastId);
+    if (!(await refreshPodcastFeed(podcastId))) {
+        logger.debug(`[PodcastWorker] ${podcastId} (${podcastTitle}) is no longer subscribed; skipping`);
+    }
 }
 
 export function startPodcastEnrichmentWorker(): Worker {

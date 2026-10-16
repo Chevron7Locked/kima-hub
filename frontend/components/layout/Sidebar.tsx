@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/hooks/useQueries";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
+import { useClickOutside } from "@/hooks/useClickOutside";
 import { notify } from "@/lib/notify";
 import { useFeatures } from "@/lib/features-context";
 import { MobileSidebar } from "./MobileSidebar";
@@ -88,21 +89,14 @@ export function Sidebar() {
             window.removeEventListener("toggle-mobile-menu", handleToggle);
     }, []);
 
-    useEffect(() => {
-        if (!showCreatePlaylist) return;
-        const handleClickOutside = (e: MouseEvent) => {
-            if (
-                createPopoverRef.current &&
-                !createPopoverRef.current.contains(e.target as Node)
-            ) {
-                setShowCreatePlaylist(false);
-                setNewPlaylistName("");
-            }
-        };
-        document.addEventListener("mousedown", handleClickOutside);
-        return () =>
-            document.removeEventListener("mousedown", handleClickOutside);
-    }, [showCreatePlaylist]);
+    useClickOutside(
+        [createPopoverRef],
+        () => {
+            setShowCreatePlaylist(false);
+            setNewPlaylistName("");
+        },
+        showCreatePlaylist,
+    );
 
     const handleCreatePlaylist = async () => {
         const name = newPlaylistName.trim();

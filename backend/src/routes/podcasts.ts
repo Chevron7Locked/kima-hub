@@ -5,7 +5,7 @@ import { forgetSearchesOf } from "../services/search";
 import { upstreamFailure, upstreamUnreachable } from "../utils/upstream";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { prisma, Prisma } from "../utils/db";
-import { rssParserService } from "../services/rss-parser";
+import { FeedReadError, rssParserService } from "../services/rss-parser";
 import { parseRangeHeader } from "../utils/rangeParser";
 import { safeError } from "../utils/errors";
 import { guardedAxios, validateUrlForFetch } from "../utils/ssrf";
@@ -36,10 +36,9 @@ import { proxyPreviewStream } from "../utils/previewProxy";
 
 const router = Router();
 
-// Bound the preview RSS fetch so a slow or dead feed returns partial data
-// quickly instead of sitting on the 30s parser timeout and hanging the request.
-// The feed is non-critical for a preview; core data comes from Apple's
-// catalog, and both call sites already fall through to partial data.
+// Bound the feed fetch for a show not yet followed, so a slow or dead feed does not sit on the 30s parser
+// timeout. The preview then answers from Apple's data alone; the sample has nothing else to play, so a slow
+// feed there is a 502.
 const PREVIEW_RSS_TIMEOUT_MS = 8000;
 
 /** A show's or episode's cover: the cached copy when there is one, the feed's image otherwise. */
@@ -145,6 +144,8 @@ router.get("/", requireAuth, async (req, res) => {
                 coverUrl: podcastCover(podcast),
                 episodeCount: podcast.episodeCount,
                 autoDownloadEpisodes: false,
+                // The episodes come newest first: the first one's date is when the show last published.
+                latestEpisodeAt: podcast.episodes[0]?.publishedAt ?? null,
                 episodes: podcast.episodes.map((ep) => ({
                     id: ep.id,
                     title: ep.title,
@@ -168,7 +169,6 @@ const pageParams = z.object({
     offset: z.coerce.number().int().min(0).max(CHART_MAX).default(0),
 });
 
-/** GET /podcasts/categories — Apple's podcast categories, sub-categories naming their parent. */
 /**
  * An upstream's trouble (Apple, a show's feed or audio host) is never Kima's 500: it has no such thing → 404 with
  * `missing`; it is down, throttling or answered with something else → 502 with `down` (utils/upstream).
@@ -186,6 +186,7 @@ function answerUpstreamFailure(res: Response, label: string, error: unknown, mis
 const appleFailure = (res: Response, label: string, error: unknown) =>
     answerUpstreamFailure(res, label, error, "Apple Podcasts has no such chart or show", "Apple Podcasts did not answer; try again shortly");
 
+/** GET /podcasts/categories — Apple's podcast categories, sub-categories naming their parent. */
 router.get("/categories", async (_req, res) => {
     try {
         res.json(await categoryTree());
@@ -194,10 +195,12 @@ router.get("/categories", async (_req, res) => {
     }
 });
 
-/** GET /podcasts/charts?category=<id>&limit&offset — Apple's chart for a category, the overall chart without one. */
-router.get("/charts", async (req, res) => {
-    const page = pageParams.safeParse(req.query);
-    const category = req.query.category === undefined ? null : Number(req.query.category);
+/**
+ * A page of Apple's chart for a category (null: the overall chart). An id that is not a whole number, or a page
+ * out of range, is a 400; an id that is not one of Apple's categories a 404, before Apple is asked for its chart.
+ */
+async function answerChart(res: Response, category: number | null, query: unknown, label: string) {
+    const page = pageParams.safeParse(query);
     if (!page.success || (category !== null && !Number.isInteger(category))) {
         return res.status(400).json({ error: "category must be a category id; limit 1-200; offset 0-200" });
     }
@@ -208,9 +211,14 @@ router.get("/charts", async (req, res) => {
         const shows = (await chart(category)).slice(page.data.offset, page.data.offset + page.data.limit);
         res.json(await toDiscoveryItems(shows));
     } catch (error) {
-        appleFailure(res, "Error fetching podcast chart", error);
+        appleFailure(res, label, error);
     }
-});
+}
+
+/** GET /podcasts/charts?category=<id>&limit&offset — Apple's chart for a category, the overall chart without one. */
+router.get("/charts", (req, res) =>
+    answerChart(res, req.query.category === undefined ? null : Number(req.query.category), req.query, "Error fetching podcast chart"),
+);
 
 /** GET /podcasts/for-you — rows from the categories of the shows this user follows. */
 router.get("/for-you", requireAuth, async (req, res) => {
@@ -285,45 +293,34 @@ router.get("/listening", requireAuth, async (req, res) => {
     }
 });
 
-/** GET /podcasts/discover/top — the overall chart (kept for clients that ask here). */
-router.get("/discover/top", async (req, res) => {
-    const page = pageParams.safeParse(req.query);
-    if (!page.success) return res.status(400).json({ error: "limit must be 1-200" });
-    try {
-        res.json(await toDiscoveryItems((await chart(null)).slice(0, page.data.limit)));
-    } catch (error) {
-        appleFailure(res, "Error fetching top podcasts", error);
-    }
-});
+/** GET /podcasts/discover/top?limit&offset — the overall chart, as /charts (kept for the iOS app, which asks here). */
+router.get("/discover/top", (req, res) => answerChart(res, null, req.query, "Error fetching top podcasts"));
 
-/** GET /podcasts/discover/genres?genres=a,b — the first ten of each category's chart, keyed by category id. */
+/**
+ * GET /podcasts/discover/genres?genres=a,b — the first ten of each category's chart, keyed by category id. Only
+ * Apple's own categories are asked for, each once; an id that is not one is left out of the answer.
+ */
 router.get("/discover/genres", async (req, res) => {
     const ids = typeof req.query.genres === "string" ? req.query.genres.split(",").map((g) => Number(g.trim())) : [];
     if (ids.length === 0 || ids.some((id) => !Number.isInteger(id))) {
         return res.status(400).json({ error: "genres parameter required (comma-separated genre IDs)" });
     }
     try {
+        const known = new Set((await categoryTree()).map((c) => c.id));
         const out: Record<number, unknown> = {};
-        for (const id of ids) out[id] = await toDiscoveryItems((await chart(id)).slice(0, 10));
+        for (const id of new Set(ids)) {
+            if (known.has(id)) out[id] = await toDiscoveryItems((await chart(id)).slice(0, 10));
+        }
         res.json(out);
     } catch (error) {
         appleFailure(res, "Error fetching genre podcasts", error);
     }
 });
 
-/** GET /podcasts/discover/genre/:genreId?limit&offset — one category's chart, paged. */
-router.get("/discover/genre/:genreId", async (req, res) => {
-    const page = pageParams.safeParse(req.query);
-    const id = Number(req.params.genreId);
-    if (!page.success || !Number.isInteger(id)) return res.status(400).json({ error: "genreId must be a category id" });
-    try {
-        if (!(await isCategory(id))) return res.status(404).json({ error: "No such podcast category" });
-        const shows = (await chart(id)).slice(page.data.offset, page.data.offset + page.data.limit);
-        res.json(await toDiscoveryItems(shows));
-    } catch (error) {
-        appleFailure(res, "Error fetching paginated genre podcasts", error);
-    }
-});
+/** GET /podcasts/discover/genre/:genreId?limit&offset — one category's chart, as /charts (kept for the iOS app). */
+router.get("/discover/genre/:genreId", (req, res) =>
+    answerChart(res, Number(req.params.genreId), req.query, "Error fetching paginated genre podcasts"),
+);
 
 /**
  * GET /podcasts/preview/:itunesId
@@ -364,7 +361,6 @@ router.get("/preview/:itunesId", requireAuth, async (req, res) => {
                     PREVIEW_RSS_TIMEOUT_MS,
                     "RSS preview timed out",
                 );
-                if (feedResult.notModified) throw new Error("Unexpected 304 on preview fetch");
                 description = feedResult.podcast.description || "";
                 previewEpisodes = [...feedResult.episodes]
                     .sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime())
@@ -425,7 +421,7 @@ router.get("/preview/:itunesId/snippet", async (req, res) => {
     try {
         const snippet = await snippetFor(itunesId, async (feedUrl) => {
             const feed = await withTimeout(rssParserService.parseFeed(feedUrl), PREVIEW_RSS_TIMEOUT_MS, "RSS snippet timed out");
-            return feed.notModified ? null : snippetFrom(feed.episodes);
+            return snippetFrom(feed.episodes);
         });
         if (!snippet) {
             return res.status(404).json({ error: "This podcast has no episode to sample" });
@@ -441,6 +437,23 @@ router.get("/preview/:itunesId/snippet", async (req, res) => {
         });
     } catch (error) {
         answerUpstreamFailure(res, "Error streaming podcast snippet", error, "This podcast has no episode to sample", "The show's feed did not answer; try again shortly");
+    }
+});
+
+/** GET /podcasts/preview/:itunesId/similar — a show not followed yet: shows on its categories' charts, as /:id/similar. */
+router.get("/preview/:itunesId/similar", requireAuth, async (req, res) => {
+    const { itunesId } = req.params;
+    if (!/^\d+$/.test(itunesId)) {
+        return res.status(404).json({ error: "Podcast not found" });
+    }
+    try {
+        const show = (await lookupShows([itunesId])).get(itunesId);
+        if (!show) {
+            return res.status(404).json({ error: "Podcast not found" });
+        }
+        res.json(await similarShows(show));
+    } catch (error) {
+        appleFailure(res, "Error fetching similar podcasts", error);
     }
 });
 
@@ -471,8 +484,8 @@ router.post("/refresh-all", requireAuth, async (req, res) => {
                     { jobId: `podcast-${sub.podcastId}-${Date.now()}` },
                 );
                 queued++;
-            } catch {
-                // Job already queued (dedup by jobId) -- skip silently
+            } catch (err) {
+                logger.warn(`[PODCAST] Could not queue a refresh of ${sub.podcastId}: ${(err as Error).message}`);
             }
         }
 
@@ -726,12 +739,6 @@ router.post("/subscribe", requireAuth, async (req, res) => {
                 .json({ error: "feedUrl or itunesId is required" });
         }
 
-        logger.debug(
-            `\n [PODCAST] Subscribe request from ${req.user!.username}`
-        );
-        logger.debug(`   Feed URL: ${feedUrl || "N/A"}`);
-        logger.debug(`   iTunes ID: ${itunesId || "N/A"}`);
-
         const appleId = itunesId === undefined || itunesId === null || itunesId === "" ? null : String(itunesId);
         const userId = req.user!.id;
 
@@ -753,7 +760,6 @@ router.post("/subscribe", requireAuth, async (req, res) => {
             podcast = await existing(finalFeedUrl);
             if (podcast) return res.json(await follow(userId, podcast));
         }
-        logger.debug(`   Feed URL: ${finalFeedUrl}`);
 
         // SSRF validation: block internal/private addresses
         const ssrfError = await validateUrlForFetch(finalFeedUrl);
@@ -762,20 +768,14 @@ router.post("/subscribe", requireAuth, async (req, res) => {
         }
 
         // Parse RSS feed to get podcast and episodes
-        logger.debug(`   Parsing RSS feed...`);
         const subscribeResult = await rssParserService.parseFeed(finalFeedUrl);
-        if (subscribeResult.notModified) {
-            return res.status(500).json({ error: "Unexpected 304 on initial subscribe" });
-        }
         const { podcast: podcastData, episodes } = subscribeResult;
 
         // Create podcast in database. Apple ids are unique and the preview finds shows by them, so one is stored only
         // when Apple says it names this feed: the client and the feed itself can each claim any show's id.
-        logger.debug(`    Saving podcast to database...`);
         const feedDeclared = podcastData.itunesId ? String(podcastData.itunesId) : null;
         const finalItunesId =
             (await appleIdFor(appleId, finalFeedUrl)) ?? (feedDeclared !== appleId ? await appleIdFor(feedDeclared, finalFeedUrl) : null);
-        logger.debug(`   iTunes ID to save: ${finalItunesId || "NONE"}`);
 
         try {
             podcast = await prisma.podcast.create({
@@ -804,11 +804,8 @@ router.post("/subscribe", requireAuth, async (req, res) => {
         }
 
         await assignCategories(podcast.id, finalItunesId, podcastData.categoryNames);
-        logger.debug(`   Podcast created: ${podcast.id}`);
-        logger.debug(`   iTunes ID saved: ${podcast.itunesId || "NONE"}`);
 
         // Save episodes
-        logger.debug(`    Saving ${episodes.length} episodes...`);
         await prisma.podcastEpisode.createMany({
             data: episodes.map((ep) => ({
                 podcastId: podcast!.id,
@@ -827,8 +824,6 @@ router.post("/subscribe", requireAuth, async (req, res) => {
             skipDuplicates: true,
         });
 
-        logger.debug(`   Episodes saved`);
-
         res.json(await follow(userId, podcast));
     } catch (error: any) {
         // A feed or Apple failing is never the server failing (utils/upstream): nothing there → 404; the host or Apple
@@ -840,10 +835,7 @@ router.post("/subscribe", requireAuth, async (req, res) => {
         if (failure === "down" && upstreamUnreachable(error)) {
             return res.status(502).json({ error: "The show's feed or Apple Podcasts did not answer; try again shortly" });
         }
-        if (
-            error instanceof Error &&
-            error.message.startsWith("Failed to parse podcast feed")
-        ) {
+        if (error instanceof FeedReadError) {
             return res.status(422).json({
                 error: "Podcast feed could not be read",
                 detail: error.message,
@@ -919,14 +911,8 @@ router.get("/:id/refresh", requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
 
-        logger.debug(`\n [PODCAST] Refresh request`);
-        logger.debug(`   Podcast ID: ${id}`);
-
         const result = await refreshPodcastFeed(id);
-
-        logger.debug(
-            `   Refresh complete. ${result.newEpisodesCount} new episodes added.`
-        );
+        if (!result) return res.status(404).json({ error: "Podcast not found" });
 
         res.json({
             success: true,
@@ -935,10 +921,7 @@ router.get("/:id/refresh", requireAuth, async (req, res) => {
             message: `Found ${result.newEpisodesCount} new episodes`,
         });
     } catch (error) {
-        if (error instanceof Error && error.message?.includes("not found")) {
-            return res.status(404).json({ error: "Podcast not found" });
-        }
-        safeError(res, "Error refreshing podcast", error);
+        answerUpstreamFailure(res, "Error refreshing podcast", error, "The show's feed is gone", "The show's feed did not answer; try again shortly");
     }
 });
 
@@ -1168,10 +1151,11 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
     }
 });
 
-// Lenient on shape (numbers as strings, no duration) so no client the route already served is refused.
+// Lenient on shape (numbers as strings, no duration) so no client the route already served is refused;
+// a missing duration keeps the one stored.
 const progressSchema = z.object({
     currentTime: z.coerce.number().finite().min(0),
-    duration: z.coerce.number().finite().min(0).default(0),
+    duration: z.coerce.number().finite().min(0).optional(),
     isFinished: z.boolean().optional(),
 });
 
@@ -1184,20 +1168,13 @@ router.post("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req,
         const { episodeId } = req.params;
         const body = progressSchema.safeParse(req.body);
         if (!body.success) {
-            return res.status(400).json({ error: "currentTime and duration (seconds) are required" });
+            return res.status(400).json({ error: "currentTime (seconds) is required" });
         }
         const { currentTime, duration, isFinished } = body.data;
         const episode = await prisma.podcastEpisode.findUnique({ where: { id: episodeId }, select: { id: true } });
         if (!episode) {
             return res.status(404).json({ error: "Episode not found" });
         }
-
-        logger.debug(`\n [PODCAST PROGRESS] Update:`);
-        logger.debug(`   User: ${req.user!.username}`);
-        logger.debug(`   Episode ID: ${episodeId}`);
-        logger.debug(`   Current Time: ${currentTime}s`);
-        logger.debug(`   Duration: ${duration}s`);
-        logger.debug(`   Finished: ${isFinished}`);
 
         const progress = await prisma.podcastProgress.upsert({
             where: {
@@ -1210,18 +1187,16 @@ router.post("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req,
                 userId: req.user!.id,
                 episodeId: episodeId,
                 currentTime,
-                duration,
+                duration: duration ?? 0,
                 isFinished: isFinished || false,
             },
             update: {
                 currentTime,
-                duration,
+                ...(duration !== undefined && { duration }),
                 isFinished: isFinished || false,
                 lastPlayedAt: new Date(),
             },
         });
-
-        logger.debug(`   Progress saved`);
 
         res.json({
             success: true,
@@ -1273,7 +1248,7 @@ router.get("/:id/similar", async (req, res) => {
             return res.status(404).json({ error: "Podcast not found" });
         }
         const shows = await similarShows(podcast);
-        res.json(shows.map((show, i) => ({ ...show, score: shows.length - i })));
+        res.json(shows);
     } catch (error) {
         appleFailure(res, "Error fetching similar podcasts", error);
     }
@@ -1398,12 +1373,12 @@ router.get("/episodes/:episodeId/cover", async (req, res) => {
 });
 
 /**
- * Refresh a single podcast feed -- shared logic used by both the route handler
- * and the enrichment worker's automatic refresh phase.
+ * Fetch a stored show's feed again and store its new episodes; null when the show is not stored. Shared by the
+ * refresh route, the Subsonic refresh and the podcast worker.
  */
-export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisodesCount: number; totalEpisodes: number }> {
+export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisodesCount: number; totalEpisodes: number } | null> {
     const podcast = await prisma.podcast.findUnique({ where: { id: podcastId } });
-    if (!podcast) throw new Error(`Podcast ${podcastId} not found`);
+    if (!podcast) return null;
 
     const result = await rssParserService.parseFeed(podcast.feedUrl, {
         etag: podcast.feedEtag,

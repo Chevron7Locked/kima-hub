@@ -171,15 +171,16 @@ describe("a control closed by Escape marks the key as used", () => {
 
     it("podcast search results, and not while they are closed", async () => {
         await show(<PodcastSearch />);
-        const input = find<HTMLInputElement>('input[role="combobox"]')!;
+        const input = find<HTMLInputElement>('input[aria-label="search shows and episodes"]')!;
         expect((await escapeAt(input)).defaultPrevented, "Escape with the results closed was marked as used").toBe(false);
 
         await type(input, "daddies");
-        expect(input.getAttribute("aria-expanded")).toBe("true");
+        const results = () => find('[aria-label="search results"]');
+        expect(results()).not.toBeNull();
 
         const escape = await escapeAt(input);
 
-        expect(input.getAttribute("aria-expanded")).toBe("false");
+        expect(results()).toBeNull();
         expect(escape.defaultPrevented).toBe(true);
     });
 

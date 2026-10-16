@@ -395,9 +395,13 @@ export async function measureCachedEpisodeLengths(): Promise<number> {
         if (outcome === "stored") measured++;
         if (outcome === "unreadable") unreadable.push(file);
     }
-    await fs.writeFile(marker, [new Date().toISOString(), ...unreadable].join("\n") + "\n").catch((err) => {
-        logger.warn(`[PODCAST-DL] Could not mark cached lengths measured: ${(err as Error).message}`);
-    });
+    // A marker that already lists exactly these files is left as it is.
+    const unchanged = left !== null && left.length === unreadable.length;
+    if (!unchanged) {
+        await fs.writeFile(marker, [new Date().toISOString(), ...unreadable].join("\n") + "\n").catch((err) => {
+            logger.warn(`[PODCAST-DL] Could not mark cached lengths measured: ${(err as Error).message}`);
+        });
+    }
     if (measured > 0) logger.info(`[PODCAST-DL] Measured the length of ${measured} cached episode(s)`);
     return measured;
 }
