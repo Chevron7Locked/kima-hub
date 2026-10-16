@@ -11,6 +11,7 @@ import { shuffleArray } from "@/lib/shuffle";
 import { formatTime, plural } from "@/lib/format";
 import { queryKeys, usePlaylistQuery, useRemoveFromPlaylistMutation, useDeletePlaylistMutation, useUpdatePlaylistMutation, useSetPlaylistReverseMutation, useMoveTrackInPlaylistMutation, usePublicConfig } from "@/hooks/useQueries";
 import { usePreview } from "@/hooks/usePreview";
+import { useLeaveDeletedPlaylist } from "@/hooks/useLeaveDeletedPlaylist";
 import { useQueryClient } from "@tanstack/react-query";
 import { notify } from "@/lib/notify";
 import { mosaicCovers } from "@/features/playlist/coverMosaic";
@@ -230,7 +231,9 @@ export default function PlaylistDetailPage() {
         }
     };
 
-    const { data: playlist, isLoading } = usePlaylistQuery(playlistId);
+    const playlistQuery = usePlaylistQuery(playlistId);
+    const { data: playlist, isLoading } = playlistQuery;
+    useLeaveDeletedPlaylist(playlistId, playlistQuery);
 
     const isShared = playlist?.isOwner === false;
 
@@ -310,11 +313,10 @@ export default function PlaylistDetailPage() {
         try {
             await deletePlaylistMut(playlistId);
 
+            // Every page showing this playlist, this one included, leaves for the list on this signal.
             window.dispatchEvent(
                 new CustomEvent("playlist-deleted", { detail: { playlistId } })
             );
-
-            router.push("/playlists");
         } catch (error) {
             console.error("Failed to delete playlist:", error);
             notify.error("Failed to delete playlist");

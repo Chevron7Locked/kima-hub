@@ -439,9 +439,31 @@ export function useRefreshMixesMutation() {
 
 type PlaylistCache = Record<string, unknown> | undefined;
 
-function invalidatePlaylist(queryClient: QueryClient, playlistId: string) {
-    queryClient.invalidateQueries({ queryKey: queryKeys.playlist(playlistId) });
-    queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
+/** Every edit to a playlist carries this key, so edits still on their way to the server can be counted. */
+const PLAYLIST_EDIT = ["playlist-edit"] as const;
+
+/**
+ * Edits to one playlist sent and not yet answered (one settling counts itself). While any is on its way, a reply to
+ * a playlist fetch lacks it and would briefly undo it on screen, so only the last edit to settle asks for the
+ * playlist; the live stream's echo of this device's own change waits for it too.
+ */
+export function playlistEditsInFlight(queryClient: QueryClient, playlistId: string): number {
+    return queryClient.isMutating({
+        mutationKey: PLAYLIST_EDIT,
+        predicate: (mutation) => (mutation.state.variables as { playlistId?: string } | undefined)?.playlistId === playlistId,
+    });
+}
+
+/**
+ * Per playlist, while edits to it are on their way: the playlist as cached before the first of them was shown, and
+ * whether any has been accepted. Kept per query client, so each test's client starts clean.
+ */
+const playlistEditBursts = new WeakMap<QueryClient, Map<string, { before: unknown; anyAccepted: boolean }>>();
+
+function editBursts(queryClient: QueryClient) {
+    let bursts = playlistEditBursts.get(queryClient);
+    if (!bursts) playlistEditBursts.set(queryClient, (bursts = new Map()));
+    return bursts;
 }
 
 async function applyOptimisticPlaylistEdit(
@@ -450,21 +472,38 @@ async function applyOptimisticPlaylistEdit(
     edit: (old: PlaylistCache) => PlaylistCache,
 ) {
     await queryClient.cancelQueries({ queryKey: queryKeys.playlist(playlistId) });
-    const previous = queryClient.getQueryData(queryKeys.playlist(playlistId));
+    const bursts = editBursts(queryClient);
+    if (!bursts.has(playlistId)) {
+        bursts.set(playlistId, { before: queryClient.getQueryData(queryKeys.playlist(playlistId)), anyAccepted: false });
+    }
     queryClient.setQueryData(queryKeys.playlist(playlistId), edit);
-    return { previous };
 }
 
-function rollbackPlaylistEdit(queryClient: QueryClient, playlistId: string, context: { previous: unknown } | undefined) {
-    if (context?.previous) {
-        queryClient.setQueryData(queryKeys.playlist(playlistId), context.previous);
+/**
+ * Every playlist edit ends here, accepted or not. Only the last of the edits on their way acts: if none of them was
+ * accepted (a refusal, or no connection), the playlist goes back to how it was before the first was shown; then it is
+ * fetched, so the server's truth replaces what was shown. An edit's own snapshot is never restored on its own: it
+ * would also undo edits sent after it.
+ */
+function settlePlaylistEdit(queryClient: QueryClient, playlistId: string, accepted: boolean) {
+    const bursts = editBursts(queryClient);
+    const burst = bursts.get(playlistId);
+    if (burst && accepted) burst.anyAccepted = true;
+    if (playlistEditsInFlight(queryClient, playlistId) <= 1) {
+        bursts.delete(playlistId);
+        if (burst && !burst.anyAccepted && burst.before !== undefined) {
+            queryClient.setQueryData(queryKeys.playlist(playlistId), burst.before);
+        }
+        queryClient.invalidateQueries({ queryKey: queryKeys.playlist(playlistId) });
     }
+    queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
 }
 
 export function useAddToPlaylistMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
+        mutationKey: PLAYLIST_EDIT,
         // Accepts a single trackId or many; pass trackIds to add a whole mix in
         // one request.
         mutationFn: ({
@@ -479,7 +518,7 @@ export function useAddToPlaylistMutation() {
             trackIds?.length
                 ? api.addTracksToPlaylist(playlistId, trackIds)
                 : api.addTrackToPlaylist(playlistId, trackId!),
-        onSettled: (_, __, variables) => invalidatePlaylist(queryClient, variables.playlistId),
+        onSettled: (_, error, variables) => settlePlaylistEdit(queryClient, variables.playlistId, !error),
     });
 }
 
@@ -487,6 +526,7 @@ export function useRemoveFromPlaylistMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
+        mutationKey: PLAYLIST_EDIT,
         mutationFn: ({
             playlistId,
             trackId,
@@ -504,8 +544,7 @@ export function useRemoveFromPlaylistMutation() {
                     ),
                 };
             }),
-        onError: (_err, variables, context) => rollbackPlaylistEdit(queryClient, variables.playlistId, context),
-        onSettled: (_, __, variables) => invalidatePlaylist(queryClient, variables.playlistId),
+        onSettled: (_, error, variables) => settlePlaylistEdit(queryClient, variables.playlistId, !error),
     });
 }
 
@@ -513,6 +552,7 @@ export function useUpdatePlaylistMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
+        mutationKey: PLAYLIST_EDIT,
         mutationFn: ({
             playlistId,
             data,
@@ -520,7 +560,7 @@ export function useUpdatePlaylistMutation() {
             playlistId: string;
             data: { name?: string; isPublic?: boolean };
         }) => api.updatePlaylist(playlistId, data),
-        onSuccess: (_, variables) => invalidatePlaylist(queryClient, variables.playlistId),
+        onSettled: (_, error, variables) => settlePlaylistEdit(queryClient, variables.playlistId, !error),
     });
 }
 
@@ -528,6 +568,7 @@ export function useSetPlaylistReverseMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
+        mutationKey: PLAYLIST_EDIT,
         mutationFn: ({
             playlistId,
             reverseOrder,
@@ -547,8 +588,7 @@ export function useSetPlaylistReverseMutation() {
                     }),
                 };
             }),
-        onError: (_err, variables, context) => rollbackPlaylistEdit(queryClient, variables.playlistId, context),
-        onSettled: (_, __, variables) => invalidatePlaylist(queryClient, variables.playlistId),
+        onSettled: (_, error, variables) => settlePlaylistEdit(queryClient, variables.playlistId, !error),
     });
 }
 
@@ -604,6 +644,7 @@ export function useMoveTrackInPlaylistMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
+        mutationKey: PLAYLIST_EDIT,
         mutationFn: ({
             playlistId,
             itemId,
@@ -617,8 +658,7 @@ export function useMoveTrackInPlaylistMutation() {
             applyOptimisticPlaylistEdit(queryClient, variables.playlistId, (old) =>
                 movePlaylistItem(old, variables.itemId, variables.afterItemId),
             ),
-        onError: (_err, variables, context) => rollbackPlaylistEdit(queryClient, variables.playlistId, context),
-        onSettled: (_, __, variables) => invalidatePlaylist(queryClient, variables.playlistId),
+        onSettled: (_, error, variables) => settlePlaylistEdit(queryClient, variables.playlistId, !error),
     });
 }
 

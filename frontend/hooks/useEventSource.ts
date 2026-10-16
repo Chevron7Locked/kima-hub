@@ -1,16 +1,33 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-context";
 import { searchResultStore } from "@/lib/search-result-store";
 import { api, getApiBaseUrl } from "@/lib/api";
+import { playlistEditsInFlight } from "@/hooks/useQueries";
 
 /** In proxy mode this is "", so events go through the streaming route in app/api/events. */
 function getSSEBaseUrl(): string {
     if (typeof window === "undefined") return "";
     return getApiBaseUrl();
 }
+
+/**
+ * Every cache an event below keeps fresh. Events sent while the stream is down are not replayed, so a reconnect
+ * refreshes them all. Job-status caches (scan, import, preview) are not here: their pages poll while a job runs.
+ */
+const STREAM_FED_QUERIES: QueryKey[] = [
+    ["notifications"],
+    ["active-downloads"],
+    ["download-history"],
+    ["album"],
+    ["enrichment-progress"],
+    ["library", "recently-added"],
+    ["user-imports"],
+    ["playlists"],
+    ["playlist"],
+];
 
 export function useEventSource() {
     const { isAuthenticated } = useAuth();
@@ -114,7 +131,6 @@ export function useEventSource() {
                                 ["discover-batch-status"],
                                 { active: false, status: null, batchId: data.batchId }
                             );
-                            queryClient.invalidateQueries({ queryKey: ["discover-playlist"] });
                             break;
                         case "preview:progress":
                             queryClient.setQueryData(
@@ -131,16 +147,29 @@ export function useEventSource() {
                         case "playlist:updated":
                             if (data.playlistId) {
                                 queryClient.invalidateQueries({ queryKey: ["playlists"] });
-                                queryClient.invalidateQueries({ queryKey: ["playlist", data.playlistId] });
+                                if (data.deleted) {
+                                    // Gone: drop it where no page is using it, never ask the server for it again, and tell
+                                    // a page still showing it (the same signal a delete on this device sends).
+                                    queryClient.removeQueries({ queryKey: ["playlist", data.playlistId], type: "inactive" });
+                                    window.dispatchEvent(new CustomEvent("playlist-deleted", { detail: { playlistId: data.playlistId } }));
+                                } else if (playlistEditsInFlight(queryClient, data.playlistId) === 0) {
+                                    // With this device's own edits on their way, the last of them asks instead.
+                                    queryClient.invalidateQueries({ queryKey: ["playlist", data.playlistId] });
+                                }
                             }
                             break;
                         case "connected":
-                            // Only refetch on reconnect (not initial connect) to avoid
-                            // duplicate requests when queries were just fetched on mount.
+                            // Only on a reconnect: the first connect follows pages that just fetched.
                             if (reconnectAttemptsRef.current > 0) {
-                                queryClient.invalidateQueries({ queryKey: ["notifications"] });
-                                queryClient.invalidateQueries({ queryKey: ["active-downloads"] });
-                                queryClient.invalidateQueries({ queryKey: ["download-history"] });
+                                for (const queryKey of STREAM_FED_QUERIES) {
+                                    queryClient.invalidateQueries({
+                                        queryKey,
+                                        // A playlist with this device's own edits on their way: the last of them fetches it.
+                                        predicate: (query) =>
+                                            !(query.queryKey[0] === "playlist" &&
+                                                playlistEditsInFlight(queryClient, String(query.queryKey[1])) > 0),
+                                    });
+                                }
                             }
                             reconnectAttemptsRef.current = 0;
                             // Sync batch status after reconnect to clear stale cache
