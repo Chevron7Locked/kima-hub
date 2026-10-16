@@ -1,6 +1,7 @@
 "use client";
 
 import { usePublicConfig } from "@/hooks/useQueries";
+import { ACQUIRE_LOCKED } from "@/lib/acquire";
 import { useState, useEffect, useRef, Suspense, type CSSProperties } from "react";
 import { formatTime, plural } from "@/lib/format";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -675,7 +676,7 @@ function ImportPlaylistPageContent() {
 
                         {!canAcquire && preview.summary.downloadable > 0 && (
                             <p className="text-sm text-[var(--text-muted)]">
-                                Songs not in your library are left out: downloads are operator-only here. An admin can allow members in settings.
+                                Songs not in your library are left out: {ACQUIRE_LOCKED}.
                             </p>
                         )}
 

@@ -5,13 +5,14 @@ import { Download, CheckCircle, Music } from "lucide-react";
 import { LibraryTracksList } from "./LibraryTracksList";
 import { getQualityBadge, parseFilename } from "./soulseekHelpers";
 import type { LibraryTrack, SoulseekResult } from "../types";
+import { usePublicConfig } from "@/hooks/useQueries";
+import { ACQUIRE_LOCKED, ACQUIRE_LOCKED_LABEL } from "@/lib/acquire";
 
 interface UnifiedSongsListProps {
     tracks: LibraryTrack[];
     soulseekResults: SoulseekResult[];
     downloadingFiles: Set<string>;
     onDownload: (result: SoulseekResult) => void;
-    canAcquire: boolean;
     maxTotal?: number;
     maxLibrary?: number;
 }
@@ -27,10 +28,12 @@ export function UnifiedSongsList({
     soulseekResults,
     downloadingFiles,
     onDownload,
-    canAcquire,
     maxTotal = 6,
     maxLibrary = 4,
 }: UnifiedSongsListProps) {
+    const { canAcquire, settled } = usePublicConfig();
+    // Disabled until the server answers; the operator-only message only once it has said no.
+    const locked = settled && !canAcquire;
     const librarySlice = tracks.slice(0, maxLibrary);
     const soulseekSlots = maxTotal - librarySlice.length;
     const soulseekSlice = useMemo(
@@ -70,8 +73,8 @@ export function UnifiedSongsList({
                         <button
                             onClick={() => canAcquire && !isDownloading && onDownload(result)}
                             disabled={!canAcquire || isDownloading}
-                            title={canAcquire ? "download" : "downloads are operator-only — an admin can allow members in settings"}
-                            aria-label={canAcquire ? "download from soulseek" : "downloads are operator-only"}
+                            title={locked ? ACQUIRE_LOCKED : "download"}
+                            aria-label={locked ? ACQUIRE_LOCKED_LABEL : "download from soulseek"}
                             className="w-10 h-10 flex items-center justify-center flex-shrink-0 disabled:opacity-40"
                         >
                             {isDownloading ? (

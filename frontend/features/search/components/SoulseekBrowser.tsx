@@ -13,6 +13,8 @@ import type {
     SoulseekFormatFilter,
 } from "../types";
 import { Button } from "@/components/ui/Button";
+import { usePublicConfig } from "@/hooks/useQueries";
+import { ACQUIRE_LOCKED, ACQUIRE_LOCKED_LABEL } from "@/lib/acquire";
 
 interface SoulseekBrowserProps {
     results: SoulseekResult[];
@@ -22,7 +24,6 @@ interface SoulseekBrowserProps {
     downloadingFiles: Set<string>;
     onDownload: (result: SoulseekResult) => void;
     onBulkDownload: (results: SoulseekResult[]) => void;
-    canAcquire: boolean;
 }
 
 const PAGE_SIZE = 100;
@@ -60,8 +61,10 @@ export function SoulseekBrowser({
     downloadingFiles,
     onDownload,
     onBulkDownload,
-    canAcquire,
 }: SoulseekBrowserProps) {
+    const { canAcquire, settled } = usePublicConfig();
+    // Disabled until the server answers; the operator-only message only once it has said no.
+    const locked = settled && !canAcquire;
     const [formatFilters, setFormatFilters] = useState<Set<SoulseekFormatFilter>>(new Set(["all"]));
     const [sortField, setSortField] = useState<SoulseekSortField>("quality");
     const [viewMode, setViewMode] = useState<SoulseekViewMode>("flat");
@@ -284,7 +287,7 @@ export function SoulseekBrowser({
                         variant="primary"
                         onClick={handleBulkDownloadClick}
                         disabled={!canAcquire}
-                        title={canAcquire ? undefined : "downloads are operator-only — an admin can allow members in settings"}
+                        title={locked ? ACQUIRE_LOCKED : undefined}
                         className="ml-auto"
                     >
                         <Download className="w-4 h-4" />
@@ -301,7 +304,6 @@ export function SoulseekBrowser({
                     onToggleSelect={toggleSelect}
                     onToggleSelectAll={toggleSelectAll}
                     onDownload={onDownload}
-                    canAcquire={canAcquire}
                 />
             ) : (
                 <GroupedView
@@ -312,7 +314,6 @@ export function SoulseekBrowser({
                     onToggleGroup={toggleGroup}
                     onToggleSelect={toggleSelect}
                     onDownload={onDownload}
-                    canAcquire={canAcquire}
                 />
             )}
 
@@ -336,7 +337,6 @@ interface FlatViewProps {
     onToggleSelect: (key: string) => void;
     onToggleSelectAll: () => void;
     onDownload: (result: SoulseekResult) => void;
-    canAcquire: boolean;
 }
 
 function FlatView({
@@ -346,7 +346,6 @@ function FlatView({
     onToggleSelect,
     onToggleSelectAll,
     onDownload,
-    canAcquire,
 }: FlatViewProps) {
     const allSelected = results.length > 0 && results.every((r) => selectedKeys.has(getResultKey(r)));
 
@@ -377,7 +376,6 @@ function FlatView({
                     isDownloading={downloadingFiles.has(getResultKey(result))}
                     onToggleSelect={onToggleSelect}
                     onDownload={onDownload}
-                    canAcquire={canAcquire}
                     animationDelay={index * Math.round(CASCADE_WINDOW_MS / Math.max(results.length, 1))}
                 />
             ))}
@@ -393,7 +391,6 @@ interface ResultRowProps {
     isDownloading: boolean;
     onToggleSelect: (key: string) => void;
     onDownload: (result: SoulseekResult) => void;
-    canAcquire: boolean;
     animationDelay: number;
 }
 
@@ -403,9 +400,11 @@ function ResultRow({
     isDownloading,
     onToggleSelect,
     onDownload,
-    canAcquire,
     animationDelay,
 }: ResultRowProps) {
+    const { canAcquire, settled } = usePublicConfig();
+    // Disabled until the server answers; the operator-only message only once it has said no.
+    const locked = settled && !canAcquire;
     const key = getResultKey(result);
     const parsed = result.parsedTitle
         ? { artist: result.parsedArtist || "Unknown", title: result.parsedTitle }
@@ -452,8 +451,8 @@ function ResultRow({
                 <button
                     onClick={() => onDownload(result)}
                     disabled={isDownloading || !canAcquire}
-                    title={canAcquire ? undefined : "downloads are operator-only — an admin can allow members in settings"}
-                    aria-label={canAcquire ? "download from soulseek" : "downloads are operator-only"}
+                    title={locked ? ACQUIRE_LOCKED : undefined}
+                    aria-label={locked ? ACQUIRE_LOCKED_LABEL : "download from soulseek"}
                     className={cn(
                         "p-1.5 rounded-full transition-colors",
                         isDownloading
@@ -484,7 +483,6 @@ interface GroupedViewProps {
     onToggleGroup: (username: string) => void;
     onToggleSelect: (key: string) => void;
     onDownload: (result: SoulseekResult) => void;
-    canAcquire: boolean;
 }
 
 function GroupedView({
@@ -495,7 +493,6 @@ function GroupedView({
     onToggleGroup,
     onToggleSelect,
     onDownload,
-    canAcquire,
 }: GroupedViewProps) {
     return (
         <div className="space-y-1">
@@ -529,7 +526,6 @@ function GroupedView({
                                         isDownloading={downloadingFiles.has(getResultKey(result))}
                                         onToggleSelect={onToggleSelect}
                                         onDownload={onDownload}
-                                        canAcquire={canAcquire}
                                         animationDelay={0}
                                     />
                                 ))}

@@ -5,7 +5,6 @@ import { notify } from "@/lib/notify";
 import { searchResultStore } from "@/lib/search-result-store";
 import type { SoulseekResult } from "../types";
 import { openActivityPanel } from "@/hooks/useActivityPanel";
-import { usePublicConfig } from "@/hooks/useQueries";
 
 interface UseSoulseekSearchProps {
     query: string;
@@ -20,7 +19,6 @@ interface UseSoulseekSearchReturn {
     handleDownload: (result: SoulseekResult) => Promise<void>;
     handleBulkDownload: (results: SoulseekResult[]) => Promise<void>;
     uniqueUserCount: number;
-    canAcquire: boolean;
 }
 
 export function useSoulseekSearch({
@@ -33,7 +31,6 @@ export function useSoulseekSearch({
     const [downloadingFiles, setDownloadingFiles] = useState<Set<string>>(new Set());
     const [isComplete, setIsComplete] = useState(false);
     const [hasActiveSearch, setHasActiveSearch] = useState(false);
-    const { canAcquire } = usePublicConfig();
 
     const searchIdRef = useRef<string | null>(null);
 
@@ -200,6 +197,5 @@ export function useSoulseekSearch({
         handleDownload,
         handleBulkDownload,
         uniqueUserCount,
-        canAcquire,
     };
 }

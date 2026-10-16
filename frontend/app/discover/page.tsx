@@ -11,6 +11,7 @@ import { useDiscoverData } from "@/features/discover/hooks/useDiscoverData";
 import { useDiscoverActions } from "@/features/discover/hooks/useDiscoverActions";
 import { usePreview } from "@/hooks/usePreview";
 import { usePublicConfig } from "@/hooks/useQueries";
+import { ACQUIRE_LOCKED } from "@/lib/acquire";
 import { DiscoverHero } from "@/features/discover/components/DiscoverHero";
 import { DiscoverActionBar } from "@/features/discover/components/DiscoverActionBar";
 import { TrackList } from "@/features/discover/components/TrackList";
@@ -299,7 +300,7 @@ export default function DiscoverWeeklyPage() {
                                         </button>
                                     ) : (
                                         <p className="text-sm text-[var(--text-muted)]">
-                                            Building this playlist downloads albums, and downloads are operator-only here. An admin can allow members in settings.
+                                            Building this playlist downloads albums: {ACQUIRE_LOCKED}.
                                         </p>
                                     )}
                                 </div>

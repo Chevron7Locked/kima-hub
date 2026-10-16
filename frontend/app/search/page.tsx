@@ -45,7 +45,6 @@ export default function SearchPage() {
         handleDownload,
         handleBulkDownload,
         uniqueUserCount,
-        canAcquire,
     } = useSoulseekSearch({ query });
 
     const urlQuery = searchParams.get("q") ?? "";
@@ -95,7 +94,6 @@ export default function SearchPage() {
                 soulseekResults={soulseekResults}
                 downloadingFiles={downloadingFiles}
                 onDownload={handleDownload}
-                canAcquire={canAcquire}
             />
         ) : filterTab === "library" ? (
             <LibraryTracksList tracks={libraryResults?.tracks ?? []} />
@@ -193,7 +191,6 @@ export default function SearchPage() {
                             downloadingFiles={downloadingFiles}
                             onDownload={handleDownload}
                             onBulkDownload={handleBulkDownload}
-                            canAcquire={canAcquire}
                         />
                     </div>
                 )}
