@@ -163,6 +163,15 @@ export class MusicScannerService {
             existingTracks.map((t) => [t.filePath, t])
         );
 
+        // An empty music folder (nothing in it at all, not even the artist folders) while the library holds songs is
+        // a drive that is not mounted, not a deletion: the scan stops before anything is flagged, so nothing can be
+        // retired, and fails so whoever started it is told.
+        const present = existingTracks.filter((t) => !t.missingSince).length;
+        if (present > 0 && (await fs.promises.readdir(musicPath)).length === 0) {
+            const message = `The music folder (${musicPath}) is empty, but the library has ${present} songs; nothing was marked missing. Is the drive mounted?`;
+            throw new Error(message);
+        }
+
         // Step 3: Process each audio file
         let filesScanned = 0;
         const progress: ScanProgress = {
@@ -238,11 +247,10 @@ export class MusicScannerService {
 
         await this.scanQueue.onIdle();
 
-        // Missing files are flagged; in `flag` mode (default) nothing is ever deleted:
-        // deleting the row would cascade away its plays, likes, stage records and
-        // embedding, and the flag is cleared by the scan that finds the file again.
-        // In `delete` mode, Step 4b retires tracks confirmed gone — flagged by the
-        // previous scan, still absent now — and RemovalLog records what was removed.
+        // Missing files are flagged first, never deleted on sight: deleting the row cascades away its plays, likes,
+        // stage records and embedding, and the flag is cleared by the scan that finds the file again. In `delete`
+        // mode (default), Step 4b retires tracks confirmed gone — flagged by the previous scan, still absent now —
+        // and RemovalLog records what was removed. `flag` mode only flags.
         const scannedPaths = new Set(
             audioFiles.map((f) => path.relative(musicPath, f))
         );
@@ -258,8 +266,10 @@ export class MusicScannerService {
                 try {
                     await fs.promises.access(fullPath);
                     return { track: t, exists: true };
-                } catch {
-                    return { track: t, exists: false };
+                } catch (err) {
+                    // Only "no such file" is gone. Anything else (no permission, an I/O error, a stale network
+                    // share) says nothing about the file, so it is not flagged.
+                    return { track: t, exists: (err as NodeJS.ErrnoException).code !== "ENOENT" };
                 }
             })
         );
@@ -326,7 +336,7 @@ export class MusicScannerService {
             });
         }
 
-        // Step 4b: Reconcile (opt-in). Retires tracks confirmed gone by consecutive
+        // Step 4b: Reconcile. Retires tracks confirmed gone by consecutive
         // scans; inert in `flag` mode. Runs BEFORE Steps 5-6 so their orphan cleanup
         // cascades the newly-emptied albums and artists for free.
         const reconcile = await runReconcile(new Date(startTime));

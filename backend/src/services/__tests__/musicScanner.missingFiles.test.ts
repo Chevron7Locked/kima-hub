@@ -46,6 +46,7 @@ import path from "path";
 import { parseFile } from "music-metadata";
 import { prisma } from "../../utils/db";
 import { MusicScannerService } from "../musicScanner";
+import { config } from "../../config";
 
 jest.setTimeout(60_000);
 
@@ -123,6 +124,9 @@ async function wipe(): Promise<void> {
 
 beforeEach(async () => {
     await wipe();
+    // How a vanished file is flagged and its questions closed, scan after scan: flag mode, so nothing is retired.
+    // Retiring is musicScanner.reconcile.test.ts.
+    jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "flag" });
 
     musicDir = fs.mkdtempSync(path.join(os.tmpdir(), "scanmiss-"));
     trackFile = path.join(musicDir, REL);
@@ -133,6 +137,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+    jest.restoreAllMocks();
     fs.rmSync(musicDir, { recursive: true, force: true });
 });
 

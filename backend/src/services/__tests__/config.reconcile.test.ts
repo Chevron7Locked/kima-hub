@@ -1,5 +1,5 @@
 /**
- * Reconcile config parsing: retiring confirmed-gone tracks is opt-in, and an
+ * Reconcile config parsing: the library follows the disk unless RECONCILE_MODE=flag, and an
  * unknown mode fails loudly at boot — silently falling back would flip the
  * delete decision without anyone saying so.
  */
@@ -14,8 +14,12 @@ describe("reconcile config", () => {
         process.env = { ...saved };
     });
 
-    it("defaults to flag mode", () => {
-        expect(parseReconcileMode({})).toBe("flag");
+    it("defaults to delete mode, so the library follows the disk", () => {
+        expect(parseReconcileMode({})).toBe("delete");
+    });
+
+    it("parses flag mode from env", () => {
+        expect(parseReconcileMode({ RECONCILE_MODE: "flag" })).toBe("flag");
     });
 
     it("parses delete mode from env", () => {

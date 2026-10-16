@@ -17,12 +17,13 @@ export interface MusicConfig {
 }
 
 /**
- * RECONCILE_MODE, read once when the config loads. An unknown mode fails loudly at boot: silently
+ * RECONCILE_MODE, read once when the config loads. The library follows the disk: `delete` (the default) retires a
+ * track two consecutive scans could not find; `flag` only marks it. An unknown mode fails loudly at boot: silently
  * falling back would flip the delete decision on or off without anyone saying so.
  */
 export function parseReconcileMode(env: Record<string, string | undefined>): MusicConfig["reconcileMode"] {
     const rawMode = env.RECONCILE_MODE;
-    if (rawMode === undefined || rawMode === "flag" || rawMode === "delete") return rawMode ?? "flag";
+    if (rawMode === undefined || rawMode === "flag" || rawMode === "delete") return rawMode ?? "delete";
     throw new AppError(
         ErrorCode.INVALID_CONFIG,
         ErrorCategory.FATAL,

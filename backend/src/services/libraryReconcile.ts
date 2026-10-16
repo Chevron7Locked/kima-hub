@@ -75,13 +75,20 @@ export async function reconcileDeletedTracks(
     }
     const artifacts = [...artifactsByTrack.values()].flat();
 
+    // Every playlist holding a retiring track changes, whether its place moves to another copy or goes.
+    const playlists = await playlistsHoldingTracks(tx, { id: { in: ids } });
+
+    // A file replaced by another copy of the same song (an album upgraded from mp3 to flac, say) hands its history
+    // to the copy before it goes: plays, likes, playlist places, bookmarks and audit choices.
+    const replacedBy = await carryHistoryToReplacements(tx, ids);
+
     await tx.removalLog.createMany({
         data: missing.map((t) => ({
             filePath: t.filePath,
             title: t.title,
             artistName: t.album.artist.name,
             albumTitle: t.album.title,
-            reason: "file-missing-confirmed",
+            reason: replacedBy.has(t.id) ? "replaced-by-another-file" : "file-missing-confirmed",
             artifacts: (artifactsByTrack.get(t.id) ?? []).map((p) => ({
                 table: "TranscodedFile",
                 path: p,
@@ -100,7 +107,6 @@ export async function reconcileDeletedTracks(
         data: { trackId: null },
     });
 
-    const playlists = await playlistsHoldingTracks(tx, { id: { in: ids } });
     await tx.track.deleteMany({ where: { id: { in: ids } } });
 
     // Empty-genre cleanup is library-wide, not sweep-scoped: any Genre row with no tracks
@@ -110,6 +116,48 @@ export async function reconcileDeletedTracks(
 
     logger.info(`[RECONCILE] retired ${ids.length} track(s) confirmed gone by consecutive scans`);
     return { removed: ids.length, artifacts, playlists };
+}
+
+/**
+ * For each retiring track, the live track that is the same song on the same album (same disc and track number,
+ * same title ignoring case), and the history moved onto it. A user's like, bookmark or audit choice already on the
+ * copy, or a playlist already holding it, stays as it is; the retiring row's duplicate goes with it.
+ */
+async function carryHistoryToReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Map<string, string>> {
+    const pairs = await tx.$queryRaw<Array<{ gone: string; kept: string }>>`
+        SELECT DISTINCT ON (g.id) g.id AS gone, k.id AS kept
+          FROM "Track" g
+          JOIN "Track" k
+            ON k."albumId" = g."albumId"
+           AND k."trackNo" = g."trackNo"
+           AND k."discNumber" IS NOT DISTINCT FROM g."discNumber"
+           AND lower(k.title) = lower(g.title)
+           AND k."missingSince" IS NULL
+           AND k.id <> g.id
+         WHERE g.id IN (${Prisma.join(ids)})
+         ORDER BY g.id, k.id
+    `;
+    for (const { gone, kept } of pairs) {
+        await tx.play.updateMany({ where: { trackId: gone }, data: { trackId: kept } });
+        await tx.$executeRaw`
+            UPDATE "LikedTrack" l SET "trackId" = ${kept}
+             WHERE l."trackId" = ${gone}
+               AND NOT EXISTS (SELECT 1 FROM "LikedTrack" o WHERE o."userId" = l."userId" AND o."trackId" = ${kept})`;
+        await tx.$executeRaw`
+            UPDATE "PlaylistItem" i SET "trackId" = ${kept}
+             WHERE i."trackId" = ${gone}
+               AND NOT EXISTS (SELECT 1 FROM "PlaylistItem" o WHERE o."playlistId" = i."playlistId" AND o."trackId" = ${kept})`;
+        await tx.$executeRaw`
+            UPDATE subsonic_bookmarks b SET "trackId" = ${kept}
+             WHERE b."trackId" = ${gone}
+               AND NOT EXISTS (SELECT 1 FROM subsonic_bookmarks o WHERE o."userId" = b."userId" AND o."trackId" = ${kept})`;
+        await tx.$executeRaw`
+            UPDATE "PlayAuditIgnore" a SET "trackId" = ${kept}
+             WHERE a."trackId" = ${gone}
+               AND NOT EXISTS (SELECT 1 FROM "PlayAuditIgnore" o WHERE o."userId" = a."userId" AND o."trackId" = ${kept})`;
+    }
+    if (pairs.length > 0) logger.info(`[RECONCILE] ${pairs.length} retiring track(s) handed their history to another copy of the same song`);
+    return new Map(pairs.map((p) => [p.gone, p.kept]));
 }
 
 /** Best-effort artifact unlinking after the transaction commits; failures never block a scan. */
@@ -124,10 +172,10 @@ async function unlinkArtifacts(artifacts: string[]): Promise<void> {
 }
 
 /**
- * The scan's reconcile step. In `flag` mode (default) it issues no query at all and
- * changes nothing — the stage is inert. In `delete` mode it retires tracks confirmed
- * gone by consecutive scans in one transaction and unlinks their transcode artifacts
- * after, subject to the mass-missing guard.
+ * The scan's reconcile step. In `delete` mode (default) it retires tracks confirmed gone
+ * by consecutive scans in one transaction and unlinks their transcode artifacts after,
+ * subject to the mass-missing guard. In `flag` mode it issues no query at all and changes
+ * nothing — the stage is inert.
  */
 export async function runReconcile(scanStartedAt: Date): Promise<ReconcileResult & { skipped: boolean }> {
     if (config.music.reconcileMode !== "delete") {

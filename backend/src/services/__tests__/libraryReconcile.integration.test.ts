@@ -18,6 +18,7 @@ async function cleanup() {
     await prisma.playbackState.deleteMany({ where: { userId: `${P}user` } });
     await prisma.discoveryTrack.deleteMany({ where: { filePath: { startsWith: `/tmp/${P}` } } });
     await prisma.discoveryAlbum.deleteMany({ where: { userId: `${P}user` } });
+    await prisma.playlist.deleteMany({ where: { userId: `${P}user` } });
     await prisma.likedTrack.deleteMany({ where: { userId: `${P}user` } });
     await prisma.play.deleteMany({ where: { userId: `${P}user` } });
     await prisma.user.deleteMany({ where: { id: `${P}user` } });
@@ -75,6 +76,45 @@ afterAll(async () => {
 });
 
 describe("reconcileDeletedTracks", () => {
+
+    it("hands a replaced file's plays, like and playlist place to the copy of the same song, then retires it", async () => {
+        // The album was upgraded: the mp3 is gone, the flac of the same song is in.
+        await prisma.track.create({
+            data: { id: `${P}mp3`, albumId: `${P}alb`, title: "Schema", trackNo: 1, duration: 200, filePath: `/tmp/${P}mp3.mp3`,
+                fileModified: new Date(), fileSize: 1, missingSince: new Date(Date.now() - 5 * MIN) },
+        });
+        await prisma.track.create({
+            data: { id: `${P}flac`, albumId: `${P}alb`, title: "SCHEMA", trackNo: 1, duration: 200, filePath: `/tmp/${P}flac.flac`,
+                fileModified: new Date(), fileSize: 1 },
+        });
+        // A different song on the same album, also gone, with no copy: retired with its history.
+        await prisma.track.create({
+            data: { id: `${P}solo`, albumId: `${P}alb`, title: "Other", trackNo: 2, duration: 200, filePath: `/tmp/${P}solo.mp3`,
+                fileModified: new Date(), fileSize: 1, missingSince: new Date(Date.now() - 5 * MIN) },
+        });
+        await prisma.play.createMany({ data: [
+            { userId: `${P}user`, trackId: `${P}mp3`, playedAt: new Date(Date.now() - 3 * MIN) },
+            { userId: `${P}user`, trackId: `${P}mp3`, playedAt: new Date(Date.now() - 2 * MIN) },
+            { userId: `${P}user`, trackId: `${P}solo`, playedAt: new Date(Date.now() - 2 * MIN) },
+        ] });
+        await prisma.likedTrack.create({ data: { userId: `${P}user`, trackId: `${P}mp3` } });
+        await prisma.playlist.create({
+            data: { id: `${P}pl`, userId: `${P}user`, name: "Recon", items: { create: [{ trackId: `${P}mp3`, rank: "a", sort: 0 }] } },
+        });
+
+        const res = await reconcileDeletedTracks(prisma, scanStartedAt());
+
+        expect(res.removed).toBe(2);
+        // The playlist's place moved to the copy: open clients are told it changed.
+        expect(res.playlists.map((p) => p.playlistId)).toContain(`${P}pl`);
+        expect(await prisma.track.findUnique({ where: { id: `${P}mp3` } })).toBeNull();
+        expect(await prisma.play.count({ where: { trackId: `${P}flac` } })).toBe(2);
+        expect(await prisma.play.count({ where: { userId: `${P}user` } })).toBe(2);
+        expect(await prisma.likedTrack.findUnique({ where: { userId_trackId: { userId: `${P}user`, trackId: `${P}flac` } } })).not.toBeNull();
+        expect((await prisma.playlistItem.findMany({ where: { playlistId: `${P}pl` } })).map((i) => i.trackId)).toEqual([`${P}flac`]);
+        const log = await prisma.removalLog.findMany({ where: { filePath: { in: [`/tmp/${P}mp3.mp3`, `/tmp/${P}solo.mp3`] } }, orderBy: { filePath: "asc" } });
+        expect(log.map((l) => l.reason)).toEqual(["replaced-by-another-file", "file-missing-confirmed"]);
+    });
 
     it("a flag set by this scan waits for the next one", async () => {
         await seedTrack(`${P}new`, { missingMinutesAgo: 0 });
@@ -189,9 +229,11 @@ describe("reconcileDeletedTracks", () => {
         expect(abs.startsWith("/")).toBe(true);
     });
 
-    it("flag mode (default) skips the sweep without touching tracks", async () => {
+    it("flag mode skips the sweep without touching tracks", async () => {
         await seedTrack(`${P}flag`, { missingMinutesAgo: 999 });
+        const spy = jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "flag" });
         const res = await runReconcile(scanStartedAt());
+        spy.mockRestore();
         expect(res).toEqual({ removed: 0, artifacts: [], playlists: [], skipped: true });
         expect(await prisma.track.findUnique({ where: { id: `${P}flag` } })).not.toBeNull();
         expect(await prisma.removalLog.count({ where: { filePath: `/tmp/${P}flag.flac` } })).toBe(0);

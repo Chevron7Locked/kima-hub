@@ -71,6 +71,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+    jest.restoreAllMocks();
     fs.rmSync(musicDir, { recursive: true, force: true });
 });
 
@@ -146,7 +147,8 @@ describe("scanLibrary in delete mode", () => {
         }
     });
 
-    it("flag mode (default config) deletes nothing across the same three scans", async () => {
+    it("flag mode deletes nothing across the same three scans", async () => {
+        jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "flag" });
         const scanner = new MusicScannerService();
         await scanner.scanLibrary(musicDir);
         fs.unlinkSync(trackFile);
@@ -156,5 +158,16 @@ describe("scanLibrary in delete mode", () => {
         expect(third.tracksRemoved).toBe(0);
         expect(await prisma.track.findUnique({ where: { filePath: REL } })).not.toBeNull();
         expect(await prisma.removalLog.count({ where: { filePath: REL } })).toBe(0);
+    });
+
+    it("marks nothing missing, and so retires nothing, when the music folder is empty: a drive that is not mounted", async () => {
+        const scanner = new MusicScannerService();
+        await scanner.scanLibrary(musicDir);
+        fs.rmSync(path.join(musicDir, "Artist"), { recursive: true, force: true });
+
+        await expect(scanner.scanLibrary(musicDir)).rejects.toThrow(/is empty.*drive mounted/);
+        await expect(scanner.scanLibrary(musicDir)).rejects.toThrow(/is empty.*drive mounted/);
+        const track = await prisma.track.findUnique({ where: { filePath: REL } });
+        expect(track?.missingSince).toBeNull();
     });
 });
