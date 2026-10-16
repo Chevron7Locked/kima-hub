@@ -2789,6 +2789,15 @@ const PROGRESS_MEMO_MS = 5 * 1000;
 
 type EnrichmentProgress = Awaited<ReturnType<typeof computeEnrichmentProgress>>;
 
+/**
+ * A stage's percent done over the songs whose files are there: a song whose file is gone is not owed (the scan
+ * reopens it if the file comes back), so it neither counts as done nor holds the bar short of 100.
+ */
+function shareDone(completed: number, total: number, missing: number): number {
+    const owed = total - missing;
+    return owed > 0 ? Math.round((completed / owed) * 100) : 0;
+}
+
 export async function getEnrichmentProgress(): Promise<EnrichmentProgress> {
     if (progressMemo && Date.now() - progressMemo.at < PROGRESS_MEMO_MS) {
         return progressMemo.value;
@@ -2967,12 +2976,7 @@ async function computeEnrichmentProgress() {
             waiting: recordingWaiting,
             // Owed again when a scan finds the file; nothing the sweep can do meanwhile.
             waitingMissing: recording.fileMissing,
-            progress:
-                recording.total > 0 ?
-                    Math.round(
-                        (recording.completed / recording.total) * 100,
-                    )
-                :   0,
+            progress: shareDone(recording.completed, recording.total, recording.fileMissing),
         },
 
         // Background enrichment (non-blocking, runs in audio-analyzer container)
@@ -2985,10 +2989,7 @@ async function computeEnrichmentProgress() {
             failed: analysis.retryableFailed,
             permanentlyFailed: analysis.terminalFailed,
             waitingMissing: analysis.fileMissing,
-            progress:
-                analysis.total > 0 ?
-                    Math.round((analysis.completed / analysis.total) * 100)
-                :   0,
+            progress: shareDone(analysis.completed, analysis.total, analysis.fileMissing),
             isBackground: true, // Flag to indicate this runs separately
         },
 
@@ -3001,10 +3002,7 @@ async function computeEnrichmentProgress() {
             failed: embedding.retryableFailed + embedding.terminalFailed,
             retrying: embedding.retryableFailed,
             waitingMissing: embedding.fileMissing,
-            progress:
-                embedding.total > 0 ?
-                    Math.round((embedding.completed / embedding.total) * 100)
-                :   0,
+            progress: shareDone(embedding.completed, embedding.total, embedding.fileMissing),
             isBackground: true,
         },
 
@@ -3018,10 +3016,7 @@ async function computeEnrichmentProgress() {
             processing: fingerprint.working,
             failed: fingerprint.retryableFailed + fingerprint.terminalFailed,
             waitingMissing: fingerprint.fileMissing,
-            progress:
-                fingerprint.total > 0 ?
-                    Math.round((fingerprint.completed / fingerprint.total) * 100)
-                :   0,
+            progress: shareDone(fingerprint.completed, fingerprint.total, fingerprint.fileMissing),
             isBackground: true,
         },
 

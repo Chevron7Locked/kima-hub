@@ -1781,6 +1781,8 @@ class ApiClient {
                 pending: number;
                 /** Open but blocked behind the fingerprint → recording gate. */
                 waiting: number;
+                /** Songs whose files are gone: not owed, and not counted in `progress`. */
+                waitingMissing: number;
                 progress: number;
             };
             audioAnalysis: {
@@ -1791,6 +1793,7 @@ class ApiClient {
                 processing: number;
                 failed: number;
                 permanentlyFailed: number;
+                waitingMissing: number;
                 progress: number;
                 isBackground: boolean;
             };
@@ -1800,6 +1803,7 @@ class ApiClient {
                 pending: number;
                 processing: number;
                 failed: number;
+                waitingMissing: number;
                 progress: number;
                 isBackground: boolean;
             };

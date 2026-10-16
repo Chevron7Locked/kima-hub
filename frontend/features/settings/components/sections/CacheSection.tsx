@@ -23,7 +23,7 @@ import {
 import {
     CheckCircle,
     User,
-    Heart,
+    Fingerprint,
     Activity,
     Pause,
     Play,
@@ -80,6 +80,7 @@ function EnrichmentStage({
     permanentlyFailed = 0,
     queued = 0,
     processing = 0,
+    missing = 0,
 }: {
     icon: LucideIcon;
     label: string;
@@ -92,6 +93,8 @@ function EnrichmentStage({
     permanentlyFailed?: number;
     queued?: number;
     processing?: number;
+    /** Songs whose files are gone: left out of the count, shown beside it. */
+    missing?: number;
 }) {
     const isComplete = progress === 100;
     const hasActivity = processing > 0;
@@ -137,8 +140,9 @@ function EnrichmentStage({
                 </div>
                 <div className="flex items-center gap-3 mt-1 text-xs tabular-nums text-[var(--text-muted)]">
                     <span>
-                        {completed} / {total}
+                        {completed} / {total - missing}
                     </span>
+                    {missing > 0 && <span>{missing} files missing</span>}
                     {queued > 0 && (
                         <span className="text-[var(--text-secondary)]">
                             {queued} queued
@@ -739,14 +743,15 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             />
 
                             <EnrichmentStage
-                                icon={Heart}
-                                label="Mood Tags"
-                                description="Vibes and mood data from the enrichment pipeline"
+                                icon={Fingerprint}
+                                label="Song Identification"
+                                description="Which recording each song is, from AcoustID fingerprints and MusicBrainz"
                                 completed={
                                     enrichmentProgress.trackTags.enriched
                                 }
                                 total={enrichmentProgress.trackTags.total}
                                 progress={enrichmentProgress.trackTags.progress}
+                                missing={enrichmentProgress.trackTags.waitingMissing}
                             />
 
                             {/* audioAnalysis is absent from the progress payload until the analyzer has run. */}
@@ -768,6 +773,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     queued={enrichmentProgress.audioAnalysis.queued}
                                     failed={enrichmentProgress.audioAnalysis.failed}
                                     permanentlyFailed={enrichmentProgress.audioAnalysis.permanentlyFailed}
+                                    missing={enrichmentProgress.audioAnalysis.waitingMissing}
                                     isBackground={true}
                                 />
                             ) : !featuresLoading ? (
@@ -793,6 +799,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                             progress={enrichmentProgress.clapEmbeddings.progress}
                                             processing={enrichmentProgress.clapEmbeddings.processing}
                                             failed={enrichmentProgress.clapEmbeddings.failed}
+                                            missing={enrichmentProgress.clapEmbeddings.waitingMissing}
                                             isBackground={true}
                                         />
                                     )}

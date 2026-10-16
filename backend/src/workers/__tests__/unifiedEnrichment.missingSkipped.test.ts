@@ -148,6 +148,8 @@ import {
     waitForFingerprintWork,
     getNextWork,
     retryFailedAndBlocked,
+    getEnrichmentProgress,
+    invalidateEnrichmentProgress,
 } from "../../workers/unifiedEnrichment";
 
 const PREFIX = "scanmiss";
@@ -273,5 +275,23 @@ describe("enrichment skips a track flagged missing", () => {
 
         const work = await getNextWork(10, "recording");
         expect(work.map((w) => w.trackId)).toEqual([id("back")]);
+    });
+
+    it("leaves a missing file out of a stage's percent done, and counts it as missing", async () => {
+        await seedTrack(id("here"));
+        await prisma.trackStage.create({ data: { trackId: id("here"), stage: "analysis", status: "done" } });
+        invalidateEnrichmentProgress();
+        const before = (await getEnrichmentProgress()).audioAnalysis;
+
+        await seedTrack(id("gone"), { missingSince: new Date() });
+        await prisma.trackStage.create({
+            data: { trackId: id("gone"), stage: "analysis", status: "failed", retryable: false, failureClass: "FILE_MISSING" },
+        });
+        invalidateEnrichmentProgress();
+        const after = (await getEnrichmentProgress()).audioAnalysis;
+
+        expect(after.total).toBe(before.total + 1);
+        expect(after.waitingMissing).toBe(before.waitingMissing + 1);
+        expect(after.progress).toBe(before.progress);
     });
 });
