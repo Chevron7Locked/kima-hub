@@ -27,6 +27,18 @@ export const FEATURES_ONLY_WEIGHTS = {
 };
 
 /**
+ * On installs without CLAP the stored valence and arousal are the mood analyzer's alone. Its fitted mapping
+ * (analyzer.py VA_MAP) spreads a library 4.78x (valence) and 2.90x (arousal) narrower than the stretch the weights
+ * above were set on, measured as the mean difference between two of 8,971 library tracks
+ * (services/audio-analyzer-clap/eval/music-switch-2026-10-17/followup.json). A difference counts this many times
+ * over, so these two terms keep the share of the score they had.
+ */
+export const FEATURES_ONLY_VA_SCALE = {
+    valence: 4.78,
+    arousal: 2.9,
+};
+
+/**
  * Similar tracks on the matching formula
  * when the CLAP analyzer is installed; empty until the seed has matching data.
  * Installs without CLAP rank on audio features.
@@ -78,6 +90,7 @@ async function findSimilarFeaturesOnly(
     if (!seed) return [];
 
     const w = FEATURES_ONLY_WEIGHTS;
+    const va = FEATURES_ONLY_VA_SCALE;
     const scored = Prisma.sql`
         WITH source AS (
             SELECT energy, valence, arousal, bpm, "danceabilityMl", acousticness, instrumentalness, key, "keyScale"
@@ -91,8 +104,8 @@ async function findSimilarFeaturesOnly(
                 ar.id AS "artistId", ar.name AS "artistName",
                 (
                     ${w.energy} * (CASE WHEN t.energy IS NULL OR s.energy IS NULL THEN 0 ELSE 1 - ABS(t.energy - s.energy) END)
-                    + ${w.valence} * (CASE WHEN t.valence IS NULL OR s.valence IS NULL THEN 0 ELSE 1 - ABS(t.valence - s.valence) END)
-                    + ${w.arousal} * (CASE WHEN t.arousal IS NULL OR s.arousal IS NULL THEN 0 ELSE 1 - ABS(t.arousal - s.arousal) END)
+                    + ${w.valence} * (CASE WHEN t.valence IS NULL OR s.valence IS NULL THEN 0 ELSE 1 - LEAST(1, ABS(t.valence - s.valence) * ${va.valence}) END)
+                    + ${w.arousal} * (CASE WHEN t.arousal IS NULL OR s.arousal IS NULL THEN 0 ELSE 1 - LEAST(1, ABS(t.arousal - s.arousal) * ${va.arousal}) END)
                     + ${w.bpm} * (CASE WHEN t.bpm IS NULL OR s.bpm IS NULL THEN 0 ELSE bpm_similarity(t.bpm, s.bpm) END)
                     + ${w.danceability} * (CASE WHEN t."danceabilityMl" IS NULL OR s."danceabilityMl" IS NULL THEN 0 ELSE 1 - ABS(t."danceabilityMl" - s."danceabilityMl") END)
                     + ${w.acousticness} * (CASE WHEN t.acousticness IS NULL OR s.acousticness IS NULL THEN 0 ELSE 1 - ABS(t.acousticness - s.acousticness) END)

@@ -329,6 +329,17 @@ export async function generateHappyMix(
     };
 }
 
+// The stored valence (0.7 mood analyzer + 0.3 sound model) spreads a library 2.48x narrower than when this sort was
+// written, measured as the mean difference between two of 8,971 library tracks
+// (services/audio-analyzer-clap/eval/music-switch-2026-10-17/followup.json). Scaling it by that keeps valence's share
+// of the sort.
+export const MELANCHOLY_VALENCE_SCALE = 2.48;
+
+/** Lower sorts first: low valence, low energy, minor key. */
+export function melancholyScore(t: { valence?: number | null; energy?: number | null; keyScale?: string | null }): number {
+    return (t.valence || 0.5) * 2 * MELANCHOLY_VALENCE_SCALE + (t.energy || 0.5) + (t.keyScale === "minor" ? 0 : 0.3);
+}
+
 export async function generateMelancholyMix(
     _userId: string,
     today: string
@@ -403,17 +414,7 @@ export async function generateMelancholyMix(
         return null;
     }
 
-    const sortedTracks = tracks.sort((a, b) => {
-        const aScore =
-            (a.valence || 0.5) * 2 +
-            (a.energy || 0.5) +
-            (a.keyScale === "minor" ? 0 : 0.3);
-        const bScore =
-            (b.valence || 0.5) * 2 +
-            (b.energy || 0.5) +
-            (b.keyScale === "minor" ? 0 : 0.3);
-        return aScore - bScore;
-    });
+    const sortedTracks = tracks.sort((a, b) => melancholyScore(a) - melancholyScore(b));
 
     const seed = getSeededRandom(`melancholy-${today}`);
     const shuffled = seededShuffle(sortedTracks.slice(0, 50), seed);

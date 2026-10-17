@@ -9,6 +9,7 @@ import { prisma } from "../../utils/db";
 import { featureDetection } from "../../services/featureDetection";
 import {
     findSimilarTracks,
+    FEATURES_ONLY_VA_SCALE,
     FEATURES_ONLY_WEIGHTS,
     SimilarTrack,
 } from "../hybridSimilarity";
@@ -179,6 +180,28 @@ describe("hybridSimilarity null handling (DB, shipped functions)", () => {
             expect(r.distance).toBeCloseTo(1 - r.similarity, 6);
         }
         expect(byFar!.distance).toBeGreaterThan(0.1); // far track has real distance
+    });
+
+    it("features-only: a valence or arousal difference counts FEATURES_ONLY_VA_SCALE times over, at most fully", async () => {
+        setMode("featuresOnly");
+        const base = {
+            energy: 0.5, valence: 0.5, arousal: 0.5, bpm: 120,
+            danceabilityMl: 0.5, acousticness: null, instrumentalness: null,
+            key: "C", keyScale: "major",
+        };
+        await seedTrack("va_src", { ...base });
+        await seedTrack("va_v", { ...base, valence: 0.6 });
+        await seedTrack("va_a", { ...base, arousal: 0.45 });
+        await seedTrack("va_far", { ...base, valence: 0.9 });
+
+        const w = FEATURES_ONLY_WEIGHTS;
+        const present = w.energy + w.valence + w.arousal + w.bpm + w.danceability + w.key;
+        const rows = await findSimilarTracks("trk_hs_va_src", 10);
+        const sim = (id: string) => rows.find((r) => r.id === `trk_hs_${id}`)!.similarity;
+        expect(sim("va_v")).toBeCloseTo(1 - (w.valence * 0.1 * FEATURES_ONLY_VA_SCALE.valence) / present, 6);
+        expect(sim("va_a")).toBeCloseTo(1 - (w.arousal * 0.05 * FEATURES_ONLY_VA_SCALE.arousal) / present, 6);
+        // 0.4 apart is past the full difference (0.4 * 4.78 > 1): the term gives nothing, never less.
+        expect(sim("va_far")).toBeCloseTo(1 - w.valence / present, 6);
     });
 
     it("features-only weights sum to 1.0, and the source carries no neutral-0.5 or constant-0 distance pattern (invariant)", () => {
