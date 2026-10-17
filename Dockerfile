@@ -4,41 +4,34 @@
 
 # ============================================================
 # CLAP ONNX BUILDER STAGE
-# Exports hf_audio.onnx (sha256 37df17afb9881569c4f50e5b691167aa54586418059701a74a54934514969972)
-# from the PUBLIC laion/clap-htsat-unfused checkpoint with a pinned toolchain.
-# Same pins give the same bytes on amd64 and arm64.
-# The sha gate below fails the build on any drift -- upstream checkpoint
-# revision, toolchain version, or export script change.
+# Exports both towers of LAION-CLAP's music checkpoint from the PUBLIC
+# lukewys/laion_clap file (revision b3708341..., sha-gated) with the pinned
+# toolchain in services/audio-analyzer-clap/requirements-export.txt:
+#   music_audio.onnx  sha256 ab1bf5eba067b246198c630f153f774e8f1c3169b3924d4d6a4dc247bd73de97
+#   music_text.onnx   sha256 6dbba074b27f8973d84c5c7ae9acd0b9139a6cd9dd82bea6e87954dc3b835956
+# The same pins gave these bytes on linux/arm64, linux/amd64 and macOS arm64.
+# The sha gate fails the build on any drift: the checkpoint, the toolchain, the
+# export script, or the roberta-base config laion_clap fetches by name. The
+# checkpoint (2.4 GB) stays in this stage.
 FROM python:3.11-slim AS clap-onnx-builder
 WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
 
-# Toolchain pins that reproduce the shipped export (torch 2.8.0 cpu +
-# transformers 4.57.6 + onnx; numpy<2 for the exporter stack).
-RUN pip3 install --no-cache-dir \
+COPY services/audio-analyzer-clap/requirements-export.txt .
+RUN pip3 install --no-cache-dir --no-deps \
     --index-url https://download.pytorch.org/whl/cpu \
     --extra-index-url https://pypi.org/simple \
-    'torch==2.8.0' 'transformers==4.57.6' 'onnx' 'numpy<2'
-COPY services/audio-analyzer-clap/export_onnx.py .
-# Public checkpoint (revision 8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a),
-# sha-gated so a moved/rewritten upstream file fails the build.
-# NOTE: mkdir -p ckpt is required — curl -o does NOT create parent dirs
-# (error 23 "Failed to open the file ... No such file or directory").
-# All three files must live INSIDE ckpt/ — from_pretrained('ckpt') finds
-# weights only in the snapshot dir, not alongside it.
+    -r requirements-export.txt
+COPY services/audio-analyzer-clap/export_music_onnx.py .
+# NOTE: mkdir -p ckpt is required — curl -o does NOT create parent dirs.
 RUN mkdir -p ckpt \
-    && curl -fL --retry 5 --retry-delay 5 --retry-all-errors -o ckpt/pytorch_model.bin \
-        'https://huggingface.co/laion/clap-htsat-unfused/resolve/8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a/pytorch_model.bin' \
-    && echo '1cd3c601bc4afe0fa87be3de4c13dd2cfadd249fac1e29acf74a9b296c3219bb  ckpt/pytorch_model.bin' | sha256sum -c - \
-    && curl -fL --retry 5 --retry-delay 5 --retry-all-errors -o ckpt/config.json \
-        'https://huggingface.co/laion/clap-htsat-unfused/resolve/8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a/config.json' \
-    && echo '9efb9557bc804f2ca6e394486af2e45dfed0b18554909735a99c6220b84e4288  ckpt/config.json' | sha256sum -c - \
-    && curl -fL --retry 5 --retry-delay 5 --retry-all-errors -o ckpt/preprocessor_config.json \
-        'https://huggingface.co/laion/clap-htsat-unfused/resolve/8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a/preprocessor_config.json' \
-    && echo '9739f58296aa6f9ac18008fd0150fb2649bc554985fbde86d0a4041c882ac753  ckpt/preprocessor_config.json' | sha256sum -c -
-RUN python3 export_onnx.py --src ckpt --out hf_audio.onnx \
-    && echo '37df17afb9881569c4f50e5b691167aa54586418059701a74a54934514969972  hf_audio.onnx' | sha256sum -c - \
-    && echo '[builder] hf_audio.onnx exported and sha-verified'
+    && curl -fL --retry 5 --retry-delay 5 --retry-all-errors -o ckpt/music_audioset_epoch_15_esc_90.14.pt \
+        'https://huggingface.co/lukewys/laion_clap/resolve/b3708341862f581175dba5c356a4ebf74a9b6651/music_audioset_epoch_15_esc_90.14.pt' \
+    && echo 'fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd  ckpt/music_audioset_epoch_15_esc_90.14.pt' | sha256sum -c -
+RUN python3 export_music_onnx.py --ckpt ckpt/music_audioset_epoch_15_esc_90.14.pt --out-dir . \
+    && echo 'ab1bf5eba067b246198c630f153f774e8f1c3169b3924d4d6a4dc247bd73de97  music_audio.onnx' | sha256sum -c - \
+    && echo '6dbba074b27f8973d84c5c7ae9acd0b9139a6cd9dd82bea6e87954dc3b835956  music_text.onnx' | sha256sum -c - \
+    && echo '[builder] music_audio.onnx and music_text.onnx exported and sha-verified'
 
 # ============================================================
 # MUSICNN MODELS (vendored ONNX + reference answers)
@@ -129,12 +122,9 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 # since v1.11.0 the shipped images run the ONNX CLAP backend (CLAP_BACKEND=onnx,
 # the analyzer default) and are torch-free. The legacy torch backend remains
 # available in code; restore it with services/audio-analyzer-clap/requirements-torch.txt.
-# transformers supplies the tokenizer (RobertaTokenizer) for the text encoder
-# and the audio_utils numpy primitives used by our vendored clap_mel.py.
-# NOTE: ClapFeatureExtractor itself is torch-gated on EVERY version we can
-# install -- the shipped runtime does NOT use ClapFeatureExtractor (it is
-# torch-gated upstream); clap_mel.py reproduces its mel bit-for-bit (proven,
-# test_clap_mel_parity). The same pins as services/audio-analyzer-clap/
+# transformers supplies the tokenizer (RobertaTokenizer) for the text encoder;
+# the sound model's front end is numpy and librosa's mel filter bank
+# (music_clap_mel.py). The same pins as services/audio-analyzer-clap/
 # requirements.txt (test_ship_blocker.py checks). transformers is exact:
 # torchless imports crash on unvetted releases, so a bump ships only with a
 # full ONNX re-validation. 5.10.4 is validated (mel, tokenizer, 512-d
@@ -206,7 +196,7 @@ WORKDIR /app/audio-analyzer-clap
 # verify_runtime.py + test_fixtures ride along for the build-time parity gate.
 COPY services/audio-analyzer-clap/analyzer.py /app/audio-analyzer-clap/
 COPY services/audio-analyzer-clap/onnx_backend.py /app/audio-analyzer-clap/
-COPY services/audio-analyzer-clap/clap_mel.py /app/audio-analyzer-clap/
+COPY services/audio-analyzer-clap/music_clap_mel.py services/audio-analyzer-clap/music_clap_onnx.py /app/audio-analyzer-clap/
 COPY services/audio-analyzer-clap/verify_runtime.py /app/audio-analyzer-clap/
 COPY services/audio-analyzer-clap/gpu_runtime.py services/audio-analyzer-clap/gpu_switch.py /app/audio-analyzer-clap/
 COPY services/audio-analyzer-clap/gpu_env.sh /app/audio-analyzer-clap/
@@ -218,41 +208,22 @@ COPY services/audio-analyzer-clap/test_fixtures/ /app/audio-analyzer-clap/test_f
 RUN cd /app/audio-analyzer-clap &&     python3 -c "import onnx_backend; print('[CLAP] onnx_backend importable')"
 
 # ============================================================
-# CLAP ONNX WEIGHTS -- PUBLIC SOURCES ONLY, SHA-GATED
-#
-# hf_audio.onnx comes from the builder stage (deterministic export of the
-# public laion/clap-htsat-unfused checkpoint, revision 8fa0f1c6..., sha-gated
-# there). text_model.onnx is byte-identical to Xenova/clap-htsat-unfused's
-# public ONNX text export (sha 6df7c51f...). The graph has no attention-mask
-# input, so onnx_backend encodes each prompt unpadded; that matches the masked
-# HF text embedding (test_text_parity.py).
-# A tampered or moved upstream file FAILS THE BUILD on checksum mismatch.
-RUN mkdir -p /app/audio-analyzer-clap/models \
-    && curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 \
-        -o /app/audio-analyzer-clap/models/text_model.onnx \
-        'https://huggingface.co/Xenova/clap-htsat-unfused/resolve/main/onnx/text_model.onnx' \
-    && echo '6df7c51f2d78e236a03f2b816e613d538c815639d13644fe7c2124f439da9648  /app/audio-analyzer-clap/models/text_model.onnx' | sha256sum -c - \
-    && ls -lh /app/audio-analyzer-clap/models/
-COPY --from=clap-onnx-builder /build/hf_audio.onnx /app/audio-analyzer-clap/models/hf_audio.onnx
+# CLAP ONNX WEIGHTS -- PUBLIC SOURCES ONLY, SHA-GATED IN THE BUILDER
+# Both towers of the music checkpoint, exported and sha-checked in the
+# clap-onnx-builder stage above.
+RUN mkdir -p /app/audio-analyzer-clap/models
+COPY --from=clap-onnx-builder /build/music_audio.onnx /build/music_text.onnx /app/audio-analyzer-clap/models/
 
 # ============================================================
 # OFFLINE HUGGINGFACE CACHE (boot without network)
-# The runtime lazily loads two HF artifacts at first use:
-#   clap_mel.ClapMelExtractor (reads the laion preprocessor_config.json only)
-#   RobertaTokenizer.from_pretrained('roberta-base')  (text tokenizer)
-# Without a baked cache the first embedding requires huggingface.co to be up.
-# Pin the exact revisions; sha-gate every file.
-RUN LAION='https://huggingface.co/laion/clap-htsat-unfused/resolve/8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a' \
-    && ROB='https://huggingface.co/roberta-base/resolve/e2da8e2f811d1448a5b465c236feacd80ffbac7b' \
-    && LDIR='/root/.cache/huggingface/hub/models--laion--clap-htsat-unfused' \
+# The text model's tokenizer, RobertaTokenizer.from_pretrained('roberta-base'),
+# loads lazily at first use. Without a baked cache the first text embedding
+# requires huggingface.co to be up. Pin the exact revision; sha-gate every file.
+RUN ROB='https://huggingface.co/roberta-base/resolve/e2da8e2f811d1448a5b465c236feacd80ffbac7b' \
     && RDIR='/root/.cache/huggingface/hub/models--roberta-base' \
-    && mkdir -p "$LDIR/snapshots/8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a" "$LDIR/refs" \
-              "$RDIR/snapshots/e2da8e2f811d1448a5b465c236feacd80ffbac7b" "$RDIR/refs" \
-    && printf '%s' '8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a' > "$LDIR/refs/main" \
+    && RS="$RDIR/snapshots/e2da8e2f811d1448a5b465c236feacd80ffbac7b" \
+    && mkdir -p "$RS" "$RDIR/refs" \
     && printf '%s' 'e2da8e2f811d1448a5b465c236feacd80ffbac7b' > "$RDIR/refs/main" \
-    && curl -fsSL --retry 5 --retry-all-errors -o "$LDIR/snapshots/8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a/preprocessor_config.json" "$LAION/preprocessor_config.json" \
-    && echo '9739f58296aa6f9ac18008fd0150fb2649bc554985fbde86d0a4041c882ac753  '"$LDIR"'/snapshots/8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a/preprocessor_config.json' | sha256sum -c - \
-    && LS="$LDIR/snapshots/8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a" RS="$RDIR/snapshots/e2da8e2f811d1448a5b465c236feacd80ffbac7b" \
     && curl -fsSL --retry 5 --retry-all-errors -o "$RS/vocab.json" "$ROB/vocab.json" \
     && echo '9e7f63c2d15d666b52e21d250d2e513b87c9b713cfa6987a82ed89e5e6e50655  '"$RS"'/vocab.json' | sha256sum -c - \
     && curl -fsSL --retry 5 --retry-all-errors -o "$RS/merges.txt" "$ROB/merges.txt" \
@@ -266,8 +237,8 @@ RUN LAION='https://huggingface.co/laion/clap-htsat-unfused/resolve/8fa0f1c6d0433
 # BUILD-TIME PARITY GATE
 # Embed the tracked fixtures through the image's own runtime stack (offline --
 # HF_HUB_OFFLINE=1 proves the baked cache suffices) and require cosine
-# >= 0.999 against expected_onnx_embeddings.npy, which was produced by the
-# VALIDATED pipeline. Any preprocessing/toolchain drift fails the build.
+# >= 0.999 against expected_music_embeddings.npy, laion_clap's own embeddings
+# of the fixtures on the music checkpoint. Any preprocessing/toolchain drift fails the build.
 # Also exercises the text encoder end to end.
 RUN cd /app/audio-analyzer-clap \
     && HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 verify_runtime.py
