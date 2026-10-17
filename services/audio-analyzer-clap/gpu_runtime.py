@@ -138,7 +138,7 @@ def request_gpu():
 
 
 def busy():
-    """True while an install or a removal is running in this process."""
+    """True while an install is running in this process."""
     thread = _install_thread
     return thread is not None and thread.is_alive()
 
@@ -209,11 +209,28 @@ def _externally_managed() -> bool:
     return os.path.exists(os.path.join(sysconfig.get_paths()['stdlib'], 'EXTERNALLY-MANAGED'))
 
 
-def _pip(args, env=None, timeout=PIP_TIMEOUT_S):
+def _pip(args, env=None, timeout=PIP_TIMEOUT_S, cancellable=False):
+    """Run pip. A cancellable run is killed as soon as a cancel is asked for (returncode None then)."""
     cmd = [sys.executable, '-m', 'pip'] + args
     if _externally_managed():
         cmd += ['--disable-pip-version-check']
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+    if not cancellable:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+    deadline = time.monotonic() + timeout
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env) as proc:
+        while True:
+            try:
+                out, err = proc.communicate(timeout=1)
+                return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+            except subprocess.TimeoutExpired:
+                if _cancel.is_set():
+                    proc.kill()
+                    out, err = proc.communicate()
+                    return subprocess.CompletedProcess(cmd, None, out, err)
+                if time.monotonic() > deadline:
+                    proc.kill()
+                    proc.communicate()
+                    raise subprocess.TimeoutExpired(cmd, timeout)
 
 
 def _pip_output(proc):
@@ -225,11 +242,18 @@ def _pip_tail(proc):
 
 
 def _download(wheels_dir):
+    """None when the wheels are in wheels_dir, 'cancelled' when a cancel stopped it, else (reason, detail)."""
     last = None
-    for _ in range(PIP_ATTEMPTS):
+    attempts = 0
+    while attempts < PIP_ATTEMPTS:
         proc = _pip(['download', '--no-deps', '--only-binary=:all:',
                      '--timeout', '30', '--retries', '2',
-                     '-d', wheels_dir] + PIN_SPECS)
+                     '-d', wheels_dir] + PIN_SPECS, cancellable=True)
+        if _cancel.is_set():
+            return 'cancelled'
+        if proc.returncode is None:
+            continue  # killed by a cancel, then switched back on before this look: start the download again
+        attempts += 1
         if proc.returncode == 0:
             return None
         last = proc
@@ -342,11 +366,11 @@ def _install():
             update_state(status='idle', reason=None, detail='cancelled before download')
             return 'cancelled'
         failure = _download(wheels_dir)
+        if failure == 'cancelled':
+            update_state(status='idle', reason=None, detail='cancelled during download')
+            return 'cancelled'
         if failure:
             return _failed(*failure)
-        if _cancel.is_set():
-            update_state(status='idle', reason=None, detail='cancelled after download')
-            return 'cancelled'
         failure = _verify_checksums(wheels_dir)
         if failure:
             return _failed(*failure)
@@ -372,32 +396,16 @@ def _install():
         shutil.rmtree(tmp_root, ignore_errors=True)
 
 
-def _remove():
-    """Delete the runtime: 'removed' or 'failed'."""
-    try:
-        shutil.rmtree(SITE, ignore_errors=True)
-        shutil.rmtree(os.path.join(ROOT, 'site.old'), ignore_errors=True)
-        _clear_abandoned_installs()
-        if os.path.exists(SITE):
-            return _failed('removal_failed', 'removal left files in %s' % SITE)
-        update_state(status='idle', reason=None, detail=None, pinned=None,
-                     bytes=None, provider=None, installedAt=None)
-        return 'removed'
-    except Exception as exc:
-        return _failed('removal_failed', 'removal failed: %r' % exc)
-
-
 def _next_action(retry_failed):
     """What the switches ask of the disk: install when the runtime is wanted and missing (after a failed
-    attempt only when retry_failed), remove when it is not wanted and anything of it is left."""
+    attempt only when retry_failed). Nothing is ever removed: an installed runtime that nothing wants stays
+    on disk, inert (each process puts it on its path only while its own switch is on)."""
     status = read_state().get('status')
-    if read_enabled():
-        if is_installed() or status == 'installing':
-            return None
-        return 'install' if retry_failed or status != 'failed' else None
-    if status == 'installed' or os.path.isdir(SITE):
-        return 'remove'
-    return None
+    if not read_enabled():
+        return None
+    if is_installed() or status == 'installing':
+        return None
+    return 'install' if retry_failed or status != 'failed' else None
 
 
 def _start(action):
@@ -415,44 +423,67 @@ def _converge(action):
     while this thread was busy is carried out. A failed step ends the run instead of repeating."""
     global _install_thread
     while action:
-        outcome = _install() if action == 'install' else _remove()
+        outcome = _install()
         with _lock:
             action = None if outcome == 'failed' else _next_action(retry_failed=False)
+            if not read_enabled():
+                _forget_failure()  # both switches went off while it ran: nobody is waiting on this answer
             if action == 'install':
                 _cancel.clear()
             if action is None:
                 _install_thread = None
 
 
+def _forget_failure():
+    """A failed step nobody wants any more (both switches off) is no longer worth reporting."""
+    if read_state().get('status') == 'failed':
+        _write_state({'status': 'idle', 'reason': None, 'detail': None})
+
+
 def dispatch(action):
-    """Entry point for control messages. While an install or removal runs, the request is left to it (it
-    looks at the switches again when it ends); a removal request also stops a running install early."""
+    """Entry point for control messages. While an install runs, an install request is left to it (it looks at
+    the switches again when it ends). 'cancel' stops a running download; once the download is done the
+    install finishes and the runtime stays, unused. Nothing installed is ever deleted."""
     with _lock:
-        if busy():
-            if action == 'remove':
+        if action == 'cancel':
+            # A cancel that arrives after a switch went back on (two quick clicks) is stale: the switches win.
+            if read_enabled():
+                return 'still_wanted'
+            if busy():
                 _cancel.set()
-            return 'busy'
-        if action == 'install':
-            if not read_enabled():
-                return 'skipped_disabled'
-            if is_installed():
-                return 'skipped_installed'
-        elif action != 'remove':
+                return 'cancelling'
+            # A download left by a killed install is half a runtime nobody can use: clear it.
+            _clear_abandoned_installs()
+            _forget_failure()
+            return 'nothing_to_cancel'
+        if action != 'install':
             return 'unknown_action'
+        if busy():
+            # Switched on again while an earlier "off" was stopping the download: let it carry on.
+            _cancel.clear()
+            return 'busy'
+        if not read_enabled():
+            return 'skipped_disabled'
+        if is_installed():
+            return 'skipped_installed'
         _start(action)
         return 'started'
 
 
 def reconcile():
-    """At start, do what the switches ask of the disk: this carries out a request sent while the process
-    was down, and tries a failed install again. An install still marked running was this process's
-    predecessor's, killed with it."""
+    """At start, install what the switches ask for if it is missing: this carries out a request sent while the
+    process was down, and tries a failed install again. It never removes anything. An install still marked
+    running was this process's predecessor's, killed with it."""
     with _lock:
         if busy():
             return 'busy'
         recorded = read_json(STATE_PATH)
+        # Nothing runs yet in this process, so any download folder is a killed predecessor's: clear it.
+        _clear_abandoned_installs()
         if isinstance(recorded, dict) and recorded.get('status') == 'installing':
             _write_state({'status': 'failed', 'reason': 'install_failed', 'detail': ABANDONED})
+        if not read_enabled():
+            _forget_failure()
         action = _next_action(retry_failed=True)
         if action is None:
             return 'nothing_to_do'

@@ -316,11 +316,11 @@ const confirmMeta: Record<
     },
 };
 
-// The analyzer installs the runtime while either switch is on and removes it when
-// both are off, so the status keeps polling until the runtime matches the switches.
-function gpuSettling(g: GpuRuntimeStatus): boolean {
+// The analyzer installs the runtime while either switch is on and keeps it when both are off, so the
+// status keeps polling until the runtime matches the switches.
+export function gpuSettling(g: GpuRuntimeStatus): boolean {
     if (g.installing) return true;
-    if (!g.enabled && !g.analysis) return g.installed;
+    if (!g.enabled && !g.analysis) return false;
     if (!g.installed) return g.status !== "failed";
     return (g.enabled && !g.effective && !g.fellBack) || (g.analysis && !g.analysisEffective && !g.analysisFellBack);
 }
@@ -345,7 +345,7 @@ function GpuSwitchRow({ id, label, description, gpu, on, effective, fellBack, pe
                     <span
                         data-testid={`${id}-status`}
                         className={`text-xs text-right ${
-                            gpu.status === "failed" || (on && fellBack)
+                            on && (gpu.status === "failed" || fellBack)
                                 ? "text-warning"
                                 : effective
                                   ? "text-success"
@@ -360,8 +360,13 @@ function GpuSwitchRow({ id, label, description, gpu, on, effective, fellBack, pe
     );
 }
 
-function gpuStatusText(g: GpuRuntimeStatus, on: boolean, effective: boolean, fellBack: boolean): string {
+export function gpuStatusText(g: GpuRuntimeStatus, on: boolean, effective: boolean, fellBack: boolean): string {
     if (g.installing) return "Downloading GPU runtime (~2 GB)…";
+    // A failure only matters to a switch that wants the runtime; the analyzer forgets it once both are off.
+    if (!on)
+        return g.installed
+            ? "Runtime installed; GPU is off."
+            : "Off (CPU)";
     if (g.status === "failed") {
         switch (g.reason) {
             case "no_gpu":
@@ -374,16 +379,10 @@ function gpuStatusText(g: GpuRuntimeStatus, on: boolean, effective: boolean, fel
                 return "Failed: Linux x86_64 only";
             case "checksum_mismatch":
                 return "Failed: checksum mismatch";
-            case "removal_failed":
-                return "Failed: could not remove the GPU runtime from the data directory";
             default:
                 return `Failed: ${g.reason || "install error"}.`;
         }
     }
-    if (!on)
-        return g.installed
-            ? "Runtime installed; GPU is off."
-            : "Off (CPU)";
     if (effective) return "Active";
     if (fellBack) return "Installed, but the GPU session fell back to the CPU";
     if (g.installed)

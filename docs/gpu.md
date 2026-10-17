@@ -53,7 +53,7 @@ Seeing the card is not enough; an administrator chooses what uses it. Open **Set
 
 Both switches are off by default, and the 1.11 welcome window asks the same question once.
 
-The first switch you turn on downloads the GPU runtime: twelve pinned packages from PyPI, about 2 GB. Kima checks every file against a fixed fingerprint before installing, and the packages take about 3.4 GB in your data folder. Nothing about your library leaves your server. Nothing is added to the Docker image, so if you never turn a switch on, you download nothing. When both switches are off again, the runtime is removed.
+The first switch you turn on downloads the GPU runtime: twelve pinned packages from PyPI, about 2 GB. Kima checks every file against a fixed fingerprint before installing, and the packages take about 3.4 GB in your data folder. Nothing about your library leaves your server. Nothing is added to the Docker image, so if you never turn a switch on, you download nothing. When both switches are off again, the download stays on disk and does nothing, so turning a switch on later uses it at once with no new download. To get the space back, turn both switches off and stop Kima. With the single image, the runtime is the `gpu-onnx` folder inside whatever you mounted at `/data`: delete it from that host folder, or, for a named volume such as `kima_data`, run `docker run --rm -v kima_data:/data alpine rm -rf /data/gpu-onnx`. With the split stack, the runtime lives in its own Docker volume: run `docker compose down`, then `docker volume rm` on the volume whose name ends in `gpu_runtime_data` (`docker volume ls` lists it). Start Kima again. Turning a switch on after that downloads the runtime again.
 
 A switch takes effect on its own within about a minute. The analyzer finishes the songs it is on, then restarts with the card on or off. It is safe to turn on partway through a run.
 
@@ -64,7 +64,7 @@ Each switch shows a status line. "Active" means the card is doing the work. The 
 | Status line | Meaning |
 | --- | --- |
 | Off (CPU) | The switch is off and no runtime is installed. |
-| Runtime installed; GPU is off. | The runtime is on disk but this switch is off. |
+| Runtime installed; GPU is off. | The runtime is on disk but this switch is off. It is kept so you can switch back on without downloading again. |
 | Downloading GPU runtime (~2 GB)… | The first download is running. |
 | Installed, applying (the analyzer restarts between songs) | The analyzer restarts between songs, then uses the card. |
 | Active | The card is doing the work. |

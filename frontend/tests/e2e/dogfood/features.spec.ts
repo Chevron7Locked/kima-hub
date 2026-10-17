@@ -297,13 +297,14 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
         session.assertClean("Journey 4 (public feed)");
     });
 
-    test("5. GPU: the runtime stays while either switch is on, goes when both are off, and each switch applies on its own", async () => {
+    test("5. GPU: the runtime stays while either switch is on and when both are off (inert), and each switch applies on its own", async () => {
         test.setTimeout(GPU_INSTALL_MS + 10 * 60_000);
         session.setJourney("5. GPU runtime");
 
         type Gpu = {
             supported: boolean; enabled: boolean; analysis: boolean; installed: boolean; installing: boolean;
             effective: boolean; analysisEffective: boolean; status: string; reason: string | null;
+            providerActive: boolean; analysisProviderActive: boolean;
         };
         const gpu = () => getJson<Gpu>("/system-settings/gpu");
         const vectorsStatus = () => page.getByTestId("gpu-onnx-toggle-status");
@@ -330,22 +331,37 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
             expect(state).toMatchObject({ enabled: false, analysis: true, installed: true });
         });
 
-        await session.step("switching audio analysis off too removes the runtime", async () => {
+        await session.step("switching audio analysis off too keeps the runtime installed and inert", async () => {
             await settingsSwitch("gpu-analysis-toggle").click();
-            await expect.poll(async () => (await gpu()).installed, { timeout: 2 * 60_000 }).toBe(false);
-            await expect(vectorsStatus()).toHaveText("Off (CPU)");
-            await expect(analysisStatus()).toHaveText("Off (CPU)");
-            expect(await gpu()).toMatchObject({ effective: false, analysisEffective: false });
+            await expect(analysisStatus()).toHaveText("Runtime installed; GPU is off.", { timeout: 2 * 60_000 });
+            await expect(vectorsStatus()).toHaveText("Runtime installed; GPU is off.");
+            await settle(page, 70_000); // longer than the analyzer takes to act on a switch
+            // Both analyzers restarted without the runtime, so the takeover below is a real one.
+            await expect
+                .poll(async () => { const g = await gpu(); return !g.providerActive && !g.analysisProviderActive; }, { timeout: 5 * 60_000 })
+                .toBe(true);
+            expect(await gpu()).toMatchObject({
+                enabled: false, analysis: false, installed: true, effective: false, analysisEffective: false, status: "installed",
+            });
         });
 
-        await session.step("switching both on downloads it again and both analyzers take it up on their own", async () => {
+        await session.step("switching both on again uses the kept runtime with no new download", async () => {
             const started = Date.now();
             await settingsSwitch("gpu-onnx-toggle").click();
             await settingsSwitch("gpu-analysis-toggle").click();
-            await expect(vectorsStatus()).toHaveText("Active", { timeout: GPU_INSTALL_MS + 3 * 60_000 });
+            let downloaded = false;
+            await expect
+                .poll(async () => {
+                    const g = await gpu();
+                    if (g.installing || !g.installed) downloaded = true;
+                    return g.effective && g.analysisEffective;
+                }, { timeout: 3 * 60_000, intervals: [1_000] })
+                .toBe(true);
+            expect(downloaded, "switching back on downloaded the runtime again").toBe(false);
+            await expect(vectorsStatus()).toHaveText("Active", { timeout: 3 * 60_000 });
             await expect(analysisStatus()).toHaveText("Active", { timeout: 3 * 60_000 });
             expect(await gpu()).toMatchObject({
-                enabled: true, analysis: true, installed: true, effective: true, analysisEffective: true, status: "installed",
+                enabled: true, analysis: true, installed: true, installing: false, effective: true, analysisEffective: true, status: "installed",
             });
             return { applySeconds: Math.round((Date.now() - started) / 1000) };
         });

@@ -289,6 +289,7 @@ export interface GpuRuntimeStatus {
     bytesDownloaded: number | null;
     pinned: string[];
     providerActive: boolean;
+    analysisProviderActive: boolean;
     updatedAt: string | null;
 }
 

@@ -1,6 +1,6 @@
 /**
  * Two switches share one GPU runtime: vibe embeddings and audio analysis. The
- * runtime is wanted while either is on and removed when both are off; each
+ * runtime is downloaded while either is on and stays on disk, unused, when both are off; each
  * analyzer reads its own switch from the projection; each status line is
  * measured for its own switch. Real database; the data directory is a temp dir.
  */
@@ -56,10 +56,23 @@ describe("the two GPU switches", () => {
         expect(lastCommand()).toBe("install_gpu");
     });
 
-    it("removes the runtime when both are off", async () => {
+    it("keeps the runtime when both are off: the files stay and the only command is to stop a running download", async () => {
+        fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({ status: "installed" }));
+        fs.mkdirSync(path.join(root, "site", "onnxruntime"), { recursive: true });
+        mockPublish.mockClear();
         await gpu.setGpuToggles({ analysis: false });
         expect(projection()).toMatchObject({ enabled: false, soundVectors: false, analysis: false });
-        expect(lastCommand()).toBe("remove_gpu");
+        expect(mockPublish.mock.calls.map((c) => JSON.parse(c[1]).command)).toEqual(["cancel_gpu_install"]);
+        expect(fs.existsSync(path.join(root, "site", "onnxruntime"))).toBe(true);
+        expect(await gpu.getGpuStatus()).toMatchObject({ installed: true, installing: false, enabled: false, analysis: false });
+    });
+
+    it("turning a switch on again asks to install, which the analyzer answers with the files already there", async () => {
+        await gpu.setGpuToggles({ soundVectors: true });
+        expect(lastCommand()).toBe("install_gpu");
+        expect(fs.existsSync(path.join(root, "site", "onnxruntime"))).toBe(true);
+        expect(await gpu.getGpuStatus()).toMatchObject({ installed: true, enabled: true });
+        await gpu.setGpuToggles({ soundVectors: false });
     });
 
     it("calls analysis active only when it is on, installed, and its sessions got the GPU", async () => {
@@ -69,6 +82,17 @@ describe("the two GPU switches", () => {
         fs.writeFileSync(path.join(root, "analysis-provider.json"), JSON.stringify({ active: true }));
         const status = await gpu.getGpuStatus();
         expect(status).toMatchObject({ analysis: true, analysisEffective: true, enabled: false, effective: false });
+    });
+
+    it("reports what each running process has, whatever its switch now says, so a takeover can be told from an old answer", async () => {
+        await gpu.setGpuToggles({ soundVectors: false, analysis: false });
+        fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({ status: "installed", provider: { active: true } }));
+        fs.writeFileSync(path.join(root, "analysis-provider.json"), JSON.stringify({ active: true }));
+        expect(await gpu.getGpuStatus()).toMatchObject({
+            effective: false, analysisEffective: false, providerActive: true, analysisProviderActive: true,
+        });
+        fs.writeFileSync(path.join(root, "analysis-provider.json"), JSON.stringify({ active: false, measured: false }));
+        expect((await gpu.getGpuStatus()).analysisProviderActive).toBe(false);
     });
 
     it("says a switch fell back only when its analyzer started with the runtime and still got no GPU", async () => {
