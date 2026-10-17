@@ -1,7 +1,9 @@
-// Cut-offs on instrumentalness, acousticness, valence and arousal (read wholly or partly from the sound model and the
-// mood analyzer) pass the same share of a library as before the music sound model and the mood analyzer's new
-// valence/arousal mapping: each was matched on 8,971 tracks, recorded in
+// Cut-offs on acousticness, valence and arousal (read wholly or partly from the sound model and the mood analyzer)
+// pass the same share of a library as before the music sound model and the mood analyzer's new valence/arousal
+// mapping: each was matched on 8,971 tracks, recorded in
 // services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json. A new model or mapping needs a new match.
+// Instrumentalness keeps its old cut-offs: the music model reads vocals correctly, and matching would have kept the
+// old model's error of calling most sung tracks instrumental (same file, "Instrumentalness").
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import {
@@ -563,7 +565,7 @@ export async function generateInstrumentalMix(
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
-            instrumentalness: { gte: 0.467 },
+            instrumentalness: { gte: 0.7 },
             energy: { gte: 0.3, lte: 0.6 },
         },
         include: { album: { select: { coverUrl: true } } },
@@ -937,7 +939,7 @@ export async function generateShowerKaraoke(
             ...NOT_MISSING,
             analysisStatus: "completed",
             AND: [
-                { instrumentalness: { lte: 0.111 } },
+                { instrumentalness: { lte: 0.35 } },
                 { energy: { gte: 0.55 } },
                 { valence: { gte: 0.491 } },
             ],
@@ -1026,7 +1028,7 @@ export async function generateCoffeeShopVibes(
                 {
                     OR: [
                         { acousticness: { gte: 0.353 } },
-                        { instrumentalness: { gte: 0.083 } },
+                        { instrumentalness: { gte: 0.25 } },
                     ],
                 },
             ],
@@ -1327,7 +1329,7 @@ export async function generateVocalDetox(
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
-            instrumentalness: { gte: 0.6 },
+            instrumentalness: { gte: 0.75 },
         },
     });
 }

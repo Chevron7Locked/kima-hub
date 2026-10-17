@@ -840,7 +840,7 @@ router.get("/radio", async (req, res) => {
           case "instrumental":
             moodWhere = {
               analysisStatus: "completed",
-              instrumentalness: { gte: 0.467 },
+              instrumentalness: { gte: 0.7 },
             };
             break;
           default:
