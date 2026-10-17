@@ -693,8 +693,8 @@ class AudioAnalyzer:
         if mood_aggressive is not None and mood_aggressive >= 0.6:
             tags += ['aggressive', 'intense']
 
-        # The valence/arousal cut-offs below pass the same share of a library as the v4 analyzer's did on its stretched
-        # values (services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json).
+        # The valence/arousal cut-offs below pass the same share of a library as the old stretched values did on the
+        # same middle-90-second analysis (services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json).
         if arousal is not None and arousal >= 0.578:
             tags += ['energetic', 'upbeat']
         elif arousal is not None and arousal <= 0.448:
