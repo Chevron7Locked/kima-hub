@@ -84,6 +84,10 @@ describe("re-queueing vectors from every model but the music ONNX one", () => {
     it("closes a missing file's record as missing instead of leaving it waiting", async () => {
         expect(await vectors(`${P}gone`)).toHaveLength(0);
         expect(await stage(`${P}gone`)).toMatchObject({ status: "failed", failureClass: "FILE_MISSING", retryable: false });
+        expect(await prisma.track.findUniqueOrThrow({ where: { id: `${P}gone` } })).toMatchObject({
+            vibeAnalysisStatus: "permanently_failed",
+            vibeAnalysisError: "file missing",
+        });
     });
 
     it("leaves vectors from the music ONNX model alone", async () => {

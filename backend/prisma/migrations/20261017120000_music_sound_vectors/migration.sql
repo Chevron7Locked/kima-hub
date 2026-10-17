@@ -23,6 +23,14 @@ UPDATE "TrackStage"
 UPDATE "Track"
    SET "vibeAnalysisStatus" = 'pending', "vibeAnalysisStartedAt" = NULL, "vibeAnalysisError" = NULL,
        "vibeAnalysisRetryCount" = 0, "vibeAnalysisStatusUpdatedAt" = NULL
- WHERE id IN (SELECT track_id FROM track_embeddings WHERE model_version <> 'laion-clap-music-onnx-v1');
+ WHERE id IN (SELECT track_id FROM track_embeddings WHERE model_version <> 'laion-clap-music-onnx-v1')
+   AND "missingSince" IS NULL;
+
+-- A missing file's track reads as its closed record does, as missingFileStages.ts marks it.
+UPDATE "Track"
+   SET "vibeAnalysisStatus" = 'permanently_failed', "vibeAnalysisError" = 'file missing',
+       "vibeAnalysisStatusUpdatedAt" = now()
+ WHERE id IN (SELECT track_id FROM track_embeddings WHERE model_version <> 'laion-clap-music-onnx-v1')
+   AND "missingSince" IS NOT NULL;
 
 DELETE FROM track_embeddings WHERE model_version <> 'laion-clap-music-onnx-v1';
