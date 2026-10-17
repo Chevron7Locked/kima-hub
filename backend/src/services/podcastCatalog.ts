@@ -5,7 +5,7 @@
  */
 import axios from "axios";
 import { redisClient } from "../utils/redis";
-import { rateLimiter } from "./rateLimiter";
+import { INTERACTIVE_PRIORITY, rateLimiter, type QueueTicket } from "./rateLimiter";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
@@ -71,14 +71,41 @@ export async function isCategory(id: number): Promise<boolean> {
     return (await categoryTree()).some((c) => c.id === id);
 }
 
-async function cached<T>(key: string, ttlSeconds: number, load: () => Promise<T>): Promise<T> {
+/**
+ * Kima's requests to Apple share one queue per server, one request every 3 s. A request a person is waiting on
+ * (a show page, the top shows, "for you") goes first; work that can wait (the podcasts page's category rows, the
+ * category fill-in at start) goes after it.
+ */
+export type ApplePriority = "interactive" | "background";
+const QUEUE_PRIORITY: Record<ApplePriority, number> = { interactive: INTERACTIVE_PRIORITY, background: 0 };
+
+/**
+ * Loads still waiting on Apple, by cache key: a later asker (another row, a retry, another user) shares the first
+ * one's request instead of sending its own. A person joining background work raises it to the front, so they never
+ * wait behind the rows and Apple is still asked once.
+ */
+const inFlight = new Map<string, { loading: Promise<unknown>; ticket: QueueTicket }>();
+
+async function cached<T>(key: string, ttlSeconds: number, load: () => Promise<T>, priority: ApplePriority = "interactive"): Promise<T> {
+    const pending = inFlight.get(key);
+    if (pending) {
+        rateLimiter.raise("itunes", pending.ticket, QUEUE_PRIORITY[priority]);
+        return pending.loading as Promise<T>;
+    }
+    const ticket: QueueTicket = { priority: QUEUE_PRIORITY[priority], waitingId: null };
+    const loading = cachedOnce(key, ttlSeconds, load, ticket).finally(() => inFlight.delete(key));
+    inFlight.set(key, { loading, ticket });
+    return loading;
+}
+
+async function cachedOnce<T>(key: string, ttlSeconds: number, load: () => Promise<T>, ticket: QueueTicket): Promise<T> {
     try {
         const hit = await redisClient.get(key);
         if (hit) return JSON.parse(hit) as T;
     } catch (err) {
         logger.warn(`[PodcastCatalog] Redis read failed for ${key}: ${(err as Error).message}`);
     }
-    const value = await rateLimiter.execute("itunes", load);
+    const value = await rateLimiter.execute("itunes", load, { ticket });
     try {
         await redisClient.setex(key, ttlSeconds, JSON.stringify(value));
     } catch (err) {
@@ -123,7 +150,7 @@ export async function categoryTree(): Promise<PodcastCategory[]> {
 }
 
 /** Apple's chart for one category (the overall chart without one), in rank order, up to 200 shows. */
-export async function chart(categoryId: number | null): Promise<CatalogPodcast[]> {
+export async function chart(categoryId: number | null, priority: ApplePriority = "interactive"): Promise<CatalogPodcast[]> {
     const country = await chartCountry();
     const genre = categoryId ? `/genre=${categoryId}` : "";
     return cached(`podcasts:chart:v1:${country}:${categoryId ?? "all"}`, 6 * 3600, async () => {
@@ -148,11 +175,11 @@ export async function chart(categoryId: number | null): Promise<CatalogPodcast[]
                 isExternal: true,
             };
         }).filter((p) => p.itunesId);
-    });
+    }, priority);
 }
 
 /** Apple's record for each show id: its feed and categories. Ids Apple does not know are left out. */
-export async function lookupShows(itunesIds: string[]): Promise<Map<string, LookupShow>> {
+export async function lookupShows(itunesIds: string[], priority: ApplePriority = "interactive"): Promise<Map<string, LookupShow>> {
     const out = new Map<string, LookupShow>();
     const ids = [...new Set(itunesIds.filter((id) => /^\d+$/.test(id)))];
     const missing: string[] = [];
@@ -172,7 +199,9 @@ export async function lookupShows(itunesIds: string[]): Promise<Map<string, Look
     // Apple answers up to 200 ids in one lookup; ids it does not know are remembered as unknown.
     for (let i = 0; i < missing.length; i += LOOKUP_BATCH) {
         const batch = missing.slice(i, i + LOOKUP_BATCH);
-        const data = await rateLimiter.execute("itunes", () => apple("/lookup", { id: batch.join(","), entity: "podcast" }));
+        const data = await rateLimiter.execute("itunes", () => apple("/lookup", { id: batch.join(","), entity: "podcast" }), {
+            priority: QUEUE_PRIORITY[priority],
+        });
         // Ids missing from a well-formed reply are unknown to Apple; a reply without a results list says nothing.
         if (!Array.isArray(data?.results)) throw new AppleReplyError("Apple's lookup reply had no results list");
         const found = new Map<string, LookupShow>();
@@ -216,10 +245,15 @@ export async function categoryIdsForNames(names: string[]): Promise<number[]> {
  * Store a show's categories: Apple's record when the show has an Apple id, else its feed's own tags.
  * Never fails the caller; a show Apple cannot answer for keeps what it had.
  */
-export async function assignCategories(podcastId: string, itunesId: string | null, feedCategoryNames: string[] = []): Promise<number[]> {
+export async function assignCategories(
+    podcastId: string,
+    itunesId: string | null,
+    feedCategoryNames: string[] = [],
+    priority: ApplePriority = "interactive",
+): Promise<number[]> {
     try {
         let ids: number[] = [];
-        if (itunesId) ids = (await lookupShows([itunesId])).get(itunesId)?.categoryIds ?? [];
+        if (itunesId) ids = (await lookupShows([itunesId], priority)).get(itunesId)?.categoryIds ?? [];
         if (ids.length === 0) ids = await categoryIdsForNames(feedCategoryNames);
         if (ids.length > 0) {
             await prisma.podcast.updateMany({ where: { id: podcastId }, data: { categoryIds: ids } });
@@ -239,12 +273,12 @@ export async function assignMissingCategories(): Promise<number> {
     });
     // One batched lookup (200 shows a request) fills the cache each assignment then reads; if Apple fails here,
     // each assignment asks again and copes on its own.
-    await lookupShows(shows.map((s) => s.itunesId!)).catch((err) =>
+    await lookupShows(shows.map((s) => s.itunesId!), "background").catch((err) =>
         logger.warn(`[PodcastCatalog] Batched lookup for the category backfill failed: ${(err as Error).message}`),
     );
     let filled = 0;
     for (const s of shows) {
-        if ((await assignCategories(s.id, s.itunesId)).length > 0) filled++;
+        if ((await assignCategories(s.id, s.itunesId, [], "background")).length > 0) filled++;
     }
     if (filled > 0) logger.info(`[PodcastCatalog] Categories filled for ${filled} podcast(s)`);
     return filled;

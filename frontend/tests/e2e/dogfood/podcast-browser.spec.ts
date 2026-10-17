@@ -89,7 +89,7 @@ test.afterAll(async () => {
     await page.context().close();
 });
 
-test("the podcasts page shows continue listening, for you, every category and the top shows; a category opens its chart", async () => {
+test("the podcasts page shows continue listening, for you, the top shows and a row for every category; a category opens its chart", async () => {
     test.setTimeout(240_000);
     session.setJourney("podcasts page");
     const podcastId = await follow(SEED_SHOW);
@@ -138,13 +138,6 @@ test("the podcasts page shows continue listening, for you, every category and th
         return { rows: forYou.length };
     });
 
-    await session.step("browse lists every top-level category", async () => {
-        const nav = page.getByRole("navigation", { name: "podcast categories" });
-        expect(await hrefsIn(nav, "/podcasts/category/")).toEqual(topLevel.map((c) => `/podcasts/category/${c.id}`));
-        expect(await nav.getByRole("link").allTextContents()).toEqual(topLevel.map((c) => c.name));
-        return { categories: topLevel.length };
-    });
-
     await session.step("top shows are the overall chart, in rank order", async () => {
         const section = sectionTitled(page, "top shows");
         const shown = await hrefsIn(section, "/podcasts/");
@@ -152,11 +145,38 @@ test("the podcasts page shows continue listening, for you, every category and th
         return { shows: top.length };
     });
 
+    // Every top-level category not already a for-you row has its own row of its chart's top shows, by name.
+    const rowCategories = topLevel
+        .filter((c) => !forYou.some((r) => r.category.id === c.id))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    await session.step("every other top-level category is a row of its top shows, loaded as it scrolls into view", async () => {
+        expect(rowCategories.length, "every top-level category is already a for-you row").toBeGreaterThan(0);
+        const charts = new Map<number, Chart>();
+        for (const c of rowCategories) charts.set(c.id, await get(`/charts?category=${c.id}&limit=12`));
+        // A category whose chart Apple sends empty has no row.
+        const shownRows = rowCategories.filter((c) => charts.get(c.id)!.length > 0);
+        for (const c of rowCategories.filter((c) => !shownRows.includes(c))) session.noteNotCovered(`podcasts page: Apple sent ${c.name}'s chart empty`);
+        for (const c of shownRows) {
+            const section = sectionTitled(page, c.name);
+            await section.scrollIntoViewIfNeeded();
+            await expect(section.locator('a[href^="/podcasts/"]:not([href^="/podcasts/category/"])').first()).toBeVisible({ timeout: 30_000 });
+            expect(await hrefsIn(section, "/podcasts/"), c.name).toEqual(charts.get(c.id)!.map((s) => `/podcasts/${s.itunesId}`));
+            await expect(section.locator(`a[href="/podcasts/category/${c.id}"]`)).toBeAttached();
+        }
+        // Rows in name order, read once every row has loaded.
+        const headings = (await page.getByRole("heading", { level: 2 }).allTextContents()).map((h) => h.trim().toLowerCase());
+        expect(headings.filter((h) => shownRows.some((c) => c.name.toLowerCase() === h))).toEqual(shownRows.map((c) => c.name.toLowerCase()));
+        return { rows: shownRows.length };
+    });
+
     // Prefer a category that has sub-categories, so the sub-category tabs are checked too.
-    const parentWithKids = topLevel.find((c) => categories.some((k) => k.parentId === c.id)) ?? topLevel[0];
+    const parentWithKids = rowCategories.find((c) => categories.some((k) => k.parentId === c.id)) ?? rowCategories[0];
     await session.step(`opening ${parentWithKids.name} shows its chart`, async () => {
         const chart: Chart = await get(`/charts?category=${parentWithKids.id}&limit=48`);
-        await page.getByRole("navigation", { name: "podcast categories" }).getByRole("link", { name: parentWithKids.name, exact: true }).click();
+        await page.goto("/podcasts");
+        const row = sectionTitled(page, parentWithKids.name);
+        await row.scrollIntoViewIfNeeded();
+        await row.locator(`a[href="/podcasts/category/${parentWithKids.id}"]`).click();
         await page.waitForURL(new RegExp(`/podcasts/category/${parentWithKids.id}$`));
         await expect(page.getByRole("heading", { level: 1, name: parentWithKids.name, exact: true })).toBeVisible();
         const grid = page.locator(".grid-media");

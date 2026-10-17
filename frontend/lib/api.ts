@@ -1478,9 +1478,11 @@ class ApiClient {
     }
 
     /** Apple's chart for a category, or the overall chart for `null`. */
-    async getPodcastChart(category: number | null, limit = 24, offset = 0) {
+    /** `background`: nobody is waiting on it yet, so the server asks Apple for it after the requests people are. */
+    async getPodcastChart(category: number | null, limit = 24, offset = 0, background = false) {
         const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
         if (category !== null) params.set("category", String(category));
+        if (background) params.set("background", "true");
         return this.request<DiscoveryPodcast[]>(`/podcasts/charts?${params}`);
     }
 

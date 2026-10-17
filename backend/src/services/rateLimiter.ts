@@ -16,6 +16,18 @@ import { logger } from "../utils/logger";
  */
 export const INTERACTIVE_PRIORITY = 10;
 
+/**
+ * One caller's place in a service's queue, kept across its retries. Raising it moves a request still waiting in
+ * the queue up to the new place, and any retry after that queues there too.
+ */
+export interface QueueTicket {
+    priority: number;
+    /** The id of this ticket's attempt while it waits in the queue; null once it runs. */
+    waitingId: string | null;
+}
+
+let ticketSeq = 0;
+
 interface RateLimitConfig {
     /** Requests per interval */
     intervalCap: number;
@@ -164,14 +176,30 @@ class GlobalRateLimiter {
     /**
      * Execute a request with rate limiting and automatic retry
      */
+    /** Raise a ticket's place: a request still waiting moves up now, and its retries queue at the new place. */
+    raise(service: ServiceName, ticket: QueueTicket, priority: number): void {
+        if (priority <= ticket.priority) return;
+        ticket.priority = priority;
+        const waiting = ticket.waitingId;
+        if (!waiting) return;
+        try {
+            this.queues.get(service)?.setPriority(waiting, priority);
+        } catch {
+            // Taken off the queue between the check and the move: it is already running.
+        }
+    }
+
     async execute<T>(
         service: ServiceName,
         requestFn: () => Promise<T>,
         options?: {
             priority?: number;
             skipRetry?: boolean;
+            /** A ticket the caller can raise with `raise` while this waits; it overrides `priority`. */
+            ticket?: QueueTicket;
         }
     ): Promise<T> {
+        const ticket: QueueTicket = options?.ticket ?? { priority: options?.priority ?? 0, waitingId: null };
         const queue = this.queues.get(service);
         const config = SERVICE_CONFIGS[service];
 
@@ -203,11 +231,14 @@ class GlobalRateLimiter {
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
+                const id = `${service}-${++ticketSeq}`;
+                ticket.waitingId = id;
                 const result = await queue.add(
                     async () => {
+                        ticket.waitingId = null;
                         return await requestFn();
                     },
-                    { priority: options?.priority ?? 0 }
+                    { priority: ticket.priority, id }
                 );
 
                 // The service answered: it is not rate limiting any more, so a breaker opened while this request

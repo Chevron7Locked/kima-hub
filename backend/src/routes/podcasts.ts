@@ -168,6 +168,9 @@ router.get("/", requireAuth, async (req, res) => {
 const pageParams = z.object({
     limit: z.coerce.number().int().min(1).max(CHART_MAX).default(20),
     offset: z.coerce.number().int().min(0).max(CHART_MAX).default(0),
+    // "true": nobody is waiting on this chart yet (the podcasts page's category rows), so it queues for Apple
+    // behind requests a person is waiting on.
+    background: z.enum(["true", "false"]).optional(),
 });
 
 /**
@@ -209,7 +212,8 @@ async function answerChart(res: Response, category: number | null, query: unknow
         if (category !== null && !(await isCategory(category))) {
             return res.status(404).json({ error: "No such podcast category" });
         }
-        const shows = (await chart(category)).slice(page.data.offset, page.data.offset + page.data.limit);
+        const priority = page.data.background === "true" ? "background" : "interactive";
+        const shows = (await chart(category, priority)).slice(page.data.offset, page.data.offset + page.data.limit);
         res.json(await toDiscoveryItems(shows));
     } catch (error) {
         appleFailure(res, label, error);
@@ -1470,7 +1474,8 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
         },
     });
     if (podcast.categoryIds.length === 0) {
-        await assignCategories(podcastId, podcast.itunesId, result.podcast.categoryNames);
+        // Nobody waits on a refresh's categories, so a person's own requests to Apple go first.
+        await assignCategories(podcastId, podcast.itunesId, result.podcast.categoryNames, "background");
     }
 
     // Batch fetch all existing GUIDs to avoid N+1 queries

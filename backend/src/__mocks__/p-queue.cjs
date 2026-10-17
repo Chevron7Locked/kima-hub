@@ -14,6 +14,9 @@ class PQueue {
         return fn();
     }
 
+    // Nothing ever waits here, so there is nothing to move.
+    setPriority() {}
+
     onIdle() {
         return Promise.resolve();
     }
