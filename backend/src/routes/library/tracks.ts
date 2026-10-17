@@ -831,15 +831,16 @@ router.get("/radio", async (req, res) => {
             };
             break;
           case "acoustic":
+            // Matched by library share like the mixes' (services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json).
             moodWhere = {
               analysisStatus: "completed",
-              acousticness: { gte: 0.6 },
+              acousticness: { gte: 0.663 },
             };
             break;
           case "instrumental":
             moodWhere = {
               analysisStatus: "completed",
-              instrumentalness: { gte: 0.7 },
+              instrumentalness: { gte: 0.467 },
             };
             break;
           default:

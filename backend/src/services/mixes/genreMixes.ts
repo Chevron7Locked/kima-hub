@@ -1,3 +1,7 @@
+// Cut-offs on instrumentalness, acousticness, valence and arousal (read wholly or partly from the sound model and the
+// mood analyzer) pass the same share of a library as before the music sound model and the mood analyzer's new
+// valence/arousal mapping: each was matched on 8,971 tracks, recorded in
+// services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json. A new model or mapping needs a new match.
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import {
@@ -258,7 +262,7 @@ export async function generateWorkoutMix(
             analysisStatus: "completed",
             analysisMode: "enhanced",
             AND: [
-                { arousal: { gte: 0.6 } },
+                { arousal: { gte: 0.579 } },
                 { energy: { gte: 0.6 } },
                 { bpm: { gte: 110 } },
             ],
@@ -422,7 +426,7 @@ export async function generateFocusMix(
                 where: {
                 ...NOT_MISSING,
                 analysisStatus: "completed",
-                instrumentalness: { gte: 0.5 },
+                instrumentalness: { gte: 0.182 },
                 energy: { gte: 0.2, lte: 0.7 },
             },
             include: { album: { select: { coverUrl: true } } },

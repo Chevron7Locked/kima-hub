@@ -1,3 +1,7 @@
+// Cut-offs on instrumentalness, acousticness, valence and arousal (read wholly or partly from the sound model and the
+// mood analyzer) pass the same share of a library as before the music sound model and the mood analyzer's new
+// valence/arousal mapping: each was matched on 8,971 tracks, recorded in
+// services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json. A new model or mapping needs a new match.
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import {
@@ -68,9 +72,9 @@ export async function generateChillMix(
                     { bpm: { lte: 115 } },
                     {
                         OR: [
-                            { arousal: { lte: 0.55 } },
-                            { acousticness: { gte: 0.3 } },
-                            { valence: { lte: 0.65 } },
+                            { arousal: { lte: 0.545 } },
+                            { acousticness: { gte: 0.314 } },
+                            { valence: { lte: 0.582 } },
                         ],
                     },
                 ],
@@ -205,9 +209,9 @@ export async function generateLateNightMix(
                     { bpm: { lte: 110 } },
                     {
                         OR: [
-                            { arousal: { lte: 0.5 } },
-                            { valence: { lte: 0.6 } },
-                            { acousticness: { gte: 0.3 } },
+                            { arousal: { lte: 0.515 } },
+                            { valence: { lte: 0.558 } },
+                            { acousticness: { gte: 0.314 } },
                         ],
                     },
                 ],
@@ -266,7 +270,7 @@ export async function generateHappyMix(
                 where: {
                 ...NOT_MISSING,
                 analysisStatus: "completed",
-                valence: { gte: 0.6 },
+                valence: { gte: 0.559 },
                 energy: { gte: 0.5 },
             },
             include: { album: { select: { coverUrl: true } } },
@@ -343,7 +347,7 @@ export async function generateMelancholyMix(
                 where: {
                 ...NOT_MISSING,
                 analysisStatus: "completed",
-                valence: { lte: 0.35 },
+                valence: { lte: 0.454 },
                 energy: { lte: 0.6 },
             },
             include: { album: { select: { coverUrl: true } } },
@@ -498,7 +502,7 @@ export async function generateAcousticMix(
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
-            acousticness: { gte: 0.6 },
+            acousticness: { gte: 0.663 },
             energy: { gte: 0.3, lte: 0.6 },
         },
         include: { album: { select: { coverUrl: true } } },
@@ -559,7 +563,7 @@ export async function generateInstrumentalMix(
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
-            instrumentalness: { gte: 0.7 },
+            instrumentalness: { gte: 0.467 },
             energy: { gte: 0.3, lte: 0.6 },
         },
         include: { album: { select: { coverUrl: true } } },
@@ -713,14 +717,14 @@ export async function generateSadGirlSundays(
             OR: [
                 {
                     AND: [
-                        { valence: { lte: 0.35 } },
+                        { valence: { lte: 0.454 } },
                         { keyScale: "minor" },
                     ],
                 },
                 {
                     AND: [
-                        { valence: { lte: 0.3 } },
-                        { arousal: { lte: 0.4 } },
+                        { valence: { lte: 0.439 } },
+                        { arousal: { lte: 0.465 } },
                     ],
                 },
             ],
@@ -745,7 +749,7 @@ export async function generateMainCharacterEnergy(
             ...NOT_MISSING,
             analysisStatus: "completed",
             AND: [
-                { valence: { gte: 0.55 } },
+                { valence: { gte: 0.533 } },
                 { energy: { gte: 0.55 } },
                 { danceability: { gte: 0.5 } },
             ],
@@ -800,13 +804,13 @@ export async function generate3AMThoughts(
             ...NOT_MISSING,
             analysisStatus: "completed",
             AND: [
-                { arousal: { lte: 0.4 } },
+                { arousal: { lte: 0.465 } },
                 { energy: { lte: 0.5 } },
                 { bpm: { lte: 110 } },
                 {
                     OR: [
-                        { valence: { lte: 0.5 } },
-                        { acousticness: { gte: 0.3 } },
+                        { valence: { lte: 0.51 } },
+                        { acousticness: { gte: 0.314 } },
                     ],
                 },
             ],
@@ -840,7 +844,7 @@ export async function generateHotGirlWalk(
                 },
                 {
                     AND: [
-                        { valence: { gte: 0.6 } },
+                        { valence: { gte: 0.559 } },
                         { energy: { gte: 0.6 } },
                     ],
                 },
@@ -869,7 +873,7 @@ export async function generateRageCleaning(
                 {
                     AND: [
                         { energy: { gte: 0.75 } },
-                        { arousal: { gte: 0.65 } },
+                        { arousal: { gte: 0.616 } },
                         { bpm: { gte: 125 } },
                     ],
                 },
@@ -906,8 +910,8 @@ export async function generateGoldenHour(
             OR: [
                 {
                     AND: [
-                        { valence: { gte: 0.45 } },
-                        { acousticness: { gte: 0.35 } },
+                        { valence: { gte: 0.491 } },
+                        { acousticness: { gte: 0.353 } },
                         { energy: { gte: 0.25, lte: 0.65 } },
                     ],
                 },
@@ -933,9 +937,9 @@ export async function generateShowerKaraoke(
             ...NOT_MISSING,
             analysisStatus: "completed",
             AND: [
-                { instrumentalness: { lte: 0.35 } },
+                { instrumentalness: { lte: 0.111 } },
                 { energy: { gte: 0.55 } },
-                { valence: { gte: 0.45 } },
+                { valence: { gte: 0.491 } },
             ],
         },
     });
@@ -960,9 +964,9 @@ export async function generateInMyFeelings(
             OR: [
                 {
                     AND: [
-                        { valence: { lte: 0.4 } },
-                        { arousal: { lte: 0.55 } },
-                        { acousticness: { gte: 0.25 } },
+                        { valence: { lte: 0.471 } },
+                        { arousal: { lte: 0.545 } },
+                        { acousticness: { gte: 0.282 } },
                     ],
                 },
             ],
@@ -991,8 +995,8 @@ export async function generateMidnightDrive(
                 { bpm: { gte: 80, lte: 130 } },
                 {
                     OR: [
-                        { arousal: { lte: 0.6 } },
-                        { valence: { gte: 0.3, lte: 0.7 } },
+                        { arousal: { lte: 0.58 } },
+                        { valence: { gte: 0.439, lte: 0.607 } },
                     ],
                 },
             ],
@@ -1021,8 +1025,8 @@ export async function generateCoffeeShopVibes(
                 { bpm: { lte: 120 } },
                 {
                     OR: [
-                        { acousticness: { gte: 0.35 } },
-                        { instrumentalness: { gte: 0.25 } },
+                        { acousticness: { gte: 0.353 } },
+                        { instrumentalness: { gte: 0.083 } },
                     ],
                 },
             ],
@@ -1049,9 +1053,9 @@ export async function generateRomanticizeYourLife(
             OR: [
                 {
                     AND: [
-                        { valence: { gte: 0.35, lte: 0.75 } },
-                        { arousal: { gte: 0.25, lte: 0.65 } },
-                        { acousticness: { gte: 0.25 } },
+                        { valence: { gte: 0.455, lte: 0.632 } },
+                        { arousal: { gte: 0.393, lte: 0.616 } },
+                        { acousticness: { gte: 0.282 } },
                     ],
                 },
             ],
@@ -1076,7 +1080,7 @@ export async function generateThatGirlEra(
             ...NOT_MISSING,
             analysisStatus: "completed",
             AND: [
-                { valence: { gte: 0.55 } },
+                { valence: { gte: 0.533 } },
                 { energy: { gte: 0.45 } },
                 { danceability: { gte: 0.45 } },
             ],
@@ -1103,8 +1107,8 @@ export async function generateUnhinged(
             OR: [
                 { energy: { gte: 0.85 } },
                 { energy: { lte: 0.15 } },
-                { valence: { gte: 0.9 } },
-                { valence: { lte: 0.1 } },
+                { valence: { gte: 0.702 } },
+                { valence: { lte: 0.376 } },
                 { bpm: { gte: 160 } },
                 { bpm: { lte: 70 } },
                 { danceability: { gte: 0.9 } },
@@ -1323,7 +1327,7 @@ export async function generateVocalDetox(
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
-            instrumentalness: { gte: 0.75 },
+            instrumentalness: { gte: 0.6 },
         },
     });
 }
