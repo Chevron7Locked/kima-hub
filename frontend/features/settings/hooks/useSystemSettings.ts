@@ -34,6 +34,17 @@ const defaultSystemSettings: SystemSettings = {
     // Download preferences
     downloadSource: "soulseek",
     primaryFailureFallback: "none",
+    // AI playlist generation (#240, Manual Mode) — off by default. Values are
+    // overwritten by the server once loaded; these only seed the pre-load
+    // render and the shape of the SystemSettings type.
+    aiPlaylistEnabled: false,
+    aiProvider: "openai",
+    aiApiBaseUrl: null,
+    aiModel: null,
+    aiApiKey: null,
+    aiMaxPlaylistSize: 100,
+    aiBlockedGenres: [],
+    aiBlockedArtists: [],
     // Server
     publicUrl: "",
 };
@@ -128,6 +139,22 @@ export function useSystemSettings() {
                         slskdApiKey: systemSettings.slskdApiKey ?? undefined,
                     });
                     break;
+                case "ai": {
+                    // Test the candidate values currently in the form — never
+                    // the saved credentials — so a key can be validated before
+                    // it is persisted (#240, Manual Mode).
+                    const aiKey = systemSettings.aiApiKey ?? undefined;
+                    result = await api.testAIProvider({
+                        provider:
+                            systemSettings.aiProvider === "openai"
+                                ? "openai"
+                                : "openai_compatible",
+                        apiBaseUrl: systemSettings.aiApiBaseUrl ?? undefined,
+                        model: systemSettings.aiModel ?? undefined,
+                        apiKey: aiKey,
+                    });
+                    break;
+                }
                 default:
                     throw new Error(`Unknown service: ${service}`);
             }

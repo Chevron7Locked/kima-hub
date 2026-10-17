@@ -51,6 +51,18 @@ export interface SystemSettings {
     // Download Preferences
     downloadSource: "soulseek" | "lidarr";
     primaryFailureFallback: "none" | "lidarr" | "soulseek";
+    // AI playlist generation (#240, Manual Mode): off by default. The LLM
+    // only translates a prompt into selection parameters; track selection is
+    // deterministic. aiApiKey is encrypted at rest; the aiBlocked* lists are
+    // global guardrails the backend applies on top of any user query.
+    aiPlaylistEnabled: boolean;
+    aiProvider: "openai" | "openai_compatible" | "none";
+    aiApiBaseUrl: string | null;
+    aiModel: string | null;
+    aiApiKey: string | null;
+    aiMaxPlaylistSize: number;
+    aiBlockedGenres: string[];
+    aiBlockedArtists: string[];
     // Server
     publicUrl: string;
 }

@@ -38,6 +38,7 @@ import browseRoutes from "./routes/browse";
 import analysisRoutes from "./routes/analysis";
 import releasesRoutes from "./routes/releases";
 import vibeRoutes from "./routes/vibe";
+import aiPlaylistsRoutes from "./routes/aiPlaylists";
 import publicVibeRoutes from "./routes/publicVibe";
 import systemRoutes from "./routes/system";
 import shareRoutes from "./routes/share";
@@ -159,6 +160,7 @@ app.use("/api/system-settings", apiLimiter, systemSettingsRoutes);
 app.use("/api/playback-state", playbackStateRoutes); // No rate limit - syncs frequently
 app.use("/api/offline", apiLimiter, offlineRoutes);
 app.use("/api/playlists", apiLimiter, playlistsRoutes);
+app.use("/api/ai-playlists", apiLimiter, aiPlaylistsRoutes);
 app.use("/api/search", apiLimiter, searchRoutes);
 app.use("/api/recommendations", apiLimiter, recommendationsRoutes);
 app.use("/api/downloads", apiLimiter, downloadsRoutes);

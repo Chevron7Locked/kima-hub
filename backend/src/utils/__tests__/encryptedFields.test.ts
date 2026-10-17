@@ -67,10 +67,10 @@ describe("the encrypted settings map", () => {
 
     it("maps every encrypted settings field", () => {
         // Every encrypted SystemSettings field, read and write side alike.
-        expect(Object.keys(ENCRYPTED_FIELDS)).toHaveLength(8);
+        expect(Object.keys(ENCRYPTED_FIELDS)).toHaveLength(9);
         for (const field of ["fanartApiKey", "slskdApiKey", "spotifyClientSecret",
             "lidarrApiKey", "lidarrWebhookSecret", "acoustidApiKey",
-            "audiobookshelfApiKey", "soulseekPassword"]) {
+            "audiobookshelfApiKey", "soulseekPassword", "aiApiKey"]) {
             expect(ENCRYPTED_FIELDS).toHaveProperty(field);
         }
     });

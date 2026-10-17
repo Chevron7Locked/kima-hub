@@ -23,6 +23,7 @@ import { DownloadPreferencesSection } from "@/features/settings/components/secti
 import { LidarrSection } from "@/features/settings/components/sections/LidarrSection";
 import { AudiobookshelfSection } from "@/features/settings/components/sections/AudiobookshelfSection";
 import { SoulseekSection } from "@/features/settings/components/sections/SoulseekSection";
+import { AiSection } from "@/features/settings/components/sections/AiSection";
 import { ArtworkSection } from "@/features/settings/components/sections/ArtworkSection";
 import { StoragePathsSection } from "@/features/settings/components/sections/StoragePathsSection";
 import { CacheSection } from "@/features/settings/components/sections/CacheSection";
@@ -39,6 +40,7 @@ const sidebarItems: SidebarItem[] = [
     { id: "lidarr", label: "Download Services", adminOnly: true },
     { id: "audiobookshelf", label: "Media Servers", adminOnly: true },
     { id: "soulseek", label: "P2P Networks", adminOnly: true },
+    { id: "ai", label: "AI Playlists", adminOnly: true },
     { id: "artwork", label: "Artwork", adminOnly: true },
     { id: "storage", label: "Storage", adminOnly: true },
     { id: "cache", label: "Library Enrichment", adminOnly: true },
@@ -249,6 +251,13 @@ export default function SettingsPage() {
                             onUpdate={updateSystemSettings}
                             onTest={handleTestService}
                             isTesting={testingServices.soulseek || false}
+                        />
+
+                        <AiSection
+                            settings={systemSettings}
+                            onUpdate={updateSystemSettings}
+                            onTest={handleTestService}
+                            isTesting={testingServices.ai || false}
                         />
 
                         <ArtworkSection

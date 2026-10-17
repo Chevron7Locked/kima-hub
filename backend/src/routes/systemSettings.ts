@@ -19,7 +19,8 @@ import {
 } from "../services/gpuRuntime";
 import { configureLidarrWebhook } from "../services/lidarrWebhookSetup";
 import { createLidarrClient } from "../services/lidarrClient";
-import { safeError } from "../utils/errors";
+import { safeError, UserFacingError } from "../utils/errors";
+import { parseStringArray, stringifyStringArray } from "../utils/jsonArrays";
 
 const router = Router();
 
@@ -109,6 +110,32 @@ const systemSettingsSchema = z.object({
   // Server
   publicUrl: z.union([z.string().url(), z.literal("")]).optional(),
   registrationOpen: z.boolean().optional(),
+
+  // AI playlists (#240, Manual Mode): off by default. The LLM only
+  // translates a free-text prompt into selection parameters; track selection
+  // stays deterministic SQL (services/ai). The API key is stored encrypted.
+  aiPlaylistEnabled: z.boolean().optional(),
+  aiProvider: z.enum(["openai", "openai_compatible", "none"]).optional(),
+  aiApiBaseUrl: z
+    .union([
+      z
+        .string()
+        .url()
+        .refine((u) => /^https?:\/\//i.test(u), {
+          message: "aiApiBaseUrl must start with http:// or https://",
+        }),
+      z.literal(""),
+    ])
+    .nullable()
+    .optional(),
+  aiModel: z.string().nullable().optional(),
+  aiApiKey: z.string().nullable().optional(),
+  aiMaxPlaylistSize: z.number().int().min(1).max(1000).optional(),
+  // Global guardrails, applied to every AI-generated playlist regardless of
+  // what the prompt or the user's parameters ask for. Stored as JSON arrays
+  // in TEXT columns (prisma String?), validated here as string[].
+  aiBlockedGenres: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+  aiBlockedArtists: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
 });
 
 // GET /system-settings
@@ -142,7 +169,14 @@ router.get("/", async (_req, res) => {
     // Decrypt every field in ENCRYPTED_FIELDS before sending to the client.
     const resolved = await resolveEncryptedSettings({ ...settings });
 
-    res.json(resolved);
+    // The AI guardrail lists are stored as JSON strings (prisma String?);
+    // the client always deals in string[] and sends string[] back on save.
+    const resolvedAny = resolved as Record<string, unknown>;
+    res.json({
+      ...resolved,
+      aiBlockedGenres: parseStringArray(resolvedAny.aiBlockedGenres),
+      aiBlockedArtists: parseStringArray(resolvedAny.aiBlockedArtists),
+    });
   } catch (error) {
     logger.error("Get system settings error:", error);
     res.status(500).json({ error: "Failed to get system settings" });
@@ -153,6 +187,20 @@ router.get("/", async (_req, res) => {
 router.post("/", async (req, res) => {
   try {
     const data = systemSettingsSchema.parse(req.body);
+
+    // The AI guardrail lists are validated as string[] above and stored as
+    // JSON strings (prisma String?) — serialize before the upsert.
+    const mutableData = data as Record<string, unknown>;
+    if (mutableData.aiBlockedGenres !== undefined) {
+      mutableData.aiBlockedGenres = stringifyStringArray(
+        mutableData.aiBlockedGenres as string[],
+      );
+    }
+    if (mutableData.aiBlockedArtists !== undefined) {
+      mutableData.aiBlockedArtists = stringifyStringArray(
+        mutableData.aiBlockedArtists as string[],
+      );
+    }
 
     logger.debug("[SYSTEM SETTINGS] Saving settings...");
     logger.debug(
@@ -553,6 +601,55 @@ const PROTECTED_KEY_PREFIXES = [
   "lock:",
   "sse:",
 ];
+
+// Test an AI provider connection without saving the credentials (#240,
+// Manual Mode). The candidate values come from the (unsaved) settings form.
+router.post("/test-ai", async (req, res) => {
+  try {
+    const { provider, apiBaseUrl, model, apiKey } = req.body as {
+      provider?: string;
+      apiBaseUrl?: string;
+      model?: string;
+      apiKey?: string;
+    };
+
+    if (provider === "openai") {
+      if (!apiKey || !apiKey.trim()) {
+        return res.status(400).json({ error: "An API key is required for the OpenAI provider" });
+      }
+    } else if (provider === "openai_compatible") {
+      if (!apiBaseUrl?.trim() || !/^https?:\/\//i.test(apiBaseUrl) || !model?.trim()) {
+        return res.status(400).json({
+          error: "An http(s) endpoint URL and a model name are required for an OpenAI-compatible provider",
+        });
+      }
+    } else {
+      return res.status(400).json({
+        error: "provider must be 'openai' or 'openai_compatible'",
+      });
+    }
+
+    const { createAIProvider } = await import("../services/ai/providers");
+    const testProvider = createAIProvider({
+      provider: provider as "openai" | "openai_compatible",
+      apiBaseUrl,
+      model,
+      apiKey,
+    });
+    if (!testProvider) {
+      return res.status(400).json({ error: "The provider configuration is incomplete" });
+    }
+
+    logger.debug(`[AI-TEST] Testing provider "${provider}"...`);
+    await testProvider.testConnection();
+    res.json({ success: true, message: `Connected to ${provider}` });
+  } catch (error) {
+    if (error instanceof UserFacingError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    safeError(res, "AI provider connection test", error, 502);
+  }
+});
 
 // Clear all rebuildable caches (never queue, session, or control-plane state)
 router.post("/clear-caches", async (_req, res) => {

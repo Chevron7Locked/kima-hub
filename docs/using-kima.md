@@ -12,10 +12,16 @@ The home page shows the sections that have something to show:
 
 - **Library Radio:** one-click stations. Shuffle All, Workout (high energy), Discovery (lesser-played) and Favorites (most played), plus stations for your common genres and decades.
 - **Continue Listening** and **Recently Added.**
-- **Made For You:** generated mixes. The **Mood Mixer** button beside it makes a playlist from one of the five moods: Upbeat, Melancholic, Calm, Intense or Energetic.
+- **Made For You:** generated mixes. The **Mood Mixer** button beside it makes a playlist from one of the five moods: Upbeat, Melancholic, Calm, Intense or Energetic — or, with an AI provider configured, from a free-text description via the **AI Mix** tab ([AI Mix](#ai-mix)).
 - **Recommended:** artists picked from your listening.
 - **Popular Artists** (from ListenBrainz) and **Featured Playlists** (from Deezer).
 - **Popular Podcasts** and **Audiobooks.**
+
+### AI Mix
+
+The **AI Mix** tab in the Mood Mixer turns a free-text description into explicit selection parameters: a target for the sound (valence, energy), a tolerance, a length, an era range, and genre include/exclude lists. The AI only does the translation into parameters; selecting your library's tracks stays deterministic. The first step always produces a preview: the parameters appear in an editable form and the matched tracks are listed. Nothing is created until you hit **Save playlist**, and then only the parameters as you left them in the form. The admin's global genre/artist exclusions always apply, and the max-length guardrail is clamped into the form before anything is resolved.
+
+Enable it under **Settings → AI Playlists** (admin only): provider, base URL, model, API key, a maximum playlist size, and global exclusions, with a **Test connection** check before you save. Without an API key the tab is hidden.
 
 ## The vibe map
 

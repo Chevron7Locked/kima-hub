@@ -18,6 +18,7 @@ export const ENCRYPTED_FIELDS = {
     soulseekPassword: "Soulseek password",
     slskdApiKey: "slskd API key",
     spotifyClientSecret: "Spotify client secret",
+    aiApiKey: "AI provider API key",
 } as const;
 
 export type EncryptedField = keyof typeof ENCRYPTED_FIELDS;

@@ -29,6 +29,80 @@ interface MoodBucketMix {
     tracks?: ApiData[];
 }
 
+// AI playlist generation (#240, Manual Mode). The LLM only translates a
+// free-text prompt into explicit selection parameters (a VibeQuery); track
+// selection stays deterministic on the server. A call carrying a `prompt` is
+// always a dry run (preview, no playlist); only the user's reviewed
+// `vibeQuery` with `apply: true` creates one.
+export type AiProviderId = "openai" | "openai_compatible" | "none";
+
+/** Raw, user-editable query fields (mirrors the backend's VIBE_QUERY_FIELDS). */
+export interface AiVibeQuery {
+    /** 0..1 — "happy vs. dark" target on the library's feel distribution. */
+    valenceTarget?: number;
+    /** 0..1 — "calm vs. intense" target. */
+    arousalTarget?: number;
+    /** Allowed distance from the feel targets, in std-devs (0.25..3). */
+    feelTolerance?: number;
+    genreIncludes?: string[];
+    genreExcludes?: string[];
+    /** 1900..2100 */
+    eraFrom?: number;
+    eraTo?: number;
+    /** 1..500 (capped further by the admin's max-playlist-size guardrail). */
+    length?: number;
+}
+
+/** The server's normalized query — what the preview was built from. */
+export interface NormalizedAiVibeQuery {
+    valenceTarget?: number;
+    arousalTarget?: number;
+    feelTolerance: number;
+    genreIncludes: string[];
+    genreExcludes: string[];
+    eraFrom?: number;
+    eraTo?: number;
+    length: number;
+}
+
+export interface AiCandidateTrack {
+    id: string;
+    title: string;
+    duration: number;
+    albumId: string;
+    albumTitle: string;
+    coverUrl: string | null;
+    artistId: string;
+    artistName: string;
+    year: number | null;
+    feel: { valence: number; arousal: number };
+}
+
+export interface AiGenerateResult {
+    /** "llm" = the prompt was translated by the model; "direct" = raw query. */
+    source: "llm" | "direct";
+    vibeQuery: NormalizedAiVibeQuery;
+    /** Metadata-only library outline the model was shown (genres, year range). */
+    libraryContext: {
+        genres: string[];
+        yearRange: [number, number] | null;
+    };
+    tracks: AiCandidateTrack[];
+    trackCount: number;
+    /** Present only when the user's reviewed query was applied. */
+    playlistId?: string;
+    playlistName?: string;
+}
+
+export interface AiGeneratePayload {
+    /** Free-text prompt; implies a dry run. Mutually exclusive in effect with a reviewed query. */
+    prompt?: string;
+    /** User-edited parameters; resolved directly, creates only with `apply`. */
+    vibeQuery?: AiVibeQuery;
+    name?: string;
+    apply?: boolean;
+}
+
 interface VibePathTrack {
     id: string;
     title: string;
@@ -78,6 +152,7 @@ interface ApiError extends Error {
 interface ServiceTestResult {
     success?: boolean;
     version?: string;
+    message?: string;
     error?: string;
 }
 
@@ -1072,6 +1147,23 @@ class ApiClient {
         });
     }
 
+    /**
+     * Tests the AI provider that is currently in the (unsaved) settings form
+     * (#240, Manual Mode) — never the saved one, so a candidate key can be
+     * validated before it is persisted.
+     */
+    async testAIProvider(settings: {
+        provider: "openai" | "openai_compatible";
+        apiBaseUrl?: string;
+        model?: string;
+        apiKey?: string;
+    }) {
+        return this.request<ServiceTestResult>("/system-settings/test-ai", {
+            method: "POST",
+            body: JSON.stringify(settings),
+        });
+    }
+
     // Downloads (Lidarr)
     async downloadAlbum(
         artistName: string,
@@ -1643,6 +1735,17 @@ class ApiClient {
                 body: JSON.stringify(trackIds ? { trackIds } : {}),
             }
         );
+    }
+
+    // AI playlist generation (#240, Manual Mode). A `prompt` payload is
+    // always a dry run: it returns the (editable) parameters plus a track
+    // preview. Only a `vibeQuery` payload with `apply: true` creates a
+    // playlist — the reviewed parameters are what the server resolves.
+    async aiGeneratePlaylist(payload: AiGeneratePayload) {
+        return this.request<AiGenerateResult>("/ai-playlists/generate", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        });
     }
 
     // Enrichment
