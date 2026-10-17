@@ -228,7 +228,7 @@ Kima builds on these projects and services:
 - [LRCLIB](https://lrclib.net/) for lyrics
 - [Apple's iTunes Search API](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/) and Apple Podcasts' charts for podcast search and discovery
 - [Odesli](https://odesli.co/) (song.link) for resolving links from other music services during playlist import, and [yt-dlp](https://github.com/yt-dlp/yt-dlp) for reading playlist links
-- [LAION CLAP](https://huggingface.co/laion/clap-htsat-unfused) for the sound model, and [Essentia](https://essentia.upf.edu/) with its MusiCNN models for audio analysis
+- [LAION-CLAP](https://github.com/LAION-AI/CLAP)'s music checkpoint ([lukewys/laion_clap](https://huggingface.co/lukewys/laion_clap), CC0-1.0) for the sound model, and [Essentia](https://essentia.upf.edu/) with its MusiCNN models for audio analysis
 - [DEAM](https://cvml.unige.ch/databases/DEAM/) for the human valence and arousal ratings behind the feel part of matching
 - [UMAP](https://arxiv.org/abs/1802.03426) (McInnes, Healy and Melville) for the method behind the map's layout
 - [Lidarr](https://lidarr.audio/), [Audiobookshelf](https://www.audiobookshelf.org/) and [slskd](https://github.com/slskd/slskd) for the services Kima connects to
