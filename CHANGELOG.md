@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A podcast download cut off by the host no longer leaves a half file in the cache.** Kima deleted the partial file while it was still being closed, so it could reappear; it now waits for the file to close first.
+- **On a TV remote, a row that loads in above you no longer moves you onto another row.** The remote reads where the focus really is, remembers each row's column by the row itself, and starts a row at its first card from its "show all" link.
 - **A setting saved in the old encrypted format can no longer come back as garbage.** Values stored before 1.10's encryption change had no tamper check, so read with the wrong key they came back as random bytes about one time in 256 instead of being refused; and a value saved under the oldest key form was missed when the current key happened to pass. Kima now accepts only text, tries both key forms, and otherwise asks for the setting to be re-entered.
 - **Songs of one album no longer fail when they save the same new genre at the same moment.** Two songs finishing together both tried to create the genre, and one failed with a duplicate-name error until its retry.
 - **Two songs of one album asked about at once share one MusicBrainz tracklist request** instead of each making its own.
