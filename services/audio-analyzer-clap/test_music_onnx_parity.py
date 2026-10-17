@@ -158,6 +158,41 @@ class TestMusicOnnxParity(unittest.TestCase):
         np.testing.assert_allclose(self.text.embed_text([prompts[0]])[0], cand[0], atol=1e-5)
 
 
+def _missing_models():
+    for name in ('music_audio.onnx', 'music_text.onnx'):
+        if not os.path.exists(os.path.join(ONNX_DIR, name)):
+            return f'{name} not present in {ONNX_DIR}'
+    return None
+
+
+@unittest.skipIf(_missing_models(), _missing_models())
+class TestAnalyzerRunsTheTestedModel(unittest.TestCase):
+    """The analyzer's backends (onnx_backend) give the vectors of the classes the parity tests above check."""
+
+    def test_audio(self):
+        import librosa
+        from music_clap_onnx import MusicClapAudio
+        from onnx_backend import OnnxCLAPBackend
+        audio, _ = librosa.load(_clips()[0], sr=mp.SR, mono=True)
+        clips = [audio[:mp.WIN], audio[mp.WIN:2 * mp.WIN + 1], audio[:3 * mp.SR]]
+        backend = OnnxCLAPBackend(os.path.join(ONNX_DIR, 'music_audio.onnx'))
+        want = MusicClapAudio(os.path.join(ONNX_DIR, 'music_audio.onnx')).embed_windows(clips, [0, 0, 0])
+        got = backend.embed_clips(clips)
+        for k in range(len(clips)):
+            self.assertGreaterEqual(mp.cos(want[k], got[k]), 0.999999, f'clip {k}')
+
+    def test_text(self):
+        from music_clap_onnx import MusicClapText
+        from onnx_backend import OnnxTextCLAPBackend
+        prompts = ['jazz', 'music with singing vocals', SEARCH_LONG]
+        want = MusicClapText(os.path.join(ONNX_DIR, 'music_text.onnx')).embed_text(prompts)
+        got = OnnxTextCLAPBackend(os.path.join(ONNX_DIR, 'music_text.onnx')).embed_text(prompts)
+        np.testing.assert_allclose(got, want, atol=1e-6)
+
+
+SEARCH_LONG = mp.SEARCH_PROMPTS[-1]
+
+
 class TestCandidateIsTorchFree(unittest.TestCase):
 
     def test_no_torch_import(self):

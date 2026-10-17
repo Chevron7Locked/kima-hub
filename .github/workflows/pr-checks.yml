@@ -157,11 +157,13 @@ jobs:
 
             - name: Run sound-vector analyzer tests that need no model weights
               working-directory: services/audio-analyzer-clap
-              # The parity tests and the eager-load test need the model weights;
-              # the image build runs verify_runtime.py against the real model.
+              # The eager-load test needs the model weights, and the music model's parity
+              # test skips its checks without the checkpoint and torch (it still proves the
+              # front end imports no torch); the image build runs verify_runtime.py against
+              # the real model.
               run: >-
                   python -m pytest test_gpu_nobody_pays.py test_gpu_switch.py test_reports.py test_one_thread.py test_ship_blocker.py
-                  test_window_offsets.py test_window_sweep.py -v
+                  test_window_offsets.py test_window_sweep.py test_music_onnx_parity.py -v
                   --deselect test_ship_blocker.py::test_ensure_onnx_backend_eagerly_loads_model
 
     build-docker:
