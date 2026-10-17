@@ -195,7 +195,19 @@ def _get_workers_from_db() -> int:
 # The settings page's count first, then the NUM_WORKERS environment variable, then the default.
 NUM_WORKERS = _get_workers_from_db()
 # Bump when stored features change meaning, with a migration that asks every older answer again.
-ESSENTIA_VERSION = '2.1b6-enhanced-v4'
+ESSENTIA_VERSION = '2.1b6-enhanced-v5'
+
+# Valence and arousal on 0-1: alpha + beta * raw, raw the two heads' mean on their 1-9 scale, fitted by least squares
+# to Memo2496's human ratings and chosen against the Soundtracks sets' (services/audio-analyzer-clap/eval/
+# music-switch-2026-10-17/va_mapping.json). It replaced a x2.5 stretch about 5 clipped to 1-9, which agreed worse
+# with the ratings and put 18% of a library's arousal at an edge.
+VA_MAP = {'valence': (0.22618388390710234, 0.06503314529834055),
+          'arousal': (0.007891416107343032, 0.10103310536880765)}
+
+
+def map_va(axis: str, raw: float) -> float:
+    alpha, beta = VA_MAP[axis]
+    return round(max(0.0, min(1.0, alpha + beta * raw)), 3)
 
 # Seconds to allow the single ffmpeg decode before giving up on the track; the decode is also
 # the integrity check.
@@ -645,17 +657,12 @@ class AudioAnalyzer:
         result: Dict[str, Any] = {field: positive_prob(head) for field, head in mood_heads.items()}
 
         # Valence and arousal: the mean of the DEAM and emoMusic regressions, each [frames, 2]
-        # on a 1-9 scale. Temperature scaling spreads the compressed predictions around the
-        # centre (5.0) before mapping to 0-1.
+        # on a 1-9 scale, mapped to 0-1 by VA_MAP.
         va = [self.prediction_models[m](embeddings) for m in ('deam', 'emomusic')]
         valence_raw = sum(float(np.mean(p[:, 0])) for p in va) / len(va)
         arousal_raw = sum(float(np.mean(p[:, 1])) for p in va) / len(va)
-        center = 5.0
-        temperature = 2.5
-        valence_scaled = max(1.0, min(9.0, center + (valence_raw - center) * temperature))
-        arousal_scaled = max(1.0, min(9.0, center + (arousal_raw - center) * temperature))
-        result['valence'] = round(max(0.0, min(1.0, (valence_scaled - 1.0) / 8.0)), 3)
-        result['arousal'] = round(max(0.0, min(1.0, (arousal_scaled - 1.0) / 8.0)), 3)
+        result['valence'] = map_va('valence', valence_raw)
+        result['arousal'] = map_va('arousal', arousal_raw)
 
         # Danceability: the head's probability, across the whole 0-1 range.
         result['danceabilityMl'] = positive_prob('danceability')
@@ -686,15 +693,17 @@ class AudioAnalyzer:
         if mood_aggressive is not None and mood_aggressive >= 0.6:
             tags += ['aggressive', 'intense']
 
-        if arousal is not None and arousal >= 0.7:
+        # The valence/arousal cut-offs below pass the same share of a library as the v4 analyzer's did on its stretched
+        # values (services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json).
+        if arousal is not None and arousal >= 0.578:
             tags += ['energetic', 'upbeat']
-        elif arousal is not None and arousal <= 0.3:
+        elif arousal is not None and arousal <= 0.448:
             tags += ['calm', 'peaceful']
 
         if valence is not None and 'happy' not in tags and 'sad' not in tags:
-            if valence >= 0.7:
+            if valence >= 0.593:
                 tags += ['happy', 'uplifting']
-            elif valence <= 0.3:
+            elif valence <= 0.509:
                 tags += ['sad', 'melancholic']
 
         if danceability is not None and danceability >= 0.7:
@@ -708,11 +717,11 @@ class AudioAnalyzer:
         if features.get('keyScale') == 'minor' and 'happy' not in tags:
             tags.append('moody')
 
-        if arousal is not None and bpm is not None and arousal >= 0.7 and bpm >= 120:
+        if arousal is not None and bpm is not None and arousal >= 0.578 and bpm >= 120:
             tags.append('workout')
-        if arousal is not None and valence is not None and arousal <= 0.4 and valence <= 0.4:
+        if arousal is not None and valence is not None and arousal <= 0.481 and valence <= 0.53:
             tags.append('atmospheric')
-        if arousal is not None and bpm is not None and arousal <= 0.3 and bpm <= 90:
+        if arousal is not None and bpm is not None and arousal <= 0.448 and bpm <= 90:
             tags.append('chill')
         if mood_aggressive is not None and bpm is not None and mood_aggressive >= 0.5 and bpm >= 120:
             tags.append('intense')

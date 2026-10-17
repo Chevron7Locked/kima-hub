@@ -100,7 +100,15 @@ class ExtractMoodsTest(unittest.TestCase):
     def test_valence_and_arousal_are_the_mean_of_both_regressions(self):
         heads = self._heads(deam=_Head([6.0, 4.0]), emomusic=_Head([4.0, 6.0]))
         out = _analyzer_with(heads)._extract_ml_features(np.zeros(16000))
-        self.assertEqual((out['valence'], out['arousal']), (0.5, 0.5))
+        self.assertEqual((out['valence'], out['arousal']),
+                         (analyzer.map_va('valence', 5.0), analyzer.map_va('arousal', 5.0)))
+
+    def test_the_mapping_keeps_the_heads_range_off_the_edges(self):
+        # The heads answer within about 3-8 on their 1-9 scale; none of that is pinned at 0 or 1, where
+        # the x2.5 stretch clipped at 1-9 pinned everything outside 3.4-6.6.
+        for axis in ('valence', 'arousal'):
+            lo, hi = analyzer.map_va(axis, 3.0), analyzer.map_va(axis, 8.0)
+            self.assertTrue(0.0 < lo < hi < 1.0, (axis, lo, hi))
 
     @mock.patch.object(analyzer, 'ESSENTIA_AVAILABLE', True)
     def test_without_the_models_a_track_fails_with_the_reason(self):
