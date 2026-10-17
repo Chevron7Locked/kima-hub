@@ -71,7 +71,7 @@ if CLAP_BACKEND == 'torch' and not TORCH_AVAILABLE:
         "no embeddings will be produced. Use CLAP_BACKEND=onnx (the default)."
     )
 # Resolve the ONNX model path the same way the backend does: default to the
-# analyzer's own models/ directory (where the validated hf_audio.onnx lives),
+# analyzer's own models/ directory (where the validated music_audio.onnx lives),
 # overridable with CLAP_ONNX_MODEL_PATH.
 from onnx_backend import ONNX_MODEL_PATH as CLAP_ONNX_MODEL_PATH
 
@@ -82,15 +82,16 @@ TEXT_EMBED_RESPONSE_PREFIX = 'audio:text:embed:response:'
 CONTROL_CHANNEL = 'audio:clap:control'
 INTERNAL_SECRET_KEY = 'kima:internal-secret'
 
-# Model version identifier
-MODEL_VERSION = 'laion-clap-htsat-unfused-v1'
+# The label every stored vector carries. The backend matches only vectors under its feel probe's label
+# (backend matching/feelProbe.json), so a new model or window recipe needs a new label.
+MODEL_VERSION = 'laion-clap-music-onnx-v1'
 # A stage job id ends in its claim: <key>-<attempt>-r<redelivered> (backend `claimOf`).
 CLAIM_IN_JOB_ID = re.compile(r'-(\d+)-r(\d+)$')
 
-# Zero-shot valence/arousal: score = sigmoid(a * margin + b), fitted on Memo2496 and chosen by
-# leave-one-out transfer to the other labelled sets. Refit with eval/calibrate_platt.py; the fit is
-# recorded in eval/calibration/platt-memo2496.json.
-VA_CALIB = {'valence': (12.738, -0.172), 'arousal': (12.449, -2.309)}
+# Zero-shot valence/arousal: score = sigmoid(a * margin + b), fitted on Memo2496 with eval/calibrate_platt.py
+# for the music model (eval/music-switch-2026-10-17/platt-memo2496-music.json; the general model's fit is
+# eval/calibration/platt-memo2496.json). A new model needs a new fit.
+VA_CALIB = {'valence': (8.264, 0.249), 'arousal': (14.857, 0.375)}
 
 # The zero-shot prompt groups. A changed prompt changes every stored score that reads it.
 PROMPTS = {
@@ -168,7 +169,8 @@ class CLAPAnalyzer:
     """
     LAION CLAP model wrapper for generating audio and text embeddings.
 
-    Runs laion/clap-htsat-unfused (HTSAT-tiny audio encoder). Supports idle model unloading
+    Runs LAION-CLAP's music checkpoint (music_audioset_epoch_15_esc_90.14, HTSAT-base audio encoder):
+    ONNX by default, laion_clap with torch when CLAP_BACKEND=torch. Supports idle model unloading
     to free memory when no work is pending.
     """
 

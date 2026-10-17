@@ -7,10 +7,8 @@ soundfile==0.14.0
 # onnx_backend at module load.
 onnxruntime==1.30.0
 
-# transformers supplies what the ONNX backends need and nothing more: the
-# numpy audio_utils primitives used by our vendored clap_mel.py (bit-for-bit
-# equivalent of ClapFeatureExtractor's mel, which is torch-gated upstream on
-# every installable version) and the text tokenizer (RobertaTokenizer).
+# transformers supplies the text tokenizer (RobertaTokenizer) and nothing more; the sound model's
+# front end is numpy and librosa's mel filter bank (music_clap_mel.py).
 # 5.10.4 fixes CVE-2026-4372/5241/9856 (model-loading RCE class); its
 # audio_utils, tokenizer and 512-d embeddings were verified bit-identical
 # to 4.57.6 on the shipped fixtures.

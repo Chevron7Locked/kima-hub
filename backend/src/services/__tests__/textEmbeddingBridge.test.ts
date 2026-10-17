@@ -127,7 +127,7 @@ describe("searchTracksByText", () => {
         const [strings, vectorForSelect, model, vectorForOrder, limitArg] = txQueryRawMock.mock.calls[1];
         expect(strings.join(" ")).toContain("ORDER BY te.embedding <=>");
         expect(strings.join(" ")).toContain("te.model_version =");
-        expect(model).toBe("laion-clap-htsat-unfused-v1");
+        expect(model).toBe("laion-clap-music-onnx-v1");
         expect(vectorForSelect).toBe("[0.1,0.2,-0.3]");
         expect(vectorForOrder).toBe("[0.1,0.2,-0.3]");
         expect(limitArg).toBe(25);

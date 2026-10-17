@@ -107,7 +107,7 @@ async function seedChildren(trackId: string): Promise<void> {
     });
     await prisma.$executeRawUnsafe(
         `INSERT INTO track_embeddings (track_id, embedding, model_version)
-         VALUES ($1, $2::vector, 'laion-clap-htsat-unfused-v1')`,
+         VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1')`,
         trackId,
         "[" + Array.from({ length: 512 }, () => 0.1).join(",") + "]",
     );

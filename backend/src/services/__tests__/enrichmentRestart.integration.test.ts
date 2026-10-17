@@ -48,7 +48,7 @@ beforeAll(async () => {
     });
     await prisma.$executeRawUnsafe(
         `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-         VALUES ($1, $2::vector, 'laion-clap-htsat-unfused-v1', now())`,
+         VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
         `${P}trk`, `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`,
     );
     await prisma.$executeRawUnsafe(

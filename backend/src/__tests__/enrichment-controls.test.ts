@@ -412,7 +412,7 @@ describe("redecideEverything", () => {
         });
         await prisma.$executeRawUnsafe(
             `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-             VALUES ($1, $2::vector, 'laion-clap-htsat-unfused-v1', now())
+             VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())
              ON CONFLICT (track_id) DO NOTHING`,
             id("keep"), `[${Array.from({ length: 512 }, (_, i) => (i % 7) / 7).join(",")}]`,
         );
@@ -503,7 +503,7 @@ describe("retryFailedAndBlocked", () => {
         await putStage(id("answered"), "fingerprint", "done", {});
         await prisma.$executeRawUnsafe(
             `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-             VALUES ($1, $2::vector, 'laion-clap-htsat-unfused-v1', now())
+             VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())
              ON CONFLICT (track_id) DO NOTHING`,
             id("answered"), `[${Array.from({ length: 512 }, (_, i) => (i % 7) / 7).join(",")}]`,
         );

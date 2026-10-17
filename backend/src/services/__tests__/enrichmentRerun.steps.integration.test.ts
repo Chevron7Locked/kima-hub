@@ -27,7 +27,7 @@ async function seedEnrichedTrack(id: string, withVector: boolean) {
     if (withVector) {
         await prisma.$executeRawUnsafe(
             `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-             VALUES ($1, $2::vector, 'laion-clap-htsat-unfused-v1', now())`,
+             VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
             id, `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`,
         );
     }
@@ -137,7 +137,7 @@ describe("a vectors re-run", () => {
     it("leaves a sound vector a person set aside as they left it", async () => {
         await prisma.$executeRawUnsafe(
             `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-             VALUES ($1, $2::vector, 'laion-clap-htsat-unfused-v1', now())`,
+             VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
             `${P}decided`, `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`,
         );
         const stage = await prisma.trackStage.findUniqueOrThrow({ where: { id: `${P}decided__embedding` } });
@@ -160,7 +160,7 @@ describe("an analysis re-run", () => {
         });
         await prisma.$executeRawUnsafe(
             `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-             VALUES ($1, $2::vector, 'laion-clap-htsat-unfused-v1', now())`,
+             VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
             `${P}trk`, `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`,
         );
         await rerunEnrichment("analysis");

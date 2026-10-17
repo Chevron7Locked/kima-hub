@@ -9,6 +9,8 @@ Stages, each writing into --work:
   ref      (torch + laion_clap venv) reference vectors, the model loaded as v1.10.0 did
   cand     (torch-free venv)         candidate vectors, and the general model's for comparison
   compare  (any venv)                the parity table, written to --work/report.json
+  fixture  (torch + laion_clap venv) test_fixtures/expected_music_embeddings.npy for verify_runtime.py
+           (writes no --work)
 
 Two window recipes, both reported:
   1.10  v1.10.0 analyzer.py:151-188, 223-229: the middle 60 s (all of a shorter song) as one
@@ -282,6 +284,29 @@ def stage_ref(work, ckpt, threads):
              **{f'ear_win_{i}': w for i, w in enumerate(out['ear_win'])})
 
 
+FIXTURES = ('sine440.wav', 'white.wav', 'sine880.wav')  # verify_runtime.py's order
+
+
+def stage_fixture(ckpt):
+    """test_fixtures/expected_music_embeddings.npy, the vectors verify_runtime.py checks every image against:
+    laion_clap's embedding of each fixture's first 10 s at 48 kHz (exactly 480000 samples, so no random cut),
+    which is what the analyzer's backend embeds when handed the whole fixture."""
+    import librosa
+    import torch
+    import laion_clap
+    model = laion_clap.CLAP_Module(enable_fusion=False, amodel='HTSAT-base', device='cpu')
+    model.load_ckpt(ckpt, verbose=False)
+    model = model.eval()
+    rows = []
+    for name in FIXTURES:
+        audio, _ = librosa.load(os.path.join(SVC, 'test_fixtures', name), sr=SR, mono=True)
+        with torch.no_grad():
+            rows.append(unit(model.get_audio_embedding_from_data([audio[:WIN]], use_tensor=False)[0]))
+    out = os.path.join(SVC, 'test_fixtures', 'expected_music_embeddings.npy')
+    np.save(out, np.stack(rows).astype(np.float32))
+    print(f'[fixture] {out}')
+
+
 # ---- candidate ---------------------------------------------------------------------------------
 
 def stage_cand(work, onnx_dir, threads, general_audio, general_text, july_model):
@@ -500,8 +525,8 @@ def stage_compare(work):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('stage', choices=['decode', 'ref', 'cand', 'compare'])
-    ap.add_argument('--work', required=True)
+    ap.add_argument('stage', choices=['decode', 'ref', 'cand', 'compare', 'fixture'])
+    ap.add_argument('--work')
     ap.add_argument('--ckpt', default=os.path.join(SVC, 'cache', 'music_ckpt',
                                                    'music_audioset_epoch_15_esc_90.14.pt'))
     ap.add_argument('--onnx-dir', default=os.path.join(SVC, 'cache', 'music_onnx'))
@@ -510,6 +535,10 @@ def main():
     ap.add_argument('--general-text', default=None)
     ap.add_argument('--july-model', default=None)
     a = ap.parse_args()
+    if a.stage == 'fixture':
+        return stage_fixture(a.ckpt)
+    if not a.work:
+        ap.error(f'{a.stage} needs --work')
     os.makedirs(a.work, exist_ok=True)
     if a.stage == 'decode':
         stage_decode(a.work)

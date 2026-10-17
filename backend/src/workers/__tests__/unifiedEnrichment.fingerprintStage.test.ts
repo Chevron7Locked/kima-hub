@@ -240,7 +240,7 @@ async function storedFingerprint(trackId: string): Promise<string | null> {
 async function seedEmbedding(trackId: string): Promise<void> {
     await prisma.$executeRawUnsafe(
         `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-         VALUES ($1, $2::vector, 'laion-clap-htsat-unfused-v1', now())
+         VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())
          ON CONFLICT (track_id) DO NOTHING`,
         trackId,
         `[${Array.from({ length: 512 }, (_, i) => (i % 7) / 7).join(",")}]`,

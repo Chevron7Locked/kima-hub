@@ -86,7 +86,7 @@ beforeAll(async () => {
     for (let start = 0; start < TRACK_COUNT; start += 25) {
         const ids = ALL_IDS.slice(start, start + 25);
         const values = ids
-            .map((_, j) => `($${2 * j + 1}, $${2 * j + 2}::vector, 'laion-clap-htsat-unfused-v1', now())`)
+            .map((_, j) => `($${2 * j + 1}, $${2 * j + 2}::vector, 'laion-clap-music-onnx-v1', now())`)
             .join(",");
         const params = ids.flatMap((id, j) => [id, randomUnit(start + j)]);
         await prisma.$executeRawUnsafe(

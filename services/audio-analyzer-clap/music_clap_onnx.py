@@ -2,7 +2,7 @@
 The music CLAP checkpoint on ONNX Runtime, without PyTorch: 10 s windows through
 music_clap_mel's front end and music_audio.onnx, and prompts through music_text.onnx.
 Built by export_music_onnx.py; matched against laion_clap by test_music_onnx_parity.py.
-Not wired into the analyzer.
+onnx_backend runs the analyzer's sound model on this front end and its text model through MusicClapText.
 """
 from typing import Optional, Sequence
 
