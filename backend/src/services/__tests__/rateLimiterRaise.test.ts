@@ -31,3 +31,22 @@ it('never lowers a ticket', () => {
     rateLimiter.raise('itunes', ticket, 0);
     expect(ticket.priority).toBe(INTERACTIVE_PRIORITY);
 });
+
+it('gives up a request that is still waiting when its caller does, without running it', async () => {
+    const queue = (rateLimiter as any).queues.get('itunes');
+    const add = jest.spyOn(queue, 'add');
+    const circuit = (rateLimiter as any).circuitBreakers.get('itunes');
+    Object.assign(circuit, { isOpen: true, openedAt: Date.now(), resetAfterMs: 60_000 });
+    const quit = new AbortController();
+    const ran = jest.fn();
+    const call = rateLimiter.execute('itunes', async () => ran(), { signal: quit.signal });
+    setTimeout(() => quit.abort(new Error('caller gave up')), 50);
+    try {
+        await expect(call).rejects.toThrow('caller gave up');
+    } finally {
+        Object.assign(circuit, { isOpen: false, consecutiveFailures: 0, resetAfterMs: 30_000 });
+        add.mockRestore();
+    }
+    expect(ran).not.toHaveBeenCalled();
+    expect(add).not.toHaveBeenCalled();
+});

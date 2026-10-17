@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Podcast search counts against Apple's limit like Kima's other Apple requests.** It called Apple directly, outside the queue that keeps Kima within Apple's limit; it now goes through it, ahead of background work, and still gives up after 5 seconds, waiting included.
 - **A podcast download cut off by the host no longer leaves a half file in the cache.** Kima deleted the partial file while it was still being closed, so it could reappear; it now waits for the file to close first.
 - **On a TV remote, a row that loads in above you no longer moves you onto another row.** The remote reads where the focus really is, remembers each row's column by the row itself, and starts a row at its first card from its "show all" link.
 - **A setting saved in the old encrypted format can no longer come back as garbage.** Values stored before 1.10's encryption change had no tamper check, so read with the wrong key they came back as random bytes about one time in 256 instead of being refused; and a value saved under the oldest key form was missed when the current key happened to pass. Kima now accepts only text, tries both key forms, and otherwise asks for the setting to be re-entered.

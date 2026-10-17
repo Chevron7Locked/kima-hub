@@ -56,9 +56,14 @@ export interface Snippet {
 }
 
 // ITUNES_BASE_URL points tests at recorded replies (scripts/record-apple-podcasts.ts).
-async function apple<T = any>(pathname: string, params?: Record<string, string | number>): Promise<T> {
+async function apple<T = any>(
+    pathname: string,
+    params?: Record<string, string | number>,
+    timeout = 15000,
+    signal?: AbortSignal,
+): Promise<T> {
     const base = process.env.ITUNES_BASE_URL ?? "https://itunes.apple.com";
-    return (await axios.get(base + pathname, { params, timeout: 15000 })).data;
+    return (await axios.get(base + pathname, { params, timeout, signal })).data;
 }
 
 /** Apple answered, but not with what was asked for (an error page, a throttled empty reply). Never cached. */
@@ -176,6 +181,29 @@ export async function chart(categoryId: number | null, priority: ApplePriority =
             };
         }).filter((p) => p.itunesId);
     }, priority);
+}
+
+const SEARCH_DEADLINE_MS = 5000;
+
+/**
+ * Apple's podcast search for a term, as Apple answers it (the caller shapes and caches the shows). It queues with
+ * Kima's other Apple requests, ahead of background work, so a search counts against Apple's limit like the rest.
+ * The whole search, queue wait included, gets 5 s as it always had; past that it gives up and is never sent, and a
+ * rate-limited search fails at once rather than waiting out a backoff.
+ */
+export async function searchShows(term: string, limit: number): Promise<any[]> {
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(new Error("Apple podcast search took longer than 5 s")), SEARCH_DEADLINE_MS);
+    try {
+        const data = await rateLimiter.execute(
+            "itunes",
+            () => apple("/search", { term, media: "podcast", entity: "podcast", limit }, SEARCH_DEADLINE_MS, deadline.signal),
+            { priority: QUEUE_PRIORITY.interactive, skipRetry: true, signal: deadline.signal },
+        );
+        return Array.isArray(data?.results) ? data.results : [];
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 /** Apple's record for each show id: its feed and categories. Ids Apple does not know are left out. */
