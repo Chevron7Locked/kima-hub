@@ -1,0 +1,16 @@
+/**
+ * The two spread scales are measured values (eval/music-switch-2026-10-17/followup.json), not free parameters.
+ * The formula tests multiply by the imported constant, so they would pass with any value; these pin the values.
+ */
+import { MELANCHOLY_VALENCE_SCALE } from "../mixes/moodMixes";
+import { FEATURES_ONLY_VA_SCALE } from "../hybridSimilarity";
+
+describe("measured mood spread scales", () => {
+    it("Melancholy's valence scale is 2.48", () => {
+        expect(MELANCHOLY_VALENCE_SCALE).toBe(2.48);
+    });
+
+    it("feature-only similar tracks scale valence 4.78 and arousal 2.90", () => {
+        expect(FEATURES_ONLY_VA_SCALE).toEqual({ valence: 4.78, arousal: 2.9 });
+    });
+});
