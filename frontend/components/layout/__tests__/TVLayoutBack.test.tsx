@@ -42,6 +42,13 @@ const press = async (key: string) => {
     // Let every listener and anything they scheduled run.
     await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
 };
+/** Fire TV's Back: key code 4 (Amazon's remote input table). */
+const fireTvBack = async () => {
+    await act(async () => {
+        (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { keyCode: 4, bubbles: true, cancelable: true }));
+    });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+};
 const onTabRow = () => document.activeElement?.hasAttribute("data-tv-tab") ?? false;
 
 beforeEach(async () => {
@@ -84,6 +91,22 @@ describe("Back on the TV layout", () => {
 
         expect(trigger.getAttribute("aria-expanded")).toBe("false");
         expect(onTabRow(), "Back also moved the focus while closing the timer").toBe(false);
+    });
+
+    it("takes Fire TV's Back as Back: the tab row from the page, and an open sleep timer closes first", async () => {
+        const trigger = host.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')!;
+        await act(async () => trigger.click());
+        await fireTvBack();
+        expect(trigger.getAttribute("aria-expanded")).toBe("false");
+        expect(onTabRow()).toBe(false);
+        await fireTvBack();
+        expect(onTabRow()).toBe(true);
+    });
+
+    it("cancels the browser's own back for Fire TV's Back", async () => {
+        const back = new KeyboardEvent("keydown", { keyCode: 4, bubbles: true, cancelable: true });
+        await act(async () => { document.body.dispatchEvent(back); });
+        expect(back.defaultPrevented).toBe(true);
     });
 
     it("leaves a key alone that a window listener added after the layout's own used", async () => {

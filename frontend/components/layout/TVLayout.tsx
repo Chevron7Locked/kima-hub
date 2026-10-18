@@ -23,6 +23,8 @@ const tvNavigation = [
     { name: "Playlists", href: "/playlists" },
 ];
 
+const FIRE_TV_BACK = 4;
+
 export function TVLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const router = useRouter();
@@ -185,6 +187,19 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, [handleKeyDown]);
+
+    // Fire TV's remote sends Back as key code 4 (Amazon's Fire TV remote input table); everything in Kima answers
+    // Escape. Back is turned into Escape before anything sees it, and the browser's own back is cancelled.
+    useEffect(() => {
+        const backToEscape = (e: KeyboardEvent) => {
+            if (e.keyCode !== FIRE_TV_BACK) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            (e.target ?? window).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        };
+        window.addEventListener("keydown", backToEscape, true);
+        return () => window.removeEventListener("keydown", backToEscape, true);
+    }, []);
 
     // Focus correct nav tab when isNavFocused changes or focusedTabIndex changes
     useEffect(() => {

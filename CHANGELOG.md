@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Fire TV remote's Back button works.** Fire TV sends Back as its own key, which Kima ignored; on the TV layout it now does what Escape does: closes what's open, then returns to the tab row.
 - **Podcast search counts against Apple's limit like Kima's other Apple requests.** It called Apple directly, outside the queue that keeps Kima within Apple's limit; it now goes through it, ahead of background work, and still gives up after 5 seconds, waiting included.
 - **A podcast download cut off by the host no longer leaves a half file in the cache.** Kima deleted the partial file while it was still being closed, so it could reappear; it now waits for the file to close first.
 - **On a TV remote, a row that loads in above you no longer moves you onto another row.** The remote reads where the focus really is, remembers each row's column by the row itself, and starts a row at its first card from its "show all" link.
