@@ -22,7 +22,7 @@ import { PodcastSearch } from "@/features/podcast/components/PodcastSearch";
 import { PodcastShelf } from "@/features/podcast/components/PodcastShelf";
 import { ListeningShelf } from "@/features/podcast/components/ListeningShelf";
 import { NewEpisodes } from "@/features/podcast/components/NewEpisodes";
-import { CategoryChips } from "@/features/podcast/components/CategoryChips";
+import { CategoryShelf } from "@/features/podcast/components/CategoryShelf";
 import { sortShows, type ShowSort } from "@/features/podcast/utils";
 
 type SortOption = ShowSort;
@@ -102,7 +102,12 @@ export default function PodcastsPage() {
 
     if (isLoading) return <LoadingScreen />;
 
-    const topLevel = categories.filter((c) => c.parentId === null);
+    // Every top-level category gets its own row, by name as Apple Podcasts lists them, except one already shown as
+    // a for-you row. (The server's list is in Apple's id order, which reads as random.)
+    const forYouIds = new Set(forYou.map((row) => row.category.id));
+    const categoryRows = categories
+        .filter((c) => c.parentId === null && !forYouIds.has(c.id))
+        .sort((a, b) => a.name.localeCompare(b.name));
     const inProgress = listening?.inProgress ?? [];
     const newEpisodes = listening?.newEpisodes ?? [];
 
@@ -245,26 +250,23 @@ export default function PodcastsPage() {
                 )}
 
                 {forYou.map((row) => (
-                    <section key={row.category.id}>
+                    <section key={row.category.id} data-tv-section={`for-you-${row.category.id}`}>
                         <SectionHeader type="podcast" title={`for you · ${row.category.name}`} showAllHref={`/podcasts/category/${row.category.id}`} />
                         <p className="-mt-2 mb-3 text-xs text-[var(--text-muted)]">because you follow {row.because.join(" and ")}</p>
                         <PodcastShelf podcasts={row.podcasts} />
                     </section>
                 ))}
 
-                {topLevel.length > 0 && (
-                    <section>
-                        <SectionHeader type="podcast" title="browse" />
-                        <CategoryChips categories={topLevel} />
-                    </section>
-                )}
-
                 {topShows.length > 0 && (
-                    <section>
+                    <section data-tv-section="top-shows">
                         <SectionHeader type="podcast" title="top shows" showAllHref="/podcasts/category/top" />
                         <PodcastShelf podcasts={topShows} ranked />
                     </section>
                 )}
+
+                {categoryRows.map((c) => (
+                    <CategoryShelf key={c.id} category={c} enabled={isAuthenticated} />
+                ))}
             </div>
         </div>
     );

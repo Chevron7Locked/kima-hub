@@ -125,30 +125,51 @@ export function decrypt(text: string): string {
     );
 }
 
+/**
+ * Every value Kima stored is text: valid UTF-8 with no control characters other than tab and line breaks.
+ * AES-256-CBC carries no MAC, so a wrong key passes the padding check about one time in 256 and decrypts to
+ * random bytes. Those bytes read as text like this about one time in 120,000 for the shortest value (one block),
+ * so a wrong key is accepted about once in 31 million per key tried rather than once in 256; the rest are refused
+ * instead of handed back as a credential. A leading byte-order mark is kept, as the old decoding kept it.
+ */
+const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+const NOT_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/;
+
+function asStoredText(bytes: Buffer): string | null {
+    let text: string;
+    try {
+        text = STRICT_UTF8.decode(bytes);
+    } catch {
+        return null;
+    }
+    return NOT_TEXT.test(text) ? null : text;
+}
+
 /** AES-256-CBC, both key derivations, for values written before `xc1.`. */
 function decryptLegacy(text: string): string {
     const parts = text.split(":");
     const iv = Buffer.from(parts[0], "hex");
     const encryptedText = Buffer.from(parts.slice(1).join(":"), "hex");
 
-    const attempt = (key: Buffer): string => {
-        const decipher = crypto.createDecipheriv(LEGACY_ALGORITHM, key, iv);
-        return Buffer.concat([decipher.update(encryptedText), decipher.final()]).toString();
+    // Text under this key, or null: a padding failure and padding that passed by chance on bytes that are
+    // not text both mean "not this key".
+    const attempt = (key: Buffer): string | null => {
+        let bytes: Buffer;
+        try {
+            const decipher = crypto.createDecipheriv(LEGACY_ALGORITHM, key, iv);
+            bytes = Buffer.concat([decipher.update(encryptedText), decipher.final()]);
+        } catch {
+            return null;
+        }
+        return asStoredText(bytes);
     };
 
-    try {
-        return attempt(ENCRYPTION_KEY);
-    } catch (error) {
-        if (LEGACY_KEY) {
-            // Pre-SHA-256 normalization: the first 32 bytes of the raw env var.
-            try {
-                return attempt(LEGACY_KEY);
-            } catch {
-                throw error;
-            }
-        }
-        throw error;
+    // The pre-SHA-256 derivation (the first 32 bytes of the raw env var) is tried when the current one fails.
+    const plain = attempt(ENCRYPTION_KEY) ?? (LEGACY_KEY ? attempt(LEGACY_KEY) : null);
+    if (plain === null) {
+        throw new Error("Decryption failed: the value was not encrypted with this server's key");
     }
+    return plain;
 }
 
 /** Whether a value carries either recognised format (`xc1.` or `iv:cipher`). */

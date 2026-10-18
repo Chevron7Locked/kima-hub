@@ -57,7 +57,7 @@ def test_a_restart_is_needed_exactly_when_the_wanted_runtime_differs_from_the_on
     assert gpu_switch.restart_needed("analysis") is True
 
 
-def test_the_sound_vector_analyzer_waits_for_an_install_or_removal_to_finish(tmp_path, monkeypatch):
+def test_the_sound_vector_analyzer_waits_for_an_install_to_finish(tmp_path, monkeypatch):
     import importlib.util
     spec = importlib.util.spec_from_file_location("clap_analyzer_switch", os.path.join(SERVICE_DIR, "analyzer.py"))
     assert spec and spec.loader
@@ -121,8 +121,7 @@ def _want(root, on):
     (root / "enabled.json").write_text(json.dumps({"enabled": on, "soundVectors": on, "analysis": False}))
 
 
-def _fake_steps(root, monkeypatch, gate=None, remove_fails=False):
-    import shutil
+def _fake_steps(root, monkeypatch, gate=None, install_fails=False):
     import threading
     ran = []
 
@@ -130,23 +129,14 @@ def _fake_steps(root, monkeypatch, gate=None, remove_fails=False):
         ran.append("install")
         if gate:
             gate.wait(5)
+        if install_fails:
+            gpu_runtime.update_state(status="failed", reason="no_network", detail="index unreachable")
+            return "failed"
         (root / "site" / "onnxruntime").mkdir(parents=True, exist_ok=True)
         gpu_runtime.update_state(status="installed")
         return "installed"
 
-    def remove():
-        ran.append("remove")
-        if gate:
-            gate.wait(5)
-        if remove_fails:
-            gpu_runtime.update_state(status="failed", detail="removal failed")
-            return "failed"
-        shutil.rmtree(root / "site", ignore_errors=True)
-        gpu_runtime.update_state(status="idle")
-        return "removed"
-
     monkeypatch.setattr(gpu_runtime, "_install", install)
-    monkeypatch.setattr(gpu_runtime, "_remove", remove)
     return ran, threading
 
 
@@ -158,45 +148,95 @@ def _settle():
     assert not gpu_runtime.busy()
 
 
-def test_switching_off_during_a_download_removes_the_runtime_once_the_download_ends(tmp_path, monkeypatch):
+def test_switching_off_during_a_download_cancels_the_download_and_deletes_nothing(tmp_path, monkeypatch):
     root = _runtime_at(tmp_path, monkeypatch)
     gate = __import__("threading").Event()
-    ran, _ = _fake_steps(root, monkeypatch, gate=gate)
+    ran = []
+
+    def install():
+        ran.append("install")
+        gate.wait(5)
+        if gpu_runtime._cancel.is_set():
+            gpu_runtime.update_state(status="idle", detail="cancelled after download")
+            return "cancelled"
+        (root / "site" / "onnxruntime").mkdir(parents=True, exist_ok=True)
+        gpu_runtime.update_state(status="installed")
+        return "installed"
+
+    monkeypatch.setattr(gpu_runtime, "_install", install)
     _want(root, True)
     assert gpu_runtime.dispatch("install") == "started"
     _want(root, False)
-    assert gpu_runtime.dispatch("remove") == "busy"
+    assert gpu_runtime.dispatch("cancel") == "cancelling"
     gate.set()
     _settle()
-    assert ran == ["install", "remove"]
-    assert not (root / "site").exists()
+    assert ran == ["install"]
+    assert gpu_runtime.read_state()["status"] == "idle"
+    assert not gpu_runtime.is_installed()
 
 
-def test_switching_on_during_a_removal_downloads_the_runtime_once_the_removal_ends(tmp_path, monkeypatch):
+def test_switching_off_and_straight_back_on_during_a_download_lets_the_download_finish(tmp_path, monkeypatch):
     root = _runtime_at(tmp_path, monkeypatch)
-    (root / "site" / "onnxruntime").mkdir(parents=True)
-    gpu_runtime.update_state(status="installed")
     gate = __import__("threading").Event()
-    ran, _ = _fake_steps(root, monkeypatch, gate=gate)
+    ran = []
+
+    def install():
+        ran.append("install")
+        gate.wait(5)
+        if gpu_runtime._cancel.is_set():
+            gpu_runtime.update_state(status="idle", detail="cancelled after download")
+            return "cancelled"
+        (root / "site" / "onnxruntime").mkdir(parents=True, exist_ok=True)
+        gpu_runtime.update_state(status="installed")
+        return "installed"
+
+    monkeypatch.setattr(gpu_runtime, "_install", install)
+    _want(root, True)
+    assert gpu_runtime.dispatch("install") == "started"
     _want(root, False)
-    assert gpu_runtime.dispatch("remove") == "started"
+    assert gpu_runtime.dispatch("cancel") == "cancelling"
     _want(root, True)
     assert gpu_runtime.dispatch("install") == "busy"
     gate.set()
     _settle()
-    assert ran == ["remove", "install"]
+    assert ran == ["install"]
     assert gpu_runtime.is_installed()
 
 
-def test_a_removal_sent_while_the_analyzer_was_down_happens_at_its_start(tmp_path, monkeypatch):
+def test_switching_off_with_nothing_downloading_changes_nothing_on_disk(tmp_path, monkeypatch):
     root = _runtime_at(tmp_path, monkeypatch)
     (root / "site" / "onnxruntime").mkdir(parents=True)
     gpu_runtime.update_state(status="installed")
     ran, _ = _fake_steps(root, monkeypatch)
     _want(root, False)
-    assert gpu_runtime.reconcile() == "remove"
+    assert gpu_runtime.dispatch("cancel") == "nothing_to_cancel"
+    assert gpu_runtime.dispatch("install") == "skipped_disabled"
     _settle()
-    assert ran == ["remove"] and not (root / "site").exists()
+    assert ran == [] and gpu_runtime.is_installed()
+
+
+def test_switching_on_again_after_both_were_off_needs_no_download(tmp_path, monkeypatch):
+    root = _runtime_at(tmp_path, monkeypatch)
+    (root / "site" / "onnxruntime").mkdir(parents=True)
+    gpu_runtime.update_state(status="installed")
+    ran, _ = _fake_steps(root, monkeypatch)
+    _want(root, False)
+    _want(root, True)
+    assert gpu_runtime.dispatch("install") == "skipped_installed"
+    assert ran == []
+    assert gpu_runtime.is_installed()
+
+
+def test_a_start_never_removes_an_installed_runtime_whatever_the_switches_say(tmp_path, monkeypatch):
+    root = _runtime_at(tmp_path, monkeypatch)
+    (root / "site" / "onnxruntime").mkdir(parents=True)
+    gpu_runtime.update_state(status="installed")
+    ran, _ = _fake_steps(root, monkeypatch)
+    _want(root, False)
+    assert gpu_runtime.reconcile() == "nothing_to_do"
+    _settle()
+    assert ran == [] and gpu_runtime.is_installed()
+    assert gpu_runtime._next_action(retry_failed=True) is None
 
 
 def test_a_start_retries_an_install_its_predecessor_was_killed_in(tmp_path, monkeypatch):
@@ -209,30 +249,13 @@ def test_a_start_retries_an_install_its_predecessor_was_killed_in(tmp_path, monk
     assert ran == ["install"] and gpu_runtime.is_installed()
 
 
-def test_a_removal_that_leaves_files_fails_once_instead_of_repeating(tmp_path, monkeypatch):
+def test_a_failed_download_is_not_repeated_and_waits_for_a_restart_or_a_click(tmp_path, monkeypatch):
     root = _runtime_at(tmp_path, monkeypatch)
-    (root / "site" / "onnxruntime").mkdir(parents=True)
-    gpu_runtime.update_state(status="installed")
-    removals = []
-    monkeypatch.setattr(gpu_runtime.shutil, "rmtree", lambda path, ignore_errors=False: removals.append(path))
-    _want(root, False)
-    gpu_runtime.dispatch("remove")
-    _settle()
-    assert removals.count(str(root / "site")) == 1
-    assert gpu_runtime.read_state()["status"] == "failed"
-    assert gpu_runtime.read_state()["reason"] == "removal_failed"
-
-
-def test_a_failed_step_is_not_repeated_and_a_failed_download_waits_for_a_restart_or_a_click(tmp_path, monkeypatch):
-    root = _runtime_at(tmp_path, monkeypatch)
-    (root / "site" / "onnxruntime").mkdir(parents=True)
-    gpu_runtime.update_state(status="installed")
-    ran, _ = _fake_steps(root, monkeypatch, remove_fails=True)
-    _want(root, False)
-    gpu_runtime.dispatch("remove")
-    _settle()
-    assert ran == ["remove"]
+    ran, _ = _fake_steps(root, monkeypatch, install_fails=True)
     _want(root, True)
+    assert gpu_runtime.dispatch("install") == "started"
+    _settle()
+    assert ran == ["install"]
     assert gpu_runtime._next_action(retry_failed=False) is None
     assert gpu_runtime._next_action(retry_failed=True) == "install"
 
@@ -406,3 +429,129 @@ def test_a_fresh_install_runs_the_sound_vector_workers_the_settings_page_shows()
         program = re.search(r"\[program:audio-analyzer-clap\][^\[]*", f.read()).group(0)
     assert code_default == schema_default
     assert "NUM_WORKERS" not in program, "the all-in-one image overrides the sound-vector worker default"
+
+
+def test_switching_off_clears_a_download_a_killed_install_left(tmp_path, monkeypatch):
+    root = _runtime_at(tmp_path, monkeypatch)
+    (root / ".install-abandoned").mkdir(parents=True)
+    _want(root, False)
+    assert gpu_runtime.dispatch("cancel") == "nothing_to_cancel"
+    assert not (root / ".install-abandoned").exists()
+
+
+def test_a_start_clears_a_download_a_killed_install_left_even_with_both_switches_off(tmp_path, monkeypatch):
+    root = _runtime_at(tmp_path, monkeypatch)
+    (root / ".install-abandoned" / "wheels").mkdir(parents=True)
+    _want(root, False)
+    assert gpu_runtime.reconcile() == "nothing_to_do"
+    assert not (root / ".install-abandoned").exists()
+
+
+def test_switching_off_forgets_any_failed_step_including_a_removal_an_older_version_left(tmp_path, monkeypatch):
+    root = _runtime_at(tmp_path, monkeypatch)
+    _want(root, False)
+    for reason in ("no_network", "removal_failed"):
+        gpu_runtime.update_state(status="failed", reason=reason, detail="left over")
+        assert gpu_runtime.dispatch("cancel") == "nothing_to_cancel"
+        assert gpu_runtime.read_state().get("status") == "idle"
+        assert gpu_runtime.read_state().get("reason") is None
+
+
+def test_a_start_with_both_switches_off_forgets_a_failure_left_by_a_killed_install_or_an_older_version(tmp_path, monkeypatch):
+    root = _runtime_at(tmp_path, monkeypatch)
+    ran, _ = _fake_steps(root, monkeypatch)
+    _want(root, False)
+    gpu_runtime.update_state(status="failed", reason="removal_failed", detail="left files")
+    assert gpu_runtime.reconcile() == "nothing_to_do"
+    assert gpu_runtime.read_state().get("status") == "idle"
+    gpu_runtime.update_state(status="installing", startedEpoch=__import__("time").time())
+    assert gpu_runtime.reconcile() == "nothing_to_do"
+    assert gpu_runtime.read_state().get("status") == "idle"
+    assert ran == []
+
+
+def test_a_start_with_a_switch_on_keeps_the_failure_and_tries_again(tmp_path, monkeypatch):
+    root = _runtime_at(tmp_path, monkeypatch)
+    ran, _ = _fake_steps(root, monkeypatch)
+    _want(root, True)
+    gpu_runtime.update_state(status="failed", reason="no_network", detail="index unreachable")
+    assert gpu_runtime.reconcile() == "install"
+    _settle()
+    assert ran == ["install"]
+
+
+def test_switching_off_kills_a_running_download_at_once(tmp_path, monkeypatch):
+    import subprocess
+    import threading
+    import time
+    _runtime_at(tmp_path, monkeypatch)
+    started = []
+    real_popen = subprocess.Popen
+
+    def slow_pip(cmd, **kwargs):
+        child = real_popen(["sleep", "60"], **kwargs)
+        started.append(child)
+        return child
+
+    monkeypatch.setattr(gpu_runtime.subprocess, "Popen", slow_pip)
+    gpu_runtime._cancel.clear()
+    threading.Timer(0.5, gpu_runtime._cancel.set).start()
+    began = time.monotonic()
+    try:
+        assert gpu_runtime._download(str(tmp_path / "wheels")) == "cancelled"
+    finally:
+        gpu_runtime._cancel.clear()
+    assert time.monotonic() - began < 5
+    assert len(started) == 1 and started[0].poll() is not None
+
+
+def test_a_download_killed_by_a_cancel_that_was_then_taken_back_starts_again(tmp_path, monkeypatch):
+    import subprocess
+    _runtime_at(tmp_path, monkeypatch)
+    replies = [subprocess.CompletedProcess([], None, "", ""), subprocess.CompletedProcess([], 0, "", "")]
+    monkeypatch.setattr(gpu_runtime, "_pip", lambda *a, **k: replies.pop(0))
+    monkeypatch.setattr(gpu_runtime, "PIP_ATTEMPTS", 1)  # the killed run must not use up the one attempt
+    assert gpu_runtime._download(str(tmp_path / "wheels")) is None
+    assert replies == []
+
+
+def test_a_cancel_that_arrives_after_a_switch_went_back_on_changes_nothing(tmp_path, monkeypatch):
+    root = _runtime_at(tmp_path, monkeypatch)
+    gate = __import__("threading").Event()
+    ran, _ = _fake_steps(root, monkeypatch, gate=gate)
+    _want(root, True)
+    assert gpu_runtime.dispatch("install") == "started"
+    assert gpu_runtime.dispatch("cancel") == "still_wanted"
+    assert not gpu_runtime._cancel.is_set()
+    gate.set()
+    _settle()
+    assert ran == ["install"] and gpu_runtime.is_installed()
+
+
+def test_a_cancelled_download_ends_as_cancelled_even_if_a_switch_goes_back_on_at_that_moment(tmp_path, monkeypatch):
+    root = _runtime_at(tmp_path, monkeypatch)
+    _want(root, True)
+    monkeypatch.setattr(gpu_runtime, "_platform_ok", lambda: None)
+    monkeypatch.setattr(gpu_runtime, "_gpu_visible", lambda: None)
+
+    def download(_):
+        gpu_runtime._cancel.clear()  # the switch went back on between the kill and the installer's look
+        return "cancelled"
+
+    monkeypatch.setattr(gpu_runtime, "_download", download)
+    monkeypatch.setattr(gpu_runtime, "_verify_checksums", lambda _: (_ for _ in ()).throw(AssertionError("checked an unfinished download")))
+    assert gpu_runtime._install() == "cancelled"
+    assert gpu_runtime.read_state()["status"] == "idle"
+
+
+def test_an_install_that_fails_after_both_switches_went_off_leaves_no_failure_behind(tmp_path, monkeypatch):
+    root = _runtime_at(tmp_path, monkeypatch)
+    gate = __import__("threading").Event()
+    ran, _ = _fake_steps(root, monkeypatch, gate=gate, install_fails=True)
+    _want(root, True)
+    assert gpu_runtime.dispatch("install") == "started"
+    _want(root, False)
+    gate.set()
+    _settle()
+    assert ran == ["install"]
+    assert gpu_runtime.read_state().get("status") == "idle"

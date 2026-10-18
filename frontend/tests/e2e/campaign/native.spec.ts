@@ -126,20 +126,28 @@ test.describe(`native campaign (${ARCH})`, () => {
     if (ARCH === "linux") {
         test("5L. GPU flip under load (CPU start -> download mid-work -> GPU takeover)", async () => {
             test.setTimeout(90 * 60_000);
-            // Preconditions: runtime removed, both switches off, work queued.
+            // Preconditions: both switches off, work queued. Switching off keeps the GPU download, so the
+            // download half runs only on a stack that has none on disk (gpu-onnx deleted); the takeover always runs.
             const st = await (await api.get("/api/system-settings/gpu", { headers: auth() })).json();
             expect(st.supported, "linux stack must report GPU supported").toBeTruthy();
+            const downloads = !st.installed;
+            if (!downloads) {
+                test.info().annotations.push({ type: "not covered", description: "download mid-work: the GPU download was already on disk" });
+            }
 
-            // Manufacture the backlog if the library is already settled.
-            if (st.installed || st.enabled || st.analysis) {
+            if (st.enabled || st.analysis) {
                 await api.post("/api/system-settings/gpu", {
                     headers: auth(),
                     data: { enabled: false, analysis: false },
                 });
-                await expect
-                    .poll(async () => (await (await api.get("/api/system-settings/gpu", { headers: auth() })).json()).installed, { timeout: 5 * 60_000 })
-                    .toBe(false);
             }
+            // Both analyzers must have restarted on the CPU, or the takeover below would read their old answer.
+            await expect
+                .poll(async () => {
+                    const s = await (await api.get("/api/system-settings/gpu", { headers: auth() })).json();
+                    return !s.providerActive && !s.analysisProviderActive;
+                }, { timeout: 10 * 60_000, intervals: [5_000, 15_000] })
+                .toBe(true);
 
             // Start the churn: force a vibe rebuild on CPU.
             const rb = await api.post("/api/analysis/vibe/start", { headers: auth(), data: { force: true } });
@@ -165,9 +173,11 @@ test.describe(`native campaign (${ARCH})`, () => {
             expect(flip.ok()).toBeTruthy();
 
             // Download must be visible while work continues.
-            await expect
-                .poll(async () => (await (await api.get("/api/system-settings/gpu", { headers: auth() })).json()).installing, { timeout: 5 * 60_000 })
-                .toBe(true);
+            if (downloads) {
+                await expect
+                    .poll(async () => (await (await api.get("/api/system-settings/gpu", { headers: auth() })).json()).installing, { timeout: 5 * 60_000 })
+                    .toBe(true);
+            }
             // ...and end installed with the GPU actually carrying work.
             await expect
                 .poll(async () => {

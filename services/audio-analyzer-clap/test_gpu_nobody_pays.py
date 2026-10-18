@@ -64,6 +64,24 @@ def test_request_gpu_false_on_empty_data_dir_and_no_cudaish_modules():
     assert out.split() == []
 
 
+def test_nobody_downloads_anything_unless_they_turn_a_switch_on(tmp_path):
+    gr = _load("grB", "gpu_runtime.py", tmp_path)
+    assert gr.reconcile() == "nothing_to_do"
+    assert gr.dispatch("install") == "skipped_disabled"
+    assert not (tmp_path / "gpu-onnx").exists()
+
+
+def test_an_installed_runtime_with_both_switches_off_stays_and_is_never_removed_by_a_start(tmp_path):
+    gr = _load("grC", "gpu_runtime.py", tmp_path)
+    root = tmp_path / "gpu-onnx"
+    (root / "site" / "onnxruntime").mkdir(parents=True)
+    (root / "state.json").write_text(json.dumps({"status": "installed"}))
+    (root / "enabled.json").write_text(json.dumps({"enabled": False, "soundVectors": False, "analysis": False}))
+    assert gr.reconcile() == "nothing_to_do"
+    assert (root / "site" / "onnxruntime").is_dir()
+    assert gr.request_gpu() is False
+
+
 def test_env_wrapper_exports_nothing_when_toggle_off(tmp_path):
     out = subprocess.run(
         ["bash", os.path.join(SERVICE_DIR, "gpu_env.sh"), "env"],

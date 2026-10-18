@@ -245,6 +245,17 @@ async function performDownload(
         let lastLogTime = Date.now();
         
         await new Promise<void>((resolve, reject) => {
+            // A failed download is rejected only once the file is closed: the temp file is deleted right after,
+            // and a writer still opening or flushing would put it back.
+            const fail = (err: Error) => {
+                response.data.destroy();
+                if (writeStream.closed) reject(err);
+                else {
+                    writeStream.once('close', () => reject(err));
+                    writeStream.destroy();
+                }
+            };
+
             response.data.on('data', (chunk: Buffer) => {
                 bytesDownloaded += chunk.length;
                 downloadProgress.set(episodeId, { bytesDownloaded, totalBytes: expectedBytes });
@@ -264,21 +275,9 @@ async function performDownload(
             
             response.data.pipe(writeStream, { end: false });
             
-            writeStream.on('error', (err) => {
-                response.data.destroy();
-                reject(err);
-            });
-            
-            response.data.on('error', (err: Error) => {
-                writeStream.destroy();
-                reject(err);
-            });
-            
-            // Handle aborted connections
-            response.data.on('aborted', () => {
-                writeStream.destroy();
-                reject(new Error('Download aborted by server'));
-            });
+            writeStream.on('error', fail);
+            response.data.on('error', fail);
+            response.data.on('aborted', () => fail(new Error('Download aborted by server')));
         });
         
         // Verify file was written and is complete

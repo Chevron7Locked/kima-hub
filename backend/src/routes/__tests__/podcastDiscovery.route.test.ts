@@ -68,6 +68,14 @@ it("answers a category's chart, paged, with categories named", async () => {
     expect(next.body[0].chartRank).toBe(6);
 });
 
+it("answers a category row's background request with the same chart, and refuses a flag that is not true or false", async () => {
+    const row = await request(app).get("/podcasts/charts?category=1495&limit=5&background=true");
+    expect(row.status).toBe(200);
+    const plain = await request(app).get("/podcasts/charts?category=1495&limit=5");
+    expect(row.body).toEqual(plain.body);
+    expect((await request(app).get("/podcasts/charts?category=1495&background=yes")).status).toBe(400);
+});
+
 it("refuses a category that is not an id", async () => {
     expect((await request(app).get("/podcasts/charts?category=comedy")).status).toBe(400);
 });

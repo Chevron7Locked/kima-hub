@@ -116,11 +116,19 @@ export async function getGpuStatus() {
         bytesDownloaded: state.bytes ?? null,
         pinned: state.pinned ?? [],
         providerActive,
+        // Whether the running analysis process has the GPU, whatever its switch says (false once a process
+        // started without it); providerActive is the same for sound vectors.
+        analysisProviderActive,
         updatedAt: state.updatedAt ?? null,
     };
 }
 
-/** Set either switch. The runtime is installed while either is on and removed when both are off. */
+/**
+ * Set either switch. The runtime is downloaded while either is on. Turning both off never deletes it: it
+ * stays on disk, inert (each process only puts it on its path while its own switch is on), so turning a
+ * switch on again needs no download. A download still running when the last switch goes off is cancelled.
+ * Deleting the gpu-onnx folder in the data directory frees the space (docs/gpu.md).
+ */
 export async function setGpuToggles(change: Partial<GpuToggles>) {
     // Writing the switches on an unsupported platform only stores a setting
     // the analyzers will never act on; the routes refuse before this.
@@ -143,7 +151,7 @@ export async function setGpuToggles(change: Partial<GpuToggles>) {
     const wanted = toggles.soundVectors || toggles.analysis;
     const delivered = await redisClient.publish(
         CONTROL_CHANNEL,
-        JSON.stringify({ command: wanted ? "install_gpu" : "remove_gpu" }),
+        JSON.stringify({ command: wanted ? "install_gpu" : "cancel_gpu_install" }),
     );
     logger.info(
         `[GPU-onnx] sound vectors ${toggles.soundVectors ? "on" : "off"}, analysis ${toggles.analysis ? "on" : "off"} (control delivered to ${delivered} listener(s))`,

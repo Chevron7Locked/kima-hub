@@ -1038,9 +1038,9 @@ class ControlHandler(PubSubHandler):
                     previous = self.worker.desired_concurrency
                     applied = self.worker.set_concurrency(requested)
                     logger.info(f"Worker concurrency {previous} -> {applied} (applied live)")
-            elif command in ('install_gpu', 'remove_gpu'):
+            elif command in ('install_gpu', 'cancel_gpu_install'):
                 import gpu_runtime
-                action = 'install' if command == 'install_gpu' else 'remove'
+                action = 'install' if command == 'install_gpu' else 'cancel'
                 result = gpu_runtime.dispatch(action)
                 logger.info(f"gpu-runtime {action} dispatched: {result}")
             elif command == 'stop':
@@ -1067,7 +1067,7 @@ def probe_gpu_session():
 
 def gpu_switch_changed() -> bool:
     """The sound-vector switch, or the runtime's install, changed since this process started, and no
-    install or removal is running here."""
+    install is running here."""
     import gpu_runtime
     import gpu_switch
     return gpu_switch.restart_needed('soundVectors') and not gpu_runtime.busy()

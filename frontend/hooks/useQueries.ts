@@ -407,10 +407,10 @@ export function usePublicConfig() {
 }
 
 /** Apple's chart for a category, or the overall chart for null. */
-export function usePodcastChartQuery(category: number | null, limit: number, enabled = true) {
+export function usePodcastChartQuery(category: number | null, limit: number, enabled = true, background = false) {
     return useQuery({
         queryKey: queryKeys.podcastChart(category, limit),
-        queryFn: () => api.getPodcastChart(category, limit),
+        queryFn: () => api.getPodcastChart(category, limit, 0, background),
         enabled,
         staleTime: 60 * 60 * 1000,
     });

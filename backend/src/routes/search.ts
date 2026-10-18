@@ -10,9 +10,8 @@ import {
 import { getArtistCorrection } from "../services/artistCorrection";
 import { musicBrainzService } from "../services/musicbrainz";
 import { searchService, normalizeCacheQuery, type SearchResults } from "../services/search";
-import axios from "axios";
 import { redisClient } from "../utils/redis";
-import { categoryIdsFrom } from "../services/podcastCatalog";
+import { categoryIdsFrom, searchShows } from "../services/podcastCatalog";
 import { failureCause } from "../utils/outcome";
 
 const router = Router();
@@ -218,11 +217,7 @@ router.get("/discover", async (req, res) => {
         if (type === "podcasts" || type === "all") {
             promiseMap.podcasts = (async () => {
                 try {
-                    const resp = await axios.get("https://itunes.apple.com/search", {
-                        params: { term: query, media: "podcast", entity: "podcast", limit: searchLimit },
-                        timeout: 5000,
-                    });
-                    return (resp.data.results || []).map((podcast: any) => ({
+                    return (await searchShows(query, searchLimit)).map((podcast: any) => ({
                         type: "podcast",
                         id: podcast.collectionId,
                         name: podcast.collectionName,

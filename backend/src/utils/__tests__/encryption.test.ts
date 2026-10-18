@@ -9,6 +9,26 @@ import { ENV_KEY, legacyEncrypt, SHA256_KEY } from "./legacyCipherFixtures";
 /** The other legacy derivation: the first 32 bytes of the raw env var. */
 const RAW32_KEY = Buffer.from(ENV_KEY.slice(0, 32));
 
+function paddingPasses(stored: string, key: Buffer): boolean {
+    const [iv, body] = stored.split(":");
+    try {
+        const decipher = crypto.createDecipheriv("aes-256-cbc", key, Buffer.from(iv, "hex"));
+        Buffer.concat([decipher.update(Buffer.from(body, "hex")), decipher.final()]);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/** A value stored under a stranger's key whose padding still checks out under `key`. */
+function wrongKeyThatPassesPadding(text: string, key: Buffer): string {
+    for (let i = 0; i < 5000; i++) {
+        const stored = legacyEncrypt(text, crypto.randomBytes(32));
+        if (paddingPasses(stored, key)) return stored;
+    }
+    throw new Error("no wrong-key ciphertext found whose padding passes");
+}
+
 describe("at-rest encryption", () => {
     it("round-trips, including unicode and a long value", () => {
         for (const value of ["hunter2", "sk-Ab3_x-9", "päßwörd 🎵 ключ", "k".repeat(4096)]) {
@@ -81,18 +101,39 @@ describe("at-rest encryption", () => {
     });
 
     it("throws on an AES-shaped value encrypted under someone else's key", () => {
-        const stored = legacyEncrypt("not yours", crypto.randomBytes(32));
-        // Not asserted to throw a SPECIFIC error: CBC has no MAC, so a wrong
-        // key fails on padding, which is chance rather than detection. Here it
-        // is only required not to succeed silently.
-        let result: string | undefined;
-        let threw = false;
-        try {
-            result = decrypt(stored);
-        } catch {
-            threw = true;
+        expect(() => decrypt(legacyEncrypt("not yours", crypto.randomBytes(32)))).toThrow();
+    });
+
+    it("throws, never hands back garbage, when a wrong key happens to pass the padding check", () => {
+        // CBC has no MAC: about one wrong key in 256 decrypts with valid padding to random bytes. Find one.
+        const stored = wrongKeyThatPassesPadding("lidarr-api-key", SHA256_KEY);
+        expect(() => decrypt(stored)).toThrow(/not encrypted with this server's key/);
+    });
+
+    it("reads a value under the older derivation even when the current key passes the padding check on it", () => {
+        // The first key's lucky padding must not stop the second key from being tried.
+        for (let i = 0; i < 5000; i++) {
+            const stored = legacyEncrypt("pre-normalization-secret", RAW32_KEY);
+            if (!paddingPasses(stored, SHA256_KEY)) continue;
+            expect(decrypt(stored)).toBe("pre-normalization-secret");
+            return;
         }
-        expect(threw || result !== "not yours").toBe(true);
+        throw new Error("no ciphertext found whose padding passes under the current key");
+    });
+
+    it("refuses a legacy value that decrypts to control characters, which no stored text holds", () => {
+        expect(() => decrypt(legacyEncrypt("ab\u0001c", SHA256_KEY))).toThrow(/not encrypted with this server's key/);
+        expect(() => decrypt(legacyEncrypt("ab\u0085c", SHA256_KEY))).toThrow(/not encrypted with this server's key/);
+    });
+
+    it("keeps a leading byte-order mark, as the old decoding did", () => {
+        expect(decrypt(legacyEncrypt("\ufeffkey", SHA256_KEY))).toBe("\ufeffkey");
+    });
+
+    it("still reads every kind of text a setting holds", () => {
+        for (const value of ["päßwörd 🎵 ключ", "tab\tand\nline breaks\r\n", '["code-1","code-2"]', "a"]) {
+            expect(decrypt(legacyEncrypt(value, SHA256_KEY))).toBe(value);
+        }
     });
 
     it("treats empty as empty, at both ends", () => {

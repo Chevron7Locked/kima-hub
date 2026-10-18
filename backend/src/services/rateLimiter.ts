@@ -16,6 +16,34 @@ import { logger } from "../utils/logger";
  */
 export const INTERACTIVE_PRIORITY = 10;
 
+/**
+ * One caller's place in a service's queue, kept across its retries. Raising it moves a request still waiting in
+ * the queue up to the new place, and any retry after that queues there too.
+ */
+export interface QueueTicket {
+    priority: number;
+    /** The id of this ticket's attempt while it waits in the queue; null once it runs. */
+    waitingId: string | null;
+}
+
+let ticketSeq = 0;
+
+/** `work`'s result, or a rejection with the signal's reason as soon as it is aborted; `work` is left to settle. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+    if (signal.aborted) {
+        work.catch(() => undefined);
+        return Promise.reject(signal.reason);
+    }
+    return new Promise<T>((resolve, reject) => {
+        const onAbort = () => {
+            work.catch(() => undefined);
+            reject(signal.reason);
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    });
+}
+
 interface RateLimitConfig {
     /** Requests per interval */
     intervalCap: number;
@@ -164,14 +192,32 @@ class GlobalRateLimiter {
     /**
      * Execute a request with rate limiting and automatic retry
      */
+    /** Raise a ticket's place: a request still waiting moves up now, and its retries queue at the new place. */
+    raise(service: ServiceName, ticket: QueueTicket, priority: number): void {
+        if (priority <= ticket.priority) return;
+        ticket.priority = priority;
+        const waiting = ticket.waitingId;
+        if (!waiting) return;
+        try {
+            this.queues.get(service)?.setPriority(waiting, priority);
+        } catch {
+            // Taken off the queue between the check and the move: it is already running.
+        }
+    }
+
     async execute<T>(
         service: ServiceName,
         requestFn: () => Promise<T>,
         options?: {
             priority?: number;
             skipRetry?: boolean;
+            /** A ticket the caller can raise with `raise` while this waits; it overrides `priority`. */
+            ticket?: QueueTicket;
+            /** Gives up: the call rejects at once, any wait here ends, and a request still queued is never sent. */
+            signal?: AbortSignal;
         }
     ): Promise<T> {
+        const ticket: QueueTicket = options?.ticket ?? { priority: options?.priority ?? 0, waitingId: null };
         const queue = this.queues.get(service);
         const config = SERVICE_CONFIGS[service];
 
@@ -189,7 +235,7 @@ class GlobalRateLimiter {
                 logger.debug(
                     `Circuit breaker open for ${service} - waiting ${waitTime}ms`
                 );
-                await this.sleep(waitTime);
+                await this.sleep(waitTime, options?.signal);
             }
             // Reset circuit to initial state
             circuit.isOpen = false;
@@ -203,12 +249,19 @@ class GlobalRateLimiter {
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
-                const result = await queue.add(
+                const id = `${service}-${++ticketSeq}`;
+                ticket.waitingId = id;
+                const queued = queue.add(
                     async () => {
+                        ticket.waitingId = null;
                         return await requestFn();
                     },
-                    { priority: options?.priority ?? 0 }
+                    { priority: ticket.priority, id, signal: options?.signal }
                 );
+                // p-queue checks the signal only when the request reaches the front: a request given up while it
+                // waits then rejects there without being sent (and without using the interval). The caller is
+                // answered when it gives up, not when that turn comes.
+                const result = options?.signal ? await untilAborted(queued, options.signal) : await queued;
 
                 // The service answered: it is not rate limiting any more, so a breaker opened while this request
                 // was retrying closes too, or the next caller would sleep out a wait nothing needs.
@@ -256,7 +309,7 @@ class GlobalRateLimiter {
                     }
 
                     if (attempt < maxRetries) {
-                        await this.sleep(delay);
+                        await this.sleep(delay, options?.signal);
                         continue;
                     }
                 }
@@ -318,8 +371,19 @@ class GlobalRateLimiter {
         }
     }
 
-    private sleep(ms: number): Promise<void> {
-        return new Promise((resolve) => setTimeout(resolve, ms));
+    private sleep(ms: number, signal?: AbortSignal): Promise<void> {
+        return new Promise((resolve, reject) => {
+            if (signal?.aborted) return reject(signal.reason);
+            const timer = setTimeout(() => {
+                signal?.removeEventListener("abort", onAbort);
+                resolve();
+            }, ms);
+            const onAbort = () => {
+                clearTimeout(timer);
+                reject(signal!.reason);
+            };
+            signal?.addEventListener("abort", onAbort, { once: true });
+        });
     }
 }
 
