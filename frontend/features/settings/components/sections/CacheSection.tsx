@@ -734,7 +734,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             <EnrichmentStage
                                 icon={User}
                                 label="Artist Metadata"
-                                description="Bios, images, and similar artists from ListenBrainz + MusicBrainz"
+                                description="Bios, photos, genres, and similar artists from Wikipedia, Fanart.tv, Deezer, MusicBrainz, and ListenBrainz"
                                 completed={enrichmentProgress.artists.completed}
                                 total={enrichmentProgress.artists.total}
                                 progress={enrichmentProgress.artists.progress}
@@ -758,7 +758,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 <EnrichmentStage
                                     icon={Activity}
                                     label="Audio Analysis"
-                                    description="BPM, key, energy, and danceability from audio files"
+                                    description="Tempo, key, danceability, and mood readings from each song's audio"
                                     completed={
                                         enrichmentProgress.audioAnalysis.completed
                                     }
