@@ -19,6 +19,7 @@ import {
     mergeNewById,
 } from "./helpers";
 import { NOT_MISSING } from "../../utils/libraryEligibility";
+import { spellingsOf } from "../stats/playable";
 import type { MoodType } from "../moodBucketService";
 
 const MIN_TRACKS_DAILY = 8;
@@ -1219,7 +1220,8 @@ export async function generateKeyJourney(
 
     const byKey = new Map<string, typeof tracks>();
     for (const track of tracks) {
-        const key = track.key || "C";
+        // Essentia writes C# where keyOrder says Db; group by the table's spelling.
+        const key = spellingsOf(track.key || "C").find((s) => keyOrder.includes(s)) ?? track.key ?? "C";
         if (!byKey.has(key)) byKey.set(key, []);
         byKey.get(key)!.push(track);
     }
