@@ -198,7 +198,7 @@ export async function buildMatching(): Promise<{ feelUpdated: number; rebuilt: b
 }
 
 /** Postgres refused the transaction because of another one (serialization 40001, deadlock 40P01), as Prisma reports it. */
-function isWriteConflict(error: unknown): boolean {
+export function isWriteConflict(error: unknown): boolean {
     if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
     if (error.code === "P2034") return true;
     const pgCode = (error.meta as { code?: string } | undefined)?.code;
