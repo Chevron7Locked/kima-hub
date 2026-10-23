@@ -250,11 +250,12 @@ function EnrichmentFailuresList({ active = false }: { active?: boolean }) {
 type QueueResult = "retry" | "everything" | "wipe" | "rerun";
 type ConfirmTarget = "retryFailedAndBlocked" | "redecideEverything" | "wipeAndRerun" | null;
 
-/** The steps this page offers a re-run from; the moods step joins them when the page lists the mood step. */
-type OfferedRerunStep = Exclude<EnrichmentRerunStep, "moods">;
-
 /** What each step a re-run can start from redoes; a step added to the API must be described here. */
-const RERUN_STEPS: Record<OfferedRerunStep, { label: string; message: string }> = {
+const RERUN_STEPS: Record<EnrichmentRerunStep, { label: string; message: string }> = {
+    moods: {
+        label: "moods",
+        message: "Recomputes every song's moods from its stored sound vector. No audio is re-read.",
+    },
     similarity: {
         label: "similarity + map",
         message:
@@ -288,7 +289,7 @@ const RERUN_STEPS: Record<OfferedRerunStep, { label: string; message: string }> 
 };
 
 /** The order the steps are offered in, as written above: quickest first. */
-const RERUN_ORDER = Object.keys(RERUN_STEPS) as OfferedRerunStep[];
+const RERUN_ORDER = Object.keys(RERUN_STEPS) as EnrichmentRerunStep[];
 
 const WIPE_MESSAGE =
     "Clears what Kima worked out about your music: which recording each track is, audio analysis, vibe data, the vibe map, " +
@@ -409,8 +410,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     const [queueResult, setQueueResult] = useState<QueueResult | null>(null);
     const [wiping, setWiping] = useState(false);
     const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget>(null);
-    const [rerunStep, setRerunStep] = useState<OfferedRerunStep>("similarity");
-    const [rerunConfirmStep, setRerunConfirmStep] = useState<OfferedRerunStep | null>(null);
+    const [rerunStep, setRerunStep] = useState<EnrichmentRerunStep>("similarity");
+    const [rerunConfirmStep, setRerunConfirmStep] = useState<EnrichmentRerunStep | null>(null);
     const [rerunningStep, setRerunningStep] = useState(false);
     const [maintenanceOpen, setMaintenanceOpen] = useState(false);
     const [cleanupResult, setCleanupResult] = useState<{
@@ -873,7 +874,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     <select
                                         id="enrichment-rerun-step"
                                         value={rerunStep}
-                                        onChange={(e) => setRerunStep(e.target.value as OfferedRerunStep)}
+                                        onChange={(e) => setRerunStep(e.target.value as EnrichmentRerunStep)}
                                         disabled={rerunningStep}
                                         className="h-9 rounded-lg border border-white/10 bg-surface px-2 text-xs text-[var(--text-primary)] focus:border-[var(--color-brand)] focus:outline-none"
                                         data-testid="enrichment-rerun-select"
