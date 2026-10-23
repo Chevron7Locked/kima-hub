@@ -10,7 +10,7 @@ import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { getMixColor, tracksByIds } from "./mixes/helpers";
-import { RECIPE_LINE, getRecipe, pickPageTracks } from "./mixes/recipes";
+import { RECIPE_LINE, UnrankableLibraryError, getRecipe, pickPageTracks } from "./mixes/recipes";
 import { MOOD_HEADS, type Mood } from "./moods/heads";
 import { MOOD_STATE_VERSION, loadMoodState, type MoodStats } from "./moods/state";
 
@@ -332,7 +332,13 @@ class MoodBucketService {
         const config = MOOD_BY_ID[mood];
 
         // The mood page's recipe, skipping what this user was already served unless that leaves too few to mix from.
-        const drawn = await pickPageTracks(getRecipe(config.recipe), { limit, exclude: excludeTrackIds });
+        // A library the recipe cannot rank has no mix, like one with too few members.
+        const drawn = await pickPageTracks(getRecipe(config.recipe), { limit, exclude: excludeTrackIds }).catch(
+            (error: unknown) => {
+                if (error instanceof UnrankableLibraryError) return null;
+                throw error;
+            }
+        );
         if (!drawn) {
             logger.debug(`[MoodBucket] Not enough tracks for the ${mood} mood page`);
             return null;

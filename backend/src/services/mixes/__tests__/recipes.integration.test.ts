@@ -11,6 +11,7 @@ import { MOOD_STATE_VERSION, READINGS, buildMoodState, loadMoodState, type MoodS
 import {
     MIN_MIX_TRACKS,
     RECIPES,
+    UnrankableLibraryError,
     parseRecipes,
     pickMixTracks,
     pickRecipeStation,
@@ -205,11 +206,23 @@ describe("the line", () => {
     it("raises rather than picks when every eligible song scores the same", async () => {
         await library(background(10));
         await expect(pickStationTracks(CALM, { limit: 10 })).rejects.toThrow("every eligible song has the same score");
+        await expect(pickStationTracks(CALM, { limit: 10 })).rejects.toBeInstanceOf(UnrankableLibraryError);
     });
 
     it("raises when the library's statistics give a component no spread", async () => {
         await library([...background(10), member("M")], { calm_sd: 0 });
         await expect(pickStationTracks(CALM, { limit: 10 })).rejects.toThrow("calm has no spread");
+        await expect(pickStationTracks(CALM, { limit: 10 })).rejects.toBeInstanceOf(UnrankableLibraryError);
+    });
+
+    it("raises when every song's key has the same scale, for a recipe that leans on it", async () => {
+        // Every song major by default.
+        await library([...background(10), member("M")]);
+        const leaning = recipe({ calm: 1, minor: 1 });
+        await expect(pickStationTracks(leaning, { limit: 10 })).rejects.toThrow("key scale has no spread");
+        await expect(pickStationTracks(leaning, { limit: 10 })).rejects.toBeInstanceOf(UnrankableLibraryError);
+        // A fault is not a cannot-rank answer.
+        await expect(pickRecipeStation("no-such-mix", { limit: 10 })).rejects.not.toBeInstanceOf(UnrankableLibraryError);
     });
 });
 

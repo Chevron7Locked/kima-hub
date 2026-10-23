@@ -121,6 +121,20 @@ describe("getMoodMix draws from the mood page's recipe (database)", () => {
         }
     });
 
+    it("has no mix when the library cannot rank the page's recipe", async () => {
+        // No spread in the happy scores: the Upbeat page's recipe cannot rank anyone.
+        const { happy_sd } = await prisma.moodState.findUniqueOrThrow({ where: { id: "default" } });
+        await prisma.moodState.update({ where: { id: "default" }, data: { happy_sd: 0 } });
+        try {
+            expect(await moodBucketService.getMoodMix("happy", 15)).toBeNull();
+            expect(await moodBucketService.saveUserMoodMix("mmp_user_unranked", "happy", 15)).toBeNull();
+            // The Calm page's recipe does not use happy.
+            expect(await moodBucketService.getMoodMix("chill", 15)).not.toBeNull();
+        } finally {
+            await prisma.moodState.update({ where: { id: "default" }, data: { happy_sd } });
+        }
+    });
+
     it("persists the served track ids alongside the saved mix", async () => {
         const userId = "mmp_user_save";
         await prisma.user.create({

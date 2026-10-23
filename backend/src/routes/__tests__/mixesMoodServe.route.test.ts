@@ -108,6 +108,18 @@ describe("GET /mixes/mood/buckets/:mood remembers what it served (database)", ()
         expect(await servedTrackIds()).toEqual(res.body.trackIds);
     });
 
+    it("answers 'not enough tracks' rather than an error when the library cannot rank the page's recipe", async () => {
+        const { happy_sd } = await prisma.moodState.findUniqueOrThrow({ where: { id: "default" } });
+        await prisma.moodState.update({ where: { id: "default" }, data: { happy_sd: 0 } });
+        try {
+            const res = await request(app).get("/mixes/mood/buckets/happy");
+            expect(res.status).toBe(400);
+            expect(res.body.error).toBe("Not enough tracks for mood: happy");
+        } finally {
+            await prisma.moodState.update({ where: { id: "default" }, data: { happy_sd } });
+        }
+    });
+
     it("does not repeat remembered ids on the next serving", async () => {
         const first = await servedTrackIds();
         const saved = [trackId(0), trackId(1), trackId(2)];

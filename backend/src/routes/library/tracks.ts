@@ -13,7 +13,7 @@ import {
 } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
 import { drawIds, drawWeighted, sampleTrackIds, unplayedTrackIds } from "../../services/mixes/helpers";
-import { pickRecipeStation } from "../../services/mixes/recipes";
+import { UnrankableLibraryError, pickRecipeStation } from "../../services/mixes/recipes";
 import { LIBRARY_TRACK_WHERE, LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { PLAYABLE } from "../../utils/libraryEligibility";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
@@ -710,6 +710,17 @@ const MOOD_STATIONS = new Map([
   ["instrumental", "instrumental"],
 ]);
 
+/** A recipe station's refill; empty when the library cannot rank its songs for the recipe. */
+async function stationTracks(recipe: string, limit: number): Promise<string[]> {
+  try {
+    return await pickRecipeStation(recipe, { limit });
+  } catch (error) {
+    if (!(error instanceof UnrankableLibraryError)) throw error;
+    logger.debug(error.message);
+    return [];
+  }
+}
+
 router.get("/radio", async (req, res) => {
   try {
     const { type, value, limit = "50" } = req.query;
@@ -824,12 +835,12 @@ router.get("/radio", async (req, res) => {
         if (!recipe) {
           return res.status(400).json({ error: `Unknown mood: ${moodValue}` });
         }
-        trackIds = await pickRecipeStation(recipe, { limit: limitNum });
+        trackIds = await stationTracks(recipe, limitNum);
         break;
       }
 
       case "workout":
-        trackIds = await pickRecipeStation("workout", { limit: limitNum });
+        trackIds = await stationTracks("workout", limitNum);
         break;
 
       case "artist":

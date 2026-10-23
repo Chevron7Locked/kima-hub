@@ -24,6 +24,17 @@ const ARTIST_CAPS = [2, 3, Infinity];
 /** A tempo counts toward a BPM band only on a steady beat: the tempo extractor's confidence at least this. */
 export const STEADY_BEAT = 2;
 
+/**
+ * The library cannot rank its songs for this recipe: a component, the key's scale or the recipe score has no spread
+ * in it. A property of the library, not a fault; callers show no mix or an empty station.
+ */
+export class UnrankableLibraryError extends Error {
+    constructor(readonly recipeId: string, reason: string) {
+        super(`[Mixes] Recipe ${recipeId}: ${reason}`);
+        this.name = "UnrankableLibraryError";
+    }
+}
+
 /** The readings a recipe can blend, by their names in recipes.json. */
 const READING_OF = {
     arousal: "arousal",
@@ -183,7 +194,7 @@ async function recipeMembers(recipe: Recipe): Promise<Member[] | null> {
     const { components, filters } = recipe;
     for (const { signal } of components) {
         if (signal !== "minor" && !(statsOf(state, signal).sd > 0)) {
-            throw new Error(`[Mixes] Recipe ${recipe.id}: the library's ${signal} has no spread to score against`);
+            throw new UnrankableLibraryError(recipe.id, `the library's ${signal} has no spread to score against`);
         }
     }
 
@@ -278,10 +289,10 @@ async function recipeMembers(recipe: Recipe): Promise<Member[] | null> {
     const [summary] = rows;
     if (summary.eligible < MIN_MIX_TRACKS) return null;
     if (components.some((c) => c.signal === "minor") && !((summary.minor_sd ?? 0) > 0)) {
-        throw new Error(`[Mixes] Recipe ${recipe.id}: the library's key scale has no spread to score against`);
+        throw new UnrankableLibraryError(recipe.id, "the library's key scale has no spread to score against");
     }
     if (!((summary.score_sd ?? 0) > 0)) {
-        throw new Error(`[Mixes] Recipe ${recipe.id}: every eligible song has the same score, so none stands out`);
+        throw new UnrankableLibraryError(recipe.id, "every eligible song has the same score, so none stands out");
     }
     return rows.flatMap((r) => (r.id !== null && r.artist_id !== null ? [{ id: r.id, artistId: r.artist_id }] : []));
 }

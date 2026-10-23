@@ -412,6 +412,34 @@ describe("radio: artist whose genre match meets artists with non-array genres", 
     });
 });
 
+describe("radio: a station whose recipe the library cannot rank", () => {
+    afterAll(async () => {
+        await prisma.$transaction(async (tx) => {
+            await tx.$executeRawUnsafe(`DELETE FROM mood_state`);
+            await buildMoodState(tx);
+        });
+    });
+
+    it("answers an empty list, not an error", async () => {
+        // No spread in the happy scores: the Happy station's recipe cannot rank anyone.
+        await prisma.moodState.update({ where: { id: "default" }, data: { happy_sd: 0 } });
+        const res = await radio({ type: "mood", value: "happy", limit: LIMIT });
+        expect(res.status).toBe(200);
+        expect(res.body.tracks).toEqual([]);
+        // A station whose recipe does not use happy still plays.
+        expect((await radio({ type: "mood", value: "chill", limit: LIMIT })).body.tracks).toHaveLength(LIMIT);
+    });
+
+    it("still fails loudly on any other error", async () => {
+        const spy = jest.spyOn(prisma, "$queryRaw").mockRejectedValueOnce(new Error("connection lost"));
+        try {
+            expect((await radio({ type: "mood", value: "chill", limit: LIMIT })).status).toBe(500);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+});
+
 describe("radio: the mood and workout stations before the mood step has built the library's statistics", () => {
     beforeAll(async () => {
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
