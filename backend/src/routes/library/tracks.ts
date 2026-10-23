@@ -634,7 +634,7 @@ router.get("/genres", async (_req, res) => {
     >`
             SELECT LOWER(g.genre) as genre, COUNT(DISTINCT t.id) as track_count
             FROM "Artist" ar
-            CROSS JOIN LATERAL jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
+            CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(ar.genres) = 'array' THEN ar.genres ELSE '[]'::jsonb END) AS g(genre)
             JOIN "Album" a ON a."artistId" = ar.id
             JOIN "Track" t ON t."albumId" = a.id
             WHERE ar.genres IS NOT NULL
