@@ -1,9 +1,5 @@
-// Cut-offs on acousticness, valence and arousal (read wholly or partly from the sound model and the mood analyzer)
-// pass the same share of a library as before the music sound model and the mood analyzer's new valence/arousal
-// mapping: each was matched on 8,971 tracks, recorded in
-// services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json. A new model or mapping needs a new match.
-// Instrumentalness keeps its old cut-offs: the music model reads vocals correctly, and matching would have kept the
-// old model's error of calling most sung tracks instrumental (same file, "Instrumentalness").
+// The mood and radio cut-offs in this file are the launch values; the record of each is
+// services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json.
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import {
@@ -19,10 +15,32 @@ import {
     getMixColor,
     getSeededRandom,
     seededShuffle,
+    sampleTracks,
     findTracksByGenrePatterns,
     mergeNewById,
     TRACK_LIMIT,
 } from "./helpers";
+
+/**
+ * Up to 50 tracks per genre, drawn at random from every track with a file in
+ * the named genres' Genre table entries.
+ */
+async function tracksInGenres(genreNames: string[], seed: number) {
+    const genres = await prisma.genre.findMany({
+        where: { name: { in: genreNames, mode: "insensitive" } },
+        select: { id: true },
+    });
+    if (genres.length === 0) return [];
+    return sampleTracks({
+        where: {
+            ...NOT_MISSING,
+            trackGenres: { some: { genreId: { in: genres.map((g) => g.id) } } },
+        },
+        include: { album: { select: { coverUrl: true } } },
+        take: 50 * genres.length,
+        seed,
+    });
+}
 
 export async function generateEraMix(
     _userId: string,
@@ -101,7 +119,7 @@ export async function generateGenreMix(
     const selectedGenre = validGenres[genreSeed % validGenres.length];
 
     const trackGenres = await prisma.trackGenre.findMany({
-        where: { genreId: selectedGenre.id },
+        where: { genreId: selectedGenre.id, track: NOT_MISSING },
         include: {
             track: {
                 include: {
@@ -131,6 +149,7 @@ export async function generatePartyMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
+    const seed = getSeededRandom(`party-${today}`);
     const partyGenres = [
         "dance",
         "electronic",
@@ -152,20 +171,7 @@ export async function generatePartyMix(
 
     let tracks: any[] = [];
 
-    const genres = await prisma.genre.findMany({
-        where: { name: { in: partyGenres, mode: "insensitive" } },
-        include: {
-            trackGenres: {
-                include: {
-                    track: {
-                        include: { album: { select: { coverUrl: true } } },
-                    },
-                },
-                take: 50,
-            },
-        },
-    });
-    tracks = genres.flatMap((g) => g.trackGenres.map((tg) => tg.track));
+    tracks = await tracksInGenres(partyGenres, seed);
     logger.debug(
         `[PARTY MIX] Found ${tracks.length} tracks from Genre table`
     );
@@ -173,7 +179,8 @@ export async function generatePartyMix(
     if (tracks.length < 15) {
         const albumGenreTracks = await findTracksByGenrePatterns(
             partyGenres,
-            100
+            100,
+            seed
         );
         tracks = mergeNewById(tracks, albumGenreTracks);
         logger.debug(
@@ -182,7 +189,7 @@ export async function generatePartyMix(
     }
 
     if (tracks.length < 15) {
-        const audioTracks = await prisma.track.findMany({
+        const audioTracks = await sampleTracks({
                 where: {
                 ...NOT_MISSING,
                 analysisStatus: "completed",
@@ -198,6 +205,7 @@ export async function generatePartyMix(
             },
             include: { album: { select: { coverUrl: true } } },
             take: 50,
+            seed,
         });
         tracks = mergeNewById(tracks, audioTracks);
         logger.debug(
@@ -212,7 +220,6 @@ export async function generatePartyMix(
         return null;
     }
 
-    const seed = getSeededRandom(`party-${today}`);
     const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
@@ -234,6 +241,7 @@ export async function generateWorkoutMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
+    const seed = getSeededRandom(`workout-${today}`);
     const workoutGenres = [
         "rock",
         "metal",
@@ -258,19 +266,20 @@ export async function generateWorkoutMix(
 
     let tracks: any[] = [];
 
-    const enhancedTracks = await prisma.track.findMany({
+    const enhancedTracks = await sampleTracks({
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
             analysisMode: "enhanced",
             AND: [
-                { arousal: { gte: 0.579 } },
+                { arousal: { gte: 0.6 } },
                 { energy: { gte: 0.6 } },
                 { bpm: { gte: 110 } },
             ],
         },
         include: { album: { select: { coverUrl: true } } },
         take: 100,
+        seed,
     });
     tracks = enhancedTracks;
     logger.debug(
@@ -279,7 +288,7 @@ export async function generateWorkoutMix(
 
     if (tracks.length < 15) {
         logger.debug(`[WORKOUT MIX] Falling back to Standard mode`);
-        const audioTracks = await prisma.track.findMany({
+        const audioTracks = await sampleTracks({
                 where: {
                 ...NOT_MISSING,
                 analysisStatus: "completed",
@@ -304,6 +313,7 @@ export async function generateWorkoutMix(
             },
             include: { album: { select: { coverUrl: true } } },
             take: 100,
+            seed,
         });
         tracks = mergeNewById(tracks, audioTracks);
         logger.debug(
@@ -312,24 +322,7 @@ export async function generateWorkoutMix(
     }
 
     if (tracks.length < 15) {
-        const genres = await prisma.genre.findMany({
-            where: { name: { in: workoutGenres, mode: "insensitive" } },
-            include: {
-                trackGenres: {
-                    include: {
-                        track: {
-                            include: {
-                                album: { select: { coverUrl: true } },
-                            },
-                        },
-                    },
-                    take: 50,
-                },
-            },
-        });
-        const genreTracks = genres.flatMap((g) =>
-            g.trackGenres.map((tg) => tg.track)
-        );
+        const genreTracks = await tracksInGenres(workoutGenres, seed);
         tracks = mergeNewById(tracks, genreTracks);
         logger.debug(
             `[WORKOUT MIX] After Genre table: ${tracks.length} tracks`
@@ -339,7 +332,8 @@ export async function generateWorkoutMix(
     if (tracks.length < 15) {
         const albumGenreTracks = await findTracksByGenrePatterns(
             workoutGenres,
-            100
+            100,
+            seed
         );
         tracks = mergeNewById(tracks, albumGenreTracks);
         logger.debug(
@@ -354,7 +348,6 @@ export async function generateWorkoutMix(
         return null;
     }
 
-    const seed = getSeededRandom(`workout-${today}`);
     const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
@@ -376,6 +369,7 @@ export async function generateFocusMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
+    const seed = getSeededRandom(`focus-${today}`);
     const focusGenres = [
         "classical",
         "instrumental",
@@ -394,20 +388,7 @@ export async function generateFocusMix(
 
     let tracks: any[] = [];
 
-    const genres = await prisma.genre.findMany({
-        where: { name: { in: focusGenres, mode: "insensitive" } },
-        include: {
-            trackGenres: {
-                include: {
-                    track: {
-                        include: { album: { select: { coverUrl: true } } },
-                    },
-                },
-                take: 50,
-            },
-        },
-    });
-    tracks = genres.flatMap((g) => g.trackGenres.map((tg) => tg.track));
+    tracks = await tracksInGenres(focusGenres, seed);
     logger.debug(
         `[FOCUS MIX] Found ${tracks.length} tracks from Genre table`
     );
@@ -415,7 +396,8 @@ export async function generateFocusMix(
     if (tracks.length < 15) {
         const albumGenreTracks = await findTracksByGenrePatterns(
             focusGenres,
-            100
+            100,
+            seed
         );
         tracks = mergeNewById(tracks, albumGenreTracks);
         logger.debug(
@@ -424,7 +406,7 @@ export async function generateFocusMix(
     }
 
     if (tracks.length < 15) {
-        const audioTracks = await prisma.track.findMany({
+        const audioTracks = await sampleTracks({
                 where: {
                 ...NOT_MISSING,
                 analysisStatus: "completed",
@@ -433,6 +415,7 @@ export async function generateFocusMix(
             },
             include: { album: { select: { coverUrl: true } } },
             take: 50,
+            seed,
         });
         tracks = mergeNewById(tracks, audioTracks);
         logger.debug(
@@ -447,7 +430,6 @@ export async function generateFocusMix(
         return null;
     }
 
-    const seed = getSeededRandom(`focus-${today}`);
     const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);

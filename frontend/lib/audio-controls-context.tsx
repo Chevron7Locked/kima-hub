@@ -26,7 +26,8 @@ import { useAudioController } from "./audio-controller-context";
 import { dispatchQueryEvent } from "@/lib/query-events";
 import { notify } from "@/lib/notify";
 import { BookSession, BookSessionUnavailableError } from "@/lib/book-session";
-import { insertTrack, removeTrack } from "@/lib/queue-edit";
+import { appendTracks, insertTrack, isLastInPlayOrder, removeTrack } from "@/lib/queue-edit";
+import { refillAndResume, startStationSession, type StationSession } from "@/lib/station-refill";
 import { shuffleArray } from "@/lib/shuffle";
 import { playbackLength } from "@/lib/format";
 
@@ -42,6 +43,8 @@ interface AudioControlsContextType {
     // Track methods
     playTrack: (track: Track) => void;
     playTracks: (tracks: Track[], startIndex?: number) => void;
+    /** Plays a station: when its last track starts, fetchBatch is asked for more and the new tracks are appended. */
+    playStation: (tracks: Track[], fetchBatch: () => Promise<Track[]>) => void;
 
     // Audiobook methods
     playAudiobook: (audiobook: Audiobook) => void;
@@ -181,6 +184,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const lastSaveTimeRef = useRef(0);
     const errorClassifyingRef = useRef(false);
     const prewarmFiredForRef = useRef<string | null>(null);
+    const stationRef = useRef<StationSession<Track> | null>(null);
+    // Set when the last queued track ends and playback stops by itself; cleared when the playing track changes.
+    const queueEndedRef = useRef(false);
+    const refillStationNowRef = useRef<() => Promise<boolean>>(() => Promise.resolve(false));
     const pendingGaplessNextRef = useRef<(Track & { index: number }) | null>(null);
 
     // Session ref: always consulted by seek, handleEnded, and progress saves.
@@ -258,6 +265,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const playTrack = useCallback(
         (track: Track) => {
+            stationRef.current = null;
             if (state.activeOperation.type !== 'idle') {
                 const opTrackIds = operationTrackIds(state.activeOperation);
                 if (!opTrackIds.includes(track.id)) {
@@ -284,6 +292,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const playTracks = useCallback(
         (tracks: Track[], startIndex = 0, { skipOperationCheck = false } = {}) => {
             if (tracks.length === 0) return;
+            stationRef.current = null;
 
             if (!skipOperationCheck && state.activeOperation.type !== 'idle') {
                 const opTrackIds = operationTrackIds(state.activeOperation);
@@ -308,6 +317,14 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: tracks[startIndex].duration });
         },
         [state, generateShuffleIndices]
+    );
+
+    const playStation = useCallback(
+        (tracks: Track[], fetchBatch: () => Promise<Track[]>) => {
+            playTracks(tracks, 0);
+            if (tracks.length > 0) stationRef.current = startStationSession(tracks, fetchBatch);
+        },
+        [playTracks]
     );
 
     const startAudiobookSession = useCallback(
@@ -470,15 +487,22 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         return false;
     }, [state, playback]);
 
+    // Play after a station's queue ended: try its refill again (one try per press), and play the new
+    // tracks if it brings any, otherwise replay as before.
+    const playOrRefill = useCallback(async () => {
+        if (queueEndedRef.current && (await refillStationNowRef.current())) return;
+        controllerRef.current?.play();
+    }, []);
+
     const resume = useCallback(async () => {
         await loadRestoredState();
-        controllerRef.current?.play();
-    }, [loadRestoredState]);
+        await playOrRefill();
+    }, [loadRestoredState, playOrRefill]);
 
     const resumeWithGesture = useCallback(async () => {
         await loadRestoredState();
-        controllerRef.current?.play();
-    }, [loadRestoredState]);
+        await playOrRefill();
+    }, [loadRestoredState, playOrRefill]);
 
     const seek = useCallback(
         (time: number) => {
@@ -701,6 +725,71 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         [state, queueSnapshot]
     );
 
+    const appendToQueue = useCallback(
+        (tracks: Track[]) => {
+            const next = appendTracks(queueSnapshot(), tracks);
+            queueRef.current = next.queue;
+            shuffleIndicesRef.current = next.shuffleIndices;
+            state.setQueue(next.queue);
+            if (isShuffleRef.current) state.setShuffleIndices(next.shuffleIndices);
+        },
+        [state, queueSnapshot]
+    );
+
+    const playQueueIndex = useCallback(
+        (index: number) => {
+            const track = queueRef.current[index];
+            if (!track) return;
+            currentIndexRef.current = index;
+            state.setCurrentIndex(index);
+            state.setCurrentTrack(track);
+            setCurrentTimeRef.current(0);
+            controllerRef.current?.load(api.getStreamUrl(track.id), { autoplay: true, expectedDurationS: track.duration });
+        },
+        [state]
+    );
+
+    // Refills the station from the live queue. If it fails the position can be tried again: on the next
+    // player state change, or when the listener presses play after the queue ended.
+    const refillStationNow = useCallback((): Promise<boolean> => {
+        const session = stationRef.current;
+        if (!session) return Promise.resolve(false);
+        const snap = queueSnapshot();
+        if (!isLastInPlayOrder(snap)) return Promise.resolve(false);
+        return refillAndResume(
+            session,
+            `${snap.currentIndex}:${currentTrackRef.current?.id}`,
+            snap.queue,
+            {
+                isCurrent: () => stationRef.current === session,
+                append: (fresh) => {
+                    const before = queueRef.current.length;
+                    appendToQueue(fresh);
+                    return before;
+                },
+                playbackEnded: () => queueEndedRef.current,
+                startAt: playQueueIndex,
+            }
+        ).catch((error) => {
+            console.error("Failed to refill station:", error);
+            return false;
+        });
+    }, [queueSnapshot, appendToQueue, playQueueIndex]);
+
+    // A station refills when its last queued track starts.
+    useEffect(() => {
+        queueEndedRef.current = false;
+    }, [state.currentIndex, state.currentTrack?.id]);
+
+    useEffect(() => {
+        if (!stationRef.current) return;
+        if (state.playbackType !== "track") {
+            stationRef.current = null;
+            return;
+        }
+        void refillStationNow();
+    }, [state, refillStationNow]);
+
     const removeFromQueue = useCallback(
         (index: number) => {
             const next = removeTrack(
@@ -724,6 +813,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     );
 
     const clearQueue = useCallback(() => {
+        stationRef.current = null;
         state.setQueue([]);
         state.setCurrentIndex(0);
         state.setCurrentTrack(null);
@@ -735,6 +825,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     // preserveOrder=true will skip shuffle index generation (used for vibe mode)
     const setUpcoming = useCallback(
         (tracks: Track[], preserveOrder = false) => {
+            stationRef.current = null;
             if (!state.currentTrack || state.playbackType !== "track") {
                 if (tracks.length > 0) {
                     state.setQueue(tracks);
@@ -994,6 +1085,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         currentPodcastRef.current = state.currentPodcast;
         repeatModeRef.current = state.repeatMode;
         nextRef.current = next;
+        refillStationNowRef.current = refillStationNow;
         nextPodcastEpisodeRef.current = nextPodcastEpisode;
         queueRef.current = state.queue;
         currentIndexRef.current = state.currentIndex;
@@ -1195,6 +1287,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             );
 
             if (!nextTrack) {
+                queueEndedRef.current = true;
                 ctrl.pause();
                 return;
             }
@@ -1577,6 +1670,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         () => ({
             playTrack,
             playTracks,
+            playStation,
             playAudiobook,
             playAudiobookAt,
             playPodcast,
@@ -1607,6 +1701,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         [
             playTrack,
             playTracks,
+            playStation,
             playAudiobook,
             playAudiobookAt,
             playPodcast,

@@ -733,6 +733,7 @@ model Track {
   fileModified                DateTime
   fileSize                    Int
   bpm                         Float?
+  bpmConfidence               Float?
   beatsCount                  Int?
   key                         String?
   keyScale                    String?

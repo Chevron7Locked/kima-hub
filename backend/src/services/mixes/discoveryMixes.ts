@@ -12,6 +12,8 @@ import {
     randomSample,
     getSeededRandom,
     seededShuffle,
+    drawIds,
+    tracksByIds,
     TRACK_LIMIT,
 } from "./helpers";
 
@@ -66,27 +68,33 @@ export async function generateRediscoverMix(
     userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    const allTracks = await prisma.track.findMany({
-            where: {
+    const playCounts = await prisma.track.findMany({
+        where: {
             ...NOT_MISSING,
             album: { location: LIBRARY_LOCATION },
         },
-        take: 5000,
-        include: {
+        select: {
+            id: true,
             _count: {
                 select: {
                     plays: { where: { userId } },
                 },
             },
-            album: { select: { coverUrl: true } },
         },
+        orderBy: { id: "asc" },
     });
 
-    const underplayedTracks = allTracks.filter((t) => t._count.plays <= 2);
+    const underplayedIds = playCounts
+        .filter((t) => t._count.plays <= 2)
+        .map((t) => t.id);
 
-    if (underplayedTracks.length < 5) return null;
+    if (underplayedIds.length < 5) return null;
 
     const seed = getSeededRandom(`rediscover-${today}`);
+    const underplayedTracks = await tracksByIds(
+        drawIds(underplayedIds, 5000, seed),
+        { album: { select: { coverUrl: true } } }
+    );
     const shuffled = seededShuffle(underplayedTracks, seed);
 
     const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
@@ -227,26 +235,31 @@ export async function generateRandomDiscoveryMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    const totalAlbums = await prisma.album.count({
+    const eligibleAlbums = await prisma.album.findMany({
         where: { tracks: { some: NOT_MISSING } },
+        select: { id: true },
+        orderBy: { id: "asc" },
     });
 
-    if (totalAlbums < 10) return null;
+    if (eligibleAlbums.length < 10) return null;
 
-    const seed = getSeededRandom(`random-${today}`) % totalAlbums;
-
-    const randomAlbums = await prisma.album.findMany({
-        where: { tracks: { some: NOT_MISSING } },
+    const albumIds = drawIds(
+        eligibleAlbums.map((a) => a.id),
+        5,
+        getSeededRandom(`random-${today}`)
+    );
+    const drawnAlbums = await prisma.album.findMany({
+        where: { id: { in: albumIds } },
         include: {
             tracks: {
+                where: NOT_MISSING,
                 include: {
                     album: { select: { coverUrl: true } },
                 },
             },
         },
-        skip: seed,
-        take: 5,
     });
+    const randomAlbums = albumIds.flatMap((id) => drawnAlbums.filter((a) => a.id === id));
 
     const tracks = randomAlbums.flatMap((album) => album.tracks);
     if (tracks.length < 5) return null;

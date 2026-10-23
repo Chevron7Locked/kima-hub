@@ -1,3 +1,5 @@
+// The mood and radio cut-offs in this file are the launch values; the record of each is
+// services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json.
 import { Router } from "express";
 import { requireAdmin } from "../../middleware/auth";
 import { announcePlaylistsChanged, playlistsHoldingTracks } from "../../services/playlistEvents";
@@ -12,6 +14,7 @@ import {
   getDecadeFromYear,
 } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
+import { drawIds, drawWeighted, sampleTrackIds, unplayedTrackIds } from "../../services/mixes/helpers";
 import { LIBRARY_TRACK_WHERE, LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { PLAYABLE } from "../../utils/libraryEligibility";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
@@ -699,7 +702,7 @@ router.get("/decades", async (_req, res) => {
 router.get("/radio", async (req, res) => {
   try {
     const { type, value, limit = "50" } = req.query;
-    const limitNum = Math.min(parseInt(limit as string) || 50, 100);
+    const limitNum = Math.min(parseLimit(limit, 50), 100);
     if (!type) {
       return res.status(400).json({ error: "Radio type is required" });
     }
@@ -708,23 +711,21 @@ router.get("/radio", async (req, res) => {
 
     switch (type) {
       case "discovery":
-        const unplayedTracks = await prisma.track.findMany({
-          where: {
-            plays: { none: {} },
-          },
-          select: { id: true },
-          take: limitNum * 2,
-        });
+        const unplayed = drawIds(
+          await unplayedTrackIds({ excludeMissing: true, excludeCorrupt: true }),
+          limitNum * 2,
+        );
 
-        if (unplayedTracks.length >= limitNum) {
-          trackIds = unplayedTracks.map((t) => t.id);
+        if (unplayed.length >= limitNum) {
+          trackIds = unplayed;
         } else {
           const leastPlayedTracks = await prisma.$queryRaw<{ id: string }[]>`
                         SELECT t.id
                         FROM "Track" t
                         LEFT JOIN "Play" p ON p."trackId" = t.id
+                        WHERE t."missingSince" IS NULL AND t.corrupt = false
                         GROUP BY t.id
-                        ORDER BY COUNT(p.id) ASC
+                        ORDER BY COUNT(p.id) ASC, random()
                         LIMIT ${limitNum * 2}
                     `;
           trackIds = leastPlayedTracks.map((t) => t.id);
@@ -738,9 +739,10 @@ router.get("/radio", async (req, res) => {
                     SELECT t.id, COUNT(p.id) as play_count
                     FROM "Track" t
                     LEFT JOIN "Play" p ON p."trackId" = t.id
+                    WHERE t."missingSince" IS NULL AND t.corrupt = false
                     GROUP BY t.id
                     HAVING COUNT(p.id) > 0
-                    ORDER BY play_count DESC
+                    ORDER BY -LN(1 - random()) / COUNT(p.id) ASC
                     LIMIT ${limitNum * 2}
                 `;
 
@@ -750,25 +752,22 @@ router.get("/radio", async (req, res) => {
           logger.debug(
             "[Radio:favorites] No play data found, returning random tracks",
           );
-          const randomTracks = await prisma.track.findMany({
-            select: { id: true },
+          trackIds = await sampleTrackIds({
+            where: {},
             take: limitNum * 2,
           });
-          trackIds = randomTracks.map((t) => t.id);
         }
         break;
 
       case "decade":
         const decadeStart = parseInt(value as string) || 2000;
 
-        const decadeTracks = await prisma.track.findMany({
+        trackIds = await sampleTrackIds({
           where: {
             album: getDecadeWhereClause(decadeStart),
           },
-          select: { id: true },
           take: limitNum * 3,
         });
-        trackIds = decadeTracks.map((t) => t.id);
         break;
 
       case "genre":
@@ -790,9 +789,11 @@ router.get("/radio", async (req, res) => {
                             WHERE LOWER(ug.genre) LIKE ${"%" + genreValue + "%"}
                         ))
                     )
-                    LIMIT ${limitNum * 2}
                 `;
-        trackIds = genreTracks.map((t) => t.id);
+        trackIds = drawIds(
+          genreTracks.map((t) => t.id),
+          limitNum * 2,
+        );
 
         logger.debug(
           `[Radio:genre] Found ${trackIds.length} tracks for genre "${genreValue}" from Artist.genres and userGenres`,
@@ -811,12 +812,15 @@ router.get("/radio", async (req, res) => {
           dance: "party",
         };
         if (BUCKET_MOODS[moodValue]) {
-            const bucketRows = await prisma.moodBucket.findMany({
-                where: { mood: BUCKET_MOODS[moodValue] },
-                select: { trackId: true },
-                orderBy: { score: "desc" },
-                take: limitNum * 3,
-            });
+            // Weighted draw without replacement in the database: the smallest
+            // -LN(1 - random()) / score come first (Efraimidis-Spirakis, as drawWeighted).
+            const bucketRows = await prisma.$queryRaw<{ trackId: string }[]>`
+                SELECT "trackId"
+                FROM "MoodBucket"
+                WHERE mood = ${BUCKET_MOODS[moodValue]} AND score > 0
+                ORDER BY -LN(1 - random()) / score ASC
+                LIMIT ${limitNum * 3}
+            `;
             trackIds = bucketRows.map((r) => r.trackId);
             break;
         }
@@ -831,10 +835,9 @@ router.get("/radio", async (req, res) => {
             };
             break;
           case "acoustic":
-            // Matched by library share like the mixes' (services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json).
             moodWhere = {
               analysisStatus: "completed",
-              acousticness: { gte: 0.663 },
+              acousticness: { gte: 0.6 },
             };
             break;
           case "instrumental":
@@ -847,18 +850,16 @@ router.get("/radio", async (req, res) => {
             return res.status(400).json({ error: `Unknown mood: ${moodValue}` });
         }
 
-        const moodTracks = await prisma.track.findMany({
+        trackIds = await sampleTrackIds({
           where: moodWhere,
-          select: { id: true },
           take: limitNum * 3,
         });
-        trackIds = moodTracks.map((t) => t.id);
         break;
 
       case "workout":
         let workoutTrackIds: string[] = [];
 
-        const energyTracks = await prisma.track.findMany({
+        workoutTrackIds = await sampleTrackIds({
           where: {
             analysisStatus: "completed",
             OR: [
@@ -872,10 +873,8 @@ router.get("/radio", async (req, res) => {
               },
             ],
           },
-          select: { id: true },
           take: limitNum * 2,
         });
-        workoutTrackIds = energyTracks.map((t) => t.id);
         logger.debug(
           `[Radio:workout] Found ${workoutTrackIds.length} tracks via audio analysis`,
         );
@@ -911,17 +910,22 @@ router.get("/radio", async (req, res) => {
                 mode: "insensitive",
               },
             },
-            include: {
-              trackGenres: {
-                select: { trackId: true },
-                take: 50,
-              },
-            },
+            select: { id: true },
           });
 
-          const genreTrackIds = workoutGenres.flatMap((g) =>
-            g.trackGenres.map((tg) => tg.trackId),
-          );
+          const genreTrackIds =
+            workoutGenres.length === 0
+              ? []
+              : drawIds(
+                  (
+                    await prisma.trackGenre.groupBy({
+                      by: ["trackId"],
+                      where: { genreId: { in: workoutGenres.map((g) => g.id) } },
+                      orderBy: { trackId: "asc" },
+                    })
+                  ).map((tg) => tg.trackId),
+                  50 * workoutGenres.length,
+                );
           workoutTrackIds = [
             ...new Set([...workoutTrackIds, ...genreTrackIds]),
           ];
@@ -930,21 +934,30 @@ router.get("/radio", async (req, res) => {
           );
 
           if (workoutTrackIds.length < limitNum) {
-            const albumGenreTracks = await prisma.track.findMany({
-              where: {
-                album: {
-                  OR: workoutGenreNames.map((g) => ({
-                    genres: { string_contains: g },
-                  })),
-                },
-              },
-              select: { id: true },
-              take: limitNum,
-            });
+            // Album.genres is a JSON array of names, which string_contains never
+            // matches (it reads a JSON string), so the names are matched in SQL.
+            const albumGenreTrackIds = drawIds(
+              (
+                await prisma.$queryRaw<{ id: string }[]>`
+                  SELECT t.id
+                  FROM "Track" t
+                  JOIN "Album" a ON a.id = t."albumId"
+                  WHERE jsonb_typeof(a.genres) = 'array'
+                    AND EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements_text(a.genres) AS g(genre)
+                      CROSS JOIN unnest(${workoutGenreNames}::text[]) AS p(name)
+                      WHERE strpos(lower(g.genre), p.name) > 0
+                    )
+                  ORDER BY t.id
+                `
+              ).map((r) => r.id),
+              limitNum,
+            );
             workoutTrackIds = [
               ...new Set([
                 ...workoutTrackIds,
-                ...albumGenreTracks.map((t) => t.id),
+                ...albumGenreTrackIds,
               ]),
             ];
             logger.debug(
@@ -1021,7 +1034,8 @@ router.get("/radio", async (req, res) => {
         const similarInLibrary = await prisma.similarArtist.findMany({
           where: {
             fromArtistId: artistId,
-            toArtistId: { in: Array.from(libraryArtistIds) },
+            toArtist: { ownedAlbums: { some: {} } },
+            NOT: { toArtistId: artistId },
           },
           orderBy: { weight: "desc" },
           take: 15,
@@ -1041,7 +1055,8 @@ router.get("/radio", async (req, res) => {
           if (artistGenres.length > 0) {
             const genreMatchArtists = await prisma.artist.findMany({
               where: {
-                id: { in: Array.from(libraryArtistIds) },
+                ownedAlbums: { some: {} },
+                NOT: { id: artistId },
               },
               select: {
                 id: true,
@@ -1087,6 +1102,7 @@ router.get("/radio", async (req, res) => {
           similarTracks = await prisma.track.findMany({
             where: {
               album: { artistId: { in: similarArtistIds } },
+              ...PLAYABLE,
             },
             select: {
               id: true,
@@ -1143,22 +1159,64 @@ router.get("/radio", async (req, res) => {
           );
         }
 
+        // Only tracks that can play are candidates, so the 40/60 split holds after
+        // the playable filter below. The similar tracks are filtered in their query.
+        const playableIds = new Set(
+          (
+            await prisma.track.findMany({
+              where: {
+                id: { in: artistTracks.map((t) => t.id) },
+                ...PLAYABLE,
+              },
+              select: { id: true },
+            })
+          ).map((t) => t.id),
+        );
+        const ownPlayable = artistTracks.filter((t) => playableIds.has(t.id));
+
         const originalCount = Math.min(
           Math.ceil(limitNum * 0.4),
-          artistTracks.length,
+          ownPlayable.length,
         );
         const similarCount = Math.min(
           limitNum - originalCount,
           similarTracks.length,
         );
 
-        const selectedOriginal = shuffleArray(artistTracks).slice(
+        const selectedOriginal = shuffleArray(ownPlayable).slice(
           0,
           originalCount,
         );
-        const selectedSimilar = shuffleArray(
-          similarTracks.slice(0, similarCount * 2),
-        ).slice(0, similarCount);
+        // Tracks with a closeness score are drawn in proportion to it. Tracks
+        // without one (no artist sound to compare with) are drawn uniformly, and
+        // get the share of the slots that their share of the candidates is, rounded
+        // to a whole track. A track scoring exactly 0 has no weight, so it is
+        // taken only when too few weighted tracks are left to fill the slots.
+        let selectedSimilar: typeof similarTracks = [];
+        if (similarCount >= 1) {
+          const scoreOf = (t: unknown) => (t as { vibeScore?: number }).vibeScore;
+          const scored = similarTracks.filter((t) => scoreOf(t) !== undefined);
+          const unscored = similarTracks.filter((t) => scoreOf(t) === undefined);
+          const unscoredSlots = Math.round(
+            (similarCount * unscored.length) / similarTracks.length,
+          );
+          const weightedSlots = similarCount - unscoredSlots;
+          selectedSimilar = [
+            ...(weightedSlots >= 1
+              ? drawWeighted(scored, (t) => scoreOf(t) ?? 0, weightedSlots)
+              : []),
+            ...shuffleArray(unscored).slice(0, unscoredSlots),
+          ];
+          if (selectedSimilar.length < similarCount) {
+            const taken = new Set(selectedSimilar);
+            selectedSimilar.push(
+              ...shuffleArray(similarTracks.filter((t) => !taken.has(t))).slice(
+                0,
+                similarCount - selectedSimilar.length,
+              ),
+            );
+          }
+        }
 
         trackIds = [...selectedOriginal, ...selectedSimilar].map((t) => t.id);
         logger.debug(
@@ -1168,11 +1226,7 @@ router.get("/radio", async (req, res) => {
 
       case "all":
       default:
-        const allTracks = await prisma.track.findMany({
-          select: { id: true },
-          take: 300,
-        });
-        trackIds = allTracks.map((t) => t.id);
+        trackIds = await sampleTrackIds({ where: {}, take: 300 });
     }
 
     // Every station draws only tracks that can play: the file is present and not corrupt.

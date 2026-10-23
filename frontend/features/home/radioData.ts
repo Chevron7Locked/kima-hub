@@ -131,7 +131,7 @@ function getDecadeName(decade: number): string {
 }
 
 export function useRadioPlayer() {
-    const { playTracks } = useAudioControls();
+    const { playStation } = useAudioControls();
     const [loadingStation, setLoadingStation] = useState<string | null>(null);
 
     const startRadio = async (station: RadioStation) => {
@@ -142,9 +142,9 @@ export function useRadioPlayer() {
             if (station.filter.value) params.set("value", station.filter.value);
             params.set("limit", "100");
 
-            const response = await api.get<{ tracks: Track[] }>(
-                `/library/radio?${params.toString()}`
-            );
+            const fetchTracks = () =>
+                api.get<{ tracks: Track[] }>(`/library/radio?${params.toString()}`);
+            const response = await fetchTracks();
 
             if (!response.tracks || response.tracks.length === 0) {
                 notify.error("No tracks for this radio station", { message: station.name });
@@ -158,7 +158,7 @@ export function useRadioPlayer() {
             }
 
             const shuffled = shuffleArray(response.tracks);
-            playTracks(shuffled, 0);
+            playStation(shuffled, async () => shuffleArray((await fetchTracks()).tracks ?? []));
         } catch (error) {
             console.error("Failed to start radio:", error);
             notify.error("Failed to start radio station");

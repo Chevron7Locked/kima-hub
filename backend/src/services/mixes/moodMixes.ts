@@ -1,9 +1,5 @@
-// Cut-offs on acousticness, valence and arousal (read wholly or partly from the sound model and the mood analyzer)
-// pass the same share of a library as before the music sound model and the mood analyzer's new valence/arousal
-// mapping: each was matched on 8,971 tracks, recorded in
-// services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json. A new model or mapping needs a new match.
-// Instrumentalness keeps its old cut-offs: the music model reads vocals correctly, and matching would have kept the
-// old model's error of calling most sung tracks instrumental (same file, "Instrumentalness").
+// The mood and radio cut-offs in this file are the launch values; the record of each is
+// services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json.
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import {
@@ -12,6 +8,10 @@ import {
     getMixColor,
     randomSample,
     sampledMix,
+    sampleTracks,
+    drawIds,
+    tracksByIds,
+    unplayedTrackIds,
     sampleMix,
     getSeededRandom,
     seededShuffle,
@@ -36,22 +36,20 @@ const WEEKLY_TRACK_LIMIT = 20;
 async function poolTracksForMood(
     mood: MoodType,
     extraWhere: Record<string, unknown>,
-    take: number
+    take: number,
+    seed?: number
 ) {
-    const bucket = await prisma.moodBucket.findMany({
-        where: { mood },
-        select: { trackId: true },
-        take: 1000,
-    });
-    if (bucket.length === 0) return [];
-    return prisma.track.findMany({
+    // The bucket is matched in the database: a bucket can hold more tracks than
+    // one query can send as ids (Postgres allows 65,535 bound values).
+    return sampleTracks({
         where: {
-            id: { in: bucket.map((b) => b.trackId) },
+            moodBuckets: { some: { mood } },
             ...NOT_MISSING,
             ...extraWhere,
         },
         include: { album: { select: { coverUrl: true } } },
         take,
+        seed,
     });
 }
 
@@ -59,14 +57,15 @@ export async function generateChillMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
+    const seed = getSeededRandom(`chill-${today}`);
     // Mood path: the bucket pool, flavoured by low energy.
-    let tracks = await poolTracksForMood("chill", { energy: { lte: 0.55 } }, 100);
+    let tracks = await poolTracksForMood("chill", { energy: { lte: 0.55 } }, 100, seed);
 
     logger.debug(`[CHILL MIX] Bucket mode: Found ${tracks.length} tracks`);
 
     if (tracks.length < MIN_TRACKS_DAILY) {
         logger.debug(`[CHILL MIX] Falling back to Standard mode`);
-        tracks = await prisma.track.findMany({
+        tracks = await sampleTracks({
                 where: {
                 ...NOT_MISSING,
                 analysisStatus: "completed",
@@ -75,15 +74,16 @@ export async function generateChillMix(
                     { bpm: { lte: 115 } },
                     {
                         OR: [
-                            { arousal: { lte: 0.545 } },
-                            { acousticness: { gte: 0.314 } },
-                            { valence: { lte: 0.582 } },
+                            { arousal: { lte: 0.55 } },
+                            { acousticness: { gte: 0.3 } },
+                            { valence: { lte: 0.65 } },
                         ],
                     },
                 ],
             },
             include: { album: { select: { coverUrl: true } } },
             take: 100,
+            seed,
         });
         logger.debug(
             `[CHILL MIX] Standard mode: Found ${tracks.length} tracks`
@@ -101,7 +101,6 @@ export async function generateChillMix(
         return null;
     }
 
-    const seed = getSeededRandom(`chill-${today}`);
     const shuffled = seededShuffle(tracks, seed);
 
     const isWeekly = tracks.length >= MIN_TRACKS_WEEKLY;
@@ -126,7 +125,8 @@ export async function generateHighEnergyMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    let tracks: any[] = await prisma.track.findMany({
+    const seed = getSeededRandom(`high-energy-${today}`);
+    let tracks: any[] = await sampleTracks({
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -135,6 +135,7 @@ export async function generateHighEnergyMix(
         },
         include: { album: { select: { coverUrl: true } } },
         take: 100,
+        seed,
     });
     logger.debug(
         `[HIGH ENERGY MIX] Found ${tracks.length} tracks from audio analysis`
@@ -153,7 +154,8 @@ export async function generateHighEnergyMix(
         ];
         const albumGenreTracks = await findTracksByGenrePatterns(
             energyGenres,
-            100
+            100,
+            seed
         );
         tracks = mergeNewById(tracks, albumGenreTracks);
         logger.debug(
@@ -168,7 +170,6 @@ export async function generateHighEnergyMix(
         return null;
     }
 
-    const seed = getSeededRandom(`high-energy-${today}`);
     const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, WEEKLY_TRACK_LIMIT);
@@ -190,11 +191,13 @@ export async function generateLateNightMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
+    const seed = getSeededRandom(`late-night-${today}`);
     // Mood path: the bucket pool, flavoured by late-night tempo.
     let tracks = await poolTracksForMood(
         "chill",
         { energy: { lte: 0.5 }, bpm: { lte: 110 } },
-        100
+        100,
+        seed
     );
 
     logger.debug(
@@ -203,7 +206,7 @@ export async function generateLateNightMix(
 
     if (tracks.length < MIN_TRACKS_DAILY) {
         logger.debug(`[LATE NIGHT MIX] Falling back to Standard mode`);
-        tracks = await prisma.track.findMany({
+        tracks = await sampleTracks({
                 where: {
                 ...NOT_MISSING,
                 analysisStatus: "completed",
@@ -212,15 +215,16 @@ export async function generateLateNightMix(
                     { bpm: { lte: 110 } },
                     {
                         OR: [
-                            { arousal: { lte: 0.515 } },
-                            { valence: { lte: 0.558 } },
-                            { acousticness: { gte: 0.314 } },
+                            { arousal: { lte: 0.5 } },
+                            { valence: { lte: 0.6 } },
+                            { acousticness: { gte: 0.3 } },
                         ],
                     },
                 ],
             },
             include: { album: { select: { coverUrl: true } } },
             take: 100,
+            seed,
         });
         logger.debug(
             `[LATE NIGHT MIX] Standard mode: Found ${tracks.length} tracks`
@@ -238,7 +242,6 @@ export async function generateLateNightMix(
         return null;
     }
 
-    const seed = getSeededRandom(`late-night-${today}`);
     const shuffled = seededShuffle(tracks, seed);
 
     const isWeekly = tracks.length >= MIN_TRACKS_WEEKLY;
@@ -263,21 +266,23 @@ export async function generateHappyMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
+    const seed = getSeededRandom(`happy-${today}`);
     // Mood path: the bucket pool — head verdict and library rank,
     // no fixed cutoffs.
-    let tracks: any[] = await poolTracksForMood("happy", {}, 100);
+    let tracks: any[] = await poolTracksForMood("happy", {}, 100, seed);
     logger.debug(`[HAPPY MIX] Bucket mode: Found ${tracks.length} tracks`);
 
     if (tracks.length < 15) {
-        const standardTracks = await prisma.track.findMany({
+        const standardTracks = await sampleTracks({
                 where: {
                 ...NOT_MISSING,
                 analysisStatus: "completed",
-                valence: { gte: 0.559 },
+                valence: { gte: 0.6 },
                 energy: { gte: 0.5 },
             },
             include: { album: { select: { coverUrl: true } } },
             take: 100,
+            seed,
         });
         tracks = mergeNewById(tracks, standardTracks);
         logger.debug(
@@ -297,7 +302,8 @@ export async function generateHappyMix(
         ];
         const albumGenreTracks = await findTracksByGenrePatterns(
             happyGenres,
-            100
+            100,
+            seed
         );
         tracks = mergeNewById(tracks, albumGenreTracks);
         logger.debug(
@@ -312,7 +318,6 @@ export async function generateHappyMix(
         return null;
     }
 
-    const seed = getSeededRandom(`happy-${today}`);
     const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, WEEKLY_TRACK_LIMIT);
@@ -345,10 +350,11 @@ export async function generateMelancholyMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
+    const seed = getSeededRandom(`melancholy-${today}`);
     let tracks: any[] = [];
 
     // Mood path: the bucket pool.
-    const enhancedTracks = await poolTracksForMood("sad", {}, 150);
+    const enhancedTracks = await poolTracksForMood("sad", {}, 150, seed);
     logger.debug(
         `[MELANCHOLY MIX] Bucket mode: Found ${enhancedTracks.length} tracks`
     );
@@ -357,15 +363,16 @@ export async function generateMelancholyMix(
         tracks = enhancedTracks;
     } else {
         logger.debug(`[MELANCHOLY MIX] Falling back to Standard mode`);
-        const audioTracks = await prisma.track.findMany({
+        const audioTracks = await sampleTracks({
                 where: {
                 ...NOT_MISSING,
                 analysisStatus: "completed",
-                valence: { lte: 0.454 },
+                valence: { lte: 0.35 },
                 energy: { lte: 0.6 },
             },
             include: { album: { select: { coverUrl: true } } },
             take: 150,
+            seed,
         });
         logger.debug(
             `[MELANCHOLY MIX] Standard mode: Found ${audioTracks.length} low-valence tracks`
@@ -400,7 +407,8 @@ export async function generateMelancholyMix(
         ];
         const albumGenreTracks = await findTracksByGenrePatterns(
             sadGenres,
-            100
+            100,
+            seed
         );
         tracks = mergeNewById(tracks, albumGenreTracks);
         logger.debug(
@@ -417,7 +425,6 @@ export async function generateMelancholyMix(
 
     const sortedTracks = tracks.sort((a, b) => melancholyScore(a) - melancholyScore(b));
 
-    const seed = getSeededRandom(`melancholy-${today}`);
     const shuffled = seededShuffle(sortedTracks.slice(0, 50), seed);
 
     const selectedTracks = shuffled.slice(0, WEEKLY_TRACK_LIMIT);
@@ -439,7 +446,8 @@ export async function generateDanceFloorMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    let tracks: any[] = await prisma.track.findMany({
+    const seed = getSeededRandom(`dance-floor-${today}`);
+    let tracks: any[] = await sampleTracks({
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -448,6 +456,7 @@ export async function generateDanceFloorMix(
         },
         include: { album: { select: { coverUrl: true } } },
         take: 100,
+        seed,
     });
     logger.debug(
         `[DANCE FLOOR MIX] Found ${tracks.length} tracks from audio analysis`
@@ -465,7 +474,8 @@ export async function generateDanceFloorMix(
         ];
         const albumGenreTracks = await findTracksByGenrePatterns(
             danceGenres,
-            100
+            100,
+            seed
         );
         tracks = mergeNewById(tracks, albumGenreTracks);
         logger.debug(
@@ -480,7 +490,6 @@ export async function generateDanceFloorMix(
         return null;
     }
 
-    const seed = getSeededRandom(`dance-floor-${today}`);
     const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, WEEKLY_TRACK_LIMIT);
@@ -502,15 +511,17 @@ export async function generateAcousticMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    let tracks: any[] = await prisma.track.findMany({
+    const seed = getSeededRandom(`acoustic-${today}`);
+    let tracks: any[] = await sampleTracks({
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
-            acousticness: { gte: 0.663 },
+            acousticness: { gte: 0.6 },
             energy: { gte: 0.3, lte: 0.6 },
         },
         include: { album: { select: { coverUrl: true } } },
         take: 100,
+        seed,
     });
     logger.debug(
         `[ACOUSTIC MIX] Found ${tracks.length} tracks from audio analysis`
@@ -526,7 +537,8 @@ export async function generateAcousticMix(
         ];
         const albumGenreTracks = await findTracksByGenrePatterns(
             acousticGenres,
-            100
+            100,
+            seed
         );
         tracks = mergeNewById(tracks, albumGenreTracks);
         logger.debug(
@@ -541,7 +553,6 @@ export async function generateAcousticMix(
         return null;
     }
 
-    const seed = getSeededRandom(`acoustic-${today}`);
     const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, WEEKLY_TRACK_LIMIT);
@@ -563,7 +574,8 @@ export async function generateInstrumentalMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    let tracks: any[] = await prisma.track.findMany({
+    const seed = getSeededRandom(`instrumental-${today}`);
+    let tracks: any[] = await sampleTracks({
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -572,6 +584,7 @@ export async function generateInstrumentalMix(
         },
         include: { album: { select: { coverUrl: true } } },
         take: 100,
+        seed,
     });
     logger.debug(
         `[INSTRUMENTAL MIX] Found ${tracks.length} tracks from audio analysis`
@@ -588,7 +601,8 @@ export async function generateInstrumentalMix(
         ];
         const albumGenreTracks = await findTracksByGenrePatterns(
             instrumentalGenres,
-            100
+            100,
+            seed
         );
         tracks = mergeNewById(tracks, albumGenreTracks);
         logger.debug(
@@ -603,7 +617,6 @@ export async function generateInstrumentalMix(
         return null;
     }
 
-    const seed = getSeededRandom(`instrumental-${today}`);
     const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, WEEKLY_TRACK_LIMIT);
@@ -625,7 +638,8 @@ export async function generateRoadTripMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    let tracks: any[] = await prisma.track.findMany({
+    const seed = getSeededRandom(`road-trip-${today}`);
+    let tracks: any[] = await sampleTracks({
         where: {
             ...NOT_MISSING,
             // Moods come from audio analysis only. With nothing in the energetic or
@@ -634,11 +648,12 @@ export async function generateRoadTripMix(
         },
         include: { album: { select: { coverUrl: true } } },
         take: 100,
+        seed,
     });
     logger.debug(`[ROAD TRIP MIX] Found ${tracks.length} tracks from tags`);
 
     if (tracks.length < 15) {
-        const audioTracks = await prisma.track.findMany({
+        const audioTracks = await sampleTracks({
                 where: {
                 ...NOT_MISSING,
                 analysisStatus: "completed",
@@ -647,6 +662,7 @@ export async function generateRoadTripMix(
             },
             include: { album: { select: { coverUrl: true } } },
             take: 100,
+            seed,
         });
         tracks = mergeNewById(tracks, audioTracks);
         logger.debug(
@@ -664,7 +680,8 @@ export async function generateRoadTripMix(
         ];
         const albumGenreTracks = await findTracksByGenrePatterns(
             roadTripGenres,
-            100
+            100,
+            seed
         );
         tracks = mergeNewById(tracks, albumGenreTracks);
         logger.debug(
@@ -679,7 +696,6 @@ export async function generateRoadTripMix(
         return null;
     }
 
-    const seed = getSeededRandom(`road-trip-${today}`);
     const shuffled = seededShuffle(tracks, seed);
 
     const selectedTracks = shuffled.slice(0, WEEKLY_TRACK_LIMIT);
@@ -721,14 +737,14 @@ export async function generateSadGirlSundays(
             OR: [
                 {
                     AND: [
-                        { valence: { lte: 0.454 } },
+                        { valence: { lte: 0.35 } },
                         { keyScale: "minor" },
                     ],
                 },
                 {
                     AND: [
-                        { valence: { lte: 0.439 } },
-                        { arousal: { lte: 0.465 } },
+                        { valence: { lte: 0.3 } },
+                        { arousal: { lte: 0.4 } },
                     ],
                 },
             ],
@@ -753,7 +769,7 @@ export async function generateMainCharacterEnergy(
             ...NOT_MISSING,
             analysisStatus: "completed",
             AND: [
-                { valence: { gte: 0.533 } },
+                { valence: { gte: 0.55 } },
                 { energy: { gte: 0.55 } },
                 { danceability: { gte: 0.5 } },
             ],
@@ -808,13 +824,13 @@ export async function generate3AMThoughts(
             ...NOT_MISSING,
             analysisStatus: "completed",
             AND: [
-                { arousal: { lte: 0.465 } },
+                { arousal: { lte: 0.4 } },
                 { energy: { lte: 0.5 } },
                 { bpm: { lte: 110 } },
                 {
                     OR: [
-                        { valence: { lte: 0.51 } },
-                        { acousticness: { gte: 0.314 } },
+                        { valence: { lte: 0.5 } },
+                        { acousticness: { gte: 0.3 } },
                     ],
                 },
             ],
@@ -848,7 +864,7 @@ export async function generateHotGirlWalk(
                 },
                 {
                     AND: [
-                        { valence: { gte: 0.559 } },
+                        { valence: { gte: 0.6 } },
                         { energy: { gte: 0.6 } },
                     ],
                 },
@@ -877,7 +893,7 @@ export async function generateRageCleaning(
                 {
                     AND: [
                         { energy: { gte: 0.75 } },
-                        { arousal: { gte: 0.616 } },
+                        { arousal: { gte: 0.65 } },
                         { bpm: { gte: 125 } },
                     ],
                 },
@@ -914,8 +930,8 @@ export async function generateGoldenHour(
             OR: [
                 {
                     AND: [
-                        { valence: { gte: 0.491 } },
-                        { acousticness: { gte: 0.353 } },
+                        { valence: { gte: 0.45 } },
+                        { acousticness: { gte: 0.35 } },
                         { energy: { gte: 0.25, lte: 0.65 } },
                     ],
                 },
@@ -943,7 +959,7 @@ export async function generateShowerKaraoke(
             AND: [
                 { instrumentalness: { lte: 0.35 } },
                 { energy: { gte: 0.55 } },
-                { valence: { gte: 0.491 } },
+                { valence: { gte: 0.45 } },
             ],
         },
     });
@@ -968,9 +984,9 @@ export async function generateInMyFeelings(
             OR: [
                 {
                     AND: [
-                        { valence: { lte: 0.471 } },
-                        { arousal: { lte: 0.545 } },
-                        { acousticness: { gte: 0.282 } },
+                        { valence: { lte: 0.4 } },
+                        { arousal: { lte: 0.55 } },
+                        { acousticness: { gte: 0.25 } },
                     ],
                 },
             ],
@@ -999,8 +1015,8 @@ export async function generateMidnightDrive(
                 { bpm: { gte: 80, lte: 130 } },
                 {
                     OR: [
-                        { arousal: { lte: 0.58 } },
-                        { valence: { gte: 0.439, lte: 0.607 } },
+                        { arousal: { lte: 0.6 } },
+                        { valence: { gte: 0.3, lte: 0.7 } },
                     ],
                 },
             ],
@@ -1029,7 +1045,7 @@ export async function generateCoffeeShopVibes(
                 { bpm: { lte: 120 } },
                 {
                     OR: [
-                        { acousticness: { gte: 0.353 } },
+                        { acousticness: { gte: 0.35 } },
                         { instrumentalness: { gte: 0.25 } },
                     ],
                 },
@@ -1057,9 +1073,9 @@ export async function generateRomanticizeYourLife(
             OR: [
                 {
                     AND: [
-                        { valence: { gte: 0.455, lte: 0.632 } },
-                        { arousal: { gte: 0.393, lte: 0.616 } },
-                        { acousticness: { gte: 0.282 } },
+                        { valence: { gte: 0.35, lte: 0.75 } },
+                        { arousal: { gte: 0.25, lte: 0.65 } },
+                        { acousticness: { gte: 0.25 } },
                     ],
                 },
             ],
@@ -1084,7 +1100,7 @@ export async function generateThatGirlEra(
             ...NOT_MISSING,
             analysisStatus: "completed",
             AND: [
-                { valence: { gte: 0.533 } },
+                { valence: { gte: 0.55 } },
                 { energy: { gte: 0.45 } },
                 { danceability: { gte: 0.45 } },
             ],
@@ -1111,8 +1127,8 @@ export async function generateUnhinged(
             OR: [
                 { energy: { gte: 0.85 } },
                 { energy: { lte: 0.15 } },
-                { valence: { gte: 0.702 } },
-                { valence: { lte: 0.376 } },
+                { valence: { gte: 0.9 } },
+                { valence: { lte: 0.1 } },
                 { bpm: { gte: 160 } },
                 { bpm: { lte: 70 } },
                 { danceability: { gte: 0.9 } },
@@ -1127,37 +1143,31 @@ export async function generateDeepCuts(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    const tracks = await prisma.track.findMany({
-        where: {
-            ...NOT_MISSING,
-            plays: {
-                none: {},
-            },
-        },
-        include: {
+    const tracks = await tracksByIds(
+        drawIds(await unplayedTrackIds({ excludeMissing: true }), 200),
+        {
             album: {
                 select: {
                     coverUrl: true,
                     artist: { select: { id: true } },
                 },
             },
-        },
-        take: 200,
-    });
+        }
+    );
 
     if (tracks.length < 15) {
-        const lowPlayTracks = await prisma.track.findMany({
-        where: NOT_MISSING,
-            include: {
-                album: { select: { coverUrl: true } },
-                _count: { select: { plays: true } },
-            },
-            take: 200,
+        const playCounts = await prisma.track.findMany({
+            where: NOT_MISSING,
+            select: { id: true, _count: { select: { plays: true } } },
+            orderBy: { id: "asc" },
         });
-
-        const filtered = lowPlayTracks
+        const lowPlayIds = playCounts
             .filter((t) => t._count.plays <= 3)
-            .map((t) => ({ ...t, album: t.album }));
+            .map((t) => t.id);
+
+        const filtered = await tracksByIds(drawIds(lowPlayIds, 200), {
+            album: { select: { coverUrl: true } },
+        });
 
         if (filtered.length < 15) return null;
 
@@ -1206,7 +1216,7 @@ export async function generateKeyJourney(
         "F",
     ];
 
-    const tracks = await prisma.track.findMany({
+    const tracks = await sampleTracks({
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -1214,6 +1224,7 @@ export async function generateKeyJourney(
         },
         include: { album: { select: { coverUrl: true } } },
         take: 200,
+        seed: getSeededRandom(`key-journey-${today}`),
     });
 
     if (tracks.length < 15) return null;
@@ -1262,7 +1273,7 @@ export async function generateTempoFlow(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    const tracks = await prisma.track.findMany({
+    const tracks = await sampleTracks({
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -1406,17 +1417,14 @@ export async function generateMoodOnDemand(
             ?.[1];
     for (const [key] of LEGACY_MOOD_PARAMS) delete (params as any)[key];
     if (mood) {
-        const bucket = await prisma.moodBucket.findMany({
-            where: { mood },
-            select: { trackId: true },
-        });
-        if (bucket.length < MIN_TRACKS_DAILY) {
+        const bucketSize = await prisma.moodBucket.count({ where: { mood } });
+        if (bucketSize < MIN_TRACKS_DAILY) {
             logger.debug(
-                `[MoodMixer] Bucket "${mood}" has ${bucket.length} tracks (need ${MIN_TRACKS_DAILY})`
+                `[MoodMixer] Bucket "${mood}" has ${bucketSize} tracks (need ${MIN_TRACKS_DAILY})`
             );
             return null;
         }
-        where.id = { in: bucket.map((b) => b.trackId) };
+        where.moodBuckets = { some: { mood } };
     }
 
     if (params.valence) {
@@ -1488,7 +1496,7 @@ export async function generateMoodOnDemand(
         where.keyScale = params.keyScale;
     }
 
-    const tracks = await prisma.track.findMany({
+    const tracks = await sampleTracks({
         where,
         include: { album: { select: { coverUrl: true } } },
         take: 100,

@@ -201,19 +201,124 @@ export function sampleMix(
     };
 }
 
+/** A draw of zero or a negative count would slice from the end and hand back most of the set. */
+function assertTake(take: number): void {
+    if (!Number.isInteger(take) || take < 1) throw new RangeError(`take must be a positive integer, got ${take}`);
+}
+
+/**
+ * Up to `take` of `ids`, drawn uniformly at random. With a `seed` the draw is
+ * repeatable for the same `ids` in the same order.
+ */
+export function drawIds(ids: string[], take: number, seed?: number): string[] {
+    assertTake(take);
+    const shuffled = seed === undefined ? shuffleArray(ids) : seededShuffle(ids, seed);
+    return shuffled.slice(0, take);
+}
+
+/**
+ * Up to `take` items drawn at random without replacement, each more likely the
+ * larger its weight: every item gets the key -ln(U) / weight with U uniform in
+ * (0, 1], and the smallest keys win (Efraimidis and Spirakis 2006, "Weighted
+ * random sampling with a reservoir"). An item whose weight is zero, negative
+ * or not a finite number is never drawn, so fewer than `take` come back when
+ * fewer than `take` items have a positive weight.
+ */
+export function drawWeighted<T>(items: T[], weightOf: (item: T) => number, take: number): T[] {
+    assertTake(take);
+    const keyed: { item: T; key: number }[] = [];
+    for (const item of items) {
+        const weight = weightOf(item);
+        if (!Number.isFinite(weight) || weight <= 0) continue;
+        keyed.push({ item, key: -Math.log(1 - Math.random()) / weight });
+    }
+    keyed.sort((a, b) => a.key - b.key);
+    return keyed.slice(0, take).map((k) => k.item);
+}
+
+/** The tracks with these ids, in the order of `ids`. */
+export async function tracksByIds<I extends Prisma.TrackInclude>(
+    ids: string[],
+    include: I
+): Promise<Prisma.TrackGetPayload<{ include: I }>[]> {
+    if (ids.length === 0) return [];
+    const rows = await prisma.track.findMany({ where: { id: { in: ids } }, include });
+    const byId = new Map(rows.map((t) => [t.id, t]));
+    return ids.flatMap((id) => byId.get(id) ?? []);
+}
+
+/**
+ * Ids of up to `take` tracks drawn uniformly at random from every track
+ * matching `where`, not from the first rows the database returns. Ids are read
+ * in id order so a `seed` gives the same draw each time.
+ */
+export async function sampleTrackIds(args: {
+    where: Prisma.TrackWhereInput;
+    take: number;
+    seed?: number;
+}): Promise<string[]> {
+    assertTake(args.take);
+    const rows = await prisma.track.findMany({
+        where: args.where,
+        select: { id: true },
+        orderBy: { id: "asc" },
+    });
+    return drawIds(
+        rows.map((r) => r.id),
+        args.take,
+        args.seed
+    );
+}
+
+/**
+ * Ids of every track no user has played, in id order. Written as an anti-join
+ * because Prisma's `plays: { none: {} }` becomes `id NOT IN (SELECT trackId
+ * FROM Play)`, which Postgres runs as a rescan of Play for every track once
+ * Play is too large to hash (about a minute and a half at 50,000 tracks and
+ * 105,000 plays). `excludeMissing` leaves out tracks whose file is missing and
+ * `excludeCorrupt` tracks marked corrupt; both together are the PLAYABLE rule.
+ */
+export async function unplayedTrackIds(
+    args: { excludeMissing?: boolean; excludeCorrupt?: boolean } = {}
+): Promise<string[]> {
+    const rows = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT t.id
+        FROM "Track" t
+        WHERE NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id)
+          AND (${!args.excludeMissing} OR t."missingSince" IS NULL)
+          AND (${!args.excludeCorrupt} OR t.corrupt = false)
+        ORDER BY t.id
+    `;
+    return rows.map((r) => r.id);
+}
+
+/**
+ * Up to `take` tracks drawn uniformly at random from every track matching
+ * `where`. Only ids are read for the whole match; full rows are read for the
+ * draw.
+ */
+export async function sampleTracks<I extends Prisma.TrackInclude>(args: {
+    where: Prisma.TrackWhereInput;
+    include: I;
+    take: number;
+    seed?: number;
+}): Promise<Prisma.TrackGetPayload<{ include: I }>[]> {
+    return tracksByIds(await sampleTrackIds(args), args.include);
+}
+
 /** A sampled mix of the tracks that match a filter, or null when too few do. */
 export async function sampledMix(
     spec: MixSpec & {
         where: Prisma.TrackWhereInput;
-        /** How many matching tracks to fetch before sampling. */
+        /** How many matching tracks to draw before sampling. */
         take: number;
-        /** Fewest fetched tracks that still make a mix. */
+        /** Fewest drawn tracks that still make a mix. */
         minTracks: number;
         /** Tracks in the finished mix. */
         limit: number;
     }
 ): Promise<ProgrammaticMix | null> {
-    const tracks = await prisma.track.findMany({
+    const tracks = await sampleTracks({
         where: spec.where,
         include: { album: { select: { coverUrl: true } } },
         take: spec.take,
@@ -241,7 +346,8 @@ const WITH_ALBUM_GENRES = {
  */
 export async function findTracksByGenrePatterns(
     genrePatterns: string[],
-    limit: number = 100
+    limit: number = 100,
+    seed?: number
 ): Promise<TrackWithAlbumCover[]> {
     const genreRows = await prisma.genre.findMany({
         where: {
@@ -253,7 +359,7 @@ export async function findTracksByGenrePatterns(
     const tracks =
         genreRows.length === 0
             ? []
-            : await prisma.track.findMany({
+            : await sampleTracks({
                   where: {
                       ...NOT_MISSING,
                       trackGenres: {
@@ -264,46 +370,41 @@ export async function findTracksByGenrePatterns(
                   },
                   include: WITH_ALBUM_GENRES,
                   take: limit,
+                  seed,
               });
 
     if (tracks.length >= 15) {
         return tracks as TrackWithAlbumCover[];
     }
 
-    const albumTracks = await prisma.track.findMany({
-        where: {
-            ...NOT_MISSING,
-            album: {
-                OR: [
-                    { genres: { not: { equals: null } } },
-                    { userGenres: { not: { equals: null } } },
-                ],
-            },
-        },
-        include: WITH_ALBUM_GENRES,
-        take: limit * 3,
-    });
+    const genreMatchedIds = (
+        await prisma.$queryRaw<{ id: string }[]>`
+            SELECT t.id
+            FROM "Track" t
+            JOIN "Album" a ON a.id = t."albumId"
+            LEFT JOIN "Artist" ar ON ar.id = a."artistId"
+            WHERE t."missingSince" IS NULL
+              AND (a.genres IS NOT NULL OR a."userGenres" IS NOT NULL)
+              AND EXISTS (
+                SELECT 1
+                FROM unnest(${genrePatterns}::text[]) AS p(pattern)
+                CROSS JOIN LATERAL (
+                  SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(a.genres) = 'array' THEN a.genres ELSE '[]'::jsonb END)
+                  UNION ALL
+                  SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(a."userGenres") = 'array' THEN a."userGenres" ELSE '[]'::jsonb END)
+                  UNION ALL
+                  SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(ar."userGenres") = 'array' THEN ar."userGenres" ELSE '[]'::jsonb END)
+                ) AS g(genre)
+                WHERE strpos(lower(g.genre), lower(p.pattern)) > 0
+              )
+            ORDER BY t.id
+        `
+    ).map((r) => r.id);
 
-    const genreMatched = albumTracks.filter((t) => {
-        const albumGenres = t.album.genres as string[] | null;
-        const albumUserGenres = (t.album.userGenres as string[] | null) || [];
-        const artistUserGenres =
-            (t.album.artist?.userGenres as string[] | null) || [];
-
-        const allGenres = [
-            ...(albumGenres || []),
-            ...albumUserGenres,
-            ...artistUserGenres,
-        ];
-
-        if (allGenres.length === 0) return false;
-
-        return allGenres.some((ag) =>
-            genrePatterns.some((gp) =>
-                ag.toLowerCase().includes(gp.toLowerCase())
-            )
-        );
-    });
+    const genreMatched = await tracksByIds(
+        drawIds(genreMatchedIds, limit * 3, seed),
+        WITH_ALBUM_GENRES
+    );
 
     const merged = mergeNewById(tracks, genreMatched);
 

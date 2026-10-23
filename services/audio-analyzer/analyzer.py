@@ -512,6 +512,7 @@ class AudioAnalyzer:
         """
         result = {
             'bpm': None,
+            'bpmConfidence': None,
             'beatsCount': None,
             'key': None,
             'keyScale': None,
@@ -569,8 +570,9 @@ class AudioAnalyzer:
 
             # Tempo: none is stored when the extractor fails; an onset count is not a tempo.
             try:
-                bpm, beats, _, _, _ = self.rhythm_extractor(audio_44k)
+                bpm, beats, confidence, _, _ = self.rhythm_extractor(audio_44k)
                 result['bpm'] = round(float(bpm), 1)
+                result['bpmConfidence'] = float(confidence)
                 result['beatsCount'] = len(beats)
             except Exception as rhythm_error:
                 logger.warning(f"Tempo extraction failed: {rhythm_error}")
@@ -1260,6 +1262,7 @@ class AnalysisWorker:
                 UPDATE "Track"
                 SET
                     bpm = %s,
+                    "bpmConfidence" = %s,
                     "beatsCount" = %s,
                     key = %s,
                     "keyScale" = %s,
@@ -1285,6 +1288,7 @@ class AnalysisWorker:
                     "analyzedAt" = now()
                 WHERE id = %s""", (
                 features['bpm'],
+                features.get('bpmConfidence'),
                 features['beatsCount'],
                 features['key'],
                 features['keyScale'],

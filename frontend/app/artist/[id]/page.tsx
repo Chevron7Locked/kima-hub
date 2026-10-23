@@ -31,7 +31,7 @@ export default function ArtistPage() {
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();
-    const { playTracks, pause } = useAudioControls();
+    const { playTracks, playStation, pause } = useAudioControls();
     const { isPendingByMbid } = useDownloadContext();
 
     const {
@@ -124,7 +124,10 @@ export default function ArtistPage() {
 
             if (response.tracks && response.tracks.length > 0) {
                 // Backend already returns properly formatted tracks - just pass them through
-                playTracks(response.tracks, 0);
+                playStation(response.tracks, async () => {
+                    const more = await api.getRadioTracks("artist", artist.id);
+                    return more.tracks ?? [];
+                });
             } else {
                 notify.error(
                     "Not enough similar music in your library for artist radio",

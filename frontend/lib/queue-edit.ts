@@ -61,3 +61,22 @@ export function removeTrack<T>(snap: QueueSnapshot<T>, cursors: InsertCursors, i
 
     return { queue, shuffleIndices, currentIndex, currentTrack, upNextAt, shufflePos };
 }
+
+/** Adds tracks after the last one. In shuffle they also join the end of the play order, so nothing already queued is reordered. */
+export function appendTracks<T>(snap: QueueSnapshot<T>, tracks: T[]) {
+    const queue = [...snap.queue, ...tracks];
+    let shuffleIndices = snap.shuffleIndices;
+    if (snap.isShuffle && shuffleIndices.length > 0) {
+        shuffleIndices = [...shuffleIndices, ...tracks.map((_, i) => snap.queue.length + i)];
+    }
+    return { queue, shuffleIndices };
+}
+
+/** Whether the playing track is the last one in play order. */
+export function isLastInPlayOrder<T>(snap: QueueSnapshot<T>): boolean {
+    if (snap.queue.length === 0) return false;
+    if (snap.isShuffle && snap.shuffleIndices.length > 0) {
+        return snap.shuffleIndices.indexOf(snap.currentIndex) === snap.shuffleIndices.length - 1;
+    }
+    return snap.currentIndex >= snap.queue.length - 1;
+}

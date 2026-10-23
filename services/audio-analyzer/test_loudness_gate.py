@@ -53,7 +53,7 @@ def _analyze_with_meter(monkeypatch, integrated, loudness_range):
     a.enhanced_mode = True
     t = np.arange(10 * 44100) / 44100
     a.load_audio = lambda path, max_duration=None: (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)[np.newaxis, :]
-    a.rhythm_extractor = lambda audio: (120.0, [0.5, 1.0], None, None, None)
+    a.rhythm_extractor = lambda audio: (120.0, [0.5, 1.0], 3.0, None, None)
     a.key_extractor = lambda audio: ("A", "minor", 0.8)
     a.rms = lambda frame: 0.1
     a.loudness_ebu = lambda pair: (None, None, integrated, loudness_range)

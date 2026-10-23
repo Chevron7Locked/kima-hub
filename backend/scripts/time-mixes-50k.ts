@@ -1,0 +1,251 @@
+/**
+ * Times the mix generators and every radio branch on a synthetic 50,000-track library.
+ *
+ * Writes the library to the throwaway test database, runs generateAllMixes (3 runs) and 10
+ * GET /library/radio calls per branch, prints min / median / max in milliseconds, then deletes
+ * everything it wrote. It refuses to run against any database but the test one.
+ *
+ * usage (from backend/):
+ *   DATABASE_URL=postgresql://test:test@localhost:5433/kima_v1_test npx tsx scripts/time-mixes-50k.ts
+ */
+const REQUIRED_URL = "postgresql://test:test@localhost:5433/kima_v1_test";
+
+if (process.env.DATABASE_URL !== REQUIRED_URL) {
+    console.error(`Refusing to run: DATABASE_URL must be exactly ${REQUIRED_URL}`);
+    process.exit(1);
+}
+process.env.JWT_SECRET ??= "test-jwt-secret-for-testing-purposes-only-32chars";
+process.env.SESSION_SECRET ??= "test-session-secret-for-testing-purposes-only";
+process.env.REDIS_URL ??= "redis://localhost:6379";
+process.env.SETTINGS_ENCRYPTION_KEY ??= "/pqt6ujDwltWiWSK1uSkpQOfwXQpORT0CWScZ8m66Kg=";
+process.env.MUSIC_PATH ??= "/music";
+
+const PREFIX = "perf_";
+const TRACKS = 50_000;
+const TRACKS_PER_ALBUM = 12;
+const ALBUMS = Math.ceil(TRACKS / TRACKS_PER_ALBUM);
+const ALBUMS_PER_ARTIST = 4;
+const ARTISTS = Math.ceil(ALBUMS / ALBUMS_PER_ARTIST);
+const RADIO_CALLS = 10;
+const MIX_RUNS = 3;
+
+function mulberry32(seed: number) {
+    let a = seed;
+    return () => {
+        a = (a + 0x6d2b79f5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+async function main() {
+    const { prisma } = await import("../src/utils/db");
+    const { GENRE_NAMES, MOOD_BUCKETS } = await import("../src/__tests__/fixtures/syntheticLibrary");
+    const { programmaticPlaylistService } = await import("../src/services/mixes");
+    const express = (await import("express")).default;
+    const request = (await import("supertest")).default;
+    const router = (await import("../src/routes/library/tracks")).default;
+    const { findTracksByGenrePatterns } = await import("../src/services/mixes/helpers");
+
+    const rng = mulberry32(20261021);
+    const r4 = (x: number) => Math.round(x * 10000) / 10000;
+    const inChunks = async <T>(rows: T[], write: (c: T[]) => Promise<unknown>, size = 2000) => {
+        for (let i = 0; i < rows.length; i += size) await write(rows.slice(i, i + size));
+    };
+    const user1 = `${PREFIX}user1`;
+    const user2 = `${PREFIX}user2`;
+    const genreIds = new Map<string, string>();
+
+    async function cleanup() {
+        await prisma.play.deleteMany({ where: { userId: { startsWith: PREFIX } } });
+        await prisma.track.deleteMany({ where: { id: { startsWith: PREFIX } } });
+        await prisma.artist.deleteMany({ where: { id: { startsWith: PREFIX } } });
+        await prisma.user.deleteMany({ where: { id: { startsWith: PREFIX } } });
+        await prisma.genre.deleteMany({ where: { id: { startsWith: PREFIX } } });
+    }
+
+    async function seed() {
+        await cleanup();
+        await prisma.user.createMany({ data: [user1, user2].map((id) => ({ id, username: id, passwordHash: "x" })) });
+        const existing = new Set((await prisma.genre.findMany({ select: { name: true } })).map((g) => g.name));
+        await prisma.genre.createMany({
+            data: GENRE_NAMES.filter((n) => !existing.has(n)).map((name) => ({ id: `${PREFIX}gen_${name}`, name })),
+        });
+        for (const g of await prisma.genre.findMany({ select: { id: true, name: true } })) genreIds.set(g.name, g.id);
+        const lower = GENRE_NAMES.map((g) => g.toLowerCase());
+        const some = <T,>(xs: T[], n: number) => {
+            const pool = [...xs];
+            const out: T[] = [];
+            while (out.length < n && pool.length) out.push(...pool.splice(Math.floor(rng() * pool.length), 1));
+            return out;
+        };
+
+        await inChunks(
+            Array.from({ length: ARTISTS }, (_, a) => ({
+                id: `${PREFIX}art_${a}`,
+                name: `Perf Artist ${a}`,
+                normalizedName: `perf artist ${a}`,
+                identityKey: `${PREFIX}ak_${a}`,
+                genres: some(lower, 1 + Math.floor(rng() * 3)),
+            })),
+            (data) => prisma.artist.createMany({ data })
+        );
+        const albums = Array.from({ length: ALBUMS }, (_, b) => {
+            const year = 1960 + Math.floor(rng() * 65);
+            return {
+                id: `${PREFIX}alb_${b}`,
+                rgMbid: `${PREFIX}rg_${b}`,
+                artistId: `${PREFIX}art_${Math.floor(b / ALBUMS_PER_ARTIST)}`,
+                identityKey: `${PREFIX}ik_${b}`,
+                title: `Perf Album ${b}`,
+                primaryType: "Album",
+                year,
+                originalYear: rng() >= 0.3 ? year : null,
+                location: rng() < 0.04 ? ("DISCOVER" as const) : ("LIBRARY" as const),
+                genres: some(lower, 1 + Math.floor(rng() * 2)),
+            };
+        });
+        await inChunks(albums, (data) => prisma.album.createMany({ data }));
+        await prisma.ownedAlbum.createMany({
+            data: Array.from({ length: ARTISTS }, (_, a) => ({
+                artistId: `${PREFIX}art_${a}`,
+                rgMbid: `${PREFIX}rg_${a * ALBUMS_PER_ARTIST}`,
+                source: "test",
+            })),
+        });
+        const similar = [];
+        for (let a = 0; a < ARTISTS - 10; a++)
+            for (let k = 1; k <= 10; k++)
+                similar.push({ fromArtistId: `${PREFIX}art_${a}`, toArtistId: `${PREFIX}art_${a + k}`, weight: 1 - k / 20 });
+        await inChunks(similar, (data) => prisma.similarArtist.createMany({ data }));
+
+        const ids: string[] = [];
+        const tracks = Array.from({ length: TRACKS }, (_, i) => {
+            const id = `${PREFIX}trk_${String(i).padStart(6, "0")}`;
+            ids.push(id);
+            const kind = rng();
+            const nullReadings = kind >= 0.07 && kind < 0.09;
+            const reading = () => (nullReadings ? null : r4(rng()));
+            return {
+                id,
+                albumId: `${PREFIX}alb_${Math.floor(i / TRACKS_PER_ALBUM)}`,
+                title: `Perf Track ${i}`,
+                trackNo: (i % TRACKS_PER_ALBUM) + 1,
+                duration: 200,
+                filePath: `/tmp/${PREFIX}${i}.flac`,
+                fileModified: new Date(),
+                fileSize: 1000,
+                energy: reading(),
+                valence: reading(),
+                arousal: reading(),
+                danceability: reading(),
+                acousticness: reading(),
+                instrumentalness: reading(),
+                bpm: nullReadings ? null : Math.round((60 + rng() * 120) * 10) / 10,
+                keyScale: nullReadings ? null : rng() < 0.45 ? "minor" : "major",
+                key: nullReadings ? null : ["C", "D", "E", "F", "G", "A", "B"][Math.floor(rng() * 7)],
+                moodTags: nullReadings ? [] : ["energetic", "calm", "happy", "sad", "dark", "workout"].filter(() => rng() < 0.15),
+                analysisMode: nullReadings ? null : "enhanced",
+                analysisStatus: kind < 0.04 ? "pending" : "completed",
+                missingSince: kind >= 0.09 && kind < 0.12 ? new Date() : null,
+                corrupt: kind >= 0.12 && kind < 0.15,
+                moodHappy: r4(rng()),
+                moodSad: r4(rng()),
+                moodRelaxed: r4(rng()),
+                moodAggressive: r4(rng()),
+                moodParty: r4(rng()),
+            };
+        });
+        await inChunks(tracks, (data) => prisma.track.createMany({ data }));
+
+        const buckets: { trackId: string; mood: string; score: number }[] = [];
+        const trackGenres: { trackId: string; genreId: string }[] = [];
+        for (const t of tracks) {
+            if (t.analysisStatus === "completed")
+                for (const mood of MOOD_BUCKETS) if (rng() < 0.3) buckets.push({ trackId: t.id, mood, score: r4(rng()) });
+            for (const g of some(GENRE_NAMES, 1 + Math.floor(rng() * 3))) trackGenres.push({ trackId: t.id, genreId: genreIds.get(g)! });
+        }
+        await inChunks(buckets, (data) => prisma.moodBucket.createMany({ data }));
+        await inChunks(trackGenres, (data) => prisma.trackGenre.createMany({ data }));
+
+        const plays: { userId: string; trackId: string }[] = [];
+        ids.forEach((id, i) => {
+            const u = rng();
+            const n1 = i < 25 ? 40 - i : u < 0.05 ? 3 : u < 0.3 ? 1 + Math.floor(rng() * 2) : 0;
+            for (let k = 0; k < n1; k++) plays.push({ userId: user1, trackId: id });
+            if (rng() < 0.35) for (let k = 0, n = 1 + Math.floor(rng() * 8); k < n; k++) plays.push({ userId: user2, trackId: id });
+        });
+        await inChunks(plays, (data) => prisma.play.createMany({ data }), 5000);
+        // A genre with 5 Genre-table tracks (under the 15 that skip the fallback) and ~10% of albums carrying it in
+        // Album.genres, so findTracksByGenrePatterns takes its album-genre fallback over thousands of tracks.
+        await prisma.genre.create({ data: { id: `${PREFIX}gen_niche`, name: "perfniche" } });
+        await prisma.trackGenre.createMany({ data: ids.slice(0, 5).map((trackId) => ({ trackId, genreId: `${PREFIX}gen_niche` })) });
+        await prisma.$executeRaw`UPDATE "Album" SET genres = genres || '["Perfniche Rock"]'::jsonb WHERE id LIKE ${PREFIX + "alb_%"} AND random() < 0.1`;
+        console.log(`seeded: ${TRACKS} tracks, ${ALBUMS} albums, ${ARTISTS} artists, ${buckets.length} mood rows, ${trackGenres.length} track-genre rows, ${plays.length} plays`);
+    }
+
+    const summarize = (label: string, ms: number[]) => {
+        const s = [...ms].sort((a, b) => a - b);
+        console.log(`${label.padEnd(28)} min ${s[0].toFixed(0).padStart(6)}  median ${s[Math.floor(s.length / 2)].toFixed(0).padStart(6)}  max ${s[s.length - 1].toFixed(0).padStart(6)}  ms  (n=${s.length})`);
+    };
+    const time = async (fn: () => Promise<unknown>) => {
+        const t0 = performance.now();
+        await fn();
+        return performance.now() - t0;
+    };
+
+    try {
+        await seed();
+
+        const mixMs: number[] = [];
+        let mixCount = 0;
+        for (let k = 0; k < MIX_RUNS; k++)
+            mixMs.push(await time(async () => (mixCount = (await programmaticPlaylistService.generateAllMixes(user1, true)).length)));
+        summarize(`generateAllMixes (${mixCount} mixes)`, mixMs);
+
+        const fallbackMs: number[] = [];
+        let fallbackCount = 0;
+        for (let k = 0; k < RADIO_CALLS; k++)
+            fallbackMs.push(await time(async () => (fallbackCount = (await findTracksByGenrePatterns(["perfniche"], 100)).length)));
+        summarize(`genre fallback (${fallbackCount} tracks)`, fallbackMs);
+
+        const app = express();
+        app.use(express.json());
+        app.use("/", router);
+        const artist = `${PREFIX}art_5`;
+        const branches: [string, Record<string, string | number>][] = [
+            ["discovery", { type: "discovery" }],
+            ["favorites", { type: "favorites" }],
+            ["decade 1990", { type: "decade", value: 1990 }],
+            ["genre rock", { type: "genre", value: "rock" }],
+            ["mood happy", { type: "mood", value: "happy" }],
+            ["mood chill", { type: "mood", value: "chill" }],
+            ["mood high-energy", { type: "mood", value: "high-energy" }],
+            ["mood acoustic", { type: "mood", value: "acoustic" }],
+            ["mood instrumental", { type: "mood", value: "instrumental" }],
+            ["workout", { type: "workout" }],
+            ["artist", { type: "artist", value: artist }],
+            ["all", { type: "all" }],
+        ];
+        for (const [label, query] of branches) {
+            const ms: number[] = [];
+            for (let k = 0; k < RADIO_CALLS; k++) {
+                let status = 0;
+                ms.push(await time(async () => (status = (await request(app).get("/radio").query({ ...query, limit: 20 })).status)));
+                if (status !== 200) console.log(`  ${label}: call ${k} returned status ${status}`);
+            }
+            summarize(`radio ${label}`, ms);
+        }
+    } finally {
+        await cleanup();
+        await prisma.$disconnect();
+        console.log("cleaned up");
+    }
+    process.exit(0);
+}
+
+main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+});

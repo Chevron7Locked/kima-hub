@@ -1,7 +1,5 @@
-// Cut-offs on acousticness, valence and arousal (read wholly or partly from the sound model and the mood analyzer)
-// pass the same share of a library as before the music sound model and the mood analyzer's new valence/arousal
-// mapping: each was matched on 8,971 tracks, recorded in
-// services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json. A new model or mapping needs a new match.
+// The mood and radio cut-offs in this file are the launch values; the record of each is
+// services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json.
 import { Prisma } from "@prisma/client";
 import { ProgrammaticMix, sampledMix, TRACK_LIMIT } from "./helpers";
 import { NOT_MISSING } from "../../utils/libraryEligibility";
@@ -28,7 +26,7 @@ const DAY_MIXES: Record<
             ...NOT_MISSING,
             analysisStatus: "completed",
             energy: { lte: 0.5 },
-            acousticness: { gte: 0.551 },
+            acousticness: { gte: 0.5 },
         },
     },
     1: {
@@ -41,7 +39,7 @@ const DAY_MIXES: Record<
             ...NOT_MISSING,
             analysisStatus: "completed",
             energy: { gte: 0.6 },
-            valence: { gte: 0.51 },
+            valence: { gte: 0.5 },
         },
     },
     5: {

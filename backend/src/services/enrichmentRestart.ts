@@ -75,7 +75,7 @@ function resetRecording(tx: Tx): Promise<unknown> {
 async function resetAnalysis(tx: Tx): Promise<number> {
     const tracks = await tx.$executeRaw`
         UPDATE "Track"
-        SET bpm = NULL, "beatsCount" = NULL, key = NULL, "keyScale" = NULL, "keyStrength" = NULL,
+        SET bpm = NULL, "bpmConfidence" = NULL, "beatsCount" = NULL, key = NULL, "keyScale" = NULL, "keyStrength" = NULL,
             energy = NULL, loudness = NULL, "dynamicRange" = NULL, danceability = NULL,
             valence = NULL, arousal = NULL, "deamValence" = NULL, "deamArousal" = NULL,
             "clapValenceRaw" = NULL, "clapArousalRaw" = NULL,
