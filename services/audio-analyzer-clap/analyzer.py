@@ -91,7 +91,7 @@ CLAIM_IN_JOB_ID = re.compile(r'-(\d+)-r(\d+)$')
 # Zero-shot valence/arousal: score = sigmoid(a * margin + b), calibrate_platt.py's fit for the music model, chosen in
 # eval/music-switch-2026-10-17/fits.json: valence fitted on Memo2496, arousal on DEAM (the Memo2496 fit pinned 18% of
 # a rock-heavy library at >= 0.99). The general model's fit is eval/calibration/platt-memo2496.json. A new model
-# needs a new fit, and the backend's mix cut-offs a new match (cutoffs.json).
+# needs a new fit.
 VA_CALIB = {'valence': (8.264, 0.249), 'arousal': (10.654, 0.018)}
 
 # The zero-shot prompt groups. A changed prompt changes every stored score that reads it.
