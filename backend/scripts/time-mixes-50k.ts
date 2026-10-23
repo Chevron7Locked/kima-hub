@@ -1,13 +1,16 @@
 /**
  * Times the mix generators and every radio branch on a synthetic 50,000-track library.
  *
- * Writes the library to the throwaway test database, runs generateAllMixes (3 runs) and 10
+ * Writes the library to the throwaway test database with learned mood scores and the library's
+ * mood statistics, runs generateAllMixes (3 runs), every recipe's member query once and 10
  * GET /library/radio calls per branch, prints min / median / max in milliseconds, then deletes
  * everything it wrote. It refuses to run against any database but the test one.
  *
  * usage (from backend/):
  *   DATABASE_URL=postgresql://test:test@localhost:5433/kima_v1_test npx tsx scripts/time-mixes-50k.ts
  */
+import type { Prisma } from "@prisma/client";
+
 const REQUIRED_URL = "postgresql://test:test@localhost:5433/kima_v1_test";
 
 if (process.env.DATABASE_URL !== REQUIRED_URL) {
@@ -46,7 +49,9 @@ async function main() {
     const express = (await import("express")).default;
     const request = (await import("supertest")).default;
     const router = (await import("../src/routes/library/tracks")).default;
-    const { findTracksByGenrePatterns } = await import("../src/services/mixes/helpers");
+    const { MOODS, MOOD_HEADS } = await import("../src/services/moods/heads");
+    const { buildMoodState } = await import("../src/services/moods/state");
+    const { RECIPES, pickRecipeStation } = await import("../src/services/mixes/recipes");
 
     const rng = mulberry32(20261021);
     const r4 = (x: number) => Math.round(x * 10000) / 10000;
@@ -63,6 +68,7 @@ async function main() {
         await prisma.artist.deleteMany({ where: { id: { startsWith: PREFIX } } });
         await prisma.user.deleteMany({ where: { id: { startsWith: PREFIX } } });
         await prisma.genre.deleteMany({ where: { id: { startsWith: PREFIX } } });
+        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
     }
 
     async function seed() {
@@ -143,6 +149,7 @@ async function main() {
                 acousticness: reading(),
                 instrumentalness: reading(),
                 bpm: nullReadings ? null : Math.round((60 + rng() * 120) * 10) / 10,
+                bpmConfidence: nullReadings || rng() < 0.1 ? null : r4(4 * rng()),
                 keyScale: nullReadings ? null : rng() < 0.45 ? "minor" : "major",
                 key: nullReadings ? null : ["C", "D", "E", "F", "G", "A", "B"][Math.floor(rng() * 7)],
                 moodTags: nullReadings ? [] : ["energetic", "calm", "happy", "sad", "dark", "workout"].filter(() => rng() < 0.15),
@@ -177,11 +184,26 @@ async function main() {
             if (rng() < 0.35) for (let k = 0, n = 1 + Math.floor(rng() * 8); k < n; k++) plays.push({ userId: user2, trackId: id });
         });
         await inChunks(plays, (data) => prisma.play.createMany({ data }), 5000);
-        // A genre with 5 Genre-table tracks (under the 15 that skip the fallback) and ~10% of albums carrying it in
-        // Album.genres, so findTracksByGenrePatterns takes its album-genre fallback over thousands of tracks.
-        await prisma.genre.create({ data: { id: `${PREFIX}gen_niche`, name: "perfniche" } });
-        await prisma.trackGenre.createMany({ data: ids.slice(0, 5).map((trackId) => ({ trackId, genreId: `${PREFIX}gen_niche` })) });
-        await prisma.$executeRaw`UPDATE "Album" SET genres = genres || '["Perfniche Rock"]'::jsonb WHERE id LIKE ${PREFIX + "alb_%"} AND random() < 0.1`;
+
+        // A sound vector for every track and its 22 learned mood scores (independent normal logits, mean -1, SD 1.5),
+        // then the library's mood statistics, as the mood step leaves them.
+        const analyzedAt = new Date("2026-10-23T00:00:00Z");
+        const unit = `[1${",0".repeat(MOOD_HEADS.dims - 1)}]`;
+        await prisma.$executeRaw`
+            INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
+            SELECT id, ${unit}::vector, ${MOOD_HEADS.model}, ${analyzedAt} FROM unnest(${ids}::text[]) AS id
+        `;
+        const gaussian = () => Math.sqrt(-2 * Math.log(1 - rng())) * Math.cos(2 * Math.PI * rng());
+        await inChunks(
+            ids.map((track_id) => ({
+                track_id,
+                embedded_at: analyzedAt,
+                weights: MOOD_HEADS.version,
+                ...Object.fromEntries(MOODS.map((mood) => [mood, r4(-1 + 1.5 * gaussian())])),
+            })) as Prisma.TrackMoodCreateManyInput[],
+            (data) => prisma.trackMood.createMany({ data })
+        );
+        await prisma.$transaction((tx) => buildMoodState(tx), { timeout: 600_000 });
         console.log(`seeded: ${TRACKS} tracks, ${ALBUMS} albums, ${ARTISTS} artists, ${buckets.length} mood rows, ${trackGenres.length} track-genre rows, ${plays.length} plays`);
     }
 
@@ -204,11 +226,9 @@ async function main() {
             mixMs.push(await time(async () => (mixCount = (await programmaticPlaylistService.generateAllMixes(user1, true)).length)));
         summarize(`generateAllMixes (${mixCount} mixes)`, mixMs);
 
-        const fallbackMs: number[] = [];
-        let fallbackCount = 0;
-        for (let k = 0; k < RADIO_CALLS; k++)
-            fallbackMs.push(await time(async () => (fallbackCount = (await findTracksByGenrePatterns(["perfniche"], 100)).length)));
-        summarize(`genre fallback (${fallbackCount} tracks)`, fallbackMs);
+        const recipeMs: number[] = [];
+        for (const id of RECIPES.keys()) recipeMs.push(await time(() => pickRecipeStation(id, { limit: 100 })));
+        summarize(`one recipe's members (${RECIPES.size})`, recipeMs);
 
         const app = express();
         app.use(express.json());
@@ -220,7 +240,10 @@ async function main() {
             ["decade 1990", { type: "decade", value: 1990 }],
             ["genre rock", { type: "genre", value: "rock" }],
             ["mood happy", { type: "mood", value: "happy" }],
+            ["mood melancholy", { type: "mood", value: "melancholy" }],
             ["mood chill", { type: "mood", value: "chill" }],
+            ["mood intense", { type: "mood", value: "intense" }],
+            ["mood dance", { type: "mood", value: "dance" }],
             ["mood high-energy", { type: "mood", value: "high-energy" }],
             ["mood acoustic", { type: "mood", value: "acoustic" }],
             ["mood instrumental", { type: "mood", value: "instrumental" }],
