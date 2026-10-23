@@ -1,0 +1,491 @@
+{
+    "chill": {
+        "name": "Chill Mix",
+        "components": {
+            "calm": 45,
+            "low:arousal": 25,
+            "groovy": 15,
+            "dreamy": 15
+        }
+    },
+    "late-night": {
+        "name": "Late Night",
+        "components": {
+            "night": 30,
+            "calm": 20,
+            "low:arousal": 20,
+            "groovy": 15,
+            "sexy": 15
+        }
+    },
+    "happy": {
+        "name": "Happy Vibes / Happy station",
+        "components": {
+            "happy": 40,
+            "uplifting": 15,
+            "arousal": 15,
+            "groovy": 10,
+            "low:minor": 10,
+            "low:instrumental": 10
+        }
+    },
+    "melancholy": {
+        "name": "Melancholy / Melancholy station",
+        "components": {
+            "sad": 0.5,
+            "minor": 0.15,
+            "low:arousal": 0.2,
+            "nostalgic": 0.15
+        }
+    },
+    "sad-girl-sundays": {
+        "name": "Sad Girl Sundays",
+        "components": {
+            "sad": 0.35,
+            "romantic": 0.25,
+            "dreamy": 0.25,
+            "low:arousal": 0.15
+        },
+        "filters": {
+            "instrumental_max": 0.5
+        }
+    },
+    "in-my-feelings": {
+        "name": "In My Feelings",
+        "components": {
+            "romantic": 0.4,
+            "sad": 0.25,
+            "groovy": 0.2,
+            "sexy": 0.15
+        },
+        "filters": {
+            "instrumental_max": 0.5
+        }
+    },
+    "3am-thoughts": {
+        "name": "3AM Thoughts",
+        "components": {
+            "night": 0.35,
+            "dreamy": 0.25,
+            "sad": 0.2,
+            "low:arousal": 0.2
+        }
+    },
+    "romanticize": {
+        "name": "Romanticize Your Life",
+        "components": {
+            "romantic": 25,
+            "uplifting": 20,
+            "dreamy": 15,
+            "happy": 15,
+            "acoustic": 15,
+            "nostalgic": 10
+        }
+    },
+    "golden-hour": {
+        "name": "Golden Hour",
+        "components": {
+            "summer": 30,
+            "groovy": 25,
+            "happy": 20,
+            "dreamy": 15,
+            "romantic": 10
+        }
+    },
+    "sunday-morning": {
+        "name": "Sunday Morning",
+        "components": {
+            "calm": 35,
+            "happy": 25,
+            "acoustic": 15,
+            "low:arousal": 15,
+            "groovy": 10
+        }
+    },
+    "coffee-shop": {
+        "name": "Coffee Shop Vibes",
+        "components": {
+            "calm": 0.35,
+            "acoustic": 0.25,
+            "groovy": 0.15,
+            "dreamy": 0.1,
+            "low:arousal": 0.15
+        }
+    },
+    "acoustic": {
+        "name": "Acoustic Afternoon",
+        "components": {
+            "acoustic": 0.5,
+            "happy": 0.2,
+            "uplifting": 0.15,
+            "low:instrumental": 0.15
+        }
+    },
+    "sleep": {
+        "name": "Sleep",
+        "components": {
+            "sleep": 40,
+            "low:arousal": 25,
+            "calm": 15,
+            "instrumental": 10,
+            "acoustic": 10
+        }
+    },
+    "road-trip": {
+        "name": "Road Trip",
+        "components": {
+            "driving": 0.45,
+            "uplifting": 0.25,
+            "summer": 0.15,
+            "low:instrumental": 0.15
+        }
+    },
+    "midnight-drive": {
+        "name": "Midnight Drive",
+        "components": {
+            "night": 35,
+            "driving": 20,
+            "dark": 15,
+            "dreamy": 10,
+            "low:acoustic": 20
+        },
+        "filters": {
+            "arousal_pct": [
+                0.25,
+                0.75
+            ]
+        }
+    },
+    "instrumental": {
+        "name": "Instrumental Focus",
+        "components": {
+            "focus": 40,
+            "calm": 30,
+            "instrumental": 30
+        },
+        "filters": {
+            "instrumental_min": 0.5,
+            "arousal_pct": [
+                0.0,
+                0.75
+            ]
+        }
+    },
+    "focus": {
+        "name": "Focus Mix",
+        "components": {
+            "focus": 1,
+            "instrumental": 1.25
+        },
+        "filters": {
+            "arousal_pct": [
+                0.0,
+                0.75
+            ]
+        }
+    },
+    "summer": {
+        "name": "Summer",
+        "components": {
+            "summer": 40,
+            "happy": 20,
+            "party": 15,
+            "groovy": 10,
+            "arousal": 15
+        }
+    },
+    "epic": {
+        "name": "Epic",
+        "components": {
+            "epic": 45,
+            "arousal": 20,
+            "uplifting": 15,
+            "energetic": 10,
+            "instrumental": 10
+        }
+    },
+    "dreamy": {
+        "name": "Dreamy",
+        "components": {
+            "dreamy": 50,
+            "calm": 20,
+            "low:arousal": 15,
+            "romantic": 15
+        }
+    },
+    "nostalgic": {
+        "name": "Nostalgic",
+        "components": {
+            "nostalgic": 50,
+            "happy": 15,
+            "sad": 15,
+            "arousal": 20
+        }
+    },
+    "intense": {
+        "name": "Intense station",
+        "components": {
+            "aggressive": 35,
+            "arousal": 25,
+            "dark": 20,
+            "energetic": 10,
+            "epic": 10
+        }
+    },
+    "upbeat": {
+        "name": "Upbeat page",
+        "components": {
+            "happy": 30,
+            "arousal": 25,
+            "energetic": 15,
+            "uplifting": 15,
+            "party": 15
+        }
+    },
+    "calm": {
+        "name": "Calm page",
+        "components": {
+            "calm": 45,
+            "low:arousal": 25,
+            "acoustic": 10,
+            "instrumental": 10,
+            "low:dark": 10
+        }
+    },
+    "energetic": {
+        "name": "Energetic page",
+        "components": {
+            "energetic": 35,
+            "arousal": 30,
+            "party": 20,
+            "workout": 15
+        }
+    },
+    "high-energy": {
+        "name": "High Energy",
+        "components": {
+            "energetic": 0.45,
+            "happy": 0.3,
+            "party": 0.25,
+            "low:calm": 0.15,
+            "low:sleep": 0.15
+        },
+        "filters": {
+            "arousal_pct": [
+                0.5,
+                1
+            ]
+        }
+    },
+    "rage-cleaning": {
+        "name": "Rage Cleaning",
+        "components": {
+            "aggressive": 0.55,
+            "energetic": 0.2,
+            "fun_quirky": 0.15,
+            "dark": 0.1,
+            "low:calm": 0.15,
+            "low:sleep": 0.15
+        },
+        "filters": {
+            "arousal_pct": [
+                0.5,
+                1
+            ]
+        }
+    },
+    "villain-era": {
+        "name": "Villain Era",
+        "components": {
+            "dark": 0.45,
+            "aggressive": 0.3,
+            "sexy": 0.15,
+            "epic": 0.1,
+            "low:happy": 0.15
+        },
+        "filters": {
+            "arousal_pct": [
+                0.35,
+                1
+            ]
+        }
+    },
+    "main-character": {
+        "name": "Main Character Energy",
+        "components": {
+            "uplifting": 0.3,
+            "epic": 0.2,
+            "happy": 0.15,
+            "dreamy": 0.1,
+            "driving": 0.1,
+            "summer": 0.1,
+            "nostalgic": 0.05,
+            "low:dark": 0.3,
+            "low:aggressive": 0.3,
+            "low:sleep": 0.3,
+            "low:sad": 0.1
+        },
+        "filters": {
+            "arousal_pct": [
+                0.35,
+                1
+            ]
+        }
+    },
+    "that-girl-era": {
+        "name": "That Girl Era",
+        "components": {
+            "happy": 0.3,
+            "uplifting": 0.2,
+            "calm": 0.15,
+            "summer": 0.15,
+            "dreamy": 0.1,
+            "focus": 0.05,
+            "groovy": 0.05,
+            "low:aggressive": 0.5,
+            "low:dark": 0.4,
+            "low:sad": 0.3,
+            "low:night": 0.2,
+            "low:party": 0.1
+        },
+        "filters": {
+            "arousal_pct": [
+                0.25,
+                0.75
+            ]
+        }
+    },
+    "hot-girl-walk": {
+        "name": "Hot Girl Walk",
+        "components": {
+            "sexy": 0.4,
+            "groovy": 0.25,
+            "happy": 0.2,
+            "energetic": 0.15,
+            "low:calm": 0.15,
+            "low:sleep": 0.15
+        },
+        "filters": {
+            "arousal_pct": [
+                0.35,
+                1
+            ]
+        }
+    },
+    "monday-motivation": {
+        "name": "Monday Motivation",
+        "components": {
+            "uplifting": 0.5,
+            "epic": 0.2,
+            "energetic": 0.15,
+            "happy": 0.15,
+            "low:sad": 0.15,
+            "low:sleep": 0.15
+        },
+        "filters": {
+            "arousal_pct": [
+                0.5,
+                1
+            ]
+        }
+    },
+    "workout": {
+        "name": "Workout Mix",
+        "components": {
+            "workout": 0.55,
+            "energetic": 0.3,
+            "uplifting": 0.15,
+            "low:calm": 0.15,
+            "low:sleep": 0.15
+        },
+        "filters": {
+            "arousal_pct": [
+                0.5,
+                1
+            ]
+        }
+    },
+    "dance-floor": {
+        "name": "Dance Floor",
+        "components": {
+            "groovy": 0.45,
+            "party": 0.35,
+            "energetic": 0.2
+        },
+        "filters": {
+            "arousal_pct": [
+                0.5,
+                1
+            ],
+            "bpm": [
+                110,
+                140
+            ]
+        }
+    },
+    "party": {
+        "name": "Party Playlist",
+        "components": {
+            "party": 0.5,
+            "happy": 0.2,
+            "fun_quirky": 0.15,
+            "energetic": 0.15,
+            "low:sad": 0.15,
+            "low:sleep": 0.15
+        }
+    },
+    "friday-night": {
+        "name": "Friday Night",
+        "components": {
+            "night": 0.4,
+            "party": 0.25,
+            "sexy": 0.25,
+            "groovy": 0.1
+        },
+        "filters": {
+            "arousal_pct": [
+                0.35,
+                1
+            ]
+        }
+    },
+    "unhinged": {
+        "name": "Unhinged",
+        "components": {
+            "fun_quirky": 0.4,
+            "trippy": 0.35,
+            "aggressive": 0.15,
+            "dark": 0.1,
+            "low:calm": 0.15,
+            "low:sleep": 0.15
+        },
+        "filters": {
+            "arousal_pct": [
+                0.5,
+                1
+            ]
+        }
+    },
+    "shower-karaoke": {
+        "name": "Shower Karaoke",
+        "components": {
+            "happy": 0.3,
+            "uplifting": 0.2,
+            "nostalgic": 0.15,
+            "energetic": 0.15,
+            "party": 0.1,
+            "romantic": 0.1,
+            "low:dark": 0.3,
+            "low:aggressive": 0.2,
+            "low:sleep": 0.4,
+            "low:calm": 0.1
+        },
+        "filters": {
+            "arousal_pct": [
+                0.35,
+                1
+            ],
+            "instrumental_max": 0.5
+        }
+    }
+}

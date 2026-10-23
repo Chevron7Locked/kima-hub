@@ -28,7 +28,7 @@ const logit = (column: string) => {
     const p = `LEAST(0.99, GREATEST(0.01, t.${column}))`;
     return `CASE WHEN t.${column} IS NOT NULL THEN ln(${p} / (1 - ${p})) END`;
 };
-const READING_SQL: Record<Reading, string> = {
+export const READING_SQL: Record<Reading, string> = {
     arousal: logit("arousal"),
     instrumental_logit: logit("instrumentalness"),
     acoustic_logit: logit("acousticness"),

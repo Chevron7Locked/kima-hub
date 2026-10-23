@@ -26,9 +26,12 @@
  *   - two users. user1 plays 25 tracks (none with a missing file) 40..16 times
  *     (distinct counts, so the top 20 is unambiguous), 3 plays on 5% of tracks, 1-2 plays on 25%. user2
  *     plays 35% of tracks 1-8 times.
+ *
+ * `seedSyntheticMoods` adds learned mood scores and tempo confidence on top, from a seed of its own.
  */
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
+import { MOODS, MOOD_HEADS } from "../../services/moods/heads";
 
 export const TRACK_COUNT = 3000;
 const ALBUM_COUNT = 500;
@@ -258,6 +261,37 @@ export async function seedSyntheticLibrary(prefix: string): Promise<LibraryHandl
     await inChunks(plays, (data) => prisma.play.createMany({ data }));
 
     return { prefix, user1, user2 };
+}
+
+/**
+ * Gives every track under `prefix` a sound vector of the mood heads' model, its 22 learned mood scores (independent
+ * normal logits, mean -1, SD 1.5) and a tempo confidence (uniform 0-4, none on a tenth of tracks), from a seed of its
+ * own so `seedSyntheticLibrary`'s readings stay as they are. The library's mood statistics are left to the caller.
+ */
+export async function seedSyntheticMoods(prefix: string): Promise<void> {
+    const rng = mulberry32(20261024);
+    const gaussian = () => Math.sqrt(-2 * Math.log(1 - rng())) * Math.cos(2 * Math.PI * rng());
+    const r4 = (x: number) => Math.round(x * 10000) / 10000;
+    const ids = Array.from({ length: TRACK_COUNT }, (_, i) => trackId(prefix, i));
+    const analyzedAt = new Date("2026-10-23T00:00:00Z");
+    const unit = `[1${",0".repeat(MOOD_HEADS.dims - 1)}]`;
+    await prisma.$executeRaw`
+        INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
+        SELECT id, ${unit}::vector, ${MOOD_HEADS.model}, ${analyzedAt} FROM unnest(${ids}::text[]) AS id
+    `;
+    const rows = ids.map((id) => ({
+        track_id: id,
+        embedded_at: analyzedAt,
+        weights: MOOD_HEADS.version,
+        ...Object.fromEntries(MOODS.map((mood) => [mood, r4(-1 + 1.5 * gaussian())])),
+    })) as Prisma.TrackMoodCreateManyInput[];
+    await inChunks(rows, (data) => prisma.trackMood.createMany({ data }));
+    const confidence = ids.map(() => (rng() < 0.1 ? null : r4(4 * rng())));
+    await prisma.$executeRaw`
+        UPDATE "Track" t SET "bpmConfidence" = c.confidence
+        FROM unnest(${ids}::text[], ${confidence}::float8[]) AS c(id, confidence)
+        WHERE t.id = c.id
+    `;
 }
 
 /** Removes everything `seedSyntheticLibrary(prefix)` wrote (and nothing else). */
