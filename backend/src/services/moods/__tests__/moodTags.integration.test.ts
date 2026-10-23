@@ -144,6 +144,62 @@ describe("mood tags", () => {
         expect(await pass()).toEqual({ scored: 0, stateChanged: false, tagged: 3 });
         expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
     });
+
+    it("stay while the statistics are of other weights or cleared, and move when statistics return", async () => {
+        // Statistics a rewrite would tag no one by.
+        await prisma.$executeRawUnsafe(`UPDATE mood_state SET version = 'other weights', happy_mean = 100, sad_mean = 100`);
+        expect(await writeMoodTags()).toBe(0);
+        expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
+
+        // Cleared, as a rescore clears them, while the library grows by the two tracks of the test above.
+        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+        await seedLibrary(10, [3, 3], [0, 0]);
+        expect(await writeMoodTags()).toBe(0);
+        expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
+
+        expect(await pass()).toMatchObject({ scored: 0, stateChanged: true });
+        expect(await tagsOf(library(12))).toEqual([
+            ["happy", "sad"], ["sad"], ["sad"], [], [], [], [], [], [], [], ["happy"], ["happy"],
+        ]);
+        await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id IN ($1, $2)`, trackId(10), trackId(11));
+        expect(await pass()).toMatchObject({ stateChanged: true });
+        expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
+    });
+});
+
+describe("a deadlock while the tags are written", () => {
+    it("writes nothing and returns 0, and the next pass writes the tags", async () => {
+        await prisma.$executeRawUnsafe(`UPDATE "Track" SET "moodTags" = '{}' WHERE id = $1`, trackId(0));
+        let writing: Promise<number> | undefined;
+        // Holds a track the tags need, then takes the state row the tag writer holds: each waits on the other.
+        await prisma.$transaction(
+            async (tx) => {
+                await tx.$executeRawUnsafe(`UPDATE "Track" SET title = title WHERE id = $1`, trackId(0));
+                writing = writeMoodTags();
+                // Watched from outside this transaction, which would see one snapshot of the activity throughout; given
+                // up well inside the transaction's timeout, so a writer that never waits fails the test.
+                const giveUp = Date.now() + 20_000;
+                for (;;) {
+                    if (Date.now() > giveUp) throw new Error("The tag writer never waited on the held track");
+                    const [{ n }] = await prisma.$queryRawUnsafe<Array<{ n: number }>>(
+                        `SELECT count(*)::int AS n FROM pg_stat_activity
+                         WHERE datname = current_database() AND wait_event_type = 'Lock'
+                           AND query LIKE '%SET "moodTags" = n.tags%'`,
+                    );
+                    if (n > 0) break;
+                    await new Promise((resolve) => setTimeout(resolve, 20));
+                }
+                await tx.$queryRawUnsafe(`SELECT id FROM mood_state WHERE id = 'default' FOR UPDATE`);
+            },
+            { timeout: 30_000, maxWait: 30_000 },
+        );
+        // The tag writer waited first, so Postgres's deadlock check ends its transaction rather than this one.
+        expect(await writing).toBe(0);
+        expect(await tagsOf([trackId(0)])).toEqual([[]]);
+
+        expect(await writeMoodTags()).toBe(1);
+        expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
+    });
 });
 
 describe("an analysis re-run", () => {
@@ -151,7 +207,7 @@ describe("an analysis re-run", () => {
         await rerunEnrichment("analysis");
         expect(await tagsOf(library(10))).toEqual(library(10).map(() => []));
 
-        // The analysis is pending and the sound vectors are gone, so a pass finds nothing to tag.
+        // The analysis is pending, the sound vectors and the statistics are gone, so a pass writes no tags.
         expect(await pass()).toEqual({ scored: 0, stateChanged: false, tagged: 0 });
         expect(await loadMoodState()).toBeNull();
         expect(await tagsOf(library(10))).toEqual(library(10).map(() => []));

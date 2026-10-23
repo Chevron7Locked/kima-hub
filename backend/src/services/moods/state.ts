@@ -185,7 +185,9 @@ export const TAG_LINE_Z = 1.0;
  * Every track's mood tags: each mood whose score sits at least TAG_LINE_Z SDs above the library's mean, in the moods'
  * order. Tags are relative to the library, so every pass sets them from the current scores and statistics; a track
  * the statistics leave out has none. Only tracks whose tags differ are written, so a pass also refills tags that
- * anything else cleared. Returns how many tracks' tags changed.
+ * anything else cleared. Without statistics for these weights (a rescore or a re-run cleared them, or no track is
+ * eligible) nothing is written and every track keeps its tags until a pass has statistics again. Returns how many
+ * tracks' tags changed.
  */
 export async function writeMoodTags(): Promise<number> {
     const tags = Prisma.raw(
@@ -194,35 +196,49 @@ export async function writeMoodTags(): Promise<number> {
                        THEN '${mood}' END`,
         ).join(", ")}]::text[], NULL)`,
     );
-    // Read committed, so a track another writer changes meanwhile is waited for instead of failing the pass.
-    return prisma.$transaction(
-        async (tx) => {
-            // The state row first, as the build and a re-run take it, before the track rows: one order, no deadlock.
-            await tx.$queryRaw`SELECT id FROM mood_state WHERE id = 'default' FOR UPDATE`;
-            return tx.$executeRaw`
-                UPDATE "Track" t
-                SET "moodTags" = n.tags
-                FROM (
-                    SELECT tr.id,
-                           CASE WHEN te.track_id IS NOT NULL AND s.id IS NOT NULL
-                                     AND tr."missingSince" IS NULL AND tr.corrupt = false
-                                     AND tr."analysisStatus" = 'completed'
-                                THEN ${tags} ELSE '{}'::text[] END AS tags
-                    FROM "Track" tr
-                    LEFT JOIN track_moods m ON m.track_id = tr.id AND m.weights = ${MOOD_HEADS.version}
-                    LEFT JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
-                                                 AND te.model_version = ${MOOD_HEADS.model}
-                    LEFT JOIN mood_state s ON s.id = 'default' AND s.version = ${MOOD_STATE_VERSION}
-                ) n
-                WHERE t.id = n.id AND t."moodTags" IS DISTINCT FROM n.tags
-            `;
-        },
-        {
-            isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-            timeout: BUILD_TIMEOUT_MS,
-            maxWait: BUILD_TIMEOUT_MS,
-        },
-    );
+    try {
+        // Read committed, so a track another writer changes meanwhile is waited for instead of failing the pass.
+        return await prisma.$transaction(
+            async (tx) => {
+                // The state row first, as the build and a re-run take it, before the track rows: one order, so neither
+                // deadlocks. Held to the commit, so the statistics cannot change under the update.
+                const [state] = await tx.$queryRaw<Array<{ version: string }>>`
+                    SELECT version FROM mood_state WHERE id = 'default' FOR UPDATE
+                `;
+                if (state?.version !== MOOD_STATE_VERSION) return 0;
+                return tx.$executeRaw`
+                    UPDATE "Track" t
+                    SET "moodTags" = n.tags
+                    FROM (
+                        SELECT tr.id,
+                               CASE WHEN te.track_id IS NOT NULL
+                                         AND tr."missingSince" IS NULL AND tr.corrupt = false
+                                         AND tr."analysisStatus" = 'completed'
+                                    THEN ${tags} ELSE '{}'::text[] END AS tags
+                        FROM "Track" tr
+                        JOIN mood_state s ON s.id = 'default'
+                        LEFT JOIN track_moods m ON m.track_id = tr.id AND m.weights = ${MOOD_HEADS.version}
+                        LEFT JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
+                                                     AND te.model_version = ${MOOD_HEADS.model}
+                    ) n
+                    WHERE t.id = n.id AND t."moodTags" IS DISTINCT FROM n.tags
+                `;
+            },
+            {
+                isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+                timeout: BUILD_TIMEOUT_MS,
+                maxWait: BUILD_TIMEOUT_MS,
+            },
+        );
+    } catch (error) {
+        // Another transaction held tracks this one needed (a deadlock): nothing was written, and the next pass
+        // rewrites the tags from the data as it is then.
+        if (isWriteConflict(error)) {
+            logger.info("[Moods] Tracks changed while the tags were written; the next pass writes them");
+            return 0;
+        }
+        throw error;
+    }
 }
 
 export interface MoodStats {
