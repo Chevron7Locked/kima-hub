@@ -8,7 +8,10 @@ export interface StationSession<T extends { id: string }> {
     seen: Set<string>;
     exhausted: boolean;
     loading: boolean;
-    /** The queue position a refill was last tried from, so one track start triggers one fetch. */
+    /**
+     * The queue position a refill was last tried from, so one track start triggers one fetch. A refill that
+     * adds tracks clears it: the queue only ends there again if the listener removes them, and then it needs more.
+     */
     triggeredFor: string | null;
 }
 
@@ -47,6 +50,7 @@ export async function refillStation<T extends { id: string }>(
             fresh.push(track);
         }
         if (fresh.length === 0) session.exhausted = true;
+        else session.triggeredFor = null;
         return fresh;
     } catch (error) {
         session.triggeredFor = null;

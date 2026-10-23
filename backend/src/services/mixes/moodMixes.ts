@@ -731,6 +731,7 @@ export async function generateSadGirlSundays(
         take: 50,
         minTracks: 8,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`sad-girl-sundays-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -765,6 +766,7 @@ export async function generateMainCharacterEnergy(
         take: 50,
         minTracks: 8,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`main-character-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -790,6 +792,7 @@ export async function generateVillainEra(
         take: 50,
         minTracks: 8,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`villain-era-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -820,6 +823,7 @@ export async function generate3AMThoughts(
         take: 50,
         minTracks: MIN_TRACKS_DAILY,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`3am-thoughts-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -851,6 +855,7 @@ export async function generateHotGirlWalk(
         take: 50,
         minTracks: 8,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`hot-girl-walk-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -886,6 +891,7 @@ export async function generateRageCleaning(
         take: 50,
         minTracks: 8,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`rage-cleaning-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -924,6 +930,7 @@ export async function generateGoldenHour(
         take: 50,
         minTracks: 8,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`golden-hour-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -953,6 +960,7 @@ export async function generateShowerKaraoke(
         take: 50,
         minTracks: 8,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`shower-karaoke-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -978,6 +986,7 @@ export async function generateInMyFeelings(
         take: 50,
         minTracks: 8,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`in-my-feelings-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -1007,6 +1016,7 @@ export async function generateMidnightDrive(
         take: 50,
         minTracks: MIN_TRACKS_DAILY,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`midnight-drive-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -1037,6 +1047,7 @@ export async function generateCoffeeShopVibes(
         take: 50,
         minTracks: MIN_TRACKS_DAILY,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`coffee-shop-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -1067,6 +1078,7 @@ export async function generateRomanticizeYourLife(
         take: 50,
         minTracks: 8,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`romanticize-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -1096,6 +1108,7 @@ export async function generateThatGirlEra(
         take: 50,
         minTracks: 8,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`that-girl-era-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -1121,6 +1134,7 @@ export async function generateUnhinged(
         take: 100,
         minTracks: 8,
         limit: DAILY_TRACK_LIMIT,
+        seed: getSeededRandom(`unhinged-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -1340,6 +1354,7 @@ export async function generateVocalDetox(
         take: 100,
         minTracks: 15,
         limit: WEEKLY_TRACK_LIMIT,
+        seed: getSeededRandom(`vocal-detox-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",
@@ -1364,6 +1379,7 @@ export async function generateMinorKeyMix(
         take: 100,
         minTracks: 15,
         limit: WEEKLY_TRACK_LIMIT,
+        seed: getSeededRandom(`minor-key-${today}`),
         where: {
             ...NOT_MISSING,
             analysisStatus: "completed",

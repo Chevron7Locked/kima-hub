@@ -1,7 +1,7 @@
 // The mood and radio cut-offs in this file are the launch values; the record of each is
 // services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json.
 import { Prisma } from "@prisma/client";
-import { ProgrammaticMix, sampledMix, TRACK_LIMIT } from "./helpers";
+import { ProgrammaticMix, getSeededRandom, sampledMix, TRACK_LIMIT } from "./helpers";
 import { NOT_MISSING } from "../../utils/libraryEligibility";
 
 /** The days that have a mix, by day of week (0 = Sunday). */
@@ -73,6 +73,7 @@ export async function generateDayMix(
         take: 100,
         minTracks: 15,
         limit: TRACK_LIMIT,
+        seed: getSeededRandom(`${day.id}-${today}`),
         where: day.where,
     });
 }

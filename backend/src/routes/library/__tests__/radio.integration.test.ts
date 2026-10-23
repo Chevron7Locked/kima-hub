@@ -450,3 +450,18 @@ describe("radio: workout falls back to the Genre table, then to album genres", (
         });
     });
 });
+
+describe("radio: genre with an artist whose genres are not a JSON array", () => {
+    let odd: string;
+    beforeAll(async () => {
+        odd = rows.find((r) => artistGenres(r).some((g) => g.toLowerCase().includes("rock")))!.album.artist.id;
+        await prisma.artist.update({ where: { id: odd }, data: { genres: "rock", userGenres: { rock: true } } });
+    });
+
+    it("leaves that artist out instead of failing the request", async () => {
+        const res = await radio({ type: "genre", value: "rock", limit: LIMIT });
+        expect(res.status).toBe(200);
+        expect(res.body.tracks).toHaveLength(LIMIT);
+        expect((res.body.tracks as RadioTrack[]).filter((t) => t.artist.id === odd)).toEqual([]);
+    });
+});

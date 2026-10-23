@@ -179,6 +179,8 @@ interface MixSpec {
     description: string;
     /** Key into the mix colour table. */
     colorType: string;
+    /** Makes the draw repeatable: the same seed gives the same tracks. */
+    seed?: number;
 }
 
 /** A mix of `limit` randomly sampled tracks. */
@@ -187,7 +189,10 @@ export function sampleMix(
     tracks: { id: string; album: { coverUrl: string | null } }[],
     limit: number
 ): ProgrammaticMix {
-    const sample = randomSample(tracks, limit);
+    const sample =
+        spec.seed === undefined
+            ? randomSample(tracks, limit)
+            : seededShuffle(tracks, spec.seed).slice(0, limit);
 
     return {
         id: spec.id,
@@ -322,6 +327,7 @@ export async function sampledMix(
         where: spec.where,
         include: { album: { select: { coverUrl: true } } },
         take: spec.take,
+        seed: spec.seed,
     });
 
     if (tracks.length < spec.minTracks) return null;

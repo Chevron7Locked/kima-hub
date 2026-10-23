@@ -92,7 +92,7 @@ export async function generateRediscoverMix(
 
     const seed = getSeededRandom(`rediscover-${today}`);
     const underplayedTracks = await tracksByIds(
-        drawIds(underplayedIds, 5000, seed),
+        drawIds(underplayedIds, 200, seed),
         { album: { select: { coverUrl: true } } }
     );
     const shuffled = seededShuffle(underplayedTracks, seed);

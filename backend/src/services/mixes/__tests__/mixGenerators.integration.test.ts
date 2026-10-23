@@ -81,11 +81,14 @@ const NOT_DATE: any[] = [
     "setTimeout", "clearTimeout",
 ];
 
-/** Run `fn` with the clock's date set to a given weekday (0 = Sunday); only Date is faked. */
-async function onWeekday<T>(day: number | undefined, fn: () => Promise<T>): Promise<T> {
+/**
+ * Run `fn` with the clock's date set to a given weekday (0 = Sunday) of the `week`th week; only Date is faked.
+ * A mix that reads today's date from the clock gets a different date, and so a different seed, each week.
+ */
+async function onWeekday<T>(day: number | undefined, fn: () => Promise<T>, week = 0): Promise<T> {
     if (day === undefined) return fn();
     // 2026-10-18 is a Sunday.
-    jest.useFakeTimers({ doNotFake: NOT_DATE, now: Date.UTC(2026, 9, 18 + day, 12) });
+    jest.useFakeTimers({ doNotFake: NOT_DATE, now: Date.UTC(2026, 9, 18 + day + 7 * week, 12) });
     try {
         return await fn();
     } finally {
@@ -132,34 +135,34 @@ const cases: Case[] = [
     { name: "Road Trip", size: 20, seeded: true, run: (d) => mood.generateRoadTripMix(lib.user1, d),
       clause: tagged("energetic", "upbeat", "happy") },
 
-    // ---- curated daily mixes (10 tracks), the draw is not seeded ----
-    { name: "Sad Girl Sundays", size: 10, seeded: false, day: 0, run: (d) => mood.generateSadGirlSundays(lib.user1, d),
+    // ---- curated daily mixes (10 tracks) ----
+    { name: "Sad Girl Sundays", size: 10, seeded: true, day: 0, run: (d) => mood.generateSadGirlSundays(lib.user1, d),
       clause: (r) => done(r) && ((le(r.valence, 0.35) && r.keyScale === "minor") || (le(r.valence, 0.3) && le(r.arousal, 0.4))) },
-    { name: "Main Character Energy", size: 10, seeded: false, run: (d) => mood.generateMainCharacterEnergy(lib.user1, d),
+    { name: "Main Character Energy", size: 10, seeded: true, run: (d) => mood.generateMainCharacterEnergy(lib.user1, d),
       clause: (r) => done(r) && ge(r.valence, 0.55) && ge(r.energy, 0.55) && ge(r.danceability, 0.5) },
-    { name: "Villain Era", size: 10, seeded: false, run: (d) => mood.generateVillainEra(lib.user1, d),
+    { name: "Villain Era", size: 10, seeded: true, run: (d) => mood.generateVillainEra(lib.user1, d),
       clause: (r) => done(r) && ((r.keyScale === "minor" && ge(r.energy, 0.65)) || tagged("aggressive", "dark", "intense")(r)) },
-    { name: "3AM Thoughts", size: 10, seeded: false, run: (d) => mood.generate3AMThoughts(lib.user1, d),
+    { name: "3AM Thoughts", size: 10, seeded: true, run: (d) => mood.generate3AMThoughts(lib.user1, d),
       clause: (r) => done(r) && le(r.arousal, 0.4) && le(r.energy, 0.5) && le(r.bpm, 110) && (le(r.valence, 0.5) || ge(r.acousticness, 0.3)) },
-    { name: "Hot Girl Walk", size: 10, seeded: false, run: (d) => mood.generateHotGirlWalk(lib.user1, d),
+    { name: "Hot Girl Walk", size: 10, seeded: true, run: (d) => mood.generateHotGirlWalk(lib.user1, d),
       clause: (r) => done(r) && ((ge(r.danceability, 0.65) && within(r.bpm, 95, 135) && ge(r.energy, 0.55)) || (ge(r.valence, 0.6) && ge(r.energy, 0.6))) },
-    { name: "Rage Cleaning", size: 10, seeded: false, run: (d) => mood.generateRageCleaning(lib.user1, d),
+    { name: "Rage Cleaning", size: 10, seeded: true, run: (d) => mood.generateRageCleaning(lib.user1, d),
       clause: (r) => done(r) && ((ge(r.energy, 0.75) && ge(r.arousal, 0.65) && ge(r.bpm, 125)) || (ge(r.energy, 0.8) && ge(r.danceability, 0.6)) || tagged("aggressive", "energetic")(r)) },
-    { name: "Golden Hour", size: 10, seeded: false, run: (d) => mood.generateGoldenHour(lib.user1, d),
+    { name: "Golden Hour", size: 10, seeded: true, run: (d) => mood.generateGoldenHour(lib.user1, d),
       clause: (r) => done(r) && ge(r.valence, 0.45) && ge(r.acousticness, 0.35) && within(r.energy, 0.25, 0.65) },
-    { name: "Shower Karaoke", size: 10, seeded: false, run: (d) => mood.generateShowerKaraoke(lib.user1, d),
+    { name: "Shower Karaoke", size: 10, seeded: true, run: (d) => mood.generateShowerKaraoke(lib.user1, d),
       clause: (r) => done(r) && le(r.instrumentalness, 0.35) && ge(r.energy, 0.55) && ge(r.valence, 0.45) },
-    { name: "In My Feelings", size: 10, seeded: false, run: (d) => mood.generateInMyFeelings(lib.user1, d),
+    { name: "In My Feelings", size: 10, seeded: true, run: (d) => mood.generateInMyFeelings(lib.user1, d),
       clause: (r) => done(r) && le(r.valence, 0.4) && le(r.arousal, 0.55) && ge(r.acousticness, 0.25) },
-    { name: "Midnight Drive", size: 10, seeded: false, run: (d) => mood.generateMidnightDrive(lib.user1, d),
+    { name: "Midnight Drive", size: 10, seeded: true, run: (d) => mood.generateMidnightDrive(lib.user1, d),
       clause: (r) => done(r) && within(r.energy, 0.3, 0.65) && within(r.bpm, 80, 130) && (le(r.arousal, 0.6) || within(r.valence, 0.3, 0.7)) },
-    { name: "Coffee Shop Vibes", size: 10, seeded: false, run: (d) => mood.generateCoffeeShopVibes(lib.user1, d),
+    { name: "Coffee Shop Vibes", size: 10, seeded: true, run: (d) => mood.generateCoffeeShopVibes(lib.user1, d),
       clause: (r) => done(r) && le(r.energy, 0.55) && le(r.bpm, 120) && (ge(r.acousticness, 0.35) || ge(r.instrumentalness, 0.25)) },
-    { name: "Romanticize Your Life", size: 10, seeded: false, run: (d) => mood.generateRomanticizeYourLife(lib.user1, d),
+    { name: "Romanticize Your Life", size: 10, seeded: true, run: (d) => mood.generateRomanticizeYourLife(lib.user1, d),
       clause: (r) => done(r) && within(r.valence, 0.35, 0.75) && within(r.arousal, 0.25, 0.65) && ge(r.acousticness, 0.25) },
-    { name: "That Girl Era", size: 10, seeded: false, run: (d) => mood.generateThatGirlEra(lib.user1, d),
+    { name: "That Girl Era", size: 10, seeded: true, run: (d) => mood.generateThatGirlEra(lib.user1, d),
       clause: (r) => done(r) && ge(r.valence, 0.55) && ge(r.energy, 0.45) && ge(r.danceability, 0.45) },
-    { name: "Unhinged", size: 10, seeded: false, run: (d) => mood.generateUnhinged(lib.user1, d),
+    { name: "Unhinged", size: 10, seeded: true, run: (d) => mood.generateUnhinged(lib.user1, d),
       clause: (r) => done(r) && (ge(r.energy, 0.85) || le(r.energy, 0.15) || ge(r.valence, 0.9) || le(r.valence, 0.1) || ge(r.bpm, 160) || le(r.bpm, 70) || ge(r.danceability, 0.9)) },
 
     // ---- weekly mixes (20 tracks) ----
@@ -169,9 +172,9 @@ const cases: Case[] = [
       clause: (r) => done(r) && r.key !== null },
     { name: "Tempo Flow", size: 20, seeded: false, run: (d) => mood.generateTempoFlow(lib.user1, d),
       clause: (r) => done(r) && r.bpm !== null },
-    { name: "Vocal Detox", size: 20, seeded: false, run: (d) => mood.generateVocalDetox(lib.user1, d),
+    { name: "Vocal Detox", size: 20, seeded: true, run: (d) => mood.generateVocalDetox(lib.user1, d),
       clause: (r) => done(r) && ge(r.instrumentalness, 0.75) },
-    { name: "Minor Key Mondays", size: 20, seeded: false, day: 1, run: (d) => mood.generateMinorKeyMix(lib.user1, d),
+    { name: "Minor Key Mondays", size: 20, seeded: true, day: 1, run: (d) => mood.generateMinorKeyMix(lib.user1, d),
       clause: (r) => done(r) && r.keyScale === "minor" && ge(r.energy, 0.45) },
 
     // ---- genre mixes ----
@@ -191,11 +194,11 @@ const cases: Case[] = [
       clause: inGenres(FOCUS_GENRES) },
 
     // ---- day-of-week mix: three days have one ----
-    { name: "Day mix, Sunday", size: 20, seeded: false, day: 0, run: () => time.generateDayMix(lib.user1),
+    { name: "Day mix, Sunday", size: 20, seeded: true, day: 0, run: () => time.generateDayMix(lib.user1),
       clause: (r) => done(r) && le(r.energy, 0.5) && ge(r.acousticness, 0.5) },
-    { name: "Day mix, Monday", size: 20, seeded: false, day: 1, run: () => time.generateDayMix(lib.user1),
+    { name: "Day mix, Monday", size: 20, seeded: true, day: 1, run: () => time.generateDayMix(lib.user1),
       clause: (r) => done(r) && ge(r.energy, 0.6) && ge(r.valence, 0.5) },
-    { name: "Day mix, Friday", size: 20, seeded: false, day: 5, run: () => time.generateDayMix(lib.user1),
+    { name: "Day mix, Friday", size: 20, seeded: true, day: 5, run: () => time.generateDayMix(lib.user1),
       clause: (r) => done(r) && ge(r.danceability, 0.7) && ge(r.energy, 0.6) },
 
     // ---- discovery mixes ----
@@ -241,8 +244,8 @@ describe.each(cases)("$name", (c) => {
         );
         callDates = c.spread === "repeat" ? Array(CALLS).fill(dates[0]) : dates;
         mixes = [];
-        for (const d of callDates) {
-            const mix = await onWeekday(c.day, () => c.run(d));
+        for (const [week, d] of callDates.entries()) {
+            const mix = await onWeekday(c.day, () => c.run(d), week);
             if (mix) mixes.push(mix);
         }
     });
@@ -284,7 +287,7 @@ describe.each(cases)("$name", (c) => {
         it("returns identical tracks for the same date and different ones for another", async () => {
             const again = await onWeekday(c.day, () => c.run(dates[0]));
             expect(again!.trackIds).toEqual(mixes[0].trackIds);
-            const other = await onWeekday(c.day, () => c.run(dates[1]));
+            const other = await onWeekday(c.day, () => c.run(dates[1]), 1);
             expect(other!.trackIds).not.toEqual(mixes[0].trackIds);
             expect(new Set(other!.trackIds)).not.toEqual(new Set(mixes[0].trackIds));
         });

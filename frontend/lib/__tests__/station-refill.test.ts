@@ -23,7 +23,7 @@ describe("refillStation", () => {
         expect(calls).toBe(1);
     });
 
-    it("fetches once per queue position and never twice at once", async () => {
+    it("never fetches twice at once", async () => {
         let calls = 0;
         const session = startStationSession(t("a"), async () => {
             calls++;
@@ -32,8 +32,15 @@ describe("refillStation", () => {
         const [first, overlapping] = await Promise.all([refillStation(session, "1"), refillStation(session, "1")]);
         expect(first).toEqual(t("b"));
         expect(overlapping).toEqual([]);
-        expect(await refillStation(session, "1")).toEqual([]);
         expect(calls).toBe(1);
+    });
+
+    it("fetches again from a position the listener returns to by removing the tracks a refill added", async () => {
+        let calls = 0;
+        const session = startStationSession(t("a"), async () => (++calls === 1 ? t("b") : t("c")));
+        expect(await refillStation(session, "0:a", t("a"))).toEqual(t("b"));
+        expect(await refillStation(session, "0:a", t("a"))).toEqual(t("c"));
+        expect(calls).toBe(2);
     });
 
     it("does not mark the session done when a fetch fails", async () => {

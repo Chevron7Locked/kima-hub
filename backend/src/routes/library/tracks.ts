@@ -719,16 +719,23 @@ router.get("/radio", async (req, res) => {
         if (unplayed.length >= limitNum) {
           trackIds = unplayed;
         } else {
-          const leastPlayedTracks = await prisma.$queryRaw<{ id: string }[]>`
-                        SELECT t.id
-                        FROM "Track" t
-                        LEFT JOIN "Play" p ON p."trackId" = t.id
-                        WHERE t."missingSince" IS NULL AND t.corrupt = false
-                        GROUP BY t.id
-                        ORDER BY COUNT(p.id) ASC, random()
-                        LIMIT ${limitNum * 2}
-                    `;
-          trackIds = leastPlayedTracks.map((t) => t.id);
+          // The least played of every unplayed track and a random draw of the
+          // others, so plays are counted for that draw, not the whole library.
+          const candidates = [
+            ...new Set([
+              ...unplayed,
+              ...(await sampleTrackIds({ where: PLAYABLE, take: limitNum * 10 })),
+            ]),
+          ];
+          const playCounts = await prisma.play.groupBy({
+            by: ["trackId"],
+            where: { trackId: { in: candidates } },
+            _count: { trackId: true },
+          });
+          const playsOf = new Map(playCounts.map((p) => [p.trackId, p._count.trackId]));
+          trackIds = candidates
+            .sort((a, b) => (playsOf.get(a) ?? 0) - (playsOf.get(b) ?? 0))
+            .slice(0, limitNum * 2);
         }
         break;
 
@@ -780,12 +787,12 @@ router.get("/radio", async (req, res) => {
                     JOIN "Track" t ON t."albumId" = a.id
                     WHERE (
                         (ar.genres IS NOT NULL AND EXISTS (
-                            SELECT 1 FROM jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
+                            SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(ar.genres) = 'array' THEN ar.genres ELSE '[]'::jsonb END) AS g(genre)
                             WHERE LOWER(g.genre) LIKE ${"%" + genreValue + "%"}
                         ))
                         OR
                         (ar."userGenres" IS NOT NULL AND EXISTS (
-                            SELECT 1 FROM jsonb_array_elements_text(ar."userGenres"::jsonb) AS ug(genre)
+                            SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(ar."userGenres") = 'array' THEN ar."userGenres" ELSE '[]'::jsonb END) AS ug(genre)
                             WHERE LOWER(ug.genre) LIKE ${"%" + genreValue + "%"}
                         ))
                     )

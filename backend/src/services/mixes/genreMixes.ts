@@ -11,7 +11,7 @@ import { NOT_MISSING } from "../../utils/libraryEligibility";
 import {
     ProgrammaticMix,
     albumCoverUrls,
-    sampleMix,
+    sampledMix,
     getMixColor,
     getSeededRandom,
     seededShuffle,
@@ -46,13 +46,13 @@ export async function generateEraMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    const albums = await prisma.album.findMany({
+    const albumYears = await prisma.album.groupBy({
+        by: ["year", "originalYear", "displayYear"],
         where: { tracks: { some: NOT_MISSING } },
-        select: { year: true, originalYear: true, displayYear: true },
     });
 
     const decades = new Set<number>();
-    albums.forEach((album) => {
+    albumYears.forEach((album) => {
         const effectiveYear = getEffectiveYear(album);
         if (effectiveYear) {
             const decade = getDecadeFromYear(effectiveYear);
@@ -66,29 +66,20 @@ export async function generateEraMix(
     const decadeSeed = getSeededRandom(`era-${today}`);
     const selectedDecade = decadeArray[decadeSeed % decadeArray.length];
 
-    const tracks = await prisma.track.findMany({
+    return sampledMix({
+        id: `era-${selectedDecade}-${today}`,
+        type: "era",
+        name: `Your ${selectedDecade}s Mix`,
+        description: `Random picks from the ${selectedDecade}s`,
+        colorType: "era",
+        take: 100,
+        minTracks: 15,
+        limit: TRACK_LIMIT,
         where: {
             ...NOT_MISSING,
             album: getDecadeWhereClause(selectedDecade),
         },
-        include: {
-            album: { select: { coverUrl: true } },
-        },
     });
-
-    if (tracks.length < 15) return null;
-
-    return sampleMix(
-        {
-            id: `era-${selectedDecade}-${today}`,
-            type: "era",
-            name: `Your ${selectedDecade}s Mix`,
-            description: `Random picks from the ${selectedDecade}s`,
-            colorType: "era",
-        },
-        tracks,
-        TRACK_LIMIT
-    );
 }
 
 export async function generateGenreMix(
@@ -118,31 +109,20 @@ export async function generateGenreMix(
     const genreSeed = getSeededRandom(`genre-${today}`);
     const selectedGenre = validGenres[genreSeed % validGenres.length];
 
-    const trackGenres = await prisma.trackGenre.findMany({
-        where: { genreId: selectedGenre.id, track: NOT_MISSING },
-        include: {
-            track: {
-                include: {
-                    album: { select: { coverUrl: true } },
-                },
-            },
+    return sampledMix({
+        id: `genre-${selectedGenre.id}-${today}`,
+        type: "genre",
+        name: `Your ${selectedGenre.name} Mix`,
+        description: `Random ${selectedGenre.name} picks`,
+        colorType: "genre",
+        take: 100,
+        minTracks: 5,
+        limit: TRACK_LIMIT,
+        where: {
+            ...NOT_MISSING,
+            trackGenres: { some: { genreId: selectedGenre.id } },
         },
     });
-
-    const tracks = trackGenres.map((tg) => tg.track);
-    if (tracks.length < 5) return null;
-
-    return sampleMix(
-        {
-            id: `genre-${selectedGenre.id}-${today}`,
-            type: "genre",
-            name: `Your ${selectedGenre.name} Mix`,
-            description: `Random ${selectedGenre.name} picks`,
-            colorType: "genre",
-        },
-        tracks,
-        TRACK_LIMIT
-    );
 }
 
 export async function generatePartyMix(
