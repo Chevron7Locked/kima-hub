@@ -292,16 +292,53 @@ describe("mood buckets and the mood snapshot (database)", () => {
         expect((await mapTracks()).find((t) => t.id === idOf("flat"))!.dominantMood).toBe("moodParty");
     });
 
-    it("a re-run that clears the statistics empties the buckets until the mood step builds them again", async () => {
+    it("while the statistics are cleared, buckets and snapshot keep their last contents; new ones rebuild them", async () => {
+        const before = await bucketsNow();
+        const dominant = moodOutput((await currentMoodSnapshot()).views.get(idOf(4))).dominantMood;
         const state = await prisma.moodState.findUniqueOrThrow({ where: { id: "default" } });
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
-        expect(await syncMoodBuckets()).toBe(true);
-        expect((await bucketsNow()).size).toBe(0);
-        expect(moodOutput((await currentMoodSnapshot()).views.get(idOf(0))).dominantMood).toBe(UNANALYZED);
 
+        expect(await syncMoodBuckets()).toBe(false);
+        expect(await bucketsNow()).toEqual(before);
+        expect(moodOutput((await currentMoodSnapshot()).views.get(idOf(4))).dominantMood).toBe(dominant);
+        expect((await mapTracks()).find((t) => t.id === idOf(4))!.dominantMood).toBe(dominant);
+        await moodBucketService.backfillAllTracks();
+        expect(await bucketsNow()).toEqual(before);
+
+        // The same statistics back: nothing to rebuild.
         await prisma.$transaction((tx) => buildMoodState(tx));
         expect((await prisma.moodState.findUniqueOrThrow({ where: { id: "default" } })).fingerprint).toBe(state.fingerprint);
+        expect(await syncMoodBuckets()).toBe(false);
+        expect(await bucketsNow()).toEqual(before);
+
+        // Cleared again, and the library changes meanwhile: the new statistics rebuild the buckets.
+        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+        await prisma.trackMood.update({ where: { track_id: idOf(5) }, data: { calm: 7 } });
+        await prisma.$executeRawUnsafe(`UPDATE track_embeddings SET analyzed_at = $2 WHERE track_id = $1`, idOf(5),
+            new Date(ANALYZED_AT.getTime() + 120_000));
+        await prisma.$executeRawUnsafe(`UPDATE track_moods SET embedded_at = $2 WHERE track_id = $1`, idOf(5),
+            new Date(ANALYZED_AT.getTime() + 120_000));
+        expect(await syncMoodBuckets()).toBe(false);
+        expect(await bucketsNow()).toEqual(before);
+        await prisma.$transaction((tx) => buildMoodState(tx));
         expect(await syncMoodBuckets()).toBe(true);
+        await expectBucketsToFollowTheRule();
+        expect((await bucketsNow()).has(`chill:${idOf(5)}`)).toBe(true);
+    });
+
+    it("a process that starts with no statistics leaves the stored buckets alone until they exist", async () => {
+        const before = await bucketsNow();
+        expect(before.size).toBeGreaterThan(0);
+        const state = await prisma.moodState.findUniqueOrThrow({ where: { id: "default" } });
+        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+        await jest.isolateModulesAsync(async () => {
+            // A fresh worker and service, as after a restart: no snapshot in memory, nothing built yet.
+            const fresh = await import("../../workers/moodBucketWorker");
+            expect(await fresh.syncMoodBuckets()).toBe(false);
+            expect(await bucketsNow()).toEqual(before);
+            await prisma.moodState.create({ data: state });
+            expect(await fresh.syncMoodBuckets()).toBe(true);
+        });
         await expectBucketsToFollowTheRule();
     });
 

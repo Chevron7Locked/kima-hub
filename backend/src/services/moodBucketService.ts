@@ -139,8 +139,17 @@ export function classifyMoods(row: MoodValues, dist: MoodDistribution): MoodView
     return { dominant, score, ranks, moods };
 }
 
+/**
+ * The signature while the library has no current mood statistics (a rescore or a weights change before the next
+ * mood pass finishes): nothing is judged then, and the last buckets and snapshot stand.
+ */
+export const NO_STATISTICS = "none";
+
 export interface MoodSnapshot {
-    /** The mood statistics' version and inputs fingerprint: changes whenever a track's mood scores could. */
+    /**
+     * The mood statistics' version and inputs fingerprint: changes whenever a track's mood scores could. NO_STATISTICS
+     * only for a snapshot built before this process ever saw statistics; it has no views.
+     */
     signature: string;
     views: Map<string, MoodView>;
     /** Tracks still waiting for mood scores. */
@@ -171,7 +180,7 @@ async function librarySignature(): Promise<{ signature: string; pending: number 
                                                 OR m.weights IS DISTINCT FROM ${MOOD_HEADS.version})))
     `;
     return {
-        signature: state?.version === MOOD_STATE_VERSION ? `${state.version}:${state.fingerprint}` : "none",
+        signature: state?.version === MOOD_STATE_VERSION ? `${state.version}:${state.fingerprint}` : NO_STATISTICS,
         pending,
     };
 }
@@ -179,7 +188,7 @@ async function librarySignature(): Promise<{ signature: string; pending: number 
 /** Every track the mood statistics cover (current scores, a present readable file, finished analysis), classified. */
 async function buildSnapshot(signature: string, pending: number): Promise<MoodSnapshot> {
     const state = await loadMoodState();
-    if (!state) return { signature, views: new Map(), pending };
+    if (!state) return { signature: NO_STATISTICS, views: new Map(), pending };
     const scores = Prisma.raw(MOODS.map((m) => `m."${m.learned}"::float8 AS "${m.field}"`).join(", "));
     const rows = await prisma.$queryRaw<Array<{ id: string } & MoodValues>>`
         SELECT t.id, ${scores}
@@ -199,12 +208,12 @@ async function buildSnapshot(signature: string, pending: number): Promise<MoodSn
 }
 
 /**
- * The current library's mood decisions. Re-reads the library only when its
- * signature changed; `changed` says whether this call rebuilt it.
+ * The current library's mood decisions. Re-reads the library only when its signature changed; `changed` says whether
+ * this call rebuilt it. While the library has no current statistics the last snapshot stands, unchanged.
  */
 export async function refreshMoodSnapshot(): Promise<{ snapshot: MoodSnapshot; changed: boolean }> {
     const { signature, pending } = await librarySignature();
-    if (snapshot && snapshot.signature === signature) {
+    if (snapshot && (snapshot.signature === signature || signature === NO_STATISTICS)) {
         snapshot.pending = pending;
         return { snapshot, changed: false };
     }
@@ -213,7 +222,13 @@ export async function refreshMoodSnapshot(): Promise<{ snapshot: MoodSnapshot; c
             building = null;
         });
     }
-    snapshot = await building;
+    const built = await building;
+    // The statistics went away while this one was being built.
+    if (snapshot && built.signature === NO_STATISTICS) {
+        snapshot.pending = pending;
+        return { snapshot, changed: false };
+    }
+    snapshot = built;
     return { snapshot, changed: true };
 }
 
@@ -554,10 +569,16 @@ class MoodBucketService {
     }
 
     /**
-     * Rebuild all mood buckets from the current library (admin backfill).
+     * Rebuild all mood buckets from the current snapshot (admin backfill). While the library has no current mood
+     * statistics that is the last snapshot, so the buckets come back as they were; before this process has seen any
+     * statistics there is nothing to judge by, and the buckets are left as they are.
      */
     async backfillAllTracks(): Promise<{ processed: number; assigned: number }> {
         const { snapshot: snap } = await refreshMoodSnapshot();
+        if (snap.signature === NO_STATISTICS) {
+            logger.info("[MoodBucket] No mood statistics yet; the buckets are left as they are");
+            return { processed: 0, assigned: 0 };
+        }
         const result = await this.rebuildBuckets(snap);
         return { processed: result.tracks, assigned: result.assignments };
     }
