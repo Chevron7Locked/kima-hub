@@ -1,5 +1,3 @@
-// The mood and radio cut-offs in this file are the launch values; the record of each is
-// services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json.
 import { Router } from "express";
 import { requireAdmin } from "../../middleware/auth";
 import { announcePlaylistsChanged, playlistsHoldingTracks } from "../../services/playlistEvents";
@@ -15,6 +13,7 @@ import {
 } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
 import { drawIds, drawWeighted, sampleTrackIds, unplayedTrackIds } from "../../services/mixes/helpers";
+import { pickRecipeStation } from "../../services/mixes/recipes";
 import { LIBRARY_TRACK_WHERE, LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { PLAYABLE } from "../../utils/libraryEligibility";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
@@ -699,6 +698,18 @@ router.get("/decades", async (_req, res) => {
   }
 });
 
+/** The recipe each mood station draws from (recipes.json): everything above its line, in a fresh order. */
+const MOOD_STATIONS = new Map([
+  ["happy", "happy"],
+  ["melancholy", "melancholy"],
+  ["chill", "chill"],
+  ["intense", "intense"],
+  ["dance", "party"],
+  ["high-energy", "high-energy"],
+  ["acoustic", "acoustic"],
+  ["instrumental", "instrumental"],
+]);
+
 router.get("/radio", async (req, res) => {
   try {
     const { type, value, limit = "50" } = req.query;
@@ -807,173 +818,18 @@ router.get("/radio", async (req, res) => {
         );
         break;
 
-      case "mood":
+      case "mood": {
         const moodValue = ((value as string) || "").toLowerCase();
-        // The five named moods are the mood-bucket verdicts, as on the mood page;
-        // the other values are audio-feature filters.
-        const BUCKET_MOODS: Record<string, "happy" | "sad" | "chill" | "aggressive" | "party"> = {
-          happy: "happy",
-          melancholy: "sad",
-          chill: "chill",
-          intense: "aggressive",
-          dance: "party",
-        };
-        if (BUCKET_MOODS[moodValue]) {
-            // Weighted draw without replacement in the database: the smallest
-            // -LN(1 - random()) / score come first (Efraimidis-Spirakis, as drawWeighted).
-            const bucketRows = await prisma.$queryRaw<{ trackId: string }[]>`
-                SELECT "trackId"
-                FROM "MoodBucket"
-                WHERE mood = ${BUCKET_MOODS[moodValue]} AND score > 0
-                ORDER BY -LN(1 - random()) / score ASC
-                LIMIT ${limitNum * 3}
-            `;
-            trackIds = bucketRows.map((r) => r.trackId);
-            break;
+        const recipe = MOOD_STATIONS.get(moodValue);
+        if (!recipe) {
+          return res.status(400).json({ error: `Unknown mood: ${moodValue}` });
         }
-        let moodWhere: any = { analysisStatus: "completed" };
-
-        switch (moodValue) {
-          case "high-energy":
-            moodWhere = {
-              analysisStatus: "completed",
-              energy: { gte: 0.7 },
-              bpm: { gte: 120 },
-            };
-            break;
-          case "acoustic":
-            moodWhere = {
-              analysisStatus: "completed",
-              acousticness: { gte: 0.6 },
-            };
-            break;
-          case "instrumental":
-            moodWhere = {
-              analysisStatus: "completed",
-              instrumentalness: { gte: 0.7 },
-            };
-            break;
-          default:
-            return res.status(400).json({ error: `Unknown mood: ${moodValue}` });
-        }
-
-        trackIds = await sampleTrackIds({
-          where: moodWhere,
-          take: limitNum * 3,
-        });
+        trackIds = await pickRecipeStation(recipe, { limit: limitNum });
         break;
+      }
 
       case "workout":
-        let workoutTrackIds: string[] = [];
-
-        workoutTrackIds = await sampleTrackIds({
-          where: {
-            analysisStatus: "completed",
-            OR: [
-              {
-                AND: [{ energy: { gte: 0.65 } }, { bpm: { gte: 115 } }],
-              },
-              {
-                moodTags: {
-                  hasSome: ["workout", "energetic", "upbeat"],
-                },
-              },
-            ],
-          },
-          take: limitNum * 2,
-        });
-        logger.debug(
-          `[Radio:workout] Found ${workoutTrackIds.length} tracks via audio analysis`,
-        );
-
-        if (workoutTrackIds.length < limitNum) {
-          const workoutGenreNames = [
-            "rock",
-            "metal",
-            "hard rock",
-            "alternative rock",
-            "punk",
-            "hip hop",
-            "rap",
-            "trap",
-            "electronic",
-            "edm",
-            "house",
-            "techno",
-            "drum and bass",
-            "dubstep",
-            "hardstyle",
-            "metalcore",
-            "hardcore",
-            "industrial",
-            "nu metal",
-            "pop punk",
-          ];
-
-          const workoutGenres = await prisma.genre.findMany({
-            where: {
-              name: {
-                in: workoutGenreNames,
-                mode: "insensitive",
-              },
-            },
-            select: { id: true },
-          });
-
-          const genreTrackIds =
-            workoutGenres.length === 0
-              ? []
-              : drawIds(
-                  (
-                    await prisma.trackGenre.groupBy({
-                      by: ["trackId"],
-                      where: { genreId: { in: workoutGenres.map((g) => g.id) } },
-                      orderBy: { trackId: "asc" },
-                    })
-                  ).map((tg) => tg.trackId),
-                  50 * workoutGenres.length,
-                );
-          workoutTrackIds = [
-            ...new Set([...workoutTrackIds, ...genreTrackIds]),
-          ];
-          logger.debug(
-            `[Radio:workout] After genre check: ${workoutTrackIds.length} tracks`,
-          );
-
-          if (workoutTrackIds.length < limitNum) {
-            // Album.genres is a JSON array of names, which string_contains never
-            // matches (it reads a JSON string), so the names are matched in SQL.
-            const albumGenreTrackIds = drawIds(
-              (
-                await prisma.$queryRaw<{ id: string }[]>`
-                  SELECT t.id
-                  FROM "Track" t
-                  JOIN "Album" a ON a.id = t."albumId"
-                  WHERE jsonb_typeof(a.genres) = 'array'
-                    AND EXISTS (
-                      SELECT 1
-                      FROM jsonb_array_elements_text(a.genres) AS g(genre)
-                      CROSS JOIN unnest(${workoutGenreNames}::text[]) AS p(name)
-                      WHERE strpos(lower(g.genre), p.name) > 0
-                    )
-                  ORDER BY t.id
-                `
-              ).map((r) => r.id),
-              limitNum,
-            );
-            workoutTrackIds = [
-              ...new Set([
-                ...workoutTrackIds,
-                ...albumGenreTrackIds,
-              ]),
-            ];
-            logger.debug(
-              `[Radio:workout] After album genre check: ${workoutTrackIds.length} tracks`,
-            );
-          }
-        }
-
-        trackIds = workoutTrackIds;
+        trackIds = await pickRecipeStation("workout", { limit: limitNum });
         break;
 
       case "artist":

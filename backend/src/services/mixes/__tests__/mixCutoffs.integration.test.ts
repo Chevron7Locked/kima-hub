@@ -13,7 +13,8 @@
  * that no other ever does. The numbers are written by hand from the rule's
  * wording, not read from the code. Pools are removed after each rule.
  *
- * The radio route's cut-offs are at the end, called over HTTP with supertest.
+ * The radio route's decade bounds are at the end, called over HTTP with supertest; its mood and workout stations
+ * draw from their recipes (radio.integration.test.ts).
  */
 import express from "express";
 import request from "supertest";
@@ -47,27 +48,6 @@ async function onWeekday<T>(day: number | undefined, fn: () => Promise<T>): Prom
 }
 
 type Fields = Record<string, number | string | string[] | null>;
-
-const r4 = (x: number) => Math.round(x * 1e4) / 1e4;
-
-interface Cut {
-    name: string;
-    /** Readings changed on both the in and the out tracks so only this cut-off decides. */
-    set?: Fields;
-    ins: Fields[];
-    outs: Fields[];
-}
-
-/** A cut-off on one reading: `dir` is "lte" (at most) or "gte" (at least). */
-function edge(field: string, dir: "lte" | "gte", cut: number, set: Fields = {}, step = field === "bpm" ? 0.5 : 0.01): Cut {
-    const sign = dir === "lte" ? -1 : 1;
-    return {
-        name: `${field} ${dir === "lte" ? "at most" : "at least"} ${cut}`,
-        set,
-        ins: [{ [field]: cut }, { [field]: r4(cut + sign * step) }],
-        outs: [{ [field]: r4(cut - sign * step) }],
-    };
-}
 
 const COMPLETED: Fields = { analysisStatus: "completed", analysisMode: "enhanced" };
 const user = `${PREFIX}user1`;
@@ -227,81 +207,6 @@ describe.each(rules.map((r, idx) => ({ ...r, idx })))("$name", (rule) => {
 const app = express();
 app.use(express.json());
 app.use("/", radioRouter);
-
-interface RadioRule {
-    name: string;
-    query: Record<string, string | number>;
-    base: Fields;
-    cuts: Cut[];
-}
-
-const radioRules: RadioRule[] = [
-    { name: "mood acoustic: acousticness >= .6", query: { type: "mood", value: "acoustic" },
-      base: { ...COMPLETED, acousticness: 0.8 }, cuts: [edge("acousticness", "gte", 0.6)] },
-    { name: "mood instrumental: instrumentalness >= .7", query: { type: "mood", value: "instrumental" },
-      base: { ...COMPLETED, instrumentalness: 0.85 }, cuts: [edge("instrumentalness", "gte", 0.7)] },
-    { name: "mood high-energy: energy >= .7 and bpm >= 120", query: { type: "mood", value: "high-energy" },
-      base: { ...COMPLETED, energy: 0.9, bpm: 140 }, cuts: [edge("energy", "gte", 0.7), edge("bpm", "gte", 120)] },
-    { name: "workout: (energy >= .65 and bpm >= 115) or a workout tag", query: { type: "workout" },
-      base: { ...COMPLETED, energy: 0.9, bpm: 140, moodTags: [] },
-      cuts: [
-          edge("energy", "gte", 0.65),
-          edge("bpm", "gte", 115),
-          { name: "workout tag", set: { energy: 0.2, bpm: 80 },
-            ins: [{ moodTags: ["workout"] }, { moodTags: ["energetic"] }, { moodTags: ["upbeat"] }],
-            outs: [{ moodTags: ["calm"] }] },
-      ] },
-];
-
-describe.each(radioRules.map((r, idx) => ({ ...r, idx })))("radio cut-offs: $name", (rule) => {
-    const tag = `r${rule.idx}`;
-    const ins: string[] = [];
-    const outs: string[] = [];
-    const anchors: string[] = [];
-    let returned = new Set<string>();
-
-    beforeAll(async () => {
-        const pool: PoolTrack[] = [];
-        for (let a = 0; a < 5; a++) {
-            const id = `${PREFIX}${tag}_anchor${a}`;
-            anchors.push(id);
-            pool.push({ id, fields: { ...rule.base } });
-        }
-        rule.cuts.forEach((cut, c) => {
-            cut.ins.forEach((v, i) => {
-                const id = `${PREFIX}${tag}_${c}_in${i}`;
-                ins.push(id);
-                pool.push({ id, fields: { ...rule.base, ...(cut.set ?? {}), ...v } });
-            });
-            cut.outs.forEach((v, i) => {
-                const id = `${PREFIX}${tag}_${c}_out${i}`;
-                outs.push(id);
-                pool.push({ id, fields: { ...rule.base, ...(cut.set ?? {}), ...v } });
-            });
-        });
-        await writeTracks(tag, pool);
-        // The pool is under the limit, so each call returns every matching track.
-        returned = new Set();
-        for (let k = 0; k < 5; k++) {
-            const res = await request(app).get("/radio").query({ ...rule.query, limit: 100 });
-            expect(res.status).toBe(200);
-            for (const t of res.body.tracks) returned.add(t.id);
-        }
-    });
-
-    afterAll(async () => {
-        await prisma.track.deleteMany({ where: { id: { startsWith: `${PREFIX}${tag}_` } } });
-    });
-
-    it("returns the anchors and every track on the line or just inside it", () => {
-        expect(anchors.filter((id) => !returned.has(id))).toEqual([]);
-        expect(ins.filter((id) => !returned.has(id))).toEqual([]);
-    });
-
-    it("never returns a track just past a cut-off", () => {
-        expect(outs.filter((id) => returned.has(id))).toEqual([]);
-    });
-});
 
 describe("radio cut-offs: decade", () => {
     // Decade 1990 means original year 1990-1999; with no original year the album year decides.

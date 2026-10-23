@@ -15,9 +15,13 @@
  *               tracks and reach the first and the last third of the ids that
  *               match (the branch has well over 10x `limit` matches).
  *
- * The describe blocks at the end change the library (marking every track
- * pending, deleting plays or genre rows) to reach the fallback stages; they run
- * last and the library is deleted afterwards.
+ * The mood and workout stations draw from their recipes (recipes.json): their
+ * clause is membership of the recipe, as the recipe engine computes it on the
+ * library's learned moods (recipes.integration.test.ts checks the engine).
+ *
+ * The describe blocks at the end change the library (deleting plays, clearing
+ * the mood statistics) to reach the fallback stages; they run last and the
+ * library is deleted afterwards.
  */
 import express from "express";
 import request from "supertest";
@@ -25,12 +29,14 @@ import { prisma } from "../../../utils/db";
 import {
     LibraryHandle,
     Row,
-    WORKOUT_GENRES,
     loadRows,
     removeSyntheticLibrary,
     seedSyntheticLibrary,
+    seedSyntheticMoods,
     spanOf,
 } from "../../../__tests__/fixtures/syntheticLibrary";
+import { buildMoodState } from "../../../services/moods/state";
+import { pickRecipeStation } from "../../../services/mixes/recipes";
 import router from "../tracks";
 
 jest.setTimeout(600_000);
@@ -47,23 +53,40 @@ const app = express();
 app.use(express.json());
 app.use("/", router);
 
+/** The recipe behind each station value, as the product names them. */
+const STATIONS: [query: Record<string, string>, recipe: string][] = [
+    [{ type: "mood", value: "happy" }, "happy"],
+    [{ type: "mood", value: "melancholy" }, "melancholy"],
+    [{ type: "mood", value: "chill" }, "chill"],
+    [{ type: "mood", value: "intense" }, "intense"],
+    [{ type: "mood", value: "dance" }, "party"],
+    [{ type: "mood", value: "high-energy" }, "high-energy"],
+    [{ type: "mood", value: "acoustic" }, "acoustic"],
+    [{ type: "mood", value: "instrumental" }, "instrumental"],
+    [{ type: "workout" }, "workout"],
+];
+/** Every member of each station's recipe. */
+const members = new Map<string, Set<string>>();
+
 beforeAll(async () => {
     lib = await seedSyntheticLibrary(PREFIX);
+    await seedSyntheticMoods(PREFIX);
+    await prisma.$transaction((tx) => buildMoodState(tx));
     rows = await loadRows(PREFIX, lib.user1);
     byId = new Map(rows.map((r) => [r.id, r]));
+    for (const [, recipe] of STATIONS) members.set(recipe, new Set(await pickRecipeStation(recipe, { limit: 100_000 })));
 });
 
 afterAll(async () => {
     await removeSyntheticLibrary(PREFIX);
+    await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
     await prisma.$disconnect();
 });
 
 // ---- clause vocabulary -----------------------------------------------------
 
-const ge = (x: number | null, v: number) => x !== null && x >= v;
-const done = (r: Row) => r.analysisStatus === "completed";
 const playable = (r: Row) => r.missingSince === null && !r.corrupt;
-const inBucket = (m: string) => (r: Row) => r.buckets.includes(m);
+const inRecipe = (recipe: string) => (r: Row) => members.get(recipe)!.has(r.id);
 const year = (r: Row) => r.album.originalYear ?? r.album.year;
 const artistGenres = (r: Row) =>
     [...((r.album.artist.genres as string[] | null) ?? []), ...((r.album.artist.userGenres as string[] | null) ?? [])];
@@ -96,6 +119,8 @@ interface Branch {
     query: Record<string, string | number>;
     /** The branch's clause, by hand (without the playable check, which every branch shares). */
     clause: (r: Row) => boolean;
+    /** Fewest tracks the clause must match for the spread checks to mean something; LIMIT x 10 unless set. */
+    minMatch?: number;
 }
 
 const branches: Branch[] = [
@@ -109,19 +134,13 @@ const branches: Branch[] = [
       clause: (r) => artistGenres(r).some((g) => g.toLowerCase().includes("rock")) },
     { name: "genre Pop (value is lower-cased)", query: { type: "genre", value: "Pop" },
       clause: (r) => artistGenres(r).some((g) => g.toLowerCase().includes("pop")) },
-    { name: "mood happy", query: { type: "mood", value: "happy" }, clause: inBucket("happy") },
-    { name: "mood melancholy (sad bucket)", query: { type: "mood", value: "melancholy" }, clause: inBucket("sad") },
-    { name: "mood chill", query: { type: "mood", value: "chill" }, clause: inBucket("chill") },
-    { name: "mood intense (aggressive bucket)", query: { type: "mood", value: "intense" }, clause: inBucket("aggressive") },
-    { name: "mood dance (party bucket)", query: { type: "mood", value: "dance" }, clause: inBucket("party") },
-    { name: "mood high-energy", query: { type: "mood", value: "high-energy" },
-      clause: (r) => done(r) && ge(r.energy, 0.7) && ge(r.bpm, 120) },
-    { name: "mood acoustic", query: { type: "mood", value: "acoustic" },
-      clause: (r) => done(r) && ge(r.acousticness, 0.6) },
-    { name: "mood instrumental", query: { type: "mood", value: "instrumental" },
-      clause: (r) => done(r) && ge(r.instrumentalness, 0.7) },
-    { name: "workout", query: { type: "workout" },
-      clause: (r) => done(r) && ((ge(r.energy, 0.65) && ge(r.bpm, 115)) || r.moodTags.some((t) => ["workout", "energetic", "upbeat"].includes(t))) },
+    ...STATIONS.map(([query, recipe]) => ({
+        name: `${Object.values(query).join(" ")} (recipe ${recipe})`,
+        query,
+        clause: inRecipe(recipe),
+        // A recipe's members are about the top 7% of the library, fewer with its filters.
+        minMatch: LIMIT * 4,
+    })),
     { name: "all", query: { type: "all" }, clause: () => true },
 ];
 
@@ -141,7 +160,7 @@ describe.each(branches)("radio: $name", (b) => {
     });
 
     it("returns only playable tracks that satisfy the clause", () => {
-        expect(matching().length).toBeGreaterThanOrEqual(LIMIT * 10);
+        expect(matching().length).toBeGreaterThanOrEqual(b.minMatch ?? LIMIT * 10);
         const ids = results.flat().map((t) => t.id);
         expect(ids.filter((id) => !byId.has(id))).toEqual([]);
         expect(ids.filter((id) => !playable(byId.get(id)!))).toEqual([]);
@@ -232,58 +251,26 @@ describe("radio: artist", () => {
     });
 });
 
-describe("radio: mood weighting", () => {
-    const WEIGHT_CALLS = 60;
-
-    it("leans toward higher bucket scores yet reaches the whole bucket, with the right size", async () => {
-        const bucket = await prisma.moodBucket.findMany({
-            where: { mood: "happy", trackId: { startsWith: PREFIX } },
-            select: { trackId: true, score: true },
-        });
-        const score = new Map(bucket.map((b) => [b.trackId, b.score]));
-        const eligible = bucket.filter((b) => playable(byId.get(b.trackId)!));
-        const meanEligible = eligible.reduce((sum, b) => sum + b.score, 0) / eligible.length;
-
-        const results = await calls({ type: "mood", value: "happy", limit: LIMIT }, WEIGHT_CALLS);
-        for (const tracks of results) {
-            expect(tracks).toHaveLength(LIMIT);
-            expect(new Set(tracks.map((t) => t.id)).size).toBe(LIMIT);
-        }
-        const ids = results.flat().map((t) => t.id);
-        expect(ids.filter((id) => !score.has(id))).toEqual([]);
-
-        const meanReturned = ids.reduce((sum, id) => sum + score.get(id)!, 0) / ids.length;
-        expect(meanReturned).toBeGreaterThan(meanEligible + 0.05);
-
-        // Per song, a top-quarter song comes back more often than a bottom-quarter one.
-        const ranked = [...eligible].sort((a, b) => b.score - a.score);
-        const quarter = Math.floor(ranked.length / 4);
-        const count = new Map<string, number>();
-        for (const id of ids) count.set(id, (count.get(id) ?? 0) + 1);
-        const perSong = (rs: typeof ranked) => rs.reduce((sum, r) => sum + (count.get(r.trackId) ?? 0), 0) / rs.length;
-        expect(perSong(ranked.slice(0, quarter))).toBeGreaterThan(perSong(ranked.slice(-quarter)) * 2);
-
-        // Every song can be reached: songs from the lowest-scoring third come back too.
-        const lowestThird = new Set(ranked.slice(-Math.floor(ranked.length / 3)).map((r) => r.trackId));
-        expect(ids.filter((id) => lowestThird.has(id)).length).toBeGreaterThan(0);
-    });
-});
-
-describe("radio: mood bucket read", () => {
-    it("reads only limit x 3 bucket rows, with a score above 0", async () => {
-        const spy = jest.spyOn(prisma, "$queryRaw");
-        try {
-            const res = await radio({ type: "mood", value: "happy", limit: LIMIT });
+describe("radio: every mood value and the workout station draw from their recipe", () => {
+    it.each(STATIONS)("%o draws from recipe %s, every member reachable", async (query, recipe) => {
+        const want = members.get(recipe)!;
+        const seen = new Set<string>();
+        for (let k = 0; k < 5; k++) {
+            const res = await radio({ ...query, limit: 100 });
             expect(res.status).toBe(200);
-            const reads = spy.mock.calls
-                .map((c, i) => ({ sql: (c[0] as unknown as string[]).join?.("") ?? "", out: spy.mock.results[i].value }))
-                .filter((c) => c.sql.includes('"MoodBucket"'));
-            expect(reads).toHaveLength(1);
-            expect(reads[0].sql).toContain("score > 0");
-            expect(await reads[0].out).toHaveLength(LIMIT * 3);
-        } finally {
-            spy.mockRestore();
+            const ids = (res.body.tracks as RadioTrack[]).map((t) => t.id);
+            expect(ids).toHaveLength(Math.min(100, want.size));
+            expect(ids.filter((id) => !want.has(id))).toEqual([]);
+            ids.forEach((id) => seen.add(id));
         }
+        // Five refills of 100 from fewer than 200 members reach nearly all of them.
+        expect(seen.size).toBeGreaterThan(want.size * 0.9);
+    });
+
+    it("the mood value is read in any case", async () => {
+        const res = await radio({ type: "mood", value: "High-Energy", limit: LIMIT });
+        expect(res.status).toBe(200);
+        expect((res.body.tracks as RadioTrack[]).every((t) => members.get("high-energy")!.has(t.id))).toBe(true);
     });
 });
 
@@ -336,8 +323,10 @@ describe("radio: bad requests", () => {
     it("400 without a type", async () => {
         expect((await radio({})).status).toBe(400);
     });
-    it("400 for an unknown mood", async () => {
+    it("400 for an unknown mood, including a name every object carries", async () => {
         expect((await radio({ type: "mood", value: "no-such-mood" })).status).toBe(400);
+        expect((await radio({ type: "mood", value: "constructor" })).status).toBe(400);
+        expect((await radio({ type: "mood" })).status).toBe(400);
     });
     it("400 for artist radio without an artist", async () => {
         expect((await radio({ type: "artist" })).status).toBe(400);
@@ -395,62 +384,6 @@ describe("radio: favorites with no plays at all returns random tracks", () => {
     });
 });
 
-describe("radio: workout falls back to the Genre table, then to album genres", () => {
-    const workoutNames = WORKOUT_GENRES;
-    const inWorkoutGenres = (r: Row) => r.genreNames.some((n) => workoutNames.includes(n.toLowerCase()));
-
-    describe("when no analysed track matches (stage 2: Genre table)", () => {
-        beforeAll(async () => {
-            // Nothing is "completed", so the audio-analysis stage finds no track.
-            await prisma.track.updateMany({ where: { id: { startsWith: PREFIX } }, data: { analysisStatus: "pending" } });
-        });
-
-        it("draws the limit from every track in the workout genres", async () => {
-            const results = await calls({ type: "workout", limit: LIMIT });
-            for (const tracks of results) {
-                expect(tracks).toHaveLength(LIMIT);
-                expect(new Set(tracks.map((t) => t.id)).size).toBe(LIMIT);
-            }
-            const ids = results.flat().map((t) => t.id);
-            expect(ids.filter((id) => !playable(byId.get(id)!) || !inWorkoutGenres(byId.get(id)!))).toEqual([]);
-            const matching = rows.filter((r) => playable(r) && inWorkoutGenres(r)).map((r) => r.id);
-            expect(matching.length).toBeGreaterThanOrEqual(LIMIT * 10);
-            const span = spanOf(ids, matching);
-            expect(span.distinct).toBeGreaterThan(LIMIT * 3);
-            expect(span.lowest).toBeLessThan(1 / 3);
-            expect(span.highest).toBeGreaterThanOrEqual(2 / 3);
-        });
-    });
-
-    describe("when the Genre table has nothing either (stage 3: album genres)", () => {
-        beforeAll(async () => {
-            await prisma.trackGenre.deleteMany({ where: { trackId: { startsWith: PREFIX } } });
-            for (const r of rows) {
-                r.genreNames = [];
-                r.genreIds = [];
-            }
-            // Album.genres holds lower-case names; stage 3 asks for albums whose genres contain a workout genre.
-        });
-
-        it("draws tracks of albums whose genres name a workout genre", async () => {
-            const res = await radio({ type: "workout", limit: LIMIT });
-            expect(res.status).toBe(200);
-            const albumRows = await prisma.album.findMany({ where: { id: { startsWith: PREFIX } }, select: { id: true, genres: true } });
-            const workoutAlbums = new Set(
-                albumRows
-                    .filter((a) => ((a.genres as string[] | null) ?? []).some((g) => workoutNames.some((w) => g.toLowerCase().includes(w))))
-                    .map((a) => a.id),
-            );
-            expect(workoutAlbums.size).toBeGreaterThan(0);
-            expect(res.body.tracks.length).toBeGreaterThan(0);
-            for (const t of res.body.tracks as RadioTrack[]) {
-                expect(workoutAlbums.has(t.album.id)).toBe(true);
-                expect(playable(byId.get(t.id)!)).toBe(true);
-            }
-        });
-    });
-});
-
 describe("radio: genre with an artist whose genres are not a JSON array", () => {
     let odd: string;
     beforeAll(async () => {
@@ -476,5 +409,17 @@ describe("radio: artist whose genre match meets artists with non-array genres", 
         const res = await radio({ type: "artist", value: target, limit: LIMIT });
         expect(res.status).toBe(200);
         expect(res.body.tracks.length).toBeGreaterThan(0);
+    });
+});
+
+describe("radio: the mood and workout stations before the mood step has built the library's statistics", () => {
+    beforeAll(async () => {
+        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+    });
+
+    it.each(STATIONS)("%o answers an empty list", async (query) => {
+        const res = await radio({ ...query, limit: LIMIT });
+        expect(res.status).toBe(200);
+        expect(res.body.tracks).toEqual([]);
     });
 });
