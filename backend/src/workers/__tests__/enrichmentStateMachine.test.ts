@@ -81,8 +81,10 @@ jest.mock("ioredis", () => {
 });
 
 const mockBuildMoods = jest.fn();
+const mockWriteMoodTags = jest.fn();
 jest.mock("../../services/moods/state", () => ({
     buildMoods: () => mockBuildMoods(),
+    writeMoodTags: () => mockWriteMoodTags(),
     moodProgress: jest.fn().mockResolvedValue({ total: 0, completed: 0 }),
 }));
 
@@ -265,6 +267,7 @@ describe("Enrichment State Machine", () => {
         // Default: state service returns idle
         mockGetState.mockResolvedValue({ status: "idle" });
         mockBuildMoods.mockResolvedValue({ scored: 0, stateChanged: false });
+        mockWriteMoodTags.mockResolvedValue(0);
         mockRedisScan.mockResolvedValue(["0", []]);
         // Default: one track owes each stage, so a phase that consults the
         // stage records finds work unless a test restapes this.
@@ -572,6 +575,17 @@ describe("Enrichment State Machine", () => {
             expect(await executeMoodPhase()).toBe(0);
             expect(mockRedisScan).not.toHaveBeenCalled();
             expect(mockRedisDel).not.toHaveBeenCalled();
+        });
+
+        it("rewrites the mood tags on every pass, after the scores and statistics", async () => {
+            mockWriteMoodTags.mockResolvedValue(4);
+            expect(await executeMoodPhase()).toBe(0);
+            expect(mockWriteMoodTags).toHaveBeenCalledTimes(1);
+            expect(mockBuildMoods.mock.invocationCallOrder[0]).toBeLessThan(
+                mockWriteMoodTags.mock.invocationCallOrder[0],
+            );
+            // No mix reads the tags, so changed tags alone keep the cached mixes.
+            expect(mockRedisScan).not.toHaveBeenCalled();
         });
     });
 

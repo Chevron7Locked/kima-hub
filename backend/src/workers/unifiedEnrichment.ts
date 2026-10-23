@@ -49,7 +49,7 @@ import { albumFactsOf, fillAlbumFromCatalogue, identifyAlbumsBySound, type Album
 import { fpcalcService } from "../services/fpcalc";
 import { resolveWithinMusicRoot } from "../routes/library/trackPath";
 import { buildMatching, matchingProgress } from "../services/matching/state";
-import { buildMoods, moodProgress } from "../services/moods/state";
+import { buildMoods, moodProgress, writeMoodTags } from "../services/moods/state";
 import { updateMap } from "../services/matching/map";
 import {
     classifyFailure,
@@ -2717,9 +2717,10 @@ export async function executeVibePhase(): Promise<number> {
 
 /**
  * The mood step: the learned mood scores for new or changed sound vectors and the
- * library's mood statistics when their inputs changed (services/moods/state.ts).
- * Mixes are cached from the moods, so any change drops the cached mixes. Returns
- * how many tracks were scored.
+ * library's mood statistics when their inputs changed (services/moods/state.ts),
+ * then every track's mood tags from them. Mixes are cached from the moods, so any
+ * change to scores or statistics drops the cached mixes. Returns how many tracks
+ * were scored.
  */
 export async function executeMoodPhase(): Promise<number> {
     const { scored, stateChanged } = await buildMoods();
@@ -2727,6 +2728,8 @@ export async function executeMoodPhase(): Promise<number> {
         const dropped = await dropCachedMixes();
         if (dropped > 0) logger.info(`[Enrichment] Cleared ${dropped} mix cache entries after the moods changed`);
     }
+    const tagged = await writeMoodTags();
+    if (tagged > 0) logger.info(`[Enrichment] Mood tags changed on ${tagged} tracks`);
     return scored;
 }
 
