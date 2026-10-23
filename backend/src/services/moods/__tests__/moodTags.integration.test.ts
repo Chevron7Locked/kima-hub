@@ -3,7 +3,9 @@
  * library's mean for it, z = (score - mean) / SD >= 1.0, with the mean and population SD over the tracks the
  * statistics cover. The scores are written by hand here, so every expected tag is worked out in the comments.
  */
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../../utils/db";
+import { isWriteConflict } from "../../matching/state";
 import { MOODS, MOOD_HEADS, type Mood } from "../heads";
 import { buildMoods, loadMoodState, writeMoodTags } from "../state";
 import { rerunEnrichment } from "../../enrichmentRestart";
@@ -78,6 +80,28 @@ async function tagsOf(ids: string[]): Promise<string[][]> {
 }
 
 const library = (n: number) => Array.from({ length: n }, (_, i) => trackId(i));
+
+/**
+ * Until a statement containing `fragment` waits on a lock. Watched from outside any transaction, which would see one
+ * snapshot of the activity throughout; given up well inside a transaction's timeout, so a statement that never waits
+ * fails the test.
+ */
+async function untilWaiting(fragment: string) {
+    const giveUp = Date.now() + 20_000;
+    for (;;) {
+        if (Date.now() > giveUp) throw new Error(`No statement with ${fragment} waited on a lock`);
+        const [{ n }] = await prisma.$queryRawUnsafe<Array<{ n: number }>>(
+            `SELECT count(*)::int AS n FROM pg_stat_activity
+             WHERE datname = current_database() AND wait_event_type = 'Lock' AND position($1 IN query) > 0`,
+            fragment,
+        );
+        if (n > 0) return;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+}
+
+const holdTrack = (tx: Prisma.TransactionClient, id: string) =>
+    tx.$executeRawUnsafe(`UPDATE "Track" SET title = title WHERE id = $1`, id);
 
 async function cleanup() {
     await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
@@ -174,21 +198,9 @@ describe("a deadlock while the tags are written", () => {
         // Holds a track the tags need, then takes the state row the tag writer holds: each waits on the other.
         await prisma.$transaction(
             async (tx) => {
-                await tx.$executeRawUnsafe(`UPDATE "Track" SET title = title WHERE id = $1`, trackId(0));
+                await holdTrack(tx, trackId(0));
                 writing = writeMoodTags();
-                // Watched from outside this transaction, which would see one snapshot of the activity throughout; given
-                // up well inside the transaction's timeout, so a writer that never waits fails the test.
-                const giveUp = Date.now() + 20_000;
-                for (;;) {
-                    if (Date.now() > giveUp) throw new Error("The tag writer never waited on the held track");
-                    const [{ n }] = await prisma.$queryRawUnsafe<Array<{ n: number }>>(
-                        `SELECT count(*)::int AS n FROM pg_stat_activity
-                         WHERE datname = current_database() AND wait_event_type = 'Lock'
-                           AND query LIKE '%SET "moodTags" = n.tags%'`,
-                    );
-                    if (n > 0) break;
-                    await new Promise((resolve) => setTimeout(resolve, 20));
-                }
+                await untilWaiting(`SET "moodTags" = n.tags`);
                 await tx.$queryRawUnsafe(`SELECT id FROM mood_state WHERE id = 'default' FOR UPDATE`);
             },
             { timeout: 30_000, maxWait: 30_000 },
@@ -199,6 +211,33 @@ describe("a deadlock while the tags are written", () => {
 
         expect(await writeMoodTags()).toBe(1);
         expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
+    });
+
+    it("is reported by Prisma for a raw statement in a shape isWriteConflict recognises", async () => {
+        // Two transactions each hold one track and then ask for the other's.
+        let refused: Promise<unknown> | undefined;
+        await prisma.$transaction(
+            async (tx) => {
+                await holdTrack(tx, trackId(1));
+                refused = prisma
+                    .$transaction(
+                        async (tx2) => {
+                            await holdTrack(tx2, trackId(2));
+                            await tx2.$executeRawUnsafe(`UPDATE "Track" SET title = title || '' WHERE id = $1`, trackId(1));
+                        },
+                        { timeout: 30_000, maxWait: 30_000 },
+                    )
+                    .then(() => null, (error: unknown) => error);
+                await untilWaiting(`SET title = title || ''`);
+                await holdTrack(tx, trackId(2));
+            },
+            { timeout: 30_000, maxWait: 30_000 },
+        );
+        // The second waited first, so the deadlock check ends it.
+        const error = await refused;
+        expect(error).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+        expect(error).toMatchObject({ code: "P2010", meta: { code: "40P01" } });
+        expect(isWriteConflict(error)).toBe(true);
     });
 });
 
