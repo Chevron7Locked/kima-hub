@@ -214,6 +214,7 @@ import {
     getEnrichmentProgress,
     invalidateEnrichmentProgress,
 } from "../unifiedEnrichment";
+import { logger } from "../../utils/logger";
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -586,6 +587,35 @@ describe("Enrichment State Machine", () => {
             );
             // No mix reads the tags, so changed tags alone keep the cached mixes.
             expect(mockRedisScan).not.toHaveBeenCalled();
+        });
+
+        it("logs a failure and goes on to the similarity step, writing no tags", async () => {
+            const refused = new Error("[Moods] arousal_mean has no value over 3 eligible tracks");
+            mockBuildMoods.mockRejectedValue(refused);
+            await startUnifiedEnrichmentWorker();
+            mockUpdateState.mockClear();
+
+            await triggerEnrichmentNow();
+
+            const phases = mockUpdateState.mock.calls
+                .map(([update]) => (update as { currentPhase?: string | null }).currentPhase)
+                .filter(Boolean);
+            expect(phases.slice(phases.indexOf("vibe"))).toEqual(["vibe", "mood", "similarity"]);
+            expect(logger.error).toHaveBeenCalledWith(
+                "[Enrichment] Mood step failed; the cycle goes on without it:",
+                refused,
+            );
+            expect(logger.error).not.toHaveBeenCalledWith("[Enrichment] Cycle error:", refused);
+            expect(mockWriteMoodTags).not.toHaveBeenCalled();
+        });
+
+        it("logs a failure to write the tags and returns", async () => {
+            mockWriteMoodTags.mockRejectedValue(new Error("connection lost"));
+            expect(await executeMoodPhase()).toBe(0);
+            expect(logger.error).toHaveBeenCalledWith(
+                "[Enrichment] Mood step failed; the cycle goes on without it:",
+                expect.objectContaining({ message: "connection lost" }),
+            );
         });
     });
 

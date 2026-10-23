@@ -2719,18 +2719,24 @@ export async function executeVibePhase(): Promise<number> {
  * The mood step: the learned mood scores for new or changed sound vectors and the
  * library's mood statistics when their inputs changed (services/moods/state.ts),
  * then every track's mood tags from them. Mixes are cached from the moods, so any
- * change to scores or statistics drops the cached mixes. Returns how many tracks
- * were scored.
+ * change to scores or statistics drops the cached mixes. A failure is logged, the
+ * transaction it happened in writes nothing, and the cycle goes on to the similarity
+ * step, which never reads the moods. Returns how many tracks were scored.
  */
 export async function executeMoodPhase(): Promise<number> {
-    const { scored, stateChanged } = await buildMoods();
-    if (scored > 0 || stateChanged) {
-        const dropped = await dropCachedMixes();
-        if (dropped > 0) logger.info(`[Enrichment] Cleared ${dropped} mix cache entries after the moods changed`);
+    try {
+        const { scored, stateChanged } = await buildMoods();
+        if (scored > 0 || stateChanged) {
+            const dropped = await dropCachedMixes();
+            if (dropped > 0) logger.info(`[Enrichment] Cleared ${dropped} mix cache entries after the moods changed`);
+        }
+        const tagged = await writeMoodTags();
+        if (tagged > 0) logger.info(`[Enrichment] Mood tags changed on ${tagged} tracks`);
+        return scored;
+    } catch (error) {
+        logger.error("[Enrichment] Mood step failed; the cycle goes on without it:", error);
+        return 0;
     }
-    const tagged = await writeMoodTags();
-    if (tagged > 0) logger.info(`[Enrichment] Mood tags changed on ${tagged} tracks`);
-    return scored;
 }
 
 /**
