@@ -1103,7 +1103,7 @@ model TrackMood {
 }
 
 /// The library's mean and population SD of each learned mood and of the three readings the mixes blend with them
-/// (arousal, and CLAP's instrumental and acoustic as logits), rebuilt by the mood enrichment step whenever its
+/// (arousal and CLAP's instrumental and acoustic, each as a logit), rebuilt by the mood enrichment step whenever its
 /// inputs change (services/moods/state.ts).
 model MoodState {
   id                      String   @id @default("default")

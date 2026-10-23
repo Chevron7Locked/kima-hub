@@ -13,12 +13,12 @@ import { BUILD_TIMEOUT_MS, isWriteConflict } from "../matching/state";
 import { MOODS, MOOD_HEADS, type Mood } from "./heads";
 
 /** Raise when the tracks the statistics cover or a reading's transform changes, so every library rebuilds them. */
-const STATE_FORMULA_VERSION = 1;
+const STATE_FORMULA_VERSION = 2;
 export const MOOD_STATE_VERSION = `${STATE_FORMULA_VERSION}/${MOOD_HEADS.version}`;
 
 /**
- * The readings the mixes blend with the moods: the stored arousal as it is, and CLAP's instrumental and acoustic
- * probabilities as logits, clipped to 0.01-0.99 first so a probability of 0 or 1 stays finite.
+ * The readings the mixes blend with the moods: the stored arousal and CLAP's instrumental and acoustic probabilities,
+ * each as a logit, clipped to 0.01-0.99 first so a value of 0 or 1 stays finite.
  */
 export const READINGS = ["arousal", "instrumental_logit", "acoustic_logit"] as const;
 export type Reading = (typeof READINGS)[number];
@@ -29,7 +29,7 @@ const logit = (column: string) => {
     return `CASE WHEN t.${column} IS NOT NULL THEN ln(${p} / (1 - ${p})) END`;
 };
 const READING_SQL: Record<Reading, string> = {
-    arousal: "t.arousal",
+    arousal: logit("arousal"),
     instrumental_logit: logit("instrumentalness"),
     acoustic_logit: logit("acousticness"),
 };

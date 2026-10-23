@@ -89,8 +89,11 @@ async function seed() {
         await insertVector(trackId(n), vector(n < 2 ? 3 + n : 1 + (rand() - 0.5) * 2e-3));
     }
     // Readings at and past the clip, so the logits' clipping is exercised.
-    await prisma.track.update({ where: { id: trackId(0) }, data: { instrumentalness: 0, acousticness: 1 } });
-    await prisma.track.update({ where: { id: trackId(1) }, data: { instrumentalness: 0.995, acousticness: 0.005 } });
+    await prisma.track.update({ where: { id: trackId(0) }, data: { instrumentalness: 0, acousticness: 1, arousal: 1 } });
+    await prisma.track.update({
+        where: { id: trackId(1) },
+        data: { instrumentalness: 0.995, acousticness: 0.005, arousal: 0.004 },
+    });
     await insertTrack(OTHER_MODEL);
     await insertVector(OTHER_MODEL, vector(), "laion-clap-music");
     await insertTrack(GONE, { missingSince: new Date() });
@@ -251,7 +254,7 @@ describe("the library statistics", () => {
             n: rows.length,
             moods: Object.fromEntries(MOODS.map((mood) => [mood, stats(rows.map((r) => Math.fround(r[mood])))])),
             readings: {
-                arousal: stats(present(rows.map((r) => r.arousal))),
+                arousal: stats(present(rows.map((r) => r.arousal)).map(logit)),
                 instrumental_logit: stats(present(rows.map((r) => r.instrumentalness)).map(logit)),
                 acoustic_logit: stats(present(rows.map((r) => r.acousticness)).map(logit)),
             } as Record<Reading, { mean: number; sd: number; n: number }>,
