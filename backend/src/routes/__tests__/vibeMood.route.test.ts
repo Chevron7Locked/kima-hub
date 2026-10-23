@@ -1,6 +1,7 @@
 /**
  * GET /api/vibe/mood/:trackId answers with the mood that colours the track's
- * star on the map, read from the real library through a real sign-in.
+ * star on the map, read from the real library's learned moods through a real
+ * sign-in.
  */
 
 import express from "express";
@@ -10,12 +11,15 @@ import { generateToken } from "../../middleware/auth";
 import vibeRouter from "../vibe";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
+import { MOODS, MOOD_HEADS, type Mood } from "../../services/moods/heads";
+import { buildMoodState } from "../../services/moods/state";
 
 const P = "cvmood";
-const MOODS = ["moodHappy", "moodSad", "moodRelaxed", "moodAggressive", "moodParty"] as const;
+const ANALYZED_AT = new Date("2026-10-23T00:00:00Z");
 
-function moods(strong?: (typeof MOODS)[number]) {
-    return Object.fromEntries(MOODS.map((m) => [m, m === strong ? 0.95 : 0.1]));
+/** Learned scores: 0 on every mood, `strong` far above, or every mood below the rest of the library. */
+function moods(strong?: Mood | "low") {
+    return Object.fromEntries(MOODS.map((m) => [m, strong === "low" ? -1 : m === strong ? 5 : 0])) as Record<Mood, number>;
 }
 
 async function cleanup() {
@@ -23,6 +27,7 @@ async function cleanup() {
     await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id LIKE '${P}%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id LIKE '${P}%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "User" WHERE id LIKE '${P}%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
 }
 
 let token: string;
@@ -35,21 +40,33 @@ beforeAll(async () => {
     token = generateToken(user);
     await prisma.artist.create({ data: { id: `${P}art`, name: "Mood Artist", identityKey: `${P}-art` } });
     await prisma.album.create({ data: { id: `${P}alb`, artistId: `${P}art`, rgMbid: `${P}-rg`, title: "Mood Album", primaryType: "Album" } });
-    const tracks: [string, Record<string, number | null>, string][] = [
-        ["happy", moods("moodHappy"), "completed"],
-        ["calm", moods("moodRelaxed"), "completed"],
-        ["flat", moods(), "completed"],
-        ["fresh", Object.fromEntries(MOODS.map((m) => [m, null])), "pending"],
+    // Ten quiet tracks give the library a mean and spread to stand out against.
+    const tracks: [string, Record<Mood, number> | null, string][] = [
+        ["happy", moods("happy"), "completed"],
+        ["calm", moods("calm"), "completed"],
+        ["flat", moods("low"), "completed"],
+        ["fresh", null, "pending"],
+        ...Array.from({ length: 10 }, (_, i): [string, Record<Mood, number>, string] => [`quiet${i}`, moods(), "completed"]),
     ];
-    for (const [i, [name, values, status]] of tracks.entries()) {
+    for (const [i, [name, scores, status]] of tracks.entries()) {
+        const id = `${P}${name}`;
         await prisma.track.create({
             data: {
-                id: `${P}${name}`, albumId: `${P}alb`, title: name, trackNo: i + 1, duration: 200,
-                filePath: `/tmp/${P}${name}.flac`, fileModified: new Date(), fileSize: 1000,
-                analysisStatus: status, ...values,
+                id, albumId: `${P}alb`, title: name, trackNo: i + 1, duration: 200,
+                filePath: `/tmp/${id}.flac`, fileModified: new Date(), fileSize: 1000,
+                analysisStatus: status, arousal: 0.2 + (i % 5) * 0.15, instrumentalness: 0.5, acousticness: 0.1 + (i % 3) * 0.3,
             },
         });
+        if (!scores) continue;
+        await prisma.$executeRawUnsafe(
+            `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at) VALUES ($1, $2::vector, $3, $4)`,
+            id, `[1${",0".repeat(MOOD_HEADS.dims - 1)}]`, MOOD_HEADS.model, ANALYZED_AT,
+        );
+        await prisma.trackMood.create({
+            data: { track_id: id, embedded_at: ANALYZED_AT, weights: MOOD_HEADS.version, ...scores },
+        });
     }
+    await prisma.$transaction((tx) => buildMoodState(tx));
 });
 
 afterAll(async () => {

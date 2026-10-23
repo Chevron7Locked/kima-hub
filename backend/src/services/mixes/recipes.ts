@@ -349,6 +349,23 @@ export async function pickRecipeTracks(
     return pickMixTracks(getRecipe(recipeId), options);
 }
 
+/**
+ * A mood page's mix: up to `limit` drawn evenly from the recipe's members in a fresh order, with the mix's artist cap,
+ * skipping `exclude` (the songs this listener was already served) while at least MIN_MIX_TRACKS others remain. Null
+ * when fewer than MIN_MIX_TRACKS songs are members.
+ */
+export async function pickPageTracks(
+    recipe: Recipe,
+    { limit, exclude = [] }: { limit: number; exclude?: string[] },
+): Promise<string[] | null> {
+    if (!Number.isInteger(limit) || limit < 1) throw new RangeError(`limit must be a positive integer, got ${limit}`);
+    const members = await recipeMembers(recipe);
+    if (!members || members.length < MIN_MIX_TRACKS) return null;
+    const served = new Set(exclude);
+    const fresh = members.filter((m) => !served.has(m.id));
+    return drawMembers(fresh.length >= MIN_MIX_TRACKS ? fresh : members, crypto.randomUUID(), limit);
+}
+
 /** A station's refill: up to `limit` of the recipe's members in a fresh random order; empty when it has none. */
 export async function pickStationTracks(recipe: Recipe, { limit }: { limit: number }): Promise<string[]> {
     if (!Number.isInteger(limit) || limit < 1) throw new RangeError(`limit must be a positive integer, got ${limit}`);

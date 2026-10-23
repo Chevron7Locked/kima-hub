@@ -1,6 +1,6 @@
 /**
  * saveUserMoodMix with trackIds stores those tracks in order; without them it
- * regenerates through getMoodMix.
+ * regenerates through getMoodMix, which draws from the mood page's recipe.
  */
 
 jest.mock("../../utils/db", () => ({
@@ -12,22 +12,22 @@ jest.mock("../../utils/db", () => ({
         track: {
             findMany: jest.fn(),
         },
-        moodBucket: {
-            findMany: jest.fn(),
-        },
     },
+}));
+
+jest.mock("../mixes/recipes", () => ({
+    RECIPE_LINE: 1,
+    getRecipe: jest.fn((id: string) => ({ id })),
+    pickPageTracks: jest.fn(),
 }));
 
 jest.mock("../../utils/logger", () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));
 
-jest.mock("../../utils/shuffle", () => ({
-    shuffleArray: <T,>(arr: T[]): T[] => arr, // Return as-is for predictable order
-}));
-
 import { moodBucketService, MoodType } from "../moodBucketService";
 import { prisma } from "../../utils/db";
+import { pickPageTracks } from "../mixes/recipes";
 
 const USER_ID = "user-test-123";
 const MOOD: MoodType = "happy";
@@ -51,26 +51,12 @@ const MOCK_REGEN_TRACKS = [
     { id: "regen-track-8", album: { coverUrl: "https://example.com/regen8.jpg" } },
 ];
 
-// Mocked moodBucket entries for getMoodMix (need >= 8 to pass the threshold)
-const MOCK_MOOD_BUCKETS = [
-    { trackId: "regen-track-1", score: 0.9 },
-    { trackId: "regen-track-2", score: 0.8 },
-    { trackId: "regen-track-3", score: 0.7 },
-    { trackId: "regen-track-4", score: 0.6 },
-    { trackId: "regen-track-5", score: 0.5 },
-    { trackId: "regen-track-6", score: 0.5 },
-    { trackId: "regen-track-7", score: 0.5 },
-    { trackId: "regen-track-8", score: 0.5 },
-];
-
 
 describe("saveUserMoodMix with explicit trackIds", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         // Track lookup returns the tracks matching the provided trackIds
         (prisma.track.findMany as jest.Mock).mockResolvedValue(MOCK_TRACKS);
-        // moodBucket.findMany is not called in explicit path
-        (prisma.moodBucket.findMany as jest.Mock).mockResolvedValue([]);
     });
 
     it("persists the exact trackIds and derived coverUrls", async () => {
@@ -258,8 +244,8 @@ describe("saveUserMoodMix without explicit trackIds (regenerate path)", () => {
         jest.clearAllMocks();
         // Track lookup for regenerate path
         (prisma.track.findMany as jest.Mock).mockResolvedValue(MOCK_REGEN_TRACKS);
-        // moodBucket entries for getMoodMix
-        (prisma.moodBucket.findMany as jest.Mock).mockResolvedValue(MOCK_MOOD_BUCKETS);
+        // The page recipe's draw for getMoodMix
+        (pickPageTracks as jest.Mock).mockResolvedValue(MOCK_REGEN_TRACKS.map((t) => t.id));
     });
 
     it("calls getMoodMix and persists the regenerated mix", async () => {
@@ -278,9 +264,10 @@ describe("saveUserMoodMix without explicit trackIds (regenerate path)", () => {
           "https://example.com/regen4.jpg",
         ]);
 
-        // Verify getMoodMix was called (track.findMany + moodBucket.findMany)
+        // getMoodMix drew from the Upbeat page's recipe, then read the drawn tracks
+        expect(pickPageTracks).toHaveBeenCalledTimes(1);
+        expect(pickPageTracks).toHaveBeenCalledWith({ id: "upbeat" }, expect.objectContaining({ limit: 15 }));
         expect(prisma.track.findMany).toHaveBeenCalledTimes(1);
-        expect(prisma.moodBucket.findMany).toHaveBeenCalledTimes(1);
 
         // Verify upsert was called with regenerated data
         expect(prisma.userMoodMix.upsert).toHaveBeenCalledTimes(1);
@@ -302,7 +289,7 @@ describe("saveUserMoodMix without explicit trackIds (regenerate path)", () => {
     });
 
     it("returns null when getMoodMix returns null (not enough tracks)", async () => {
-        (prisma.moodBucket.findMany as jest.Mock).mockResolvedValue([]);
+        (pickPageTracks as jest.Mock).mockResolvedValue(null);
 
         const result = await moodBucketService.saveUserMoodMix(
             USER_ID,

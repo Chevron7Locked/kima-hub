@@ -12,6 +12,8 @@ import { generateMoodOnDemand } from "../mixes/moodMixes";
 import { getVibeMap } from "../vibeMap";
 import { syncMoodBuckets } from "../../workers/moodBucketWorker";
 import { MATCHING_MODEL, buildMatching } from "../matching/state";
+import { MOODS, MOOD_HEADS } from "../moods/heads";
+import { buildMoodState } from "../moods/state";
 
 jest.mock("../../utils/redis", () => ({
     redisClient: {
@@ -67,11 +69,10 @@ async function seed() {
                 // Low energy, for the custom mix's range.
                 energy: 0.3,
                 bpm: 90,
-                moodRelaxed: 0.9,
-                moodHappy: 0.1,
-                moodSad: 0.1,
-                moodAggressive: 0.05,
-                moodParty: i / (N - 1),
+                // Readings the mood statistics need.
+                arousal: 0.2 + (i % 4) * 0.2,
+                instrumentalness: 0.5,
+                acousticness: 0.3 + (i % 3) * 0.2,
             },
         });
         // One-hot 512-d embeddings; the seed and the missing track are the
@@ -83,8 +84,17 @@ async function seed() {
             `[${v.join(",")}]`,
             MATCHING_MODEL,
         );
+        // Learned moods: party rises with i, so the missing track would top the party bucket. Copied in SQL, as
+        // the vector's time has microseconds a JavaScript Date would drop.
+        await prisma.$executeRawUnsafe(
+            `INSERT INTO track_moods (track_id, embedded_at, weights, ${MOODS.map((m) => `"${m}"`).join(", ")})
+             SELECT track_id, analyzed_at, $2, ${MOODS.map((m) => (m === "party" ? "$3" : "0")).join(", ")}
+             FROM track_embeddings WHERE track_id = $1`,
+            id, MOOD_HEADS.version, i / (N - 1),
+        );
     }
     await buildMatching();
+    await prisma.$transaction((tx) => buildMoodState(tx));
 }
 
 /**
@@ -130,6 +140,7 @@ describe("library eligibility at the read side", () => {
     // The test DB is shared by every file in the run; leaving these rows makes
     // other files' queue sweeps see eleven extra due embeddings.
     afterAll(async () => {
+        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
         await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id LIKE $1`, "trk\\_elig\\_%");
         for (const [table, pattern] of [
             ["Track", "trk\\_elig\\_%"],
@@ -150,8 +161,8 @@ describe("library eligibility at the read side", () => {
         await syncMoodBuckets();
         const rows = await prisma.moodBucket.findMany({ where: { trackId: MISSING } });
         expect(rows).toHaveLength(0);
-        // trk_elig_10 has the highest party head (10/11): the bucket the
-        // missing track would have ranked into with the same value.
+        // trk_elig_10 has the highest party score of the present tracks (10/11, at least 1.5 SD above their mean):
+        // the bucket the missing track, at 11/11, would have topped.
         const kept = await prisma.moodBucket.findMany({ where: { trackId: "trk_elig_10" } });
         expect(kept.length).toBeGreaterThan(0);
     });

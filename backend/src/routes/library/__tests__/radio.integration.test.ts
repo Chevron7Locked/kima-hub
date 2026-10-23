@@ -255,7 +255,8 @@ describe("radio: every mood value and the workout station draw from their recipe
     it.each(STATIONS)("%o draws from recipe %s, every member reachable", async (query, recipe) => {
         const want = members.get(recipe)!;
         const seen = new Set<string>();
-        for (let k = 0; k < 5; k++) {
+        // Refills adding up to four times the members: each is missed with probability about e^-4 (2%).
+        for (let k = 0; k < Math.max(5, Math.ceil((want.size * 4) / 100)); k++) {
             const res = await radio({ ...query, limit: 100 });
             expect(res.status).toBe(200);
             const ids = (res.body.tracks as RadioTrack[]).map((t) => t.id);
@@ -263,7 +264,6 @@ describe("radio: every mood value and the workout station draw from their recipe
             expect(ids.filter((id) => !want.has(id))).toEqual([]);
             ids.forEach((id) => seen.add(id));
         }
-        // Five refills of 100 from fewer than 200 members reach nearly all of them.
         expect(seen.size).toBeGreaterThan(want.size * 0.9);
     });
 

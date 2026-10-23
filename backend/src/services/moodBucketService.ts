@@ -1,28 +1,30 @@
 /**
- * A track's moods from five Essentia heads: happy (Upbeat), sad (Melancholic), relaxed (Calm), aggressive (Intense),
- * party (Energetic). A track has a mood when its head gives P > 0.5, whatever else the library holds; library rank is
- * display only (the dominant label, map colouring), never membership. Buckets rebuild when the analysed library changes.
+ * A track's moods from five of the learned moods: happy (Upbeat), sad (Melancholic), calm (Calm), aggressive (Intense),
+ * party (Energetic). A track has a mood when its score sits at least RECIPE_LINE standard deviations above the
+ * library's mean for that mood, by the statistics the mood step keeps (the same line the mixes use); its library rank
+ * orders the bucket and picks the dominant label. Buckets rebuild when those statistics change. Each mood page's mix
+ * draws from that mood's page recipe.
  */
 
+import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
-import { shuffleArray } from "../utils/shuffle";
-import { NOT_MISSING } from "../utils/libraryEligibility";
-import { getMixColor } from "./mixes/helpers";
+import { getMixColor, tracksByIds } from "./mixes/helpers";
+import { RECIPE_LINE, getRecipe, pickPageTracks } from "./mixes/recipes";
+import { MOOD_HEADS, type Mood } from "./moods/heads";
+import { MOOD_STATE_VERSION, loadMoodState, type MoodStats } from "./moods/state";
 
-// The heads' own lean: strictly more likely than not (two-class softmax
-// argmax), not a tuned value. Exactly 0.5 is the model not leaning either
-// way, so it carries no mood. It stops a dirge-heavy library from labelling
-// its least-gloomy tracks "Upbeat": a dirge scores ~0.2.
-const HEAD_DECISION = 0.5;
-
+/**
+ * `id` is the bucket's id and `field` the name the vibe map and the apps key the mood on: both kept from the old
+ * Essentia heads so no client breaks. `learned` is the learned mood behind it, `recipe` the mood page's recipe.
+ */
 export const MOODS = [
-    { id: "happy", field: "moodHappy", name: "Upbeat", color: "from-yellow-400 to-orange-500", icon: "Smile" },
-    { id: "sad", field: "moodSad", name: "Melancholic", color: "from-blue-600 to-indigo-700", icon: "CloudRain" },
-    { id: "chill", field: "moodRelaxed", name: "Calm", color: "from-teal-400 to-cyan-500", icon: "Wind" },
-    { id: "aggressive", field: "moodAggressive", name: "Intense", color: "from-red-700 to-gray-900", icon: "Flame" },
-    { id: "party", field: "moodParty", name: "Energetic", color: "from-pink-500 to-rose-600", icon: "PartyPopper" },
-] as const;
+    { id: "happy", field: "moodHappy", learned: "happy", recipe: "upbeat", name: "Upbeat", color: "from-yellow-400 to-orange-500", icon: "Smile" },
+    { id: "sad", field: "moodSad", learned: "sad", recipe: "melancholy", name: "Melancholic", color: "from-blue-600 to-indigo-700", icon: "CloudRain" },
+    { id: "chill", field: "moodRelaxed", learned: "calm", recipe: "calm", name: "Calm", color: "from-teal-400 to-cyan-500", icon: "Wind" },
+    { id: "aggressive", field: "moodAggressive", learned: "aggressive", recipe: "intense", name: "Intense", color: "from-red-700 to-gray-900", icon: "Flame" },
+    { id: "party", field: "moodParty", learned: "party", recipe: "energetic", name: "Energetic", color: "from-pink-500 to-rose-600", icon: "PartyPopper" },
+] as const satisfies readonly (Record<string, string> & { learned: Mood })[];
 
 export type MoodType = (typeof MOODS)[number]["id"];
 export type MoodField = (typeof MOODS)[number]["field"];
@@ -31,7 +33,7 @@ const MOOD_FIELDS: MoodField[] = MOODS.map((m) => m.field);
 
 /** Analysed, but no mood stands out for this track. */
 export const NEUTRAL = "neutral";
-/** Mood values not written yet (analysis pending or failed). */
+/** No current mood scores for this track (analysis, its sound vector or the mood step pending, or failed). */
 export const UNANALYZED = "unanalyzed";
 
 const MOOD_BY_ID: Record<MoodType, (typeof MOODS)[number]> = Object.fromEntries(
@@ -47,6 +49,7 @@ const MOOD_GRADIENTS: Record<MoodType, string> = {
         "linear-gradient(to bottom, rgba(69, 10, 10, 0.7), rgba(17, 24, 39, 0.6), rgba(0, 0, 0, 0.5))",
 };
 
+/** A track's learned mood scores (logits), under the client-facing names. */
 export type MoodValues = { [F in MoodField]: number | null };
 
 export interface MoodView {
@@ -56,7 +59,7 @@ export interface MoodView {
     score: number;
     /** Library rank (0..1) per mood; empty when UNANALYZED. */
     ranks: Partial<Record<MoodField, number>>;
-    /** Every mood the track has (head says yes). */
+    /** Every mood the track has: its score at least RECIPE_LINE standard deviations above the library's mean. */
     moods: MoodField[];
 }
 
@@ -78,12 +81,12 @@ function upperBound(sorted: Float64Array, v: number): number {
     return lo;
 }
 
-/** Each mood's sorted library values, for ranking a value within the library. */
+/** Each mood's sorted library values, for ranking a value within the library, and the library's mood statistics. */
 export class MoodDistribution {
     private readonly sorted: Record<MoodField, Float64Array>;
     readonly size: number;
 
-    constructor(rows: MoodValues[]) {
+    constructor(rows: MoodValues[], private readonly stats: Record<MoodField, MoodStats>) {
         const complete = rows.filter(isAnalysed);
         this.size = complete.length;
         this.sorted = Object.fromEntries(
@@ -99,6 +102,12 @@ export class MoodDistribution {
         const s = this.sorted[field];
         if (s.length === 0) return 0;
         return (lowerBound(s, v) + upperBound(s, v)) / 2 / s.length;
+    }
+
+    /** How many of the library's standard deviations v sits above its mean on this mood. */
+    z(field: MoodField, v: number): number {
+        const { mean, sd } = this.stats[field];
+        return (v - mean) / sd;
     }
 }
 
@@ -119,7 +128,7 @@ export function classifyMoods(row: MoodValues, dist: MoodDistribution): MoodView
         const value = row[f] as number;
         const r = dist.rank(f, value);
         ranks[f] = r;
-        if (value > HEAD_DECISION) {
+        if (dist.z(f, value) >= RECIPE_LINE) {
             moods.push(f);
             if (r > score) {
                 dominant = f;
@@ -131,57 +140,57 @@ export function classifyMoods(row: MoodValues, dist: MoodDistribution): MoodView
 }
 
 export interface MoodSnapshot {
-    /** Changes whenever the analysed library changes. */
+    /** The mood statistics' version and inputs fingerprint: changes whenever a track's mood scores could. */
     signature: string;
     views: Map<string, MoodView>;
-    /** Tracks still waiting for mood values. */
+    /** Tracks still waiting for mood scores. */
     pending: number;
 }
 
 let snapshot: MoodSnapshot | null = null;
 let building: Promise<MoodSnapshot> | null = null;
 
+/**
+ * The statistics' version and fingerprint, which change with any rescore, sound vector, reading or eligible track;
+ * and how many present tracks are still waiting for mood scores: analysis running, or a sound vector the mood step
+ * has not scored with the current weights.
+ */
 async function librarySignature(): Promise<{ signature: string; pending: number }> {
-    const rows = await prisma.$queryRaw<
-        Array<{ analysed: bigint; pending: bigint; latest: Date | null }>
-    >`
-        SELECT
-            COUNT(*) FILTER (WHERE "analysisStatus" = 'completed' AND "moodHappy" IS NOT NULL
-                AND "moodSad" IS NOT NULL AND "moodRelaxed" IS NOT NULL
-                AND "moodAggressive" IS NOT NULL AND "moodParty" IS NOT NULL) AS analysed,
-            COUNT(*) FILTER (WHERE "analysisStatus" IN ('pending', 'queued', 'processing')) AS pending,
-            MAX("analyzedAt") AS latest
-        FROM "Track"
-        WHERE "missingSince" IS NULL
+    const state = await prisma.moodState.findUnique({
+        where: { id: "default" },
+        select: { version: true, fingerprint: true },
+    });
+    const [{ pending }] = await prisma.$queryRaw<Array<{ pending: number }>>`
+        SELECT count(*)::int AS pending
+        FROM "Track" t
+        LEFT JOIN track_embeddings te ON te.track_id = t.id AND te.model_version = ${MOOD_HEADS.model}
+        LEFT JOIN track_moods m ON m.track_id = t.id
+        WHERE t."missingSince" IS NULL
+          AND (t."analysisStatus" IN ('pending', 'queued', 'processing')
+               OR (te.track_id IS NOT NULL AND (m.embedded_at IS DISTINCT FROM te.analyzed_at
+                                                OR m.weights IS DISTINCT FROM ${MOOD_HEADS.version})))
     `;
-    const r = rows[0];
     return {
-        signature: `${r?.analysed ?? 0}:${r?.latest?.toISOString() ?? ""}`,
-        pending: Number(r?.pending ?? 0),
+        signature: state?.version === MOOD_STATE_VERSION ? `${state.version}:${state.fingerprint}` : "none",
+        pending,
     };
 }
 
+/** Every track the mood statistics cover (current scores, a present readable file, finished analysis), classified. */
 async function buildSnapshot(signature: string, pending: number): Promise<MoodSnapshot> {
-    const rows = await prisma.track.findMany({
-        where: {
-            analysisStatus: "completed",
-            moodHappy: { not: null },
-            moodSad: { not: null },
-            moodRelaxed: { not: null },
-            moodAggressive: { not: null },
-            moodParty: { not: null },
-            ...NOT_MISSING,
-        },
-        select: {
-            id: true,
-            moodHappy: true,
-            moodSad: true,
-            moodRelaxed: true,
-            moodAggressive: true,
-            moodParty: true,
-        },
-    });
-    const dist = new MoodDistribution(rows);
+    const state = await loadMoodState();
+    if (!state) return { signature, views: new Map(), pending };
+    const scores = Prisma.raw(MOODS.map((m) => `m."${m.learned}"::float8 AS "${m.field}"`).join(", "));
+    const rows = await prisma.$queryRaw<Array<{ id: string } & MoodValues>>`
+        SELECT t.id, ${scores}
+        FROM track_moods m
+        JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
+        JOIN "Track" t ON t.id = m.track_id
+        WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model}
+          AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'
+    `;
+    const stats = Object.fromEntries(MOODS.map((m) => [m.field, state.moods[m.learned]])) as Record<MoodField, MoodStats>;
+    const dist = new MoodDistribution(rows, stats);
     const views = new Map<string, MoodView>();
     for (const row of rows) {
         views.set(row.id, classifyMoods(row, dist));
@@ -307,51 +316,17 @@ class MoodBucketService {
 
         const config = MOOD_BY_ID[mood];
 
-        // Draw uniformly from the whole bucket; scores never enter the draw.
-        const moodBuckets = await prisma.moodBucket.findMany({
-            where: { mood },
-            select: { trackId: true },
-        });
-
-        // Skip what this user was already served, unless that leaves too
-        // small a pool to mix from -- then start over from the full bucket.
-        let pool = moodBuckets;
-        if (excludeTrackIds.length > 0) {
-            const excluded = new Set(excludeTrackIds);
-            const fresh = moodBuckets.filter((b) => !excluded.has(b.trackId));
-            if (fresh.length >= 8) {
-                pool = fresh;
-            }
-        }
-
-        if (pool.length < 8) {
-            logger.debug(
-                `[MoodBucket] Not enough tracks for mood ${mood}: ${pool.length}`
-            );
+        // The mood page's recipe, skipping what this user was already served unless that leaves too few to mix from.
+        const drawn = await pickPageTracks(getRecipe(config.recipe), { limit, exclude: excludeTrackIds });
+        if (!drawn) {
+            logger.debug(`[MoodBucket] Not enough tracks for the ${mood} mood page`);
             return null;
         }
-
-        // Randomly sample from the pool
-        const shuffled = shuffleArray(pool);
-        const selectedIds = shuffled.slice(0, limit).map((b) => b.trackId);
-
-        // Get cover URLs for the selected tracks
-        const tracks = await prisma.track.findMany({
-            where: { id: { in: selectedIds } },
-            select: {
-                id: true,
-                album: { select: { coverUrl: true } },
-            },
-        });
-
-        // Preserve order of selectedIds
-        const orderedTracks = selectedIds
-            .map((id) => tracks.find((t) => t.id === id))
-            .filter(Boolean);
+        const orderedTracks = await tracksByIds(drawn, { album: { select: { coverUrl: true } } });
         const coverUrls = orderedTracks
-            .filter((t) => t?.album.coverUrl)
+            .filter((t) => t.album.coverUrl)
             .slice(0, 4)
-            .map((t) => t!.album.coverUrl!);
+            .map((t) => t.album.coverUrl!);
 
         const timestamp = Date.now();
         return {
@@ -359,7 +334,7 @@ class MoodBucketService {
             mood,
             name: `${config.name} Mix`,
             description: `Tracks that match your ${config.name.toLowerCase()} vibe`,
-            trackIds: orderedTracks.map((t) => t!.id),
+            trackIds: orderedTracks.map((t) => t.id),
             coverUrls,
             trackCount: orderedTracks.length,
             color: MOOD_GRADIENTS[mood],

@@ -1,6 +1,7 @@
 /**
- * GET /mixes/mood/buckets/:mood stores the ids it served on the caller's
- * UserMoodMix and excludes them from the next serving.
+ * GET /mixes/mood/buckets/:mood draws from the mood page's recipe, stores the
+ * ids it served on the caller's UserMoodMix and excludes them from the next
+ * serving. On the synthetic library with learned moods.
  */
 
 const store = new Map<string, string>();
@@ -32,15 +33,22 @@ import express from "express";
 import request from "supertest";
 import mixRoutes from "../mixes";
 import { prisma } from "../../utils/db";
+import { buildMoodState } from "../../services/moods/state";
+import { pickRecipeStation } from "../../services/mixes/recipes";
+import {
+    removeSyntheticLibrary,
+    seedSyntheticLibrary,
+    seedSyntheticMoods,
+} from "../../__tests__/fixtures/syntheticLibrary";
 
-jest.setTimeout(60_000);
+jest.setTimeout(300_000);
 
+const PREFIX = "mmsr_";
 const USER_ID = "mmsr_user";
-const BUCKET_ROWS = 40; // 15 served + 3 saved + 15 fresh leaves >= 7 spare
 
-function trackId(i: number): string {
-    return `mmsr_trk_${i}`;
-}
+/** Every member of the Calm page's recipe; 15 served + 3 saved + 15 fresh needs well over 33. */
+let calm: string[] = [];
+const trackId = (i: number) => calm[i];
 
 function makeApp() {
     const app = express();
@@ -63,25 +71,14 @@ describe("GET /mixes/mood/buckets/:mood remembers what it served (database)", ()
     let app: express.Application;
 
     beforeAll(async () => {
-        const artist = await prisma.artist.create({ data: { id: "mmsr_art", name: "Serve Route Artist", identityKey: "mmsr_a" } });
-        const album = await prisma.album.create({
-            data: { id: "mmsr_alb", rgMbid: "mmsr_rg", artistId: artist.id, title: "Serve Route Album", primaryType: "Album" },
-        });
+        await seedSyntheticLibrary(PREFIX);
+        await seedSyntheticMoods(PREFIX);
+        await prisma.$transaction((tx) => buildMoodState(tx));
+        calm = await pickRecipeStation("calm", { limit: 100_000 });
+        expect(calm.length).toBeGreaterThan(60);
         await prisma.user.create({
             data: { id: USER_ID, username: "mmsr-tester", passwordHash: "x" },
         });
-        const bucketRows = [];
-        for (let i = 0; i < BUCKET_ROWS; i++) {
-            const id = trackId(i);
-            await prisma.track.create({
-                data: {
-                    id, albumId: album.id, title: `SR ${i}`, trackNo: i + 1, duration: 180,
-                    filePath: `/tmp/${id}.flac`, fileModified: new Date(), fileSize: 1000,
-                },
-            });
-            bucketRows.push({ trackId: id, mood: "chill", score: 0.9999 - i * 0.001 });
-        }
-        await prisma.moodBucket.createMany({ data: bucketRows });
         // A mix the user already saved, before any serving is recorded.
         await prisma.userMoodMix.create({
             data: {
@@ -97,11 +94,8 @@ describe("GET /mixes/mood/buckets/:mood remembers what it served (database)", ()
 
     afterAll(async () => {
         await prisma.userMoodMix.deleteMany({ where: { userId: { startsWith: "mmsr_" } } });
-        await prisma.user.deleteMany({ where: { id: { startsWith: "mmsr_" } } });
-        await prisma.moodBucket.deleteMany({ where: { trackId: { startsWith: "mmsr_trk_" } } });
-        await prisma.track.deleteMany({ where: { id: { startsWith: "mmsr_trk_" } } });
-        await prisma.album.deleteMany({ where: { id: "mmsr_alb" } });
-        await prisma.artist.deleteMany({ where: { id: "mmsr_art" } });
+        await removeSyntheticLibrary(PREFIX);
+        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
         await prisma.$disconnect();
     });
 
@@ -110,6 +104,7 @@ describe("GET /mixes/mood/buckets/:mood remembers what it served (database)", ()
 
         expect(res.status).toBe(200);
         expect(res.body.trackIds).toHaveLength(15);
+        expect(res.body.trackIds.filter((id: string) => !calm.includes(id))).toEqual([]);
         expect(await servedTrackIds()).toEqual(res.body.trackIds);
     });
 
