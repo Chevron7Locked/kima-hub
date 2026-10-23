@@ -270,9 +270,18 @@ class ProgrammaticPlaylistService {
             `[MIXES] Final selected indices: [${selectedIndices.join(", ")}]`
         );
 
+        // One mix failing (a recipe refusing a library with no spread on a mood) must not blank the others.
+        const generate = async (i: number): Promise<ProgrammaticMix | null> => {
+            try {
+                return await mixGenerators[i].fn();
+            } catch (error) {
+                logger.error(`[MIXES] ${mixGenerators[i].name} failed:`, error);
+                return null;
+            }
+        };
         const mixPromises = selectedIndices.map((i) => {
             logger.debug(`[MIXES] Generating ${mixGenerators[i].name}...`);
-            return mixGenerators[i].fn();
+            return generate(i);
         });
         const mixes = await Promise.all(mixPromises);
 
@@ -316,7 +325,7 @@ class ProgrammaticPlaylistService {
                     logger.debug(
                         `[MIXES] Attempting fallback: ${mixGenerators[i].name}`
                     );
-                    const fallbackMix = await mixGenerators[i].fn();
+                    const fallbackMix = await generate(i);
                     if (
                         fallbackMix &&
                         !successfulTypes.has(fallbackMix.type)
