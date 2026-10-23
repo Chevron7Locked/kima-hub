@@ -138,6 +138,8 @@ jest.mock("../../workers/podcastEnrichmentWorker", () => ({
 }));
 
 import { prisma } from "../../utils/db";
+import { PROBE_ID } from "../../services/matching/state";
+import { buildMoods } from "../../services/moods/state";
 import {
     closeOrphanedDependents,
     getEnrichmentProgress,
@@ -394,6 +396,37 @@ describe("getEnrichmentProgress", () => {
         const progress = await getEnrichmentProgress();
         expect(progress.artists.owed).toBe(1);
         expect(progress.coreComplete).toBe(false);
+    });
+
+    it("holds fully-complete until every sound vector has current mood scores", async () => {
+        await settledLibrary(id("moody"));
+        await prisma.$executeRawUnsafe(
+            `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
+             VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
+            id("moody"), `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`,
+        );
+        // The similarity step is done with it, so only the moods are owed.
+        await prisma.$executeRawUnsafe(
+            `INSERT INTO matching_feel (track_id, embedded_at, probe, valence, arousal)
+             SELECT track_id, analyzed_at, $2, 0.5, 0.5 FROM track_embeddings WHERE track_id = $1`,
+            id("moody"), PROBE_ID,
+        );
+        await prisma.$executeRawUnsafe(
+            `INSERT INTO matching_map (track_id, embedded_at, x, y, z, colour, laid_out)
+             SELECT track_id, analyzed_at, 0, 0, 0, 0.5, true FROM track_embeddings WHERE track_id = $1`,
+            id("moody"),
+        );
+        invalidateEnrichmentProgress();
+        let progress = await getEnrichmentProgress();
+        expect(progress.similarity).toMatchObject({ total: 1, completed: 1 });
+        expect(progress.moods).toMatchObject({ total: 1, completed: 0, pending: 1, progress: 0 });
+        expect(progress.isFullyComplete).toBe(false);
+
+        await buildMoods();
+        invalidateEnrichmentProgress();
+        progress = await getEnrichmentProgress();
+        expect(progress.moods).toMatchObject({ total: 1, completed: 1, pending: 0, progress: 100 });
+        expect(progress.isFullyComplete).toBe(true);
     });
 
     it("counts a record a person set aside as closed, and closes what needed its answer", async () => {

@@ -25,6 +25,7 @@ export type EnrichmentPhase =
     | "audio"
     | "podcasts"
     | "vibe"
+    | "mood"
     | "similarity"
     | null;
 

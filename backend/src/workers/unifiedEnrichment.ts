@@ -1,7 +1,8 @@
 /**
  * The enrichment scheduler: artist metadata, per-track identification,
  * audio analysis, CLAP embeddings, fingerprints and podcast refresh, driven
- * from TrackStage records on a self-rescheduling cycle.
+ * from TrackStage records on a self-rescheduling cycle, then the learned moods
+ * and the similarity step from the stored sound vectors.
  */
 
 import { logger } from "../utils/logger";
@@ -48,6 +49,7 @@ import { albumFactsOf, fillAlbumFromCatalogue, identifyAlbumsBySound, type Album
 import { fpcalcService } from "../services/fpcalc";
 import { resolveWithinMusicRoot } from "../routes/library/trackPath";
 import { buildMatching, matchingProgress } from "../services/matching/state";
+import { buildMoods, moodProgress } from "../services/moods/state";
 import { updateMap } from "../services/matching/map";
 import {
     classifyFailure,
@@ -1191,6 +1193,20 @@ export async function stopUnifiedEnrichmentWorker() {
         );
 }
 
+/** Drop every cached mix so the next read rebuilds it; returns how many were dropped. */
+async function dropCachedMixes(): Promise<number> {
+    const redis = getRedis();
+    const keys: string[] = [];
+    let cursor = "0";
+    do {
+        const [next, batch] = await redis.scan(cursor, "MATCH", "mixes:*", "COUNT", 100);
+        cursor = next;
+        keys.push(...batch);
+    } while (cursor !== "0");
+    if (keys.length > 0) await redis.del(...keys);
+    return keys.length;
+}
+
 /** Drop every cached mix so the next read rebuilds it from what enrichment has now answered, and record
  * that this point's clear is done. */
 async function clearMixCache(
@@ -1198,17 +1214,9 @@ async function clearMixCache(
     done: { coreCacheCleared: true } | { fullCacheCleared: true },
 ): Promise<void> {
     try {
-        const redis = getRedis();
-        const keys: string[] = [];
-        let cursor = "0";
-        do {
-            const [next, batch] = await redis.scan(cursor, "MATCH", "mixes:*", "COUNT", 100);
-            cursor = next;
-            keys.push(...batch);
-        } while (cursor !== "0");
-        if (keys.length > 0) {
-            await redis.del(...keys);
-            logger.info(`[Enrichment] Cleared ${keys.length} mix cache entries after ${point} enrichment complete`);
+        const dropped = await dropCachedMixes();
+        if (dropped > 0) {
+            logger.info(`[Enrichment] Cleared ${dropped} mix cache entries after ${point} enrichment complete`);
         }
         await enrichmentStateService.updateState(done);
     } catch (error) {
@@ -1696,6 +1704,8 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         // Vibe embedding sweep — catches tracks missed by the event-driven subscriber
         const vibeResult = await runPhase("vibe", executeVibePhase);
         vibeQueued = vibeResult ?? 0;
+
+        await runPhase("mood", executeMoodPhase);
 
         await runPhase("similarity", executeSimilarityPhase);
 
@@ -2706,6 +2716,21 @@ export async function executeVibePhase(): Promise<number> {
 }
 
 /**
+ * The mood step: the learned mood scores for new or changed sound vectors and the
+ * library's mood statistics when their inputs changed (services/moods/state.ts).
+ * Mixes are cached from the moods, so any change drops the cached mixes. Returns
+ * how many tracks were scored.
+ */
+export async function executeMoodPhase(): Promise<number> {
+    const { scored, stateChanged } = await buildMoods();
+    if (scored > 0 || stateChanged) {
+        const dropped = await dropCachedMixes();
+        if (dropped > 0) logger.info(`[Enrichment] Cleared ${dropped} mix cache entries after the moods changed`);
+    }
+    return scored;
+}
+
+/**
  * The similarity step: feel for new sound vectors and the library's matching
  * state when its inputs changed (services/matching/state.ts), then the vibe map:
  * laid out or extended with new tracks (services/matching/map.ts). Returns how
@@ -2905,6 +2930,7 @@ async function computeEnrichmentProgress() {
     `;
     const recordingWaiting = Number(recordingWaitingRow?.waiting ?? 0);
 
+    const moods = await moodProgress();
     const similarity = await matchingProgress();
 
     // Questions about missing files are closed by the scan as FILE_MISSING and
@@ -3020,6 +3046,15 @@ async function computeEnrichmentProgress() {
             isBackground: true,
         },
 
+        // The learned mood scores for each sound vector (the mood step)
+        moods: {
+            total: moods.total,
+            completed: moods.completed,
+            pending: moods.total - moods.completed,
+            progress: moods.total > 0 ? Math.round((moods.completed / moods.total) * 100) : 0,
+            isBackground: true,
+        },
+
         // Feel for each sound vector and the library's matching state (the similarity step)
         similarity: {
             total: similarity.total,
@@ -3046,6 +3081,7 @@ async function computeEnrichmentProgress() {
             fingerprintPending === 0 &&
             fingerprint.working === 0 &&
             fingerprint.retryableFailed === 0 &&
+            moods.completed === moods.total &&
             similarity.completed === similarity.total,
     };
 }

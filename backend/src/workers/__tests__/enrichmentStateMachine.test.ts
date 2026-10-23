@@ -61,6 +61,7 @@ const mockRedisRpush = jest.fn().mockResolvedValue(1);
 const mockRedisLlen = jest.fn().mockResolvedValue(0);
 const mockRedisDel = jest.fn().mockResolvedValue(1);
 const mockRedisGet = jest.fn().mockResolvedValue(null);
+const mockRedisScan = jest.fn().mockResolvedValue(["0", []]);
 
 jest.mock("ioredis", () => {
     return jest.fn().mockImplementation(() => ({
@@ -73,10 +74,17 @@ jest.mock("ioredis", () => {
         llen: mockRedisLlen,
         del: mockRedisDel,
         get: mockRedisGet,
+        scan: mockRedisScan,
         disconnect: jest.fn(),
         status: "ready",
     }));
 });
+
+const mockBuildMoods = jest.fn();
+jest.mock("../../services/moods/state", () => ({
+    buildMoods: () => mockBuildMoods(),
+    moodProgress: jest.fn().mockResolvedValue({ total: 0, completed: 0 }),
+}));
 
 jest.mock("../../config", () => ({
     config: { redisUrl: "redis://localhost:6379" },
@@ -199,6 +207,7 @@ import {
     startUnifiedEnrichmentWorker,
     executeAudioPhase,
     executeVibePhase,
+    executeMoodPhase,
     executeIdentificationPhase,
     getEnrichmentProgress,
     invalidateEnrichmentProgress,
@@ -255,6 +264,8 @@ describe("Enrichment State Machine", () => {
         jest.useFakeTimers();
         // Default: state service returns idle
         mockGetState.mockResolvedValue({ status: "idle" });
+        mockBuildMoods.mockResolvedValue({ scored: 0, stateChanged: false });
+        mockRedisScan.mockResolvedValue(["0", []]);
         // Default: one track owes each stage, so a phase that consults the
         // stage records finds work unless a test restapes this.
         // getNextWork passes the stage as a bind parameter, so the stage under
@@ -525,6 +536,42 @@ describe("Enrichment State Machine", () => {
                 return where.includes("analysisStatus");
             });
             expect(statusScans).toHaveLength(0);
+        });
+    });
+
+    describe("the mood step", () => {
+        it("runs after the vibe sweep and before the similarity step", async () => {
+            await startUnifiedEnrichmentWorker();
+            mockUpdateState.mockClear();
+
+            await triggerEnrichmentNow();
+
+            const phases = mockUpdateState.mock.calls
+                .map(([update]) => (update as { currentPhase?: string | null }).currentPhase)
+                .filter(Boolean);
+            expect(phases.slice(phases.indexOf("vibe"))).toEqual(["vibe", "mood", "similarity"]);
+            expect(mockBuildMoods).toHaveBeenCalledTimes(1);
+        });
+
+        it.each([
+            ["new scores", { scored: 3, stateChanged: true }],
+            ["new statistics alone", { scored: 0, stateChanged: true }],
+        ])("drops every cached mix after %s", async (_what, result) => {
+            mockBuildMoods.mockResolvedValue(result);
+            mockRedisScan
+                .mockResolvedValueOnce(["7", ["mixes:u1"]])
+                .mockResolvedValueOnce(["0", ["mixes:u2"]]);
+
+            expect(await executeMoodPhase()).toBe(result.scored);
+
+            expect(mockRedisScan).toHaveBeenCalledWith("0", "MATCH", "mixes:*", "COUNT", 100);
+            expect(mockRedisDel).toHaveBeenCalledWith("mixes:u1", "mixes:u2");
+        });
+
+        it("keeps the cached mixes when nothing changed", async () => {
+            expect(await executeMoodPhase()).toBe(0);
+            expect(mockRedisScan).not.toHaveBeenCalled();
+            expect(mockRedisDel).not.toHaveBeenCalled();
         });
     });
 

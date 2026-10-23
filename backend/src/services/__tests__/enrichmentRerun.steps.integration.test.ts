@@ -1,10 +1,12 @@
 /**
- * A re-run from each of the five steps redoes that step and everything that
- * depends on it -- and nothing else. The vibe map is always laid out again;
- * person-decided answers and everything people made stay.
+ * A re-run from each of the six steps redoes that step and everything that
+ * depends on it -- and nothing else. Every step but the moods lays the vibe map
+ * out again; person-decided answers and everything people made stay.
  */
 import { prisma } from "../../utils/db";
 import { rerunEnrichment } from "../enrichmentRestart";
+import { MOODS } from "../moods/heads";
+import { READINGS } from "../moods/state";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const P = "crerun";
@@ -39,7 +41,32 @@ async function mapAndStateGone(): Promise<boolean> {
     return state[0].n === 0 && map[0].n === 0;
 }
 
+/** Scores for every seeded sound vector, and the library's mood statistics. */
+async function seedMoods() {
+    await prisma.$executeRawUnsafe(
+        `INSERT INTO track_moods (track_id, embedded_at, weights, ${MOODS.map((m) => `"${m}"`).join(", ")})
+         SELECT track_id, analyzed_at, 'w', ${MOODS.map(() => "0").join(", ")}
+         FROM track_embeddings WHERE track_id LIKE '${P}%'
+         ON CONFLICT (track_id) DO NOTHING`,
+    );
+    const stats = [...MOODS, ...READINGS].flatMap((name) => [`"${name}_mean"`, `"${name}_sd"`]);
+    await prisma.$executeRawUnsafe(
+        `INSERT INTO mood_state (id, version, fingerprint, track_count, ${stats.join(", ")})
+         VALUES ('default', 'v', 'f', 1, ${stats.map(() => "0").join(", ")})
+         ON CONFLICT (id) DO NOTHING`,
+    );
+}
+
+async function moodsLeft(): Promise<{ scores: number; state: number }> {
+    const [{ scores }] = await prisma.$queryRawUnsafe<Array<{ scores: number }>>(
+        `SELECT count(*)::int AS scores FROM track_moods WHERE track_id LIKE '${P}%'`,
+    );
+    const [{ state }] = await prisma.$queryRawUnsafe<Array<{ state: number }>>(`SELECT count(*)::int AS state FROM mood_state`);
+    return { scores, state };
+}
+
 async function cleanup() {
+    await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
     await prisma.$executeRawUnsafe(`DELETE FROM matching_state`);
     await prisma.$executeRawUnsafe(`DELETE FROM "EnrichmentFailure" WHERE "entityId" LIKE '${P}%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${P}%'`);
@@ -78,10 +105,37 @@ afterAll(async () => {
     await closeEngineConnections();
 });
 
+describe("a moods re-run", () => {
+    it("clears the mood scores and statistics, and nothing else", async () => {
+        await seedMoods();
+        const wiped = await rerunEnrichment("moods");
+        expect(wiped).toEqual({ artists: 0, tracks: 0, vectors: 0 });
+        expect(await moodsLeft()).toEqual({ scores: 0, state: 0 });
+        expect((await prisma.$queryRawUnsafe<Array<{ n: number }>>(`SELECT count(*)::int AS n FROM matching_state`))[0].n).toBe(1);
+        expect((await prisma.$queryRawUnsafe<Array<{ n: number }>>(
+            `SELECT count(*)::int AS n FROM matching_map WHERE track_id = $1`, `${P}trk`,
+        ))[0].n).toBe(1);
+        expect((await prisma.$queryRawUnsafe<Array<{ n: number }>>(
+            `SELECT count(*)::int AS n FROM track_embeddings WHERE track_id = $1`, `${P}trk`,
+        ))[0].n).toBe(1);
+        const t = await prisma.track.findUniqueOrThrow({ where: { id: `${P}trk` } });
+        expect(t).toMatchObject({
+            bpm: 120, energy: 0.8, analysisStatus: "completed", vibeAnalysisStatus: "completed", recordingMbid: `${P}-rec`,
+        });
+        const stages = await prisma.trackStage.findMany({ where: { trackId: `${P}trk` } });
+        expect(stages).toHaveLength(3);
+        expect(stages.every((s) => s.status === "done")).toBe(true);
+        const a = await prisma.artist.findUniqueOrThrow({ where: { id: `${P}art` } });
+        expect(a).toMatchObject({ summary: "A bio", enrichmentStatus: "completed" });
+    });
+});
+
 describe("a similarity re-run", () => {
     it("clears the matching state and every stored position, and nothing else", async () => {
+        await seedMoods();
         await rerunEnrichment("similarity");
         expect(await mapAndStateGone()).toBe(true);
+        expect(await moodsLeft()).toEqual({ scores: 1, state: 1 });
         const t = await prisma.track.findUniqueOrThrow({ where: { id: `${P}trk` } });
         expect(t).toMatchObject({
             bpm: 120, analysisStatus: "completed", vibeAnalysisStatus: "completed", recordingMbid: `${P}-rec`,
@@ -102,7 +156,9 @@ describe("an artists re-run", () => {
                  "feelSdValence", "feelSdArousal", "soundSpread", "genreSpread", "genreWeight", genres)
              VALUES ('default', 'v', 'f', 1, 0.5, 0.5, 0.1, 0.1, 0.9, 0.5, 0.2, '{}'::jsonb)`,
         );
+        await seedMoods();
         await rerunEnrichment("artists");
+        expect(await moodsLeft()).toEqual({ scores: 1, state: 1 });
         const a = await prisma.artist.findUniqueOrThrow({ where: { id: `${P}art` } });
         expect(a).toMatchObject({ summary: null, genres: null, lastEnriched: null, enrichmentStatus: "pending" });
         expect(await prisma.similarArtist.count({ where: { fromArtistId: `${P}art` } })).toBe(0);
@@ -121,7 +177,9 @@ describe("a vectors re-run", () => {
             where: { id: `${P}decided__embedding` },
             data: { status: "blocked", decidedAt: new Date(), decidedBy: "resolved-via-failures-api" },
         });
+        await seedMoods();
         await rerunEnrichment("vectors");
+        expect(await moodsLeft()).toEqual({ scores: 0, state: 0 });
         expect((await prisma.$queryRawUnsafe<Array<{ n: number }>>(
             `SELECT count(*)::int AS n FROM track_embeddings WHERE track_id = $1`, `${P}trk`,
         ))[0].n).toBe(0);
@@ -163,7 +221,9 @@ describe("an analysis re-run", () => {
              VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
             `${P}trk`, `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`,
         );
+        await seedMoods();
         await rerunEnrichment("analysis");
+        expect(await moodsLeft()).toEqual({ scores: 0, state: 0 });
         const t = await prisma.track.findUniqueOrThrow({ where: { id: `${P}trk` } });
         expect(t).toMatchObject({ bpm: null, analysisStatus: "pending", vibeAnalysisStatus: "pending", recordingMbid: `${P}-rec` });
         expect((await prisma.$queryRawUnsafe<Array<{ n: number }>>(
@@ -186,7 +246,14 @@ describe("an identification re-run", () => {
             data: { status: "blocked", decidedAt: new Date(), decidedBy: "resolved-via-failures-api" },
         });
 
+        await prisma.$executeRawUnsafe(
+            `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
+             VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
+            `${P}trk`, `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`,
+        );
+        await seedMoods();
         await rerunEnrichment("identification");
+        expect(await moodsLeft()).toEqual({ scores: 0, state: 0 });
 
         const asked = await prisma.track.findUniqueOrThrow({ where: { id: `${P}trk` } });
         expect(asked).toMatchObject({ recordingMbid: null, isrc: null, isrcSource: null, analysisStatus: "pending", vibeAnalysisStatus: "pending" });

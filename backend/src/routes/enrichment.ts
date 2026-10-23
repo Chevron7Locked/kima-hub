@@ -176,15 +176,16 @@ const RERUN_STEPS: Record<RerunStep, string> = {
     artists: "artists",
     analysis: "audio analysis",
     vectors: "sound vectors",
+    moods: "moods",
     similarity: "similarity",
 };
 
 /**
  * POST /enrichment/rerun
- * Re-run the enrichment from one of its five steps: the step's answers and
- * everything that depends on them are cleared and worked out again, the vibe
- * map laid out fresh (services/enrichmentRestart.ts). Person-decided answers
- * and everything people made stay. Admin only.
+ * Re-run the enrichment from one of its six steps: the step's answers and
+ * everything that depends on them are cleared and worked out again
+ * (services/enrichmentRestart.ts). Person-decided answers and everything
+ * people made stay. Admin only.
  */
 router.post("/rerun", requireAuth, requireAdmin, async (req, res) => {
   try {

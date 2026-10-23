@@ -1,11 +1,12 @@
 /**
- * Re-run the enrichment from any of its five steps: identification (which
- * recording each track is), artists, audio analysis, sound vectors, or the
- * similarity step (feel, statistics and the vibe map). A re-run redoes its
- * step and everything that depends on it; nothing the engine worked out is
- * frozen across a run, and the vibe map is laid out again. Answers a person
- * set aside or closed stay as they left them, and everything people made --
- * the library, playlists, plays, likes, edits and artist images -- stays.
+ * Re-run the enrichment from any of its six steps: identification (which
+ * recording each track is), artists, audio analysis, sound vectors, the
+ * learned moods (scores and statistics), or the similarity step (feel,
+ * statistics and the vibe map). A re-run redoes its step and everything that
+ * depends on it; nothing the engine worked out is frozen across a run, and
+ * every step but the moods lays the vibe map out again. Answers a person set
+ * aside or closed stay as they left them, and everything people made -- the
+ * library, playlists, plays, likes, edits and artist images -- stays.
  */
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
@@ -15,7 +16,7 @@ import { closeStagesForMissingTracks } from "./missingFileStages";
 import { askedAgain } from "./stageReopen";
 import { RERUN_TIMEOUT_MS } from "./matching/state";
 
-export type RerunStep = "identification" | "artists" | "analysis" | "vectors" | "similarity";
+export type RerunStep = "identification" | "artists" | "analysis" | "vectors" | "moods" | "similarity";
 
 export interface EnrichmentWipe {
     artists: number;
@@ -25,20 +26,26 @@ export interface EnrichmentWipe {
 
 /**
  * What each step's re-run clears, in the order the resets share a transaction.
- * Every step also clears the similarity state and the map, because the
- * formula reads artist genres, analysis and sound vectors.
+ * The moods are scored from sound vectors and their statistics read the
+ * analysis' arousal and CLAP's readings, so every step that clears either
+ * clears them too. Every step but the moods clears the similarity state and
+ * the map, because the formula reads artist genres, analysis and sound vectors
+ * and never the moods.
  */
 const STEP_CLEARS: Record<RerunStep, {
+    similarity: boolean;
+    moods: boolean;
     recording: boolean;
     artists: boolean;
     analysis: boolean;
     vectors: boolean;
 }> = {
-    identification: { recording: true, artists: true, analysis: true, vectors: true },
-    artists: { recording: false, artists: true, analysis: false, vectors: false },
-    analysis: { recording: false, artists: false, analysis: true, vectors: true },
-    vectors: { recording: false, artists: false, analysis: false, vectors: true },
-    similarity: { recording: false, artists: false, analysis: false, vectors: false },
+    identification: { similarity: true, moods: true, recording: true, artists: true, analysis: true, vectors: true },
+    artists: { similarity: true, moods: false, recording: false, artists: true, analysis: false, vectors: false },
+    analysis: { similarity: true, moods: true, recording: false, artists: false, analysis: true, vectors: true },
+    vectors: { similarity: true, moods: true, recording: false, artists: false, analysis: false, vectors: true },
+    moods: { similarity: false, moods: true, recording: false, artists: false, analysis: false, vectors: false },
+    similarity: { similarity: true, moods: false, recording: false, artists: false, analysis: false, vectors: false },
 };
 
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
@@ -118,13 +125,21 @@ async function resetVectors(tx: Tx): Promise<number> {
 }
 
 /**
- * The first statement of every re-run. A map write locks the state row before it touches the stored map
- * (matching/map.ts), so the re-run takes that row before anything that reaches the map: deleting sound vectors
- * removes their map rows with them. Both sides then lock state first and map second, and never deadlock; a layout
- * in flight either finishes before the re-run clears it or finds no state and writes nothing.
+ * The first statement of every re-run that clears the similarity step. A map write locks the state row before it
+ * touches the stored map (matching/map.ts), so the re-run takes that row before anything that reaches the map:
+ * deleting sound vectors removes their map rows with them. Both sides then lock state first and map second, and never
+ * deadlock; a layout in flight either finishes before the re-run clears it or finds no state and writes nothing.
  */
 function releaseMatchingState(tx: Tx): Promise<unknown> {
     return tx.$executeRaw`DELETE FROM matching_state`;
+}
+
+/**
+ * Taken after the matching state and before any stage, track or vector row: the mood step locks its state row before
+ * the score rows it writes, and deleting sound vectors removes their score rows with them.
+ */
+function releaseMoodState(tx: Tx): Promise<unknown> {
+    return tx.$executeRaw`DELETE FROM mood_state`;
 }
 
 /**
@@ -136,6 +151,11 @@ function lockStages(tx: Tx, stages: string[]): Promise<unknown> {
     return tx.$queryRaw`
         SELECT count(*) FROM (SELECT 1 FROM "TrackStage" WHERE stage = ANY(${stages}) AND "decidedAt" IS NULL FOR UPDATE) locked
     `;
+}
+
+function resetMoods(tx: Tx): Promise<unknown> {
+    // With the state gone (above), the next mood pass scores every sound vector again from the stored vectors.
+    return tx.$executeRaw`DELETE FROM track_moods`;
 }
 
 function resetSimilarity(tx: Tx): Promise<unknown> {
@@ -158,7 +178,8 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
     }
     return prisma.$transaction(
         async (tx) => {
-            await releaseMatchingState(tx);
+            if (clears.similarity) await releaseMatchingState(tx);
+            if (clears.moods) await releaseMoodState(tx);
             const stages = [clears.recording && "recording", clears.analysis && "analysis", clears.vectors && "embedding"];
             const reset = stages.filter((s): s is string => Boolean(s));
             if (reset.length > 0) await lockStages(tx, reset);
@@ -181,7 +202,8 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
             if (clears.vectors) {
                 await tx.$executeRaw`DELETE FROM "EnrichmentFailure" WHERE "entityType" = 'vibe'`;
             }
-            await resetSimilarity(tx);
+            if (clears.moods) await resetMoods(tx);
+            if (clears.similarity) await resetSimilarity(tx);
             // A file that is gone cannot be re-run; its records wait for a scan to find it.
             if (trackWork) await closeStagesForMissingTracks(tx);
             return { artists, tracks, vectors };

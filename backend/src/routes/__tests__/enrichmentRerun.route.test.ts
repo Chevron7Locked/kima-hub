@@ -1,5 +1,5 @@
 /**
- * POST /enrichment/rerun takes one of the five steps, hands it to rerunEnrichment, and starts the
+ * POST /enrichment/rerun takes one of the six steps, hands it to rerunEnrichment, and starts the
  * engine. Anything else is a 400, and a member is refused by the real admin check: only the re-run
  * itself and the engine are stood in for.
  */
@@ -61,6 +61,14 @@ describe("POST /enrichment/rerun", () => {
         expect(res.body).toMatchObject({ artists: 1, tracks: 2, vectors: 3, message: "Re-running from similarity" });
         expect(mockRerun).toHaveBeenCalledWith("similarity");
         expect(mockInvalidateEnrichmentProgress).toHaveBeenCalledTimes(1);
+        expect(mockStartEnrichmentNow).toHaveBeenCalledTimes(1);
+    });
+
+    it("takes the moods step", async () => {
+        const res = await rerun("moods");
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ message: "Re-running from moods" });
+        expect(mockRerun).toHaveBeenCalledWith("moods");
         expect(mockStartEnrichmentNow).toHaveBeenCalledTimes(1);
     });
 

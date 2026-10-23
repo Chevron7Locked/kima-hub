@@ -8,8 +8,8 @@ const REFRESH_TOKEN_KEY = "refresh_token";
 // Mood Bucket Types (simplified mood system)
 export type MoodType = "happy" | "sad" | "chill" | "aggressive" | "party";
 
-/** The five enrichment steps a re-run can start from. */
-export type EnrichmentRerunStep = "identification" | "artists" | "analysis" | "vectors" | "similarity";
+/** The six enrichment steps a re-run can start from. */
+export type EnrichmentRerunStep = "identification" | "artists" | "analysis" | "vectors" | "moods" | "similarity";
 
 export interface MoodBucketPreset {
     id: MoodType;
@@ -194,7 +194,7 @@ interface EnrichmentState {
     startedAt?: string;
     pausedAt?: string;
     stoppedAt?: string;
-    currentPhase: "artists" | "tracks" | "fingerprint" | "audio" | "podcasts" | "vibe" | "similarity" | null;
+    currentPhase: "artists" | "tracks" | "fingerprint" | "audio" | "podcasts" | "vibe" | "mood" | "similarity" | null;
     lastActivity: string;
     /** Set by the backend when status=running but nothing has moved for >15 min. */
     hung?: boolean;
@@ -1810,6 +1810,13 @@ class ApiClient {
                 progress: number;
                 isBackground: boolean;
             };
+            moods: {
+                total: number;
+                completed: number;
+                pending: number;
+                progress: number;
+                isBackground: boolean;
+            };
             similarity: {
                 total: number;
                 completed: number;
@@ -1837,8 +1844,8 @@ class ApiClient {
         );
     }
 
-    /** Re-run the enrichment from one of the five steps; everything that
-     * depends on the step is worked out again, the vibe map included. */
+    /** Re-run the enrichment from one of the six steps; everything that
+     * depends on the step is worked out again. */
     async rerunEnrichment(step: EnrichmentRerunStep) {
         return this.request<{ artists: number; tracks: number; vectors: number; message: string }>(
             "/enrichment/rerun",
