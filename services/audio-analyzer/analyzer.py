@@ -525,7 +525,6 @@ class AudioAnalyzer:
             'arousal': None,
             'instrumentalness': None,  # instrumentalness and acousticness come from CLAP zero-shot
             'acousticness': None,
-            'moodTags': [],
             'moodHappy': None,
             'moodSad': None,
             'moodRelaxed': None,
@@ -621,8 +620,6 @@ class AudioAnalyzer:
                 result['_error'] = f'ML analysis failed: {e}'
                 return result
 
-            result['moodTags'] = self._generate_mood_tags(result)
-
             logger.info(f"Analysis complete [{result['analysisMode']}]: BPM={result['bpm']}, Key={result['key']} {result['keyScale']}, Valence={result['valence']}, Arousal={result['arousal']}")
         except MemoryError:
             logger.error(f"MemoryError during analysis of {file_path}")
@@ -672,63 +669,6 @@ class AudioAnalyzer:
 
         logger.info(f"ML Moods: H={result['moodHappy']}, S={result['moodSad']}, R={result['moodRelaxed']}, A={result['moodAggressive']}, P={result['moodParty']}")
         return result
-
-    def _generate_mood_tags(self, features: Dict[str, Any]) -> List[str]:
-        """Mood tags from the models' moods, valence/arousal and danceability, and the
-        measured tempo and key. A value that was not measured gives no tag; 0 is a value."""
-        tags = []
-        bpm = features.get('bpm')
-        valence = features.get('valence')
-        arousal = features.get('arousal')
-        danceability = features.get('danceability')
-        mood_happy = features.get('moodHappy')
-        mood_sad = features.get('moodSad')
-        mood_relaxed = features.get('moodRelaxed')
-        mood_aggressive = features.get('moodAggressive')
-
-        if mood_happy is not None and mood_happy >= 0.6:
-            tags += ['happy', 'uplifting']
-        if mood_sad is not None and mood_sad >= 0.6:
-            tags += ['sad', 'melancholic']
-        if mood_relaxed is not None and mood_relaxed >= 0.6:
-            tags += ['relaxed', 'chill']
-        if mood_aggressive is not None and mood_aggressive >= 0.6:
-            tags += ['aggressive', 'intense']
-
-        # The valence/arousal cut-offs below pass the same share of a library as the old stretched values did on the
-        # same middle-90-second analysis (services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json).
-        if arousal is not None and arousal >= 0.578:
-            tags += ['energetic', 'upbeat']
-        elif arousal is not None and arousal <= 0.448:
-            tags += ['calm', 'peaceful']
-
-        if valence is not None and 'happy' not in tags and 'sad' not in tags:
-            if valence >= 0.593:
-                tags += ['happy', 'uplifting']
-            elif valence <= 0.509:
-                tags += ['sad', 'melancholic']
-
-        if danceability is not None and danceability >= 0.7:
-            tags += ['dance', 'groovy']
-
-        if bpm is not None and bpm >= 140:
-            tags.append('fast')
-        elif bpm is not None and bpm <= 80:
-            tags.append('slow')
-
-        if features.get('keyScale') == 'minor' and 'happy' not in tags:
-            tags.append('moody')
-
-        if arousal is not None and bpm is not None and arousal >= 0.578 and bpm >= 120:
-            tags.append('workout')
-        if arousal is not None and valence is not None and arousal <= 0.481 and valence <= 0.53:
-            tags.append('atmospheric')
-        if arousal is not None and bpm is not None and arousal <= 0.448 and bpm <= 90:
-            tags.append('chill')
-        if mood_aggressive is not None and bpm is not None and mood_aggressive >= 0.5 and bpm >= 120:
-            tags.append('intense')
-
-        return list(dict.fromkeys(tags))[:12]
 
 
 # The analyzer of this worker process, built by _init_worker_process.
@@ -1273,7 +1213,6 @@ class AnalysisWorker:
                     danceability = %s,
                     "deamValence" = %s,
                     "deamArousal" = %s,
-                    "moodTags" = %s,
                     "essentiaGenres" = %s,
                     "moodHappy" = %s,
                     "moodSad" = %s,
@@ -1299,7 +1238,6 @@ class AnalysisWorker:
                 features['danceability'],
                 features['valence'],
                 features['arousal'],
-                features['moodTags'],
                 features['essentiaGenres'],
                 features.get('moodHappy'),
                 features.get('moodSad'),

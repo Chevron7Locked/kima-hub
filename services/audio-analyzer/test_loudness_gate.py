@@ -59,7 +59,6 @@ def _analyze_with_meter(monkeypatch, integrated, loudness_range):
     a.loudness_ebu = lambda pair: (None, None, integrated, loudness_range)
     a.resampler = lambda audio: audio
     a._extract_ml_features = lambda audio: {"valence": 0.5, "arousal": 0.5}
-    a._generate_mood_tags = lambda result: []
     return a.analyze("/music/test.flac")
 
 

@@ -134,21 +134,27 @@ class ExtractMoodsTest(unittest.TestCase):
         self.assertIn('ML analysis failed', out.get('_error', ''))
 
 
-class MoodTags(unittest.TestCase):
-    def _tags(self, **features):
-        base = dict(bpm=None, valence=None, arousal=None, danceability=None, keyScale=None,
-                    moodHappy=None, moodSad=None, moodRelaxed=None, moodAggressive=None)
-        return object.__new__(analyzer.AudioAnalyzer)._generate_mood_tags({**base, **features})
+class NoMoodTagsTest(unittest.TestCase):
+    """Mood tags come from the backend's mood step, relative to the library; the analyzer makes none."""
 
-    def test_zero_is_a_measured_value(self):
-        tags = self._tags(valence=0.0, arousal=0.0, danceability=0.0, bpm=100.0)
-        self.assertIn('sad', tags)
-        self.assertIn('calm', tags)
-
-    def test_an_unmeasured_tempo_gives_no_tempo_tag(self):
-        tags = self._tags(valence=0.5, arousal=0.2, danceability=0.5)
-        self.assertNotIn('slow', tags)
-        self.assertNotIn('chill', tags)
+    @mock.patch.object(analyzer, 'ESSENTIA_AVAILABLE', True)
+    def test_an_analysis_carries_no_mood_tags(self):
+        a = _analyzer_with({})
+        a.enhanced_mode = True
+        a.load_audio = lambda path, max_duration=None: np.full((2, 10 * 44100), 0.1, dtype=np.float32)
+        a.rhythm_extractor = lambda audio: (150.0, [0.5, 1.0], 3.0, None, [0.5])
+        a.key_extractor = lambda audio: ('A', 'minor', 0.8)
+        a.rms = lambda frame: 0.1
+        a.loudness_ebu = lambda pair: (None, None, -14.0, 6.0)
+        a.resampler = lambda audio: audio
+        # Values past every cut-off the analyzer used to tag with.
+        a._extract_ml_features = lambda audio: dict(
+            moodHappy=0.9, moodSad=0.9, moodRelaxed=0.9, moodAggressive=0.9,
+            valence=0.9, arousal=0.9, danceability=0.9)
+        out = a.analyze('/music/x.flac')
+        self.assertNotIn('_error', out)
+        self.assertEqual((out['bpm'], out['analysisMode']), (150.0, 'enhanced'))
+        self.assertNotIn('moodTags', out)
 
 
 class _Cursor:
@@ -196,7 +202,7 @@ def _features() -> dict:
     features: dict[str, Any] = {k: None for k in (
         'bpm', 'beatsCount', 'key', 'keyScale', 'keyStrength', 'energy',
         'loudness', 'dynamicRange', 'danceability', 'valence', 'arousal')}
-    features.update(moodTags=[], essentiaGenres=[], analysisMode='enhanced')
+    features.update(essentiaGenres=[], analysisMode='enhanced')
     return features
 
 
@@ -245,6 +251,12 @@ class ResultWriteTest(unittest.TestCase):
         # The shared valence/arousal pair is derived by the server from both analyzers' raws.
         self.assertIsNone(re.search(r'\b(valence|arousal)\s*=', update_sql))
         self.assertEqual(update_sql.count('%s'), len(update_params))
+
+    def test_save_results_leaves_mood_tags_to_the_mood_step(self):
+        w = _worker()
+        w._save_results({"trackId": "t1", "filePath": "/x.flac", "jobId": "t1-1-r0"}, _features())
+        update_sql, _ = w.db.cursor.statements[1]
+        self.assertNotIn('moodTags', update_sql)
 
 
 if __name__ == '__main__':

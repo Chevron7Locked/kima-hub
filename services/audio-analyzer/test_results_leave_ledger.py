@@ -55,7 +55,7 @@ class SuccessLeavesLedgerTest(unittest.TestCase):
         features: dict[str, Any] = {k: None for k in (
             "bpm", "beatsCount", "key", "keyScale", "keyStrength", "energy",
             "loudness", "dynamicRange", "danceability", "valence", "arousal")}
-        features.update(moodTags=[], essentiaGenres=[], analysisMode="enhanced")
+        features.update(essentiaGenres=[], analysisMode="enhanced")
         self.worker._save_results({"trackId": "t1", "filePath": "/x.flac", "jobId": "t1-1-r0"}, features)
 
     def test_no_statement_touches_enrichmentfailure(self):

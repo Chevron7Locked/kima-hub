@@ -42,7 +42,7 @@ def test_the_save_writes_the_confidence_next_to_bpm():
     features = {k: None for k in (
         "bpm", "beatsCount", "key", "keyScale", "keyStrength", "energy",
         "loudness", "dynamicRange", "danceability", "valence", "arousal")}
-    features.update(bpm=120.0, bpmConfidence=3.27, moodTags=[], essentiaGenres=[], analysisMode="enhanced")
+    features.update(bpm=120.0, bpmConfidence=3.27, essentiaGenres=[], analysisMode="enhanced")
     assert worker._save_results({"trackId": "t1", "filePath": "/x.flac", "jobId": "t1-1-r0"}, features)
     sql, params = worker.db.cursor.statements[-1]
     assert sql.index('bpm = %s') < sql.index('"bpmConfidence" = %s') < sql.index('"beatsCount" = %s')

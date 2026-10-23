@@ -85,7 +85,7 @@ class FakeDb:
 
 FEATURES: dict = {k: 0.5 for k in ("bpm", "beatsCount", "keyStrength", "energy", "loudness", "dynamicRange",
                              "danceability", "valence", "arousal")}
-FEATURES.update(key="C", keyScale="major", moodTags=[], essentiaGenres=[], analysisMode="enhanced")
+FEATURES.update(key="C", keyScale="major", essentiaGenres=[], analysisMode="enhanced")
 
 
 def claim(job_id):
