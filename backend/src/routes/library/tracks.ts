@@ -10,7 +10,7 @@ import { rateLimiter } from "../../services/rateLimiter";
 import { getMergedGenres } from "../../utils/metadataOverrides";
 import {
   getEffectiveYear,
-  getDecadeWhereClause,
+  getEffectiveDecadeWhereClause,
   getDecadeFromYear,
 } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
@@ -771,7 +771,7 @@ router.get("/radio", async (req, res) => {
 
         trackIds = await sampleTrackIds({
           where: {
-            album: getDecadeWhereClause(decadeStart),
+            album: getEffectiveDecadeWhereClause(decadeStart),
           },
           take: limitNum * 3,
         });

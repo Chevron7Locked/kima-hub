@@ -3,7 +3,7 @@
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import {
-    getDecadeWhereClause,
+    getEffectiveDecadeWhereClause,
     getEffectiveYear,
     getDecadeFromYear,
 } from "../../utils/dateFilters";
@@ -77,7 +77,7 @@ export async function generateEraMix(
         limit: TRACK_LIMIT,
         where: {
             ...NOT_MISSING,
-            album: getDecadeWhereClause(selectedDecade),
+            album: getEffectiveDecadeWhereClause(selectedDecade),
         },
     });
 }

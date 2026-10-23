@@ -423,6 +423,20 @@ describe("Era mix", () => {
     });
 });
 
+describe("Era mix with year overrides", () => {
+    afterAll(async () => {
+        await prisma.album.updateMany({ where: { id: { startsWith: PREFIX } }, data: { displayYear: null } });
+    });
+
+    it("offers a decade that exists only through displayYear and fills it from the re-dated albums", async () => {
+        await prisma.album.updateMany({ where: { id: { startsWith: PREFIX } }, data: { displayYear: 1850 } });
+        const mix = await genre.generateEraMix(lib.user1, dates[0]);
+        expect(mix).not.toBeNull();
+        expect(mix!.id).toMatch(/^era-1850-/);
+        expect(mix!.trackIds).toHaveLength(20);
+    });
+});
+
 it("the library under test is big enough that the first rows and the whole set differ", () => {
     expect(rows).toHaveLength(TRACK_COUNT);
     // Ids run in energy order: the 100 lowest ids hold only the quietest tracks.

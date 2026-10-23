@@ -465,3 +465,16 @@ describe("radio: genre with an artist whose genres are not a JSON array", () => 
         expect((res.body.tracks as RadioTrack[]).filter((t) => t.artist.id === odd)).toEqual([]);
     });
 });
+
+describe("radio: artist whose genre match meets artists with non-array genres", () => {
+    it("falls back to genre matching without failing the request", async () => {
+        const target = `${PREFIX}art_40`;
+        const other = `${PREFIX}art_41`;
+        await prisma.similarArtist.deleteMany({ where: { fromArtistId: target } });
+        await prisma.artist.update({ where: { id: target }, data: { genres: ["rock"] } });
+        await prisma.artist.update({ where: { id: other }, data: { genres: "rock", userGenres: "not json" } });
+        const res = await radio({ type: "artist", value: target, limit: LIMIT });
+        expect(res.status).toBe(200);
+        expect(res.body.tracks.length).toBeGreaterThan(0);
+    });
+});

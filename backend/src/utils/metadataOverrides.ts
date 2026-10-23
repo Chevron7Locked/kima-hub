@@ -6,6 +6,21 @@
  */
 
 /**
+ * Json columns can hold anything; only an array of strings (or a string
+ * holding one) counts as a list of genres, everything else is an empty list.
+ */
+function jsonArrayOrEmpty(value: unknown): string[] {
+    if (Array.isArray(value)) return value.filter((g): g is string => typeof g === "string");
+    if (typeof value !== "string") return [];
+    try {
+        const parsed: unknown = JSON.parse(value);
+        return jsonArrayOrEmpty(parsed);
+    } catch {
+        return [];
+    }
+}
+
+/**
  * Get merged genres (user + canonical) for functional use in mixes/discovery
  * User-added genres take precedence and are merged with canonical genres
  *
@@ -16,17 +31,8 @@ export function getMergedGenres(entity: {
     genres?: unknown;
     userGenres?: unknown;
 }): string[] {
-    const canonical = Array.isArray(entity.genres)
-        ? entity.genres
-        : typeof entity.genres === "string"
-        ? JSON.parse(entity.genres)
-        : [];
-
-    const userAdded = Array.isArray(entity.userGenres)
-        ? entity.userGenres
-        : typeof entity.userGenres === "string"
-        ? JSON.parse(entity.userGenres)
-        : [];
+    const canonical = jsonArrayOrEmpty(entity.genres);
+    const userAdded = jsonArrayOrEmpty(entity.userGenres);
 
     // Merge and deduplicate (user genres first for priority)
     const merged = [...new Set([...userAdded, ...canonical])];

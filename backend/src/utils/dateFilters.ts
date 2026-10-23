@@ -15,27 +15,16 @@ export function getEffectiveYear(album: {
 }
 
 /**
- * Build Prisma where clause for filtering albums by decade.
- * Uses originalYear with fallback to year for albums not yet enriched.
+ * Build Prisma where clause for filtering albums by decade, with the same
+ * precedence as getEffectiveYear: displayYear, then originalYear, then year.
  */
-export function getDecadeWhereClause(decade: number) {
+export function getEffectiveDecadeWhereClause(decade: number) {
+    const inDecade = { gte: decade, lt: decade + 10 };
     return {
         OR: [
-            // Albums with originalYear in the target decade
-            {
-                originalYear: {
-                    gte: decade,
-                    lt: decade + 10,
-                },
-            },
-            // Fallback: albums without originalYear, use year field
-            {
-                originalYear: null,
-                year: {
-                    gte: decade,
-                    lt: decade + 10,
-                },
-            },
+            { displayYear: inDecade },
+            { displayYear: null, originalYear: inDecade },
+            { displayYear: null, originalYear: null, year: inDecade },
         ],
     };
 }
