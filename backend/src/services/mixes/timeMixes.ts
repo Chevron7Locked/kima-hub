@@ -1,79 +1,39 @@
-// The mood and radio cut-offs in this file are the launch values; the record of each is
-// services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json.
-import { Prisma } from "@prisma/client";
-import { ProgrammaticMix, getSeededRandom, sampledMix, TRACK_LIMIT } from "./helpers";
-import { NOT_MISSING } from "../../utils/libraryEligibility";
+import { ProgrammaticMix } from "./helpers";
+import { recipeMix, type RecipeMixSpec } from "./recipeMix";
 
-/** The days that have a mix, by day of week (0 = Sunday). */
-const DAY_MIXES: Record<
-    number,
-    {
-        id: string;
-        type: string;
-        name: string;
-        description: string;
-        colorType: string;
-        where: Prisma.TrackWhereInput;
-    }
-> = {
+/** The days that have a mix, by day of week (0 = Sunday), each drawn from its recipe. */
+const DAY_MIXES: Record<number, RecipeMixSpec> = {
     0: {
+        recipe: "sunday-morning",
         id: "sunday",
         type: "sunday-morning",
         name: "Sunday Morning",
         description: "Peaceful tunes for a lazy Sunday",
         colorType: "sunday-morning",
-        where: {
-            ...NOT_MISSING,
-            analysisStatus: "completed",
-            energy: { lte: 0.5 },
-            acousticness: { gte: 0.5 },
-        },
     },
     1: {
+        recipe: "monday-motivation",
         id: "monday",
         type: "confidence-boost",
         name: "Monday Motivation",
         description: "Start your week with energy",
         colorType: "confidence-boost",
-        where: {
-            ...NOT_MISSING,
-            analysisStatus: "completed",
-            energy: { gte: 0.6 },
-            valence: { gte: 0.5 },
-        },
     },
     5: {
+        recipe: "friday-night",
         id: "friday",
         type: "dance-floor",
         name: "Friday Night",
         description: "Weekend vibes to kick off the party",
         colorType: "dance-floor",
-        where: {
-            ...NOT_MISSING,
-            analysisStatus: "completed",
-            danceability: { gte: 0.7 },
-            energy: { gte: 0.6 },
-        },
     },
 };
 
+/** Today's day mix by the server's clock, or null on a day without one. */
 export async function generateDayMix(
-    _userId: string
+    userId: string,
+    today: string
 ): Promise<ProgrammaticMix | null> {
-    const today = new Date().toISOString().split("T")[0];
     const day = DAY_MIXES[new Date().getDay()];
-    if (!day) return null;
-
-    return sampledMix({
-        id: `${day.id}-${today}`,
-        type: day.type,
-        name: day.name,
-        description: day.description,
-        colorType: day.colorType,
-        take: 100,
-        minTracks: 15,
-        limit: TRACK_LIMIT,
-        seed: getSeededRandom(`${day.id}-${today}`),
-        where: day.where,
-    });
+    return day ? recipeMix(day, userId, today) : null;
 }

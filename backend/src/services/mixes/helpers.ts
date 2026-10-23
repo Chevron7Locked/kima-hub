@@ -1,6 +1,5 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
-import { NOT_MISSING } from "../../utils/libraryEligibility";
 import { shuffleArray } from "../../utils/shuffle";
 
 export interface ProgrammaticMix {
@@ -116,12 +115,6 @@ export function randomSample<T>(array: T[], count: number): T[] {
 /** Tracks in a finished generated mix. */
 export const TRACK_LIMIT = 20;
 
-/** `current` plus those of `more` whose ids it lacks. */
-export function mergeNewById<T extends { id: string }>(current: T[], more: T[]): T[] {
-    const ids = new Set(current.map((t) => t.id));
-    return [...current, ...more.filter((t) => !ids.has(t.id))];
-}
-
 /** Up to four album covers, in track order, for a mix's cover mosaic. */
 export function albumCoverUrls(
     tracks: { album: { coverUrl: string | null } }[]
@@ -157,20 +150,6 @@ export function seededShuffle<T>(array: T[], seed: number): T[] {
     }
     return result;
 }
-
-export type TrackWithAlbumCover = {
-    id: string;
-    album: {
-        coverUrl: string | null;
-        genres?: unknown;
-        userGenres?: string[] | null;
-        artist?: {
-            userGenres?: string[] | null;
-        };
-    };
-    essentiaGenres?: string[];
-    [key: string]: unknown;
-};
 
 interface MixSpec {
     id: string;
@@ -333,86 +312,4 @@ export async function sampledMix(
     if (tracks.length < spec.minTracks) return null;
 
     return sampleMix(spec, tracks, spec.limit);
-}
-
-const WITH_ALBUM_GENRES = {
-    album: {
-        select: {
-            coverUrl: true,
-            genres: true,
-            userGenres: true,
-            artist: { select: { userGenres: true } },
-        },
-    },
-} satisfies Prisma.TrackInclude;
-
-/**
- * Tracks matching genre patterns: the Genre/TrackGenre tables first, then
- * album.genres and user genres in memory for tracks the tables lack.
- */
-export async function findTracksByGenrePatterns(
-    genrePatterns: string[],
-    limit: number = 100,
-    seed?: number
-): Promise<TrackWithAlbumCover[]> {
-    const genreRows = await prisma.genre.findMany({
-        where: {
-            name: { in: genrePatterns, mode: "insensitive" },
-        },
-        select: { id: true },
-    });
-
-    const tracks =
-        genreRows.length === 0
-            ? []
-            : await sampleTracks({
-                  where: {
-                      ...NOT_MISSING,
-                      trackGenres: {
-                          some: {
-                              genreId: { in: genreRows.map((g) => g.id) },
-                          },
-                      },
-                  },
-                  include: WITH_ALBUM_GENRES,
-                  take: limit,
-                  seed,
-              });
-
-    if (tracks.length >= 15) {
-        return tracks as TrackWithAlbumCover[];
-    }
-
-    const genreMatchedIds = (
-        await prisma.$queryRaw<{ id: string }[]>`
-            SELECT t.id
-            FROM "Track" t
-            JOIN "Album" a ON a.id = t."albumId"
-            LEFT JOIN "Artist" ar ON ar.id = a."artistId"
-            WHERE t."missingSince" IS NULL
-              AND (a.genres IS NOT NULL OR a."userGenres" IS NOT NULL)
-              AND EXISTS (
-                SELECT 1
-                FROM unnest(${genrePatterns}::text[]) AS p(pattern)
-                CROSS JOIN LATERAL (
-                  SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(a.genres) = 'array' THEN a.genres ELSE '[]'::jsonb END)
-                  UNION ALL
-                  SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(a."userGenres") = 'array' THEN a."userGenres" ELSE '[]'::jsonb END)
-                  UNION ALL
-                  SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(ar."userGenres") = 'array' THEN ar."userGenres" ELSE '[]'::jsonb END)
-                ) AS g(genre)
-                WHERE strpos(lower(g.genre), lower(p.pattern)) > 0
-              )
-            ORDER BY t.id
-        `
-    ).map((r) => r.id);
-
-    const genreMatched = await tracksByIds(
-        drawIds(genreMatchedIds, limit * 3, seed),
-        WITH_ALBUM_GENRES
-    );
-
-    const merged = mergeNewById(tracks, genreMatched);
-
-    return merged.slice(0, limit) as TrackWithAlbumCover[];
 }

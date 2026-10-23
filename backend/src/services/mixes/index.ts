@@ -32,6 +32,11 @@ import {
     generateRomanticizeYourLife,
     generateThatGirlEra,
     generateUnhinged,
+    generateSleepMix,
+    generateSummerMix,
+    generateEpicMix,
+    generateDreamyMix,
+    generateNostalgicMix,
     generateDeepCuts,
     generateKeyJourney,
     generateTempoFlow,
@@ -140,7 +145,7 @@ class ProgrammaticPlaylistService {
                 name: "Road Trip Mix",
             },
             {
-                fn: () => generateDayMix(userId),
+                fn: () => generateDayMix(userId, today + seedSuffix),
                 name: "Day Mix",
             },
             {
@@ -200,6 +205,26 @@ class ProgrammaticPlaylistService {
             {
                 fn: () => generateUnhinged(userId, today + seedSuffix),
                 name: "Unhinged",
+            },
+            {
+                fn: () => generateSleepMix(userId, today + seedSuffix),
+                name: "Sleep",
+            },
+            {
+                fn: () => generateSummerMix(userId, today + seedSuffix),
+                name: "Summer",
+            },
+            {
+                fn: () => generateEpicMix(userId, today + seedSuffix),
+                name: "Epic",
+            },
+            {
+                fn: () => generateDreamyMix(userId, today + seedSuffix),
+                name: "Dreamy",
+            },
+            {
+                fn: () => generateNostalgicMix(userId, today + seedSuffix),
+                name: "Nostalgic",
             },
             {
                 fn: () => generateDeepCuts(userId, today + seedSuffix),

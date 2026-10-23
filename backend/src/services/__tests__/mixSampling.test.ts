@@ -9,7 +9,6 @@ jest.mock("../../utils/db", () => ({
 }));
 
 import { drawIds, drawWeighted, sampledMix, sampleTrackIds, sampleTracks, tracksByIds } from "../mixes/helpers";
-import { generate3AMThoughts, generateUnhinged } from "../mixes/moodMixes";
 
 const TOTAL = 1000;
 const ALL_IDS = Array.from({ length: TOTAL }, (_, i) => `t${String(i).padStart(4, "0")}`);
@@ -190,23 +189,5 @@ describe("sampledMix output size", () => {
         );
         const mix = await sampledMix({ ...spec, take: 50, minTracks: 8, limit: 10 });
         expect(mix?.trackIds).toHaveLength(9);
-    });
-});
-
-describe("mix cut-offs are the hand-set values, not library-share matches", () => {
-    it("Unhinged keeps valence 0.9 / 0.1", async () => {
-        await generateUnhinged("u", "2026-10-21");
-        const where = mockFindMany.mock.calls[0][0].where;
-        const valenceEntries = where.OR.filter((c: any) => "valence" in c);
-        expect(valenceEntries).toEqual([{ valence: { gte: 0.9 } }, { valence: { lte: 0.1 } }]);
-    });
-
-    it("3AM Thoughts keeps arousal 0.4, valence 0.5 and acousticness 0.3", async () => {
-        await generate3AMThoughts("u", "2026-10-21");
-        const where = mockFindMany.mock.calls[0][0].where;
-        expect(where.AND[0]).toEqual({ arousal: { lte: 0.4 } });
-        expect(where.AND[3]).toEqual({
-            OR: [{ valence: { lte: 0.5 } }, { acousticness: { gte: 0.3 } }],
-        });
     });
 });

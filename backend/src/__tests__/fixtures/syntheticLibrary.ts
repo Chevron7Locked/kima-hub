@@ -317,6 +317,8 @@ export interface Row {
     acousticness: number | null;
     instrumentalness: number | null;
     bpm: number | null;
+    /** Set only by `seedSyntheticMoods`. */
+    bpmConfidence: number | null;
     key: string | null;
     keyScale: string | null;
     moodTags: string[];
@@ -364,6 +366,7 @@ export async function loadRows(prefix: string, user1: string): Promise<Row[]> {
         acousticness: t.acousticness,
         instrumentalness: t.instrumentalness,
         bpm: t.bpm,
+        bpmConfidence: t.bpmConfidence,
         key: t.key,
         keyScale: t.keyScale,
         moodTags: t.moodTags,

@@ -8,7 +8,7 @@ import path from "path";
 import { prisma } from "../../utils/db";
 import { findSimilarTracks } from "../hybridSimilarity";
 import { generateSongPath } from "../songPath";
-import { generateChillMix } from "../mixes/moodMixes";
+import { generateMoodOnDemand } from "../mixes/moodMixes";
 import { getVibeMap } from "../vibeMap";
 import { syncMoodBuckets } from "../../workers/moodBucketWorker";
 import { MATCHING_MODEL, buildMatching } from "../matching/state";
@@ -64,7 +64,7 @@ async function seed() {
                 analysisVersion: "2.1b6-enhanced-v3",
                 vibeAnalysisStatus: "completed",
                 analyzedAt: new Date(Date.UTC(2026, 9, 1, 0, i)),
-                // Chill-mix eligible: relaxed and low-energy.
+                // Low energy, for the custom mix's range.
                 energy: 0.3,
                 bpm: 90,
                 moodRelaxed: 0.9,
@@ -162,8 +162,8 @@ describe("library eligibility at the read side", () => {
         expect(path.path.map((t) => t.id)).not.toContain(MISSING);
     });
 
-    it("keeps it out of a generated mood mix", async () => {
-        const mix = await generateChillMix("u_elig", "2026-10-02");
+    it("keeps it out of a generated mix that reads the track table", async () => {
+        const mix = await generateMoodOnDemand("u_elig", { energy: { max: 0.5 } });
         expect(mix).not.toBeNull();
         expect(mix!.trackIds).not.toContain(MISSING);
     });

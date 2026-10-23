@@ -2,10 +2,17 @@
  * Every exported mix generator, run against a real Postgres holding a 3,000
  * track synthetic library (see src/__tests__/fixtures/syntheticLibrary.ts;
  * ids are handed out in energy order, so reading "the first N rows" would show
- * as ids bunched at the front).
+ * as ids bunched at the front) with learned mood scores and the library's mood
+ * statistics.
  *
- * For each generator, over 40 different dates (or 40 repeated calls where the
- * mix does not take a date), the suite checks:
+ * Mixes drawn from a recipe are checked against the recipe engine itself: each
+ * is the engine's draw for its recipe, day and user, under the mix's own id,
+ * title, description and colour, on its weekday only, and a refresh's reroll or
+ * another user draws again. The engine's own rules are tested in
+ * recipes.integration.test.ts.
+ *
+ * For every other generator, over 40 different dates (or 40 repeated calls
+ * where the mix does not take a date), the suite checks:
  *   1. size   - the documented number of tracks, no repeats;
  *   2. clause - every returned track satisfies the clause the generator's
  *               `where` states, re-written here by hand and checked against the
@@ -16,22 +23,25 @@
  *   5. repeat - a seeded mix returns identical tracks for the same date and
  *               different ones for another date; an unseeded one varies.
  *
+ * The daily rotation and the refresh path run through the playlist service.
  * Only the similar-artist lookup (a call to ListenBrainz/Deezer over the
  * network) is faked. The database is real.
  */
 import { prisma } from "../../../utils/db";
 import {
     LibraryHandle,
-    PARTY_GENRES,
-    FOCUS_GENRES,
     Row,
     TRACK_COUNT,
     loadRows,
     removeSyntheticLibrary,
     seedSyntheticLibrary,
+    seedSyntheticMoods,
     spanOf,
 } from "../../../__tests__/fixtures/syntheticLibrary";
-import type { ProgrammaticMix } from "../helpers";
+import { buildMoodState } from "../../moods/state";
+import { getMixColor, type ProgrammaticMix } from "../helpers";
+import { pickRecipeTracks, pickRecipeStation } from "../recipes";
+import { programmaticPlaylistService } from "../index";
 import * as mood from "../moodMixes";
 import * as genre from "../genreMixes";
 import * as time from "../timeMixes";
@@ -54,12 +64,15 @@ let byId: Map<string, Row>;
 
 beforeAll(async () => {
     lib = await seedSyntheticLibrary(PREFIX);
+    await seedSyntheticMoods(PREFIX);
+    await prisma.$transaction((tx) => buildMoodState(tx));
     rows = await loadRows(PREFIX, lib.user1);
     byId = new Map(rows.map((r) => [r.id, r]));
 });
 
 afterAll(async () => {
     await removeSyntheticLibrary(PREFIX);
+    await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
     await prisma.$disconnect();
 });
 
@@ -70,8 +83,17 @@ const le = (x: number | null, v: number) => x !== null && x <= v;
 const within = (x: number | null, lo: number, hi: number) => x !== null && x >= lo && x <= hi;
 const done = (r: Row) => r.analysisStatus === "completed";
 const inBucket = (m: string) => (r: Row) => r.buckets.includes(m);
-const inGenres = (names: string[]) => (r: Row) => r.genreNames.some((n) => names.includes(n.toLowerCase()));
-const tagged = (...tags: string[]) => (r: Row) => r.moodTags.some((t) => tags.includes(t));
+const playable = (r: Row) => r.missingSince === null && !r.corrupt;
+
+/** The library's median arousal over finished, present tracks, interpolated as Postgres's percentile_cont. */
+function medianArousal(): number {
+    const xs = rows
+        .filter((r) => done(r) && r.missingSince === null && r.arousal !== null)
+        .map((r) => r.arousal!)
+        .sort((a, b) => a - b);
+    const at = (xs.length - 1) / 2;
+    return xs[Math.floor(at)] + (xs[Math.ceil(at)] - xs[Math.floor(at)]) * (at - Math.floor(at));
+}
 
 const dates = Array.from({ length: CALLS }, (_, k) => new Date(Date.UTC(2026, 0, 1 + k)).toISOString().slice(0, 10));
 
@@ -115,67 +137,17 @@ interface Case {
 const year = (r: Row) => r.album.originalYear ?? r.album.year;
 
 const cases: Case[] = [
-    // ---- mood mixes, seeded ----
-    { name: "Chill", size: 20, seeded: true, run: (d) => mood.generateChillMix(lib.user1, d),
-      clause: (r) => inBucket("chill")(r) && le(r.energy, 0.55) },
-    { name: "High Energy", size: 20, seeded: true, run: (d) => mood.generateHighEnergyMix(lib.user1, d),
-      clause: (r) => done(r) && ge(r.energy, 0.7) && ge(r.bpm, 120) },
-    { name: "Late Night", size: 20, seeded: true, run: (d) => mood.generateLateNightMix(lib.user1, d),
-      clause: (r) => inBucket("chill")(r) && le(r.energy, 0.5) && le(r.bpm, 110) },
-    { name: "Happy", size: 20, seeded: true, run: (d) => mood.generateHappyMix(lib.user1, d),
-      clause: inBucket("happy") },
-    { name: "Melancholy", size: 20, seeded: true, run: (d) => mood.generateMelancholyMix(lib.user1, d),
-      clause: inBucket("sad") },
-    { name: "Dance Floor", size: 20, seeded: true, run: (d) => mood.generateDanceFloorMix(lib.user1, d),
-      clause: (r) => done(r) && ge(r.danceability, 0.7) && within(r.bpm, 110, 140) },
-    { name: "Acoustic", size: 20, seeded: true, run: (d) => mood.generateAcousticMix(lib.user1, d),
-      clause: (r) => done(r) && ge(r.acousticness, 0.6) && within(r.energy, 0.3, 0.6) },
-    { name: "Instrumental", size: 20, seeded: true, run: (d) => mood.generateInstrumentalMix(lib.user1, d),
-      clause: (r) => done(r) && ge(r.instrumentalness, 0.7) && within(r.energy, 0.3, 0.6) },
-    { name: "Road Trip", size: 20, seeded: true, run: (d) => mood.generateRoadTripMix(lib.user1, d),
-      clause: tagged("energetic", "upbeat", "happy") },
-
-    // ---- curated daily mixes (10 tracks) ----
-    { name: "Sad Girl Sundays", size: 10, seeded: true, day: 0, run: (d) => mood.generateSadGirlSundays(lib.user1, d),
-      clause: (r) => done(r) && ((le(r.valence, 0.35) && r.keyScale === "minor") || (le(r.valence, 0.3) && le(r.arousal, 0.4))) },
-    { name: "Main Character Energy", size: 10, seeded: true, run: (d) => mood.generateMainCharacterEnergy(lib.user1, d),
-      clause: (r) => done(r) && ge(r.valence, 0.55) && ge(r.energy, 0.55) && ge(r.danceability, 0.5) },
-    { name: "Villain Era", size: 10, seeded: true, run: (d) => mood.generateVillainEra(lib.user1, d),
-      clause: (r) => done(r) && ((r.keyScale === "minor" && ge(r.energy, 0.65)) || tagged("aggressive", "dark", "intense")(r)) },
-    { name: "3AM Thoughts", size: 10, seeded: true, run: (d) => mood.generate3AMThoughts(lib.user1, d),
-      clause: (r) => done(r) && le(r.arousal, 0.4) && le(r.energy, 0.5) && le(r.bpm, 110) && (le(r.valence, 0.5) || ge(r.acousticness, 0.3)) },
-    { name: "Hot Girl Walk", size: 10, seeded: true, run: (d) => mood.generateHotGirlWalk(lib.user1, d),
-      clause: (r) => done(r) && ((ge(r.danceability, 0.65) && within(r.bpm, 95, 135) && ge(r.energy, 0.55)) || (ge(r.valence, 0.6) && ge(r.energy, 0.6))) },
-    { name: "Rage Cleaning", size: 10, seeded: true, run: (d) => mood.generateRageCleaning(lib.user1, d),
-      clause: (r) => done(r) && ((ge(r.energy, 0.75) && ge(r.arousal, 0.65) && ge(r.bpm, 125)) || (ge(r.energy, 0.8) && ge(r.danceability, 0.6)) || tagged("aggressive", "energetic")(r)) },
-    { name: "Golden Hour", size: 10, seeded: true, run: (d) => mood.generateGoldenHour(lib.user1, d),
-      clause: (r) => done(r) && ge(r.valence, 0.45) && ge(r.acousticness, 0.35) && within(r.energy, 0.25, 0.65) },
-    { name: "Shower Karaoke", size: 10, seeded: true, run: (d) => mood.generateShowerKaraoke(lib.user1, d),
-      clause: (r) => done(r) && le(r.instrumentalness, 0.35) && ge(r.energy, 0.55) && ge(r.valence, 0.45) },
-    { name: "In My Feelings", size: 10, seeded: true, run: (d) => mood.generateInMyFeelings(lib.user1, d),
-      clause: (r) => done(r) && le(r.valence, 0.4) && le(r.arousal, 0.55) && ge(r.acousticness, 0.25) },
-    { name: "Midnight Drive", size: 10, seeded: true, run: (d) => mood.generateMidnightDrive(lib.user1, d),
-      clause: (r) => done(r) && within(r.energy, 0.3, 0.65) && within(r.bpm, 80, 130) && (le(r.arousal, 0.6) || within(r.valence, 0.3, 0.7)) },
-    { name: "Coffee Shop Vibes", size: 10, seeded: true, run: (d) => mood.generateCoffeeShopVibes(lib.user1, d),
-      clause: (r) => done(r) && le(r.energy, 0.55) && le(r.bpm, 120) && (ge(r.acousticness, 0.35) || ge(r.instrumentalness, 0.25)) },
-    { name: "Romanticize Your Life", size: 10, seeded: true, run: (d) => mood.generateRomanticizeYourLife(lib.user1, d),
-      clause: (r) => done(r) && within(r.valence, 0.35, 0.75) && within(r.arousal, 0.25, 0.65) && ge(r.acousticness, 0.25) },
-    { name: "That Girl Era", size: 10, seeded: true, run: (d) => mood.generateThatGirlEra(lib.user1, d),
-      clause: (r) => done(r) && ge(r.valence, 0.55) && ge(r.energy, 0.45) && ge(r.danceability, 0.45) },
-    { name: "Unhinged", size: 10, seeded: true, run: (d) => mood.generateUnhinged(lib.user1, d),
-      clause: (r) => done(r) && (ge(r.energy, 0.85) || le(r.energy, 0.15) || ge(r.valence, 0.9) || le(r.valence, 0.1) || ge(r.bpm, 160) || le(r.bpm, 70) || ge(r.danceability, 0.9)) },
-
     // ---- weekly mixes (20 tracks) ----
     { name: "Deep Cuts", size: 20, seeded: false, run: (d) => mood.generateDeepCuts(lib.user1, d),
       clause: (r) => r.plays === 0 },
     { name: "Key Journey", size: 20, seeded: true, run: (d) => mood.generateKeyJourney(lib.user1, d),
       clause: (r) => done(r) && r.key !== null },
     { name: "Tempo Flow", size: 20, seeded: false, run: (d) => mood.generateTempoFlow(lib.user1, d),
-      clause: (r) => done(r) && r.bpm !== null },
+      clause: (r) => done(r) && r.bpm !== null && ge(r.bpmConfidence, 2) },
     { name: "Vocal Detox", size: 20, seeded: true, run: (d) => mood.generateVocalDetox(lib.user1, d),
       clause: (r) => done(r) && ge(r.instrumentalness, 0.75) },
     { name: "Minor Key Mondays", size: 20, seeded: true, day: 1, run: (d) => mood.generateMinorKeyMix(lib.user1, d),
-      clause: (r) => done(r) && r.keyScale === "minor" && ge(r.energy, 0.45) },
+      clause: (r) => done(r) && r.keyScale === "minor" && ge(r.arousal, medianArousal()) },
 
     // ---- genre mixes ----
     { name: "Era (decade)", size: 20, seeded: false, spread: "repeat", run: (d) => genre.generateEraMix(lib.user1, d),
@@ -186,20 +158,6 @@ const cases: Case[] = [
       } },
     { name: "Genre", size: 20, seeded: false, spread: "repeat", run: (d) => genre.generateGenreMix(lib.user1, d),
       clause: (r, mix) => r.genreIds.includes(/^genre-(.+)-\d{4}-\d{2}-\d{2}$/.exec(mix.id)![1]) },
-    { name: "Party", size: 20, seeded: true, run: (d) => genre.generatePartyMix(lib.user1, d),
-      clause: inGenres(PARTY_GENRES) },
-    { name: "Workout", size: 20, seeded: true, run: (d) => genre.generateWorkoutMix(lib.user1, d),
-      clause: (r) => done(r) && r.analysisMode === "enhanced" && ge(r.arousal, 0.6) && ge(r.energy, 0.6) && ge(r.bpm, 110) },
-    { name: "Focus", size: 20, seeded: true, run: (d) => genre.generateFocusMix(lib.user1, d),
-      clause: inGenres(FOCUS_GENRES) },
-
-    // ---- day-of-week mix: three days have one ----
-    { name: "Day mix, Sunday", size: 20, seeded: true, day: 0, run: () => time.generateDayMix(lib.user1),
-      clause: (r) => done(r) && le(r.energy, 0.5) && ge(r.acousticness, 0.5) },
-    { name: "Day mix, Monday", size: 20, seeded: true, day: 1, run: () => time.generateDayMix(lib.user1),
-      clause: (r) => done(r) && ge(r.energy, 0.6) && ge(r.valence, 0.5) },
-    { name: "Day mix, Friday", size: 20, seeded: true, day: 5, run: () => time.generateDayMix(lib.user1),
-      clause: (r) => done(r) && ge(r.danceability, 0.7) && ge(r.energy, 0.6) },
 
     // ---- discovery mixes ----
     { name: "Rediscover", size: 20, seeded: true, run: (d) => discovery.generateRediscoverMix(lib.user1, d),
@@ -308,6 +266,176 @@ describe.each(cases)("$name", (c) => {
     });
 });
 
+// ---- mixes drawn from a recipe ---------------------------------------------
+
+interface RecipeCase {
+    name: string;
+    run: (userId: string, today: string) => Promise<ProgrammaticMix | null>;
+    recipe: string;
+    /** What the mix shows: its id prefix, type, title, description and colour key, as before the recipes. */
+    id: string;
+    type: string;
+    title: string;
+    description: string;
+    colorType: string;
+    /** Weekday the mix exists on (0 = Sunday); the clock is set to it. */
+    day?: number;
+}
+
+const recipeCases: RecipeCase[] = [
+    { name: "Chill", run: mood.generateChillMix, recipe: "chill", id: "chill", type: "chill", title: "Chill Mix",
+      description: "Relax and unwind with mellow vibes", colorType: "chill" },
+    { name: "High Energy", run: mood.generateHighEnergyMix, recipe: "high-energy", id: "high-energy", type: "workout",
+      title: "High Energy", description: "Fast-paced tracks to get you moving", colorType: "workout" },
+    { name: "Late Night", run: mood.generateLateNightMix, recipe: "late-night", id: "late-night", type: "late-night",
+      title: "Late Night", description: "Mellow vibes for the quiet hours", colorType: "late-night" },
+    { name: "Happy Vibes", run: mood.generateHappyMix, recipe: "happy", id: "happy", type: "happy", title: "Happy Vibes",
+      description: "Feel-good tracks to brighten your day", colorType: "happy" },
+    { name: "Melancholy", run: mood.generateMelancholyMix, recipe: "melancholy", id: "melancholy", type: "melancholy",
+      title: "Melancholy", description: "Introspective tracks for reflective moments", colorType: "melancholy" },
+    { name: "Dance Floor", run: mood.generateDanceFloorMix, recipe: "dance-floor", id: "dance-floor", type: "dance-floor",
+      title: "Dance Floor", description: "High danceability tracks with perfect tempo", colorType: "dance-floor" },
+    { name: "Acoustic Afternoon", run: mood.generateAcousticMix, recipe: "acoustic", id: "acoustic", type: "acoustic",
+      title: "Acoustic Afternoon", description: "Stripped-down, organic sounds", colorType: "acoustic" },
+    { name: "Instrumental Focus", run: mood.generateInstrumentalMix, recipe: "instrumental", id: "instrumental",
+      type: "instrumental", title: "Instrumental Focus", description: "No vocals, pure concentration",
+      colorType: "instrumental" },
+    { name: "Road Trip", run: mood.generateRoadTripMix, recipe: "road-trip", id: "road-trip", type: "road-trip",
+      title: "Road Trip", description: "Perfect soundtrack for the open road", colorType: "road-trip" },
+    { name: "Sad Girl Sundays", run: mood.generateSadGirlSundays, recipe: "sad-girl-sundays", id: "sad-girl-sundays",
+      type: "sad-girl-sundays", title: "Sad Girl Sundays", description: "Melancholic introspection and feelings",
+      colorType: "sad-girl-sundays", day: 0 },
+    { name: "Main Character Energy", run: mood.generateMainCharacterEnergy, recipe: "main-character",
+      id: "main-character", type: "main-character", title: "Main Character Energy",
+      description: "You're the protagonist today", colorType: "main-character" },
+    { name: "Villain Era", run: mood.generateVillainEra, recipe: "villain-era", id: "villain-era", type: "villain-era",
+      title: "Villain Era", description: "Embrace your dark side", colorType: "villain-era" },
+    { name: "3AM Thoughts", run: mood.generate3AMThoughts, recipe: "3am-thoughts", id: "3am-thoughts",
+      type: "3am-thoughts", title: "3AM Thoughts", description: "Late night overthinking companion",
+      colorType: "3am-thoughts" },
+    { name: "Hot Girl Walk", run: mood.generateHotGirlWalk, recipe: "hot-girl-walk", id: "hot-girl-walk",
+      type: "hot-girl-walk", title: "Hot Girl Walk", description: "Confidence boost for your walk",
+      colorType: "confidence-boost" },
+    { name: "Rage Cleaning", run: mood.generateRageCleaning, recipe: "rage-cleaning", id: "rage-cleaning",
+      type: "rage-cleaning", title: "Rage Cleaning", description: "Aggressive productivity fuel", colorType: "workout" },
+    { name: "Golden Hour", run: mood.generateGoldenHour, recipe: "golden-hour", id: "golden-hour", type: "golden-hour",
+      title: "Golden Hour", description: "Warm sunset vibes", colorType: "golden-hour" },
+    { name: "Shower Karaoke", run: mood.generateShowerKaraoke, recipe: "shower-karaoke", id: "shower-karaoke",
+      type: "shower-karaoke", title: "Shower Karaoke", description: "Belters you can't help but sing",
+      colorType: "happy" },
+    { name: "In My Feelings", run: mood.generateInMyFeelings, recipe: "in-my-feelings", id: "in-my-feelings",
+      type: "in-my-feelings", title: "In My Feelings", description: "Let it all out", colorType: "heartbreak-hotel" },
+    { name: "Midnight Drive", run: mood.generateMidnightDrive, recipe: "midnight-drive", id: "midnight-drive",
+      type: "midnight-drive", title: "Midnight Drive", description: "Perfect for late night cruising",
+      colorType: "night-drive" },
+    { name: "Coffee Shop Vibes", run: mood.generateCoffeeShopVibes, recipe: "coffee-shop", id: "coffee-shop",
+      type: "coffee-shop", title: "Coffee Shop Vibes", description: "Cozy background music", colorType: "coffee-shop" },
+    { name: "Romanticize Your Life", run: mood.generateRomanticizeYourLife, recipe: "romanticize", id: "romanticize",
+      type: "romanticize", title: "Romanticize Your Life", description: "Make every moment aesthetic",
+      colorType: "golden-hour" },
+    { name: "That Girl Era", run: mood.generateThatGirlEra, recipe: "that-girl-era", id: "that-girl-era",
+      type: "that-girl-era", title: "That Girl Era", description: "Self-improvement mode activated",
+      colorType: "confidence-boost" },
+    { name: "Unhinged", run: mood.generateUnhinged, recipe: "unhinged", id: "unhinged", type: "unhinged",
+      title: "Unhinged", description: "Embrace the chaos", colorType: "dance-floor" },
+    { name: "Sleep", run: mood.generateSleepMix, recipe: "sleep", id: "sleep", type: "sleep", title: "Sleep",
+      description: "Slow, quiet tracks to drift off to", colorType: "late-night" },
+    { name: "Summer", run: mood.generateSummerMix, recipe: "summer", id: "summer", type: "summer", title: "Summer",
+      description: "Sunny, carefree tracks for warm days", colorType: "summer-vibes" },
+    { name: "Epic", run: mood.generateEpicMix, recipe: "epic", id: "epic", type: "epic", title: "Epic",
+      description: "Big, soaring tracks that feel like a movie", colorType: "main-character" },
+    { name: "Dreamy", run: mood.generateDreamyMix, recipe: "dreamy", id: "dreamy", type: "dreamy", title: "Dreamy",
+      description: "Hazy, floating tracks to get lost in", colorType: "3am-thoughts" },
+    { name: "Nostalgic", run: mood.generateNostalgicMix, recipe: "nostalgic", id: "nostalgic", type: "nostalgic",
+      title: "Nostalgic", description: "Tracks that take you back", colorType: "throwback" },
+    { name: "Party Playlist", run: genre.generatePartyMix, recipe: "party", id: "party", type: "dance-floor",
+      title: "Party Playlist", description: "High energy dance, EDM, and pop hits", colorType: "dance-floor" },
+    { name: "Workout Mix", run: genre.generateWorkoutMix, recipe: "workout", id: "workout", type: "workout",
+      title: "Workout Mix", description: "High energy tracks to power your workout", colorType: "workout" },
+    { name: "Focus Mix", run: genre.generateFocusMix, recipe: "focus", id: "focus", type: "focus-flow",
+      title: "Focus Mix", description: "Concentration music for deep work", colorType: "focus-flow" },
+    { name: "Day mix, Sunday Morning", run: time.generateDayMix, recipe: "sunday-morning", id: "sunday",
+      type: "sunday-morning", title: "Sunday Morning", description: "Peaceful tunes for a lazy Sunday",
+      colorType: "sunday-morning", day: 0 },
+    { name: "Day mix, Monday Motivation", run: time.generateDayMix, recipe: "monday-motivation", id: "monday",
+      type: "confidence-boost", title: "Monday Motivation", description: "Start your week with energy",
+      colorType: "confidence-boost", day: 1 },
+    { name: "Day mix, Friday Night", run: time.generateDayMix, recipe: "friday-night", id: "friday",
+      type: "dance-floor", title: "Friday Night", description: "Weekend vibes to kick off the party",
+      colorType: "dance-floor", day: 5 },
+];
+
+const RECIPE_DATES = dates.slice(0, 5);
+/** What a refresh appends to the day: the time of the refresh. */
+const REROLL = "-1792771200000";
+
+describe.each(recipeCases)("$name (recipe $recipe)", (c) => {
+    let members = new Set<string>();
+    const mixes: ProgrammaticMix[] = [];
+
+    beforeAll(async () => {
+        members = new Set(await pickRecipeStation(c.recipe, { limit: 100_000 }));
+        mixes.length = 0;
+        for (const d of RECIPE_DATES) {
+            const mix = await onWeekday(c.day, () => c.run(lib.user1, d));
+            if (mix) mixes.push(mix);
+        }
+    });
+
+    it("is the engine's draw for its recipe, this day and this user", async () => {
+        expect(members.size).toBeGreaterThanOrEqual(8);
+        expect(mixes).toHaveLength(RECIPE_DATES.length);
+        for (const [k, d] of RECIPE_DATES.entries()) {
+            const drawn = await pickRecipeTracks(c.recipe, { userId: lib.user1, date: d });
+            expect(mixes[k].trackIds).toEqual(drawn!.trackIds);
+            // 125 artists hold the members, so the 2-per-artist cap never shortens a mix here.
+            expect(mixes[k].trackIds).toHaveLength(Math.min(20, members.size));
+            expect(mixes[k].trackCount).toBe(mixes[k].trackIds.length);
+            expect(mixes[k].trackIds.every((id) => members.has(id) && playable(byId.get(id)!))).toBe(true);
+        }
+    });
+
+    it("keeps the mix's id, type, title, description and colour", () => {
+        for (const [k, d] of RECIPE_DATES.entries()) {
+            expect(mixes[k]).toMatchObject({
+                id: `${c.id}-${d}`,
+                type: c.type,
+                name: c.title,
+                description: c.description,
+                color: getMixColor(c.colorType),
+            });
+            expect(mixes[k].coverUrls.length).toBeGreaterThan(0);
+            expect(mixes[k].coverUrls.length).toBeLessThanOrEqual(4);
+        }
+    });
+
+    it("draws again for a refresh's reroll and for another user, and the same for the same day and user", async () => {
+        const d = RECIPE_DATES[0];
+        const again = await onWeekday(c.day, () => c.run(lib.user1, d));
+        expect(again!.trackIds).toEqual(mixes[0].trackIds);
+        const rerolled = await onWeekday(c.day, () => c.run(lib.user1, d + REROLL));
+        const otherUser = await onWeekday(c.day, () => c.run(lib.user2, d));
+        expect(rerolled!.id).toBe(`${c.id}-${d}${REROLL}`);
+        expect(rerolled!.trackIds).not.toEqual(mixes[0].trackIds);
+        expect(otherUser!.trackIds).not.toEqual(mixes[0].trackIds);
+        // A recipe with 20 members or fewer ships all of them, in another order.
+        if (members.size > 20) {
+            expect(new Set(rerolled!.trackIds)).not.toEqual(new Set(mixes[0].trackIds));
+            expect(new Set(otherUser!.trackIds)).not.toEqual(new Set(mixes[0].trackIds));
+        }
+    });
+
+    if (c.day !== undefined) {
+        it("has no mix on the other days of the week", async () => {
+            for (const day of [0, 1, 2, 3, 4, 5, 6].filter((x) => x !== c.day)) {
+                const mix = await onWeekday(day, () => c.run(lib.user1, RECIPE_DATES[0]));
+                // The day mix has a different recipe on Sunday, Monday and Friday.
+                if (mix) expect(mix.id.startsWith(`${c.id}-`)).toBe(false);
+            }
+        });
+    }
+});
+
 // ---- generators with their own shape ---------------------------------------
 
 describe("Top Tracks", () => {
@@ -399,7 +527,7 @@ describe("Tempo Flow", () => {
 
 describe("mixes that exist only on certain weekdays", () => {
     it("Day mix is null on a day without one (Wednesday)", async () => {
-        expect(await onWeekday(3, () => time.generateDayMix(lib.user1))).toBeNull();
+        expect(await onWeekday(3, () => time.generateDayMix(lib.user1, dates[0]))).toBeNull();
     });
     it("Sad Girl Sundays is null on a Monday; Minor Key Mondays is null on a Sunday", async () => {
         expect(await onWeekday(1, () => mood.generateSadGirlSundays(lib.user1, dates[0]))).toBeNull();
@@ -442,4 +570,61 @@ it("the library under test is big enough that the first rows and the whole set d
     // Ids run in energy order: the 100 lowest ids hold only the quietest tracks.
     const first100 = rows.slice(0, 100).map((r) => r.energy).filter((e): e is number => e !== null);
     expect(Math.max(...first100)).toBeLessThan(0.1);
+});
+
+describe("the daily rotation and its refresh (the playlist service)", () => {
+    // Wednesday 2026-10-21, noon UTC; only Date is faked, so the picks are the same on every run.
+    const NOW = Date.UTC(2026, 9, 21, 12);
+    const TODAY = "2026-10-21";
+    const atNoon = async <T,>(fn: () => Promise<T>): Promise<T> => {
+        jest.useFakeTimers({ doNotFake: NOT_DATE, now: NOW });
+        try {
+            return await fn();
+        } finally {
+            jest.useRealTimers();
+        }
+    };
+    const recipeOf = new Map(recipeCases.map((c) => [c.id, c.recipe]));
+    /** The recipe behind a mix id `<prefix>-<day><suffix>`, or undefined for a mix without one. */
+    const recipeFor = (mixId: string, suffix: string) => recipeOf.get(mixId.slice(0, -`-${TODAY}${suffix}`.length));
+
+    it("offers the five new mixes among the others", async () => {
+        const NEW = ["sleep", "summer", "epic", "dreamy", "nostalgic"];
+        const seen = new Set<string>();
+        for (let u = 0; u < 200 && NEW.some((id) => !seen.has(id)); u++) {
+            const mixes = await atNoon(() => programmaticPlaylistService.generateAllMixes(`${PREFIX}rotation_${u}`));
+            expect(mixes.length).toBeGreaterThanOrEqual(5);
+            for (const mix of mixes) {
+                const prefix = mix.id.slice(0, -`-${TODAY}`.length);
+                if (NEW.includes(prefix)) seen.add(prefix);
+            }
+        }
+        expect([...seen].sort()).toEqual([...NEW].sort());
+    });
+
+    it("draws each recipe mix for the day and user, and a refresh draws them again", async () => {
+        const daily = await atNoon(() => programmaticPlaylistService.generateAllMixes(lib.user1));
+        for (const mix of daily.filter((m) => recipeFor(m.id, "") !== undefined)) {
+            const drawn = await pickRecipeTracks(recipeFor(mix.id, "")!, { userId: lib.user1, date: TODAY });
+            expect(mix.trackIds).toEqual(drawn!.trackIds);
+        }
+
+        const suffix = `-${NOW}`;
+        let rerolled = 0;
+        for (let k = 0; k < 3; k++) {
+            const refreshed = await atNoon(() => programmaticPlaylistService.generateAllMixes(lib.user1, true));
+            for (const mix of refreshed) {
+                // Every mix that carries the day carries the refresh's reroll after it.
+                if (mix.id.includes(TODAY)) expect(mix.id.endsWith(`${TODAY}${suffix}`)).toBe(true);
+                const recipe = recipeFor(mix.id, suffix);
+                if (!recipe) continue;
+                rerolled++;
+                const drawn = await pickRecipeTracks(recipe, { userId: lib.user1, date: TODAY + suffix });
+                expect(mix.trackIds).toEqual(drawn!.trackIds);
+                const ofTheDay = await pickRecipeTracks(recipe, { userId: lib.user1, date: TODAY });
+                expect(mix.trackIds).not.toEqual(ofTheDay!.trackIds);
+            }
+        }
+        expect(rerolled).toBeGreaterThan(0);
+    });
 });

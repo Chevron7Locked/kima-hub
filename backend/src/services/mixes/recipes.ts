@@ -22,7 +22,7 @@ export const MIN_MIX_TRACKS = 8;
 /** Songs per artist in a mix; each next cap is used only while the one before leaves fewer than MIN_MIX_TRACKS. */
 const ARTIST_CAPS = [2, 3, Infinity];
 /** A tempo counts toward a BPM band only on a steady beat: the tempo extractor's confidence at least this. */
-const STEADY_BEAT = 2;
+export const STEADY_BEAT = 2;
 
 /** The readings a recipe can blend, by their names in recipes.json. */
 const READING_OF = {

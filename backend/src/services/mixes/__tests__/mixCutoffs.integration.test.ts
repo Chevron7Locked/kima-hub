@@ -1,21 +1,17 @@
 /**
- * The cut-off numbers inside the mix rules, tested against a real Postgres.
+ * The cut-offs left in the mix rules, tested against a real Postgres. The mood
+ * mixes have none: they draw from their recipes (recipes.integration.test.ts).
+ * What remains are the literal mixes' rules: Vocal Detox's instrumental
+ * reading, Minor Key Mondays' minor key and felt energy at or above the
+ * library's median, and Tempo Flow's steady beat.
  *
- * Each mix rule says things like "energy at most 0.5". The constant is only
- * trustworthy if the real query puts a track exactly on the line in and a track
- * just past it out. So for every cut-off below this suite writes real tracks
- * into the database:
- *   - "in" tracks: exactly on the cut-off, and one step inside it;
- *   - "out" tracks: one step past it (0.01 for readings, 0.5 for tempo);
- * every other reading is set so the cut-off under test is the only thing that
- * decides. It then runs the generator on 60 dates (or 60 calls for mixes that
- * take no date) and checks that every "in" track shows up at least once and that
- * no "out" track ever does. The cut-off numbers here are written by hand from
- * the rule's wording, not read from the code.
- *
- * Each rule has a small private pool of tracks (about 16 anchor tracks that
- * satisfy the rule comfortably plus the edge tracks), so each generator can
- * return the whole pool across the 60 calls. Pools are removed after each rule.
+ * A constant is only trustworthy if the real query puts a track exactly on the
+ * line in and a track just past it out. So for every rule this suite writes a
+ * small private pool of real tracks (anchors that pass comfortably, tracks on
+ * the line and just inside it, tracks just past it), runs the generator on 60
+ * dates, and checks that every track meant to pass shows up at least once and
+ * that no other ever does. The numbers are written by hand from the rule's
+ * wording, not read from the code. Pools are removed after each rule.
  *
  * The radio route's cut-offs are at the end, called over HTTP with supertest.
  */
@@ -24,7 +20,6 @@ import request from "supertest";
 import { prisma } from "../../../utils/db";
 import type { ProgrammaticMix } from "../helpers";
 import * as mood from "../moodMixes";
-import * as time from "../timeMixes";
 import radioRouter from "../../../routes/library/tracks";
 
 jest.setTimeout(600_000);
@@ -74,231 +69,78 @@ function edge(field: string, dir: "lte" | "gte", cut: number, set: Fields = {}, 
     };
 }
 
-interface Rule {
-    name: string;
-    /** Comfortable values that satisfy the rule; the cut tracks start from these. */
-    base: Fields;
-    /** Anchors differ from `base` when `base` must sit just outside an OR rule. */
-    anchor?: Fields;
-    cuts: Cut[];
-    /** The generator, called once per date. */
-    run: (today: string) => Promise<ProgrammaticMix | null>;
-    day?: number;
-    /** Every track of the pool is a member of this mood bucket (bucket path), or none (fallback path). */
-    bucket?: string;
-    /** One more out track: fine on every reading but not in the bucket. */
-    outsideBucket?: boolean;
-    anchors?: number;
-}
-
 const COMPLETED: Fields = { analysisStatus: "completed", analysisMode: "enhanced" };
 const user = `${PREFIX}user1`;
-
-const rules: Rule[] = [
-    // ---- 3AM Thoughts: arousal <= .4 AND energy <= .5 AND bpm <= 110 AND (valence <= .5 OR acousticness >= .3)
-    {
-        name: "3AM Thoughts",
-        base: { ...COMPLETED, arousal: 0.2, energy: 0.3, bpm: 90, valence: 0.3, acousticness: 0.1 },
-        run: (d) => mood.generate3AMThoughts(user, d),
-        cuts: [
-            edge("arousal", "lte", 0.4),
-            edge("energy", "lte", 0.5),
-            edge("bpm", "lte", 110),
-            edge("valence", "lte", 0.5, { acousticness: 0.1 }),
-            edge("acousticness", "gte", 0.3, { valence: 0.8 }),
-        ],
-    },
-    // ---- Unhinged: any one extreme (energy >= .85 or <= .15, valence >= .9 or <= .1, bpm >= 160 or <= 70, danceability >= .9)
-    {
-        name: "Unhinged",
-        base: { ...COMPLETED, energy: 0.5, valence: 0.5, bpm: 120, danceability: 0.5 },
-        anchor: { ...COMPLETED, energy: 0.97, valence: 0.5, bpm: 120, danceability: 0.5 },
-        run: (d) => mood.generateUnhinged(user, d),
-        cuts: [
-            edge("energy", "gte", 0.85),
-            edge("energy", "lte", 0.15),
-            edge("valence", "gte", 0.9),
-            edge("valence", "lte", 0.1),
-            edge("bpm", "gte", 160),
-            edge("bpm", "lte", 70),
-            edge("danceability", "gte", 0.9),
-        ],
-    },
-    // ---- Chill, bucket path: member of the chill bucket AND energy <= .55
-    {
-        name: "Chill (bucket path)",
-        base: { ...COMPLETED, energy: 0.3 },
-        bucket: "chill",
-        outsideBucket: true,
-        run: (d) => mood.generateChillMix(user, d),
-        cuts: [edge("energy", "lte", 0.55)],
-    },
-    // ---- Chill, fallback: completed AND energy <= .55 AND bpm <= 115 AND (arousal <= .55 OR acousticness >= .3 OR valence <= .65)
-    {
-        name: "Chill (fallback path)",
-        base: { ...COMPLETED, energy: 0.3, bpm: 90, arousal: 0.3, acousticness: 0.1, valence: 0.9 },
-        run: (d) => mood.generateChillMix(user, d),
-        cuts: [
-            edge("energy", "lte", 0.55),
-            edge("bpm", "lte", 115),
-            edge("arousal", "lte", 0.55),
-            edge("acousticness", "gte", 0.3, { arousal: 0.9 }),
-            edge("valence", "lte", 0.65, { arousal: 0.9 }),
-        ],
-    },
-    // ---- Late Night, bucket path: chill bucket AND energy <= .5 AND bpm <= 110
-    {
-        name: "Late Night (bucket path)",
-        base: { ...COMPLETED, energy: 0.3, bpm: 90 },
-        bucket: "chill",
-        outsideBucket: true,
-        run: (d) => mood.generateLateNightMix(user, d),
-        cuts: [edge("energy", "lte", 0.5), edge("bpm", "lte", 110)],
-    },
-    // ---- Late Night, fallback: completed AND energy <= .45 AND bpm <= 110 AND (arousal <= .5 OR valence <= .6 OR acousticness >= .3)
-    {
-        name: "Late Night (fallback path)",
-        base: { ...COMPLETED, energy: 0.3, bpm: 90, arousal: 0.3, valence: 0.9, acousticness: 0.1 },
-        run: (d) => mood.generateLateNightMix(user, d),
-        cuts: [
-            edge("energy", "lte", 0.45),
-            edge("bpm", "lte", 110),
-            edge("arousal", "lte", 0.5),
-            edge("valence", "lte", 0.6, { arousal: 0.9 }),
-            edge("acousticness", "gte", 0.3, { arousal: 0.9 }),
-        ],
-    },
-    // ---- Melancholy, fallback: completed AND valence <= .35 AND energy <= .6 AND (minor key OR a sad tag)
-    {
-        name: "Melancholy (fallback path)",
-        base: { ...COMPLETED, valence: 0.2, energy: 0.3, keyScale: "minor", moodTags: [] },
-        anchors: 15,
-        run: (d) => mood.generateMelancholyMix(user, d),
-        cuts: [
-            edge("valence", "lte", 0.35),
-            edge("energy", "lte", 0.6),
-            { name: "minor key", set: { moodTags: [] }, ins: [{ keyScale: "minor" }], outs: [{ keyScale: "major" }] },
-            {
-                name: "sad tag",
-                set: { keyScale: "major" },
-                ins: [{ moodTags: ["sad"] }, { moodTags: ["melancholic"] }],
-                outs: [{ moodTags: ["happy"] }],
-            },
-        ],
-    },
-    // ---- Happy, fallback: completed AND valence >= .6 AND energy >= .5
-    {
-        name: "Happy (fallback path)",
-        base: { ...COMPLETED, valence: 0.8, energy: 0.7 },
-        run: (d) => mood.generateHappyMix(user, d),
-        cuts: [edge("valence", "gte", 0.6), edge("energy", "gte", 0.5)],
-    },
-    // ---- High Energy: completed AND energy >= .7 AND bpm >= 120
-    {
-        name: "High Energy",
-        base: { ...COMPLETED, energy: 0.9, bpm: 140 },
-        run: (d) => mood.generateHighEnergyMix(user, d),
-        cuts: [edge("energy", "gte", 0.7), edge("bpm", "gte", 120)],
-    },
-    // ---- Acoustic: completed AND acousticness >= .6 AND .3 <= energy <= .6
-    {
-        name: "Acoustic",
-        base: { ...COMPLETED, acousticness: 0.8, energy: 0.45 },
-        run: (d) => mood.generateAcousticMix(user, d),
-        cuts: [edge("acousticness", "gte", 0.6), edge("energy", "gte", 0.3), edge("energy", "lte", 0.6)],
-    },
-    // ---- Instrumental: completed AND instrumentalness >= .7 AND .3 <= energy <= .6
-    {
-        name: "Instrumental",
-        base: { ...COMPLETED, instrumentalness: 0.85, energy: 0.45 },
-        run: (d) => mood.generateInstrumentalMix(user, d),
-        cuts: [edge("instrumentalness", "gte", 0.7), edge("energy", "gte", 0.3), edge("energy", "lte", 0.6)],
-    },
-    // ---- Dance Floor: completed AND danceability >= .7 AND 110 <= bpm <= 140
-    {
-        name: "Dance Floor",
-        base: { ...COMPLETED, danceability: 0.85, bpm: 125 },
-        run: (d) => mood.generateDanceFloorMix(user, d),
-        cuts: [edge("danceability", "gte", 0.7), edge("bpm", "gte", 110), edge("bpm", "lte", 140)],
-    },
-    // ---- Sad Girl Sundays (Sunday): (valence <= .35 AND minor key) OR (valence <= .3 AND arousal <= .4)
-    {
-        name: "Sad Girl Sundays",
-        base: { ...COMPLETED, valence: 0.5, keyScale: "major", arousal: 0.9 },
-        anchor: { ...COMPLETED, valence: 0.1, keyScale: "minor", arousal: 0.1 },
-        day: 0,
-        run: (d) => mood.generateSadGirlSundays(user, d),
-        cuts: [
-            edge("valence", "lte", 0.35, { keyScale: "minor", arousal: 0.9 }),
-            { name: "minor key", set: { valence: 0.2, arousal: 0.9 }, ins: [{ keyScale: "minor" }], outs: [{ keyScale: "major" }] },
-            edge("valence", "lte", 0.3, { keyScale: "major", arousal: 0.2 }),
-            edge("arousal", "lte", 0.4, { keyScale: "major", valence: 0.1 }),
-        ],
-    },
-    // ---- Main Character Energy: valence >= .55 AND energy >= .55 AND danceability >= .5
-    {
-        name: "Main Character Energy",
-        base: { ...COMPLETED, valence: 0.8, energy: 0.8, danceability: 0.8 },
-        run: (d) => mood.generateMainCharacterEnergy(user, d),
-        cuts: [edge("valence", "gte", 0.55), edge("energy", "gte", 0.55), edge("danceability", "gte", 0.5)],
-    },
-    // ---- In My Feelings: valence <= .4 AND arousal <= .55 AND acousticness >= .25
-    {
-        name: "In My Feelings",
-        base: { ...COMPLETED, valence: 0.2, arousal: 0.3, acousticness: 0.6 },
-        run: (d) => mood.generateInMyFeelings(user, d),
-        cuts: [edge("valence", "lte", 0.4), edge("arousal", "lte", 0.55), edge("acousticness", "gte", 0.25)],
-    },
-    // ---- Romanticize Your Life: .35 <= valence <= .75 AND .25 <= arousal <= .65 AND acousticness >= .25
-    {
-        name: "Romanticize Your Life",
-        base: { ...COMPLETED, valence: 0.55, arousal: 0.45, acousticness: 0.6 },
-        run: (d) => mood.generateRomanticizeYourLife(user, d),
-        cuts: [
-            edge("valence", "gte", 0.35),
-            edge("valence", "lte", 0.75),
-            edge("arousal", "gte", 0.25),
-            edge("arousal", "lte", 0.65),
-            edge("acousticness", "gte", 0.25),
-        ],
-    },
-    // ---- Golden Hour: valence >= .45 AND acousticness >= .35 AND .25 <= energy <= .65
-    {
-        name: "Golden Hour",
-        base: { ...COMPLETED, valence: 0.7, acousticness: 0.6, energy: 0.45 },
-        run: (d) => mood.generateGoldenHour(user, d),
-        cuts: [edge("valence", "gte", 0.45), edge("acousticness", "gte", 0.35), edge("energy", "gte", 0.25), edge("energy", "lte", 0.65)],
-    },
-    // ---- Day mixes
-    {
-        name: "Sunday Morning (day mix)",
-        base: { ...COMPLETED, energy: 0.3, acousticness: 0.8 },
-        day: 0,
-        run: () => time.generateDayMix(user),
-        cuts: [edge("energy", "lte", 0.5), edge("acousticness", "gte", 0.5)],
-    },
-    {
-        name: "Monday Motivation (day mix)",
-        base: { ...COMPLETED, energy: 0.8, valence: 0.8 },
-        day: 1,
-        run: () => time.generateDayMix(user),
-        cuts: [edge("energy", "gte", 0.6), edge("valence", "gte", 0.5)],
-    },
-    {
-        name: "Friday Night (day mix)",
-        base: { ...COMPLETED, danceability: 0.85, energy: 0.8 },
-        day: 5,
-        run: () => time.generateDayMix(user),
-        cuts: [edge("danceability", "gte", 0.7), edge("energy", "gte", 0.6)],
-    },
-];
-
-// ---- pool writing ------------------------------------------------------------
 
 interface PoolTrack {
     id: string;
     fields: Fields;
 }
+
+/** Tracks of one rule: each meant to pass or not. */
+interface Member {
+    name: string;
+    fields: Fields;
+    passes: boolean;
+}
+
+interface Rule {
+    name: string;
+    members: Member[];
+    /** The generator, called once per date. */
+    run: (today: string) => Promise<ProgrammaticMix | null>;
+    day?: number;
+}
+
+const many = (n: number, name: string, fields: Fields, passes = true): Member[] =>
+    Array.from({ length: n }, (_, i) => ({ name: `${name}${i}`, fields, passes }));
+
+const rules: Rule[] = [
+    // ---- Vocal Detox: instrumentalness >= .75
+    {
+        name: "Vocal Detox: instrumental at least 0.75",
+        run: (d) => mood.generateVocalDetox(user, d),
+        members: [
+            ...many(16, "anchor", { ...COMPLETED, instrumentalness: 0.9 }),
+            { name: "on", fields: { ...COMPLETED, instrumentalness: 0.75 }, passes: true },
+            { name: "inside", fields: { ...COMPLETED, instrumentalness: 0.76 }, passes: true },
+            { name: "past", fields: { ...COMPLETED, instrumentalness: 0.74 }, passes: false },
+        ],
+    },
+    // ---- Minor Key Mondays (Monday): minor key AND arousal at or above the library's median arousal. The pool is the
+    // library: 35 tracks with arousal, sorted 16 at 0.1, then 0.49, then 0.5, then 17 at 0.9, so the median (the 18th)
+    // is 0.5 exactly.
+    {
+        name: "Minor Key Mondays: minor key, felt energy at or above the library's median",
+        day: 1,
+        run: (d) => mood.generateMinorKeyMix(user, d),
+        members: [
+            ...many(16, "anchor", { ...COMPLETED, keyScale: "minor", arousal: 0.9 }),
+            ...many(16, "quiet", { ...COMPLETED, keyScale: "major", arousal: 0.1 }, false),
+            { name: "onMedian", fields: { ...COMPLETED, keyScale: "minor", arousal: 0.5 }, passes: true },
+            { name: "underMedian", fields: { ...COMPLETED, keyScale: "minor", arousal: 0.49 }, passes: false },
+            { name: "major", fields: { ...COMPLETED, keyScale: "major", arousal: 0.9 }, passes: false },
+            { name: "noArousal", fields: { ...COMPLETED, keyScale: "minor", arousal: null }, passes: false },
+            { name: "unfinished", fields: { analysisStatus: "pending", keyScale: "minor", arousal: 0.9 }, passes: false },
+        ],
+    },
+    // ---- Tempo Flow: a tempo on a steady beat, tempo confidence >= 2
+    {
+        name: "Tempo Flow: steady beat, tempo confidence at least 2",
+        run: (d) => mood.generateTempoFlow(user, d),
+        members: [
+            ...many(7, "slow", { ...COMPLETED, bpm: 80, bpmConfidence: 3 }),
+            ...many(9, "medium", { ...COMPLETED, bpm: 115, bpmConfidence: 3 }),
+            ...many(7, "fast", { ...COMPLETED, bpm: 145, bpmConfidence: 3 }),
+            { name: "on", fields: { ...COMPLETED, bpm: 115, bpmConfidence: 2 }, passes: true },
+            { name: "inside", fields: { ...COMPLETED, bpm: 115, bpmConfidence: 2.01 }, passes: true },
+            { name: "past", fields: { ...COMPLETED, bpm: 115, bpmConfidence: 1.99 }, passes: false },
+            { name: "unknown", fields: { ...COMPLETED, bpm: 115, bpmConfidence: null }, passes: false },
+        ],
+    },
+];
+
+// ---- pool writing ------------------------------------------------------------
 
 async function ensureAlbum() {
     await prisma.artist.create({
@@ -346,45 +188,14 @@ afterAll(async () => {
     await prisma.$disconnect();
 });
 
-describe.each(rules.map((r, idx) => ({ ...r, idx })))("cut-offs of $name", (rule) => {
+describe.each(rules.map((r, idx) => ({ ...r, idx })))("$name", (rule) => {
     const tag = `c${rule.idx}`;
-    const anchorIds: string[] = [];
-    const inIds = new Map<string, string[]>();
-    const outIds = new Map<string, string[]>();
+    const idOf = (m: Member) => `${PREFIX}${tag}_${m.name}`;
     const union = new Set<string>();
     let nonNull = 0;
-    let outsideBucketId: string | null = null;
 
     beforeAll(async () => {
-        const pool: PoolTrack[] = [];
-        for (let a = 0; a < (rule.anchors ?? 16); a++) {
-            const id = `${PREFIX}${tag}_anchor${a}`;
-            anchorIds.push(id);
-            pool.push({ id, fields: { ...(rule.anchor ?? rule.base) } });
-        }
-        rule.cuts.forEach((cut, c) => {
-            const mk = (kind: "in" | "out", list: Fields[], into: Map<string, string[]>) => {
-                const ids: string[] = [];
-                list.forEach((v, i) => {
-                    const id = `${PREFIX}${tag}_${c}_${kind}${i}`;
-                    ids.push(id);
-                    pool.push({ id, fields: { ...rule.base, ...(cut.set ?? {}), ...v } });
-                });
-                into.set(cut.name + "#" + c, ids);
-            };
-            mk("in", cut.ins, inIds);
-            mk("out", cut.outs, outIds);
-        });
-        if (rule.outsideBucket) {
-            outsideBucketId = `${PREFIX}${tag}_nobucket`;
-            pool.push({ id: outsideBucketId, fields: { ...(rule.anchor ?? rule.base) } });
-        }
-        await writeTracks(tag, pool);
-        if (rule.bucket) {
-            await prisma.moodBucket.createMany({
-                data: pool.filter((p) => p.id !== outsideBucketId).map((p) => ({ trackId: p.id, mood: rule.bucket!, score: 0.5 })),
-            });
-        }
+        await writeTracks(tag, rule.members.map((m) => ({ id: idOf(m), fields: m.fields })));
         for (const d of dates) {
             const mix = await onWeekday(rule.day, () => rule.run(d));
             if (mix) {
@@ -398,30 +209,17 @@ describe.each(rules.map((r, idx) => ({ ...r, idx })))("cut-offs of $name", (rule
         await prisma.track.deleteMany({ where: { id: { startsWith: `${PREFIX}${tag}_` } } });
     });
 
-    it("builds a mix on every call (the pool is large enough and the right path is taken)", () => {
+    it("builds a mix on every call", () => {
         expect(nonNull).toBe(CALLS);
     });
 
-    it("reaches the anchor tracks", () => {
-        expect(anchorIds.filter((id) => union.has(id)).length).toBeGreaterThanOrEqual(Math.min(anchorIds.length, 10));
+    it("returns every track on the line or inside it at least once", () => {
+        expect(rule.members.filter((m) => m.passes && !union.has(idOf(m))).map((m) => m.name)).toEqual([]);
     });
 
-    // One test per cut-off.
-    for (let c = 0; c < rule.cuts.length; c++) {
-        const cut = rule.cuts[c];
-        it(`${cut.name}: tracks on the line and just inside appear, tracks just past it never do`, () => {
-            const ins = inIds.get(cut.name + "#" + c)!;
-            const outs = outIds.get(cut.name + "#" + c)!;
-            expect(ins.filter((id) => !union.has(id))).toEqual([]);
-            expect(outs.filter((id) => union.has(id))).toEqual([]);
-        });
-    }
-
-    if (rule.outsideBucket) {
-        it("a track that fits every reading but is not in the mood bucket never appears", () => {
-            expect(union.has(outsideBucketId!)).toBe(false);
-        });
-    }
+    it("never returns a track past the line", () => {
+        expect(rule.members.filter((m) => !m.passes && union.has(idOf(m))).map((m) => m.name)).toEqual([]);
+    });
 });
 
 // ---- radio cut-offs ------------------------------------------------------------
