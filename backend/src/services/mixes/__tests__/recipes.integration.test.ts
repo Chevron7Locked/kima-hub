@@ -10,6 +10,7 @@ import { UNKNOWN_ARTIST, VARIOUS_ARTISTS_CANONICAL } from "../../../utils/artist
 import { artistIdentityKey } from "../../artistIdentity";
 import { MOODS, MOOD_HEADS, type Mood } from "../../moods/heads";
 import { MOOD_STATE_VERSION, READINGS, buildMoodState, loadMoodState, type MoodState, type Reading } from "../../moods/state";
+import { writeMoodTags } from "../../moods/tags";
 import {
     MIN_MIX_TRACKS,
     RECIPES,
@@ -235,7 +236,10 @@ describe("the line", () => {
 });
 
 describe("the Wildcard station", () => {
-    // Stored statistics of mean 0 and SD 1, so a mood's z is its score; sad has no spread, so it claims no one.
+    // The tags come from the tag writer, on stored statistics of mean 0 and SD 1, so a mood's z is its score; sad has
+    // no spread, so it tags no one. Focus is tagged by the Focus Mix recipe (focus and instrumental) instead of the
+    // focus score: focusRecipe sits under the line on every score but is very instrumental, so it is tagged focus;
+    // focusHead has the highest focus score but almost no instrumental, so it has no tag.
     const SONGS: Song[] = [
         { name: "plain" },
         { name: "under", moods: { calm: 1.24 } },
@@ -243,6 +247,8 @@ describe("the Wildcard station", () => {
         { name: "over", moods: { party: 3 } },
         { name: "lowEverywhere", moods: Object.fromEntries(MOODS.map((m) => [m, -2])) },
         { name: "sadOnly", moods: { sad: 5 } },
+        { name: "focusRecipe", moods: { focus: 1 }, instrumentalness: 0.99 },
+        { name: "focusHead", moods: { focus: 2 }, instrumentalness: 0.01 },
         { name: "copyA", artist: "x", title: "Same Song" },
         { name: "copyB", artist: "x", title: "same song" },
         { name: "unscored", scores: "none" },
@@ -251,22 +257,42 @@ describe("the Wildcard station", () => {
         { name: "corrupt", corrupt: true },
         { name: "pending", analysisStatus: "pending" },
     ];
+    const UNTAGGED = ["plain", "under", "lowEverywhere", "sadOnly", "focusHead", "copyA"];
     const wildcard = async (limit = 100) => names(await pickWildcardStation({ limit }));
-
-    it("plays the scored songs every mood sits under the line for, one title by one artist once", async () => {
+    const tagged = async () => {
         await library(SONGS, { sad_sd: 0 });
-        // on (calm exactly 1.25) and over (party 3) are claimed; the unscored, out-of-date, missing, corrupt and
-        // unfinished songs are not the songs the statistics cover.
-        expect(await wildcard()).toEqual(new Set(["plain", "under", "lowEverywhere", "sadOnly", "copyA"]));
+        await writeMoodTags();
+    };
+
+    it("plays the scored songs without a tag, one title by one artist once", async () => {
+        await tagged();
+        const tags = new Map((await prisma.track.findMany({ where: { id: { in: [id("focusRecipe"), id("focusHead")] } } }))
+            .map((t) => [t.id, t.moodTags]));
+        expect(tags.get(id("focusRecipe"))).toEqual(["focus"]);
+        expect(tags.get(id("focusHead"))).toEqual([]);
+        // on (calm exactly 1.25), over (party 3) and focusRecipe (focus by its recipe) are tagged; the unscored,
+        // out-of-date, missing, corrupt and unfinished songs are not the songs the statistics cover.
+        expect(await wildcard()).toEqual(new Set(UNTAGGED));
     });
 
-    it("refills up to the limit, and has nothing before the mood step has built statistics", async () => {
-        await library(SONGS, { sad_sd: 0 });
+    it("follows the stored tags, so a song whose tags were cleared plays until the next pass tags it", async () => {
+        await tagged();
+        await prisma.track.update({ where: { id: id("over") }, data: { moodTags: [] } });
+        expect(await wildcard()).toEqual(new Set([...UNTAGGED, "over"]));
+        await writeMoodTags();
+        expect(await wildcard()).toEqual(new Set(UNTAGGED));
+    });
+
+    it("refills up to the limit, keeps playing while the statistics are rebuilt, and has nothing before any score", async () => {
+        await tagged();
         const two = await pickWildcardStation({ limit: 2 });
         expect(two).toHaveLength(2);
-        expect([...names(two)].every((n) => ["plain", "under", "lowEverywhere", "sadOnly", "copyA"].includes(n))).toBe(true);
+        expect([...names(two)].every((n) => UNTAGGED.includes(n))).toBe(true);
         await expect(pickWildcardStation({ limit: 0 })).rejects.toThrow(RangeError);
+        // Without statistics the tag writer keeps every song's tags, and Wildcard keeps their untagged songs.
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+        expect(await wildcard()).toEqual(new Set(UNTAGGED));
+        await prisma.$executeRawUnsafe(`DELETE FROM track_moods`);
         expect(await pickWildcardStation({ limit: 10 })).toEqual([]);
     });
 });

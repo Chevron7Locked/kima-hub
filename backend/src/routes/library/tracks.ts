@@ -718,7 +718,7 @@ const MOOD_STATIONS = new Map([
   ["nostalgic", "nostalgic"],
   ["epic", "epic"],
 ]);
-/** The station of the songs no mood claims (pickWildcardStation). */
+/** The station of the songs without a mood tag (pickWildcardStation). */
 const WILDCARD_STATION = "wildcard";
 
 /** A recipe station's refill; empty when the library cannot rank its songs for the recipe. */

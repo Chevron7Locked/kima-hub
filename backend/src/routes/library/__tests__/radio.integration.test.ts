@@ -18,8 +18,8 @@
  * The mood and workout stations draw from their recipes (recipes.json): their
  * clause is membership of the recipe, as the recipe engine computes it on the
  * library's learned moods (recipes.integration.test.ts checks the engine). The
- * Wildcard station plays the scored songs no mood claims, worked out here from
- * the stored scores and statistics.
+ * Wildcard station plays the scored songs without a mood tag, as the tag writer
+ * stored them.
  *
  * The describe blocks at the end change the library (deleting plays, clearing
  * the mood statistics) to reach the fallback stages; they run last and the
@@ -38,9 +38,9 @@ import {
     spanOf,
 } from "../../../__tests__/fixtures/syntheticLibrary";
 import { buildMoodState } from "../../../services/moods/state";
+import { writeMoodTags } from "../../../services/moods/tags";
 import { pickRecipeStation } from "../../../services/mixes/recipes";
-import { MOODS, MOOD_HEADS, type Mood } from "../../../services/moods/heads";
-import { loadMoodState } from "../../../services/moods/state";
+import { MOOD_HEADS } from "../../../services/moods/heads";
 import router from "../tracks";
 
 jest.setTimeout(600_000);
@@ -283,28 +283,28 @@ describe("radio: every mood value and the workout station draw from their recipe
     });
 });
 
-describe("radio: Wildcard, the songs no mood claims", () => {
+/** The scored songs the statistics cover whose stored tags are empty: the songs Wildcard plays. */
+async function untaggedSongs(): Promise<Set<string>> {
+    const scored = await prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT t.id
+        FROM track_moods m
+        JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
+        JOIN "Track" t ON t.id = m.track_id
+        WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model} AND t.id LIKE ${`${PREFIX}%`}
+          AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'
+          AND cardinality(t."moodTags") = 0
+    `;
+    return new Set(scored.map((row) => row.id));
+}
+
+describe("radio: Wildcard, the songs without a mood tag", () => {
     const UNSCORED = Array.from({ length: 3 }, (_, i) => `${PREFIX}unscored_${i}`);
-    /** The scored songs every mood sits under 1.25 SD above the library's mean for, by the stored statistics. */
     let unclaimed = new Set<string>();
 
     beforeAll(async () => {
-        const state = (await loadMoodState())!;
-        const scored = await prisma.$queryRawUnsafe<Array<{ id: string } & Record<Mood, number>>>(
-            `SELECT m.track_id AS id, ${MOODS.map((m) => `m."${m}"::float8 AS "${m}"`).join(", ")}
-             FROM track_moods m
-             JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
-             JOIN "Track" t ON t.id = m.track_id
-             WHERE m.weights = $1 AND te.model_version = $2 AND t.id LIKE $3
-               AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'`,
-            MOOD_HEADS.version, MOOD_HEADS.model, `${PREFIX}%`,
-        );
-        unclaimed = new Set(
-            scored
-                .filter((row) => MOODS.every((m) => !(state.moods[m].sd > 0) || (row[m] - state.moods[m].mean) / state.moods[m].sd < 1.25))
-                .map((row) => row.id),
-        );
-        // Songs with no scores at all: finished, playable, and never Wildcard.
+        await writeMoodTags();
+        unclaimed = await untaggedSongs();
+        // Songs with no scores at all: finished, playable, without a tag, and never Wildcard.
         await prisma.track.createMany({
             data: UNSCORED.map((id, i) => ({
                 id, albumId: `${PREFIX}alb_0`, title: `Unscored ${i}`, trackNo: 90 + i, duration: 200,
@@ -317,7 +317,7 @@ describe("radio: Wildcard, the songs no mood claims", () => {
         await prisma.track.deleteMany({ where: { id: { in: UNSCORED } } });
     });
 
-    it("plays only scored songs no mood claims, every one of them reachable, never an unscored song", async () => {
+    it("plays only scored songs without a tag, every one of them reachable, never an unscored song", async () => {
         expect(unclaimed.size).toBeGreaterThan(LIMIT * 4);
         const seen = new Set<string>();
         for (let k = 0; k < Math.max(5, Math.ceil((unclaimed.size * 4) / 100)); k++) {
@@ -505,13 +505,25 @@ describe("radio: a station whose recipe the library cannot rank", () => {
 });
 
 describe("radio: the mood and workout stations before the mood step has built the library's statistics", () => {
+    let untagged = new Set<string>();
+
     beforeAll(async () => {
+        await writeMoodTags();
+        untagged = await untaggedSongs();
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
     });
 
-    it.each([...STATIONS.map(([query]) => query), { type: "mood", value: "wildcard" }])("%o answers an empty list", async (query) => {
+    it.each(STATIONS.map(([query]) => query))("%o answers an empty list", async (query) => {
         const res = await radio({ ...query, limit: LIMIT });
         expect(res.status).toBe(200);
         expect(res.body.tracks).toEqual([]);
+    });
+
+    it("Wildcard keeps playing the songs without a tag, as the tags are kept until the statistics return", async () => {
+        const res = await radio({ type: "mood", value: "wildcard", limit: LIMIT });
+        expect(res.status).toBe(200);
+        const ids = (res.body.tracks as RadioTrack[]).map((t) => t.id);
+        expect(ids).toHaveLength(LIMIT);
+        expect(ids.filter((id) => !untagged.has(id))).toEqual([]);
     });
 });

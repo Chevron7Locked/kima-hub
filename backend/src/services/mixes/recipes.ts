@@ -439,35 +439,24 @@ export async function pickStationTracks(recipe: Recipe, { limit }: { limit: numb
 }
 
 /**
- * The Wildcard station's refill: the songs no learned mood claims, every mood under RECIPE_LINE standard deviations
- * above the library's mean (the songs without a single mood tag), from the same songs every recipe draws from. Up to
- * `limit` in a fresh random order, one title by one artist once; empty before the mood step has built statistics. A
- * mood with no spread in the library claims no one.
+ * The Wildcard station's refill: the songs without a single mood tag, from the same songs every recipe draws from. It
+ * reads the tags the mood step wrote (tags.ts) instead of repeating their rule, so it is always the songs shown
+ * untagged, focus tagged by the Focus Mix recipe included, and it keeps playing them while the statistics are rebuilt,
+ * as the tags are kept then. Up to `limit` in a fresh random order, one title by one artist once; empty before the mood
+ * step has scored a song.
  */
 export async function pickWildcardStation({ limit }: { limit: number }): Promise<string[]> {
     if (!Number.isInteger(limit) || limit < 1) throw new RangeError(`limit must be a positive integer, got ${limit}`);
-    const state = await loadMoodState();
-    if (!state) return [];
-    const claims = MOODS.filter((mood) => state.moods[mood].sd > 0);
-    const unclaimed = claims.length
-        ? Prisma.join(
-              claims.map((mood) => {
-                  const { mean, sd } = state.moods[mood];
-                  return Prisma.sql`(${Prisma.raw(`m."${mood}"`)}::float8 - ${mean}::float8) / ${sd}::float8 < ${RECIPE_LINE}::float8`;
-              }),
-              " AND ",
-          )
-        : Prisma.sql`true`;
     const rows = await prisma.$queryRaw<Array<{ id: string }>>`
         SELECT id FROM (
             SELECT DISTINCT ON (s.title_key, s.artist_key) s.id
             FROM (
                 SELECT t.id, lower(t.title) AS title_key, ${artistSql()} AS artist_key
                 ${SCORED_SONGS}
-                  AND ${unclaimed}
+                  AND COALESCE(cardinality(t."moodTags"), 0) = 0
             ) s
             ORDER BY s.title_key, s.artist_key, s.id
-        ) unclaimed
+        ) untagged
         ORDER BY random()
         LIMIT ${limit}
     `;
