@@ -3,9 +3,9 @@
  *
  * Writes the library to the throwaway test database with learned mood scores and the library's
  * mood statistics, runs generateAllMixes (3 runs), every recipe's member query once, 10 draws of
- * one mix (Chill), 10 mood page mixes per mood and 10 GET /library/radio calls per branch, prints
- * min / median / max in milliseconds, then deletes everything it wrote. It refuses to run against
- * any database but the test one.
+ * one mix (Chill), 10 mood page mixes per mood, 10 GET /library/radio calls per branch and, last,
+ * one mood pass after a "moods" re-run, prints the times in milliseconds, then deletes everything it
+ * wrote. It refuses to run against any database but the test one.
  *
  * usage (from backend/):
  *   DATABASE_URL=postgresql://test:test@localhost:5433/kima_v1_test npx tsx scripts/time-mixes-50k.ts
@@ -51,7 +51,8 @@ async function main() {
     const request = (await import("supertest")).default;
     const router = (await import("../src/routes/library/tracks")).default;
     const { MOODS, MOOD_HEADS } = await import("../src/services/moods/heads");
-    const { buildMoodState } = await import("../src/services/moods/state");
+    const { buildMoodState, buildMoods, writeMoodTags } = await import("../src/services/moods/state");
+    const { rerunEnrichment } = await import("../src/services/enrichmentRestart");
     const { RECIPES, pickRecipeStation } = await import("../src/services/mixes/recipes");
     const { generateChillMix } = await import("../src/services/mixes/moodMixes");
     const { moodBucketService, VALID_MOODS } = await import("../src/services/moodBucketService");
@@ -273,6 +274,20 @@ async function main() {
             }
             summarize(`radio ${label}`, ms);
         }
+
+        // A rescore, last because it leaves every song the same scores (the seeded vectors are all alike): the
+        // moods re-run clears every score and the statistics, then one mood pass scores every vector again, rebuilds
+        // the statistics and writes the tags. Until the pass ends, mood mixes, stations and pages are empty for any
+        // request the mix cache does not answer.
+        const rerunMs = await time(() => rerunEnrichment("moods"));
+        let pass = { scored: 0, stateChanged: false };
+        const buildMs = await time(async () => (pass = await buildMoods()));
+        let tagged = 0;
+        const tagMs = await time(async () => (tagged = await writeMoodTags()));
+        console.log(`moods re-run (clear)          ${rerunMs.toFixed(0).padStart(6)} ms`);
+        console.log(`mood pass: scores + statistics ${buildMs.toFixed(0).padStart(6)} ms  (${pass.scored} scored, statistics rebuilt: ${pass.stateChanged})`);
+        console.log(`mood pass: tags                ${tagMs.toFixed(0).padStart(6)} ms  (${tagged} tracks' tags written)`);
+        console.log(`mood pass total                ${(buildMs + tagMs).toFixed(0).padStart(6)} ms`);
     } finally {
         await cleanup();
         await prisma.$disconnect();
