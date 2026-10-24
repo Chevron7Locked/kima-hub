@@ -174,9 +174,10 @@ describe("utils/knn helper contract", () => {
 
 describe("text search fills its limit past rows the index walk cannot return", () => {
     const QUERY = JSON.parse(randomUnit(424242)) as number[];
-    /** The songs still searchable: one in four of the library while most are missing, one in twenty re-embedded. */
+    /** The songs still searchable: every other one while half are missing, one in twenty once re-embedded. */
     const keptEvery = (n: number) => new Set(ALL_IDS.filter((_, i) => i % n === 0));
-    const bestFirst = (rows: Array<{ distance: number }>) => rows.every((r, k) => k === 0 || rows[k - 1].distance <= r.distance);
+    const bestFirst = (rows: Array<{ distance: number }>) =>
+        rows.every((r, k) => k === 0 || rows[k - 1].distance <= r.distance);
 
     /** The text-search shape is answered through the vector index: the counts below mean something only then. */
     async function throughIndex(): Promise<boolean> {
@@ -208,19 +209,23 @@ describe("text search fills its limit past rows the index walk cannot return", (
         }
     });
 
-    it("with most songs missing, as when a share is unmounted: the nearest searchable songs, best first", async () => {
-        const KEPT = keptEvery(4);
-        // Not analysed afterwards: on this small a table the planner, told most songs are missing, reads the songs
-        // first and never asks the index; a library of 50,000 half missing is still answered through it.
+    it("with half the songs missing, as when a share is unmounted: the nearest searchable, best first", async () => {
+        const KEPT = keptEvery(2);
+        // Not analysed afterwards: on this small a table the planner, told how many songs are missing, can read the
+        // songs first and never ask the index; a library of 50,000 half missing is still answered through it.
         await prisma.$executeRawUnsafe(
             `UPDATE "Track" SET "missingSince" = now() WHERE id LIKE 'cknn%' AND NOT (id = ANY($1))`, [...KEPT],
         );
         try {
             expect(await throughIndex()).toBe(true);
-            const rows = await searchTracksByEmbedding(QUERY, 50);
-            expect(rows).toHaveLength(50);
-            expect(rows.every((r) => KEPT.has(r.id))).toBe(true);
-            expect(bestFirst(rows)).toBe(true);
+            // With half missing, a walk of 100 candidates holds about 50 searchable songs: some phrases fill 50
+            // without the scan going on, so eight different ones are asked.
+            for (let q = 0; q < 8; q++) {
+                const rows = await searchTracksByEmbedding(JSON.parse(randomUnit(424242 + q)), 50);
+                expect(rows).toHaveLength(50);
+                expect(rows.every((r) => KEPT.has(r.id))).toBe(true);
+                expect(bestFirst(rows)).toBe(true);
+            }
         } finally {
             await prisma.$executeRawUnsafe(`UPDATE "Track" SET "missingSince" = NULL WHERE id LIKE 'cknn%'`);
         }
