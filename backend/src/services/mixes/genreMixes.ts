@@ -1,10 +1,7 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import {
-    getEffectiveDecadeWhereClause,
-    getEffectiveYear,
-    getDecadeFromYear,
-} from "../../utils/dateFilters";
+import { getEffectiveYear, getDecadeFromYear } from "../../utils/dateFilters";
 import { NOT_MISSING } from "../../utils/libraryEligibility";
 import { ProgrammaticMix, sampledMix, getSeededRandom, seededOrder, TRACK_LIMIT } from "./helpers";
 import { recipeMixGenerator } from "./recipeMix";
@@ -42,10 +39,9 @@ export async function generateEraMix(
         minTracks: 15,
         limit: TRACK_LIMIT,
         seed: getSeededRandom(`era-${selectedDecade}-${today}`),
-        where: {
-            ...NOT_MISSING,
-            album: getEffectiveDecadeWhereClause(selectedDecade),
-        },
+        // The album's year as getEffectiveYear reads it: the display year, then the original year, then the year.
+        where: Prisma.sql`COALESCE(a."displayYear", a."originalYear", a.year) >= ${selectedDecade}
+                          AND COALESCE(a."displayYear", a."originalYear", a.year) < ${selectedDecade + 10}`,
     });
 }
 
@@ -85,10 +81,7 @@ export async function generateGenreMix(
         minTracks: 5,
         limit: TRACK_LIMIT,
         seed: getSeededRandom(`genre-${selectedGenre.id}-${today}`),
-        where: {
-            ...NOT_MISSING,
-            trackGenres: { some: { genreId: selectedGenre.id } },
-        },
+        where: Prisma.sql`EXISTS (SELECT 1 FROM "TrackGenre" tg WHERE tg."trackId" = t.id AND tg."genreId" = ${selectedGenre.id})`,
     });
 }
 

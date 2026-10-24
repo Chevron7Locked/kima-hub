@@ -1,5 +1,6 @@
 // Vocal Detox's instrumental cut-off is its launch value; the record is
 // services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json.
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import {
@@ -9,9 +10,7 @@ import {
     randomSample,
     sampledMix,
     sampleTracks,
-    drawIds,
-    tracksByIds,
-    unplayedTrackIds,
+    seededTracks,
     sampleMix,
     getSeededRandom,
     seededOrder,
@@ -175,30 +174,27 @@ export async function generateDeepCuts(
     today: string
 ): Promise<ProgrammaticMix | null> {
     const seed = getSeededRandom(`deep-cuts-${today}`);
-    const tracks = await tracksByIds(
-        drawIds(await unplayedTrackIds({ excludeMissing: true }), 200, seed),
-        {
+    const tracks = await seededTracks({
+        where: Prisma.sql`NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id)`,
+        include: {
             album: {
                 select: {
                     coverUrl: true,
                     artist: { select: { id: true } },
                 },
             },
-        }
-    );
+        },
+        take: 200,
+        seed,
+    });
 
     if (tracks.length < 15) {
-        const playCounts = await prisma.track.findMany({
-            where: NOT_MISSING,
-            select: { id: true, _count: { select: { plays: true } } },
-            orderBy: { id: "asc" },
-        });
-        const lowPlayIds = playCounts
-            .filter((t) => t._count.plays <= 3)
-            .map((t) => t.id);
-
-        const filtered = await tracksByIds(drawIds(lowPlayIds, 200, seed), {
-            album: { select: { coverUrl: true } },
+        // Songs played three times or fewer: every song but those played more, in one hashed list.
+        const filtered = await seededTracks({
+            where: Prisma.sql`t.id NOT IN (SELECT p."trackId" FROM "Play" p GROUP BY p."trackId" HAVING count(*) > 3)`,
+            include: { album: { select: { coverUrl: true } } },
+            take: 200,
+            seed,
         });
 
         if (filtered.length < 15) return null;
@@ -250,12 +246,8 @@ export async function generateKeyJourney(
         "F",
     ];
 
-    const tracks = await sampleTracks({
-        where: {
-            ...NOT_MISSING,
-            analysisStatus: "completed",
-            key: { not: null },
-        },
+    const tracks = await seededTracks({
+        where: Prisma.sql`t."analysisStatus" = 'completed' AND t.key IS NOT NULL`,
         include: { album: { select: { coverUrl: true } } },
         take: 200,
         seed: getSeededRandom(`key-journey-${today}`),
@@ -308,14 +300,9 @@ export async function generateTempoFlow(
     today: string
 ): Promise<ProgrammaticMix | null> {
     const seed = getSeededRandom(`tempo-flow-${today}`);
-    const tracks = await sampleTracks({
-        where: {
-            ...NOT_MISSING,
-            analysisStatus: "completed",
-            bpm: { not: null },
-            // A tempo the extractor is unsure of would put the song in the wrong band.
-            bpmConfidence: { gte: STEADY_BEAT },
-        },
+    const tracks = await seededTracks({
+        // A tempo the extractor is unsure of would put the song in the wrong band.
+        where: Prisma.sql`t."analysisStatus" = 'completed' AND t.bpm IS NOT NULL AND t."bpmConfidence" >= ${STEADY_BEAT}`,
         include: { album: { select: { coverUrl: true } } },
         take: 200,
         seed,
@@ -369,11 +356,7 @@ export async function generateVocalDetox(
         minTracks: 15,
         limit: WEEKLY_TRACK_LIMIT,
         seed: getSeededRandom(`vocal-detox-${today}`),
-        where: {
-            ...NOT_MISSING,
-            analysisStatus: "completed",
-            instrumentalness: { gte: 0.75 },
-        },
+        where: Prisma.sql`t."analysisStatus" = 'completed' AND t.instrumentalness >= 0.75`,
     });
 }
 
@@ -401,12 +384,7 @@ export async function generateMinorKeyMix(
         minTracks: 15,
         limit: WEEKLY_TRACK_LIMIT,
         seed: getSeededRandom(`minor-key-${today}`),
-        where: {
-            ...NOT_MISSING,
-            analysisStatus: "completed",
-            keyScale: "minor",
-            arousal: { gte: median },
-        },
+        where: Prisma.sql`t."analysisStatus" = 'completed' AND t."keyScale" = 'minor' AND t.arousal >= ${median}`,
     });
 }
 

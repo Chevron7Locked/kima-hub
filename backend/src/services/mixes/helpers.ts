@@ -138,15 +138,57 @@ export function getSeededRandom(seed: string): number {
 
 
 /**
- * `items` in an order fixed by `seed`: each ranked by a SHA-256 of the seed and its id, as the recipe engine draws.
- * One seed gives one order whatever order the items come in, and an item joining or leaving moves no other, so a draw
+ * The key a seeded draw ranks an id by: the MD5 of the seed and the id, as hex. Uniform is all a draw needs, and MD5 is
+ * the cheapest hash Postgres and Node both have, so seededKeySql ranks rows in the database exactly as this ranks them
+ * here. One seed gives one order whatever order the ids come in, and an id joining or leaving moves no other, so a draw
  * that takes the first n changes by at most one song when one song joins or leaves the candidates.
  */
+export function seededKey(seed: number | string, id: string): string {
+    return crypto.hash("md5", `${seed}:${id}`);
+}
+
+/** seededKey in SQL for an id column, compared byte by byte as JavaScript compares the hex strings. */
+export function seededKeySql(seed: number | string, id: Prisma.Sql): Prisma.Sql {
+    return Prisma.sql`md5(${String(seed)} || ':' || ${id}) COLLATE "C"`;
+}
+
+/** `items` in the order of their seededKey. For short lists; a draw of the first few is seededTake. */
 export function seededOrder<T>(items: T[], seed: number | string, idOf: (item: T) => string): T[] {
     return items
-        .map((item) => ({ item, key: crypto.createHash("sha256").update(`${seed}\0${idOf(item)}`).digest("hex") }))
+        .map((item) => ({ item, key: seededKey(seed, idOf(item)) }))
         .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
         .map((ranked) => ranked.item);
+}
+
+/**
+ * The first `take` of seededOrder(items, seed, idOf), kept in a heap of `take` instead of sorting the whole list. It
+ * still hashes every item on the event loop, so a list as long as the library is drawn in the database instead
+ * (seededTrackIds).
+ */
+export function seededTake<T>(items: T[], seed: number | string, idOf: (item: T) => string, take: number): T[] {
+    // A max-heap on the key: the root is the largest of the smallest `take` seen so far.
+    const heap: { item: T; key: string }[] = [];
+    const swap = (i: number, j: number) => ([heap[i], heap[j]] = [heap[j], heap[i]]);
+    for (const item of items) {
+        const key = seededKey(seed, idOf(item));
+        if (heap.length < take) {
+            heap.push({ item, key });
+            for (let i = heap.length - 1; i > 0 && heap[(i - 1) >> 1].key < heap[i].key; i = (i - 1) >> 1) swap(i, (i - 1) >> 1);
+        } else if (key < heap[0].key) {
+            heap[0] = { item, key };
+            for (let i = 0; ; ) {
+                const l = 2 * i + 1;
+                const r = l + 1;
+                let top = i;
+                if (l < heap.length && heap[l].key > heap[top].key) top = l;
+                if (r < heap.length && heap[r].key > heap[top].key) top = r;
+                if (top === i) break;
+                swap(i, top);
+                i = top;
+            }
+        }
+    }
+    return heap.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).map((ranked) => ranked.item);
 }
 
 interface MixSpec {
@@ -169,7 +211,7 @@ export function sampleMix(
     const sample =
         spec.seed === undefined
             ? randomSample(tracks, limit)
-            : seededOrder(tracks, spec.seed, (t) => t.id).slice(0, limit);
+            : seededTake(tracks, spec.seed, (t) => t.id, limit);
 
     return {
         id: spec.id,
@@ -191,12 +233,11 @@ function assertTake(take: number): void {
 /**
  * Up to `take` of `ids`, drawn uniformly at random. With a `seed` the draw is
  * repeatable whatever order `ids` come in, and an id joining or leaving changes
- * at most one pick (seededOrder).
+ * at most one pick (seededTake).
  */
 export function drawIds(ids: string[], take: number, seed?: number): string[] {
     assertTake(take);
-    const shuffled = seed === undefined ? shuffleArray(ids) : seededOrder(ids, seed, (id) => id);
-    return shuffled.slice(0, take);
+    return seed === undefined ? shuffleArray(ids).slice(0, take) : seededTake(ids, seed, (id) => id, take);
 }
 
 /**
@@ -232,13 +273,12 @@ export async function tracksByIds<I extends Prisma.TrackInclude>(
 
 /**
  * Ids of up to `take` tracks drawn uniformly at random from every track
- * matching `where`, not from the first rows the database returns. Ids are read
- * in id order so a `seed` gives the same draw each time.
+ * matching `where`, not from the first rows the database returns. A draw that
+ * must repeat for a day is seededTrackIds.
  */
 export async function sampleTrackIds(args: {
     where: Prisma.TrackWhereInput;
     take: number;
-    seed?: number;
 }): Promise<string[]> {
     assertTake(args.take);
     const rows = await prisma.track.findMany({
@@ -248,9 +288,36 @@ export async function sampleTrackIds(args: {
     });
     return drawIds(
         rows.map((r) => r.id),
-        args.take,
-        args.seed
+        args.take
     );
+}
+
+/**
+ * Ids of up to `take` tracks whose file is there and that match `where`, a condition on "Track" t and its "Album" a,
+ * ranked by seededKeySql: the draw drawIds(every matching id, take, seed) makes, picked in the database, so neither the
+ * matching ids nor their hashing reach the server's event loop however large the library.
+ */
+export async function seededTrackIds(where: Prisma.Sql, take: number, seed: number): Promise<string[]> {
+    assertTake(take);
+    const rows = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT t.id
+        FROM "Track" t
+        JOIN "Album" a ON a.id = t."albumId"
+        WHERE t."missingSince" IS NULL AND ${where}
+        ORDER BY ${seededKeySql(seed, Prisma.sql`t.id`)}
+        LIMIT ${take}
+    `;
+    return rows.map((r) => r.id);
+}
+
+/** The tracks of seededTrackIds, in the order drawn. */
+export async function seededTracks<I extends Prisma.TrackInclude>(args: {
+    where: Prisma.Sql;
+    include: I;
+    take: number;
+    seed: number;
+}): Promise<Prisma.TrackGetPayload<{ include: I }>[]> {
+    return tracksByIds(await seededTrackIds(args.where, args.take, args.seed), args.include);
 }
 
 /**
@@ -284,15 +351,15 @@ export async function sampleTracks<I extends Prisma.TrackInclude>(args: {
     where: Prisma.TrackWhereInput;
     include: I;
     take: number;
-    seed?: number;
 }): Promise<Prisma.TrackGetPayload<{ include: I }>[]> {
     return tracksByIds(await sampleTrackIds(args), args.include);
 }
 
-/** A sampled mix of the tracks that match a filter, or null when too few do. */
+/** A mix drawn for the day from the tracks that match a filter (seededTrackIds), or null when too few do. */
 export async function sampledMix(
     spec: MixSpec & {
-        where: Prisma.TrackWhereInput;
+        seed: number;
+        where: Prisma.Sql;
         /** How many matching tracks to draw before sampling. */
         take: number;
         /** Fewest drawn tracks that still make a mix. */
@@ -301,7 +368,7 @@ export async function sampledMix(
         limit: number;
     }
 ): Promise<ProgrammaticMix | null> {
-    const tracks = await sampleTracks({
+    const tracks = await seededTracks({
         where: spec.where,
         include: { album: { select: { coverUrl: true } } },
         take: spec.take,

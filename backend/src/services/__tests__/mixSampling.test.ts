@@ -1,14 +1,15 @@
 /**
  * A mix draws from every track that matches its filter, uniformly at random,
  * not from the first rows the database returns. Only ids are read for the
- * whole match; full rows are read for the draw. A seed repeats a draw.
+ * whole match; full rows are read for the draw. A seed repeats a draw; the
+ * database's seeded draw is checked in mixes/__tests__/seededDraw.integration.test.ts.
  */
 const mockFindMany = jest.fn();
 jest.mock("../../utils/db", () => ({
     prisma: { track: { findMany: (...args: unknown[]) => mockFindMany(...args) } },
 }));
 
-import { drawIds, drawWeighted, sampledMix, sampleTrackIds, sampleTracks, tracksByIds } from "../mixes/helpers";
+import { drawIds, drawWeighted, sampleTrackIds, sampleTracks, seededOrder, seededTake, tracksByIds } from "../mixes/helpers";
 
 const TOTAL = 1000;
 const ALL_IDS = Array.from({ length: TOTAL }, (_, i) => `t${String(i).padStart(4, "0")}`);
@@ -40,23 +41,16 @@ describe("sampleTracks", () => {
     });
 
     it("draws from beyond the first rows, across the whole match", async () => {
-        const rows = await sampleTracks({ where: {}, include: { album: true }, take: 50, seed: 7 });
+        const rows = await sampleTracks({ where: {}, include: { album: true }, take: 50 });
         const indexes = rows.map((r: any) => ALL_IDS.indexOf(r.id));
         expect(Math.max(...indexes)).toBeGreaterThan(500);
         expect(indexes.filter((i) => i >= 50).length).toBeGreaterThan(25);
     });
 
     it("returns rows in the order drawn, whatever order the database returns them", async () => {
-        const rows = await sampleTracks({ where: {}, include: { album: true }, take: 20, seed: 3 });
-        expect(rows.map((r: any) => r.id)).toEqual(drawIds(ALL_IDS, 20, 3));
-    });
-
-    it("is repeatable with a seed and differs between seeds", async () => {
-        const a = await sampleTracks({ where: {}, include: { album: true }, take: 30, seed: 11 });
-        const b = await sampleTracks({ where: {}, include: { album: true }, take: 30, seed: 11 });
-        const c = await sampleTracks({ where: {}, include: { album: true }, take: 30, seed: 12 });
-        expect(a.map((r: any) => r.id)).toEqual(b.map((r: any) => r.id));
-        expect(a.map((r: any) => r.id)).not.toEqual(c.map((r: any) => r.id));
+        const rows = await sampleTracks({ where: {}, include: { album: true }, take: 20 });
+        const [, rowRead] = mockFindMany.mock.calls.map((c) => c[0]);
+        expect(rows.map((r: any) => r.id)).toEqual(rowRead.where.id.in);
     });
 
     it("returns every match when fewer than take match", async () => {
@@ -125,6 +119,17 @@ describe("drawIds", () => {
     });
 });
 
+describe("seededTake", () => {
+    it("is the first `take` of seededOrder, for any take, without sorting the whole list", () => {
+        const ids = Array.from({ length: 500 }, (_, i) => `t${i}`);
+        for (const seed of [1, 42, 987654321]) {
+            const order = seededOrder(ids, seed, (id) => id);
+            for (const take of [1, 2, 20, 499, 500, 800]) expect(seededTake(ids, seed, (id) => id, take)).toEqual(order.slice(0, take));
+        }
+        expect(seededTake([], 1, (id: string) => id, 5)).toEqual([]);
+    });
+});
+
 describe("a draw refuses a take that is not a positive integer", () => {
     const bad = [0, -5, 2.5, NaN, Infinity];
     it.each(bad)("drawIds throws for %p", (take) => {
@@ -178,34 +183,5 @@ describe("tracksByIds", () => {
         mockFindMany.mockClear();
         expect(await tracksByIds([], { album: true })).toEqual([]);
         expect(mockFindMany).not.toHaveBeenCalled();
-    });
-});
-
-describe("sampledMix output size", () => {
-    const spec = {
-        id: "m", type: "t", name: "n", description: "d", colorType: "default",
-        where: {},
-    };
-
-    it("is `limit` when `take` or more tracks match", async () => {
-        const mix = await sampledMix({ ...spec, take: 50, minTracks: 8, limit: 10 });
-        expect(mix?.trackIds).toHaveLength(10);
-        expect(mix?.trackCount).toBe(10);
-        expect(new Set(mix?.trackIds).size).toBe(10);
-    });
-
-    it("is null when fewer than minTracks match", async () => {
-        mockFindMany.mockImplementation(async (args: any) =>
-            args.select ? ALL_IDS.slice(0, 7).map((id) => ({ id })) : args.where.id.in.map((id: string) => ({ id, album: { coverUrl: null } }))
-        );
-        expect(await sampledMix({ ...spec, take: 50, minTracks: 8, limit: 10 })).toBeNull();
-    });
-
-    it("is every match when fewer than `limit` match but enough make a mix", async () => {
-        mockFindMany.mockImplementation(async (args: any) =>
-            args.select ? ALL_IDS.slice(0, 9).map((id) => ({ id })) : args.where.id.in.map((id: string) => ({ id, album: { coverUrl: null } }))
-        );
-        const mix = await sampledMix({ ...spec, take: 50, minTracks: 8, limit: 10 });
-        expect(mix?.trackIds).toHaveLength(9);
     });
 });
