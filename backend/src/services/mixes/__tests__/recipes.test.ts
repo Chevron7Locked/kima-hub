@@ -2,11 +2,17 @@
  * The recipes file as shipped, the checks that refuse a malformed recipe, and the seeded draw: repeatable per seed,
  * even across members, capped per artist with the cap relaxed only to reach the 8-song minimum.
  */
-import { MIN_MIX_TRACKS, RECIPES, drawMembers, getRecipe, parseRecipes } from "../recipes";
+import { MIN_MIX_TRACKS, RECIPES, RECIPE_LINE, drawMembers, getRecipe, parseRecipes } from "../recipes";
+import { TAG_LINE_Z } from "../../moods/state";
 
 const one = (entry: Record<string, unknown>) => () => parseRecipes({ test: { name: "Test", ...entry } });
 
 describe("the shipped recipes", () => {
+    it("put the line 1.25 SD above the library's mean, the mood buckets and song tags too (Kevin 10-24)", () => {
+        expect(RECIPE_LINE).toBe(1.25);
+        expect(TAG_LINE_Z).toBe(RECIPE_LINE);
+    });
+
     it("has one recipe for every mood mix, rotating mix, station and mood page in W5's plan", () => {
         expect([...RECIPES.keys()].sort()).toEqual([
             "3am-thoughts", "acoustic", "calm", "chill", "coffee-shop", "dance-floor", "dreamy", "energetic", "epic",

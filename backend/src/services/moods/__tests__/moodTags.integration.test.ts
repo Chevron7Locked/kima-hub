@@ -1,6 +1,6 @@
 /**
- * Mood tags on a real database. A track is tagged with every mood whose score sits at least 1.0 SD above the
- * library's mean for it, z = (score - mean) / SD >= 1.0, with the mean and population SD over the tracks the
+ * Mood tags on a real database. A track is tagged with every mood whose score sits at least 1.25 SD above the
+ * library's mean for it, z = (score - mean) / SD >= 1.25, with the mean and population SD over the tracks the
  * statistics cover. The scores are written by hand here, so every expected tag is worked out in the comments.
  */
 import { Prisma } from "@prisma/client";
@@ -20,12 +20,13 @@ jest.setTimeout(60_000);
 const P = "ctag";
 const trackId = (n: number) => `${P}t${String(n).padStart(2, "0")}`;
 /**
- * happy: mean 0, population SD sqrt((4 + 6 * 1) / 10) = 1, so z is the score itself: t00 at 2 and t01, t02 at
- * exactly 1.0 are on or over the line. sad: t01 at 0.99 and t02 at 1 sit either side of it: mean -0.001,
- * SD 0.99900, z 0.992 and 1.002. Every other mood is 0 everywhere, an SD of 0, and tags no one.
+ * happy: mean 0, population SD sqrt((2.25 + 2 * 1.5625 + 2.25 + 1.5625 + 0.5625 + 0.25) / 10) = 1, so z is the score
+ * itself: t00 at 1.5 and t01, t02 at exactly 1.25 are on or over the line. sad: t01 at 1.24 and t02 at 1.26 sit
+ * either side of it: mean 0, SD 1.00001, z 1.24 and 1.26 (t00 1.49999). Every other mood is 0 everywhere, an SD of 0,
+ * and tags no one.
  */
-const HAPPY = [2, 1, 1, -1, -1, -1, -1, 0, 0, 0];
-const SAD = [2, 0.99, 1, -1, -1, -1, -1, 0, 0, 0];
+const HAPPY = [1.5, 1.25, 1.25, -1.5, -1.25, -0.75, -0.5, 0, 0, 0];
+const SAD = [1.5, 1.24, 1.26, -1.5, -1.25, -0.75, -0.5, 0, 0, 0];
 const TAGS_BEFORE: string[][] = [["happy", "sad"], ["happy"], ["happy", "sad"], [], [], [], [], [], [], []];
 /** Scored, outside the statistics: a missing file. */
 const GONE = `${P}gone`;
@@ -130,13 +131,13 @@ afterAll(async () => {
 });
 
 describe("mood tags", () => {
-    it("tag every mood a track sits at least 1.0 SD above the library's mean in, on the line included", async () => {
+    it("tag every mood a track sits at least 1.25 SD above the library's mean in, on the line included", async () => {
         await pass();
         const state = await loadMoodState();
         expect(state?.trackCount).toBe(10);
         expect(state?.moods.happy).toEqual({ mean: 0, sd: 1 });
-        expect(state?.moods.sad.mean).toBeCloseTo(-0.001, 6);
-        expect(state?.moods.sad.sd).toBeCloseTo(0.999004, 6);
+        expect(state?.moods.sad.mean).toBeCloseTo(0, 6);
+        expect(state?.moods.sad.sd).toBeCloseTo(1.00001, 6);
         expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
     });
 
@@ -149,14 +150,14 @@ describe("mood tags", () => {
     });
 
     it("move with the library's statistics", async () => {
-        // Two more tracks at happy 3. happy: mean 6/12 = 0.5, SD sqrt(28/12 - 0.25) = 1.4434, so 2 stays over the
-        // line (z 1.039), 1 falls under it (z 0.346), and 3 is over (z 1.732). sad: mean -0.00083, SD 0.91196, so
-        // t01's 0.99 is now over the line (z 1.086).
+        // Two more tracks at happy 3. happy: mean 6/12 = 0.5, SD sqrt(28/12 - 0.25) = 1.4434, so 1.5 falls under the
+        // line (z 0.693), so do the 1.25s (z 0.520), and 3 is over (z 1.732). sad: mean 0, SD 0.91288, so t01's 1.24
+        // is now over the line (z 1.358), with t00 (1.643) and t02 (1.380).
         await seedLibrary(10, [3, 3], [0, 0]);
         const result = await pass();
         expect(result).toMatchObject({ scored: 0, stateChanged: true });
         expect(await tagsOf(library(12))).toEqual([
-            ["happy", "sad"], ["sad"], ["sad"], [], [], [], [], [], [], [], ["happy"], ["happy"],
+            ["sad"], ["sad"], ["sad"], [], [], [], [], [], [], [], ["happy"], ["happy"],
         ]);
         await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id IN ($1, $2)`, trackId(10), trackId(11));
         expect(await pass()).toMatchObject({ stateChanged: true });
@@ -183,7 +184,7 @@ describe("mood tags", () => {
 
         expect(await pass()).toMatchObject({ scored: 0, stateChanged: true });
         expect(await tagsOf(library(12))).toEqual([
-            ["happy", "sad"], ["sad"], ["sad"], [], [], [], [], [], [], [], ["happy"], ["happy"],
+            ["sad"], ["sad"], ["sad"], [], [], [], [], [], [], [], ["happy"], ["happy"],
         ]);
         await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id IN ($1, $2)`, trackId(10), trackId(11));
         expect(await pass()).toMatchObject({ stateChanged: true });

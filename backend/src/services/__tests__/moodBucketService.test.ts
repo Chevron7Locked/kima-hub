@@ -16,7 +16,7 @@ jest.mock("../../utils/db", () => ({
 }));
 
 jest.mock("../mixes/recipes", () => ({
-    RECIPE_LINE: 1,
+    RECIPE_LINE: 1.25,
     UnrankableLibraryError: class UnrankableLibraryError extends Error {},
     getRecipe: jest.fn((id: string) => ({ id })),
     pickPageTracks: jest.fn(),

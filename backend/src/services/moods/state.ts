@@ -179,7 +179,7 @@ export async function buildMoods(): Promise<{ scored: number; stateChanged: bool
 }
 
 /** A track is tagged with a mood when its score sits at least this many SDs above the library's mean for it. */
-export const TAG_LINE_Z = 1.0;
+export const TAG_LINE_Z = 1.25;
 
 /**
  * Every track's mood tags: each mood whose score sits at least TAG_LINE_Z SDs above the library's mean, in the moods'

@@ -16,7 +16,7 @@ import { TRACK_LIMIT } from "./helpers";
 import recipeFile from "./recipes.json";
 
 /** A song is a member at this many library standard deviations above the average recipe score. */
-export const RECIPE_LINE = 1.0;
+export const RECIPE_LINE = 1.25;
 /** Fewest songs a mix ships with; a recipe with fewer members has no mix. */
 export const MIN_MIX_TRACKS = 8;
 /** Songs per artist in a mix; each next cap is used only while the one before leaves fewer than MIN_MIX_TRACKS. */

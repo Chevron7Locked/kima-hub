@@ -1,6 +1,6 @@
 /**
  * The recipe engine on a real database. Small libraries written for each case check the query against numbers worked
- * by hand: the 1.0 line on the recipe score standardised within the library, components against the stored library
+ * by hand: the 1.25 line on the recipe score standardised within the library, components against the stored library
  * statistics, "low:" components, each filter, which songs are eligible, duplicates, the artist cap and its relaxation,
  * shipping short, hiding under 8 and the seeded draw. The synthetic library then checks every shipped recipe against
  * the same rules computed in TypeScript.
@@ -155,23 +155,23 @@ describe("the line", () => {
     ];
     const CALM_LOW_DARK = recipe({ calm: 3, "low:dark": 1 });
 
-    it("keeps the songs at least 1 SD above the library's average recipe score (worked by hand)", async () => {
+    it("keeps the songs at least 1.25 SD above the library's average recipe score (worked by hand)", async () => {
         // Scores' mean -0.4509, SD 0.9008: z of A 1.611, B 2.304, C 1.056, E 1.125, the rest -0.610.
-        // C and E are in although their scores, 0.5 and 0.5625, are under 1: the line is on the standardised score.
+        // A is in although its score, 1.0, is under 1.25: the line is on the standardised score.
         await library(HAND, HAND_STATS);
-        expect(await membersOf(CALM_LOW_DARK)).toEqual(new Set(["A", "B", "C", "E"]));
+        expect(await membersOf(CALM_LOW_DARK)).toEqual(new Set(["A", "B"]));
     });
 
-    it("draws the line at 1 standard deviation", async () => {
-        // Calm alone against mean 0, SD 1: ten songs at 0 and three at 1.6875, 1.8125 and 4. Mean 0.5769, SD 1.1703;
-        // z 0.949, 1.056 and 2.925.
+    it("draws the line at 1.25 standard deviations", async () => {
+        // Calm alone against mean 0, SD 1: ten songs at 0 and three at 2.6875, 2.8125 and 5. Mean 0.8077, SD 1.5604;
+        // z 1.205, 1.285 and 2.687.
         await library([
             ...background(10),
-            { name: "z095", moods: { calm: 1.6875 } },
-            { name: "z106", moods: { calm: 1.8125 } },
-            { name: "z292", moods: { calm: 4 } },
+            { name: "z120", moods: { calm: 2.6875 } },
+            { name: "z128", moods: { calm: 2.8125 } },
+            { name: "z269", moods: { calm: 5 } },
         ]);
-        expect(await membersOf(CALM)).toEqual(new Set(["z106", "z292"]));
+        expect(await membersOf(CALM)).toEqual(new Set(["z128", "z269"]));
     });
 
     it("standardises within the library: B is in above, and out of a library with more songs like it", async () => {
@@ -190,17 +190,18 @@ describe("the line", () => {
 
     it("scores each component against the stored library statistics", async () => {
         // The same songs with dark's stored SD 0.05: dark weighs ten times more. Scores -3.25, A 3.25, B 2.75,
-        // C 1.625, E 7.3125; mean -1.2545, SD 3.3576; z of E 2.552, A 1.342, B 1.193, and C 0.858 falls out.
+        // C 1.625, E 7.3125; mean -1.2545, SD 3.3576; z of E 2.552, A 1.342, and B 1.193 and C 0.858 fall out.
         await library(HAND, { ...HAND_STATS, dark_sd: 0.05 });
-        expect(await membersOf(CALM_LOW_DARK)).toEqual(new Set(["A", "B", "E"]));
+        expect(await membersOf(CALM_LOW_DARK)).toEqual(new Set(["A", "E"]));
     });
 
     it("pushes away the songs high in a low: component", async () => {
-        // Counting dark up instead: scores -0.5, A 0.5, B 1.375, C 0.25, E -0.9375; z of B 2.892, A 1.356, C 0.917,
-        // E -1.168.
-        await library(HAND, HAND_STATS);
-        expect(await membersOf(recipe({ calm: 3, dark: 1 }))).toEqual(new Set(["A", "B"]));
-        expect(await membersOf(CALM_LOW_DARK)).toEqual(new Set(["A", "B", "C", "E"]));
+        // G, calm 1 and dark 1, is high in dark. With low:dark the scores are -1 (and G -1), A 1, B 1.625, C 0.5,
+        // E 0.5625: z of A 1.688, B 2.398, G -0.582. Counting dark up instead: -0.5, A 0.5, B 1.375, C 0.25,
+        // E -0.9375, G 1.0: z of B 2.459, G 1.869, A 1.082.
+        await library([...HAND, { name: "G", moods: { calm: 1, dark: 1 } }], HAND_STATS);
+        expect(await membersOf(recipe({ calm: 3, dark: 1 }))).toEqual(new Set(["B", "G"]));
+        expect(await membersOf(CALM_LOW_DARK)).toEqual(new Set(["A", "B"]));
     });
 
     it("raises rather than picks when every eligible song scores the same", async () => {
@@ -482,8 +483,8 @@ describe("every shipped recipe on the synthetic library", () => {
         const close = new Set<string>();
         eligible.forEach((row, i) => {
             const z = (scores[i] - spread.mean) / spread.sd;
-            if (Math.abs(z - 1) < 1e-6) close.add(row.id);
-            if (z < 1) return;
+            if (Math.abs(z - 1.25) < 1e-6) close.add(row.id);
+            if (z < 1.25) return;
             if (bpm) {
                 const inBand = (b: number) => b >= bpm[0] && b <= bpm[1];
                 if (row.bpmConfidence! < 2 || !(inBand(row.bpm!) || inBand(row.bpm! * 2) || inBand(row.bpm! / 2))) return;
