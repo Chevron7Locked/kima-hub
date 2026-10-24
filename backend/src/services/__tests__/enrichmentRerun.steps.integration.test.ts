@@ -5,6 +5,8 @@
  */
 import { prisma } from "../../utils/db";
 import { rerunEnrichment } from "../enrichmentRestart";
+import { executeMoodPhase } from "../../workers/unifiedEnrichment";
+import { redisClient } from "../../utils/redis";
 import { MOODS } from "../moods/heads";
 import { READINGS } from "../moods/state";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -127,6 +129,23 @@ describe("a moods re-run", () => {
         expect(stages.every((s) => s.status === "done")).toBe(true);
         const a = await prisma.artist.findUniqueOrThrow({ where: { id: `${P}art` } });
         expect(a).toMatchObject({ summary: "A bio", enrichmentStatus: "completed" });
+    });
+
+    it("leaves the cached mixes serving; the mood pass that scores the moods again drops them", async () => {
+        const cached = `mixes:${P}user`;
+        // The readings the mood statistics need, then a mood pass: the vector scored, the statistics built.
+        await prisma.track.update({ where: { id: `${P}trk` }, data: { arousal: 0.5, instrumentalness: 0.5, acousticness: 0.5 } });
+        await executeMoodPhase();
+        expect(await moodsLeft()).toEqual({ scores: 1, state: 1 });
+
+        await redisClient.set(cached, "[]");
+        await rerunEnrichment("moods");
+        expect(await moodsLeft()).toEqual({ scores: 0, state: 0 });
+        expect(await redisClient.exists(cached)).toBe(1);
+
+        await executeMoodPhase();
+        expect(await moodsLeft()).toEqual({ scores: 1, state: 1 });
+        expect(await redisClient.exists(cached)).toBe(0);
     });
 });
 
