@@ -1,4 +1,4 @@
-import { format } from "date-fns";
+import { format, isValid, parse } from "date-fns";
 import { Settings } from "lucide-react";
 import { DiscoverPlaylist, DiscoverConfig } from "../types";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -9,6 +9,16 @@ interface DiscoverHeroProps {
     playlist: DiscoverPlaylist | null;
     config: DiscoverConfig | null;
     onOpenSettings: () => void;
+}
+
+/**
+ * The week's first day as the server's calendar has it: the first ten
+ * characters of weekStart, read as a plain date so the browser's own zone
+ * cannot move it to the day before or after.
+ */
+function weekStartLabel(weekStart: string): string {
+    const day = parse(weekStart.slice(0, 10), "yyyy-MM-dd", new Date());
+    return isValid(day) ? format(day, "MMM d, yyyy") : weekStart;
 }
 
 export function DiscoverHero({ playlist, config, onOpenSettings }: DiscoverHeroProps) {
@@ -40,8 +50,8 @@ export function DiscoverHero({ playlist, config, onOpenSettings }: DiscoverHeroP
                 <div className="mt-4 inline-flex flex-wrap items-center gap-3 text-xs tabular-nums bg-white/[0.02] border border-white/10 rounded-lg px-4 py-2">
                     <div className="flex items-center gap-2">
                         <span className="w-1 h-1 bg-brand rounded-full" />
-                        <span className="text-[var(--text-secondary)]">
-                            {format(new Date(playlist.weekStart), "MMM d, yyyy")}
+                        <span className="text-[var(--text-secondary)]" data-testid="discover-week-start">
+                            {weekStartLabel(playlist.weekStart)}
                         </span>
                     </div>
                     <div className="flex items-center gap-2">
