@@ -32,6 +32,7 @@ jest.mock("../../utils/logger", () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));
 
+import { Prisma } from "@prisma/client";
 import { searchTracksByText, TextSearchRow } from "../textEmbeddingBridge";
 
 const RESPONSE_PREFIX = "audio:text:embed:response:";
@@ -94,7 +95,7 @@ describe("searchTracksByText", () => {
     it("round-trips the query into the pgvector ranking query and returns its rows in order", async () => {
         txQueryRawMock.mockResolvedValue([ROW_A, ROW_B]);
 
-        const pending = searchTracksByText("solo piano", 25);
+        const pending = searchTracksByText("solo piano", 2);
         await flush();
         expect(lastRequest).toBeDefined();
         expect(lastRequest!.text).toBe("solo piano");
@@ -114,7 +115,7 @@ describe("searchTracksByText", () => {
         expect(queryRawMock).not.toHaveBeenCalled();
         expect(txQueryRawMock).toHaveBeenCalledTimes(2);
         // First tx call: the transaction-local ef_search raise, sized from the
-        // requested limit (efFor(25) floors at 100). The is_local=true flag
+        // requested limit (efFor(2) floors at 100). The is_local=true flag
         // is literal SQL text in the template, so it is asserted there.
         const [configStrings, efValue] = txQueryRawMock.mock.calls[0];
         const configSql = configStrings.join(" ");
@@ -124,16 +125,33 @@ describe("searchTracksByText", () => {
         // Ranking is pgvector's ORDER BY on the cosine distance of the SAME
         // interpolated vector used for the selected distance column.
         // Only vectors from the model the query was embedded with are ranked.
-        const [strings, vectorForSelect, model, vectorForOrder, limitArg] = txQueryRawMock.mock.calls[1];
-        expect(strings.join(" ")).toContain("ORDER BY te.embedding <=>");
-        expect(strings.join(" ")).toContain("te.model_version =");
-        expect(model).toBe("laion-clap-music-onnx-v1");
-        expect(vectorForSelect).toBe("[0.1,0.2,-0.3]");
-        expect(vectorForOrder).toBe("[0.1,0.2,-0.3]");
-        expect(limitArg).toBe(25);
-        // Ranked list passes through untouched -- no re-sort, no cut-off, so
-        // the weaker match stays in the results behind the better one.
+        const [ranking] = txQueryRawMock.mock.calls[1] as [Prisma.Sql];
+        expect(ranking.sql).toContain("ORDER BY te.embedding <=>");
+        expect(ranking.sql).toContain("te.model_version =");
+        expect(ranking.values).toEqual(["[0.1,0.2,-0.3]", "laion-clap-music-onnx-v1", "[0.1,0.2,-0.3]", 2]);
+        // Ranked list passes through untouched -- no cut-off, so the weaker
+        // match stays in the results behind the better one.
         expect(rows).toEqual([ROW_A, ROW_B]);
+    });
+
+    it("reads every searchable track, in the same transaction, when the index returns fewer than asked", async () => {
+        txQueryRawMock
+            .mockResolvedValueOnce([{}])
+            .mockResolvedValueOnce([ROW_A])
+            .mockResolvedValueOnce([ROW_A, ROW_B]);
+
+        const pending = searchTracksByText("solo piano", 2);
+        await flush();
+        deliverResponse(lastRequest!, { success: true, embedding: [0.1, 0.2, -0.3] });
+
+        expect(await pending).toEqual([ROW_A, ROW_B]);
+        expect(transactionMock).toHaveBeenCalledTimes(1);
+        expect(txQueryRawMock).toHaveBeenCalledTimes(3);
+        // The distance offset by "+ 0" is not an order the vector index can give, so every row is read.
+        const [exact] = txQueryRawMock.mock.calls[2] as [Prisma.Sql];
+        expect(exact.sql).toContain("ORDER BY (te.embedding <=>");
+        expect(exact.sql).toContain(") + 0, t.id");
+        expect(exact.values).toEqual(["[0.1,0.2,-0.3]", "laion-clap-music-onnx-v1", "[0.1,0.2,-0.3]", 2]);
     });
 
     it("rejects and never reaches pgvector when the analyzer reports failure", async () => {

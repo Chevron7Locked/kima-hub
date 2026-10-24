@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
+import { Prisma } from "@prisma/client";
 import { redisClient } from "../utils/redis";
 import { withTimeout } from "../utils/timeout";
 import { logger } from "../utils/logger";
@@ -178,39 +179,57 @@ export async function searchTracksByText(
     return searchTracksByEmbedding(await getTextEmbedding(query), limit);
 }
 
-/** The ranking half of searchTracksByText, for an already-embedded query. */
+/** Every searchable track with its distance to `vector`: the rows text search ranks. */
+function searchableSql(vector: string): Prisma.Sql {
+    return Prisma.sql`
+        SELECT
+            t.id,
+            t.title,
+            t.duration,
+            t."trackNo",
+            te.embedding <=> ${vector}::vector AS distance,
+            a.id AS "albumId",
+            a.title AS "albumTitle",
+            a."coverUrl" AS "albumCoverUrl",
+            ar.id AS "artistId",
+            ar.name AS "artistName"
+        FROM track_embeddings te
+        JOIN "Track" t ON te.track_id = t.id
+        JOIN "Album" a ON t."albumId" = a.id
+        JOIN "Artist" ar ON a."artistId" = ar.id
+        WHERE t."missingSince" IS NULL AND te.model_version = ${MATCHING_MODEL}
+    `;
+}
+
+/**
+ * The ranking half of searchTracksByText, for an already-embedded query. The vector index answers it, scanning on past
+ * deleted or filtered-out vectors up to a cap (utils/knn.ts). Where that still comes back short (right after a re-run
+ * on a large library, or fewer searchable tracks than `limit`), the same transaction reads the distance of every
+ * searchable track instead, so the answer is full and exact at any library size.
+ */
 export async function searchTracksByEmbedding(
     embedding: number[],
     limit: number,
 ): Promise<TextSearchRow[]> {
     const vector = formatEmbedding(embedding);
-    // Widen hnsw.ef_search and scan on past deleted or filtered-out vectors, or
-    // the walk comes back short; the relaxed-order rows are re-sorted outside the
-    // materialized step ("+ 0" keeps Postgres 17+ from reusing the index order),
-    // with equal distances (copies of one song) in track id order.
-    return withEfSearch(efFor(limit), (tx) =>
-        tx.$queryRaw<TextSearchRow[]>`
+    return withEfSearch(efFor(limit), async (tx) => {
+        // The relaxed-order rows are re-sorted outside the materialized step ("+ 0" keeps Postgres 17+ from reusing
+        // the index order), with equal distances (copies of one song) in track id order.
+        const nearest = await tx.$queryRaw<TextSearchRow[]>(Prisma.sql`
             WITH nearest AS MATERIALIZED (
-                SELECT
-                    t.id,
-                    t.title,
-                    t.duration,
-                    t."trackNo",
-                    te.embedding <=> ${vector}::vector AS distance,
-                    a.id AS "albumId",
-                    a.title AS "albumTitle",
-                    a."coverUrl" AS "albumCoverUrl",
-                    ar.id AS "artistId",
-                    ar.name AS "artistName"
-                FROM track_embeddings te
-                JOIN "Track" t ON te.track_id = t.id
-                JOIN "Album" a ON t."albumId" = a.id
-                JOIN "Artist" ar ON a."artistId" = ar.id
-                WHERE t."missingSince" IS NULL AND te.model_version = ${MATCHING_MODEL}
+                ${searchableSql(vector)}
                 ORDER BY te.embedding <=> ${vector}::vector
                 LIMIT ${limit}
             )
             SELECT * FROM nearest ORDER BY distance + 0, id
-        `,
-    );
+        `);
+        if (nearest.length >= limit) return nearest;
+        logger.debug(`[VIBE-SEARCH] The index returned ${nearest.length} of ${limit}; reading every searchable track`);
+        // "+ 0" keeps the index from answering: every searchable track's distance, sorted.
+        return tx.$queryRaw<TextSearchRow[]>(Prisma.sql`
+            ${searchableSql(vector)}
+            ORDER BY (te.embedding <=> ${vector}::vector) + 0, t.id
+            LIMIT ${limit}
+        `);
+    });
 }
