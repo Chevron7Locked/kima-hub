@@ -29,13 +29,16 @@ import { moodStateOf } from "./state";
 export const TAG_LINE_Z = RECIPE_LINE;
 
 /** The recipe whose songs at the line are tagged focus. */
-const FOCUS_RECIPE = "focus";
+export const FOCUS_RECIPE = "focus";
 
 /**
  * The statistics row (version, inputs fingerprint and when it was written) the last complete pass in this process wrote
- * every track's tags from. Tags are a function of the scores, the readings and which songs are eligible (a present,
- * readable file with finished analysis and current scores); the fingerprint changes with every one of them and the row
- * is rewritten whenever it does, so a pass over the same row would change nothing.
+ * every track's tags from. Tags read the scores, which songs are eligible (a present, readable file with finished
+ * analysis and current scores) and, for focus, what the Focus Mix recipe reads. The inputs fingerprint (state.ts)
+ * covers the scores, the eligible songs and the arousal, instrumental and acoustic readings, but not tempo, its
+ * confidence or the key's scale. The skip is safe only because the focus recipe reads nothing outside the fingerprint;
+ * tags.test.ts fails if it starts to. The row is rewritten whenever the fingerprint changes, so a pass over the same
+ * row would change nothing.
  */
 let taggedFrom: string | null = null;
 
