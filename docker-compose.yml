@@ -20,6 +20,8 @@ services:
             # Server config
             PORT: 3006
             NODE_ENV: ${NODE_ENV:-production}
+            # Time zone (IANA name); the daily mixes and Discover Weekly roll over at midnight here
+            TZ: ${TZ:-UTC}
             SESSION_SECRET: ${SESSION_SECRET:-changeme-generate-secure-key}
             SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
             # To reset admin password, uncomment and set, then restart:
@@ -86,6 +88,7 @@ services:
         container_name: kima_frontend
         environment:
             NODE_ENV: ${NODE_ENV:-production}
+            TZ: ${TZ:-UTC}
             # Used by next.config.ts rewrites() inside the container.
             # IMPORTANT: "localhost" inside a container refers to itself, not the host.
             BACKEND_URL: ${BACKEND_URL:-http://backend:3006}
