@@ -9,7 +9,6 @@ import {
     albumCoverUrls,
     sampleMix,
     getMixColor,
-    randomSample,
     getSeededRandom,
     seededShuffle,
     drawIds,
@@ -261,10 +260,11 @@ export async function generateRandomDiscoveryMix(
     });
     const randomAlbums = albumIds.flatMap((id) => drawnAlbums.filter((a) => a.id === id));
 
-    const tracks = randomAlbums.flatMap((album) => album.tracks);
+    // In id order first, so the day's shuffle does not depend on the order the database returns an album's tracks in.
+    const tracks = randomAlbums.flatMap((album) => album.tracks).sort((a, b) => (a.id < b.id ? -1 : 1));
     if (tracks.length < 5) return null;
 
-    const selectedTracks = randomSample(tracks, TRACK_LIMIT);
+    const selectedTracks = seededShuffle(tracks, getSeededRandom(`random-discovery-${today}`)).slice(0, TRACK_LIMIT);
     const coverUrls = randomAlbums
         .filter((a) => a.coverUrl)
         .slice(0, 4)

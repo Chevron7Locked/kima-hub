@@ -42,6 +42,7 @@ export async function generateEraMix(
         take: 100,
         minTracks: 15,
         limit: TRACK_LIMIT,
+        seed: getSeededRandom(`era-${selectedDecade}-${today}`),
         where: {
             ...NOT_MISSING,
             album: getEffectiveDecadeWhereClause(selectedDecade),
@@ -85,6 +86,7 @@ export async function generateGenreMix(
         take: 100,
         minTracks: 5,
         limit: TRACK_LIMIT,
+        seed: getSeededRandom(`genre-${selectedGenre.id}-${today}`),
         where: {
             ...NOT_MISSING,
             trackGenres: { some: { genreId: selectedGenre.id } },

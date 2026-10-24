@@ -11,8 +11,10 @@
  * another user draws again. The engine's own rules are tested in
  * recipes.integration.test.ts.
  *
- * For every other generator, over 40 different dates (or 40 repeated calls
- * where the mix does not take a date), the suite checks:
+ * For every other generator, over 40 different dates (160 for the decade and
+ * genre mixes, whose spread is judged over the mixes that picked the first
+ * one's decade or genre; 40 repeated calls where the mix does not take a
+ * date), the suite checks:
  *   1. size   - the documented number of tracks, no repeats;
  *   2. clause - every returned track satisfies the clause the generator's
  *               `where` states, re-written here by hand and checked against the
@@ -21,7 +23,8 @@
  *   4. spread - together the calls reach the first and the last third of the
  *               ids that match, and well beyond one pool;
  *   5. repeat - a seeded mix returns identical tracks for the same date and
- *               different ones for another date; an unseeded one varies.
+ *               different ones for another date or a refresh's reroll; an
+ *               unseeded one varies.
  *
  * The daily rotation and the refresh path run through the playlist service.
  * Only the similar-artist lookup (a call to ListenBrainz/Deezer over the
@@ -96,6 +99,12 @@ function medianArousal(): number {
 }
 
 const dates = Array.from({ length: CALLS }, (_, k) => new Date(Date.UTC(2026, 0, 1 + k)).toISOString().slice(0, 10));
+/** Calls for a "grouped" case: enough that each decade or genre the date picks is picked several times. */
+const GROUPED_CALLS = 160;
+/** What a refresh appends to the day: the time of the refresh. */
+const REROLL = "-1792771200000";
+/** A mix id without the day it holds for: what its date picked, for a decade or genre mix. */
+const pickOf = (mix: ProgrammaticMix) => mix.id.replace(/-\d{4}-\d{2}-\d{2}$/, "");
 
 const NOT_DATE: any[] = [
     "hrtime", "nextTick", "performance", "queueMicrotask", "requestAnimationFrame", "cancelAnimationFrame",
@@ -118,8 +127,12 @@ interface Case {
     seeded: boolean;
     /** Weekday the mix exists on (0 = Sunday); it is drawn for dates on that day. */
     day?: number;
-    /** "repeat": the clause depends on the date, so call 40 times on one date. */
-    spread?: "dates" | "repeat";
+    /**
+     * "repeat": the clause depends on the date and the draw is not seeded, so call 40 times on one date. "grouped": the
+     * clause depends on what the date picks (a decade, a genre) and the draw is seeded, so call on GROUPED_CALLS dates
+     * and judge the spread over the mixes that picked what the first one did.
+     */
+    spread?: "dates" | "repeat" | "grouped";
     /** The id is a timestamp, not a date, so it is not stable for a date. */
     idIsTimestamp?: boolean;
 }
@@ -128,11 +141,11 @@ const year = (r: Row) => r.album.originalYear ?? r.album.year;
 
 const cases: Case[] = [
     // ---- weekly mixes (20 tracks) ----
-    { name: "Deep Cuts", size: 20, seeded: false, run: (d) => mood.generateDeepCuts(lib.user1, d),
+    { name: "Deep Cuts", size: 20, seeded: true, run: (d) => mood.generateDeepCuts(lib.user1, d),
       clause: (r) => r.plays === 0 },
     { name: "Key Journey", size: 20, seeded: true, run: (d) => mood.generateKeyJourney(lib.user1, d),
       clause: (r) => done(r) && r.key !== null },
-    { name: "Tempo Flow", size: 20, seeded: false, run: (d) => mood.generateTempoFlow(lib.user1, d),
+    { name: "Tempo Flow", size: 20, seeded: true, run: (d) => mood.generateTempoFlow(lib.user1, d),
       clause: (r) => done(r) && r.bpm !== null && ge(r.bpmConfidence, 2) },
     { name: "Vocal Detox", size: 20, seeded: true, run: (d) => mood.generateVocalDetox(lib.user1, d),
       clause: (r) => done(r) && ge(r.instrumentalness, 0.75) },
@@ -140,13 +153,13 @@ const cases: Case[] = [
       clause: (r) => done(r) && r.keyScale === "minor" && ge(r.arousal, medianArousal()) },
 
     // ---- genre mixes ----
-    { name: "Era (decade)", size: 20, seeded: false, spread: "repeat", run: (d) => genre.generateEraMix(lib.user1, d),
+    { name: "Era (decade)", size: 20, seeded: true, spread: "grouped", run: (d) => genre.generateEraMix(lib.user1, d),
       clause: (r, mix) => {
           const decade = Number(/^era-(\d+)-/.exec(mix.id)![1]);
           const y = year(r);
           return y !== null && y >= decade && y < decade + 10;
       } },
-    { name: "Genre", size: 20, seeded: false, spread: "repeat", run: (d) => genre.generateGenreMix(lib.user1, d),
+    { name: "Genre", size: 20, seeded: true, spread: "grouped", run: (d) => genre.generateGenreMix(lib.user1, d),
       clause: (r, mix) => r.genreIds.includes(/^genre-(.+)-\d{4}-\d{2}-\d{2}$/.exec(mix.id)![1]) },
 
     // ---- discovery mixes ----
@@ -185,7 +198,12 @@ beforeEach(() => {
 describe.each(cases)("$name", (c) => {
     let mixes: ProgrammaticMix[] = [];
     let callDates: string[] = [];
-    const caseDates = c.day === undefined ? dates : datesOn(c.day, CALLS);
+    const caseDates =
+        c.day !== undefined
+            ? datesOn(c.day, CALLS)
+            : c.spread === "grouped"
+              ? Array.from({ length: GROUPED_CALLS }, (_, k) => new Date(Date.UTC(2026, 0, 1 + k)).toISOString().slice(0, 10))
+              : dates;
 
     beforeAll(async () => {
         (getSimilarArtists as jest.Mock).mockImplementation(async () =>
@@ -202,12 +220,14 @@ describe.each(cases)("$name", (c) => {
     const matching = () =>
         rows.filter((r) => !r.missingSince && c.clause(r, mixes[0])).map((r) => r.id);
 
-    it("returns a mix of the documented size, with no repeated track", () => {
+    it("returns a mix of the documented size, or every match when fewer, with no repeated track", () => {
         expect(mixes).toHaveLength(callDates.length);
         for (const mix of mixes) {
-            expect(mix.trackIds).toHaveLength(c.size);
-            expect(new Set(mix.trackIds).size).toBe(c.size);
-            expect(mix.trackCount).toBe(c.size);
+            // A decade the date picks can hold fewer songs than a mix (the 1950s, from a few albums' original years).
+            const size = Math.min(c.size, rows.filter((r) => !r.missingSince && c.clause(r, mix)).length);
+            expect(mix.trackIds).toHaveLength(size);
+            expect(new Set(mix.trackIds).size).toBe(size);
+            expect(mix.trackCount).toBe(size);
             expect(mix.trackIds.every((id) => byId.has(id))).toBe(true);
         }
     });
@@ -225,7 +245,8 @@ describe.each(cases)("$name", (c) => {
 
     it("draws from the whole match, not the first rows", () => {
         const match = matching();
-        const span = spanOf(mixes.flatMap((m) => m.trackIds), match);
+        const alike = c.spread === "grouped" ? mixes.filter((m) => pickOf(m) === pickOf(mixes[0])) : mixes;
+        const span = spanOf(alike.flatMap((m) => m.trackIds), match);
         // Tracks outside the clause are the clause test's business.
         expect(span.distinct - span.unknown).toBeGreaterThan(c.size * 3);
         expect(span.lowest).toBeLessThan(1 / 3);
@@ -233,6 +254,12 @@ describe.each(cases)("$name", (c) => {
     });
 
     if (c.seeded) {
+        it("draws again for a refresh's reroll, under the reroll's id", async () => {
+            const rerolled = await c.run(caseDates[0] + REROLL);
+            expect(rerolled!.id.endsWith(`${caseDates[0]}${REROLL}`)).toBe(true);
+            expect(new Set(rerolled!.trackIds)).not.toEqual(new Set(mixes[0].trackIds));
+        });
+
         it("returns identical tracks for the same date and different ones for another", async () => {
             const again = await c.run(caseDates[0]);
             expect(again!.trackIds).toEqual(mixes[0].trackIds);
@@ -364,7 +391,6 @@ const recipeCases: RecipeCase[] = [
 
 const RECIPE_DATES = dates.slice(0, 5);
 /** What a refresh appends to the day: the time of the refresh. */
-const REROLL = "-1792771200000";
 
 describe.each(recipeCases)("$name (recipe $recipe)", (c) => {
     let members = new Set<string>();
@@ -481,14 +507,11 @@ describe("Random Discovery", () => {
         expect(span.highest).toBeGreaterThanOrEqual(2 / 3);
     });
 
-    it("picks the same albums for the same date", async () => {
-        const again = await discovery.generateRandomDiscoveryMix(lib.user1, wide[0]);
-        const albums = (m: ProgrammaticMix) => new Set(m.trackIds.map((id) => byId.get(id)!.album.id));
-        // Both draws are 20 of the same 5 albums' tracks, so every album one drew from the other can also have drawn;
-        // the albums that appear in both must be a majority.
-        const a = albums(mixes[0]);
-        const b = albums(again!);
-        expect([...a].filter((x) => b.has(x)).length).toBeGreaterThanOrEqual(3);
+    it("draws the same songs for the same date, and others for a refresh's reroll", async () => {
+        expect((await discovery.generateRandomDiscoveryMix(lib.user1, wide[0]))!.trackIds).toEqual(mixes[0].trackIds);
+        const rerolled = await discovery.generateRandomDiscoveryMix(lib.user1, wide[0] + REROLL);
+        expect(rerolled!.id).toBe(`random-discovery-${wide[0]}${REROLL}`);
+        expect(new Set(rerolled!.trackIds)).not.toEqual(new Set(mixes[0].trackIds));
     });
 });
 
@@ -515,7 +538,7 @@ describe("Tempo Flow", () => {
         const bpm = (id: string) => byId.get(id)!.bpm!;
         const klass = (b: number) => (b < 100 ? "slow" : b < 130 ? "medium" : "fast");
         for (let k = 0; k < 10; k++) {
-            const mix = await mood.generateTempoFlow(lib.user1, dates[0]);
+            const mix = await mood.generateTempoFlow(lib.user1, dates[k]);
             const counts: Record<string, number> = { slow: 0, medium: 0, fast: 0 };
             for (const id of mix!.trackIds) counts[klass(bpm(id))]++;
             expect(counts).toEqual({ slow: 6, medium: 8, fast: 6 });

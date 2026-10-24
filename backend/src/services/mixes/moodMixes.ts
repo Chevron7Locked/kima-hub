@@ -174,8 +174,9 @@ export async function generateDeepCuts(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
+    const seed = getSeededRandom(`deep-cuts-${today}`);
     const tracks = await tracksByIds(
-        drawIds(await unplayedTrackIds({ excludeMissing: true }), 200),
+        drawIds(await unplayedTrackIds({ excludeMissing: true }), 200, seed),
         {
             album: {
                 select: {
@@ -196,7 +197,7 @@ export async function generateDeepCuts(
             .filter((t) => t._count.plays <= 3)
             .map((t) => t.id);
 
-        const filtered = await tracksByIds(drawIds(lowPlayIds, 200), {
+        const filtered = await tracksByIds(drawIds(lowPlayIds, 200, seed), {
             album: { select: { coverUrl: true } },
         });
 
@@ -209,6 +210,7 @@ export async function generateDeepCuts(
                 name: "Deep Cuts",
                 description: "Hidden gems waiting to be discovered",
                 colorType: "rediscover",
+                seed,
             },
             filtered,
             WEEKLY_TRACK_LIMIT
@@ -222,6 +224,7 @@ export async function generateDeepCuts(
             name: "Deep Cuts",
             description: "Hidden gems waiting to be discovered",
             colorType: "rediscover",
+            seed,
         },
         tracks,
         WEEKLY_TRACK_LIMIT
@@ -304,6 +307,7 @@ export async function generateTempoFlow(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
+    const seed = getSeededRandom(`tempo-flow-${today}`);
     const tracks = await sampleTracks({
         where: {
             ...NOT_MISSING,
@@ -314,35 +318,26 @@ export async function generateTempoFlow(
         },
         include: { album: { select: { coverUrl: true } } },
         take: 200,
+        seed,
     });
 
     if (tracks.length < 15) return null;
 
-    const sorted = [...tracks].sort((a, b) => (a.bpm || 0) - (b.bpm || 0));
+    // Each band in an order fixed by the day: the flow takes from the front of each, so the same day gives the same
+    // songs and every song in a band has the same chance.
+    const band = (keep: (bpm: number) => boolean, salt: number) =>
+        seededShuffle(tracks.filter((t) => keep(t.bpm || 0)), seed + salt);
+    const slow = band((bpm) => bpm < 100, 1);
+    const medium = band((bpm) => bpm >= 100 && bpm < 130, 2);
+    const fast = band((bpm) => bpm >= 130, 3);
 
-    const slow = sorted.filter((t) => (t.bpm || 0) < 100);
-    const medium = sorted.filter(
-        (t) => (t.bpm || 0) >= 100 && (t.bpm || 0) < 130
-    );
-    const fast = sorted.filter((t) => (t.bpm || 0) >= 130);
-
-    const flow: typeof tracks = [];
-
-    flow.push(...randomSample(slow, Math.min(4, slow.length)));
-    flow.push(...randomSample(medium, Math.min(5, medium.length)));
-    flow.push(...randomSample(fast, Math.min(6, fast.length)));
-    flow.push(
-        ...randomSample(
-            medium.filter((t) => !flow.includes(t)),
-            Math.min(3, medium.length)
-        )
-    );
-    flow.push(
-        ...randomSample(
-            slow.filter((t) => !flow.includes(t)),
-            Math.min(2, slow.length)
-        )
-    );
+    const flow: typeof tracks = [
+        ...slow.slice(0, 4),
+        ...medium.slice(0, 5),
+        ...fast.slice(0, 6),
+        ...medium.slice(5, 8),
+        ...slow.slice(4, 6),
+    ];
 
     if (flow.length < 15) return null;
 
