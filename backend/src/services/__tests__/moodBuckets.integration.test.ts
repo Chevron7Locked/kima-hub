@@ -116,7 +116,7 @@ function learnedScores(i: number | "flat"): Record<Mood, number> {
     return scores as Record<Mood, number>;
 }
 
-const idOf = (i: number | "flat" | "pending" | "unscored") => `trk_mood_${i}`;
+const idOf = (i: number | "flat" | "pending" | "unscored" | "zero") => `trk_mood_${i}`;
 
 async function seed() {
     const artist = await prisma.artist.create({ data: { id: "art_mood", name: "Mood Artist", identityKey: "a_mood" } });
@@ -264,6 +264,22 @@ describe("mood buckets and the mood snapshot (database)", () => {
         await syncMoodBuckets();
         expect((await moodBucketService.getMoodPresets())[0].pendingTracks).toBe(before);
         expect((await moodBucketService.getMoodPresets()).find((p) => p.id === "party")!.trackCount).toBeGreaterThanOrEqual(4);
+
+        // A vector the mood step can never score, all zeros, is not waiting for it. (The column holds 512 numbers
+        // only, so a vector of the wrong length cannot be stored.)
+        await prisma.track.create({
+            data: {
+                id: idOf("zero"), albumId: "alb_mood", title: "zero", trackNo: 200, duration: 180,
+                filePath: `/tmp/${idOf("zero")}.flac`, fileModified: new Date(), fileSize: 1000,
+                analysisStatus: "completed",
+            },
+        });
+        await prisma.$executeRawUnsafe(
+            `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at) VALUES ($1, $2::vector, $3, $4)`,
+            idOf("zero"), `[0${",0".repeat(MOOD_HEADS.dims - 1)}]`, MOOD_HEADS.model, ANALYZED_AT,
+        );
+        await syncMoodBuckets();
+        expect((await moodBucketService.getMoodPresets())[0].pendingTracks).toBe(before);
     });
 
     it("serves the same decision on the vibe map", async () => {

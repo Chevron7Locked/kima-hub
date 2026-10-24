@@ -162,7 +162,8 @@ let building: Promise<MoodSnapshot> | null = null;
 /**
  * The statistics' version and fingerprint, which change with any rescore, sound vector, reading or eligible track;
  * and how many present tracks are still waiting for mood scores: analysis running, or a sound vector the mood step
- * has not scored with the current weights.
+ * has not scored with the current weights. A vector the step can never score (the wrong length, or zero) is not
+ * waiting, by the same rule as the step's progress (moodProgress).
  */
 async function librarySignature(): Promise<{ signature: string; pending: number }> {
     const state = await prisma.moodState.findUnique({
@@ -173,6 +174,7 @@ async function librarySignature(): Promise<{ signature: string; pending: number 
         SELECT count(*)::int AS pending
         FROM "Track" t
         LEFT JOIN track_embeddings te ON te.track_id = t.id AND te.model_version = ${MOOD_HEADS.model}
+                                     AND vector_dims(te.embedding) = ${MOOD_HEADS.dims} AND vector_norm(te.embedding) > 0
         LEFT JOIN track_moods m ON m.track_id = t.id
         WHERE t."missingSince" IS NULL
           AND (t."analysisStatus" IN ('pending', 'queued', 'processing')
