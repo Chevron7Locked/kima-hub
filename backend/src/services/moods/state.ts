@@ -161,11 +161,13 @@ export async function buildMoodState(tx: Prisma.TransactionClient): Promise<bool
 
 /**
  * One run of the step: scores for new or changed sound vectors, then the statistics when their inputs changed. One
- * transaction, so a mix never reads scores from one set of weights with statistics from another.
+ * transaction, so a mix never reads scores from one set of weights with statistics from another. After a large batch
+ * of scores, the planner's counts for them are refreshed.
  */
 export async function buildMoods(): Promise<{ scored: number; stateChanged: boolean }> {
+    let built: { scored: number; stateChanged: boolean };
     try {
-        return await prisma.$transaction(
+        built = await prisma.$transaction(
             async (tx) => {
                 // The state row first, as a re-run takes it, before the score rows: one order, so neither deadlocks.
                 await tx.$queryRaw`SELECT id FROM mood_state WHERE id = 'default' FOR UPDATE`;
@@ -187,6 +189,32 @@ export async function buildMoods(): Promise<{ scored: number; stateChanged: bool
             return { scored: 0, stateChanged: false };
         }
         throw error;
+    }
+    if (built.scored > 0) await refreshPlannerCounts(built.scored);
+    return built;
+}
+
+/** A batch of more scores than this, or than ANALYZE_SHARE of the rows the planner last counted, is a large one. */
+const ANALYZE_ROWS = 1000;
+const ANALYZE_SHARE = 0.1;
+
+/**
+ * The planner's row counts for the scores, refreshed after a large batch instead of whenever autovacuum next gets to
+ * the table: until then a library scored for the first time still counts as empty, and the tag, mix, station and
+ * mood-page queries are planned for an empty table. Run after the batch commits; a failure only leaves the counts to
+ * autovacuum.
+ */
+async function refreshPlannerCounts(scored: number): Promise<void> {
+    try {
+        // reltuples is -1 for a table never analysed.
+        const [{ counted }] = await prisma.$queryRaw<Array<{ counted: number }>>`
+            SELECT greatest(reltuples, 0)::float8 AS counted FROM pg_class WHERE oid = 'track_moods'::regclass
+        `;
+        if (scored > ANALYZE_ROWS || scored > ANALYZE_SHARE * counted) {
+            await prisma.$executeRaw`ANALYZE track_moods`;
+        }
+    } catch (error) {
+        logger.warn("[Moods] Could not refresh the planner's counts for the scores; autovacuum will:", error);
     }
 }
 

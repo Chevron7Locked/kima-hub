@@ -401,3 +401,36 @@ describe("a reading no eligible track has", () => {
         expect(snapshot.views.size).toBe((await loadMoodState())!.trackCount);
     });
 });
+
+describe("the planner's row count for the scores", () => {
+    const counted = async () =>
+        (await prisma.$queryRawUnsafe<Array<{ n: number }>>(
+            `SELECT reltuples::float8 AS n FROM pg_class WHERE oid = 'track_moods'::regclass`,
+        ))[0].n;
+    const rows = async () =>
+        (await prisma.$queryRawUnsafe<Array<{ n: number }>>(`SELECT count(*)::int AS n FROM track_moods`))[0].n;
+    /** The scores of `n` tracks removed, and the planner told the table is that much smaller. */
+    async function forget(n: number) {
+        await prisma.$executeRawUnsafe(
+            `DELETE FROM track_moods WHERE track_id IN (SELECT track_id FROM track_moods ORDER BY track_id LIMIT ${n})`,
+        );
+        await prisma.$executeRawUnsafe(`ANALYZE track_moods`);
+    }
+
+    it("is refreshed after a batch large against it, and left alone after a small one", async () => {
+        await buildMoods();
+        const all = await rows();
+        const half = Math.floor(all / 2);
+        await forget(half);
+        expect(await counted()).toBe(all - half);
+        // Half the table again is far more than a tenth of what the planner counts.
+        expect((await buildMoods()).scored).toBe(half);
+        expect(await counted()).toBe(all);
+
+        await forget(1);
+        // One track is under a tenth of the rest, and under a thousand.
+        expect((await buildMoods()).scored).toBe(1);
+        expect(await counted()).toBe(all - 1);
+        expect(await rows()).toBe(all);
+    });
+});

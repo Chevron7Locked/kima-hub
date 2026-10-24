@@ -7,7 +7,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../../utils/db";
 import { isWriteConflict } from "../../matching/state";
 import { MOODS, MOOD_HEADS, type Mood } from "../heads";
-import { getRecipe, recipeRankingSql } from "../../mixes/recipes";
+import { getRecipe, pickStationTracks, recipeRankingSql } from "../../mixes/recipes";
 import { buildMoods, loadMoodState } from "../state";
 import { TAG_LINE_Z, writeMoodTags } from "../tags";
 import { rerunEnrichment } from "../../enrichmentRestart";
@@ -290,6 +290,12 @@ describe("the focus tag", () => {
     const FOCUS = [2.0, 0.6, 2.0, 1.0, 0.0, -0.5, 0.2, -1.0, -0.8, 0.0, -0.5, -1.0];
     const INSTRUMENTAL = [0.02, 0.98, null, 0.95, 0.1, 0.3, 0.05, 0.2, 0.6, 0.15, 0.08, 0.4];
     const songs = FOCUS.map((_, n) => focusId(n));
+    const focusTagged = async () =>
+        (await prisma.track.findMany({
+            where: { id: { in: songs }, moodTags: { has: "focus" } }, select: { id: true }, orderBy: { id: "asc" },
+        })).map((t) => t.id);
+    /** Every member of the Focus Mix, as the engine picks them for a station refill large enough to hold them all. */
+    const focusMixMembers = async () => (await pickStationTracks(getRecipe("focus"), { limit: 1000 })).sort();
 
     beforeAll(async () => {
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
@@ -330,10 +336,20 @@ describe("the focus tag", () => {
         expect(z.get(focusId(0))).toBeCloseTo(0.187, 3);
         expect(z.get(focusId(1))).toBeCloseTo(2.063, 3);
         expect(z.get(focusId(3))).toBeCloseTo(1.984, 3);
-        const tagged = (await prisma.track.findMany({
-            where: { id: { in: songs }, moodTags: { has: "focus" } }, select: { id: true }, orderBy: { id: "asc" },
-        })).map((t) => t.id);
-        expect(tagged).toEqual(ranked.filter((r) => r.recipe_z >= TAG_LINE_Z).map((r) => r.id));
+        expect(await focusTagged()).toEqual(ranked.filter((r) => r.recipe_z >= TAG_LINE_Z).map((r) => r.id));
+        expect(await focusTagged()).toEqual(await focusMixMembers());
+    });
+
+    it("leaves out a loud instrumental song, as the Focus Mix's energy filter does", async () => {
+        // The loudest of the eleven the recipe ranks: arousal percentile 1, past the Focus Mix's 0.75. Its recipe
+        // score is unchanged, since the recipe does not blend arousal.
+        await prisma.track.update({ where: { id: focusId(1) }, data: { arousal: 0.9 } });
+        await pass();
+        expect(await tagsOf([focusId(1), focusId(3)])).toEqual([[], ["focus"]]);
+        expect(await focusTagged()).toEqual(await focusMixMembers());
+        await prisma.track.update({ where: { id: focusId(1) }, data: { arousal: 0.5 } });
+        await pass();
+        expect(await tagsOf([focusId(1)])).toEqual([["focus"]]);
     });
 
     it("tags no song with focus when the library has no instrumental spread, and keeps the other tags", async () => {

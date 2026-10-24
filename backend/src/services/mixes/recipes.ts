@@ -214,11 +214,13 @@ function artistSql(): Prisma.Sql {
  * The recipe's score for every song it ranks, against `state`, as the common table expressions of a WITH clause:
  * `library` (the songs the statistics cover: current scores, a present readable file, finished analysis), `key_scale`,
  * `eligible` (the library songs with every reading the recipe's components and filters use; a song missing one is
- * left out of this recipe only), `spread`, and `ranked`, each eligible song with `recipe_z`, its score standardised
- * over the eligible songs (null when they all score the same). The key's scale has no stored statistics, so its mean
- * and spread are taken here, over the library songs with a key reading. The two one-row aggregates are materialized,
- * so they are computed once even where a query reads them once and the planner would otherwise recompute them for
- * every song. A component that is absent or has no spread in `state` cannot be scored against: UnrankableLibraryError.
+ * left out of this recipe only), `spread`, `ranked`, each eligible song with `recipe_z`, its score standardised over
+ * the eligible songs (null when they all score the same), and `placed`, each ranked song with its arousal percentile
+ * among them and `in_filters`, whether it passes the recipe's literal filters. The key's scale has no stored
+ * statistics, so its mean and spread are taken here, over the library songs with a key reading. The two one-row
+ * aggregates are materialized, so they are computed once even where a query reads them once and the planner would
+ * otherwise recompute them for every song. A component that is absent or has no spread in `state` cannot be scored
+ * against: UnrankableLibraryError.
  */
 export function recipeRankingSql(recipe: Recipe, state: MoodState): Prisma.Sql {
     const { components, filters } = recipe;
@@ -255,6 +257,28 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState): Prisma.Sql {
     if (filters.arousalPct) present.push("l.arousal IS NOT NULL");
     if (filters.minor) present.push("l.minor IS NOT NULL");
 
+    // The arousal percentile is taken over every eligible song, before any filter.
+    const percentile = filters.arousalPct ? "percent_rank() OVER (ORDER BY r.arousal)" : "NULL::float8";
+    const passes: Prisma.Sql[] = [];
+    if (filters.bpm) {
+        const [lo, hi] = filters.bpm;
+        passes.push(Prisma.sql`p.bpm_confidence >= ${STEADY_BEAT}::float8 AND (
+            p.bpm BETWEEN ${lo}::float8 AND ${hi}::float8
+            OR p.bpm * 2 BETWEEN ${lo}::float8 AND ${hi}::float8
+            OR p.bpm / 2 BETWEEN ${lo}::float8 AND ${hi}::float8)`);
+    }
+    if (filters.instrumentalMax !== undefined) {
+        passes.push(Prisma.sql`p.instrumentalness <= ${filters.instrumentalMax}::float8`);
+    }
+    if (filters.instrumentalMin !== undefined) {
+        passes.push(Prisma.sql`p.instrumentalness >= ${filters.instrumentalMin}::float8`);
+    }
+    if (filters.arousalPct) {
+        const [lo, hi] = filters.arousalPct;
+        passes.push(Prisma.sql`p.arousal_pct BETWEEN ${lo}::float8 AND ${hi}::float8`);
+    }
+    if (filters.minor) passes.push(Prisma.sql`p.minor = 1`);
+
     return Prisma.sql`
         library AS (
             SELECT t.id, lower(t.title) AS title_key, ${artistSql()} AS artist_id, t.bpm,
@@ -276,6 +300,10 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState): Prisma.Sql {
         ranked AS (
             SELECT e.*, (e.score - s.mean) / NULLIF(s.sd, 0) AS recipe_z
             FROM eligible e CROSS JOIN spread s
+        ),
+        placed AS (
+            SELECT p.*, ${passes.length > 0 ? Prisma.join(passes, " AND ") : Prisma.sql`true`} AS in_filters
+            FROM (SELECT r.*, ${Prisma.raw(percentile)} AS arousal_pct FROM ranked r) p
         )
     `;
 }
@@ -287,32 +315,8 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState): Prisma.Sql {
 async function recipeMembers(recipe: Recipe): Promise<Member[] | null> {
     const state = await loadMoodState();
     if (!state || state.trackCount < MIN_MIX_TRACKS) return null;
-    const { components, filters } = recipe;
+    const { components } = recipe;
     const ranking = recipeRankingSql(recipe, state);
-
-    const passes = [Prisma.sql`r.recipe_z >= ${RECIPE_LINE}::float8`];
-    if (filters.bpm) {
-        const [lo, hi] = filters.bpm;
-        passes.push(Prisma.sql`r.bpm_confidence >= ${STEADY_BEAT}::float8 AND (
-            r.bpm BETWEEN ${lo}::float8 AND ${hi}::float8
-            OR r.bpm * 2 BETWEEN ${lo}::float8 AND ${hi}::float8
-            OR r.bpm / 2 BETWEEN ${lo}::float8 AND ${hi}::float8)`);
-    }
-    if (filters.instrumentalMax !== undefined) {
-        passes.push(Prisma.sql`r.instrumentalness <= ${filters.instrumentalMax}::float8`);
-    }
-    if (filters.instrumentalMin !== undefined) {
-        passes.push(Prisma.sql`r.instrumentalness >= ${filters.instrumentalMin}::float8`);
-    }
-    if (filters.arousalPct) {
-        const [lo, hi] = filters.arousalPct;
-        passes.push(Prisma.sql`r.arousal_pct BETWEEN ${lo}::float8 AND ${hi}::float8`);
-    }
-    if (filters.minor) passes.push(Prisma.sql`r.minor = 1`);
-    // Over every eligible song, before any filter.
-    const percentile = filters.arousalPct
-        ? Prisma.sql`percent_rank() OVER (ORDER BY r.arousal)`
-        : Prisma.sql`NULL::float8`;
 
     const rows = await prisma.$queryRaw<
         Array<{
@@ -324,13 +328,10 @@ async function recipeMembers(recipe: Recipe): Promise<Member[] | null> {
         }>
     >`
         WITH ${ranking},
-        placed AS (
-            SELECT r.*, ${percentile} AS arousal_pct FROM ranked r
-        ),
         members AS (
             SELECT DISTINCT ON (r.title_key, r.artist_id) r.id, r.artist_id
             FROM placed r
-            WHERE ${Prisma.join(passes, " AND ")}
+            WHERE r.recipe_z >= ${RECIPE_LINE}::float8 AND r.in_filters
             ORDER BY r.title_key, r.artist_id, r.recipe_z DESC, r.id
         )
         SELECT s.eligible, s.sd AS score_sd, k.sd AS minor_sd, mb.id, mb.artist_id
