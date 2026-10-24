@@ -52,7 +52,8 @@ async function main() {
     const request = (await import("supertest")).default;
     const router = (await import("../src/routes/library/tracks")).default;
     const { MOODS, MOOD_HEADS } = await import("../src/services/moods/heads");
-    const { buildMoodState, buildMoods, writeMoodTags } = await import("../src/services/moods/state");
+    const { buildMoodState, buildMoods } = await import("../src/services/moods/state");
+    const { writeMoodTags } = await import("../src/services/moods/tags");
     const { rerunEnrichment } = await import("../src/services/enrichmentRestart");
     const { RECIPES, pickRecipeStation } = await import("../src/services/mixes/recipes");
     const { generateChillMix } = await import("../src/services/mixes/moodMixes");
