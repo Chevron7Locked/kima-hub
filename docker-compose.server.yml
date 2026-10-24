@@ -20,7 +20,7 @@ services:
             # Persistent data (database, cache, covers, etc.)
             - kima_data:/data
         environment:
-            - TZ=${TZ:-America/Chicago}
+            - TZ=${TZ:-UTC}
             # Generate with: openssl rand -base64 32
             - SESSION_SECRET=${SESSION_SECRET:-changeme-generate-secure-key}
             # How Lidarr reaches Kima. Lidarr resolves it, so on Linux Lidarr's own container
