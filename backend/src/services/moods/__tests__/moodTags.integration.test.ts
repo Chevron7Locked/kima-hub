@@ -47,15 +47,19 @@ async function insertTrack(id: string, extra: Record<string, unknown> = {}) {
 }
 
 /**
- * A sound vector of the heads' model, and scores for it as if the mood step had computed them. The vector lies on the
- * last axis, away from the first one other suites search near: a deleted vector stays in the nearest-neighbour index
- * until a vacuum, and enough of them right at a search's query leave it nothing to return.
+ * Each vector this file writes lies on its own axis, past the first few that other suites search near. A deleted
+ * vector stays in the nearest-neighbour index until a vacuum, and many identical ones form a cluster that a later
+ * search in this database can start in and never leave, returning nothing.
  */
+let nextAxis = 100;
+
+/** A sound vector of the heads' model, and scores for it as if the mood step had computed them. */
 async function insertScores(id: string, scores: Partial<Record<Mood, number>>) {
+    const axis = nextAxis++;
     await prisma.$executeRawUnsafe(
         `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
          VALUES ($1, $2::vector, $3, clock_timestamp())`,
-        id, `[${"0,".repeat(MOOD_HEADS.dims - 1)}1]`, MOOD_HEADS.model,
+        id, `[${Array.from({ length: MOOD_HEADS.dims }, (_, i) => (i === axis ? 1 : 0)).join(",")}]`, MOOD_HEADS.model,
     );
     const values = MOODS.map((mood) => scores[mood] ?? 0);
     await prisma.$executeRawUnsafe(
