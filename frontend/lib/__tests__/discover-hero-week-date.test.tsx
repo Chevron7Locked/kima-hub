@@ -57,6 +57,15 @@ describe("Discover Weekly's week date", () => {
         expect(dateLineIn(zone, weekStart)).toEqual({ zone, line: "Oct 19, 2026" });
     });
 
+    // In Havana, 8 March 2026 starts at 01:00: clocks skip midnight.
+    it("shows a day whose midnight the browser's clocks skip", () => {
+        expect(dateLineIn("America/Havana", "2026-03-08T00:00:00.000Z")).toEqual({ zone: "America/Havana", line: "Mar 8, 2026" });
+    });
+
+    it("shows a weekStart it cannot read as sent, instead of failing", () => {
+        expect(dateLineIn("UTC", "not a date")).toEqual({ zone: "UTC", line: "not a date" });
+    });
+
     it("keeps the same date on a UTC server, whatever the browser's zone", () => {
         for (const zone of ["America/Los_Angeles", "Asia/Tokyo", "UTC"]) {
             expect(dateLineIn(zone, "2026-10-19T00:00:00.000Z")).toEqual({ zone, line: "Oct 19, 2026" });
