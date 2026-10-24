@@ -198,8 +198,13 @@ const SCORED_SONGS = Prisma.sql`
       AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'
 `;
 
-/** The identity keys of the album artist rows that name no one (artistSql). */
-const NO_ONE = [artistIdentityKey(VARIOUS_ARTISTS_CANONICAL), artistIdentityKey(UNKNOWN_ARTIST)];
+/**
+ * The identity keys of the album artist rows that name no one (artistSql). Worked out on each call, not at load, as
+ * before: tests that mock artistIdentity with only artistSortName still load this module.
+ */
+function noOneKeys(): string[] {
+    return [artistIdentityKey(VARIOUS_ARTISTS_CANONICAL), artistIdentityKey(UNKNOWN_ARTIST)];
+}
 
 /**
  * The artist a song counts toward for the per-artist cap and the one-title-per-artist rule: its album's artist, except
@@ -209,12 +214,12 @@ const NO_ONE = [artistIdentityKey(VARIOUS_ARTISTS_CANONICAL), artistIdentityKey(
  * Artist" shares that row and is treated the same. A stopgap until each song carries its own artist.
  */
 function artistSql(): Prisma.Sql {
-    return Prisma.sql`CASE WHEN ar."identityKey" IN (${Prisma.join(NO_ONE)}) THEN 'song:' || t.id ELSE a."artistId" END`;
+    return Prisma.sql`CASE WHEN ar."identityKey" IN (${Prisma.join(noOneKeys())}) THEN 'song:' || t.id ELSE a."artistId" END`;
 }
 
 /** artistSql for a song already read: its id, its album's artist id and that artist's identity key. */
 export function songArtistKey(trackId: string, albumArtistId: string, albumArtistIdentityKey: string): string {
-    return NO_ONE.includes(albumArtistIdentityKey) ? `song:${trackId}` : albumArtistId;
+    return noOneKeys().includes(albumArtistIdentityKey) ? `song:${trackId}` : albumArtistId;
 }
 
 /**
