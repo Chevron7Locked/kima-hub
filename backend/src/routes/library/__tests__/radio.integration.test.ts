@@ -17,7 +17,9 @@
  *
  * The mood and workout stations draw from their recipes (recipes.json): their
  * clause is membership of the recipe, as the recipe engine computes it on the
- * library's learned moods (recipes.integration.test.ts checks the engine).
+ * library's learned moods (recipes.integration.test.ts checks the engine). The
+ * Wildcard station plays the scored songs no mood claims, worked out here from
+ * the stored scores and statistics.
  *
  * The describe blocks at the end change the library (deleting plays, clearing
  * the mood statistics) to reach the fallback stages; they run last and the
@@ -37,6 +39,8 @@ import {
 } from "../../../__tests__/fixtures/syntheticLibrary";
 import { buildMoodState } from "../../../services/moods/state";
 import { pickRecipeStation } from "../../../services/mixes/recipes";
+import { MOODS, MOOD_HEADS, type Mood } from "../../../services/moods/heads";
+import { loadMoodState } from "../../../services/moods/state";
 import router from "../tracks";
 
 jest.setTimeout(600_000);
@@ -53,16 +57,21 @@ const app = express();
 app.use(express.json());
 app.use("/", router);
 
-/** The recipe behind each station value, as the product names them. */
+/** The recipe behind each station value, as the product names them (Kevin 10-24); Wildcard has its own tests. */
 const STATIONS: [query: Record<string, string>, recipe: string][] = [
+    [{ type: "mood", value: "calm" }, "calm-station"],
+    [{ type: "mood", value: "energy" }, "energy-station"],
+    [{ type: "mood", value: "intense" }, "intense-station"],
     [{ type: "mood", value: "happy" }, "happy"],
-    [{ type: "mood", value: "melancholy" }, "melancholy"],
-    [{ type: "mood", value: "chill" }, "chill"],
-    [{ type: "mood", value: "intense" }, "intense"],
-    [{ type: "mood", value: "dance" }, "party"],
-    [{ type: "mood", value: "high-energy" }, "high-energy"],
-    [{ type: "mood", value: "acoustic" }, "acoustic"],
-    [{ type: "mood", value: "instrumental" }, "instrumental"],
+    [{ type: "mood", value: "melancholy" }, "melancholy-station"],
+    [{ type: "mood", value: "summer" }, "summer-station"],
+    [{ type: "mood", value: "focus" }, "focus-station"],
+    [{ type: "mood", value: "feel-good" }, "feel-good-station"],
+    [{ type: "mood", value: "late-night" }, "late-night"],
+    [{ type: "mood", value: "romantic" }, "romantic-station"],
+    [{ type: "mood", value: "road-trip" }, "road-trip"],
+    [{ type: "mood", value: "nostalgic" }, "nostalgic"],
+    [{ type: "mood", value: "epic" }, "epic"],
     [{ type: "workout" }, "workout"],
 ];
 /** Every member of each station's recipe. */
@@ -268,9 +277,59 @@ describe("radio: every mood value and the workout station draw from their recipe
     });
 
     it("the mood value is read in any case", async () => {
-        const res = await radio({ type: "mood", value: "High-Energy", limit: LIMIT });
+        const res = await radio({ type: "mood", value: "Late-Night", limit: LIMIT });
         expect(res.status).toBe(200);
-        expect((res.body.tracks as RadioTrack[]).every((t) => members.get("high-energy")!.has(t.id))).toBe(true);
+        expect((res.body.tracks as RadioTrack[]).every((t) => members.get("late-night")!.has(t.id))).toBe(true);
+    });
+});
+
+describe("radio: Wildcard, the songs no mood claims", () => {
+    const UNSCORED = Array.from({ length: 3 }, (_, i) => `${PREFIX}unscored_${i}`);
+    /** The scored songs every mood sits under 1.25 SD above the library's mean for, by the stored statistics. */
+    let unclaimed = new Set<string>();
+
+    beforeAll(async () => {
+        const state = (await loadMoodState())!;
+        const scored = await prisma.$queryRawUnsafe<Array<{ id: string } & Record<Mood, number>>>(
+            `SELECT m.track_id AS id, ${MOODS.map((m) => `m."${m}"::float8 AS "${m}"`).join(", ")}
+             FROM track_moods m
+             JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
+             JOIN "Track" t ON t.id = m.track_id
+             WHERE m.weights = $1 AND te.model_version = $2 AND t.id LIKE $3
+               AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'`,
+            MOOD_HEADS.version, MOOD_HEADS.model, `${PREFIX}%`,
+        );
+        unclaimed = new Set(
+            scored
+                .filter((row) => MOODS.every((m) => !(state.moods[m].sd > 0) || (row[m] - state.moods[m].mean) / state.moods[m].sd < 1.25))
+                .map((row) => row.id),
+        );
+        // Songs with no scores at all: finished, playable, and never Wildcard.
+        await prisma.track.createMany({
+            data: UNSCORED.map((id, i) => ({
+                id, albumId: `${PREFIX}alb_0`, title: `Unscored ${i}`, trackNo: 90 + i, duration: 200,
+                filePath: `/tmp/${id}.flac`, fileModified: new Date(), fileSize: 1000, analysisStatus: "completed",
+            })),
+        });
+    });
+
+    afterAll(async () => {
+        await prisma.track.deleteMany({ where: { id: { in: UNSCORED } } });
+    });
+
+    it("plays only scored songs no mood claims, every one of them reachable, never an unscored song", async () => {
+        expect(unclaimed.size).toBeGreaterThan(LIMIT * 4);
+        const seen = new Set<string>();
+        for (let k = 0; k < Math.max(5, Math.ceil((unclaimed.size * 4) / 100)); k++) {
+            const res = await radio({ type: "mood", value: "wildcard", limit: 100 });
+            expect(res.status).toBe(200);
+            const ids = (res.body.tracks as RadioTrack[]).map((t) => t.id);
+            expect(ids).toHaveLength(Math.min(100, unclaimed.size));
+            expect(ids.filter((id) => !unclaimed.has(id))).toEqual([]);
+            ids.forEach((id) => seen.add(id));
+        }
+        expect(seen.size).toBeGreaterThan(unclaimed.size * 0.9);
+        expect(UNSCORED.filter((id) => seen.has(id))).toEqual([]);
     });
 });
 
@@ -327,6 +386,11 @@ describe("radio: bad requests", () => {
         expect((await radio({ type: "mood", value: "no-such-mood" })).status).toBe(400);
         expect((await radio({ type: "mood", value: "constructor" })).status).toBe(400);
         expect((await radio({ type: "mood" })).status).toBe(400);
+    });
+    it("400 for the mood values the 10-24 stations replaced", async () => {
+        for (const value of ["chill", "dance", "high-energy", "acoustic", "instrumental"]) {
+            expect((await radio({ type: "mood", value })).status).toBe(400);
+        }
     });
     it("400 for artist radio without an artist", async () => {
         expect((await radio({ type: "artist" })).status).toBe(400);
@@ -427,13 +491,13 @@ describe("radio: a station whose recipe the library cannot rank", () => {
         expect(res.status).toBe(200);
         expect(res.body.tracks).toEqual([]);
         // A station whose recipe does not use happy still plays.
-        expect((await radio({ type: "mood", value: "chill", limit: LIMIT })).body.tracks).toHaveLength(LIMIT);
+        expect((await radio({ type: "mood", value: "late-night", limit: LIMIT })).body.tracks).toHaveLength(LIMIT);
     });
 
     it("still fails loudly on any other error", async () => {
         const spy = jest.spyOn(prisma, "$queryRaw").mockRejectedValueOnce(new Error("connection lost"));
         try {
-            expect((await radio({ type: "mood", value: "chill", limit: LIMIT })).status).toBe(500);
+            expect((await radio({ type: "mood", value: "late-night", limit: LIMIT })).status).toBe(500);
         } finally {
             spy.mockRestore();
         }
@@ -445,7 +509,7 @@ describe("radio: the mood and workout stations before the mood step has built th
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
     });
 
-    it.each(STATIONS)("%o answers an empty list", async (query) => {
+    it.each([...STATIONS.map(([query]) => query), { type: "mood", value: "wildcard" }])("%o answers an empty list", async (query) => {
         const res = await radio({ ...query, limit: LIMIT });
         expect(res.status).toBe(200);
         expect(res.body.tracks).toEqual([]);

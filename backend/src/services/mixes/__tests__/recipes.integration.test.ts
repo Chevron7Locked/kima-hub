@@ -17,6 +17,7 @@ import {
     pickRecipeStation,
     pickRecipeTracks,
     pickStationTracks,
+    pickWildcardStation,
     type Recipe,
     type Signal,
 } from "../recipes";
@@ -224,6 +225,43 @@ describe("the line", () => {
         await expect(pickStationTracks(leaning, { limit: 10 })).rejects.toBeInstanceOf(UnrankableLibraryError);
         // A fault is not a cannot-rank answer.
         await expect(pickRecipeStation("no-such-mix", { limit: 10 })).rejects.not.toBeInstanceOf(UnrankableLibraryError);
+    });
+});
+
+describe("the Wildcard station", () => {
+    // Stored statistics of mean 0 and SD 1, so a mood's z is its score; sad has no spread, so it claims no one.
+    const SONGS: Song[] = [
+        { name: "plain" },
+        { name: "under", moods: { calm: 1.24 } },
+        { name: "on", moods: { calm: 1.25 } },
+        { name: "over", moods: { party: 3 } },
+        { name: "lowEverywhere", moods: Object.fromEntries(MOODS.map((m) => [m, -2])) },
+        { name: "sadOnly", moods: { sad: 5 } },
+        { name: "copyA", artist: "x", title: "Same Song" },
+        { name: "copyB", artist: "x", title: "same song" },
+        { name: "unscored", scores: "none" },
+        { name: "olderVector", scores: "older-vector" },
+        { name: "missing", missing: true },
+        { name: "corrupt", corrupt: true },
+        { name: "pending", analysisStatus: "pending" },
+    ];
+    const wildcard = async (limit = 100) => names(await pickWildcardStation({ limit }));
+
+    it("plays the scored songs every mood sits under the line for, one title by one artist once", async () => {
+        await library(SONGS, { sad_sd: 0 });
+        // on (calm exactly 1.25) and over (party 3) are claimed; the unscored, out-of-date, missing, corrupt and
+        // unfinished songs are not the songs the statistics cover.
+        expect(await wildcard()).toEqual(new Set(["plain", "under", "lowEverywhere", "sadOnly", "copyA"]));
+    });
+
+    it("refills up to the limit, and has nothing before the mood step has built statistics", async () => {
+        await library(SONGS, { sad_sd: 0 });
+        const two = await pickWildcardStation({ limit: 2 });
+        expect(two).toHaveLength(2);
+        expect([...names(two)].every((n) => ["plain", "under", "lowEverywhere", "sadOnly", "copyA"].includes(n))).toBe(true);
+        await expect(pickWildcardStation({ limit: 0 })).rejects.toThrow(RangeError);
+        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+        expect(await pickWildcardStation({ limit: 10 })).toEqual([]);
     });
 });
 

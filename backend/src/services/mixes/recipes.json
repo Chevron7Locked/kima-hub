@@ -30,7 +30,7 @@
         }
     },
     "melancholy": {
-        "name": "Melancholy / Melancholy station",
+        "name": "Melancholy / Melancholic page",
         "components": {
             "sad": 0.5,
             "minor": 0.15,
@@ -223,7 +223,7 @@
         }
     },
     "intense": {
-        "name": "Intense station",
+        "name": "Intense page",
         "components": {
             "aggressive": 35,
             "arousal": 25,
@@ -486,6 +486,140 @@
                 1
             ],
             "instrumental_max": 0.5
+        }
+    },
+    "calm-station": {
+        "name": "Calm station",
+        "components": {
+            "calm": 0.23,
+            "dreamy": 0.2,
+            "low:arousal": 0.2,
+            "sleep": 0.08,
+            "acoustic": 0.07,
+            "night": 0.07,
+            "groovy": 0.06,
+            "sad": 0.04,
+            "romantic": 0.03,
+            "instrumental": 0.02
+        }
+    },
+    "energy-station": {
+        "name": "Energy station",
+        "components": {
+            "party": 0.232,
+            "energetic": 0.223,
+            "groovy": 0.113,
+            "workout": 0.106,
+            "happy": 0.096,
+            "low:sleep": 0.087,
+            "low:calm": 0.058,
+            "uplifting": 0.029,
+            "fun_quirky": 0.029,
+            "low:sad": 0.029
+        },
+        "filters": {
+            "arousal_pct": [
+                0.5,
+                1
+            ]
+        }
+    },
+    "intense-station": {
+        "name": "Intense station",
+        "components": {
+            "aggressive": 0.266,
+            "dark": 0.182,
+            "fun_quirky": 0.141,
+            "trippy": 0.09,
+            "low:calm": 0.077,
+            "low:sleep": 0.077,
+            "energetic": 0.051,
+            "sexy": 0.043,
+            "low:happy": 0.043,
+            "epic": 0.029
+        },
+        "filters": {
+            "arousal_pct": [
+                0.5,
+                1
+            ]
+        }
+    },
+    "melancholy-station": {
+        "name": "Melancholy station",
+        "components": {
+            "sad": 0.425,
+            "low:arousal": 0.175,
+            "romantic": 0.125,
+            "dreamy": 0.125,
+            "minor": 0.075,
+            "nostalgic": 0.075
+        }
+    },
+    "summer-station": {
+        "name": "Summer station",
+        "components": {
+            "summer": 0.35,
+            "happy": 0.2,
+            "groovy": 0.175,
+            "dreamy": 0.075,
+            "party": 0.075,
+            "arousal": 0.075,
+            "romantic": 0.05
+        }
+    },
+    "focus-station": {
+        "name": "Focus station",
+        "components": {
+            "instrumental": 0.428,
+            "focus": 0.422,
+            "calm": 0.15
+        },
+        "filters": {
+            "arousal_pct": [
+                0.0,
+                0.75
+            ]
+        }
+    },
+    "feel-good-station": {
+        "name": "Feel-good station",
+        "components": {
+            "low:sleep": 0.175,
+            "low:dark": 0.15,
+            "uplifting": 0.125,
+            "low:aggressive": 0.125,
+            "happy": 0.112,
+            "epic": 0.05,
+            "nostalgic": 0.05,
+            "energetic": 0.037,
+            "dreamy": 0.025,
+            "driving": 0.025,
+            "summer": 0.025,
+            "low:sad": 0.025,
+            "party": 0.025,
+            "romantic": 0.025,
+            "low:calm": 0.025
+        },
+        "filters": {
+            "arousal_pct": [
+                0.35,
+                1
+            ]
+        }
+    },
+    "romantic-station": {
+        "name": "Romantic station",
+        "components": {
+            "romantic": 0.325,
+            "sad": 0.125,
+            "groovy": 0.1,
+            "uplifting": 0.1,
+            "sexy": 0.075,
+            "dreamy": 0.075,
+            "happy": 0.075,
+            "acoustic": 0.075,
+            "nostalgic": 0.05
         }
     }
 }

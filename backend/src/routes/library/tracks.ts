@@ -14,7 +14,7 @@ import {
 } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
 import { drawIds, drawWeighted, sampleTrackIds, unplayedTrackIds } from "../../services/mixes/helpers";
-import { UnrankableLibraryError, pickRecipeStation } from "../../services/mixes/recipes";
+import { UnrankableLibraryError, pickRecipeStation, pickWildcardStation } from "../../services/mixes/recipes";
 import { LIBRARY_TRACK_WHERE, LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { PLAYABLE } from "../../utils/libraryEligibility";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
@@ -699,17 +699,27 @@ router.get("/decades", async (_req, res) => {
   }
 });
 
-/** The recipe each mood station draws from (recipes.json): everything above its line, in a fresh order. */
+/**
+ * The recipe each mood station draws from (recipes.json): everything above its line, in a fresh order. Five stations
+ * share their mix's recipe; Wildcard has none (WILDCARD_STATION).
+ */
 const MOOD_STATIONS = new Map([
+  ["calm", "calm-station"],
+  ["energy", "energy-station"],
+  ["intense", "intense-station"],
   ["happy", "happy"],
-  ["melancholy", "melancholy"],
-  ["chill", "chill"],
-  ["intense", "intense"],
-  ["dance", "party"],
-  ["high-energy", "high-energy"],
-  ["acoustic", "acoustic"],
-  ["instrumental", "instrumental"],
+  ["melancholy", "melancholy-station"],
+  ["summer", "summer-station"],
+  ["focus", "focus-station"],
+  ["feel-good", "feel-good-station"],
+  ["late-night", "late-night"],
+  ["romantic", "romantic-station"],
+  ["road-trip", "road-trip"],
+  ["nostalgic", "nostalgic"],
+  ["epic", "epic"],
 ]);
+/** The station of the songs no mood claims (pickWildcardStation). */
+const WILDCARD_STATION = "wildcard";
 
 /** A recipe station's refill; empty when the library cannot rank its songs for the recipe. */
 async function stationTracks(recipe: string, limit: number): Promise<string[]> {
@@ -832,6 +842,10 @@ router.get("/radio", async (req, res) => {
 
       case "mood": {
         const moodValue = ((value as string) || "").toLowerCase();
+        if (moodValue === WILDCARD_STATION) {
+          trackIds = await pickWildcardStation({ limit: limitNum });
+          break;
+        }
         const recipe = MOOD_STATIONS.get(moodValue);
         if (!recipe) {
           return res.status(400).json({ error: `Unknown mood: ${moodValue}` });

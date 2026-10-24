@@ -182,6 +182,19 @@ interface Member {
 }
 
 /**
+ * The songs the mood statistics cover, the ones every recipe and the Wildcard station draw from: scores current for the
+ * sound vector and the weights, a present readable file, finished analysis. Aliases m (scores), t (track), a (album).
+ */
+const SCORED_SONGS = Prisma.sql`
+    FROM track_moods m
+    JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
+    JOIN "Track" t ON t.id = m.track_id
+    JOIN "Album" a ON a.id = t."albumId"
+    WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model}
+      AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'
+`;
+
+/**
  * The recipe's members through its filters, one per title (any case) and artist: the copy furthest above the line.
  * Null when the library has no mood statistics yet or fewer than MIN_MIX_TRACKS songs it could score. The eligible
  * songs are the ones the statistics cover (current scores, a present readable file, finished analysis) that have
@@ -254,12 +267,7 @@ async function recipeMembers(recipe: Recipe): Promise<Member[] | null> {
             SELECT t.id, lower(t.title) AS title_key, a."artistId" AS artist_id, t.bpm,
                    t."bpmConfidence" AS bpm_confidence, t.arousal, t.instrumentalness,
                    ${Prisma.raw(MINOR_SQL)} AS minor, ${values}
-            FROM track_moods m
-            JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
-            JOIN "Track" t ON t.id = m.track_id
-            JOIN "Album" a ON a.id = t."albumId"
-            WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model}
-              AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'
+            ${SCORED_SONGS}
         ),
         key_scale AS (
             SELECT avg(minor) AS mean, stddev_pop(minor) AS sd FROM library
@@ -384,6 +392,39 @@ export async function pickStationTracks(recipe: Recipe, { limit }: { limit: numb
     if (!Number.isInteger(limit) || limit < 1) throw new RangeError(`limit must be a positive integer, got ${limit}`);
     const members = await recipeMembers(recipe);
     return members ? shuffleArray(members.map((m) => m.id)).slice(0, limit) : [];
+}
+
+/**
+ * The Wildcard station's refill: the songs no learned mood claims, every mood under RECIPE_LINE standard deviations
+ * above the library's mean (the songs without a single mood tag), from the same songs every recipe draws from. Up to
+ * `limit` in a fresh random order, one title by one artist once; empty before the mood step has built statistics. A
+ * mood with no spread in the library claims no one.
+ */
+export async function pickWildcardStation({ limit }: { limit: number }): Promise<string[]> {
+    if (!Number.isInteger(limit) || limit < 1) throw new RangeError(`limit must be a positive integer, got ${limit}`);
+    const state = await loadMoodState();
+    if (!state) return [];
+    const claims = MOODS.filter((mood) => state.moods[mood].sd > 0);
+    const unclaimed = claims.length
+        ? Prisma.join(
+              claims.map((mood) => {
+                  const { mean, sd } = state.moods[mood];
+                  return Prisma.sql`(${Prisma.raw(`m."${mood}"`)}::float8 - ${mean}::float8) / ${sd}::float8 < ${RECIPE_LINE}::float8`;
+              }),
+              " AND ",
+          )
+        : Prisma.sql`true`;
+    const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM (
+            SELECT DISTINCT ON (lower(t.title), a."artistId") t.id
+            ${SCORED_SONGS}
+              AND ${unclaimed}
+            ORDER BY lower(t.title), a."artistId", t.id
+        ) unclaimed
+        ORDER BY random()
+        LIMIT ${limit}
+    `;
+    return rows.map((r) => r.id);
 }
 
 /** pickStationTracks for the shipped recipe with this id. */
