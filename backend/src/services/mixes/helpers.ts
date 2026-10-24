@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { shuffleArray } from "../../utils/shuffle";
@@ -137,18 +138,15 @@ export function getSeededRandom(seed: string): number {
 
 
 /**
- * Deterministic Fisher-Yates shuffle using getSeededRandom's LCG; unbiased,
- * unlike sorting with a random comparator.
+ * `items` in an order fixed by `seed`: each ranked by a SHA-256 of the seed and its id, as the recipe engine draws.
+ * One seed gives one order whatever order the items come in, and an item joining or leaving moves no other, so a draw
+ * that takes the first n changes by at most one song when one song joins or leaves the candidates.
  */
-export function seededShuffle<T>(array: T[], seed: number): T[] {
-    const result = [...array];
-    let random = seed;
-    for (let i = result.length - 1; i > 0; i--) {
-        random = (random * 9301 + 49297) % 233280;
-        const j = Math.floor((random / 233280) * (i + 1));
-        [result[i], result[j]] = [result[j], result[i]];
-    }
-    return result;
+export function seededOrder<T>(items: T[], seed: number | string, idOf: (item: T) => string): T[] {
+    return items
+        .map((item) => ({ item, key: crypto.createHash("sha256").update(`${seed}\0${idOf(item)}`).digest("hex") }))
+        .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+        .map((ranked) => ranked.item);
 }
 
 interface MixSpec {
@@ -171,7 +169,7 @@ export function sampleMix(
     const sample =
         spec.seed === undefined
             ? randomSample(tracks, limit)
-            : seededShuffle(tracks, spec.seed).slice(0, limit);
+            : seededOrder(tracks, spec.seed, (t) => t.id).slice(0, limit);
 
     return {
         id: spec.id,
@@ -192,11 +190,12 @@ function assertTake(take: number): void {
 
 /**
  * Up to `take` of `ids`, drawn uniformly at random. With a `seed` the draw is
- * repeatable for the same `ids` in the same order.
+ * repeatable whatever order `ids` come in, and an id joining or leaving changes
+ * at most one pick (seededOrder).
  */
 export function drawIds(ids: string[], take: number, seed?: number): string[] {
     assertTake(take);
-    const shuffled = seed === undefined ? shuffleArray(ids) : seededShuffle(ids, seed);
+    const shuffled = seed === undefined ? shuffleArray(ids) : seededOrder(ids, seed, (id) => id);
     return shuffled.slice(0, take);
 }
 

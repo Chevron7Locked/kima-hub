@@ -4,7 +4,7 @@
  * Writes the library to the throwaway test database with learned mood scores and the library's
  * mood statistics, runs generateAllMixes (3 runs), every recipe's member query once, 10 draws of
  * one mix (Chill), 10 Rediscover mixes for one user, 10 mood page mixes per mood, 10 GET
- * /library/radio calls per branch and, last,
+ * /library/radio calls per branch (every mood station, Wildcard among them) and, last,
  * one mood pass after a "moods" re-run, prints the times in milliseconds, then deletes everything it
  * wrote. It refuses to run against any database but the test one.
  *
@@ -260,14 +260,20 @@ async function main() {
             ["favorites", { type: "favorites" }],
             ["decade 1990", { type: "decade", value: 1990 }],
             ["genre rock", { type: "genre", value: "rock" }],
+            ["mood calm", { type: "mood", value: "calm" }],
+            ["mood energy", { type: "mood", value: "energy" }],
+            ["mood intense", { type: "mood", value: "intense" }],
             ["mood happy", { type: "mood", value: "happy" }],
             ["mood melancholy", { type: "mood", value: "melancholy" }],
-            ["mood chill", { type: "mood", value: "chill" }],
-            ["mood intense", { type: "mood", value: "intense" }],
-            ["mood dance", { type: "mood", value: "dance" }],
-            ["mood high-energy", { type: "mood", value: "high-energy" }],
-            ["mood acoustic", { type: "mood", value: "acoustic" }],
-            ["mood instrumental", { type: "mood", value: "instrumental" }],
+            ["mood summer", { type: "mood", value: "summer" }],
+            ["mood focus", { type: "mood", value: "focus" }],
+            ["mood feel-good", { type: "mood", value: "feel-good" }],
+            ["mood late-night", { type: "mood", value: "late-night" }],
+            ["mood romantic", { type: "mood", value: "romantic" }],
+            ["mood road-trip", { type: "mood", value: "road-trip" }],
+            ["mood nostalgic", { type: "mood", value: "nostalgic" }],
+            ["mood epic", { type: "mood", value: "epic" }],
+            ["mood wildcard", { type: "mood", value: "wildcard" }],
             ["workout", { type: "workout" }],
             ["artist", { type: "artist", value: artist }],
             ["all", { type: "all" }],

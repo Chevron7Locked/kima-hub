@@ -108,6 +108,27 @@ describe("getMoodMix draws from the mood page's recipe (database)", () => {
         expect(mix!.trackIds).toHaveLength(15);
     });
 
+    it("shows each preset's count as the songs its page plays, not the size of the mood's bucket", async () => {
+        const presets = await moodBucketService.getMoodPresets();
+        const buckets = await prisma.moodBucket.groupBy({ by: ["mood"], _count: { _all: true } });
+        for (const preset of presets) {
+            expect(preset.trackCount).toBe(members.get(preset.id as MoodType)!.size);
+            // The fixture's buckets are random rows, sized unlike any page recipe.
+            expect(preset.trackCount).not.toBe(buckets.find((b) => b.mood === preset.id)?._count._all ?? 0);
+        }
+
+        // A page recipe the library cannot rank plays nothing, and counts nothing.
+        const { happy_sd } = await prisma.moodState.findUniqueOrThrow({ where: { id: "default" } });
+        await prisma.moodState.update({ where: { id: "default" }, data: { happy_sd: 0 } });
+        try {
+            const unranked = await moodBucketService.getMoodPresets();
+            expect(unranked.find((p) => p.id === "happy")!.trackCount).toBe(0);
+            expect(unranked.find((p) => p.id === "chill")!.trackCount).toBe(members.get("chill")!.size);
+        } finally {
+            await prisma.moodState.update({ where: { id: "default" }, data: { happy_sd } });
+        }
+    });
+
     it("names the mix after the mood and has no mix before the mood step has built the library's statistics", async () => {
         const mix = await moodBucketService.getMoodMix("chill", 15);
         expect(mix).toMatchObject({ mood: "chill", name: "Calm Mix", description: "Tracks that match your calm vibe" });

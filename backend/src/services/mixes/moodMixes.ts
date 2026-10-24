@@ -14,7 +14,7 @@ import {
     unplayedTrackIds,
     sampleMix,
     getSeededRandom,
-    seededShuffle,
+    seededOrder,
 } from "./helpers";
 import { recipeMixGenerator } from "./recipeMix";
 import { weekdayOf } from "./mixDay";
@@ -282,7 +282,7 @@ export async function generateKeyJourney(
                 WEEKLY_TRACK_LIMIT - journey.length
             );
             const keySeed = getSeededRandom(`key-journey-${today}-${key}`);
-            const shuffled = seededShuffle(keyTracks, keySeed);
+            const shuffled = seededOrder(keyTracks, keySeed, (t) => t.id);
             journey.push(...shuffled.slice(0, count));
         }
     }
@@ -325,11 +325,11 @@ export async function generateTempoFlow(
 
     // Each band in an order fixed by the day: the flow takes from the front of each, so the same day gives the same
     // songs and every song in a band has the same chance.
-    const band = (keep: (bpm: number) => boolean, salt: number) =>
-        seededShuffle(tracks.filter((t) => keep(t.bpm || 0)), seed + salt);
-    const slow = band((bpm) => bpm < 100, 1);
-    const medium = band((bpm) => bpm >= 100 && bpm < 130, 2);
-    const fast = band((bpm) => bpm >= 130, 3);
+    const band = (keep: (bpm: number) => boolean) =>
+        seededOrder(tracks.filter((t) => keep(t.bpm || 0)), seed, (t) => t.id);
+    const slow = band((bpm) => bpm < 100);
+    const medium = band((bpm) => bpm >= 100 && bpm < 130);
+    const fast = band((bpm) => bpm >= 130);
 
     const flow: typeof tracks = [
         ...slow.slice(0, 4),

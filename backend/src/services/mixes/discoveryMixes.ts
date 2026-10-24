@@ -10,7 +10,7 @@ import {
     sampleMix,
     getMixColor,
     getSeededRandom,
-    seededShuffle,
+    seededOrder,
     drawIds,
     tracksByIds,
     TRACK_LIMIT,
@@ -94,9 +94,8 @@ export async function generateRediscoverMix(
         drawIds(underplayedIds, 200, seed),
         { album: { select: { coverUrl: true } } }
     );
-    const shuffled = seededShuffle(underplayedTracks, seed);
-
-    const selectedTracks = shuffled.slice(0, TRACK_LIMIT);
+    // Already in the day's order: drawIds ranks by the seed, and tracksByIds keeps the order it is given.
+    const selectedTracks = underplayedTracks.slice(0, TRACK_LIMIT);
     const coverUrls = albumCoverUrls(selectedTracks);
 
     return {
@@ -260,11 +259,13 @@ export async function generateRandomDiscoveryMix(
     });
     const randomAlbums = albumIds.flatMap((id) => drawnAlbums.filter((a) => a.id === id));
 
-    // In id order first, so the day's shuffle does not depend on the order the database returns an album's tracks in.
-    const tracks = randomAlbums.flatMap((album) => album.tracks).sort((a, b) => (a.id < b.id ? -1 : 1));
+    const tracks = randomAlbums.flatMap((album) => album.tracks);
     if (tracks.length < 5) return null;
 
-    const selectedTracks = seededShuffle(tracks, getSeededRandom(`random-discovery-${today}`)).slice(0, TRACK_LIMIT);
+    const selectedTracks = seededOrder(tracks, getSeededRandom(`random-discovery-${today}`), (t) => t.id).slice(
+        0,
+        TRACK_LIMIT
+    );
     const coverUrls = randomAlbums
         .filter((a) => a.coverUrl)
         .slice(0, 4)

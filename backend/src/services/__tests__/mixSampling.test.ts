@@ -105,6 +105,24 @@ describe("drawIds", () => {
         for (const id of ids) expect(counts.get(id)).toBeGreaterThan(450);
         for (const id of ids) expect(counts.get(id)).toBeLessThan(750);
     });
+
+    it("with a seed, draws the same ids whatever order they come in", () => {
+        const ids = Array.from({ length: 300 }, (_, i) => `t${i}`);
+        expect(drawIds([...ids].reverse(), 20, 42)).toEqual(drawIds(ids, 20, 42));
+    });
+
+    it("with a seed, keeps every other pick when one id leaves or joins the candidates", () => {
+        const ids = Array.from({ length: 300 }, (_, i) => `t${i}`);
+        const day = drawIds(ids, 20, 42);
+        // A picked id leaves: the other 19 stay, in their order, and one more comes in at the end.
+        const withoutPick = drawIds(ids.filter((id) => id !== day[7]), 20, 42);
+        expect(withoutPick.slice(0, 19)).toEqual(day.filter((id) => id !== day[7]));
+        // An id that was not picked leaves, or a new one joins and ranks below the 20th: nothing changes.
+        const unpicked = ids.find((id) => !day.includes(id))!;
+        expect(drawIds(ids.filter((id) => id !== unpicked), 20, 42)).toEqual(day);
+        const joined = drawIds([...ids, "new"], 20, 42);
+        expect(joined.filter((id) => id !== "new")).toEqual(joined.includes("new") ? day.slice(0, 19) : day);
+    });
 });
 
 describe("a draw refuses a take that is not a positive integer", () => {

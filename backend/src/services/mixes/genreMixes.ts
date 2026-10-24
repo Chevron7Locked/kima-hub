@@ -6,7 +6,7 @@ import {
     getDecadeFromYear,
 } from "../../utils/dateFilters";
 import { NOT_MISSING } from "../../utils/libraryEligibility";
-import { ProgrammaticMix, sampledMix, getSeededRandom, TRACK_LIMIT } from "./helpers";
+import { ProgrammaticMix, sampledMix, getSeededRandom, seededOrder, TRACK_LIMIT } from "./helpers";
 import { recipeMixGenerator } from "./recipeMix";
 
 export async function generateEraMix(
@@ -29,9 +29,8 @@ export async function generateEraMix(
 
     if (decades.size === 0) return null;
 
-    const decadeArray = Array.from(decades).sort((a, b) => b - a);
-    const decadeSeed = getSeededRandom(`era-${today}`);
-    const selectedDecade = decadeArray[decadeSeed % decadeArray.length];
+    // Ranked by the day's seed, so a decade appearing or leaving changes the pick only if it is the one picked.
+    const selectedDecade = seededOrder([...decades], getSeededRandom(`era-${today}`), String)[0];
 
     return sampledMix({
         id: `era-${selectedDecade}-${today}`,
@@ -74,8 +73,7 @@ export async function generateGenreMix(
         return null;
     }
 
-    const genreSeed = getSeededRandom(`genre-${today}`);
-    const selectedGenre = validGenres[genreSeed % validGenres.length];
+    const selectedGenre = seededOrder(validGenres, getSeededRandom(`genre-${today}`), (g) => g.id)[0];
 
     return sampledMix({
         id: `genre-${selectedGenre.id}-${today}`,

@@ -3,14 +3,14 @@
  * party (Energetic). A track has a mood when its score sits at least RECIPE_LINE standard deviations above the
  * library's mean for that mood, by the statistics the mood step keeps (the same line the mixes use); its library rank
  * orders the bucket and picks the dominant label. Buckets rebuild when those statistics change. Each mood page's mix
- * draws from that mood's page recipe.
+ * draws from that mood's page recipe, and the page's preset counts that recipe's songs, the ones it plays.
  */
 
 import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { getMixColor, tracksByIds } from "./mixes/helpers";
-import { RECIPE_LINE, UnrankableLibraryError, getRecipe, pickPageTracks } from "./mixes/recipes";
+import { RECIPE_LINE, UnrankableLibraryError, getRecipe, pickPageTracks, pickRecipeStation } from "./mixes/recipes";
 import { MOOD_HEADS, type Mood } from "./moods/heads";
 import { MOOD_STATE_VERSION, loadMoodState, type MoodStats } from "./moods/state";
 
@@ -104,9 +104,13 @@ export class MoodDistribution {
         return (lowerBound(s, v) + upperBound(s, v)) / 2 / s.length;
     }
 
-    /** How many of the library's standard deviations v sits above its mean on this mood. */
+    /**
+     * How many of the library's standard deviations v sits above its mean on this mood. A mood with no spread in the
+     * library ranks no one above anyone: -Infinity, under any line, as the recipe engine and the song tags treat it.
+     */
     z(field: MoodField, v: number): number {
         const { mean, sd } = this.stats[field];
+        if (!(sd > 0)) return -Infinity;
         return (v - mean) / sd;
     }
 }
@@ -254,6 +258,16 @@ export function moodOutput(view: MoodView | undefined): {
     return { dominantMood: view.dominant, moodScore: view.score, moods: view.ranks as Record<string, number> };
 }
 
+/** How many songs a mood page draws from: its recipe's members at the line; none when the library cannot rank it. */
+async function pageSongCount(recipe: string): Promise<number> {
+    try {
+        return (await pickRecipeStation(recipe, { limit: Number.MAX_SAFE_INTEGER })).length;
+    } catch (error) {
+        if (error instanceof UnrankableLibraryError) return 0;
+        throw error;
+    }
+}
+
 class MoodBucketService {
     /**
      * Rebuild every bucket from the snapshot: one row per mood the verdict gives
@@ -280,9 +294,10 @@ class MoodBucketService {
     }
 
     /**
-     * Get mood presets with track counts for the UI. `pendingTracks` is how
-     * many library tracks are still waiting for mood analysis, so the UI can
-     * say "not analysed yet" instead of showing an empty mood as final.
+     * Get mood presets with track counts for the UI. A preset's count is how many songs its mood page draws from: the
+     * page recipe's members at the line (none when the library cannot rank it), not the mood's bucket. `pendingTracks`
+     * is how many library tracks are still waiting for mood analysis, so the UI can say "not analysed yet" instead of
+     * showing an empty mood as final.
      */
     async getMoodPresets(): Promise<
         {
@@ -295,16 +310,15 @@ class MoodBucketService {
         }[]
     > {
         const [counts, snap] = await Promise.all([
-            prisma.moodBucket.groupBy({ by: ["mood"], _count: { _all: true } }),
+            Promise.all(MOODS.map((m) => pageSongCount(m.recipe))),
             currentMoodSnapshot(),
         ]);
-        const byMood = new Map(counts.map((c) => [c.mood, c._count._all]));
-        return MOODS.map((m) => ({
+        return MOODS.map((m, i) => ({
             id: m.id,
             name: m.name,
             color: m.color,
             icon: m.icon,
-            trackCount: byMood.get(m.id) ?? 0,
+            trackCount: counts[i],
             pendingTracks: snap.pending,
         }));
     }

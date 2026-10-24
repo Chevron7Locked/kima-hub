@@ -43,7 +43,7 @@ import { syncMoodBuckets } from "../../workers/moodBucketWorker";
 import { getVibeMap } from "../vibeMap";
 import { MOODS as LEARNED_MOODS, MOOD_HEADS, type Mood } from "../moods/heads";
 import { buildMoodState, loadMoodState } from "../moods/state";
-import { RECIPE_LINE } from "../mixes/recipes";
+import { RECIPE_LINE, pickRecipeStation } from "../mixes/recipes";
 
 jest.setTimeout(60_000);
 
@@ -91,6 +91,13 @@ describe("classifyMoods (pure)", () => {
         expect(v.dominant).toBe("moodParty");
         expect(v.score).toBeCloseTo(1);
         expect(v.moods.sort()).toEqual(["moodHappy", "moodParty"]);
+    });
+
+    it("gives no mood that has no spread in the library to anyone, however high the score", () => {
+        const flat = new MoodDistribution(lib, { ...unit(), moodParty: { mean: 0, sd: 0 } });
+        expect(flat.z("moodParty", 1e-9)).toBe(-Infinity);
+        expect(classifyMoods({ ...quiet, moodParty: 1e-9 }, flat).moods).toEqual([]);
+        expect(classifyMoods({ ...quiet, moodParty: 1e-9, moodHappy: 9 }, flat).moods).toEqual(["moodHappy"]);
     });
 
     it("reports a track with any missing mood as not analysed", () => {
@@ -263,7 +270,11 @@ describe("mood buckets and the mood snapshot (database)", () => {
         });
         await syncMoodBuckets();
         expect((await moodBucketService.getMoodPresets())[0].pendingTracks).toBe(before);
-        expect((await moodBucketService.getMoodPresets()).find((p) => p.id === "party")!.trackCount).toBeGreaterThanOrEqual(4);
+        // Each preset counts the songs its mood page plays: the page recipe's members.
+        const counts = (await moodBucketService.getMoodPresets()).map((p) => p.trackCount);
+        expect(counts).toEqual(
+            await Promise.all(MOODS.map(async (m) => (await pickRecipeStation(m.recipe, { limit: 100_000 })).length)),
+        );
 
         // A vector the mood step can never score, all zeros, is not waiting for it. (The column holds 512 numbers
         // only, so a vector of the wrong length cannot be stored.)

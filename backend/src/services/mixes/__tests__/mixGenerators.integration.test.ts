@@ -451,10 +451,16 @@ describe.each(recipeCases)("$name (recipe $recipe)", (c) => {
 
     if (c.day !== undefined) {
         it("has no mix on the other days of the week", async () => {
+            // The day mix has another day's recipe on Sunday, Monday and Friday, and nothing on the other days.
+            const otherMixDays = c.run === time.generateDayMix ? [0, 1, 5] : [];
             for (const day of [0, 1, 2, 3, 4, 5, 6].filter((x) => x !== c.day)) {
                 const mix = await c.run(lib.user1, datesOn(day, 1)[0]);
-                // The day mix has a different recipe on Sunday, Monday and Friday.
-                if (mix) expect(mix.id.startsWith(`${c.id}-`)).toBe(false);
+                if (otherMixDays.includes(day)) {
+                    expect(mix).not.toBeNull();
+                    expect(mix!.id.startsWith(`${c.id}-`)).toBe(false);
+                } else {
+                    expect(mix).toBeNull();
+                }
             }
         });
     }
@@ -577,6 +583,36 @@ describe("Genre mix", () => {
     });
 });
 
+describe("a day's draw when one song leaves the candidates", () => {
+    it("Deep Cuts keeps its other 19 songs when someone plays one of them", async () => {
+        const before = (await mood.generateDeepCuts(lib.user1, dates[0]))!;
+        const played = before.trackIds[5];
+        await prisma.play.create({ data: { userId: lib.user2, trackId: played } });
+        try {
+            const after = (await mood.generateDeepCuts(lib.user1, dates[0]))!;
+            expect(after.trackIds).toHaveLength(20);
+            expect(after.trackIds).not.toContain(played);
+            expect(after.trackIds.filter((id) => before.trackIds.includes(id))).toHaveLength(19);
+        } finally {
+            await prisma.play.deleteMany({ where: { userId: lib.user2, trackId: played } });
+        }
+    });
+
+    it("an Era mix keeps its decade and its other 19 songs when one of its files goes missing", async () => {
+        const before = (await genre.generateEraMix(lib.user1, dates[0]))!;
+        const gone = before.trackIds[3];
+        await prisma.track.update({ where: { id: gone }, data: { missingSince: new Date() } });
+        try {
+            const after = (await genre.generateEraMix(lib.user1, dates[0]))!;
+            expect(after.id).toBe(before.id);
+            expect(after.trackIds).not.toContain(gone);
+            expect(after.trackIds.filter((id) => before.trackIds.includes(id))).toHaveLength(19);
+        } finally {
+            await prisma.track.update({ where: { id: gone }, data: { missingSince: null } });
+        }
+    });
+});
+
 describe("Era mix", () => {
     it("picks different decades on different dates", async () => {
         const ids = new Set<string>();
@@ -648,8 +684,9 @@ describe("the daily rotation and its refresh (the playlist service)", () => {
         for (let k = 0; k < 3; k++) {
             const refreshed = await atNoon(() => programmaticPlaylistService.generateAllMixes(lib.user1, true));
             for (const mix of refreshed) {
-                // Every mix that carries the day carries the refresh's reroll after it.
-                if (mix.id.includes(TODAY)) expect(mix.id.endsWith(`${TODAY}${suffix}`)).toBe(true);
+                // Every mix carries the day with the refresh's reroll after it, but the three whose ids name no day.
+                if (/^(top-tracks|artist-similar-|your-mood-mix-)/.test(mix.id)) expect(mix.id).not.toContain(TODAY);
+                else expect(mix.id.endsWith(`${TODAY}${suffix}`)).toBe(true);
                 const recipe = recipeFor(mix.id, suffix);
                 if (!recipe) continue;
                 rerolled++;
