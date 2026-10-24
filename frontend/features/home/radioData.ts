@@ -1,8 +1,8 @@
 import { api } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { Track } from "@/lib/audio-state-context";
-import { shuffleArray } from "@/lib/shuffle";
 import { notify } from "@/lib/notify";
+import { stationBatches } from "@/lib/station-refill";
 import { useState } from "react";
 import { plural } from "@/lib/format";
 
@@ -142,8 +142,11 @@ export function useRadioPlayer() {
             if (station.filter.value) params.set("value", station.filter.value);
             params.set("limit", "100");
 
-            const fetchTracks = () =>
-                api.get<{ tracks: Track[] }>(`/library/radio?${params.toString()}`);
+            // Played in the server's order (stationBatches).
+            const fetchTracks = stationBatches(
+                (query) => api.get<{ tracks: Track[]; next?: number }>(`/library/radio?${query}`),
+                params
+            );
             const response = await fetchTracks();
 
             if (!response.tracks || response.tracks.length === 0) {
@@ -157,8 +160,7 @@ export function useRadioPlayer() {
                 return;
             }
 
-            const shuffled = shuffleArray(response.tracks);
-            playStation(shuffled, async () => shuffleArray((await fetchTracks()).tracks ?? []));
+            playStation(response.tracks, async () => (await fetchTracks()).tracks ?? []);
         } catch (error) {
             console.error("Failed to start radio:", error);
             notify.error("Failed to start radio station");

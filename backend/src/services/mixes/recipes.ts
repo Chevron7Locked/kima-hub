@@ -4,12 +4,12 @@
  * weighted, a "low:" component counted negatively, over the sum of the weights' sizes. That score is standardised
  * again within the library, and a song is a member of the recipe when it sits at least RECIPE_LINE standard deviations
  * above the library's average and passes the recipe's literal filters. Mixes draw evenly from the members with a seed
- * per recipe, day and user; stations draw without one.
+ * per recipe, day and user; stations play every member, in an order that spreads each artist's songs.
  */
 import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
-import { shuffleArray } from "../../utils/shuffle";
+import { randomFromSeed, spreadByArtist } from "../../utils/artistSpread";
 import { UNKNOWN_ARTIST, VARIOUS_ARTISTS_CANONICAL } from "../../utils/artistNormalization";
 import { artistIdentityKey } from "../artistIdentity";
 import { MOODS, MOOD_HEADS, type Mood } from "../moods/heads";
@@ -198,6 +198,9 @@ const SCORED_SONGS = Prisma.sql`
       AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'
 `;
 
+/** The identity keys of the album artist rows that name no one (artistSql). */
+const NO_ONE = [artistIdentityKey(VARIOUS_ARTISTS_CANONICAL), artistIdentityKey(UNKNOWN_ARTIST)];
+
 /**
  * The artist a song counts toward for the per-artist cap and the one-title-per-artist rule: its album's artist, except
  * on the album artist rows that name no one, Various Artists (every spelling of it is filed under one row) and the
@@ -206,8 +209,12 @@ const SCORED_SONGS = Prisma.sql`
  * Artist" shares that row and is treated the same. A stopgap until each song carries its own artist.
  */
 function artistSql(): Prisma.Sql {
-    const noOne = [artistIdentityKey(VARIOUS_ARTISTS_CANONICAL), artistIdentityKey(UNKNOWN_ARTIST)];
-    return Prisma.sql`CASE WHEN ar."identityKey" IN (${Prisma.join(noOne)}) THEN 'song:' || t.id ELSE a."artistId" END`;
+    return Prisma.sql`CASE WHEN ar."identityKey" IN (${Prisma.join(NO_ONE)}) THEN 'song:' || t.id ELSE a."artistId" END`;
+}
+
+/** artistSql for a song already read: its id, its album's artist id and that artist's identity key. */
+export function songArtistKey(trackId: string, albumArtistId: string, albumArtistIdentityKey: string): string {
+    return NO_ONE.includes(albumArtistIdentityKey) ? `song:${trackId}` : albumArtistId;
 }
 
 /**
@@ -468,39 +475,63 @@ export async function pageMemberCount(recipe: Recipe): Promise<number> {
     return pagePlays(members) ? members : 0;
 }
 
-/** A station's refill: up to `limit` of the recipe's members in a fresh random order; empty when it has none. */
-export async function pickStationTracks(recipe: Recipe, { limit }: { limit: number }): Promise<string[]> {
+/**
+ * What a station's refill asks for. A station plays every song that matches, in a random order that spreads each
+ * artist's songs through it (spreadByArtist, by the artist the mixes' cap counts). One `seed` always gives the same
+ * order of the same songs, so a player that keeps its seed and asks from `offset` onward hears every song once, with
+ * the spread holding across refills; without a seed each refill is a fresh order from the start.
+ */
+export interface StationRequest {
+    limit: number;
+    seed?: string;
+    /** How many songs of this seed's order were already handed out. */
+    offset?: number;
+}
+
+function checkStationRequest({ limit, seed, offset = 0 }: StationRequest): void {
     if (!Number.isInteger(limit) || limit < 1) throw new RangeError(`limit must be a positive integer, got ${limit}`);
+    if (!Number.isInteger(offset) || offset < 0) throw new RangeError(`offset must be a whole number, got ${offset}`);
+    if (seed === undefined && offset > 0) throw new RangeError("an offset needs the seed of the order it counts into");
+}
+
+function stationPage(members: Member[], { limit, seed, offset = 0 }: StationRequest): string[] {
+    // Sorted first, so one seed gives one order whatever order the database returned the songs in.
+    const sorted = [...members].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const random = seed === undefined ? Math.random : randomFromSeed(seed);
+    return spreadByArtist(sorted, (m) => m.artistId, random)
+        .slice(offset, offset + limit)
+        .map((m) => m.id);
+}
+
+/** A station's refill (StationRequest) from the recipe's members; empty when it has none. */
+export async function pickStationTracks(recipe: Recipe, request: StationRequest): Promise<string[]> {
+    checkStationRequest(request);
     const members = await recipeMembers(recipe);
-    return members ? shuffleArray(members.map((m) => m.id)).slice(0, limit) : [];
+    return members ? stationPage(members, request) : [];
 }
 
 /**
  * The Wildcard station's refill: the songs without a single mood tag, from the same songs every recipe draws from. It
  * reads the tags the mood step wrote (tags.ts) instead of repeating their rule, so it is always the songs shown
  * untagged, focus tagged by the Focus Mix recipe included, and it keeps playing them while the statistics are rebuilt,
- * as the tags are kept then. Up to `limit` in a fresh random order, one title by one artist once; empty before the mood
- * step has scored a song.
+ * as the tags are kept then. One title by one artist once, refilled as any station (StationRequest); empty before the
+ * mood step has scored a song.
  */
-export async function pickWildcardStation({ limit }: { limit: number }): Promise<string[]> {
-    if (!Number.isInteger(limit) || limit < 1) throw new RangeError(`limit must be a positive integer, got ${limit}`);
-    const rows = await prisma.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM (
-            SELECT DISTINCT ON (s.title_key, s.artist_key) s.id
-            FROM (
-                SELECT t.id, lower(t.title) AS title_key, ${artistSql()} AS artist_key
-                ${SCORED_SONGS}
-                  AND COALESCE(cardinality(t."moodTags"), 0) = 0
-            ) s
-            ORDER BY s.title_key, s.artist_key, s.id
-        ) untagged
-        ORDER BY random()
-        LIMIT ${limit}
+export async function pickWildcardStation(request: StationRequest): Promise<string[]> {
+    checkStationRequest(request);
+    const rows = await prisma.$queryRaw<Array<{ id: string; artist_key: string }>>`
+        SELECT DISTINCT ON (s.title_key, s.artist_key) s.id, s.artist_key
+        FROM (
+            SELECT t.id, lower(t.title) AS title_key, ${artistSql()} AS artist_key
+            ${SCORED_SONGS}
+              AND COALESCE(cardinality(t."moodTags"), 0) = 0
+        ) s
+        ORDER BY s.title_key, s.artist_key, s.id
     `;
-    return rows.map((r) => r.id);
+    return stationPage(rows.map((r) => ({ id: r.id, artistId: r.artist_key })), request);
 }
 
 /** pickStationTracks for the shipped recipe with this id. */
-export async function pickRecipeStation(recipeId: string, options: { limit: number }): Promise<string[]> {
+export async function pickRecipeStation(recipeId: string, options: StationRequest): Promise<string[]> {
     return pickStationTracks(getRecipe(recipeId), options);
 }

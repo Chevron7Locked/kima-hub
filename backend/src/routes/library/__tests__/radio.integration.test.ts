@@ -283,6 +283,61 @@ describe("radio: every mood value and the workout station draw from their recipe
     });
 });
 
+/** True when no artist plays twice in a row, or the largest artist has too many songs for that to be possible. */
+function spreadWhereItCan(tracks: RadioTrack[]): boolean {
+    const counts = new Map<string, number>();
+    for (const t of tracks) counts.set(t.artist.id, (counts.get(t.artist.id) ?? 0) + 1);
+    const largest = Math.max(0, ...counts.values());
+    if (2 * largest > tracks.length + 1) return true;
+    return tracks.every((t, i) => i === 0 || t.artist.id !== tracks[i - 1].artist.id);
+}
+
+describe("radio: the play order", () => {
+    it.each(STATIONS)("%o hands out one seed's order a refill at a time, each member once, from the recipe %s", async (query, recipe) => {
+        const want = await pickRecipeStation(recipe, { limit: 100_000, seed: "listener" });
+        const heard: string[] = [];
+        let offset = 0;
+        for (;;) {
+            const res = await radio({ ...query, limit: 100, seed: "listener", offset });
+            expect(res.status).toBe(200);
+            const ids = (res.body.tracks as RadioTrack[]).map((t) => t.id);
+            expect(res.body.next).toBe(offset + ids.length);
+            if (ids.length === 0) break;
+            heard.push(...ids);
+            offset = res.body.next;
+        }
+        expect(heard).toEqual(want);
+        expect(new Set(heard)).toEqual(members.get(recipe));
+    });
+
+    it("plays a station without a seed in a fresh spread order each refill", async () => {
+        const first = await radio({ type: "mood", value: "calm", limit: 100 });
+        const second = await radio({ type: "mood", value: "calm", limit: 100 });
+        expect(first.body.next).toBe(first.body.tracks.length);
+        expect(first.body.tracks.map((t: RadioTrack) => t.id)).not.toEqual(second.body.tracks.map((t: RadioTrack) => t.id));
+        expect(spreadWhereItCan(first.body.tracks)).toBe(true);
+        expect(spreadWhereItCan(second.body.tracks)).toBe(true);
+    });
+
+    it.each(branches.filter((b) => b.query.type !== "mood" && b.query.type !== "workout").map((b) => [b.name, b.query] as const))(
+        "%s spreads each refill's artists and has no next",
+        async (_name, query) => {
+            for (const tracks of await calls({ ...query, limit: LIMIT }, 5)) {
+                expect(spreadWhereItCan(tracks)).toBe(true);
+            }
+            expect((await radio({ ...query, limit: LIMIT })).body.next).toBeUndefined();
+        },
+    );
+
+    it("400 for an offset without a seed, an offset that is not a whole number, or an overlong seed", async () => {
+        expect((await radio({ type: "mood", value: "calm", offset: 20 })).status).toBe(400);
+        expect((await radio({ type: "mood", value: "calm", seed: "s", offset: "abc" })).status).toBe(400);
+        expect((await radio({ type: "mood", value: "calm", seed: "s", offset: -1 })).status).toBe(400);
+        expect((await radio({ type: "mood", value: "calm", seed: "s".repeat(129) })).status).toBe(400);
+        expect((await radio({ type: "mood", value: "calm", seed: "s", offset: 0 })).status).toBe(200);
+    });
+});
+
 /** The scored songs the statistics cover whose stored tags are empty: the songs Wildcard plays. */
 async function untaggedSongs(): Promise<Set<string>> {
     const scored = await prisma.$queryRaw<Array<{ id: string }>>`

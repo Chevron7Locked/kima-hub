@@ -24,6 +24,7 @@ import {
     pickRecipeTracks,
     pickStationTracks,
     pickWildcardStation,
+    songArtistKey,
     type Recipe,
     type Signal,
 } from "../recipes";
@@ -444,6 +445,83 @@ describe("songs on Various Artists and Unknown Artist albums", () => {
         const wildcard = names(await pickWildcardStation({ limit: 100 }));
         expect(wildcard.has("w1") && wildcard.has("w2")).toBe(true);
         expect(["w3", "w4"].filter((n) => wildcard.has(n))).toHaveLength(1);
+    });
+});
+
+describe("the station order", () => {
+    // 30 songs by one artist and 15 by 15 others, all far above the calm line: one artist is over half the station.
+    const big = Array.from({ length: 30 }, (_, i) => member(`big${String(i).padStart(2, "0")}`, { artist: "big" }));
+    const others = Array.from({ length: 15 }, (_, i) => member(`o${String(i).padStart(2, "0")}`, { artist: `o${i}` }));
+    const isBig = (n: string) => n.startsWith("big");
+    const runsOfBig = (order: string[]) => order.join(",").split(/,?o\d\d,?/).filter(Boolean).map((r) => r.split(",").length);
+    const ordered = (ids: string[]) => ids.map((x) => x.slice(P.length));
+
+    it("plays every member, the big artist in runs of 1 or 2 (30 songs in 16 runs), each other song alone between", async () => {
+        await library([...background(100), ...big, ...others]);
+        for (let t = 0; t < 10; t++) {
+            const order = ordered(await pickStationTracks(CALM, { limit: 100 }));
+            expect(new Set(order)).toEqual(new Set([...big, ...others].map((s) => s.name)));
+            const runs = runsOfBig(order);
+            expect(runs).toHaveLength(16);
+            expect(runs.filter((r) => r === 2)).toHaveLength(14);
+            expect(runs.filter((r) => r === 1)).toHaveLength(2);
+            for (let i = 1; i < order.length; i++) expect(isBig(order[i]) || isBig(order[i - 1])).toBe(true);
+        }
+    });
+
+    it("hands out one seed's order a refill at a time: each member once, in the same order as one long refill", async () => {
+        await library([...background(100), ...big, ...others]);
+        const whole = await pickStationTracks(CALM, { limit: 100, seed: "listener-1" });
+        const pages: string[] = [];
+        for (let offset = 0; offset < 60; offset += 10) {
+            pages.push(...(await pickStationTracks(CALM, { limit: 10, seed: "listener-1", offset })));
+        }
+        expect(pages).toEqual(whole);
+        expect(whole).toHaveLength(45);
+        expect(await pickStationTracks(CALM, { limit: 10, seed: "listener-1", offset: 45 })).toEqual([]);
+        expect(await pickStationTracks(CALM, { limit: 100, seed: "listener-2" })).not.toEqual(whole);
+        // Without a seed each refill is a fresh order.
+        expect(await pickStationTracks(CALM, { limit: 100 })).not.toEqual(await pickStationTracks(CALM, { limit: 100 }));
+        await expect(pickStationTracks(CALM, { limit: 10, offset: 10 })).rejects.toThrow(RangeError);
+        await expect(pickStationTracks(CALM, { limit: 10, seed: "x", offset: -1 })).rejects.toThrow(RangeError);
+    });
+
+    it("counts each song on a Various Artists album as its own artist, as the mixes' cap does", async () => {
+        // As one artist the 30 compilation songs would play in runs of 2 at most; as 30 artists a run of 5 or more of
+        // them comes up in some of 20 refills (in 97% of orders of 30 such songs and 15 others, measured over 20,000).
+        const compilation = big.map((s) => ({ ...s, artist: VARIOUS_ARTISTS_CANONICAL }));
+        await library([...background(100), ...compilation, ...others]);
+        let longest = 0;
+        for (let t = 0; t < 20; t++) {
+            longest = Math.max(longest, ...runsOfBig(ordered(await pickStationTracks(CALM, { limit: 100 }))));
+        }
+        expect(longest).toBeGreaterThanOrEqual(5);
+    });
+
+    it("names the artist for the other radios as the SQL does: the song itself on a Various or Unknown Artist album", () => {
+        expect(songArtistKey("t1", "art1", artistIdentityKey(VARIOUS_ARTISTS_CANONICAL))).toBe("song:t1");
+        expect(songArtistKey("t1", "art1", artistIdentityKey("various artists"))).toBe("song:t1");
+        expect(songArtistKey("t1", "art1", artistIdentityKey(UNKNOWN_ARTIST))).toBe("song:t1");
+        expect(songArtistKey("t1", "art1", artistIdentityKey("Two Steps From Hell"))).toBe("art1");
+    });
+
+    it("orders Wildcard the same way, a seed's order a refill at a time", async () => {
+        // 20 songs by one artist and 5 by others, all scoring 0 on every mood: untagged.
+        const plain = [
+            ...Array.from({ length: 20 }, (_, i): Song => ({ name: `big${String(i).padStart(2, "0")}`, artist: "big" })),
+            ...Array.from({ length: 5 }, (_, i): Song => ({ name: `o${String(i).padStart(2, "0")}` })),
+        ];
+        await library(plain);
+        await writeMoodTags();
+        const whole = ordered(await pickWildcardStation({ limit: 100, seed: "w" }));
+        expect(new Set(whole)).toEqual(new Set(plain.map((s) => s.name)));
+        // 20 in 6 runs: 2 of 4 and 4 of 3.
+        expect(runsOfBig(whole).sort()).toEqual([3, 3, 3, 3, 4, 4]);
+        const pages: string[] = [];
+        for (let offset = 0; offset < 25; offset += 7) {
+            pages.push(...ordered(await pickWildcardStation({ limit: 7, seed: "w", offset })));
+        }
+        expect(pages).toEqual(whole);
     });
 });
 

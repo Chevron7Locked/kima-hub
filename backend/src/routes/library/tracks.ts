@@ -14,7 +14,14 @@ import {
 } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
 import { drawIds, drawWeighted, sampleTrackIds, unplayedTrackIds } from "../../services/mixes/helpers";
-import { UnrankableLibraryError, pickRecipeStation, pickWildcardStation } from "../../services/mixes/recipes";
+import {
+  UnrankableLibraryError,
+  pickRecipeStation,
+  pickWildcardStation,
+  songArtistKey,
+  type StationRequest,
+} from "../../services/mixes/recipes";
+import { spreadByArtist } from "../../utils/artistSpread";
 import { LIBRARY_TRACK_WHERE, LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { PLAYABLE } from "../../utils/libraryEligibility";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
@@ -722,14 +729,28 @@ const MOOD_STATIONS = new Map([
 const WILDCARD_STATION = "wildcard";
 
 /** A recipe station's refill; empty when the library cannot rank its songs for the recipe. */
-async function stationTracks(recipe: string, limit: number): Promise<string[]> {
+async function stationTracks(recipe: string, request: StationRequest): Promise<string[]> {
   try {
-    return await pickRecipeStation(recipe, { limit });
+    return await pickRecipeStation(recipe, request);
   } catch (error) {
     if (!(error instanceof UnrankableLibraryError)) throw error;
     logger.debug(error.message);
     return [];
   }
+}
+
+/**
+ * A mood, Wildcard or workout station plays every matching song in one order that spreads each artist's songs
+ * (StationRequest): a player that sends the same `seed` with `offset` set to the `next` of its last refill hears each
+ * song once. Without a seed every refill is a fresh order. Null when the query's seed or offset cannot be used.
+ */
+function parseStationRequest(query: Record<string, unknown>, limit: number): StationRequest | null {
+  const { seed, offset } = query;
+  if (seed !== undefined && (typeof seed !== "string" || seed.length < 1 || seed.length > 128)) return null;
+  if (offset !== undefined && (typeof offset !== "string" || !/^\d{1,9}$/.test(offset))) return null;
+  const at = offset === undefined ? 0 : Number(offset);
+  if (seed === undefined && at > 0) return null;
+  return { limit, seed, offset: at };
 }
 
 router.get("/radio", async (req, res) => {
@@ -739,8 +760,14 @@ router.get("/radio", async (req, res) => {
     if (!type) {
       return res.status(400).json({ error: "Radio type is required" });
     }
+    const station = parseStationRequest(req.query, limitNum);
+    if (!station) {
+      return res.status(400).json({ error: "A station's offset needs its seed, and both must be short plain values" });
+    }
 
     let trackIds: string[] = [];
+    // Set by the stations that play every matching song: their ids come in play order, and the offset to ask from next.
+    let next: number | null = null;
 
     switch (type) {
       case "discovery":
@@ -843,19 +870,21 @@ router.get("/radio", async (req, res) => {
       case "mood": {
         const moodValue = ((value as string) || "").toLowerCase();
         if (moodValue === WILDCARD_STATION) {
-          trackIds = await pickWildcardStation({ limit: limitNum });
-          break;
+          trackIds = await pickWildcardStation(station);
+        } else {
+          const recipe = MOOD_STATIONS.get(moodValue);
+          if (!recipe) {
+            return res.status(400).json({ error: `Unknown mood: ${moodValue}` });
+          }
+          trackIds = await stationTracks(recipe, station);
         }
-        const recipe = MOOD_STATIONS.get(moodValue);
-        if (!recipe) {
-          return res.status(400).json({ error: `Unknown mood: ${moodValue}` });
-        }
-        trackIds = await stationTracks(recipe, limitNum);
+        next = station.offset! + trackIds.length;
         break;
       }
 
       case "workout":
-        trackIds = await stationTracks("workout", limitNum);
+        trackIds = await stationTracks("workout", station);
+        next = station.offset! + trackIds.length;
         break;
 
       case "artist":
@@ -1123,10 +1152,14 @@ router.get("/radio", async (req, res) => {
       where: { id: { in: trackIds }, ...PLAYABLE },
       select: { id: true },
     });
-    const finalIds = shuffleArray(playable.map((t) => t.id)).slice(0, limitNum);
+    const playableIds = new Set(playable.map((t) => t.id));
+    const finalIds =
+      next === null
+        ? shuffleArray([...playableIds]).slice(0, limitNum)
+        : trackIds.filter((id) => playableIds.has(id));
 
     if (finalIds.length === 0) {
-      return res.json({ tracks: [] });
+      return res.json(next === null ? { tracks: [] } : { tracks: [], next });
     }
 
     const tracks = await prisma.track.findMany({
@@ -1140,6 +1173,7 @@ router.get("/radio", async (req, res) => {
               select: {
                 id: true,
                 name: true,
+                identityKey: true,
               },
             },
           },
@@ -1152,7 +1186,14 @@ router.get("/radio", async (req, res) => {
       },
     });
 
-    const transformedTracks = tracks.map((track) => ({
+    // The stations' own order, or for the other radios the same artist spread over this refill.
+    const rank = new Map(finalIds.map((id, i) => [id, i]));
+    const ordered =
+      next === null
+        ? spreadByArtist(tracks, (t) => songArtistKey(t.id, t.album.artist.id, t.album.artist.identityKey))
+        : [...tracks].sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
+
+    const transformedTracks = ordered.map((track) => ({
       id: track.id,
       title: track.title,
       duration: track.duration,
@@ -1171,7 +1212,7 @@ router.get("/radio", async (req, res) => {
       },
     }));
 
-    res.json({ tracks: shuffleArray(transformedTracks) });
+    res.json(next === null ? { tracks: transformedTracks } : { tracks: transformedTracks, next });
   } catch (error) {
     logger.error("Radio endpoint error:", error);
     res.status(500).json({ error: "Failed to get radio tracks" });

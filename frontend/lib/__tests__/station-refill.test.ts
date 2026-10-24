@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { refillAndResume, refillStation, startStationSession } from "../station-refill";
+import { refillAndResume, refillStation, startStationSession, stationBatches } from "../station-refill";
 import { appendTracks, isLastInPlayOrder } from "../queue-edit";
 
 const t = (...ids: string[]) => ids.map((id) => ({ id }));
@@ -156,5 +156,74 @@ describe("refillAndResume", () => {
         expect(fetches).toBe(1);
         await expect(refillAndResume(session, "1", [], h)).rejects.toThrow();
         expect(fetches).toBe(2);
+    });
+});
+
+describe("stationBatches", () => {
+    it("sends one seed and asks each refill from the `next` the last batch returned", async () => {
+        const queries: string[] = [];
+        const pages = [
+            { tracks: t("a", "b"), next: 2 },
+            { tracks: t("c"), next: 3 },
+            { tracks: [], next: 3 },
+        ];
+        const fetch = stationBatches(
+            async (query) => {
+                queries.push(query);
+                return pages[queries.length - 1];
+            },
+            new URLSearchParams({ type: "mood", value: "epic", limit: "2" }),
+            "seed1"
+        );
+        expect((await fetch()).tracks).toEqual(t("a", "b"));
+        expect((await fetch()).tracks).toEqual(t("c"));
+        expect((await fetch()).tracks).toEqual([]);
+        expect(queries.map((q) => Object.fromEntries(new URLSearchParams(q)))).toEqual([
+            { type: "mood", value: "epic", limit: "2", seed: "seed1" },
+            { type: "mood", value: "epic", limit: "2", seed: "seed1", offset: "2" },
+            { type: "mood", value: "epic", limit: "2", seed: "seed1", offset: "3" },
+        ]);
+    });
+
+    it("asks again from the same place after a failed fetch", async () => {
+        const offsets: (string | null)[] = [];
+        const fetch = stationBatches(
+            async (query) => {
+                offsets.push(new URLSearchParams(query).get("offset"));
+                if (offsets.length === 2) throw new Error("offline");
+                return { tracks: t("x"), next: 2 };
+            },
+            new URLSearchParams({ type: "workout" })
+        );
+        await fetch();
+        await expect(fetch()).rejects.toThrow("offline");
+        await fetch();
+        expect(offsets).toEqual([null, "2", "2"]);
+    });
+
+    it("keeps asking from the start for a radio that returns no `next`", async () => {
+        const queries: string[] = [];
+        const fetch = stationBatches(
+            async (query) => {
+                queries.push(query);
+                return { tracks: t("x") };
+            },
+            new URLSearchParams({ type: "genre", value: "rock" })
+        );
+        await fetch();
+        await fetch();
+        expect(queries.every((q) => !new URLSearchParams(q).has("offset"))).toBe(true);
+        expect(new Set(queries.map((q) => new URLSearchParams(q).get("seed"))).size).toBe(1);
+    });
+
+    it("gives each station its own seed", async () => {
+        const seeds: (string | null)[] = [];
+        const get = async (query: string) => {
+            seeds.push(new URLSearchParams(query).get("seed"));
+            return { tracks: [] };
+        };
+        await stationBatches(get, new URLSearchParams())();
+        await stationBatches(get, new URLSearchParams())();
+        expect(seeds[0]).not.toEqual(seeds[1]);
     });
 });

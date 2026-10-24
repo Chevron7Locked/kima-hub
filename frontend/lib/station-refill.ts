@@ -84,3 +84,24 @@ export async function refillAndResume<T extends { id: string }>(
     host.startAt(firstNew);
     return true;
 }
+
+/**
+ * A station's batches from the server. The server plays a station in its own order, spreading each artist's songs, and
+ * for the stations that play every matching song (moods, Wildcard, workout) one order per seed: when a batch comes back
+ * with `next`, the next fetch asks from there with the same seed, so refills carry on through that order instead of
+ * starting a fresh one and losing the spread to the repeats a session drops.
+ */
+export function stationBatches<T>(
+    get: (query: string) => Promise<{ tracks: T[]; next?: number }>,
+    params: URLSearchParams,
+    // Not crypto.randomUUID: it exists only on HTTPS pages, and many servers are reached over plain HTTP.
+    seed = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
+): () => Promise<{ tracks: T[]; next?: number }> {
+    const query = new URLSearchParams(params);
+    query.set("seed", seed);
+    return async () => {
+        const batch = await get(query.toString());
+        if (batch.next !== undefined) query.set("offset", String(batch.next));
+        return batch;
+    };
+}
