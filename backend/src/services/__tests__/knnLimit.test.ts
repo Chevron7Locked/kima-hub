@@ -158,10 +158,28 @@ describe("utils/knn helper contract", () => {
         expect(inside).toEqual({ ef: "123", scan: "relaxed_order", tuples: String(MAX_SCAN_TUPLES) });
     });
 
-    it("reverts to pgvector's defaults on the pool after the transaction", async () => {
-        await withEfSearch(500, async () => undefined);
-        const [after] = await prisma.$queryRaw<Settings>(SETTINGS);
-        expect(after).toEqual({ ef: "40", scan: "off", tuples: "20000" });
+    it("reverts to pgvector's defaults after the transaction, on the connection that ran it too", async () => {
+        const [{ pid }] = await withEfSearch(500, (tx) => tx.$queryRaw<Array<{ pid: number }>>`
+            SELECT pg_backend_pid() AS pid
+        `);
+        // Twice the pool's size of transactions held open together take every pooled connection, so one of them
+        // reads the connection the settings were made on.
+        const poolSize = Number(process.env.DATABASE_POOL_SIZE ?? 5);
+        const reads = await Promise.all(Array.from({ length: 2 * poolSize }, () =>
+            prisma.$transaction(async (tx) => {
+                // pgvector's settings exist on a connection once it has used a vector.
+                await tx.$queryRaw`SELECT '[1]'::vector::text`;
+                const [read] = await tx.$queryRaw<Array<Settings[number] & { pid: number }>>`
+                    SELECT current_setting('hnsw.ef_search') AS ef, current_setting('hnsw.iterative_scan') AS scan,
+                           current_setting('hnsw.max_scan_tuples') AS tuples, pg_backend_pid() AS pid
+                `;
+                await new Promise((resolve) => setTimeout(resolve, 100));
+                return read;
+            }, { timeout: 30_000, maxWait: 30_000 })));
+        expect(reads.map((r) => r.pid)).toContain(pid);
+        for (const { ef, scan, tuples } of reads) {
+            expect({ ef, scan, tuples }).toEqual({ ef: "40", scan: "off", tuples: "20000" });
+        }
     });
 
     it("sizes the width as min(1000, max(2*limit, 100))", () => {
@@ -171,6 +189,37 @@ describe("utils/knn helper contract", () => {
     });
 });
 
+
+describe("text search with equal distances", () => {
+    // Six copies of one sound, written in their ids' order: without the tie-break the index hands them back reversed.
+    const COPY = randomUnit(777777);
+    const copies = ["cknncopy0", "cknncopy1", "cknncopy2", "cknncopy3", "cknncopy4", "cknncopy5"];
+
+    beforeAll(async () => {
+        for (const id of copies) {
+            await prisma.track.create({
+                data: {
+                    id, albumId: "calb_knn_1", title: `Copy ${id}`, trackNo: 1, duration: 200,
+                    filePath: `/tmp/${id}.flac`, fileModified: new Date(), fileSize: 1000,
+                },
+            });
+            await prisma.$executeRawUnsafe(
+                `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
+                 VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
+                id, COPY,
+            );
+        }
+    });
+
+    afterAll(async () => {
+        await prisma.track.deleteMany({ where: { id: { in: copies } } });
+    });
+
+    it("orders them by track id, the same on every call", async () => {
+        const rows = await searchTracksByEmbedding(JSON.parse(COPY), 6);
+        expect(rows.map((r) => r.id)).toEqual([...copies].sort());
+    });
+});
 
 describe("text search fills its limit past rows the index walk cannot return", () => {
     const QUERY = JSON.parse(randomUnit(424242)) as number[];

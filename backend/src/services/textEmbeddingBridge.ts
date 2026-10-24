@@ -186,7 +186,8 @@ export async function searchTracksByEmbedding(
     const vector = formatEmbedding(embedding);
     // Widen hnsw.ef_search and scan on past deleted or filtered-out vectors, or
     // the walk comes back short; the relaxed-order rows are re-sorted outside the
-    // materialized step ("+ 0" keeps Postgres 17+ from reusing the index order).
+    // materialized step ("+ 0" keeps Postgres 17+ from reusing the index order),
+    // with equal distances (copies of one song) in track id order.
     return withEfSearch(efFor(limit), (tx) =>
         tx.$queryRaw<TextSearchRow[]>`
             WITH nearest AS MATERIALIZED (
@@ -209,7 +210,7 @@ export async function searchTracksByEmbedding(
                 ORDER BY te.embedding <=> ${vector}::vector
                 LIMIT ${limit}
             )
-            SELECT * FROM nearest ORDER BY distance + 0
+            SELECT * FROM nearest ORDER BY distance + 0, id
         `,
     );
 }
