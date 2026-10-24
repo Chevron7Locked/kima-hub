@@ -1,6 +1,7 @@
 import { logger } from "../../utils/logger";
 import { moodBucketService } from "../moodBucketService";
 import { ProgrammaticMix, getSeededRandom } from "./helpers";
+import { mixDay } from "./mixDay";
 import {
     generateEraMix,
     generateGenreMix,
@@ -57,9 +58,11 @@ class ProgrammaticPlaylistService {
 
     async generateAllMixes(
         userId: string,
-        forceRandom = false
+        forceRandom = false,
+        now = new Date()
     ): Promise<ProgrammaticMix[]> {
-        const today = new Date().toISOString().split("T")[0];
+        // The server's calendar date: every mix's id, seed and weekday come from it.
+        const today = mixDay(now);
         const seedString = forceRandom
             ? `${userId}-${Date.now()}-${Math.random()}`
             : `${today}-${userId}`;

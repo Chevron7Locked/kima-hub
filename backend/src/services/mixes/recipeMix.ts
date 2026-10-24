@@ -3,6 +3,7 @@
  * draws from its recipe for this day and this user.
  */
 import { ProgrammaticMix, albumCoverUrls, getMixColor, tracksByIds } from "./helpers";
+import { weekdayOf } from "./mixDay";
 import { pickRecipeTracks } from "./recipes";
 
 export interface RecipeMixSpec {
@@ -15,7 +16,7 @@ export interface RecipeMixSpec {
     description: string;
     /** Key into the mix colour table. */
     colorType: string;
-    /** The weekday the mix exists on (0 = Sunday, by the server's clock); every day when absent. */
+    /** The weekday the mix exists on (0 = Sunday), of the day it is drawn for; every day when absent. */
     day?: number;
 }
 
@@ -24,7 +25,7 @@ export interface RecipeMixSpec {
  * `today` is the day the mix holds for, with a refresh's reroll appended, so a refresh draws again.
  */
 export async function recipeMix(spec: RecipeMixSpec, userId: string, today: string): Promise<ProgrammaticMix | null> {
-    if (spec.day !== undefined && new Date().getDay() !== spec.day) return null;
+    if (spec.day !== undefined && weekdayOf(today) !== spec.day) return null;
     const mix = await pickRecipeTracks(spec.recipe, { userId, date: today });
     if (!mix) return null;
     const tracks = await tracksByIds(mix.trackIds, { album: { select: { coverUrl: true } } });

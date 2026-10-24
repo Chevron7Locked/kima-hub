@@ -103,20 +103,10 @@ const NOT_DATE: any[] = [
     "setTimeout", "clearTimeout",
 ];
 
-/**
- * Run `fn` with the clock's date set to a given weekday (0 = Sunday) of the `week`th week; only Date is faked.
- * A mix that reads today's date from the clock gets a different date, and so a different seed, each week.
- */
-async function onWeekday<T>(day: number | undefined, fn: () => Promise<T>, week = 0): Promise<T> {
-    if (day === undefined) return fn();
-    // 2026-10-18 is a Sunday.
-    jest.useFakeTimers({ doNotFake: NOT_DATE, now: Date.UTC(2026, 9, 18 + day + 7 * week, 12) });
-    try {
-        return await fn();
-    } finally {
-        jest.useRealTimers();
-    }
-}
+/** `n` dates a week apart that fall on `day` (0 = Sunday): a weekday mix exists on the day it is drawn for. */
+const datesOn = (day: number, n: number) =>
+    // 2026-01-04 is a Sunday.
+    Array.from({ length: n }, (_, k) => new Date(Date.UTC(2026, 0, 4 + day + 7 * k)).toISOString().slice(0, 10));
 
 interface Case {
     name: string;
@@ -126,7 +116,7 @@ interface Case {
     clause: (r: Row, mix: ProgrammaticMix) => boolean;
     /** True when the track draw is repeatable from the date. */
     seeded: boolean;
-    /** Weekday the mix exists on (0 = Sunday); the clock is set to it. */
+    /** Weekday the mix exists on (0 = Sunday); it is drawn for dates on that day. */
     day?: number;
     /** "repeat": the clause depends on the date, so call 40 times on one date. */
     spread?: "dates" | "repeat";
@@ -195,15 +185,16 @@ beforeEach(() => {
 describe.each(cases)("$name", (c) => {
     let mixes: ProgrammaticMix[] = [];
     let callDates: string[] = [];
+    const caseDates = c.day === undefined ? dates : datesOn(c.day, CALLS);
 
     beforeAll(async () => {
         (getSimilarArtists as jest.Mock).mockImplementation(async () =>
             SIMILAR.map((name) => ({ name, mbid: null, match: 0.5 })),
         );
-        callDates = c.spread === "repeat" ? Array(CALLS).fill(dates[0]) : dates;
+        callDates = c.spread === "repeat" ? Array(CALLS).fill(caseDates[0]) : caseDates;
         mixes = [];
-        for (const [week, d] of callDates.entries()) {
-            const mix = await onWeekday(c.day, () => c.run(d), week);
+        for (const d of callDates) {
+            const mix = await c.run(d);
             if (mix) mixes.push(mix);
         }
     });
@@ -243,9 +234,9 @@ describe.each(cases)("$name", (c) => {
 
     if (c.seeded) {
         it("returns identical tracks for the same date and different ones for another", async () => {
-            const again = await onWeekday(c.day, () => c.run(dates[0]));
+            const again = await c.run(caseDates[0]);
             expect(again!.trackIds).toEqual(mixes[0].trackIds);
-            const other = await onWeekday(c.day, () => c.run(dates[1]), 1);
+            const other = await c.run(caseDates[1]);
             expect(other!.trackIds).not.toEqual(mixes[0].trackIds);
             expect(new Set(other!.trackIds)).not.toEqual(new Set(mixes[0].trackIds));
         });
@@ -253,7 +244,7 @@ describe.each(cases)("$name", (c) => {
         it("varies from call to call (the track draw is not seeded)", async () => {
             const draws = new Set<string>();
             for (let k = 0; k < 6; k++) {
-                const mix = await onWeekday(c.day, () => c.run(dates[0]));
+                const mix = await c.run(caseDates[0]);
                 draws.add([...mix!.trackIds].sort().join(","));
             }
             expect(draws.size).toBeGreaterThan(1);
@@ -266,7 +257,7 @@ describe.each(cases)("$name", (c) => {
         });
     } else {
         it("keeps the mix id for a date", async () => {
-            const again = await onWeekday(c.day, () => c.run(callDates[0]));
+            const again = await c.run(callDates[0]);
             expect(again!.id).toBe(mixes[0].id);
         });
     }
@@ -284,7 +275,7 @@ interface RecipeCase {
     title: string;
     description: string;
     colorType: string;
-    /** Weekday the mix exists on (0 = Sunday); the clock is set to it. */
+    /** Weekday the mix exists on (0 = Sunday); it is drawn for dates on that day. */
     day?: number;
 }
 
@@ -378,20 +369,21 @@ const REROLL = "-1792771200000";
 describe.each(recipeCases)("$name (recipe $recipe)", (c) => {
     let members = new Set<string>();
     const mixes: ProgrammaticMix[] = [];
+    const recipeDates = c.day === undefined ? RECIPE_DATES : datesOn(c.day, RECIPE_DATES.length);
 
     beforeAll(async () => {
         members = new Set(await pickRecipeStation(c.recipe, { limit: 100_000 }));
         mixes.length = 0;
-        for (const d of RECIPE_DATES) {
-            const mix = await onWeekday(c.day, () => c.run(lib.user1, d));
+        for (const d of recipeDates) {
+            const mix = await c.run(lib.user1, d);
             if (mix) mixes.push(mix);
         }
     });
 
     it("is the engine's draw for its recipe, this day and this user", async () => {
         expect(members.size).toBeGreaterThanOrEqual(8);
-        expect(mixes).toHaveLength(RECIPE_DATES.length);
-        for (const [k, d] of RECIPE_DATES.entries()) {
+        expect(mixes).toHaveLength(recipeDates.length);
+        for (const [k, d] of recipeDates.entries()) {
             const drawn = await pickRecipeTracks(c.recipe, { userId: lib.user1, date: d });
             expect(mixes[k].trackIds).toEqual(drawn!.trackIds);
             // 125 artists hold the members, so the 2-per-artist cap never shortens a mix here.
@@ -402,7 +394,7 @@ describe.each(recipeCases)("$name (recipe $recipe)", (c) => {
     });
 
     it("keeps the mix's id, type, title, description and colour", () => {
-        for (const [k, d] of RECIPE_DATES.entries()) {
+        for (const [k, d] of recipeDates.entries()) {
             expect(mixes[k]).toMatchObject({
                 id: `${c.id}-${d}`,
                 type: c.type,
@@ -416,11 +408,11 @@ describe.each(recipeCases)("$name (recipe $recipe)", (c) => {
     });
 
     it("draws again for a refresh's reroll and for another user, and the same for the same day and user", async () => {
-        const d = RECIPE_DATES[0];
-        const again = await onWeekday(c.day, () => c.run(lib.user1, d));
+        const d = recipeDates[0];
+        const again = await c.run(lib.user1, d);
         expect(again!.trackIds).toEqual(mixes[0].trackIds);
-        const rerolled = await onWeekday(c.day, () => c.run(lib.user1, d + REROLL));
-        const otherUser = await onWeekday(c.day, () => c.run(lib.user2, d));
+        const rerolled = await c.run(lib.user1, d + REROLL);
+        const otherUser = await c.run(lib.user2, d);
         expect(rerolled!.id).toBe(`${c.id}-${d}${REROLL}`);
         expect(rerolled!.trackIds).not.toEqual(mixes[0].trackIds);
         expect(otherUser!.trackIds).not.toEqual(mixes[0].trackIds);
@@ -434,7 +426,7 @@ describe.each(recipeCases)("$name (recipe $recipe)", (c) => {
     if (c.day !== undefined) {
         it("has no mix on the other days of the week", async () => {
             for (const day of [0, 1, 2, 3, 4, 5, 6].filter((x) => x !== c.day)) {
-                const mix = await onWeekday(day, () => c.run(lib.user1, RECIPE_DATES[0]));
+                const mix = await c.run(lib.user1, datesOn(day, 1)[0]);
                 // The day mix has a different recipe on Sunday, Monday and Friday.
                 if (mix) expect(mix.id.startsWith(`${c.id}-`)).toBe(false);
             }
@@ -533,11 +525,24 @@ describe("Tempo Flow", () => {
 
 describe("mixes that exist only on certain weekdays", () => {
     it("Day mix is null on a day without one (Wednesday)", async () => {
-        expect(await onWeekday(3, () => time.generateDayMix(lib.user1, dates[0]))).toBeNull();
+        expect(await time.generateDayMix(lib.user1, datesOn(3, 1)[0])).toBeNull();
     });
     it("Sad Girl Sundays is null on a Monday; Minor Key Mondays is null on a Sunday", async () => {
-        expect(await onWeekday(1, () => mood.generateSadGirlSundays(lib.user1, dates[0]))).toBeNull();
-        expect(await onWeekday(0, () => mood.generateMinorKeyMix(lib.user1, dates[0]))).toBeNull();
+        expect(await mood.generateSadGirlSundays(lib.user1, datesOn(1, 1)[0])).toBeNull();
+        expect(await mood.generateMinorKeyMix(lib.user1, datesOn(0, 1)[0])).toBeNull();
+    });
+
+    it("go by the day they are drawn for, whatever the clock says", async () => {
+        // The clock on a Wednesday; the mixes drawn for Sunday 2026-10-25 and Monday 2026-10-26.
+        jest.useFakeTimers({ doNotFake: NOT_DATE, now: Date.UTC(2026, 9, 21, 12) });
+        try {
+            expect((await time.generateDayMix(lib.user1, "2026-10-25"))!.id).toBe("sunday-2026-10-25");
+            expect((await time.generateDayMix(lib.user1, `2026-10-26${REROLL}`))!.id).toBe(`monday-2026-10-26${REROLL}`);
+            expect(await mood.generateSadGirlSundays(lib.user1, "2026-10-25")).not.toBeNull();
+            expect(await mood.generateMinorKeyMix(lib.user1, "2026-10-26")).not.toBeNull();
+        } finally {
+            jest.useRealTimers();
+        }
     });
 });
 
