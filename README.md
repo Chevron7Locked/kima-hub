@@ -185,6 +185,7 @@ Most things are set in the web app, under **Settings**. In the all-in-one image 
 | `ALLOWED_ORIGINS` | Comma-separated origins allowed to call the API from a browser. Unset allows any. |
 | `KIMA_CALLBACK_URL` | The address Lidarr uses to reach Kima. |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, `error` or `silent`. |
+| `TZ` | Your time zone, such as `America/Chicago`. The daily mixes and Discover Weekly roll over at midnight here. Unset means UTC. |
 | `DISABLE_CLAP` | Set to `true` to stop the sound-vector analyzer. The vibe features then do not work. |
 
 Every variable, the ports and the storage paths are in [docs/configuration.md](docs/configuration.md).

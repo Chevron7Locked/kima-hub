@@ -22,7 +22,7 @@ import { removeDiscoveryArtist } from "./discovery/lidarrRemoval";
 import { lidarrService } from "./lidarr";
 import { isLidarrConfigured } from "./lidarrClient";
 import { requestScan } from "../workers/scanRequest";
-import { resolveGenerationWeekStart } from "../lib/discoveryWeek";
+import { resolveGenerationWeekStart, weekStartKey } from "../lib/discoveryWeek";
 import { getSystemSettings } from "../utils/systemSettings";
 import { discoveryLogger } from "./discoveryLogger";
 import { acquisitionService } from "./acquisitionService";
@@ -113,7 +113,7 @@ class DiscoverWeeklyService {
             discoveryLogger.table({
                 "Target Songs": config.playlistSize,
                 "Download Ratio": `${downloadRatio}x`,
-                "Week Start": weekStart.toISOString().split("T")[0],
+                "Week Start": weekStartKey(weekStart),
             });
 
             // Likes from last week decide which albums stay before new ones are picked.

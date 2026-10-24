@@ -49,6 +49,7 @@ With the split stack (`docker-compose.yml`), set both in a `.env` file next to t
 | `ALLOWED_ORIGINS` | unset | Comma-separated list of origins allowed to call the API from a browser. Unset means any origin; login still protects the API. The split stack's Compose file sets it to `http://localhost:3000,http://localhost:3030` unless you override it. |
 | `SECURE_COOKIES` | `false` | Set to `true` when Kima is served over HTTPS, so the session cookie is only sent over HTTPS. |
 | `LOG_LEVEL` | `warn` in production, `debug` otherwise | One of `debug`, `info`, `warn`, `error`, `silent`. |
+| `TZ` | `UTC` (`docker-compose.server.yml` uses `America/Chicago`) | The server's time zone, as an IANA name such as `America/Chicago` or `Europe/London`. The daily mixes and Discover Weekly roll over at midnight in this zone, and Discover Weekly makes the new week's playlist on Monday at 05:00 here. The split stack's `docker-compose.yml` does not pass it to the backend; add `TZ` to the backend service's `environment`. |
 | `TRANSCODE_CACHE_MAX_GB` | `10` | Size limit for cached transcoded audio. |
 | `MUSICBRAINZ_BASE_URL` | `https://musicbrainz.org/ws/2` | Point Kima at your own MusicBrainz mirror. |
 | `ACOUSTID_CLIENT_KEY` | a shared key | Your own AcoustID key, if you want to lift the shared key's rate limit. Also settable in Settings under Artwork. |

@@ -1,3 +1,7 @@
+import { execFileSync } from "child_process";
+import fs from "fs";
+import path from "path";
+import ts from "typescript";
 import {
     resolveGenerationWeekStart,
     resolveViewWeek,
@@ -58,8 +62,8 @@ describe("resolveGenerationWeekStart -- boundary roll-forward", () => {
         expect(result.toISOString().slice(0, 10)).toBe("2026-05-25");
     });
 
-    // The week start is exactly midnight UTC, not the run's time of day, since
-    // it is stored and compared against midnight values.
+    // The week start is exactly midnight (UTC here, Jest's zone), not the run's
+    // time of day, since it is stored and compared against midnight values.
     it("returns the week-start normalized to 00:00:00.000 UTC -- not the run's time-of-day (mid-week branch)", () => {
         const wednesdayNoon = new Date("2026-05-27T12:00:00.000Z");
         const result = resolveGenerationWeekStart(wednesdayNoon, 1);
@@ -144,10 +148,7 @@ describe("weekStartKey -- stable jobId key", () => {
         expect(weekStartKey(new Date("2026-05-25T05:00:00.000Z"))).toBe("2026-05-25");
     });
 
-    it("does not roll the date backward for a late-evening UTC instant (no local-TZ leak)", () => {
-        // A key built from local-string formatting (toLocaleDateString / getDate)
-        // on a non-UTC host would shift 23:30 UTC to the previous day. Using the
-        // UTC ISO slice keeps it on 2026-05-25.
+    it("keeps the same day for any time on that day (late evening)", () => {
         expect(weekStartKey(new Date("2026-05-25T23:30:00.000Z"))).toBe("2026-05-25");
     });
 
@@ -171,5 +172,97 @@ describe("weekStartKey -- stable jobId key", () => {
         expect(kMon).toBe("2026-05-25");
         expect(kWed).toBe("2026-05-25");
         expect(kMon).toBe(kWed);
+    });
+});
+
+/** What a run at one wall-clock time saw, in a Node process on one time zone. */
+interface RunSeen {
+    zone: string;
+    /** The job key of the week the run generates for. */
+    key: string;
+    /** The key of the calendar week GET /current compares against. */
+    calendarKey: string;
+    /** Local weekday (0 = Sunday), hour and minute the generated week starts at. */
+    startsAt: number[];
+    /** The UTC date of that week start. */
+    utcDate: string;
+}
+
+/**
+ * discoveryWeek.ts run in a fresh Node process with the time zone `tz` (Jest's
+ * own processes are pinned to UTC), once per local wall-clock time
+ * [year, month, day, hour, minute].
+ */
+function inTimeZone(tz: string, wallTimes: number[][]): RunSeen[] {
+    const source = fs.readFileSync(path.join(__dirname, "../discoveryWeek.ts"), "utf8");
+    const module = ts.transpileModule(source, {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 },
+    }).outputText;
+    const script = `
+        const module = { exports: {} }, exports = module.exports;
+        ${module}
+        const { startOfWeek } = require("date-fns");
+        const seen = ${JSON.stringify(wallTimes)}.map(([y, mo, d, h, mi]) => {
+            const now = new Date(y, mo - 1, d, h, mi);
+            const start = module.exports.resolveGenerationWeekStart(now, 1);
+            return {
+                zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                key: module.exports.weekStartKey(start),
+                calendarKey: module.exports.weekStartKey(startOfWeek(now, { weekStartsOn: 1 })),
+                startsAt: [start.getDay(), start.getHours(), start.getMinutes()],
+                utcDate: start.toISOString().slice(0, 10),
+            };
+        });
+        process.stdout.write(JSON.stringify(seen));
+    `;
+    return JSON.parse(
+        execFileSync(process.execPath, ["-e", script], {
+            cwd: path.resolve(__dirname, "../../.."),
+            env: { ...process.env, TZ: tz },
+        }).toString(),
+    );
+}
+
+describe("the week on the server's own clock (TZ)", () => {
+    const CRON_RUN = [2026, 5, 25, 5, 0]; // Monday 05:00, when discoverCron fires
+    const SUNDAY_LATE = [2026, 5, 24, 23, 30];
+    const MONDAY_EARLY = [2026, 5, 25, 0, 30];
+    const WEDNESDAY = [2026, 5, 27, 12, 0];
+    const SATURDAY = [2026, 5, 23, 17, 30];
+
+    it.each(["Asia/Tokyo", "Pacific/Kiritimati", "UTC", "America/Los_Angeles"])(
+        "names the local Monday the week starts on, either side of Sunday/Monday midnight, in %s",
+        (tz) => {
+            const runs = inTimeZone(tz, [CRON_RUN, SUNDAY_LATE, MONDAY_EARLY, WEDNESDAY, SATURDAY]);
+            expect(runs.map(({ zone, key, calendarKey, startsAt }) => ({ zone, key, calendarKey, startsAt }))).toEqual([
+                { zone: tz, key: "2026-05-25", calendarKey: "2026-05-25", startsAt: [1, 0, 0] },
+                // The week's last day rolls forward to the week about to start.
+                { zone: tz, key: "2026-05-25", calendarKey: "2026-05-18", startsAt: [1, 0, 0] },
+                { zone: tz, key: "2026-05-25", calendarKey: "2026-05-25", startsAt: [1, 0, 0] },
+                { zone: tz, key: "2026-05-25", calendarKey: "2026-05-25", startsAt: [1, 0, 0] },
+                { zone: tz, key: "2026-05-18", calendarKey: "2026-05-18", startsAt: [1, 0, 0] },
+            ]);
+        },
+    );
+
+    // East of UTC, local midnight is still the previous day in UTC, so a key
+    // read off the UTC date named the Sunday before the week.
+    it("keys a Tokyo week by its Monday although that midnight is Sunday in UTC", () => {
+        const [run] = inTimeZone("Asia/Tokyo", [CRON_RUN]);
+        expect(run.key).toBe("2026-05-25");
+        expect(run.utcDate).toBe("2026-05-24");
+    });
+
+    it("lands on local midnight Monday across both daylight-saving changes in Los Angeles", () => {
+        const runs = inTimeZone("America/Los_Angeles", [
+            [2026, 3, 8, 20, 0], // Sunday clocks went forward
+            [2026, 11, 1, 20, 0], // Sunday clocks went back
+            [2026, 11, 2, 5, 0], // the cron's run the next morning
+        ]);
+        expect(runs.map(({ key, startsAt }) => ({ key, startsAt }))).toEqual([
+            { key: "2026-03-09", startsAt: [1, 0, 0] },
+            { key: "2026-11-02", startsAt: [1, 0, 0] },
+            { key: "2026-11-02", startsAt: [1, 0, 0] },
+        ]);
     });
 });
