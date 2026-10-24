@@ -7,6 +7,9 @@
 /** Canonical name for compilation/various artists. */
 export const VARIOUS_ARTISTS_CANONICAL = "Various Artists";
 
+/** The artist the scanner files a song under when it has no artist tags and no folder artist (musicScanner.ts). */
+export const UNKNOWN_ARTIST = "Unknown Artist";
+
 /**
  * Check if an artist name is a variation of "Various Artists"
  * and return the canonical form if so.

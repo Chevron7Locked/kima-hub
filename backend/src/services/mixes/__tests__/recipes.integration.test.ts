@@ -6,6 +6,8 @@
  * the same rules computed in TypeScript.
  */
 import { prisma } from "../../../utils/db";
+import { UNKNOWN_ARTIST, VARIOUS_ARTISTS_CANONICAL } from "../../../utils/artistNormalization";
+import { artistIdentityKey } from "../../artistIdentity";
 import { MOODS, MOOD_HEADS, type Mood } from "../../moods/heads";
 import { MOOD_STATE_VERSION, READINGS, buildMoodState, loadMoodState, type MoodState, type Reading } from "../../moods/state";
 import {
@@ -81,7 +83,11 @@ async function library(songs: Song[], stats: Stats = {}) {
     const artistOf = (s: Song) => s.artist ?? s.name;
     const artists = [...new Set(songs.map(artistOf))];
     await prisma.artist.createMany({
-        data: artists.map((a) => ({ id: id(`art_${a}`), name: a, identityKey: id(`ak_${a}`) })),
+        // The rows that name no artist carry the key the scanner files them under.
+        data: artists.map((a) => ({
+            id: id(`art_${a}`), name: a,
+            identityKey: [VARIOUS_ARTISTS_CANONICAL, UNKNOWN_ARTIST].includes(a) ? artistIdentityKey(a) : id(`ak_${a}`),
+        })),
     });
     await prisma.album.createMany({
         data: artists.map((a) => ({
@@ -364,6 +370,50 @@ describe("eligible songs", () => {
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
         expect(await pickMixTracks(CALM, { userId: USER, date: DAY })).toBeNull();
         expect(await pickStationTracks(CALM, { limit: 50 })).toEqual([]);
+    });
+});
+
+describe("songs on Various Artists and Unknown Artist albums", () => {
+    // Twelve songs on one album and eight songs by eight artists, all far above the line.
+    const album = (artist: string) =>
+        Array.from({ length: 12 }, (_, i) => member(`al${String(i).padStart(2, "0")}`, { artist }));
+    const others = Array.from({ length: 8 }, (_, i) => member(`o${i}`, { artist: `o${i}` }));
+    const onAlbumOf = async (ids: string[], artist: string) =>
+        prisma.track.count({ where: { id: { in: ids }, album: { artistId: id(`art_${artist}`) } } });
+
+    it.each([VARIOUS_ARTISTS_CANONICAL, UNKNOWN_ARTIST])("count as their own artists: a %s album fills a mix past the cap", async (artist) => {
+        await library([...background(100), ...album(artist), ...others]);
+        const mix = (await pickMixTracks(CALM, { userId: USER, date: DAY }))!;
+        expect(mix.members).toBe(20);
+        expect(mix.trackIds).toHaveLength(20);
+        expect(await onAlbumOf(mix.trackIds, artist)).toBe(12);
+    });
+
+    it("leave a normal artist's cap at 2", async () => {
+        await library([...background(100), ...album("solo"), ...others]);
+        const mix = (await pickMixTracks(CALM, { userId: USER, date: DAY }))!;
+        expect(mix.trackIds).toHaveLength(10);
+        expect(await onAlbumOf(mix.trackIds, "solo")).toBe(2);
+    });
+
+    it.each([VARIOUS_ARTISTS_CANONICAL, UNKNOWN_ARTIST])("keep two %s songs with one title, in recipes and Wildcard", async (artist) => {
+        await library([
+            ...background(40),
+            member("x1", { artist, title: "Same Song" }),
+            member("x2", { artist, title: "same song" }),
+            member("y1", { artist: "solo", title: "Other Song" }),
+            member("y2", { artist: "solo", title: "other song" }),
+            { name: "w1", artist, title: "Quiet Song" },
+            { name: "w2", artist, title: "quiet song" },
+            { name: "w3", artist: "solo", title: "Hush" },
+            { name: "w4", artist: "solo", title: "hush" },
+        ]);
+        // One title by a normal artist still counts once: y1, the lower id of two equal scores.
+        const calm = await membersOf(CALM);
+        expect(["x1", "x2", "y1", "y2"].filter((n) => calm.has(n))).toEqual(["x1", "x2", "y1"]);
+        const wildcard = names(await pickWildcardStation({ limit: 100 }));
+        expect(wildcard.has("w1") && wildcard.has("w2")).toBe(true);
+        expect(["w3", "w4"].filter((n) => wildcard.has(n))).toHaveLength(1);
     });
 });
 

@@ -10,6 +10,8 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { shuffleArray } from "../../utils/shuffle";
+import { UNKNOWN_ARTIST, VARIOUS_ARTISTS_CANONICAL } from "../../utils/artistNormalization";
+import { artistIdentityKey } from "../artistIdentity";
 import { MOODS, MOOD_HEADS, type Mood } from "../moods/heads";
 import { READING_SQL, loadMoodState, type MoodState, type MoodStats, type Reading } from "../moods/state";
 import { TRACK_LIMIT } from "./helpers";
@@ -183,16 +185,30 @@ interface Member {
 
 /**
  * The songs the mood statistics cover, the ones every recipe and the Wildcard station draw from: scores current for the
- * sound vector and the weights, a present readable file, finished analysis. Aliases m (scores), t (track), a (album).
+ * sound vector and the weights, a present readable file, finished analysis. Aliases m (scores), t (track), a (album),
+ * ar (album artist).
  */
 const SCORED_SONGS = Prisma.sql`
     FROM track_moods m
     JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
     JOIN "Track" t ON t.id = m.track_id
     JOIN "Album" a ON a.id = t."albumId"
+    JOIN "Artist" ar ON ar.id = a."artistId"
     WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model}
       AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'
 `;
+
+/**
+ * The artist a song counts toward for the per-artist cap and the one-title-per-artist rule: its album's artist, except
+ * on the album artist rows that name no one, Various Artists (every spelling of it is filed under one row) and the
+ * Unknown Artist the scanner falls back to, where each song counts as its own artist. So a compilation can fill a mix
+ * past the cap, and two songs with one title by different performers both stay. An artist actually named "Unknown
+ * Artist" shares that row and is treated the same. A stopgap until each song carries its own artist.
+ */
+function artistSql(): Prisma.Sql {
+    const noOne = [artistIdentityKey(VARIOUS_ARTISTS_CANONICAL), artistIdentityKey(UNKNOWN_ARTIST)];
+    return Prisma.sql`CASE WHEN ar."identityKey" IN (${Prisma.join(noOne)}) THEN 'song:' || t.id ELSE a."artistId" END`;
+}
 
 /**
  * The recipe's score for every song it ranks, against `state`, as the common table expressions of a WITH clause:
@@ -241,7 +257,7 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState): Prisma.Sql {
 
     return Prisma.sql`
         library AS (
-            SELECT t.id, lower(t.title) AS title_key, a."artistId" AS artist_id, t.bpm,
+            SELECT t.id, lower(t.title) AS title_key, ${artistSql()} AS artist_id, t.bpm,
                    t."bpmConfidence" AS bpm_confidence, t.arousal, t.instrumentalness,
                    ${Prisma.raw(MINOR_SQL)} AS minor, ${values}
             ${SCORED_SONGS}
@@ -443,10 +459,13 @@ export async function pickWildcardStation({ limit }: { limit: number }): Promise
         : Prisma.sql`true`;
     const rows = await prisma.$queryRaw<Array<{ id: string }>>`
         SELECT id FROM (
-            SELECT DISTINCT ON (lower(t.title), a."artistId") t.id
-            ${SCORED_SONGS}
-              AND ${unclaimed}
-            ORDER BY lower(t.title), a."artistId", t.id
+            SELECT DISTINCT ON (s.title_key, s.artist_key) s.id
+            FROM (
+                SELECT t.id, lower(t.title) AS title_key, ${artistSql()} AS artist_key
+                ${SCORED_SONGS}
+                  AND ${unclaimed}
+            ) s
+            ORDER BY s.title_key, s.artist_key, s.id
         ) unclaimed
         ORDER BY random()
         LIMIT ${limit}
