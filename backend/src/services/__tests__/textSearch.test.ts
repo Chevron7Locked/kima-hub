@@ -22,6 +22,9 @@ const SEEDS: Array<[string, number]> = [
 ];
 
 beforeAll(async () => {
+    // Earlier suites in this worker leave thousands of deleted vectors in the HNSW index until a vacuum, and the
+    // approximate search below then misses some of the nearest live ones.
+    await prisma.$executeRawUnsafe(`VACUUM track_embeddings`);
     const artist = await prisma.artist.create({
         data: { id: "art_ts_1", name: "TS Artist", identityKey: "a_ts_1" },
     });
