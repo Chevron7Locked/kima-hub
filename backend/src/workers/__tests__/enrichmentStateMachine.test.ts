@@ -84,8 +84,10 @@ const mockBuildMoods = jest.fn();
 const mockWriteMoodTags = jest.fn();
 jest.mock("../../services/moods/state", () => ({
     buildMoods: () => mockBuildMoods(),
-    writeMoodTags: () => mockWriteMoodTags(),
     moodProgress: jest.fn().mockResolvedValue({ total: 0, completed: 0 }),
+}));
+jest.mock("../../services/moods/tags", () => ({
+    writeMoodTags: () => mockWriteMoodTags(),
 }));
 
 jest.mock("../../config", () => ({

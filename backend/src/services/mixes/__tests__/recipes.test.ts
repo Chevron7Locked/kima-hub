@@ -3,7 +3,7 @@
  * even across members, capped per artist with the cap relaxed only to reach the 8-song minimum.
  */
 import { MIN_MIX_TRACKS, RECIPES, RECIPE_LINE, drawMembers, getRecipe, parseRecipes } from "../recipes";
-import { TAG_LINE_Z } from "../../moods/state";
+import { TAG_LINE_Z } from "../../moods/tags";
 
 const one = (entry: Record<string, unknown>) => () => parseRecipes({ test: { name: "Test", ...entry } });
 

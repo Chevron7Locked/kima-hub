@@ -195,15 +195,16 @@ const SCORED_SONGS = Prisma.sql`
 `;
 
 /**
- * The recipe's members through its filters, one per title (any case) and artist: the copy furthest above the line.
- * Null when the library has no mood statistics yet or fewer than MIN_MIX_TRACKS songs it could score. The eligible
- * songs are the ones the statistics cover (current scores, a present readable file, finished analysis) that have
- * every reading the recipe uses; a song missing one is left out of this recipe only. The key's scale has no stored
- * statistics, so its mean and spread are taken here, over the same songs with a key reading.
+ * The recipe's score for every song it ranks, against `state`, as the common table expressions of a WITH clause:
+ * `library` (the songs the statistics cover: current scores, a present readable file, finished analysis), `key_scale`,
+ * `eligible` (the library songs with every reading the recipe's components and filters use; a song missing one is
+ * left out of this recipe only), `spread`, and `ranked`, each eligible song with `recipe_z`, its score standardised
+ * over the eligible songs (null when they all score the same). The key's scale has no stored statistics, so its mean
+ * and spread are taken here, over the library songs with a key reading. The two one-row aggregates are materialized,
+ * so they are computed once even where a query reads them once and the planner would otherwise recompute them for
+ * every song. A component with no spread in `state` cannot be scored against: UnrankableLibraryError.
  */
-async function recipeMembers(recipe: Recipe): Promise<Member[] | null> {
-    const state = await loadMoodState();
-    if (!state || state.trackCount < MIN_MIX_TRACKS) return null;
+export function recipeRankingSql(recipe: Recipe, state: MoodState): Prisma.Sql {
     const { components, filters } = recipe;
     for (const { signal } of components) {
         if (signal !== "minor" && !(statsOf(state, signal).sd > 0)) {
@@ -231,6 +232,41 @@ async function recipeMembers(recipe: Recipe): Promise<Member[] | null> {
     if (filters.arousalPct) present.push("l.arousal IS NOT NULL");
     if (filters.minor) present.push("l.minor IS NOT NULL");
 
+    return Prisma.sql`
+        library AS (
+            SELECT t.id, lower(t.title) AS title_key, a."artistId" AS artist_id, t.bpm,
+                   t."bpmConfidence" AS bpm_confidence, t.arousal, t.instrumentalness,
+                   ${Prisma.raw(MINOR_SQL)} AS minor, ${values}
+            ${SCORED_SONGS}
+        ),
+        key_scale AS MATERIALIZED (
+            SELECT avg(minor) AS mean, stddev_pop(minor) AS sd FROM library
+        ),
+        eligible AS (
+            SELECT l.*, (${terms}) / ${totalWeight}::float8 AS score
+            FROM library l CROSS JOIN key_scale k
+            WHERE ${Prisma.raw(present.length > 0 ? present.join(" AND ") : "true")}
+        ),
+        spread AS MATERIALIZED (
+            SELECT count(*)::int AS eligible, avg(score) AS mean, stddev_pop(score) AS sd FROM eligible
+        ),
+        ranked AS (
+            SELECT e.*, (e.score - s.mean) / NULLIF(s.sd, 0) AS recipe_z
+            FROM eligible e CROSS JOIN spread s
+        )
+    `;
+}
+
+/**
+ * The recipe's members through its filters, one per title (any case) and artist: the copy furthest above the line.
+ * Null when the library has no mood statistics yet or fewer than MIN_MIX_TRACKS songs it could score.
+ */
+async function recipeMembers(recipe: Recipe): Promise<Member[] | null> {
+    const state = await loadMoodState();
+    if (!state || state.trackCount < MIN_MIX_TRACKS) return null;
+    const { components, filters } = recipe;
+    const ranking = recipeRankingSql(recipe, state);
+
     const passes = [Prisma.sql`r.recipe_z >= ${RECIPE_LINE}::float8`];
     if (filters.bpm) {
         const [lo, hi] = filters.bpm;
@@ -250,8 +286,9 @@ async function recipeMembers(recipe: Recipe): Promise<Member[] | null> {
         passes.push(Prisma.sql`r.arousal_pct BETWEEN ${lo}::float8 AND ${hi}::float8`);
     }
     if (filters.minor) passes.push(Prisma.sql`r.minor = 1`);
+    // Over every eligible song, before any filter.
     const percentile = filters.arousalPct
-        ? Prisma.sql`percent_rank() OVER (ORDER BY e.arousal)`
+        ? Prisma.sql`percent_rank() OVER (ORDER BY r.arousal)`
         : Prisma.sql`NULL::float8`;
 
     const rows = await prisma.$queryRaw<
@@ -263,30 +300,13 @@ async function recipeMembers(recipe: Recipe): Promise<Member[] | null> {
             artist_id: string | null;
         }>
     >`
-        WITH library AS (
-            SELECT t.id, lower(t.title) AS title_key, a."artistId" AS artist_id, t.bpm,
-                   t."bpmConfidence" AS bpm_confidence, t.arousal, t.instrumentalness,
-                   ${Prisma.raw(MINOR_SQL)} AS minor, ${values}
-            ${SCORED_SONGS}
-        ),
-        key_scale AS (
-            SELECT avg(minor) AS mean, stddev_pop(minor) AS sd FROM library
-        ),
-        eligible AS (
-            SELECT l.*, (${terms}) / ${totalWeight}::float8 AS score
-            FROM library l CROSS JOIN key_scale k
-            WHERE ${Prisma.raw(present.length > 0 ? present.join(" AND ") : "true")}
-        ),
-        spread AS (
-            SELECT count(*)::int AS eligible, avg(score) AS mean, stddev_pop(score) AS sd FROM eligible
-        ),
-        ranked AS (
-            SELECT e.*, (e.score - s.mean) / NULLIF(s.sd, 0) AS recipe_z, ${percentile} AS arousal_pct
-            FROM eligible e CROSS JOIN spread s
+        WITH ${ranking},
+        placed AS (
+            SELECT r.*, ${percentile} AS arousal_pct FROM ranked r
         ),
         members AS (
             SELECT DISTINCT ON (r.title_key, r.artist_id) r.id, r.artist_id
-            FROM ranked r
+            FROM placed r
             WHERE ${Prisma.join(passes, " AND ")}
             ORDER BY r.title_key, r.artist_id, r.recipe_z DESC, r.id
         )

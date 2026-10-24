@@ -7,7 +7,9 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../../utils/db";
 import { isWriteConflict } from "../../matching/state";
 import { MOODS, MOOD_HEADS, type Mood } from "../heads";
-import { buildMoods, loadMoodState, writeMoodTags } from "../state";
+import { getRecipe, recipeRankingSql } from "../../mixes/recipes";
+import { buildMoods, loadMoodState } from "../state";
+import { TAG_LINE_Z, writeMoodTags } from "../tags";
 import { rerunEnrichment } from "../../enrichmentRestart";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 
@@ -44,12 +46,16 @@ async function insertTrack(id: string, extra: Record<string, unknown> = {}) {
     });
 }
 
-/** A sound vector of the heads' model, and scores for it as if the mood step had computed them. */
+/**
+ * A sound vector of the heads' model, and scores for it as if the mood step had computed them. The vector lies on the
+ * last axis, away from the first one other suites search near: a deleted vector stays in the nearest-neighbour index
+ * until a vacuum, and enough of them right at a search's query leave it nothing to return.
+ */
 async function insertScores(id: string, scores: Partial<Record<Mood, number>>) {
     await prisma.$executeRawUnsafe(
         `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
          VALUES ($1, $2::vector, $3, clock_timestamp())`,
-        id, `[${Array.from({ length: MOOD_HEADS.dims }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`, MOOD_HEADS.model,
+        id, `[${"0,".repeat(MOOD_HEADS.dims - 1)}1]`, MOOD_HEADS.model,
     );
     const values = MOODS.map((mood) => scores[mood] ?? 0);
     await prisma.$executeRawUnsafe(
@@ -261,5 +267,77 @@ describe("an analysis re-run", () => {
 
         expect(await pass()).toEqual({ scored: 0, stateChanged: true, tagged: 3 });
         expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
+    });
+});
+
+describe("the focus tag", () => {
+    const focusId = (n: number) => `${P}f${String(n).padStart(2, "0")}`;
+    /**
+     * Focus scores and CLAP instrumental readings. Focus: mean 0.16667, SD 1.00857 over all twelve. Instrumental, as
+     * the clipped logit: mean -0.78252, SD 2.28963 over the eleven with a reading. The Focus Mix recipe score is
+     * (z_focus + 1.25 z_instrumental) / 2.25 over the eleven it ranks (mean -0.07344, SD 0.67807), standardised again:
+     *   f00 vocal, focus 2.0:            focus z 1.818 (over the line alone), recipe z 0.187: no focus tag
+     *   f01 instrumental, focus 0.6:     focus z 0.430 (under the line alone), recipe z 2.063: focus tag
+     *   f02 no instrumental, focus 2.0:  focus z 1.818, not ranked by the recipe: no focus tag
+     *   f03 instrumental, focus 1.0:     focus z 0.826, recipe z 1.984: focus tag
+     *   the rest:                        recipe z under 0
+     * f00 is also at workout 3 and f04 at happy 3, z 3.317 each; every other score is 0.
+     */
+    const FOCUS = [2.0, 0.6, 2.0, 1.0, 0.0, -0.5, 0.2, -1.0, -0.8, 0.0, -0.5, -1.0];
+    const INSTRUMENTAL = [0.02, 0.98, null, 0.95, 0.1, 0.3, 0.05, 0.2, 0.6, 0.15, 0.08, 0.4];
+    const songs = FOCUS.map((_, n) => focusId(n));
+
+    beforeAll(async () => {
+        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+        await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings`);
+        await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${P}%'`);
+        for (const [n, id] of songs.entries()) {
+            await insertTrack(id, { instrumentalness: INSTRUMENTAL[n] });
+            await insertScores(id, { focus: FOCUS[n], workout: n === 0 ? 3 : 0, happy: n === 4 ? 3 : 0 });
+        }
+        await pass();
+    });
+
+    it("leaves out a vocal song the focus score alone puts over the line, and keeps its other tags", async () => {
+        expect(await tagsOf([focusId(0)])).toEqual([["workout"]]);
+    });
+
+    it("tags an instrumental song with a moderate focus score", async () => {
+        expect(await tagsOf([focusId(1), focusId(3)])).toEqual([["focus"], ["focus"]]);
+    });
+
+    it("leaves out a song without the instrumental reading", async () => {
+        expect(await tagsOf([focusId(2)])).toEqual([[]]);
+    });
+
+    it("tags every other mood from its own score", async () => {
+        expect(await tagsOf(songs)).toEqual([
+            ["workout"], ["focus"], [], ["focus"], ["happy"], [], [], [], [], [], [], [],
+        ]);
+    });
+
+    it("tags the songs the Focus Mix recipe ranks at the line, by the engine's own score", async () => {
+        const ranking = recipeRankingSql(getRecipe("focus"), (await loadMoodState())!);
+        const ranked = await prisma.$queryRaw<Array<{ id: string; recipe_z: number }>>`
+            WITH ${ranking} SELECT id, recipe_z FROM ranked ORDER BY id
+        `;
+        const z = new Map(ranked.map((r) => [r.id, r.recipe_z]));
+        expect(z.has(focusId(2))).toBe(false);
+        expect(z.get(focusId(0))).toBeCloseTo(0.187, 3);
+        expect(z.get(focusId(1))).toBeCloseTo(2.063, 3);
+        expect(z.get(focusId(3))).toBeCloseTo(1.984, 3);
+        const tagged = (await prisma.track.findMany({
+            where: { id: { in: songs }, moodTags: { has: "focus" } }, select: { id: true }, orderBy: { id: "asc" },
+        })).map((t) => t.id);
+        expect(tagged).toEqual(ranked.filter((r) => r.recipe_z >= TAG_LINE_Z).map((r) => r.id));
+    });
+
+    it("tags no song with focus when the library has no instrumental spread, and keeps the other tags", async () => {
+        await prisma.track.updateMany({
+            where: { id: { in: songs }, instrumentalness: { not: null } },
+            data: { instrumentalness: 0.5 },
+        });
+        expect(await pass()).toMatchObject({ stateChanged: true, tagged: 2 });
+        expect(await tagsOf(songs)).toEqual([["workout"], [], [], [], ["happy"], [], [], [], [], [], [], []]);
     });
 });

@@ -49,7 +49,8 @@ import { albumFactsOf, fillAlbumFromCatalogue, identifyAlbumsBySound, type Album
 import { fpcalcService } from "../services/fpcalc";
 import { resolveWithinMusicRoot } from "../routes/library/trackPath";
 import { buildMatching, matchingProgress } from "../services/matching/state";
-import { buildMoods, moodProgress, writeMoodTags } from "../services/moods/state";
+import { buildMoods, moodProgress } from "../services/moods/state";
+import { writeMoodTags } from "../services/moods/tags";
 import { updateMap } from "../services/matching/map";
 import {
     classifyFailure,

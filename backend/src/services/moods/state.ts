@@ -2,11 +2,11 @@
  * The mood enrichment step.
  * Per track it stores the 22 learned mood scores for the sound vector they were computed from; per library it
  * stores the mean and spread of each mood and of each reading the mixes blend with them, rebuilt whenever the
- * eligible tracks, their sound vectors, their readings or the weights change. Each track's mood tags are the moods it
- * sits well above the library's mean in.
+ * eligible tracks, their sound vectors, their readings or the weights change. The song tags are written from both
+ * (tags.ts).
  */
 import crypto from "crypto";
-import { Prisma } from "@prisma/client";
+import { Prisma, type MoodState as MoodStateRow } from "@prisma/client";
 import { logger } from "../../utils/logger";
 import { prisma } from "../../utils/db";
 import { formatEmbedding } from "../../utils/embedding";
@@ -178,69 +178,6 @@ export async function buildMoods(): Promise<{ scored: number; stateChanged: bool
     }
 }
 
-/** A track is tagged with a mood when its score sits at least this many SDs above the library's mean for it. */
-export const TAG_LINE_Z = 1.25;
-
-/**
- * Every track's mood tags: each mood whose score sits at least TAG_LINE_Z SDs above the library's mean, in the moods'
- * order. Tags are relative to the library, so every pass sets them from the current scores and statistics; a track
- * the statistics leave out has none. Only tracks whose tags differ are written, so a pass also refills tags that
- * anything else cleared. Without statistics for these weights (a rescore or a re-run cleared them, or no track is
- * eligible) nothing is written and every track keeps its tags until a pass has statistics again. Returns how many
- * tracks' tags changed.
- */
-export async function writeMoodTags(): Promise<number> {
-    const tags = Prisma.raw(
-        `array_remove(ARRAY[${MOODS.map(
-            (mood) => `CASE WHEN (m."${mood}" - s."${mood}_mean") / NULLIF(s."${mood}_sd", 0) >= ${TAG_LINE_Z}
-                       THEN '${mood}' END`,
-        ).join(", ")}]::text[], NULL)`,
-    );
-    try {
-        // Read committed, so a track another writer changes meanwhile is waited for instead of failing the pass.
-        return await prisma.$transaction(
-            async (tx) => {
-                // The state row first, as the build and a re-run take it, before the track rows: one order, so neither
-                // deadlocks. Held to the commit, so the statistics cannot change under the update.
-                const [state] = await tx.$queryRaw<Array<{ version: string }>>`
-                    SELECT version FROM mood_state WHERE id = 'default' FOR UPDATE
-                `;
-                if (state?.version !== MOOD_STATE_VERSION) return 0;
-                return tx.$executeRaw`
-                    UPDATE "Track" t
-                    SET "moodTags" = n.tags
-                    FROM (
-                        SELECT tr.id,
-                               CASE WHEN te.track_id IS NOT NULL
-                                         AND tr."missingSince" IS NULL AND tr.corrupt = false
-                                         AND tr."analysisStatus" = 'completed'
-                                    THEN ${tags} ELSE '{}'::text[] END AS tags
-                        FROM "Track" tr
-                        JOIN mood_state s ON s.id = 'default'
-                        LEFT JOIN track_moods m ON m.track_id = tr.id AND m.weights = ${MOOD_HEADS.version}
-                        LEFT JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
-                                                     AND te.model_version = ${MOOD_HEADS.model}
-                    ) n
-                    WHERE t.id = n.id AND t."moodTags" IS DISTINCT FROM n.tags
-                `;
-            },
-            {
-                isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-                timeout: BUILD_TIMEOUT_MS,
-                maxWait: BUILD_TIMEOUT_MS,
-            },
-        );
-    } catch (error) {
-        // Another transaction held tracks this one needed (a deadlock): nothing was written, and the next pass
-        // rewrites the tags from the data as it is then.
-        if (isWriteConflict(error)) {
-            logger.info("[Moods] Tracks changed while the tags were written; the next pass writes them");
-            return 0;
-        }
-        throw error;
-    }
-}
-
 export interface MoodStats {
     mean: number;
     sd: number;
@@ -254,7 +191,11 @@ export interface MoodState {
 
 /** The library's statistics, or null until the mood step has built them for these weights. */
 export async function loadMoodState(): Promise<MoodState | null> {
-    const row = await prisma.moodState.findUnique({ where: { id: "default" } });
+    return moodStateOf(await prisma.moodState.findUnique({ where: { id: "default" } }));
+}
+
+/** The statistics a stored row holds, or null for no row or a row of other weights. */
+export function moodStateOf(row: MoodStateRow | null): MoodState | null {
     if (!row || row.version !== MOOD_STATE_VERSION) return null;
     const stats = (name: Mood | Reading): MoodStats => ({
         mean: row[`${name}_mean` as const],
