@@ -29,23 +29,10 @@ const PREFIX = "cut_";
 const CALLS = 60;
 const dates = Array.from({ length: CALLS }, (_, k) => new Date(Date.UTC(2026, 0, 1 + k)).toISOString().slice(0, 10));
 
-const NOT_DATE: any[] = [
-    "hrtime", "nextTick", "performance", "queueMicrotask", "requestAnimationFrame", "cancelAnimationFrame",
-    "requestIdleCallback", "cancelIdleCallback", "setImmediate", "clearImmediate", "setInterval", "clearInterval",
-    "setTimeout", "clearTimeout",
-];
-
-/** Run `fn` with the clock's date set to a weekday (0 = Sunday); only Date is faked. */
-async function onWeekday<T>(day: number | undefined, fn: () => Promise<T>): Promise<T> {
-    if (day === undefined) return fn();
-    // 2026-10-18 is a Sunday.
-    jest.useFakeTimers({ doNotFake: NOT_DATE, now: Date.UTC(2026, 9, 18 + day, 12) });
-    try {
-        return await fn();
-    } finally {
-        jest.useRealTimers();
-    }
-}
+/** `n` dates a week apart that fall on `day` (0 = Sunday): a weekday mix exists on the day it is drawn for. */
+const datesOn = (day: number, n: number) =>
+    // 2026-01-04 is a Sunday.
+    Array.from({ length: n }, (_, k) => new Date(Date.UTC(2026, 0, 4 + day + 7 * k)).toISOString().slice(0, 10));
 
 type Fields = Record<string, number | string | string[] | null>;
 
@@ -69,6 +56,7 @@ interface Rule {
     members: Member[];
     /** The generator, called once per date. */
     run: (today: string) => Promise<ProgrammaticMix | null>;
+    /** Weekday the mix exists on (0 = Sunday); it is drawn for dates on that day. */
     day?: number;
 }
 
@@ -176,8 +164,8 @@ describe.each(rules.map((r, idx) => ({ ...r, idx })))("$name", (rule) => {
 
     beforeAll(async () => {
         await writeTracks(tag, rule.members.map((m) => ({ id: idOf(m), fields: m.fields })));
-        for (const d of dates) {
-            const mix = await onWeekday(rule.day, () => rule.run(d));
+        for (const d of rule.day === undefined ? dates : datesOn(rule.day, CALLS)) {
+            const mix = await rule.run(d);
             if (mix) {
                 nonNull++;
                 mix.trackIds.forEach((id) => union.add(id));
