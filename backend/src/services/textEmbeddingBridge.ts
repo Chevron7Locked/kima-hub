@@ -184,27 +184,32 @@ export async function searchTracksByEmbedding(
     limit: number,
 ): Promise<TextSearchRow[]> {
     const vector = formatEmbedding(embedding);
-    // Widen hnsw.ef_search, or any limit past 40 comes back short.
+    // Widen hnsw.ef_search and scan on past deleted or filtered-out vectors, or
+    // the walk comes back short; the relaxed-order rows are re-sorted outside the
+    // materialized step ("+ 0" keeps Postgres 17+ from reusing the index order).
     return withEfSearch(efFor(limit), (tx) =>
         tx.$queryRaw<TextSearchRow[]>`
-            SELECT
-                t.id,
-                t.title,
-                t.duration,
-                t."trackNo",
-                te.embedding <=> ${vector}::vector AS distance,
-                a.id AS "albumId",
-                a.title AS "albumTitle",
-                a."coverUrl" AS "albumCoverUrl",
-                ar.id AS "artistId",
-                ar.name AS "artistName"
-            FROM track_embeddings te
-            JOIN "Track" t ON te.track_id = t.id
-            JOIN "Album" a ON t."albumId" = a.id
-            JOIN "Artist" ar ON a."artistId" = ar.id
-            WHERE t."missingSince" IS NULL AND te.model_version = ${MATCHING_MODEL}
-            ORDER BY te.embedding <=> ${vector}::vector
-            LIMIT ${limit}
+            WITH nearest AS MATERIALIZED (
+                SELECT
+                    t.id,
+                    t.title,
+                    t.duration,
+                    t."trackNo",
+                    te.embedding <=> ${vector}::vector AS distance,
+                    a.id AS "albumId",
+                    a.title AS "albumTitle",
+                    a."coverUrl" AS "albumCoverUrl",
+                    ar.id AS "artistId",
+                    ar.name AS "artistName"
+                FROM track_embeddings te
+                JOIN "Track" t ON te.track_id = t.id
+                JOIN "Album" a ON t."albumId" = a.id
+                JOIN "Artist" ar ON a."artistId" = ar.id
+                WHERE t."missingSince" IS NULL AND te.model_version = ${MATCHING_MODEL}
+                ORDER BY te.embedding <=> ${vector}::vector
+                LIMIT ${limit}
+            )
+            SELECT * FROM nearest ORDER BY distance + 0
         `,
     );
 }

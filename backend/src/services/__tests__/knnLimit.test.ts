@@ -4,8 +4,9 @@
  * guard runs first: on a small table Postgres seq-scans and the count check alone
  * would pass without the widening.
  */
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
-import { efFor, withEfSearch } from "../../utils/knn";
+import { MAX_SCAN_TUPLES, efFor, withEfSearch } from "../../utils/knn";
 import { searchTracksByEmbedding } from "../textEmbeddingBridge";
 
 jest.mock("../../utils/logger", () => ({
@@ -146,27 +147,100 @@ describe("text search returns the requested row count", () => {
 });
 
 describe("utils/knn helper contract", () => {
-    it("raises ef_search to the requested width inside the transaction", async () => {
-        const inside = await withEfSearch(123, async (tx) => {
-            const rows = await tx.$queryRaw<Array<{ v: string }>>`
-                SELECT current_setting('hnsw.ef_search') AS v
-            `;
-            return rows[0].v;
-        });
-        expect(inside).toBe("123");
+    type Settings = Array<{ ef: string; scan: string; tuples: string }>;
+    const SETTINGS = Prisma.sql`
+        SELECT current_setting('hnsw.ef_search') AS ef, current_setting('hnsw.iterative_scan') AS scan,
+               current_setting('hnsw.max_scan_tuples') AS tuples
+    `;
+
+    it("raises ef_search to the requested width and scans on in relaxed order inside the transaction", async () => {
+        const [inside] = await withEfSearch(123, (tx) => tx.$queryRaw<Settings>(SETTINGS));
+        expect(inside).toEqual({ ef: "123", scan: "relaxed_order", tuples: String(MAX_SCAN_TUPLES) });
     });
 
-    it("reverts to the 40 default on the pool after the transaction", async () => {
+    it("reverts to pgvector's defaults on the pool after the transaction", async () => {
         await withEfSearch(500, async () => undefined);
-        const rows = await prisma.$queryRaw<Array<{ v: string }>>`
-            SELECT current_setting('hnsw.ef_search') AS v
-        `;
-        expect(rows[0].v).toBe("40");
+        const [after] = await prisma.$queryRaw<Settings>(SETTINGS);
+        expect(after).toEqual({ ef: "40", scan: "off", tuples: "20000" });
     });
 
     it("sizes the width as min(1000, max(2*limit, 100))", () => {
         expect(efFor(100)).toBe(200);
         expect(efFor(30)).toBe(100);
         expect(efFor(600)).toBe(1000);
+    });
+});
+
+
+describe("text search fills its limit past rows the index walk cannot return", () => {
+    const QUERY = JSON.parse(randomUnit(424242)) as number[];
+    /** The songs still searchable: one in four of the library while most are missing, one in twenty re-embedded. */
+    const keptEvery = (n: number) => new Set(ALL_IDS.filter((_, i) => i % n === 0));
+    const bestFirst = (rows: Array<{ distance: number }>) => rows.every((r, k) => k === 0 || rows[k - 1].distance <= r.distance);
+
+    /** The text-search shape is answered through the vector index: the counts below mean something only then. */
+    async function throughIndex(): Promise<boolean> {
+        const plan = await prisma.$queryRaw<Array<Record<string, string>>>`
+            EXPLAIN (COSTS OFF)
+            SELECT t.id
+            FROM track_embeddings te
+            JOIN "Track" t ON te.track_id = t.id
+            JOIN "Album" a ON t."albumId" = a.id
+            JOIN "Artist" ar ON a."artistId" = ar.id
+            WHERE t."missingSince" IS NULL
+            ORDER BY te.embedding <=> ${randomUnit(424242)}::vector
+            LIMIT 50
+        `;
+        return plan.map((row) => Object.values(row).join("\n")).join("\n").includes("track_embeddings_embedding_idx");
+    }
+
+    beforeAll(async () => {
+        // A server keeps deleted vectors in the index until autovacuum runs, and so does this test for its whole
+        // length; the songs' statistics also stay as the cases below leave them.
+        for (const table of ["track_embeddings", '"Track"']) {
+            await prisma.$executeRawUnsafe(`ALTER TABLE ${table} SET (autovacuum_enabled = false)`);
+        }
+    });
+
+    afterAll(async () => {
+        for (const table of ["track_embeddings", '"Track"']) {
+            await prisma.$executeRawUnsafe(`ALTER TABLE ${table} RESET (autovacuum_enabled)`);
+        }
+    });
+
+    it("with most songs missing, as when a share is unmounted: the nearest searchable songs, best first", async () => {
+        const KEPT = keptEvery(4);
+        // Not analysed afterwards: on this small a table the planner, told most songs are missing, reads the songs
+        // first and never asks the index; a library of 50,000 half missing is still answered through it.
+        await prisma.$executeRawUnsafe(
+            `UPDATE "Track" SET "missingSince" = now() WHERE id LIKE 'cknn%' AND NOT (id = ANY($1))`, [...KEPT],
+        );
+        try {
+            expect(await throughIndex()).toBe(true);
+            const rows = await searchTracksByEmbedding(QUERY, 50);
+            expect(rows).toHaveLength(50);
+            expect(rows.every((r) => KEPT.has(r.id))).toBe(true);
+            expect(bestFirst(rows)).toBe(true);
+        } finally {
+            await prisma.$executeRawUnsafe(`UPDATE "Track" SET "missingSince" = NULL WHERE id LIKE 'cknn%'`);
+        }
+    });
+
+    it("after a vectors re-run deleted every vector and the analyzer wrote some back", async () => {
+        const KEPT = keptEvery(20);
+        await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id LIKE 'cknn%'`);
+        for (const [i, id] of ALL_IDS.entries()) {
+            if (!KEPT.has(id)) continue;
+            await prisma.$executeRawUnsafe(
+                `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
+                 VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
+                id, randomUnit(i),
+            );
+        }
+        expect(await throughIndex()).toBe(true);
+        const rows = await searchTracksByEmbedding(QUERY, 50);
+        expect(rows).toHaveLength(50);
+        expect(rows.every((r) => KEPT.has(r.id))).toBe(true);
+        expect(bestFirst(rows)).toBe(true);
     });
 });
