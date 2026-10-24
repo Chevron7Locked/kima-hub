@@ -9,7 +9,7 @@ jest.mock("../../utils/db", () => ({
     prisma: { track: { findMany: (...args: unknown[]) => mockFindMany(...args) } },
 }));
 
-import { drawIds, drawWeighted, sampleTrackIds, sampleTracks, seededOrder, seededTake, tracksByIds } from "../mixes/helpers";
+import { drawIds, drawWeighted, sampleTrackIds, sampleTracks, seededKey, seededOrder, seededTake, tracksByIds } from "../mixes/helpers";
 
 const TOTAL = 1000;
 const ALL_IDS = Array.from({ length: TOTAL }, (_, i) => `t${String(i).padStart(4, "0")}`);
@@ -116,6 +116,14 @@ describe("drawIds", () => {
         expect(drawIds(ids.filter((id) => id !== unpicked), 20, 42)).toEqual(day);
         const joined = drawIds([...ids, "new"], 20, 42);
         expect(joined.filter((id) => id !== "new")).toEqual(joined.includes("new") ? day.slice(0, 19) : day);
+    });
+});
+
+describe("seededKey", () => {
+    it("is the hex MD5 of seed, colon, id, the key Postgres computes as md5('42' || ':' || 't1')", () => {
+        // A changed key would reshuffle every seeded mix and part from the database's draws.
+        expect(seededKey(42, "t1")).toBe("00e5e273cc89b20ab75ed70dcf8dee08");
+        expect(seededKey("42", "t1")).toBe(seededKey(42, "t1"));
     });
 });
 

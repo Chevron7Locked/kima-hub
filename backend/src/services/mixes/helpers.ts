@@ -144,7 +144,8 @@ export function getSeededRandom(seed: string): number {
  * that takes the first n changes by at most one song when one song joins or leaves the candidates.
  */
 export function seededKey(seed: number | string, id: string): string {
-    return crypto.hash("md5", `${seed}:${id}`);
+    // createHash, not the one-shot crypto.hash, which Node 20 lacks before 20.12; the split stack builds on node:20-slim.
+    return crypto.createHash("md5").update(`${seed}:${id}`).digest("hex");
 }
 
 /** seededKey in SQL for an id column, compared byte by byte as JavaScript compares the hex strings. */
