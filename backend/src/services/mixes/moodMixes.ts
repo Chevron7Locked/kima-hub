@@ -17,7 +17,6 @@ import {
     seededShuffle,
 } from "./helpers";
 import { recipeMixGenerator } from "./recipeMix";
-import { weekdayOf } from "./mixDay";
 import { STEADY_BEAT } from "./recipes";
 import { NOT_MISSING } from "../../utils/libraryEligibility";
 import { spellingsOf } from "../stats/playable";
@@ -386,7 +385,8 @@ export async function generateMinorKeyMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    if (weekdayOf(today) !== 1) return null;
+    const dayOfWeek = new Date().getDay();
+    if (dayOfWeek !== 1) return null;
 
     // Felt energy (arousal) in the upper half of this library, whatever level the library sits at.
     const [{ median }] = await prisma.$queryRaw<Array<{ median: number | null }>>`
