@@ -10,7 +10,7 @@ import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { getMixColor, tracksByIds } from "./mixes/helpers";
-import { RECIPE_LINE, UnrankableLibraryError, getRecipe, pickPageTracks, pickRecipeStation } from "./mixes/recipes";
+import { RECIPE_LINE, UnrankableLibraryError, getRecipe, pageMemberCount, pickPageTracks } from "./mixes/recipes";
 import { MOOD_HEADS, type Mood } from "./moods/heads";
 import { MOOD_STATE_VERSION, loadMoodState, type MoodStats } from "./moods/state";
 
@@ -258,10 +258,13 @@ export function moodOutput(view: MoodView | undefined): {
     return { dominantMood: view.dominant, moodScore: view.score, moods: view.ranks as Record<string, number> };
 }
 
-/** How many songs a mood page draws from: its recipe's members at the line; none when the library cannot rank it. */
+/**
+ * How many songs a mood page draws from: its recipe's members at the line, counted in the database; none when the page
+ * would have no mix (fewer than its minimum) or the library cannot rank the recipe.
+ */
 async function pageSongCount(recipe: string): Promise<number> {
     try {
-        return (await pickRecipeStation(recipe, { limit: Number.MAX_SAFE_INTEGER })).length;
+        return await pageMemberCount(getRecipe(recipe));
     } catch (error) {
         if (error instanceof UnrankableLibraryError) return 0;
         throw error;

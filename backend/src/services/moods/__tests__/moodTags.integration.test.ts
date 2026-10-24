@@ -174,10 +174,29 @@ describe("mood tags", () => {
         expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
     });
 
-    it("refill tags cleared while the statistics stayed the same", async () => {
-        await prisma.$executeRawUnsafe(`UPDATE "Track" SET "moodTags" = '{}' WHERE id LIKE '${P}%'`);
-        expect(await pass()).toEqual({ scored: 0, stateChanged: false, tagged: 3 });
+    it("skip a pass over the statistics the last pass wrote from, and run once they are rewritten", async () => {
+        // Cleared by hand, which nothing in Kima does without changing what the statistics cover: the skipped pass
+        // leaves it so, which shows it never read the tracks.
+        await prisma.$executeRawUnsafe(`UPDATE "Track" SET "moodTags" = '{}' WHERE id = $1`, trackId(0));
+        expect(await pass()).toEqual({ scored: 0, stateChanged: false, tagged: 0 });
+        expect(await tagsOf([trackId(0)])).toEqual([[]]);
+        await prisma.$executeRawUnsafe(`UPDATE mood_state SET computed_at = now()`);
+        expect(await writeMoodTags()).toBe(1);
         expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
+    });
+
+    it("take a song's tags away while it is missing or corrupt, and give them back when it returns", async () => {
+        // Without t00, happy: mean -0.167, SD 0.913, so the 1.25s are at z 1.552; sad: mean -0.167, SD 0.913, so t01's
+        // 1.24 is at z 1.541 and t02's 1.26 at 1.563.
+        const without = [[], ["happy", "sad"], ["happy", "sad"], [], [], [], [], [], [], []];
+        for (const change of [{ missingSince: new Date() }, { corrupt: true }]) {
+            await prisma.track.update({ where: { id: trackId(0) }, data: change });
+            expect(await pass()).toMatchObject({ scored: 0, stateChanged: true });
+            expect(await tagsOf(library(10))).toEqual(without);
+            await prisma.track.update({ where: { id: trackId(0) }, data: { missingSince: null, corrupt: false } });
+            expect(await pass()).toMatchObject({ scored: 0, stateChanged: true });
+            expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
+        }
     });
 
     it("stay while the statistics are of other weights or cleared, and move when statistics return", async () => {
@@ -205,6 +224,8 @@ describe("mood tags", () => {
 describe("a deadlock while the tags are written", () => {
     it("writes nothing and returns 0, and the next pass writes the tags", async () => {
         await prisma.$executeRawUnsafe(`UPDATE "Track" SET "moodTags" = '{}' WHERE id = $1`, trackId(0));
+        // A rewritten statistics row, so the pass runs instead of being skipped.
+        await prisma.$executeRawUnsafe(`UPDATE mood_state SET computed_at = now()`);
         let writing: Promise<number> | undefined;
         // Holds a track the tags need, then takes the state row the tag writer holds: each waits on the other.
         await prisma.$transaction(
@@ -359,5 +380,68 @@ describe("the focus tag", () => {
         });
         expect(await pass()).toMatchObject({ stateChanged: true, tagged: 2 });
         expect(await tagsOf(songs)).toEqual([["workout"], [], [], [], ["happy"], [], [], [], [], [], [], []]);
+    });
+});
+
+describe("the focus tag by the Focus Mix's own rules", () => {
+    const gId = (n: number) => `${P}g${String(n).padStart(2, "0")}`;
+    const focusMixMembers = async () => (await pickStationTracks(getRecipe("focus"), { limit: 1000 })).sort();
+    const focusTagged = async () =>
+        (await prisma.track.findMany({
+            where: { id: { startsWith: `${P}g` }, moodTags: { has: "focus" } },
+            select: { id: true },
+            orderBy: { id: "asc" },
+        })).map((t) => t.id);
+
+    type Song = { focus: number; instrumental: number | null; title?: string; happy?: number };
+
+    /** A fresh library of these songs (focus score, instrumental reading, title), scored and tagged. */
+    async function libraryOf(songs: Song[]) {
+        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+        await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings`);
+        await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${P}%'`);
+        for (const [n, song] of songs.entries()) {
+            const title = song.title ? { title: song.title } : {};
+            await insertTrack(gId(n), { instrumentalness: song.instrumental, ...title });
+            await insertScores(gId(n), { focus: song.focus, happy: song.happy ?? 0 });
+        }
+        await pass();
+    }
+
+    it("tags every copy of a title the Focus Mix plays one copy of", async () => {
+        // The focus tag's twelve songs, and g12, a second copy of g01: same title, same artist, same scores.
+        const FOCUS = [2.0, 0.6, 2.0, 1.0, 0.0, -0.5, 0.2, -1.0, -0.8, 0.0, -0.5, -1.0, 0.6];
+        const INSTRUMENTAL = [0.02, 0.98, null, 0.95, 0.1, 0.3, 0.05, 0.2, 0.6, 0.15, 0.08, 0.4, 0.98];
+        await libraryOf(FOCUS.map((focus, n) => ({
+            focus, instrumental: INSTRUMENTAL[n], ...(n === 12 ? { title: `Tag ${gId(1)}` } : {}),
+        })));
+        expect(await focusTagged()).toEqual([gId(1), gId(3), gId(12)]);
+        const members = await focusMixMembers();
+        expect(members.filter((id) => id === gId(1) || id === gId(12))).toHaveLength(1);
+        expect(members).toContain(gId(3));
+    });
+
+    it("tags no song while the Focus Mix ranks fewer than 8, though the library has more", async () => {
+        // Ten songs, six with an instrumental reading: g00 stands far out among those six (z 2.24), but a ranking of
+        // six makes no mix. g09's happy tag shows the other tags are still written.
+        await libraryOf([
+            { focus: 2, instrumental: 0.99 },
+            ...Array.from({ length: 5 }, () => ({ focus: 0, instrumental: 0.5 })),
+            ...Array.from({ length: 3 }, () => ({ focus: 0, instrumental: null })),
+            { focus: 0, instrumental: null, happy: 3 },
+        ]);
+        expect(await focusMixMembers()).toEqual([]);
+        expect(await focusTagged()).toEqual([]);
+        expect(await tagsOf([gId(9)])).toEqual([["happy"]]);
+    });
+
+    it("tags no song while the library holds fewer than 8 scored songs", async () => {
+        await libraryOf([
+            { focus: 2, instrumental: 0.99, happy: 3 },
+            ...Array.from({ length: 5 }, () => ({ focus: 0, instrumental: 0.5 })),
+        ]);
+        expect(await focusMixMembers()).toEqual([]);
+        expect(await focusTagged()).toEqual([]);
+        expect(await tagsOf([gId(0)])).toEqual([["happy"]]);
     });
 });

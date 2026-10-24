@@ -309,44 +309,75 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState): Prisma.Sql {
 }
 
 /**
+ * SQL true for a row of `placed` under `alias` that sits at the line: at least RECIPE_LINE above the average and
+ * through the filters, in a ranking of at least MIN_MIX_TRACKS songs (a smaller one has no members). The recipe's
+ * members are these, one copy per title and artist; the focus tag takes every copy (moods/tags.ts).
+ */
+export function atLineSql(alias: string): string {
+    const ranked = `(SELECT eligible FROM spread) >= ${MIN_MIX_TRACKS}`;
+    return `(${alias}.recipe_z >= ${RECIPE_LINE} AND ${alias}.in_filters AND ${ranked})`;
+}
+
+/** The members step after recipeRankingSql: the songs at the line, one per title (any case) and artist. */
+const MEMBERS_SQL = Prisma.sql`
+    members AS (
+        SELECT DISTINCT ON (r.title_key, r.artist_id) r.id, r.artist_id
+        FROM placed r
+        WHERE ${Prisma.raw(atLineSql("r"))}
+        ORDER BY r.title_key, r.artist_id, r.recipe_z DESC, r.id
+    )
+`;
+
+interface RankingSummary {
+    eligible: number;
+    score_sd: number | null;
+    minor_sd: number | null;
+}
+
+/** False when the recipe ranks fewer than MIN_MIX_TRACKS songs; an error when the ranking cannot set any apart. */
+function ranksEnough(recipe: Recipe, summary: RankingSummary): boolean {
+    if (summary.eligible < MIN_MIX_TRACKS) return false;
+    if (recipe.components.some((c) => c.signal === "minor") && !((summary.minor_sd ?? 0) > 0)) {
+        throw new UnrankableLibraryError(recipe.id, "the library's key scale has no spread to score against");
+    }
+    if (!((summary.score_sd ?? 0) > 0)) {
+        throw new UnrankableLibraryError(recipe.id, "every eligible song has the same score, so none stands out");
+    }
+    return true;
+}
+
+/**
  * The recipe's members through its filters, one per title (any case) and artist: the copy furthest above the line.
  * Null when the library has no mood statistics yet or fewer than MIN_MIX_TRACKS songs it could score.
  */
 async function recipeMembers(recipe: Recipe): Promise<Member[] | null> {
     const state = await loadMoodState();
     if (!state || state.trackCount < MIN_MIX_TRACKS) return null;
-    const { components } = recipe;
-    const ranking = recipeRankingSql(recipe, state);
-
-    const rows = await prisma.$queryRaw<
-        Array<{
-            eligible: number;
-            score_sd: number | null;
-            minor_sd: number | null;
-            id: string | null;
-            artist_id: string | null;
-        }>
-    >`
-        WITH ${ranking},
-        members AS (
-            SELECT DISTINCT ON (r.title_key, r.artist_id) r.id, r.artist_id
-            FROM placed r
-            WHERE r.recipe_z >= ${RECIPE_LINE}::float8 AND r.in_filters
-            ORDER BY r.title_key, r.artist_id, r.recipe_z DESC, r.id
-        )
+    const rows = await prisma.$queryRaw<Array<RankingSummary & { id: string | null; artist_id: string | null }>>`
+        WITH ${recipeRankingSql(recipe, state)}, ${MEMBERS_SQL}
         SELECT s.eligible, s.sd AS score_sd, k.sd AS minor_sd, mb.id, mb.artist_id
         FROM spread s CROSS JOIN key_scale k LEFT JOIN members mb ON true
         ORDER BY mb.id
     `;
-    const [summary] = rows;
-    if (summary.eligible < MIN_MIX_TRACKS) return null;
-    if (components.some((c) => c.signal === "minor") && !((summary.minor_sd ?? 0) > 0)) {
-        throw new UnrankableLibraryError(recipe.id, "the library's key scale has no spread to score against");
-    }
-    if (!((summary.score_sd ?? 0) > 0)) {
-        throw new UnrankableLibraryError(recipe.id, "every eligible song has the same score, so none stands out");
-    }
+    if (!ranksEnough(recipe, rows[0])) return null;
     return rows.flatMap((r) => (r.id !== null && r.artist_id !== null ? [{ id: r.id, artistId: r.artist_id }] : []));
+}
+
+/** How many members recipeMembers would return, counted in the database; null where it returns null. */
+async function recipeMemberCount(recipe: Recipe): Promise<number | null> {
+    const state = await loadMoodState();
+    if (!state || state.trackCount < MIN_MIX_TRACKS) return null;
+    const [summary] = await prisma.$queryRaw<Array<RankingSummary & { members: number }>>`
+        WITH ${recipeRankingSql(recipe, state)}, ${MEMBERS_SQL}
+        SELECT s.eligible, s.sd AS score_sd, k.sd AS minor_sd, (SELECT count(*)::int FROM members) AS members
+        FROM spread s CROSS JOIN key_scale k
+    `;
+    return ranksEnough(recipe, summary) ? summary.members : null;
+}
+
+/** A mood page plays its recipe only with at least MIN_MIX_TRACKS members; with fewer it has no mix. */
+function pagePlays(members: number | null): members is number {
+    return members !== null && members >= MIN_MIX_TRACKS;
 }
 
 /**
@@ -425,10 +456,16 @@ export async function pickPageTracks(
 ): Promise<string[] | null> {
     if (!Number.isInteger(limit) || limit < 1) throw new RangeError(`limit must be a positive integer, got ${limit}`);
     const members = await recipeMembers(recipe);
-    if (!members || members.length < MIN_MIX_TRACKS) return null;
+    if (!members || !pagePlays(members.length)) return null;
     const served = new Set(exclude);
     const fresh = members.filter((m) => !served.has(m.id));
     return drawMembers(fresh.length >= MIN_MIX_TRACKS ? fresh : members, crypto.randomUUID(), limit);
+}
+
+/** How many songs a mood page draws from: the recipe's members, or 0 when the page has no mix (pickPageTracks). */
+export async function pageMemberCount(recipe: Recipe): Promise<number> {
+    const members = await recipeMemberCount(recipe);
+    return pagePlays(members) ? members : 0;
 }
 
 /** A station's refill: up to `limit` of the recipe's members in a fresh random order; empty when it has none. */

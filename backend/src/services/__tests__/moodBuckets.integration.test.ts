@@ -43,7 +43,7 @@ import { syncMoodBuckets } from "../../workers/moodBucketWorker";
 import { getVibeMap } from "../vibeMap";
 import { MOODS as LEARNED_MOODS, MOOD_HEADS, type Mood } from "../moods/heads";
 import { buildMoodState, loadMoodState } from "../moods/state";
-import { RECIPE_LINE, pickRecipeStation } from "../mixes/recipes";
+import { MIN_MIX_TRACKS, RECIPE_LINE, pickRecipeStation } from "../mixes/recipes";
 
 jest.setTimeout(60_000);
 
@@ -270,11 +270,14 @@ describe("mood buckets and the mood snapshot (database)", () => {
         });
         await syncMoodBuckets();
         expect((await moodBucketService.getMoodPresets())[0].pendingTracks).toBe(before);
-        // Each preset counts the songs its mood page plays: the page recipe's members.
+        // Each preset counts the songs its mood page plays: the page recipe's members, or none when they are too few
+        // for the page to play, though a station would play them.
         const counts = (await moodBucketService.getMoodPresets()).map((p) => p.trackCount);
-        expect(counts).toEqual(
-            await Promise.all(MOODS.map(async (m) => (await pickRecipeStation(m.recipe, { limit: 100_000 })).length)),
+        const members = await Promise.all(
+            MOODS.map(async (m) => (await pickRecipeStation(m.recipe, { limit: 100_000 })).length),
         );
+        expect(members.some((n) => n > 0 && n < MIN_MIX_TRACKS)).toBe(true);
+        expect(counts).toEqual(members.map((n) => (n >= MIN_MIX_TRACKS ? n : 0)));
 
         // A vector the mood step can never score, all zeros, is not waiting for it. (The column holds 512 numbers
         // only, so a vector of the wrong length cannot be stored.)

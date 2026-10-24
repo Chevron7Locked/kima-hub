@@ -11,12 +11,15 @@ import { artistIdentityKey } from "../../artistIdentity";
 import { MOODS, MOOD_HEADS, type Mood } from "../../moods/heads";
 import { MOOD_STATE_VERSION, READINGS, buildMoodState, loadMoodState, type MoodState, type Reading } from "../../moods/state";
 import { writeMoodTags } from "../../moods/tags";
+import { moodBucketService } from "../../moodBucketService";
 import {
     MIN_MIX_TRACKS,
     RECIPES,
     UnrankableLibraryError,
+    pageMemberCount,
     parseRecipes,
     pickMixTracks,
+    pickPageTracks,
     pickRecipeStation,
     pickRecipeTracks,
     pickStationTracks,
@@ -275,10 +278,11 @@ describe("the Wildcard station", () => {
         expect(await wildcard()).toEqual(new Set(UNTAGGED));
     });
 
-    it("follows the stored tags, so a song whose tags were cleared plays until the next pass tags it", async () => {
+    it("follows the stored tags: a song whose tags were cleared plays until a pass over new statistics", async () => {
         await tagged();
         await prisma.track.update({ where: { id: id("over") }, data: { moodTags: [] } });
         expect(await wildcard()).toEqual(new Set([...UNTAGGED, "over"]));
+        await prisma.$executeRawUnsafe(`UPDATE mood_state SET computed_at = now()`);
         await writeMoodTags();
         expect(await wildcard()).toEqual(new Set(UNTAGGED));
     });
@@ -479,6 +483,28 @@ describe("the mix draw", () => {
         expect((await pickMixTracks(CALM, { userId: USER, date: DAY }))?.trackIds).toHaveLength(MIN_MIX_TRACKS);
         await library([...background(100), ...members(MIN_MIX_TRACKS - 1)]);
         expect(await pickMixTracks(CALM, { userId: USER, date: DAY })).toBeNull();
+    });
+
+    it("counts a mood page's songs as the members it draws from, or 0 when the page has no mix", async () => {
+        await library([...background(100), ...members(12)]);
+        expect(await pageMemberCount(CALM)).toBe(12);
+        expect(await pickPageTracks(CALM, { limit: 100 })).toHaveLength(12);
+        await library([...background(100), ...members(MIN_MIX_TRACKS - 1)]);
+        // A station plays any members; a page plays none under 8, and counts none.
+        expect(await pickStationTracks(CALM, { limit: 100 })).toHaveLength(MIN_MIX_TRACKS - 1);
+        expect(await pickPageTracks(CALM, { limit: 100 })).toBeNull();
+        expect(await pageMemberCount(CALM)).toBe(0);
+    });
+
+    it("shows 0 on a mood preset whose page recipe has fewer than 8 members, the count its page plays", async () => {
+        // The calm preset's page recipe weighs calm most; every other component is level across these songs.
+        const calmPage = RECIPES.get("calm")!;
+        await library([...background(100), ...members(5)]);
+        expect(await pickStationTracks(calmPage, { limit: 100 })).toHaveLength(5);
+        const preset = (await moodBucketService.getMoodPresets()).find((p) => p.id === "chill")!;
+        expect(preset.trackCount).toBe(0);
+        await library([...background(100), ...members(9)]);
+        expect((await moodBucketService.getMoodPresets()).find((p) => p.id === "chill")!.trackCount).toBe(9);
     });
 
     describe("from 30 members", () => {
