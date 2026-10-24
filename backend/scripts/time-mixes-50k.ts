@@ -3,7 +3,8 @@
  *
  * Writes the library to the throwaway test database with learned mood scores and the library's
  * mood statistics, runs generateAllMixes (3 runs), every recipe's member query once, 10 draws of
- * one mix (Chill), 10 mood page mixes per mood, 10 GET /library/radio calls per branch and, last,
+ * one mix (Chill), 10 Rediscover mixes for one user, 10 mood page mixes per mood, 10 GET
+ * /library/radio calls per branch and, last,
  * one mood pass after a "moods" re-run, prints the times in milliseconds, then deletes everything it
  * wrote. It refuses to run against any database but the test one.
  *
@@ -55,6 +56,7 @@ async function main() {
     const { rerunEnrichment } = await import("../src/services/enrichmentRestart");
     const { RECIPES, pickRecipeStation } = await import("../src/services/mixes/recipes");
     const { generateChillMix } = await import("../src/services/mixes/moodMixes");
+    const { generateRediscoverMix } = await import("../src/services/mixes/discoveryMixes");
     const { moodBucketService, VALID_MOODS } = await import("../src/services/moodBucketService");
 
     const rng = mulberry32(20261021);
@@ -237,6 +239,11 @@ async function main() {
         const chillMs: number[] = [];
         for (let k = 0; k < RADIO_CALLS; k++) chillMs.push(await time(() => generateChillMix(user1, `2026-10-2${k}`)));
         summarize("one mix (Chill Mix)", chillMs);
+
+        // Rediscover reads every library track's play count for the user before it draws.
+        const rediscoverMs: number[] = [];
+        for (let k = 0; k < RADIO_CALLS; k++) rediscoverMs.push(await time(() => generateRediscoverMix(user1, `2026-10-2${k}`)));
+        summarize("Rediscover (one user)", rediscoverMs);
 
         for (const mood of VALID_MOODS) {
             const pageMs: number[] = [];
