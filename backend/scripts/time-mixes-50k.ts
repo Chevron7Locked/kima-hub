@@ -2,9 +2,10 @@
  * Times the mix generators and every radio branch on a synthetic 50,000-track library.
  *
  * Writes the library to the throwaway test database with learned mood scores and the library's
- * mood statistics, runs generateAllMixes (3 runs), every recipe's member query once and 10
- * GET /library/radio calls per branch, prints min / median / max in milliseconds, then deletes
- * everything it wrote. It refuses to run against any database but the test one.
+ * mood statistics, runs generateAllMixes (3 runs), every recipe's member query once, 10 draws of
+ * one mix (Chill), 10 mood page mixes per mood and 10 GET /library/radio calls per branch, prints
+ * min / median / max in milliseconds, then deletes everything it wrote. It refuses to run against
+ * any database but the test one.
  *
  * usage (from backend/):
  *   DATABASE_URL=postgresql://test:test@localhost:5433/kima_v1_test npx tsx scripts/time-mixes-50k.ts
@@ -52,6 +53,8 @@ async function main() {
     const { MOODS, MOOD_HEADS } = await import("../src/services/moods/heads");
     const { buildMoodState } = await import("../src/services/moods/state");
     const { RECIPES, pickRecipeStation } = await import("../src/services/mixes/recipes");
+    const { generateChillMix } = await import("../src/services/mixes/moodMixes");
+    const { moodBucketService, VALID_MOODS } = await import("../src/services/moodBucketService");
 
     const rng = mulberry32(20261021);
     const r4 = (x: number) => Math.round(x * 10000) / 10000;
@@ -229,6 +232,16 @@ async function main() {
         const recipeMs: number[] = [];
         for (const id of RECIPES.keys()) recipeMs.push(await time(() => pickRecipeStation(id, { limit: 100 })));
         summarize(`one recipe's members (${RECIPES.size})`, recipeMs);
+
+        const chillMs: number[] = [];
+        for (let k = 0; k < RADIO_CALLS; k++) chillMs.push(await time(() => generateChillMix(user1, `2026-10-2${k}`)));
+        summarize("one mix (Chill Mix)", chillMs);
+
+        for (const mood of VALID_MOODS) {
+            const pageMs: number[] = [];
+            for (let k = 0; k < RADIO_CALLS; k++) pageMs.push(await time(() => moodBucketService.getMoodMix(mood, 15)));
+            summarize(`mood page ${mood}`, pageMs);
+        }
 
         const app = express();
         app.use(express.json());
