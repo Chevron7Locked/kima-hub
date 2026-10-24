@@ -6,6 +6,7 @@ import { logger } from "../../utils/logger";
 import { lrclibService } from "../../services/lrclib";
 import { rateLimiter } from "../../services/rateLimiter";
 import { getMergedGenres } from "../../utils/metadataOverrides";
+import { genreArraySql } from "../../utils/genreSql";
 import {
   getEffectiveYear,
   getEffectiveDecadeWhereClause,
@@ -633,7 +634,7 @@ router.get("/genres", async (_req, res) => {
     >`
             SELECT LOWER(g.genre) as genre, COUNT(DISTINCT t.id) as track_count
             FROM "Artist" ar
-            CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(ar.genres) = 'array' THEN ar.genres ELSE '[]'::jsonb END) AS g(genre)
+            CROSS JOIN LATERAL jsonb_array_elements_text(${genreArraySql("ar.genres")}) AS g(genre)
             JOIN "Album" a ON a."artistId" = ar.id
             JOIN "Track" t ON t."albumId" = a.id
             WHERE ar.genres IS NOT NULL
@@ -809,12 +810,12 @@ router.get("/radio", async (req, res) => {
                     JOIN "Track" t ON t."albumId" = a.id
                     WHERE (
                         (ar.genres IS NOT NULL AND EXISTS (
-                            SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(ar.genres) = 'array' THEN ar.genres ELSE '[]'::jsonb END) AS g(genre)
+                            SELECT 1 FROM jsonb_array_elements_text(${genreArraySql("ar.genres")}) AS g(genre)
                             WHERE LOWER(g.genre) LIKE ${"%" + genreValue + "%"}
                         ))
                         OR
                         (ar."userGenres" IS NOT NULL AND EXISTS (
-                            SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(ar."userGenres") = 'array' THEN ar."userGenres" ELSE '[]'::jsonb END) AS ug(genre)
+                            SELECT 1 FROM jsonb_array_elements_text(${genreArraySql('ar."userGenres"')}) AS ug(genre)
                             WHERE LOWER(ug.genre) LIKE ${"%" + genreValue + "%"}
                         ))
                     )

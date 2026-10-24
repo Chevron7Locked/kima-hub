@@ -5,6 +5,7 @@ import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicRe
 import { searchService } from "../../services/search";
 import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong } from "./mappers";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
+import { artistGenresSql } from "../../utils/genreSql";
 
 export const searchRouter = Router();
 
@@ -200,9 +201,7 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
     if (genre) {
         // Genre lives on Artist, not Album — filter via artist's enriched genres
         whereConditions.push(Prisma.sql`EXISTS (
-            SELECT 1 FROM jsonb_array_elements_text(
-                COALESCE(NULLIF(NULLIF(ar."userGenres", 'null'::jsonb), '[]'::jsonb), ar.genres)
-            ) g WHERE g ILIKE '%' || ${genre} || '%'
+            SELECT 1 FROM jsonb_array_elements_text(${artistGenresSql("ar")}) g WHERE g ILIKE '%' || ${genre} || '%'
         )`);
     }
 
@@ -299,9 +298,7 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
           AND t."missingSince" IS NULL
           AND al.location = 'LIBRARY'
           AND EXISTS (
-            SELECT 1 FROM jsonb_array_elements_text(
-                COALESCE(NULLIF(NULLIF(ar."userGenres", 'null'::jsonb), '[]'::jsonb), ar.genres)
-            ) g WHERE g ILIKE '%' || ${genre} || '%'
+            SELECT 1 FROM jsonb_array_elements_text(${artistGenresSql("ar")}) g WHERE g ILIKE '%' || ${genre} || '%'
           )
         ORDER BY LOWER(t.title) ASC, t.title ASC
         OFFSET ${offset}

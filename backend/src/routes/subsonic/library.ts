@@ -5,6 +5,7 @@ import { mapArtist, mapAlbum, mapSong, firstArtistGenre, wrap, clamp, parseIntPa
 import { LEADING_ARTICLES } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { PLAYABLE } from "../../utils/libraryEligibility";
+import { artistGenresSql } from "../../utils/genreSql";
 
 export const libraryRouter = Router();
 
@@ -390,9 +391,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
                 ${ALBUM_LIST_SELECT}
                 WHERE a."location" = 'LIBRARY'
                   AND EXISTS (
-                    SELECT 1 FROM jsonb_array_elements_text(
-                        COALESCE(NULLIF(NULLIF(ar."userGenres", 'null'::jsonb), '[]'::jsonb), ar.genres)
-                    ) g WHERE g ILIKE '%' || ${genre} || '%'
+                    SELECT 1 FROM jsonb_array_elements_text(${artistGenresSql("ar")}) g WHERE g ILIKE '%' || ${genre} || '%'
                 )
                   AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id)
                 ORDER BY a."sortName" ASC

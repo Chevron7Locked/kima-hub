@@ -92,11 +92,12 @@ export function mapSong(
 // Extract the first genre string from an artist's enriched genre array.
 // Prefers userGenres override; falls back to enrichment genres.
 // Tags starting with "_" are internal markers (e.g. "_no_mood_tags") — filtered out.
+// Only a JSON array counts as a list of genres, as in the genre filters (utils/genreSql.ts): a bare string or an
+// object in either column is none.
 export function firstArtistGenre(genres: unknown, userGenres: unknown): string | undefined {
-    const arr = ((userGenres as string[] | null)?.length
-        ? (userGenres as string[])
-        : (genres as string[] | null)) ?? [];
-    return arr.find((g) => g && !g.startsWith("_"));
+    const list = (value: unknown) => (Array.isArray(value) ? value.filter((g): g is string => typeof g === "string") : []);
+    const user = list(userGenres);
+    return (user.length > 0 ? user : list(genres)).find((g) => g && !g.startsWith("_"));
 }
 
 // Normalize codec names stored by the library scanner (e.g. "FLAC", "MPEG 1 Layer 3")
