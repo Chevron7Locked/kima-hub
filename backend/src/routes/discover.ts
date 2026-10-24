@@ -4,7 +4,7 @@ import { requireAuthOrToken, requireAdmin, requireAcquirePermission } from "../m
 import { prisma } from "../utils/db";
 import { listenBrainzService } from "../services/listenBrainz";
 import { startOfWeek, endOfWeek } from "date-fns";
-import { resolveViewWeek, resolveGenerationWeekStart, weekStartKey } from "../lib/discoveryWeek";
+import { resolveViewWeek, resolveGenerationWeekStart, weekStartKey, weekBoundaryIso } from "../lib/discoveryWeek";
 import { createLidarrClient, isLidarrConfigured } from "../services/lidarrClient";
 import fs from "fs";
 import path from "path";
@@ -330,7 +330,7 @@ router.get("/current", async (req, res) => {
         });
         const view = resolveViewWeek(calendarWeekStart, latestBatch?.weekStart ?? null);
         const weekStart = view.weekStart;
-        const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
+        const weekEnd = endOfWeek(view.weekOf, { weekStartsOn: 1 });
 
         const discoveryAlbums = await prisma.discoveryAlbum.findMany({
             where: {
@@ -546,8 +546,8 @@ router.get("/current", async (req, res) => {
         }
 
         res.json({
-            weekStart,
-            weekEnd,
+            weekStart: weekBoundaryIso(view.weekOf),
+            weekEnd: weekBoundaryIso(weekEnd),
             stale: view.stale,
             tracks,
             unavailable,

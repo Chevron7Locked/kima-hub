@@ -1,4 +1,4 @@
-import { startOfWeek, endOfWeek, addWeeks, isSameDay, isBefore, format } from "date-fns";
+import { startOfWeek, endOfWeek, addWeeks, addHours, isSameDay, isBefore, format } from "date-fns";
 
 /** date-fns weekStartsOn: 0=Sun..6=Sat. Discovery defaults to 1 (Monday). */
 export type WeekStartsOn = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -19,9 +19,25 @@ export function resolveGenerationWeekStart(now: Date, weekStartsOn: WeekStartsOn
 }
 
 export interface ViewWeek {
+  /** The batch's stored week start, which its albums are keyed by. */
   weekStart: Date;
+  /** Midnight starting the server's local week the batch belongs to. */
+  weekOf: Date;
   /** True when the displayed content is not from the current calendar week. */
   stale: boolean;
+}
+
+/**
+ * A stored week start is midnight starting a week in whatever zone the server
+ * ran in when it made the batch (UTC while the image forced it), at most 26
+ * hours (UTC+14 to UTC-12) from the same midnight here. Weeks are 168 hours
+ * apart, so half a week forward always lands inside the batch's own week.
+ */
+const HALF_WEEK_HOURS = 84;
+
+/** The local week a stored week start belongs to, whichever zone made it. */
+export function localWeekOf(storedWeekStart: Date, weekStartsOn: WeekStartsOn = 1): Date {
+  return startOfWeek(addHours(storedWeekStart, HALF_WEEK_HOURS), { weekStartsOn });
 }
 
 /**
@@ -34,12 +50,11 @@ export function resolveViewWeek(
   latestBatchWeekStart: Date | null
 ): ViewWeek {
   if (!latestBatchWeekStart) {
-    return { weekStart: calendarWeekStart, stale: false };
+    return { weekStart: calendarWeekStart, weekOf: calendarWeekStart, stale: false };
   }
-  // Stale only if the batch is strictly before the current calendar week.
+  const weekOf = localWeekOf(latestBatchWeekStart);
   // Same week or a future (early-generated) week counts as fresh.
-  const stale = isBefore(latestBatchWeekStart, calendarWeekStart);
-  return { weekStart: latestBatchWeekStart, stale };
+  return { weekStart: latestBatchWeekStart, weekOf, stale: isBefore(weekOf, calendarWeekStart) };
 }
 
 /**
@@ -49,4 +64,14 @@ export function resolveViewWeek(
  */
 export function weekStartKey(weekStart: Date): string {
   return format(weekStart, "yyyy-MM-dd");
+}
+
+/**
+ * A week boundary for API responses: ISO 8601 with the server's own offset, so
+ * its first ten characters are the server's calendar date, which the iPhone app
+ * shows, and it still parses to the exact instant. On a UTC server it is the
+ * text toISOString gives.
+ */
+export function weekBoundaryIso(date: Date): string {
+  return format(date, "yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
 }

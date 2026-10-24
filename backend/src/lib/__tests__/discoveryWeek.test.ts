@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import ts from "typescript";
 import {
+    localWeekOf,
     resolveGenerationWeekStart,
     resolveViewWeek,
     weekStartKey,
@@ -190,10 +191,10 @@ interface RunSeen {
 
 /**
  * discoveryWeek.ts run in a fresh Node process with the time zone `tz` (Jest's
- * own processes are pinned to UTC), once per local wall-clock time
- * [year, month, day, hour, minute].
+ * own processes are pinned to UTC). `body` sees the module as `week` and
+ * date-fns as `dateFns`, and leaves its answer in `seen`.
  */
-function inTimeZone(tz: string, wallTimes: number[][]): RunSeen[] {
+function runInTimeZone<T>(tz: string, body: string): T {
     const source = fs.readFileSync(path.join(__dirname, "../discoveryWeek.ts"), "utf8");
     const module = ts.transpileModule(source, {
         compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 },
@@ -201,18 +202,9 @@ function inTimeZone(tz: string, wallTimes: number[][]): RunSeen[] {
     const script = `
         const module = { exports: {} }, exports = module.exports;
         ${module}
-        const { startOfWeek } = require("date-fns");
-        const seen = ${JSON.stringify(wallTimes)}.map(([y, mo, d, h, mi]) => {
-            const now = new Date(y, mo - 1, d, h, mi);
-            const start = module.exports.resolveGenerationWeekStart(now, 1);
-            return {
-                zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                key: module.exports.weekStartKey(start),
-                calendarKey: module.exports.weekStartKey(startOfWeek(now, { weekStartsOn: 1 })),
-                startsAt: [start.getDay(), start.getHours(), start.getMinutes()],
-                utcDate: start.toISOString().slice(0, 10),
-            };
-        });
+        const week = module.exports, dateFns = require("date-fns");
+        let seen;
+        ${body}
         process.stdout.write(JSON.stringify(seen));
     `;
     return JSON.parse(
@@ -221,6 +213,23 @@ function inTimeZone(tz: string, wallTimes: number[][]): RunSeen[] {
             env: { ...process.env, TZ: tz },
         }).toString(),
     );
+}
+
+/** A generation run at each local wall-clock time [year, month, day, hour, minute]. */
+function inTimeZone(tz: string, wallTimes: number[][]): RunSeen[] {
+    return runInTimeZone(tz, `
+        seen = ${JSON.stringify(wallTimes)}.map(([y, mo, d, h, mi]) => {
+            const now = new Date(y, mo - 1, d, h, mi);
+            const start = week.resolveGenerationWeekStart(now, 1);
+            return {
+                zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                key: week.weekStartKey(start),
+                calendarKey: week.weekStartKey(dateFns.startOfWeek(now, { weekStartsOn: 1 })),
+                startsAt: [start.getDay(), start.getHours(), start.getMinutes()],
+                utcDate: start.toISOString().slice(0, 10),
+            };
+        });
+    `);
 }
 
 describe("the week on the server's own clock (TZ)", () => {
@@ -263,6 +272,171 @@ describe("the week on the server's own clock (TZ)", () => {
             { key: "2026-03-09", startsAt: [1, 0, 0] },
             { key: "2026-11-02", startsAt: [1, 0, 0] },
             { key: "2026-11-02", startsAt: [1, 0, 0] },
+        ]);
+    });
+});
+
+describe("localWeekOf -- the week a stored week start belongs to", () => {
+    const HOUR = 3_600_000;
+    const MONDAY = Date.UTC(2026, 4, 25);
+    const WEEK = 7 * 24 * HOUR;
+
+    // A week start stored in any zone is within 26 hours (UTC+14 to UTC-12) of
+    // the same midnight here; weeks are 168 hours apart, so no shift in that
+    // range can reach a neighbouring week.
+    it("finds the stored week, never the one before or after, for every shift of up to 26 hours", () => {
+        for (let shift = -26; shift <= 26; shift++) {
+            for (const weeks of [-1, 0, 1]) {
+                const stored = new Date(MONDAY + weeks * WEEK + shift * HOUR);
+                expect([weeks, shift, localWeekOf(stored).getTime()]).toEqual([weeks, shift, MONDAY + weeks * WEEK]);
+            }
+        }
+    });
+
+    it("keeps the batch's own instant for its albums and the local week for display", () => {
+        const stored = new Date(MONDAY - 9 * HOUR); // midnight Monday in Tokyo
+        const view = resolveViewWeek(new Date(MONDAY), stored);
+        expect(view.weekStart).toBe(stored);
+        expect(view.weekOf.getTime()).toBe(MONDAY);
+        expect(view.stale).toBe(false);
+    });
+});
+
+/** What GET /current would show for one stored batch, viewed at one local wall-clock time. */
+interface ViewSeen {
+    zone: string;
+    stale: boolean;
+    /** The stored week start was handed back unchanged, for the album queries. */
+    keepsStored: boolean;
+    /** The local week the batch counts as, YYYY-MM-DD. */
+    weekOf: string | null;
+    /** The response's weekStart and weekEnd text, and whether each parses back to its instant. */
+    weekStartText: string | null;
+    weekEndText: string | null;
+    textsParseBack: boolean | null;
+}
+
+/** A stored week start: an exact instant, or midnight of [year, month, day] on the viewing zone's own clock. */
+type Stored = number | number[];
+
+function viewInTimeZone(tz: string, cases: { now: number[]; stored: Stored }[]): ViewSeen[] {
+    return runInTimeZone(tz, `
+        seen = ${JSON.stringify(cases)}.map(({ now: [y, mo, d, h, mi], stored }) => {
+            const now = new Date(y, mo - 1, d, h, mi);
+            const batch = typeof stored === "number" ? new Date(stored) : new Date(stored[0], stored[1] - 1, stored[2]);
+            const view = week.resolveViewWeek(dateFns.startOfWeek(now, { weekStartsOn: 1 }), batch);
+            const shown = view.weekOf && typeof week.weekBoundaryIso === "function";
+            const weekEnd = view.weekOf && dateFns.endOfWeek(view.weekOf, { weekStartsOn: 1 });
+            return {
+                zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                stale: view.stale,
+                keepsStored: view.weekStart.getTime() === batch.getTime(),
+                weekOf: view.weekOf ? week.weekStartKey(view.weekOf) : null,
+                weekStartText: shown ? week.weekBoundaryIso(view.weekOf) : null,
+                weekEndText: shown ? week.weekBoundaryIso(weekEnd) : null,
+                textsParseBack: shown
+                    ? new Date(week.weekBoundaryIso(view.weekOf)).getTime() === view.weekOf.getTime()
+                        && new Date(week.weekBoundaryIso(weekEnd)).getTime() === weekEnd.getTime()
+                    : null,
+            };
+        });
+    `);
+}
+
+describe("the week GET /current shows, on the server's own clock (TZ)", () => {
+    const HOUR = 3_600_000;
+    const ZONES = ["Asia/Tokyo", "Pacific/Kiritimati", "UTC", "America/Los_Angeles"];
+    // Batches made while the image forced UTC: Monday midnight UTC.
+    const UTC_THIS_MONDAY = Date.UTC(2026, 4, 25);
+    const UTC_LAST_MONDAY = Date.UTC(2026, 4, 18);
+    const UTC_NEXT_MONDAY = Date.UTC(2026, 5, 1);
+    const WEDNESDAY = [2026, 5, 27, 12, 0];
+    const SUNDAY_NIGHT = [2026, 5, 31, 22, 0];
+
+    it.each(ZONES)("counts a batch made under the old UTC pin as this week when viewed mid-week, in %s", (tz) => {
+        const seen = viewInTimeZone(tz, [{ now: WEDNESDAY, stored: UTC_THIS_MONDAY }]);
+        expect(seen.map(({ zone, stale, keepsStored }) => ({ zone, stale, keepsStored }))).toEqual([
+            { zone: tz, stale: false, keepsStored: true },
+        ]);
+    });
+
+    it.each(ZONES)("still flags last week's batch as stale, whether made under the UTC pin or here, in %s", (tz) => {
+        const seen = viewInTimeZone(tz, [
+            { now: WEDNESDAY, stored: UTC_LAST_MONDAY },
+            { now: WEDNESDAY, stored: [2026, 5, 18] },
+        ]);
+        expect(seen.map(({ zone, stale }) => ({ zone, stale }))).toEqual([
+            { zone: tz, stale: true },
+            { zone: tz, stale: true },
+        ]);
+    });
+
+    it.each(ZONES)("treats this week's and next week's batches made here as fresh, in %s", (tz) => {
+        const seen = viewInTimeZone(tz, [
+            { now: WEDNESDAY, stored: [2026, 5, 25] },
+            { now: SUNDAY_NIGHT, stored: [2026, 6, 1] },
+            { now: SUNDAY_NIGHT, stored: UTC_NEXT_MONDAY },
+        ]);
+        expect(seen.map(({ stale }) => stale)).toEqual([false, false, false]);
+    });
+
+    it.each(ZONES)("names the batch's local week, with weekEnd that week's last instant, in %s", (tz) => {
+        const seen = viewInTimeZone(tz, [
+            { now: WEDNESDAY, stored: UTC_THIS_MONDAY },
+            { now: WEDNESDAY, stored: UTC_LAST_MONDAY },
+            { now: SUNDAY_NIGHT, stored: [2026, 6, 1] },
+        ]);
+        const offset = { "Asia/Tokyo": "+09:00", "Pacific/Kiritimati": "+14:00", UTC: "Z", "America/Los_Angeles": "-07:00" }[tz];
+        expect(seen.map(({ weekOf, weekStartText, weekEndText, textsParseBack }) => ({ weekOf, weekStartText, weekEndText, textsParseBack }))).toEqual([
+            { weekOf: "2026-05-25", weekStartText: `2026-05-25T00:00:00.000${offset}`, weekEndText: `2026-05-31T23:59:59.999${offset}`, textsParseBack: true },
+            { weekOf: "2026-05-18", weekStartText: `2026-05-18T00:00:00.000${offset}`, weekEndText: `2026-05-24T23:59:59.999${offset}`, textsParseBack: true },
+            { weekOf: "2026-06-01", weekStartText: `2026-06-01T00:00:00.000${offset}`, weekEndText: `2026-06-07T23:59:59.999${offset}`, textsParseBack: true },
+        ]);
+    });
+
+    it("gets both daylight-saving changes right in Los Angeles", () => {
+        const springWednesday = [2026, 3, 11, 12, 0];
+        const fallWednesday = [2026, 11, 4, 12, 0];
+        const seen = viewInTimeZone("America/Los_Angeles", [
+            { now: springWednesday, stored: Date.UTC(2026, 2, 9) },
+            { now: springWednesday, stored: Date.UTC(2026, 2, 2) },
+            { now: springWednesday, stored: [2026, 3, 9] },
+            { now: springWednesday, stored: [2026, 3, 2] },
+            { now: fallWednesday, stored: Date.UTC(2026, 10, 2) },
+            { now: fallWednesday, stored: Date.UTC(2026, 9, 26) },
+            { now: fallWednesday, stored: [2026, 11, 2] },
+            { now: fallWednesday, stored: [2026, 10, 26] },
+        ]);
+        expect(seen.map(({ stale, weekOf }) => ({ stale, weekOf }))).toEqual([
+            { stale: false, weekOf: "2026-03-09" },
+            { stale: true, weekOf: "2026-03-02" },
+            { stale: false, weekOf: "2026-03-09" },
+            { stale: true, weekOf: "2026-03-02" },
+            { stale: false, weekOf: "2026-11-02" },
+            { stale: true, weekOf: "2026-10-26" },
+            { stale: false, weekOf: "2026-11-02" },
+            { stale: true, weekOf: "2026-10-26" },
+        ]);
+        expect(seen[4].weekStartText).toBe("2026-11-02T00:00:00.000-08:00");
+        expect(seen[0].weekEndText).toBe("2026-03-15T23:59:59.999-07:00");
+    });
+
+    // The widest gap between two zones, 26 hours, in both directions: an
+    // operator who moves the server from UTC+14 to UTC-12, or back.
+    it.each([
+        ["Etc/GMT+12", -14],
+        ["Pacific/Kiritimati", +12],
+    ])("keeps every week apart when batches were made 26 hours away, viewed in %s", (tz, madeAtOffsetFromUtc) => {
+        const madeThere = (utcMonday: number) => utcMonday + (madeAtOffsetFromUtc as number) * HOUR;
+        const seen = viewInTimeZone(tz as string, [
+            { now: WEDNESDAY, stored: madeThere(UTC_THIS_MONDAY) },
+            { now: WEDNESDAY, stored: madeThere(UTC_LAST_MONDAY) },
+            { now: SUNDAY_NIGHT, stored: madeThere(UTC_NEXT_MONDAY) },
+        ]);
+        expect(seen.map(({ zone, stale, weekOf }) => ({ zone, stale, weekOf }))).toEqual([
+            { zone: tz, stale: false, weekOf: "2026-05-25" },
+            { zone: tz, stale: true, weekOf: "2026-05-18" },
+            { zone: tz, stale: false, weekOf: "2026-06-01" },
         ]);
     });
 });

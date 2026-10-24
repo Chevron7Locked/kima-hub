@@ -261,6 +261,29 @@ describe('GET /discover/current -- bounded latest-completed-batch fallback', () 
         expect(albumQuery.where.weekStartDate.toISOString().slice(0, 10)).toBe('2026-06-01');
     });
 
+    // The server's time zone changed since the batch was made: its stored week
+    // start is midnight Monday in Tokyo, 15:00 on Sunday here (UTC). It is still
+    // this week's batch, shown as this week, and its albums are still found by
+    // the instant they were stored under.
+    it('ZONE CHANGE: a batch made at another zone\'s midnight counts as its own week, keyed by its stored instant', async () => {
+        const tokyoMonday = new Date('2026-05-24T15:00:00.000Z');
+        (prisma.discoveryBatch.findFirst as jest.Mock).mockResolvedValue({ weekStart: tokyoMonday });
+        (prisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue([
+            { ...ACTIVE_ALBUM, weekStartDate: tokyoMonday, downloadedAt: tokyoMonday },
+        ]);
+
+        const res = await request(app).get('/discover/current');
+
+        expect(res.status).toBe(200);
+        expect(res.body.stale).toBe(false);
+        expect(res.body.weekStart).toBe(`${CALENDAR_MONDAY}T00:00:00.000Z`);
+        expect(res.body.weekEnd).toBe('2026-05-31T23:59:59.999Z');
+        const albumQuery = (prisma.discoveryAlbum.findMany as jest.Mock).mock.calls[0][0];
+        expect(albumQuery.where.weekStartDate.getTime()).toBe(tokyoMonday.getTime());
+        const unavailQuery = (prisma.unavailableAlbum.findMany as jest.Mock).mock.calls[0][0];
+        expect(unavailQuery.where.weekStartDate.getTime()).toBe(tokyoMonday.getTime());
+    });
+
     it('HAPPY PATH: batch matches the calendar week -> served, not stale', async () => {
         const sameWeek = new Date(`${CALENDAR_MONDAY}T00:00:00.000Z`);
         (prisma.discoveryBatch.findFirst as jest.Mock).mockResolvedValue({ weekStart: sameWeek });
