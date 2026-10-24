@@ -5,7 +5,7 @@
  * would pass without the widening.
  */
 import { Prisma } from "@prisma/client";
-import { prisma } from "../../utils/db";
+import { connectionLimit, prisma } from "../../utils/db";
 import { MAX_SCAN_TUPLES, efFor, withEfSearch } from "../../utils/knn";
 import { searchTracksByEmbedding } from "../textEmbeddingBridge";
 
@@ -162,10 +162,9 @@ describe("utils/knn helper contract", () => {
         const [{ pid }] = await withEfSearch(500, (tx) => tx.$queryRaw<Array<{ pid: number }>>`
             SELECT pg_backend_pid() AS pid
         `);
-        // Twice the pool's size of transactions held open together take every pooled connection, so one of them
-        // reads the connection the settings were made on.
-        const poolSize = Number(process.env.DATABASE_POOL_SIZE ?? 5);
-        const reads = await Promise.all(Array.from({ length: 2 * poolSize }, () =>
+        // As many transactions held open together as the pool holds connections take every one of them, so one reads
+        // the connection the settings were made on.
+        const reads = await Promise.all(Array.from({ length: connectionLimit }, () =>
             prisma.$transaction(async (tx) => {
                 // pgvector's settings exist on a connection once it has used a vector.
                 await tx.$queryRaw`SELECT '[1]'::vector::text`;

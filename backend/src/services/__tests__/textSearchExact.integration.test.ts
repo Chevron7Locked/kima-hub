@@ -1,21 +1,52 @@
 /**
  * Text search's exact second read, on a real database: when the vector index returns fewer rows than asked, the search
- * reads every searchable track's distance in the same transaction, so the answer is full and exact. Here the index is
- * made to stop early, as it does once it reaches its scan cap on a library far larger than this one (utils/knn.ts):
- * the wrapper below turns the keep-going scan off after the product's own settings, so only the first walk of
- * ef_search candidates runs. (On 2,000 vectors a low hnsw.max_scan_tuples did not stop it.)
+ * reads every searchable track's distance, after the index's transaction has ended, so the answer is full and exact.
+ * Here the index is made to stop early, as it does once it reaches its scan cap on a library far larger than this one
+ * (utils/knn.ts): the wrapper below turns the keep-going scan off after the product's own settings, so only the first
+ * walk of ef_search candidates runs. (On 2,000 vectors a low hnsw.max_scan_tuples did not stop it.)
  */
 import type { Prisma } from "@prisma/client";
+
+/** Whether the index's transaction had ended when the exact read began; null until an exact read runs. */
+let mockExactAfterIndex: boolean | null = null;
+let mockIndexOpen = false;
+/** Set to make the exact read slow: a lock held for SLOW_MS blocks it, as a long read on a slow disk would. */
+let mockSlow = false;
+const SLOW_MS = 6000;
+let mockLocker: Promise<unknown> | null = null;
+
+/** Runs before an exact read on whichever client runs it: records when it ran, and slows it if asked. */
+async function mockBeforeExact(query: unknown): Promise<void> {
+    const sql = (query as { sql?: unknown } | undefined)?.sql;
+    if (typeof sql !== "string" || !sql.includes(") + 0, t.id")) return;
+    mockExactAfterIndex = !mockIndexOpen;
+    if (!mockSlow) return;
+    const { prisma } = jest.requireActual("../../utils/db");
+    let locked!: () => void;
+    const holding = new Promise<void>((resolve) => (locked = resolve));
+    mockLocker = prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await tx.$executeRawUnsafe(`LOCK TABLE track_embeddings IN ACCESS EXCLUSIVE MODE`);
+        locked();
+        await new Promise((resolve) => setTimeout(resolve, SLOW_MS));
+    }, { timeout: 4 * SLOW_MS, maxWait: 4 * SLOW_MS });
+    await holding;
+}
 
 jest.mock("../../utils/knn", () => {
     const actual = jest.requireActual("../../utils/knn");
     return {
         ...actual,
-        withEfSearch: <T>(ef: number, run: (tx: Prisma.TransactionClient) => Promise<T>) =>
-            actual.withEfSearch(ef, async (tx: Prisma.TransactionClient) => {
-                await tx.$queryRaw`SELECT set_config('hnsw.iterative_scan', 'off', true)`;
-                return run(tx);
-            }),
+        withEfSearch: async <T>(ef: number, run: (tx: Prisma.TransactionClient) => Promise<T>) => {
+            mockIndexOpen = true;
+            try {
+                return await actual.withEfSearch(ef, async (tx: Prisma.TransactionClient) => {
+                    await tx.$queryRaw`SELECT set_config('hnsw.iterative_scan', 'off', true)`;
+                    return run(tx);
+                });
+            } finally {
+                mockIndexOpen = false;
+            }
+        },
     };
 });
 
@@ -31,6 +62,14 @@ jest.mock("../../utils/redis", () => ({
 
 import { prisma } from "../../utils/db";
 import { searchTracksByEmbedding } from "../textEmbeddingBridge";
+
+// Every exact read passes through here, on the pool or on a transaction's client: the latter runs this same method
+// with itself as `this`, which is passed on unchanged.
+const queryRaw = prisma.$queryRaw;
+jest.spyOn(prisma, "$queryRaw").mockImplementation(async function (this: unknown, ...args: unknown[]) {
+    await mockBeforeExact(args[0]);
+    return (queryRaw as (...a: unknown[]) => Promise<unknown>).apply(this, args);
+} as typeof prisma.$queryRaw);
 
 jest.setTimeout(120_000);
 
@@ -109,7 +148,10 @@ afterAll(async () => {
     await prisma.$disconnect();
 });
 
-beforeEach(() => mockDebug.mockClear());
+beforeEach(() => {
+    mockDebug.mockClear();
+    mockExactAfterIndex = null;
+});
 
 describe("text search's exact second read", () => {
     it("is not taken when the index fills the limit", async () => {
@@ -119,7 +161,7 @@ describe("text search's exact second read", () => {
         expect(fellBack()).toBe(false);
     });
 
-    it("fills the limit with the exact nearest after a vectors re-run left the index full of deleted ones", async () => {
+    it("fills the limit with the exact nearest after a vectors re-run filled the index with deleted ones", async () => {
         const back = ALL.filter((_, i) => i % 20 === 0);
         await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id LIKE 'cexact%'`);
         await writeVectors(back);
@@ -136,5 +178,22 @@ describe("text search's exact second read", () => {
         const rows = await searchTracksByEmbedding(QUERY, 50);
         expect(fellBack()).toBe(true);
         expect(rows.map((r) => r.id)).toEqual(bruteForce(back, 50));
+    });
+
+    it("reads after the index's transaction ends, so a read past Prisma's 5-second limit still answers", async () => {
+        const back = ALL.filter((_, i) => i % 20 === 0);
+        await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id LIKE 'cexact%'`);
+        await writeVectors(back);
+        mockSlow = true;
+        try {
+            const started = Date.now();
+            const rows = await searchTracksByEmbedding(QUERY, 50);
+            expect(Date.now() - started).toBeGreaterThanOrEqual(SLOW_MS);
+            expect(mockExactAfterIndex).toBe(true);
+            expect(rows.map((r) => r.id)).toEqual(bruteForce(back, 50));
+        } finally {
+            mockSlow = false;
+            await mockLocker;
+        }
     });
 });

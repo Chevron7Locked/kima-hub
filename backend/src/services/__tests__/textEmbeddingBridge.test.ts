@@ -134,21 +134,21 @@ describe("searchTracksByText", () => {
         expect(rows).toEqual([ROW_A, ROW_B]);
     });
 
-    it("reads every searchable track, in the same transaction, when the index returns fewer than asked", async () => {
-        txQueryRawMock
-            .mockResolvedValueOnce([{}])
-            .mockResolvedValueOnce([ROW_A])
-            .mockResolvedValueOnce([ROW_A, ROW_B]);
+    it("reads every searchable track after the index's transaction when the index returns too few", async () => {
+        txQueryRawMock.mockResolvedValueOnce([{}]).mockResolvedValueOnce([ROW_A]);
+        queryRawMock.mockResolvedValueOnce([ROW_A, ROW_B]);
 
         const pending = searchTracksByText("solo piano", 2);
         await flush();
         deliverResponse(lastRequest!, { success: true, embedding: [0.1, 0.2, -0.3] });
 
         expect(await pending).toEqual([ROW_A, ROW_B]);
+        // The exact read is its own query on the pool, outside the index's transaction and its time limit.
         expect(transactionMock).toHaveBeenCalledTimes(1);
-        expect(txQueryRawMock).toHaveBeenCalledTimes(3);
+        expect(txQueryRawMock).toHaveBeenCalledTimes(2);
+        expect(queryRawMock).toHaveBeenCalledTimes(1);
         // The distance offset by "+ 0" is not an order the vector index can give, so every row is read.
-        const [exact] = txQueryRawMock.mock.calls[2] as [Prisma.Sql];
+        const [exact] = queryRawMock.mock.calls[0] as [Prisma.Sql];
         expect(exact.sql).toContain("ORDER BY (te.embedding <=>");
         expect(exact.sql).toContain(") + 0, t.id");
         expect(exact.values).toEqual(["[0.1,0.2,-0.3]", "laion-clap-music-onnx-v1", "[0.1,0.2,-0.3]", 2]);
@@ -179,7 +179,7 @@ describe("searchTracksByText", () => {
             deliverResponse(deadRequest!, { success: true, embedding: [1, 1, 1] });
 
             txQueryRawMock.mockResolvedValue([ROW_A]);
-            const second = searchTracksByText("loud piano", 5);
+            const second = searchTracksByText("loud piano", 1);
             await flush();
             expect(lastRequest!.text).toBe("loud piano");
             deliverResponse(lastRequest!, { success: true, embedding: [0.4, 0.5, 0.6] });

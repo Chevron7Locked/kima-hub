@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
 import { Prisma } from "@prisma/client";
+import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { withTimeout } from "../utils/timeout";
 import { logger } from "../utils/logger";
@@ -204,32 +205,35 @@ function searchableSql(vector: string): Prisma.Sql {
 /**
  * The ranking half of searchTracksByText, for an already-embedded query. The vector index answers it, scanning on past
  * deleted or filtered-out vectors up to a cap (utils/knn.ts). Where that still comes back short (right after a re-run
- * on a large library, or fewer searchable tracks than `limit`), the same transaction reads the distance of every
- * searchable track instead, so the answer is full and exact at any library size.
+ * on a large library, or fewer searchable tracks than `limit`), a second query reads the distance of every searchable
+ * track instead, so the answer is full and exact at any library size. That read runs after the index's transaction
+ * has ended, so Prisma's 5-second limit on an interactive transaction does not cut it off on a large library or a
+ * slow disk; it needs none of the transaction's index settings.
  */
 export async function searchTracksByEmbedding(
     embedding: number[],
     limit: number,
 ): Promise<TextSearchRow[]> {
     const vector = formatEmbedding(embedding);
-    return withEfSearch(efFor(limit), async (tx) => {
-        // The relaxed-order rows are re-sorted outside the materialized step ("+ 0" keeps Postgres 17+ from reusing
-        // the index order), with equal distances (copies of one song) in track id order.
-        const nearest = await tx.$queryRaw<TextSearchRow[]>(Prisma.sql`
+    // The relaxed-order rows are re-sorted outside the materialized step ("+ 0" keeps Postgres 17+ from reusing the
+    // index order), with equal distances (copies of one song) in track id order. Which of several equal copies make the
+    // cut at the limit is still the index's choice.
+    const nearest = await withEfSearch(efFor(limit), (tx) =>
+        tx.$queryRaw<TextSearchRow[]>(Prisma.sql`
             WITH nearest AS MATERIALIZED (
                 ${searchableSql(vector)}
                 ORDER BY te.embedding <=> ${vector}::vector
                 LIMIT ${limit}
             )
             SELECT * FROM nearest ORDER BY distance + 0, id
-        `);
-        if (nearest.length >= limit) return nearest;
-        logger.debug(`[VIBE-SEARCH] The index returned ${nearest.length} of ${limit}; reading every searchable track`);
-        // "+ 0" keeps the index from answering: every searchable track's distance, sorted.
-        return tx.$queryRaw<TextSearchRow[]>(Prisma.sql`
-            ${searchableSql(vector)}
-            ORDER BY (te.embedding <=> ${vector}::vector) + 0, t.id
-            LIMIT ${limit}
-        `);
-    });
+        `),
+    );
+    if (nearest.length >= limit) return nearest;
+    logger.debug(`[VIBE-SEARCH] The index returned ${nearest.length} of ${limit}; reading every searchable track`);
+    // "+ 0" keeps the index from answering: every searchable track's distance, sorted.
+    return prisma.$queryRaw<TextSearchRow[]>(Prisma.sql`
+        ${searchableSql(vector)}
+        ORDER BY (te.embedding <=> ${vector}::vector) + 0, t.id
+        LIMIT ${limit}
+    `);
 }
