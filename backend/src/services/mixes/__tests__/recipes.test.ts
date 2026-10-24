@@ -122,4 +122,40 @@ describe("drawMembers", () => {
     it("returns every member when there are fewer than the limit", () => {
         expect(drawMembers(members(MIN_MIX_TRACKS + 1), "seed", 20)).toHaveLength(MIN_MIX_TRACKS + 1);
     });
+
+    const perArtistOf = (pool: { id: string; artistId: string }[], draw: string[]) => {
+        const counts = new Map<string, number>();
+        for (const id of draw) {
+            const artist = pool.find((m) => m.id === id)!.artistId;
+            counts.set(artist, (counts.get(artist) ?? 0) + 1);
+        }
+        return counts;
+    };
+
+    it("keeps 2 per artist for a draw smaller than 8 that 2 per artist can fill", () => {
+        // Two artists with ten songs each: a draw of 4 is two from each on every seed.
+        const pool = members(20, (i) => `a${i % 2}`);
+        for (let s = 0; s < 200; s++) {
+            const draw = drawMembers(pool, `seed-${s}`, 4);
+            expect(draw).toHaveLength(4);
+            expect([...perArtistOf(pool, draw).values()]).toEqual([2, 2]);
+        }
+    });
+
+    it("draws evenly within the cap: three artists, ten songs each, 3 per artist, each song about 30% of the time", () => {
+        const pool = members(30, (i) => `a${i % 3}`);
+        const counts = new Map(pool.map((m) => [m.id, 0]));
+        const seeds = 4000;
+        for (let s = 0; s < seeds; s++) {
+            const draw = drawMembers(pool, `seed-${s}`, 20);
+            // 2 per artist gives 6, under 8, so the cap is 3: nine songs, three from each artist.
+            expect([...perArtistOf(pool, draw).values()]).toEqual([3, 3, 3]);
+            for (const id of draw) counts.set(id, counts.get(id)! + 1);
+        }
+        // Each count is binomial(4000, 0.3): mean 1,200, SD 29; six SDs either side.
+        for (const count of counts.values()) {
+            expect(count).toBeGreaterThan(1200 - 174);
+            expect(count).toBeLessThan(1200 + 174);
+        }
+    });
 });

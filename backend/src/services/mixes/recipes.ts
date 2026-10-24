@@ -300,7 +300,8 @@ async function recipeMembers(recipe: Recipe): Promise<Member[] | null> {
 /**
  * Up to `limit` of `members`, each with an equal chance, in an order fixed by `seed`: every member is ranked by a hash
  * of the seed and its id, so one seed always draws the same songs and a member added later leaves the others' order
- * alone. At most 2 songs per artist; while that leaves fewer than MIN_MIX_TRACKS, the cap rises to 3, then lifts.
+ * alone. At most 2 songs per artist; while that leaves fewer than MIN_MIX_TRACKS (or than `limit`, if smaller), the cap
+ * rises to 3, then lifts.
  */
 export function drawMembers(members: Member[], seed: string, limit: number): string[] {
     const ranked = members
@@ -320,7 +321,8 @@ export function drawMembers(members: Member[], seed: string, limit: number): str
             perArtist.set(artistId, count + 1);
             picked.push(id);
         }
-        if (picked.length >= MIN_MIX_TRACKS) break;
+        // A draw asked for fewer than MIN_MIX_TRACKS (a short mood page) keeps its cap once it has them all.
+        if (picked.length >= Math.min(limit, MIN_MIX_TRACKS)) break;
     }
     return picked;
 }
