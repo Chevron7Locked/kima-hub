@@ -496,7 +496,7 @@ describe("every shipped recipe on the synthetic library", () => {
         const stats = (signal: Signal) => {
             if (signal === "minor") return minor;
             if ((MOODS as readonly string[]).includes(signal)) return state.moods[signal as Mood];
-            return state.readings[READING_STATS[signal as keyof typeof READING_STATS]];
+            return state.readings[READING_STATS[signal as keyof typeof READING_STATS]]!;
         };
         const { bpm, instrumentalMax, instrumentalMin, arousalPct, minor: minorOnly } = r.filters;
         const eligible = rows.filter(

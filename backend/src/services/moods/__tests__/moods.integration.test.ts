@@ -5,9 +5,13 @@
  * progress count.
  */
 import { prisma } from "../../../utils/db";
+import { logger } from "../../../utils/logger";
 import { parseEmbedding } from "../../../utils/embedding";
+import { RECIPES, UnrankableLibraryError, getRecipe, pickStationTracks } from "../../mixes/recipes";
+import { refreshMoodSnapshot } from "../../moodBucketService";
 import { MOODS, MOOD_HEADS, type Mood } from "../heads";
 import { READINGS, buildMoodState, buildMoods, loadMoodState, moodProgress, updateMoods, type Reading } from "../state";
+import { writeMoodTags } from "../tags";
 import reference from "./fixtures/shipped-reference.json";
 
 jest.mock("../../../utils/logger", () => ({
@@ -273,8 +277,8 @@ describe("the library statistics", () => {
             expect(state.moods[mood].sd).toBeGreaterThan(0);
         }
         for (const reading of READINGS) {
-            expect(state.readings[reading].mean).toBeCloseTo(expected.readings[reading].mean, 9);
-            expect(state.readings[reading].sd).toBeCloseTo(expected.readings[reading].sd, 9);
+            expect(state.readings[reading]!.mean).toBeCloseTo(expected.readings[reading].mean, 9);
+            expect(state.readings[reading]!.sd).toBeCloseTo(expected.readings[reading].sd, 9);
         }
         // The track without an instrumental reading counts for every other statistic.
         expect(expected.readings.instrumental_logit.n).toBe(ELIGIBLE - 1);
@@ -284,7 +288,7 @@ describe("the library statistics", () => {
     it("rebuild when an eligible track's reading changes, without rescoring", async () => {
         await prisma.track.update({ where: { id: trackId(6) }, data: { arousal: 0.987 } });
         expect(await buildMoods()).toEqual({ scored: 0, stateChanged: true });
-        expect((await loadMoodState())!.readings.arousal.mean).toBeCloseTo((await direct()).readings.arousal.mean, 9);
+        expect((await loadMoodState())!.readings.arousal!.mean).toBeCloseTo((await direct()).readings.arousal.mean, 9);
     });
 
     it("stay when only a track outside them changes", async () => {
@@ -316,5 +320,84 @@ describe("the mood step's progress", () => {
         expect(await moodProgress()).toEqual({ total: present, completed: present - 1 });
         await buildMoods();
         expect(await moodProgress()).toEqual({ total: present, completed: present });
+    });
+});
+
+describe("a re-run that deletes a sound vector while the step scores it", () => {
+    it("with no statistics row to lock, leaves the step writing nothing, and the next pass builds", async () => {
+        const [gone, waiting] = [trackId(3), trackId(4)];
+        await buildMoods();
+        // As after a rescore: no statistics row, and both tracks owed scores.
+        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+        await prisma.$executeRawUnsafe(`DELETE FROM track_moods WHERE track_id IN ($1, $2)`, gone, waiting);
+        let building: Promise<{ scored: number; stateChanged: boolean }> | undefined;
+        await prisma.$transaction(
+            async (tx) => {
+                await tx.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id = $1`, gone);
+                building = buildMoods();
+                // The build's insert waits on the deleted vector's row; watched from outside this transaction.
+                const giveUp = Date.now() + 20_000;
+                for (;;) {
+                    if (Date.now() > giveUp) throw new Error("The build never waited on the deleted vector");
+                    const [{ n }] = await prisma.$queryRawUnsafe<Array<{ n: number }>>(
+                        `SELECT count(*)::int AS n FROM pg_stat_activity
+                         WHERE datname = current_database() AND wait_event_type = 'Lock'
+                           AND position('INSERT INTO track_moods' IN query) > 0`,
+                    );
+                    if (n > 0) break;
+                    await new Promise((resolve) => setTimeout(resolve, 20));
+                }
+            },
+            { timeout: 30_000, maxWait: 30_000 },
+        );
+        // Postgres refuses the insert as a serialization failure (40001), not a missing reference, and the build
+        // treats it as inputs that changed under it.
+        expect(await building).toEqual({ scored: 0, stateChanged: false });
+        expect(logger.info).toHaveBeenCalledWith(
+            "[Moods] Scores changed while the build waited; the next pass rebuilds them",
+        );
+        const [{ rows, states }] = await prisma.$queryRawUnsafe<Array<{ rows: number; states: number }>>(
+            `SELECT (SELECT count(*)::int FROM track_moods WHERE track_id = $1) AS rows,
+                    (SELECT count(*)::int FROM mood_state) AS states`,
+            waiting,
+        );
+        expect({ rows, states }).toEqual({ rows: 0, states: 0 });
+
+        expect(await buildMoods()).toEqual({ scored: 1, stateChanged: true });
+        await insertVector(gone, vector());
+        expect(await buildMoods()).toEqual({ scored: 1, stateChanged: true });
+    });
+});
+
+describe("a reading no eligible track has", () => {
+    it("is stored as absent while the moods' statistics build; only the recipes that blend it refuse", async () => {
+        await prisma.$executeRawUnsafe(`UPDATE "Track" SET instrumentalness = NULL WHERE id LIKE '${P}%'`);
+        expect(await buildMoods()).toEqual({ scored: 0, stateChanged: true });
+        expect(logger.warn).toHaveBeenCalledWith(
+            "[Moods] No eligible track has the instrumental_logit reading; recipes that blend it rank no songs",
+        );
+        const state = (await loadMoodState())!;
+        expect(state.readings.instrumental_logit).toBeNull();
+        expect(state.readings.arousal?.sd).toBeGreaterThan(0);
+        expect(state.readings.acoustic_logit?.sd).toBeGreaterThan(0);
+        for (const mood of MOODS) expect(state.moods[mood].sd).toBeGreaterThan(0);
+
+        await expect(pickStationTracks(getRecipe("focus"), { limit: 10 })).rejects.toThrow(UnrankableLibraryError);
+        await expect(pickStationTracks(getRecipe("focus"), { limit: 10 })).rejects.toThrow("instrumental reading");
+        const moodsOnly = [...RECIPES.values()].find((r) =>
+            r.components.every((c) => (MOODS as readonly string[]).includes(c.signal)) &&
+            r.filters.instrumentalMin === undefined && r.filters.instrumentalMax === undefined);
+        expect(moodsOnly).toBeDefined();
+        await expect(pickStationTracks(moodsOnly!, { limit: 10 })).resolves.toEqual(expect.any(Array));
+    });
+
+    it("leaves the song tags and the mood snapshot, which read moods only, working", async () => {
+        await writeMoodTags();
+        const tags = (await prisma.track.findMany({ where: { id: { startsWith: P } }, select: { moodTags: true } }))
+            .map((t) => t.moodTags);
+        expect(tags.some((t) => t.length > 0)).toBe(true);
+        expect(tags.some((t) => t.includes("focus"))).toBe(false);
+        const { snapshot } = await refreshMoodSnapshot();
+        expect(snapshot.views.size).toBe((await loadMoodState())!.trackCount);
     });
 });

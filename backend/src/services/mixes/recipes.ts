@@ -172,7 +172,7 @@ function valueSql(signal: Signal): string {
     return READING_SQL[READING_OF[signal]];
 }
 
-function statsOf(state: MoodState, signal: Mood | ReadingName): MoodStats {
+function statsOf(state: MoodState, signal: Mood | ReadingName): MoodStats | null {
     return isMood(signal) ? state.moods[signal] : state.readings[READING_OF[signal]];
 }
 
@@ -202,14 +202,21 @@ const SCORED_SONGS = Prisma.sql`
  * over the eligible songs (null when they all score the same). The key's scale has no stored statistics, so its mean
  * and spread are taken here, over the library songs with a key reading. The two one-row aggregates are materialized,
  * so they are computed once even where a query reads them once and the planner would otherwise recompute them for
- * every song. A component with no spread in `state` cannot be scored against: UnrankableLibraryError.
+ * every song. A component that is absent or has no spread in `state` cannot be scored against: UnrankableLibraryError.
  */
 export function recipeRankingSql(recipe: Recipe, state: MoodState): Prisma.Sql {
     const { components, filters } = recipe;
+    const scales = new Map<Signal, MoodStats>();
     for (const { signal } of components) {
-        if (signal !== "minor" && !(statsOf(state, signal).sd > 0)) {
+        if (signal === "minor") continue;
+        const stats = statsOf(state, signal);
+        if (!stats) {
+            throw new UnrankableLibraryError(recipe.id, `no song the statistics cover has the ${signal} reading`);
+        }
+        if (!(stats.sd > 0)) {
             throw new UnrankableLibraryError(recipe.id, `the library's ${signal} has no spread to score against`);
         }
+        scales.set(signal, stats);
     }
 
     const values = Prisma.raw(components.map(({ signal }, i) => `${valueSql(signal)} AS c${i}`).join(", "));
@@ -217,7 +224,7 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState): Prisma.Sql {
         components.map(({ signal, weight }, i) => {
             const value = Prisma.raw(`l.c${i}`);
             if (signal === "minor") return Prisma.sql`${weight}::float8 * (${value} - k.mean) / NULLIF(k.sd, 0)`;
-            const { mean, sd } = statsOf(state, signal);
+            const { mean, sd } = scales.get(signal)!;
             return Prisma.sql`${weight}::float8 * (${value} - ${mean}::float8) / ${sd}::float8`;
         }),
         " + ",

@@ -89,16 +89,13 @@ async function inputsFingerprint(tx: Prisma.TransactionClient): Promise<string> 
 }
 
 type StatColumn = `${Mood | Reading}_${"mean" | "sd"}`;
-const STAT_COLUMNS: StatColumn[] = [...MOODS, ...READINGS].flatMap((name) => [
-    `${name}_mean` as const,
-    `${name}_sd` as const,
-]);
 
 type StateColumns = Omit<Prisma.MoodStateCreateInput, "id" | "version" | "fingerprint" | "computed_at">;
 
 /**
  * Each mood's and reading's mean and population SD over the eligible tracks, or null when none is eligible. A reading
- * a track lacks leaves that track out of that reading's statistics only; a reading no eligible track has is an error.
+ * a track lacks leaves that track out of that reading's statistics only; a reading no eligible track has is stored as
+ * absent, so the moods keep their statistics and only the recipes that blend that reading refuse.
  */
 async function computeState(tx: Prisma.TransactionClient): Promise<StateColumns | null> {
     const aggregates = Prisma.raw(
@@ -118,13 +115,28 @@ async function computeState(tx: Prisma.TransactionClient): Promise<StateColumns 
           AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'
     `;
     if (row.n === 0) return null;
-    const stats = {} as Record<StatColumn, number>;
-    for (const column of STAT_COLUMNS) {
+    const finite = (column: StatColumn): number => {
         const value = row[column];
         if (value === null || !Number.isFinite(value)) {
             throw new Error(`[Moods] ${column} has no value over ${row.n} eligible tracks`);
         }
-        stats[column] = value;
+        return value;
+    };
+    const stats = {} as Record<`${Mood}_${"mean" | "sd"}`, number> &
+        Record<`${Reading}_${"mean" | "sd"}`, number | null>;
+    for (const mood of MOODS) {
+        stats[`${mood}_mean`] = finite(`${mood}_mean`);
+        stats[`${mood}_sd`] = finite(`${mood}_sd`);
+    }
+    for (const reading of READINGS) {
+        if (row[`${reading}_mean`] === null) {
+            logger.warn(`[Moods] No eligible track has the ${reading} reading; recipes that blend it rank no songs`);
+            stats[`${reading}_mean`] = null;
+            stats[`${reading}_sd`] = null;
+            continue;
+        }
+        stats[`${reading}_mean`] = finite(`${reading}_mean`);
+        stats[`${reading}_sd`] = finite(`${reading}_sd`);
     }
     return { track_count: row.n, ...stats };
 }
@@ -186,7 +198,8 @@ export interface MoodStats {
 export interface MoodState {
     trackCount: number;
     moods: Record<Mood, MoodStats>;
-    readings: Record<Reading, MoodStats>;
+    /** Null for a reading no eligible track has. */
+    readings: Record<Reading, MoodStats | null>;
 }
 
 /** The library's statistics, or null until the mood step has built them for these weights. */
@@ -197,14 +210,16 @@ export async function loadMoodState(): Promise<MoodState | null> {
 /** The statistics a stored row holds, or null for no row or a row of other weights. */
 export function moodStateOf(row: MoodStateRow | null): MoodState | null {
     if (!row || row.version !== MOOD_STATE_VERSION) return null;
-    const stats = (name: Mood | Reading): MoodStats => ({
-        mean: row[`${name}_mean` as const],
-        sd: row[`${name}_sd` as const],
-    });
+    const moodStats = (name: Mood): MoodStats => ({ mean: row[`${name}_mean`], sd: row[`${name}_sd`] });
+    const readingStats = (name: Reading): MoodStats | null => {
+        const mean = row[`${name}_mean`];
+        const sd = row[`${name}_sd`];
+        return mean === null || sd === null ? null : { mean, sd };
+    };
     return {
         trackCount: row.track_count,
-        moods: Object.fromEntries(MOODS.map((name) => [name, stats(name)])) as Record<Mood, MoodStats>,
-        readings: Object.fromEntries(READINGS.map((name) => [name, stats(name)])) as Record<Reading, MoodStats>,
+        moods: Object.fromEntries(MOODS.map((name) => [name, moodStats(name)])) as Record<Mood, MoodStats>,
+        readings: Object.fromEntries(READINGS.map((name) => [name, readingStats(name)])) as MoodState["readings"],
     };
 }
 

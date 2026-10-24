@@ -1155,12 +1155,12 @@ model MoodState {
   focus_sd                Float
   sleep_mean              Float
   sleep_sd                Float
-  arousal_mean            Float
-  arousal_sd              Float
-  instrumental_logit_mean Float
-  instrumental_logit_sd   Float
-  acoustic_logit_mean     Float
-  acoustic_logit_sd       Float
+  arousal_mean            Float?
+  arousal_sd              Float?
+  instrumental_logit_mean Float?
+  instrumental_logit_sd   Float?
+  acoustic_logit_mean     Float?
+  acoustic_logit_sd       Float?
 
   @@map("mood_state")
 }
