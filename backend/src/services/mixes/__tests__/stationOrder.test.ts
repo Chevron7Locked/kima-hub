@@ -127,6 +127,37 @@ describe("stationPage", () => {
         expect(partly.next).toBe(350);
     });
 
+    it("passes over a long run of songs gone missing a stored chunk at a time", async () => {
+        const reader = counted(pool(5_000));
+        const all = await listen("t", reader.read, "x", 0, 100);
+        const order = await listen("t2", reader.read, "x", 0, 5_000);
+        expect(all).toEqual(order.slice(0, 100));
+        const gone = new Set(order.slice(100, 4_100));
+        let checks = 0;
+        const playable = async (ids: string[]) => {
+            checks++;
+            return new Set(ids.filter((id) => !gone.has(id)));
+        };
+        const page = await stationPage("t", reader.read, { limit: 100, seed: "x", offset: 100, listener: "u1", playable });
+        expect(page.trackIds).toEqual(order.slice(4_100, 4_200));
+        expect(page.next).toBe(4_200);
+        // One page, then 1,000 songs a check: 4,000 missing songs take 5 checks, not 40.
+        expect(checks).toBeLessThanOrEqual(6);
+    });
+
+    it("rebuilds at the client's position when it is more than one pass past the kept session", async () => {
+        const reader = counted(pool(300));
+        const own = await listen("t2", reader.read, "x", 0, 1_200);
+        await listen("t", reader.read, "x", 0, 300);
+        expect(await redisClient.hget("station:t:u1", "pass")).toBe("0");
+        const page = await stationPage("t", reader.read, { limit: 100, seed: "x", offset: 1_000, listener: "u1" });
+        expect(page.trackIds).toEqual(own.slice(1_000, 1_100));
+        expect(page.next).toBe(1_100);
+        expect(await redisClient.hget("station:t:u1", "pass")).toBe("3");
+        const after = await stationPage("t", reader.read, { limit: 100, seed: "x", offset: 1_100, listener: "u1" });
+        expect(after.trackIds).toEqual(own.slice(1_100, 1_200));
+    });
+
     it("gives up instead of going round again when no song of a new pass can play", async () => {
         const reader = counted(pool(30));
         const nothing = async () => new Set<string>();

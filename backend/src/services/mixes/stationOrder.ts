@@ -172,30 +172,44 @@ export async function stationPage(
     // A new pass is read from the pool, which holds only playable songs, so a second one with nothing playable means
     // the pool and `playable` disagree: give up rather than go round again.
     let passesStarted = 0;
+    // Positions read at a time: a page, or after a page with nothing playable (a run of songs that went missing after
+    // the session read the pool, such as a moved music folder) a stored chunk, so the run costs one Redis read and one
+    // `playable` check per CHUNK songs instead of per page.
+    let window = limit;
     for (;;) {
         if (at >= current.start + current.length) {
             if (passesStarted++ > 1) return { trackIds: [], next: at };
             const next = await startOver(session, seed, pool, current);
             if (!next) return { trackIds: [], next: at };
             current = next;
-            // The client's position when it falls in the new pass: a pass served without being kept is built again
-            // on the next refill, which asks from after this page, not from the pass's start.
-            if (at >= current.start + current.length) at = current.start;
+            if (at >= current.start + current.length) {
+                // The client is past this pass too (its refills were served while Redis did not answer): the pass
+                // holding its position, kept in place of the one just written when that was kept.
+                const keep: Keep | null = current.kept ? { session: session!, mode: { after: { seed, start: current.start } } } : null;
+                current = await rebuild(seed, pool, at, keep);
+                if (!current) return { trackIds: [], next: at };
+            }
         }
         const from = at - current.start;
-        const to = Math.min(from + limit, current.length);
+        const to = Math.min(from + window, current.length);
         let ids = current.ids ? current.ids.slice(from, to) : await readIds(session!, seed, current.start, from, to);
         if (!ids) {
             // Redis failed, or another tab replaced the session since it was read: this refill builds its own.
             current = await rebuild(seed, pool, at, null);
             if (!current) return { trackIds: [], next: at };
-            ids = current.ids!.slice(at - current.start, at - current.start + limit);
+            ids = current.ids!.slice(at - current.start, at - current.start + window);
         }
         const keep = await playable(ids);
-        const trackIds = ids.filter((id) => keep.has(id));
-        at += ids.length;
-        // Every song of this page went missing after the session read the pool: the next page, from the same order.
-        if (trackIds.length > 0) return { trackIds, next: at };
+        const first = ids.findIndex((id) => keep.has(id));
+        if (first < 0) {
+            // Nothing here can play any more: on through the same order, a chunk at a time.
+            at += ids.length;
+            window = Math.max(limit, CHUNK);
+            continue;
+        }
+        const page = ids.slice(first, first + limit);
+        at += first + page.length;
+        return { trackIds: page.filter((id) => keep.has(id)), next: at };
     }
 }
 

@@ -3,8 +3,9 @@
  * track synthetic library (src/__tests__/fixtures/syntheticLibrary.ts; ids are
  * handed out in energy order, so a "first N rows" draw shows up as ids bunched
  * at the front). The library router is mounted on a real express app and
- * called over HTTP with supertest; the route does not read the signed-in user,
- * so no auth is mounted and nothing is mocked.
+ * called over HTTP with supertest. No auth is mounted: the route reads the
+ * signed-in user only to keep a station session for them (req.user.id), and a
+ * one-line middleware sets a fixed listener in its place. Nothing is mocked.
  *
  * For each branch, over 10 consecutive calls:
  *   1. size   - each call returns exactly `limit` tracks, no repeats;
