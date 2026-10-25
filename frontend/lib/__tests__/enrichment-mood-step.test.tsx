@@ -16,7 +16,11 @@ const progress = {
         waitingMissing: 0, progress: 100, isBackground: true,
     },
     clapEmbeddings: {
-        total: 100, completed: 100, pending: 0, processing: 0, failed: 0, waitingMissing: 0, progress: 100,
+        total: 100, completed: 100, pending: 0, processing: 0, failed: 0, retrying: 0, waitingMissing: 0, progress: 100,
+        isBackground: true,
+    },
+    fingerprints: {
+        total: 100, completed: 97, pending: 0, processing: 0, failed: 3, waitingMissing: 0, progress: 97,
         isBackground: true,
     },
     moods: { total: 100, completed: 40, pending: 60, progress: 40, isBackground: true },
@@ -88,9 +92,12 @@ describe("the enrichment steps", () => {
         const text = container.textContent ?? "";
         const steps = Array.from(container.querySelectorAll("span.text-sm.font-medium")).map((s) => s.textContent);
         expect(steps).toEqual([
-            "Artist Metadata", "Song Identification", "Audio Analysis", "Vibe Embeddings", "Moods", "Similarity",
+            "Artist Metadata", "Song Identification", "Fingerprints", "Audio Analysis", "Vibe Embeddings", "Moods",
+            "Similarity",
         ]);
         expect(text).toContain("40 / 100");
+        expect(text).toContain("97 / 100");
+        expect(text).toContain("3 failed");
         expect(text).toContain("Moods running");
         expect(text).toContain("Processing moods...");
     });
@@ -122,12 +129,34 @@ describe("the enrichment steps", () => {
 });
 
 describe("the running step's name", () => {
-    it("is the first background step with work left", () => {
+    const allDone = {
+        ...progress,
+        moods: { ...progress.moods, completed: 100, pending: 0, progress: 100 },
+        similarity: { ...progress.similarity, completed: 100, pending: 0, progress: 100 },
+    };
+
+    it("is the first background step with work left, by the counts the server waits on", () => {
         expect(backgroundStepRunning(progress)).toBe("Moods running");
-        expect(backgroundStepRunning({ ...progress, moods: { ...progress.moods, pending: 0 } })).toBe("Similarity running");
+        expect(backgroundStepRunning({ ...progress, moods: allDone.moods })).toBe("Similarity running");
         expect(
             backgroundStepRunning({ ...progress, audioAnalysis: { ...progress.audioAnalysis, processing: 3 } }),
         ).toBe("Audio analysis running");
+        expect(backgroundStepRunning({ ...allDone, audioAnalysis: { ...progress.audioAnalysis, queued: 5 } })).toBe(
+            "Audio analysis running",
+        );
+        expect(backgroundStepRunning({ ...allDone, audioAnalysis: { ...progress.audioAnalysis, failed: 2 } })).toBe(
+            "Audio analysis running",
+        );
+        expect(backgroundStepRunning({ ...allDone, clapEmbeddings: { ...progress.clapEmbeddings, retrying: 1 } })).toBe(
+            "Vibe embeddings running",
+        );
+        expect(backgroundStepRunning({ ...allDone, fingerprints: { ...progress.fingerprints, pending: 4 } })).toBe(
+            "Fingerprints running",
+        );
+    });
+
+    it("names no finished step when every listed step is done", () => {
+        expect(backgroundStepRunning(allDone)).toBe("Enrichment running");
     });
 
     it("uses the step list's words for every phase", () => {

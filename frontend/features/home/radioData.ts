@@ -32,6 +32,12 @@ export interface DecadeCount {
     count: number;
 }
 
+/**
+ * The mood, Wildcard and workout stations play every song that matches, however few (stationPage in
+ * backend/src/services/mixes/stationOrder.ts), so any song at all is enough to start one.
+ */
+const STATION_MIN_TRACKS = 1;
+
 export const STATIC_STATIONS: RadioStation[] = [
     {
         id: "all",
@@ -51,7 +57,7 @@ export const STATIC_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#ef4444]/40",
         accentGradient: "from-[#ef4444] to-[#f97316]",
         filter: { type: "workout" },
-        minTracks: 15,
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
@@ -78,8 +84,10 @@ export const STATIC_STATIONS: RadioStation[] = [
 
 /**
  * The mood stations the server plays (MOOD_STATIONS and Wildcard in backend/src/routes/library/tracks.ts), in the
- * order they were approved. Each subtitle names the three strongest parts of the station's recipe
- * (backend/src/services/mixes/recipes.json); Wildcard plays the songs with no mood tag. The colours follow the vibe
+ * order they were approved. Each subtitle names the three heaviest parts of the station's recipe
+ * (backend/src/services/mixes/recipes.json), ties in the recipe's order, a "low:" part as "not …" and the arousal
+ * reading as "high energy" or "low energy" (mood-stations.test.ts holds them to it); Wildcard plays the songs with
+ * no mood tag. The colours follow the vibe
  * map's muted mood palette (features/vibe/mapUtils.ts), written out in full so Tailwind finds the classes.
  */
 export const MOOD_STATIONS: RadioStation[] = [
@@ -91,6 +99,7 @@ export const MOOD_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#5bc2b4]/40",
         accentGradient: "from-[#5bc2b4] to-[#3f8f9c]",
         filter: { type: "mood", value: "calm" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
@@ -101,6 +110,7 @@ export const MOOD_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#e06ab0]/40",
         accentGradient: "from-[#e06ab0] to-[#f0905a]",
         filter: { type: "mood", value: "energy" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
@@ -111,6 +121,7 @@ export const MOOD_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#e0685e]/40",
         accentGradient: "from-[#e0685e] to-[#8c3a4a]",
         filter: { type: "mood", value: "intense" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
@@ -121,6 +132,7 @@ export const MOOD_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#f0b25a]/40",
         accentGradient: "from-[#f0b25a] to-[#e8875a]",
         filter: { type: "mood", value: "happy" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
@@ -131,6 +143,7 @@ export const MOOD_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#b98fe0]/40",
         accentGradient: "from-[#b98fe0] to-[#6f6fc4]",
         filter: { type: "mood", value: "melancholy" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
@@ -141,6 +154,7 @@ export const MOOD_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#f0c45a]/40",
         accentGradient: "from-[#f0c45a] to-[#5bc2b4]",
         filter: { type: "mood", value: "summer" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
@@ -151,16 +165,18 @@ export const MOOD_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#7fa8d8]/40",
         accentGradient: "from-[#7fa8d8] to-[#5bc2b4]",
         filter: { type: "mood", value: "focus" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
         id: "mood-feel-good",
         name: "Feel-good",
-        description: "Uplifting, happy, epic",
+        description: "Not sleepy, not dark, uplifting",
         color: "from-[#f0a05a]/15 to-[#e06ab0]/10",
         hoverBorder: "hover:border-[#f0a05a]/40",
         accentGradient: "from-[#f0a05a] to-[#e06ab0]",
         filter: { type: "mood", value: "feel-good" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
@@ -171,6 +187,7 @@ export const MOOD_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#6f6fc4]/40",
         accentGradient: "from-[#6f6fc4] to-[#3a3f7a]",
         filter: { type: "mood", value: "late-night" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
@@ -181,6 +198,7 @@ export const MOOD_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#e0789a]/40",
         accentGradient: "from-[#e0789a] to-[#b98fe0]",
         filter: { type: "mood", value: "romantic" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
@@ -191,6 +209,7 @@ export const MOOD_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#e8875a]/40",
         accentGradient: "from-[#e8875a] to-[#f0b25a]",
         filter: { type: "mood", value: "road-trip" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
@@ -201,6 +220,7 @@ export const MOOD_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#d8a878]/40",
         accentGradient: "from-[#d8a878] to-[#b98fe0]",
         filter: { type: "mood", value: "nostalgic" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
@@ -211,6 +231,7 @@ export const MOOD_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#e0685e]/40",
         accentGradient: "from-[#e0685e] to-[#f0b25a]",
         filter: { type: "mood", value: "epic" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
     {
@@ -221,6 +242,7 @@ export const MOOD_STATIONS: RadioStation[] = [
         hoverBorder: "hover:border-[#a3a3a3]/40",
         accentGradient: "from-[#a3a3a3] to-[#6b7280]",
         filter: { type: "mood", value: "wildcard" },
+        minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
     },
 ];

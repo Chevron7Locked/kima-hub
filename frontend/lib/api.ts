@@ -1806,6 +1806,20 @@ class ApiClient {
                 pending: number;
                 processing: number;
                 failed: number;
+                /** Of `failed`, the ones due another try. */
+                retrying: number;
+                waitingMissing: number;
+                progress: number;
+                isBackground: boolean;
+            };
+            /** AcoustID fingerprints, made on this server for every song. */
+            fingerprints: {
+                total: number;
+                completed: number;
+                pending: number;
+                processing: number;
+                /** Due another try and given up, together. */
+                failed: number;
                 waitingMissing: number;
                 progress: number;
                 isBackground: boolean;

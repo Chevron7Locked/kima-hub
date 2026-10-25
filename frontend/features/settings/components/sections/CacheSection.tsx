@@ -32,6 +32,7 @@ import {
     Waves,
     Network,
     Smile,
+    AudioLines,
     ChevronDown,
     type LucideIcon,
 } from "lucide-react";
@@ -335,24 +336,39 @@ const confirmMeta: Record<
 type EnrichmentProgress = Awaited<ReturnType<typeof api.getEnrichmentProgress>>;
 type EnrichmentPhase = NonNullable<NonNullable<Awaited<ReturnType<typeof api.getEnrichmentState>>>["currentPhase"]>;
 
-/** The steps that run after the core enrichment, in the order a cycle runs them. */
+/**
+ * The steps that run after the core enrichment, in the order a cycle runs them, each done by the same counts the
+ * server's isFullyComplete waits on (getEnrichmentProgress). Fingerprints that failed and are due a retry are not
+ * told apart from given-up ones in the reply, so they are the one thing these cannot name.
+ */
 const BACKGROUND_STEPS: { label: string; done: (p: EnrichmentProgress) => boolean }[] = [
     {
+        label: "Fingerprints",
+        done: (p) => (p.fingerprints?.pending ?? 0) === 0 && (p.fingerprints?.processing ?? 0) === 0,
+    },
+    {
         label: "Audio analysis",
-        done: (p) => (p.audioAnalysis?.pending ?? 0) === 0 && (p.audioAnalysis?.processing ?? 0) === 0,
+        done: (p) =>
+            (p.audioAnalysis?.pending ?? 0) === 0 &&
+            (p.audioAnalysis?.queued ?? 0) === 0 &&
+            (p.audioAnalysis?.processing ?? 0) === 0 &&
+            (p.audioAnalysis?.failed ?? 0) === 0,
     },
     {
         label: "Vibe embeddings",
-        done: (p) => (p.clapEmbeddings?.pending ?? 0) === 0 && (p.clapEmbeddings?.processing ?? 0) === 0,
+        done: (p) =>
+            (p.clapEmbeddings?.pending ?? 0) === 0 &&
+            (p.clapEmbeddings?.processing ?? 0) === 0 &&
+            (p.clapEmbeddings?.retrying ?? 0) === 0,
     },
     { label: "Moods", done: (p) => (p.moods?.pending ?? 0) === 0 },
     { label: "Similarity", done: (p) => (p.similarity?.pending ?? 0) === 0 },
 ];
 
-/** "<step> running" for the first background step with work left. */
+/** "<step> running" for the first background step with work left; "Enrichment running" when none of them has. */
 export function backgroundStepRunning(p: EnrichmentProgress): string {
-    const step = BACKGROUND_STEPS.find((s) => !s.done(p)) ?? BACKGROUND_STEPS[BACKGROUND_STEPS.length - 1];
-    return `${step.label} running`;
+    const step = BACKGROUND_STEPS.find((s) => !s.done(p));
+    return step ? `${step.label} running` : "Enrichment running";
 }
 
 const PHASE_LABELS: Record<EnrichmentPhase, string> = {
@@ -805,6 +821,21 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 progress={enrichmentProgress.trackTags.progress}
                                 missing={enrichmentProgress.trackTags.waitingMissing}
                             />
+
+                            {enrichmentProgress.fingerprints && (
+                                <EnrichmentStage
+                                    icon={AudioLines}
+                                    label="Fingerprints"
+                                    description="An AcoustID fingerprint of each song's audio, made on this server, for identification and spotting duplicates"
+                                    completed={enrichmentProgress.fingerprints.completed}
+                                    total={enrichmentProgress.fingerprints.total}
+                                    progress={enrichmentProgress.fingerprints.progress}
+                                    processing={enrichmentProgress.fingerprints.processing}
+                                    failed={enrichmentProgress.fingerprints.failed}
+                                    missing={enrichmentProgress.fingerprints.waitingMissing}
+                                    isBackground={true}
+                                />
+                            )}
 
                             {/* audioAnalysis is absent from the progress payload until the analyzer has run. */}
                             {!featuresLoading && musicCNN && enrichmentProgress.audioAnalysis ? (

@@ -140,7 +140,12 @@ export default function RadioPage() {
                     <div className="section-stack">
                         <section>
                             <SectionHeader title="Quick Start" />
-                            <StationGrid stations={quickStations} loadingStation={loadingStation} onStart={startRadio} />
+                            {/* Workout waits on the feature check too, so it does not pop in after the others. */}
+                            {featuresLoading ? (
+                                <SectionSkeleton />
+                            ) : (
+                                <StationGrid stations={quickStations} loadingStation={loadingStation} onStart={startRadio} />
+                            )}
                         </section>
 
                         <StationSection

@@ -23,9 +23,11 @@ export function LibraryRadioStations() {
     const { loadingStation, startRadio } = useRadioPlayer();
     const { data: genresData, isLoading: genresLoading } = useLibraryGenresQuery();
     const { data: decadesData, isLoading: decadesLoading } = useLibraryDecadesQuery();
-    const { vibeEmbeddings } = useFeatures();
+    const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
 
-    const isLoading = genresLoading || decadesLoading;
+    // Until the feature check answers, which stations can play is unknown: the row waits rather than letting
+    // Workout and the mood stations pop in among tiles already shown.
+    const isLoading = genresLoading || decadesLoading || featuresLoading;
     const genres = useMemo(
         () => (genresData?.genres || []).filter((g) => g.count >= 15).slice(0, 6),
         [genresData],
@@ -36,13 +38,14 @@ export function LibraryRadioStations() {
     );
 
     const allStations = useMemo(() => {
+        if (featuresLoading) return [];
         return [
             ...playableStations(STATIC_STATIONS, vibeEmbeddings),
             ...playableStations(MOOD_STATIONS, vibeEmbeddings),
             ...buildGenreStations(genres),
             ...buildDecadeStations(decades),
         ];
-    }, [genres, decades, vibeEmbeddings]);
+    }, [genres, decades, vibeEmbeddings, featuresLoading]);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const [currentPage, setCurrentPage] = useState(0);
