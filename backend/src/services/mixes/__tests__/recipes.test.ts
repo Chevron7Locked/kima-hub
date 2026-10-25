@@ -84,6 +84,21 @@ describe("parseRecipes refuses", () => {
         expect(one(entry)).toThrow(message);
     });
 
+    it.each([
+        ["the retired night mood", { components: { night: 1 } }, "unknown component night"],
+        ["the retired night mood pushed away", { components: { calm: 1, "low:night": 1 } }, "unknown component night"],
+        ["a familiarity of zero", { components: { calm: 1 }, familiarity: 0 }, "familiarity must be above 0 and at most 0.5"],
+        ["a familiarity past one half", { components: { calm: 1 }, familiarity: 0.6 }, "familiarity must be above 0 and at most 0.5"],
+        ["a familiarity that is not a number", { components: { calm: 1 }, familiarity: "0.2" }, "familiarity must be"],
+    ])("%s", (_, entry, message) => {
+        expect(one(entry)).toThrow(message);
+    });
+
+    it("accepts a familiarity inside the bound, and no shipped recipe reads night", () => {
+        expect(parseRecipes({ ok: { name: "Ok", components: { calm: 1 }, familiarity: 0.5 } }).get("ok")!.familiarity).toBe(0.5);
+        for (const r of RECIPES.values()) expect(r.components.map((c) => c.signal)).not.toContain("night");
+    });
+
     it("an id that is not lower-case words and hyphens, and a recipe without a name", () => {
         expect(() => parseRecipes({ "Chill Mix": { name: "Chill", components: { calm: 1 } } })).toThrow("the id must be");
         expect(() => parseRecipes({ chill: { components: { calm: 1 } } })).toThrow("no name");

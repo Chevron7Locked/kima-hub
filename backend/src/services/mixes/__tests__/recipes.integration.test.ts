@@ -17,6 +17,7 @@ import { moodBucketService } from "../../moodBucketService";
 import {
     MIN_MIX_TRACKS,
     RECIPES,
+    recipeMembers,
     UnrankableLibraryError,
     pageMemberCount,
     parseRecipes,
@@ -731,6 +732,65 @@ describe("the mix draw", () => {
     it("refuses a recipe id it does not know", async () => {
         await expect(pickRecipeTracks("no-such-mix", { userId: USER, date: DAY })).rejects.toThrow("Unknown recipe");
         await expect(pickRecipeStation("no-such-mix", { limit: 10 })).rejects.toThrow("Unknown recipe");
+    });
+});
+
+describe("familiarity", () => {
+    const USER_ID = `${P}famuser`;
+    const FAMILIAR = parseRecipes({ fam: { name: "Fam", components: { calm: 1 }, familiarity: 0.3 } }).get("fam")!;
+    // The "draws the line" library: z120 sits just under the line without a boost (z 1.205), z128 and z269 over it.
+    const LIB: Song[] = [
+        ...background(10),
+        { name: "z120", moods: { calm: 2.6875 } },
+        { name: "z128", moods: { calm: 2.8125 } },
+        { name: "z269", moods: { calm: 5 } },
+    ];
+    const heard = (name: string, times: number, heardFlag = true) =>
+        prisma.play.createMany({
+            data: Array.from({ length: times }, () => ({ userId: USER_ID, trackId: id(name), heard: heardFlag })),
+        });
+    const members = async (userId?: string) =>
+        names((await recipeMembers(FAMILIAR, userId))!.map((m) => m.id));
+
+    beforeEach(async () => {
+        await library(LIB);
+        await prisma.user.deleteMany({ where: { id: USER_ID } });
+        await prisma.user.create({ data: { id: USER_ID, username: USER_ID, passwordHash: "x" } });
+    });
+    afterAll(async () => {
+        await prisma.user.deleteMany({ where: { id: USER_ID } });
+    });
+
+    it("changes nothing for a listener who has heard nothing, or for no listener", async () => {
+        expect(await members()).toEqual(new Set(["z128", "z269"]));
+        expect(await members(USER_ID)).toEqual(new Set(["z128", "z269"]));
+    });
+
+    it("lets a song just under the line in once the listener has heard it often", async () => {
+        await heard("z120", 10);
+        // The boost moves the library's scores too (the line is standardised over them), so a song just over the line
+        // without it, z128, may fall under; the song heard and the top song are in.
+        const got = await members(USER_ID);
+        expect(got.has("z120") && got.has("z269")).toBe(true);
+        expect(got.has("bg0")).toBe(false);
+    });
+
+    it("is a boost, not a filter: songs the listener never heard stay in, and heard songs far under the line stay out", async () => {
+        await heard("bg0", 10);
+        const got = await members(USER_ID);
+        expect(got.has("z128") && got.has("z269")).toBe(true);
+        expect(got.has("bg0")).toBe(false);
+    });
+
+    it("counts only plays marked as heard", async () => {
+        await heard("z120", 10, false);
+        expect(await members(USER_ID)).toEqual(new Set(["z128", "z269"]));
+    });
+
+    it("does nothing for a recipe without a familiarity share", async () => {
+        await heard("z120", 10);
+        const plain = recipe({ calm: 1 });
+        expect(names((await recipeMembers(plain, USER_ID))!.map((m) => m.id))).toEqual(new Set(["z128", "z269"]));
     });
 });
 

@@ -13,6 +13,7 @@ import {
     seedSyntheticLibrary,
     seedSyntheticMoods,
 } from "../../../__tests__/fixtures/syntheticLibrary";
+import { generateLateNightMix, generateMidnightDrive } from "../moodMixes";
 import { buildMoodState } from "../../moods/state";
 import { MIN_MIX_TRACKS, getRecipe, recipeMembers } from "../recipes";
 import {
@@ -96,17 +97,22 @@ describe("night songs", () => {
     });
 
     it("count a title once across its copies, summing plays and keeping the most played copy", async () => {
-        const [first] = rows.filter((r) => r.id === songs[0]);
-        const title = (await prisma.track.findUniqueOrThrow({ where: { id: first.id } })).title;
+        const first = await prisma.track.findUniqueOrThrow({ where: { id: songs[0] } });
         const copy = await prisma.track.findFirstOrThrow({
-            where: { id: { startsWith: PREFIX }, title, albumId: first.album.id, NOT: { id: first.id } },
-        }).catch(() => null);
-        await play(lib.user1, songs[0], 2);
-        if (copy) await play(lib.user1, copy.id, 3);
-        const found = await nightSongs(lib.user1, "UTC");
-        expect(found).toHaveLength(1);
-        if (copy) expect(found[0]).toMatchObject({ id: copy.id, plays: 5 });
-        else expect(found[0]).toMatchObject({ id: songs[0], plays: 2 });
+            where: { albumId: first.albumId, id: { not: first.id }, missingSince: null, corrupt: false },
+            orderBy: { id: "asc" },
+        });
+        const original = copy.title;
+        await prisma.track.update({ where: { id: copy.id }, data: { title: first.title.toUpperCase() } });
+        try {
+            await play(lib.user1, first.id, 2);
+            await play(lib.user1, copy.id, 3);
+            const found = await nightSongs(lib.user1, "UTC");
+            expect(found).toHaveLength(1);
+            expect(found[0]).toMatchObject({ id: copy.id, plays: 5 });
+        } finally {
+            await prisma.track.update({ where: { id: copy.id }, data: { title: original } });
+        }
     });
 });
 
@@ -190,6 +196,35 @@ describe("Midnight Drive", () => {
         const all = (await nightMixTracks(driveSpec, lib.user1, "2026-03-11", "UTC", 60))!;
         expect(new Set(all).size).toBe(all.length);
         for (const id of all) expect(fit.has(id) || !mine.includes(id)).toBe(true);
+    });
+});
+
+describe("the night mixes as listed on Home", () => {
+    it("are Late Night and Midnight Drive, with their own ids, titles, descriptions and colours, from the listener's night songs", async () => {
+        for (const [i, id] of songs.slice(0, 40).entries()) await play(lib.user1, id, 1 + (i % 4));
+        const late = (await generateLateNightMix(lib.user1, "2026-03-11", "UTC"))!;
+        const drive = (await generateMidnightDrive(lib.user1, "2026-03-11", "UTC"))!;
+        expect(late).toMatchObject({
+            id: "late-night-2026-03-11", type: "late-night", name: "Late Night", description: "The songs you play after dark",
+        });
+        expect(drive).toMatchObject({
+            id: "midnight-drive-2026-03-11", type: "midnight-drive", name: "Midnight Drive",
+            description: "Your night songs that keep a steady pace",
+        });
+        for (const mix of [late, drive]) {
+            expect(mix.trackIds.length).toBeGreaterThanOrEqual(MIN_MIX_TRACKS);
+            expect(mix.trackCount).toBe(mix.trackIds.length);
+            for (const id of mix.trackIds) expect(songs.slice(0, 40)).toContain(id);
+        }
+    });
+
+    it("are not made when the library has nothing to build from, rather than empty", async () => {
+        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+        try {
+            expect(await generateLateNightMix(lib.user1, "2026-03-11", "UTC")).toBeNull();
+        } finally {
+            await prisma.$transaction((tx) => buildMoodState(tx));
+        }
     });
 });
 
