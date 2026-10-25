@@ -6,6 +6,7 @@
  * the same rules computed in TypeScript.
  */
 import { prisma } from "../../../utils/db";
+import { redisClient, waitForRedisReady } from "../../../utils/redis";
 import { UNKNOWN_ARTIST, VARIOUS_ARTISTS_CANONICAL } from "../../../utils/artistNormalization";
 import { artistIdentityKey } from "../../artistIdentity";
 import { MOODS, MOOD_HEADS, type Mood } from "../../moods/heads";
@@ -22,6 +23,7 @@ import {
     pickPageTracks,
     pickRecipeStation,
     pickRecipeTracks,
+    pickStationPage,
     pickStationTracks,
     pickWildcardStation,
     songArtistKey,
@@ -148,6 +150,13 @@ const CALM = recipe({ calm: 1 });
 const background = (n: number): Song[] => Array.from({ length: n }, (_, i) => ({ name: `bg${i}`, artist: "bg" }));
 /** A song far above the line of the calm recipe in a library of mostly background songs. */
 const member = (name: string, extra: Partial<Song> = {}): Song => ({ name, moods: { calm: 10 }, ...extra });
+
+/** Every station session's order kept in Redis, so a test's seeds start afresh on its own library. */
+async function forgetStationSessions() {
+    await waitForRedisReady();
+    const keys = await redisClient.keys("station:*");
+    if (keys.length > 0) await redisClient.del(...keys);
+}
 
 afterAll(async () => {
     await cleanup();
@@ -455,6 +464,22 @@ describe("the station order", () => {
     const isBig = (n: string) => n.startsWith("big");
     const runsOfBig = (order: string[]) => order.join(",").split(/,?o\d\d,?/).filter(Boolean).map((r) => r.split(",").length);
     const ordered = (ids: string[]) => ids.map((x) => x.slice(P.length));
+    const artistOfName = (n: string) => (isBig(n) ? "big" : n);
+    /** `count` positions of a session from `offset`, a refill of `limit` at a time. */
+    const listen = async (seed: string, offset: number, count: number, limit = 10) => {
+        const heard: string[] = [];
+        let at = offset;
+        while (heard.length < count) {
+            const page = await pickStationPage(CALM, { limit, seed, offset: at });
+            expect(page.trackIds.length).toBeGreaterThan(0);
+            expect(page.next).toBe(at + page.trackIds.length);
+            heard.push(...ordered(page.trackIds));
+            at = page.next;
+        }
+        return heard;
+    };
+
+    beforeEach(forgetStationSessions);
 
     it("plays every member, the big artist in runs of 1 or 2 (30 songs in 16 runs), each other song alone between", async () => {
         await library([...background(100), ...big, ...others]);
@@ -471,19 +496,82 @@ describe("the station order", () => {
 
     it("hands out one seed's order a refill at a time: each member once, in the same order as one long refill", async () => {
         await library([...background(100), ...big, ...others]);
-        const whole = await pickStationTracks(CALM, { limit: 100, seed: "listener-1" });
-        const pages: string[] = [];
-        for (let offset = 0; offset < 60; offset += 10) {
-            pages.push(...(await pickStationTracks(CALM, { limit: 10, seed: "listener-1", offset })));
-        }
-        expect(pages).toEqual(whole);
+        const whole = ordered(await pickStationTracks(CALM, { limit: 100, seed: "listener-1" }));
+        await forgetStationSessions();
+        expect(await listen("listener-1", 0, 45)).toEqual(whole);
         expect(whole).toHaveLength(45);
-        expect(await pickStationTracks(CALM, { limit: 10, seed: "listener-1", offset: 45 })).toEqual([]);
-        expect(await pickStationTracks(CALM, { limit: 100, seed: "listener-2" })).not.toEqual(whole);
+        expect(ordered(await pickStationTracks(CALM, { limit: 100, seed: "listener-2" }))).not.toEqual(whole);
         // Without a seed each refill is a fresh order.
         expect(await pickStationTracks(CALM, { limit: 100 })).not.toEqual(await pickStationTracks(CALM, { limit: 100 }));
         await expect(pickStationTracks(CALM, { limit: 10, offset: 10 })).rejects.toThrow(RangeError);
         await expect(pickStationTracks(CALM, { limit: 10, seed: "x", offset: -1 })).rejects.toThrow(RangeError);
+    });
+
+    it("never ends: after every member it starts over in a new order, not opening with the last artist or songs", async () => {
+        await library([...background(100), ...big, ...others]);
+        for (let t = 0; t < 5; t++) {
+            await forgetStationSessions();
+            const heard = await listen(`cycle-${t}`, 0, 135);
+            const [first, second, third] = [heard.slice(0, 45), heard.slice(45, 90), heard.slice(90)];
+            for (const pass of [first, second, third]) expect(new Set(pass).size).toBe(45);
+            expect(second).not.toEqual(first);
+            // The big artist closes every pass, so the next opens with another song; its run there is still 1 or 2.
+            for (const [done, next] of [[first, second], [second, third]]) {
+                expect(artistOfName(next[0])).not.toBe(artistOfName(done[44]));
+                // The last 15 songs (a third of the pool) stay out of the next pass's first 15.
+                const last = new Set(done.slice(-15));
+                expect(next.slice(0, 15).filter((n) => last.has(n))).toEqual([]);
+            }
+            expect(Math.max(...runsOfBig(heard))).toBeLessThanOrEqual(2);
+        }
+    });
+
+    it("keeps a session's order when songs join or leave the pool mid-session; the next pass takes the pool as it is", async () => {
+        await library([...background(100), ...big, ...others]);
+        const before = await listen("frozen", 0, 45);
+        await forgetStationSessions();
+        const firstPages = await listen("frozen", 0, 20);
+        // One member leaves (its mood falls under the line) and a new one joins.
+        await prisma.trackMood.update({ where: { track_id: id("o00") }, data: { calm: 0 } });
+        await prisma.track.create({
+            data: {
+                id: id("late"), albumId: id("alb_o1"), title: "late", trackNo: 2, duration: 200,
+                filePath: `/tmp/${id("late")}.flac`, fileModified: new Date(), fileSize: 1000, analysisStatus: "completed",
+                arousal: 0.5, instrumentalness: 0.5, acousticness: 0.5, bpm: 120, bpmConfidence: 3, keyScale: "major",
+            },
+        });
+        await prisma.$executeRaw`
+            INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
+            VALUES (${id("late")}, ${UNIT}::vector, ${MOOD_HEADS.model}, ${ANALYZED_AT})
+        `;
+        await prisma.trackMood.create({
+            data: {
+                track_id: id("late"), embedded_at: ANALYZED_AT, weights: MOOD_HEADS.version,
+                ...(Object.fromEntries(MOODS.map((mood) => [mood, mood === "calm" ? 10 : 0])) as Record<Mood, number>),
+            },
+        });
+        expect((await membersOf(CALM)).has("late")).toBe(true);
+        expect((await membersOf(CALM)).has("o00")).toBe(false);
+        // The rest of the pass is the order the session started with: nothing skipped, nothing twice.
+        const rest = await listen("frozen", 20, 25);
+        expect([...firstPages, ...rest]).toEqual(before);
+        const next = await listen("frozen", 45, 45);
+        expect(new Set(next)).toEqual(new Set([...before.filter((n) => n !== "o00"), "late"]));
+    });
+
+    it("rebuilds a forgotten session, or one Redis cannot serve, in the same order while the pool is unchanged", async () => {
+        await library([...background(100), ...big, ...others]);
+        const whole = await listen("forgotten", 0, 45);
+        await forgetStationSessions();
+        expect(await listen("forgotten", 20, 25)).toEqual(whole.slice(20));
+        const spy = jest.spyOn(redisClient, "hgetall").mockRejectedValue(new Error("connection lost"));
+        try {
+            expect(await listen("forgotten", 10, 20)).toEqual(whole.slice(10, 30));
+            await forgetStationSessions();
+            expect(await listen("no-redis", 0, 45)).toHaveLength(45);
+        } finally {
+            spy.mockRestore();
+        }
     });
 
     it("counts each song on a Various Artists album as its own artist, as the mixes' cap does", async () => {
@@ -517,11 +605,15 @@ describe("the station order", () => {
         expect(new Set(whole)).toEqual(new Set(plain.map((s) => s.name)));
         // 20 in 6 runs: 2 of 4 and 4 of 3.
         expect(runsOfBig(whole).sort()).toEqual([3, 3, 3, 3, 4, 4]);
+        await forgetStationSessions();
         const pages: string[] = [];
         for (let offset = 0; offset < 25; offset += 7) {
             pages.push(...ordered(await pickWildcardStation({ limit: 7, seed: "w", offset })));
         }
         expect(pages).toEqual(whole);
+        // The last page of a pass stops at its end; the next starts the pool over.
+        expect(await pickWildcardStation({ limit: 7, seed: "w", offset: 21 })).toHaveLength(4);
+        expect(new Set(ordered(await pickWildcardStation({ limit: 100, seed: "w", offset: 25 })))).toEqual(new Set(whole));
     });
 });
 

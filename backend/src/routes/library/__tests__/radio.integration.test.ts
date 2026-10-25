@@ -40,6 +40,7 @@ import {
 import { buildMoodState } from "../../../services/moods/state";
 import { writeMoodTags } from "../../../services/moods/tags";
 import { pickRecipeStation } from "../../../services/mixes/recipes";
+import { redisClient, waitForRedisReady } from "../../../utils/redis";
 import { MOOD_HEADS } from "../../../services/moods/heads";
 import router from "../tracks";
 
@@ -283,6 +284,13 @@ describe("radio: every mood value and the workout station draw from their recipe
     });
 });
 
+/** Every station session's order kept in Redis, so each test's seeds start afresh. */
+async function forgetStationSessions() {
+    await waitForRedisReady();
+    const keys = await redisClient.keys("station:*");
+    if (keys.length > 0) await redisClient.del(...keys);
+}
+
 /** True when no artist plays twice in a row, or the largest artist has too many songs for that to be possible. */
 function spreadWhereItCan(tracks: RadioTrack[]): boolean {
     const counts = new Map<string, number>();
@@ -293,21 +301,48 @@ function spreadWhereItCan(tracks: RadioTrack[]): boolean {
 }
 
 describe("radio: the play order", () => {
-    it.each(STATIONS)("%o hands out one seed's order a refill at a time, each member once, from the recipe %s", async (query, recipe) => {
-        const want = await pickRecipeStation(recipe, { limit: 100_000, seed: "listener" });
+    beforeEach(forgetStationSessions);
+
+    /** A session's songs from `offset` until `count` are heard, a refill of `limit` at a time. */
+    async function session(query: Record<string, string>, seed: string, offset: number, count: number, limit = 100) {
         const heard: string[] = [];
-        let offset = 0;
-        for (;;) {
-            const res = await radio({ ...query, limit: 100, seed: "listener", offset });
+        let at = offset;
+        while (heard.length < count) {
+            const res = await radio({ ...query, limit, seed, offset: at });
             expect(res.status).toBe(200);
             const ids = (res.body.tracks as RadioTrack[]).map((t) => t.id);
-            expect(res.body.next).toBe(offset + ids.length);
-            if (ids.length === 0) break;
+            expect(ids.length).toBeGreaterThan(0);
+            expect(res.body.next).toBe(at + ids.length);
             heard.push(...ids);
-            offset = res.body.next;
+            at = res.body.next;
         }
+        return { heard, next: at };
+    }
+
+    it.each(STATIONS)("%o hands out one seed's order a refill at a time, each member once, from the recipe %s", async (query, recipe) => {
+        const want = await pickRecipeStation(recipe, { limit: 100_000, seed: "listener" });
+        await forgetStationSessions();
+        const { heard, next } = await session(query, "listener", 0, want.length);
         expect(heard).toEqual(want);
         expect(new Set(heard)).toEqual(members.get(recipe));
+        // It does not end: the next refill starts the members over.
+        const again = await session(query, "listener", next, 1);
+        expect(again.heard.every((id) => members.get(recipe)!.has(id))).toBe(true);
+    });
+
+    it("passes over a refill whose songs all went missing after the session started", async () => {
+        const first = await radio({ type: "mood", value: "calm", limit: LIMIT, seed: "gone" });
+        const order = await pickRecipeStation("calm-station", { limit: 100_000, seed: "gone" });
+        const gone = order.slice(first.body.next, first.body.next + LIMIT);
+        await prisma.track.updateMany({ where: { id: { in: gone } }, data: { missingSince: new Date() } });
+        try {
+            const res = await radio({ type: "mood", value: "calm", limit: LIMIT, seed: "gone", offset: first.body.next });
+            expect(res.status).toBe(200);
+            expect(res.body.tracks.map((t: RadioTrack) => t.id)).toEqual(order.slice(first.body.next + LIMIT, first.body.next + 2 * LIMIT));
+            expect(res.body.next).toBe(first.body.next + 2 * LIMIT);
+        } finally {
+            await prisma.track.updateMany({ where: { id: { in: gone } }, data: { missingSince: null } });
+        }
     });
 
     it("plays a station without a seed in a fresh spread order each refill", async () => {
@@ -329,12 +364,23 @@ describe("radio: the play order", () => {
         },
     );
 
-    it("400 for an offset without a seed, an offset that is not a whole number, or an overlong seed", async () => {
+    it("400 at a station for an offset without a seed, an offset that is not a whole number, or an overlong seed", async () => {
         expect((await radio({ type: "mood", value: "calm", offset: 20 })).status).toBe(400);
         expect((await radio({ type: "mood", value: "calm", seed: "s", offset: "abc" })).status).toBe(400);
         expect((await radio({ type: "mood", value: "calm", seed: "s", offset: -1 })).status).toBe(400);
         expect((await radio({ type: "mood", value: "calm", seed: "s".repeat(129) })).status).toBe(400);
+        expect((await radio({ type: "workout", offset: 5 })).status).toBe(400);
+        expect((await radio({ type: "mood", value: "wildcard", offset: 5 })).status).toBe(400);
         expect((await radio({ type: "mood", value: "calm", seed: "s", offset: 0 })).status).toBe(200);
+    });
+
+    it("ignores seed and offset on the radios that do not use them", async () => {
+        const queries: Record<string, string | number>[] = [{ type: "genre", value: "rock" }, { type: "decade", value: 1990 }, { type: "all" }];
+        for (const query of queries) {
+            const res = await radio({ ...query, limit: LIMIT, offset: "abc", seed: "s".repeat(200) });
+            expect(res.status).toBe(200);
+            expect(res.body.tracks).toHaveLength(LIMIT);
+        }
     });
 });
 

@@ -42,6 +42,8 @@ function runsOf(order: Song[], artist: string): number[] {
 
 /** A pool like Epic on the W8 testbed: one artist with 347 of 595 songs, 248 by 50 others. */
 const EPIC = pool([["big", 347], ...Array.from({ length: 50 }, (_, i): [string, number] => [`o${i}`, i < 8 ? 10 : 4])]);
+/** xoshiro128**'s first three outputs from the SHA-256 of "a", from the reference C code compiled and run. */
+const XOSHIRO_A = [2666612042, 2876307811, 3554085701];
 const sameSongs = (a: Song[], b: Song[]) => expect([...a].map((s) => s.id).sort()).toEqual([...b].map((s) => s.id).sort());
 
 describe("spreadByArtist", () => {
@@ -154,6 +156,51 @@ describe("spreadByArtist", () => {
     });
 });
 
+describe("spreadByArtist following an order that came before", () => {
+    it("does not open with the artist just played unless it must, and keeps every other rule", () => {
+        const random = randomFromSeed("follows");
+        for (let t = 0; t < 3000; t++) {
+            const artists = 1 + Math.floor(random() * 6);
+            const shape = Array.from({ length: artists }, (_, a): [string, number] => [
+                `a${a}`,
+                1 + Math.floor(random() * (random() < 0.3 ? 40 : 8)),
+            ]);
+            const songs = pool(shape);
+            const n = songs.length;
+            const before = spread(songs, random);
+            const previousArtist = before[n - 1].artist;
+            const order = spreadByArtist(songs, (s) => s.artist, random, { previousArtist });
+            sameSongs(order, songs);
+            const [biggest, largest] = shape.reduce((best, s) => (s[1] > best[1] ? s : best));
+            const forced = largest === n || (2 * largest === n + 1 && biggest === previousArtist);
+            if (!forced) expect(order[0].artist).not.toBe(previousArtist);
+            if (2 * largest <= n + 1) expect(longestRun(order)).toBe(1);
+            // Opening with another song leaves one run fewer for the big artist.
+            else expect(longestRun(order)).toBeLessThanOrEqual(Math.ceil(largest / Math.max(1, n - largest)));
+        }
+    });
+
+    it("keeps the songs heard last out of the first places on station-sized pools", () => {
+        const calm = pool([["big", 172], ...Array.from({ length: 300 }, (_, i): [string, number] => [`c${i}`, i < 100 ? 5 : i < 200 ? 3 : 1])]);
+        for (const songs of [EPIC, calm]) {
+            for (let t = 0; t < 50; t++) {
+                const before = spread(songs);
+                const heard = new Set(before.slice(-100).map((s) => s.id));
+                const order = spreadByArtist(songs, (s) => s.artist, Math.random, {
+                    previousArtist: before[before.length - 1].artist,
+                    recent: (s) => heard.has(s.id),
+                    window: 100,
+                });
+                sameSongs(order, songs);
+                expect(order.slice(0, 100).filter((s) => heard.has(s.id))).toEqual([]);
+                expect(order[0].artist).not.toBe(before[before.length - 1].artist);
+                const big = songs === EPIC ? 2 : 1;
+                expect(longestRun(order)).toBe(big);
+            }
+        }
+    });
+});
+
 describe("randomFromSeed", () => {
     it("repeats one seed's numbers, differs between seeds, and stays in [0, 1)", () => {
         const take = (seed: string) => {
@@ -165,5 +212,8 @@ describe("randomFromSeed", () => {
         expect(take("b")).not.toEqual(a);
         expect(a.every((x) => x >= 0 && x < 1)).toBe(true);
         expect(a.reduce((s, x) => s + x, 0) / a.length).toBeCloseTo(0.5, 1);
+        // xoshiro128**: the reference C code (prng.di.unimi.it/xoshiro128starstar.c), started from the seed's SHA-256,
+        // gives these first numbers for "a" (computed with the reference compiled in C).
+        expect(a.slice(0, 3).map((x) => Math.round(x * 4294967296))).toEqual(XOSHIRO_A);
     });
 });

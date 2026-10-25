@@ -19,12 +19,35 @@ import crypto from "crypto";
  *    runs of the big artist, and those runs differ in length by at most one, the longer ones spaced evenly from a
  *    random start: the shortest longest run possible.
  *
+ * 4. `follows` continues an order that came before (a station starting its pool over): the first song is not by the
+ *    artist just played, where that is possible, and the songs heard last stay out of the first places (keepRecentLate).
+ *
  * Cost: O(n log n), from a tree over the free places and a heap over the artists; `random` is called about twice per
  * item.
  */
-export function spreadByArtist<T>(items: readonly T[], artistOf: (item: T) => string, random: () => number = Math.random): T[] {
+export function spreadByArtist<T>(
+    items: readonly T[],
+    artistOf: (item: T) => string,
+    random: () => number = Math.random,
+    follows: Follows<T> = {},
+): T[] {
     const n = items.length;
     if (n < 2) return [...items];
+    const order = spreadOnce(items, artistOf, random, follows.previousArtist);
+    return follows.recent ? keepRecentLate(order, artistOf, follows, random) : order;
+}
+
+/** What came before an order (spreadByArtist step 4). */
+export interface Follows<T> {
+    /** The artist of the song played just before the order. */
+    previousArtist?: string;
+    /** The songs heard just before the order; they are kept out of its first `window` places. */
+    recent?: (item: T) => boolean;
+    window?: number;
+}
+
+function spreadOnce<T>(items: readonly T[], artistOf: (item: T) => string, random: () => number, previousArtist?: string): T[] {
+    const n = items.length;
 
     const byArtist = new Map<string, T[]>();
     for (const item of items) {
@@ -35,9 +58,11 @@ export function spreadByArtist<T>(items: readonly T[], artistOf: (item: T) => st
     }
 
     // Step 1. Largest artist first (ties in random order), each artist's songs shuffled and spread over the free places.
-    const artists = [...byArtist.values()];
-    shuffleInPlace(artists, random);
-    artists.sort((a, b) => b.length - a.length);
+    const names = [...byArtist.keys()];
+    shuffleInPlace(names, random);
+    names.sort((a, b) => byArtist.get(b)!.length - byArtist.get(a)!.length);
+    const artists = names.map((name) => byArtist.get(name)!);
+    const previous = previousArtist === undefined ? -1 : names.indexOf(previousArtist);
     const placed: { artist: number; item: T }[] = new Array(n);
     const free = new FreePlaces(n);
     artists.forEach((songs, artist) => {
@@ -62,34 +87,37 @@ export function spreadByArtist<T>(items: readonly T[], artistOf: (item: T) => st
     let largest = 0;
     for (let a = 1; a < queues.length; a++) if (queues[a].length > queues[largest].length) largest = a;
     const big = queues[largest].length;
-    if (2 * big > n + 1) return runsOfMajority(placed, largest, big, n - big, random);
-    return withoutRepeats(placed, queues);
+    if (2 * big > n + 1) return runsOfMajority(placed, largest, big, n - big, random, previous === largest);
+    return withoutRepeats(placed, queues, previous);
 }
 
-/** Step 2: the spread order with no artist twice in a row; the caller has checked that one exists. */
-function withoutRepeats<T>(placed: { artist: number; item: T }[], queues: number[][]): T[] {
-    const heads = queues.map(() => 0);
-    const remaining = queues.map((q) => q.length);
-    // Artists by how many songs they have left, to find one that must play next.
-    const withCount = new Map<number, Set<number>>();
+/**
+ * Step 2: the spread order with no artist twice in a row; the caller has checked that one exists. `previous` is the
+ * artist played just before the order (-1 for none); it does not open the order unless it must: with exactly one song
+ * more than all the others, it has to come first and last.
+ */
+function withoutRepeats<T>(placed: { artist: number; item: T }[], queues: number[][], previous: number): T[] {
+    const heads = new Int32Array(queues.length);
+    const remaining = Int32Array.from(queues, (q) => q.length);
+    // How many artists have each count of songs left, for the most any artist has left; and the artist that has it,
+    // looked up again only when it no longer does.
     let most = 0;
-    remaining.forEach((count, artist) => {
-        if (!withCount.has(count)) withCount.set(count, new Set());
-        withCount.get(count)!.add(artist);
-        most = Math.max(most, count);
-    });
+    for (const count of remaining) most = Math.max(most, count);
+    const withCount = new Int32Array(most + 1);
+    for (const count of remaining) withCount[count]++;
+    let leader = remaining.indexOf(most);
     // Each artist's next song by its place in the spread order. An entry whose rank is no longer its artist's next
     // song is stale and skipped.
     const heap = new MinHeap();
     queues.forEach((q, artist) => heap.push(q[0], artist));
 
     const order: T[] = [];
-    let previous = -1;
     for (let left = placed.length; left > 0; left--) {
         let artist: number;
         if (2 * most === left + 1) {
             // This artist has one more song than all the others left: it plays now, or two of its songs would meet.
-            artist = withCount.get(most)!.values().next().value!;
+            if (remaining[leader] !== most) leader = remaining.indexOf(most);
+            artist = leader;
         } else {
             let top = popCurrent(heap, queues, heads);
             if (top.artist === previous) {
@@ -102,17 +130,16 @@ function withoutRepeats<T>(placed: { artist: number; item: T }[], queues: number
         order.push(placed[queues[artist][heads[artist]]].item);
         heads[artist]++;
         const count = remaining[artist]--;
-        withCount.get(count)!.delete(artist);
-        if (!withCount.has(count - 1)) withCount.set(count - 1, new Set());
-        withCount.get(count - 1)!.add(artist);
-        while (most > 0 && withCount.get(most)!.size === 0) most--;
+        withCount[count]--;
+        withCount[count - 1]++;
+        while (most > 0 && withCount[most] === 0) most--;
         if (heads[artist] < queues[artist].length) heap.push(queues[artist][heads[artist]], artist);
         previous = artist;
     }
     return order;
 }
 
-function popCurrent(heap: MinHeap, queues: number[][], heads: number[]): { rank: number; artist: number } {
+function popCurrent(heap: MinHeap, queues: number[][], heads: Int32Array): { rank: number; artist: number } {
     for (;;) {
         const entry = heap.pop();
         if (!entry) throw new Error("spreadByArtist: no song left to play");
@@ -124,25 +151,99 @@ function popCurrent(heap: MinHeap, queues: number[][], heads: number[]): { rank:
 
 /**
  * Step 3: the big artist's `big` songs in `others + 1` runs, each other song alone between two runs. `big % runs` of
- * the runs are one song longer, at evenly spaced places from a random start. Both sets keep their spread order.
+ * the runs are one song longer, at evenly spaced places from a random start. Both sets keep their spread order. When
+ * the big artist was just played (`openWithOther`), the order opens with another song instead, in `others` runs, so
+ * its last run and the next first run do not meet; with no other song there is nothing to open with.
  */
-function runsOfMajority<T>(placed: { artist: number; item: T }[], largest: number, big: number, others: number, random: () => number): T[] {
+function runsOfMajority<T>(
+    placed: { artist: number; item: T }[],
+    largest: number,
+    big: number,
+    others: number,
+    random: () => number,
+    openWithOther: boolean,
+): T[] {
     const mine = placed.filter((p) => p.artist === largest).map((p) => p.item);
     const theirs = placed.filter((p) => p.artist !== largest).map((p) => p.item);
-    const runs = others + 1;
+    const lead = openWithOther && others > 0;
+    const runs = lead ? others : others + 1;
     const short = Math.floor(big / runs);
     const longer = big % runs;
     const phase = random();
     const order: T[] = [];
     let next = 0;
+    let other = 0;
     for (let run = 0; run < runs; run++) {
+        if (lead) order.push(theirs[other++]);
         const long = Math.floor(((run + 1) * longer) / runs + phase) - Math.floor((run * longer) / runs + phase);
         const length = short + long;
         for (let i = 0; i < length; i++) order.push(mine[next++]);
-        if (run < others) order.push(theirs[run]);
+        if (!lead && run < others) order.push(theirs[other++]);
     }
     return order;
 }
+
+/**
+ * Step 4: the songs `follows.recent` names out of the first `window` places (at most half the order), changing which
+ * song takes which place but never which artist plays where, so steps 1-3 hold. First each artist's recent songs take
+ * its latest places. An artist still left with a recent song early then trades all its places with an artist of as
+ * many songs and none of them recent, chosen at random, whose latest places are late enough; a trade never puts the
+ * artist just played first. Where no such artist exists (a small pool) the song stays early.
+ */
+function keepRecentLate<T>(order: T[], artistOf: (item: T) => string, follows: Follows<T>, random: () => number): T[] {
+    const isRecent = follows.recent!;
+    const window = Math.min(follows.window ?? 0, Math.floor(order.length / 2));
+    const places = new Map<string, number[]>();
+    const songs = new Map<string, T[]>();
+    order.forEach((item, i) => {
+        const artist = artistOf(item);
+        if (!places.has(artist)) {
+            places.set(artist, []);
+            songs.set(artist, []);
+        }
+        places.get(artist)!.push(i);
+        songs.get(artist)!.push(item);
+    });
+    const recentOf = new Map<string, number>();
+    for (const [artist, list] of songs) {
+        const recent = list.filter(isRecent);
+        if (recent.length === 0) continue;
+        recentOf.set(artist, recent.length);
+        songs.set(artist, [...list.filter((s) => !isRecent(s)), ...recent]);
+    }
+
+    const spare = new Map<number, string[]>();
+    for (const [artist, list] of places) {
+        if (recentOf.has(artist)) continue;
+        if (!spare.has(list.length)) spare.set(list.length, []);
+        spare.get(list.length)!.push(artist);
+    }
+    for (const list of spare.values()) shuffleInPlace(list, random);
+    const traded = new Set<string>();
+    for (const [artist, recent] of recentOf) {
+        const mine = places.get(artist)!;
+        if (mine[mine.length - recent] >= window) continue;
+        const candidates = spare.get(mine.length) ?? [];
+        const i = candidates.findIndex((other) => {
+            if (traded.has(other)) return false;
+            const theirs = places.get(other)!;
+            if (theirs[theirs.length - recent] < window) return false;
+            if (theirs[0] === 0 && artist === follows.previousArtist) return false;
+            if (mine[0] === 0 && other === follows.previousArtist) return false;
+            return true;
+        });
+        if (i < 0) continue;
+        const other = candidates[i];
+        traded.add(other);
+        places.set(artist, places.get(other)!);
+        places.set(other, mine);
+    }
+
+    const out = new Array<T>(order.length);
+    for (const [artist, list] of songs) list.forEach((song, k) => (out[places.get(artist)![k]] = song));
+    return out;
+}
+
 
 function shuffleInPlace<T>(array: T[], random: () => number): void {
     for (let i = array.length - 1; i > 0; i--) {
@@ -231,20 +332,30 @@ class MinHeap {
 }
 
 /**
- * Numbers in [0, 1) that one seed always repeats, so a station can hand out one order a page at a time: SHA-256 of the
- * seed and a counter, read 32 bits at a time.
+ * Numbers in [0, 1) that one seed always repeats, so a station can rebuild the same order: xoshiro128** (Blackman and
+ * Vigna, prng.di.unimi.it) started from the SHA-256 of the seed. Hashing for every number cost about 0.3 s per 500,000
+ * songs; this generator costs a few milliseconds.
  */
 export function randomFromSeed(seed: string): () => number {
-    let block = Buffer.alloc(0);
-    let used = 0;
-    let counter = 0;
+    const digest = crypto.createHash("sha256").update(seed).digest();
+    let a = digest.readUInt32LE(0);
+    let b = digest.readUInt32LE(4);
+    let c = digest.readUInt32LE(8);
+    let d = digest.readUInt32LE(12);
+    if ((a | b | c | d) === 0) a = 1;
     return () => {
-        if (used === block.length) {
-            block = crypto.createHash("sha256").update(`${seed}\0${counter++}`).digest();
-            used = 0;
-        }
-        const value = block.readUInt32BE(used) / 4294967296;
-        used += 4;
-        return value;
+        const result = Math.imul(rotl(Math.imul(b, 5), 7), 9) >>> 0;
+        const t = b << 9;
+        c ^= a;
+        d ^= b;
+        b ^= c;
+        a ^= d;
+        c ^= t;
+        d = rotl(d, 11);
+        return result / 4294967296;
     };
+}
+
+function rotl(x: number, k: number): number {
+    return (x << k) | (x >>> (32 - k));
 }

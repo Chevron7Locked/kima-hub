@@ -9,13 +9,15 @@
 import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
-import { randomFromSeed, spreadByArtist } from "../../utils/artistSpread";
+import { stationPage, type StationPage, type StationRequest, type StationSong } from "./stationOrder";
 import { UNKNOWN_ARTIST, VARIOUS_ARTISTS_CANONICAL } from "../../utils/artistNormalization";
 import { artistIdentityKey } from "../artistIdentity";
 import { MOODS, MOOD_HEADS, type Mood } from "../moods/heads";
 import { READING_SQL, loadMoodState, type MoodState, type MoodStats, type Reading } from "../moods/state";
 import { TRACK_LIMIT } from "./helpers";
 import recipeFile from "./recipes.json";
+
+export type { StationPage, StationRequest };
 
 /** A song is a member at this many library standard deviations above the average recipe score. */
 export const RECIPE_LINE = 1.25;
@@ -178,10 +180,7 @@ function statsOf(state: MoodState, signal: Mood | ReadingName): MoodStats | null
     return isMood(signal) ? state.moods[signal] : state.readings[READING_OF[signal]];
 }
 
-interface Member {
-    id: string;
-    artistId: string;
-}
+type Member = StationSong;
 
 /**
  * The songs the mood statistics cover, the ones every recipe and the Wildcard station draw from: scores current for the
@@ -480,63 +479,52 @@ export async function pageMemberCount(recipe: Recipe): Promise<number> {
     return pagePlays(members) ? members : 0;
 }
 
-/**
- * What a station's refill asks for. A station plays every song that matches, in a random order that spreads each
- * artist's songs through it (spreadByArtist, by the artist the mixes' cap counts). One `seed` always gives the same
- * order of the same songs, so a player that keeps its seed and asks from `offset` onward hears every song once, with
- * the spread holding across refills; without a seed each refill is a fresh order from the start.
- */
-export interface StationRequest {
-    limit: number;
-    seed?: string;
-    /** How many songs of this seed's order were already handed out. */
-    offset?: number;
+/** A station's refill from the recipe's members (stationPage); no songs when it has none. */
+export async function pickStationPage(recipe: Recipe, request: StationRequest): Promise<StationPage> {
+    return stationPage(`recipe:${recipe.id}`, () => recipeMembers(recipe), request);
 }
 
-function checkStationRequest({ limit, seed, offset = 0 }: StationRequest): void {
-    if (!Number.isInteger(limit) || limit < 1) throw new RangeError(`limit must be a positive integer, got ${limit}`);
-    if (!Number.isInteger(offset) || offset < 0) throw new RangeError(`offset must be a whole number, got ${offset}`);
-    if (seed === undefined && offset > 0) throw new RangeError("an offset needs the seed of the order it counts into");
-}
-
-function stationPage(members: Member[], { limit, seed, offset = 0 }: StationRequest): string[] {
-    // Sorted first, so one seed gives one order whatever order the database returned the songs in.
-    const sorted = [...members].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    const random = seed === undefined ? Math.random : randomFromSeed(seed);
-    return spreadByArtist(sorted, (m) => m.artistId, random)
-        .slice(offset, offset + limit)
-        .map((m) => m.id);
-}
-
-/** A station's refill (StationRequest) from the recipe's members; empty when it has none. */
+/** pickStationPage's songs. */
 export async function pickStationTracks(recipe: Recipe, request: StationRequest): Promise<string[]> {
-    checkStationRequest(request);
-    const members = await recipeMembers(recipe);
-    return members ? stationPage(members, request) : [];
+    return (await pickStationPage(recipe, request)).trackIds;
 }
 
 /**
  * The Wildcard station's refill: the songs without a single mood tag, from the same songs every recipe draws from. It
  * reads the tags the mood step wrote (tags.ts) instead of repeating their rule, so it is always the songs shown
  * untagged, focus tagged by the Focus Mix recipe included, and it keeps playing them while the statistics are rebuilt,
- * as the tags are kept then. One title by one artist once, refilled as any station (StationRequest); empty before the
- * mood step has scored a song.
+ * as the tags are kept then. One title by one artist once, refilled as any station (stationPage); no songs before the
+ * mood step has scored one.
  */
+export async function pickWildcardPage(request: StationRequest): Promise<StationPage> {
+    return stationPage("wildcard", async () => {
+        const rows = await prisma.$queryRaw<Array<{ id: string; artist_key: string }>>`
+            SELECT id, artist_key FROM (
+                SELECT DISTINCT ON (s.title_key, s.artist_key) s.id, s.artist_key
+                FROM (
+                    SELECT t.id, lower(t.title) AS title_key, ${artistSql()} AS artist_key
+                    ${SCORED_SONGS}
+                      AND COALESCE(cardinality(t."moodTags"), 0) = 0
+                ) s
+                ORDER BY s.title_key, s.artist_key, s.id
+            ) untagged
+            ORDER BY id
+        `;
+        return rows.map((r) => ({ id: r.id, artistId: r.artist_key }));
+    }, request);
+}
+
+/** pickWildcardPage's songs. */
 export async function pickWildcardStation(request: StationRequest): Promise<string[]> {
-    checkStationRequest(request);
-    const rows = await prisma.$queryRaw<Array<{ id: string; artist_key: string }>>`
-        SELECT DISTINCT ON (s.title_key, s.artist_key) s.id, s.artist_key
-        FROM (
-            SELECT t.id, lower(t.title) AS title_key, ${artistSql()} AS artist_key
-            ${SCORED_SONGS}
-              AND COALESCE(cardinality(t."moodTags"), 0) = 0
-        ) s
-        ORDER BY s.title_key, s.artist_key, s.id
-    `;
-    return stationPage(rows.map((r) => ({ id: r.id, artistId: r.artist_key })), request);
+    return (await pickWildcardPage(request)).trackIds;
 }
 
 /** pickStationTracks for the shipped recipe with this id. */
 export async function pickRecipeStation(recipeId: string, options: StationRequest): Promise<string[]> {
     return pickStationTracks(getRecipe(recipeId), options);
+}
+
+/** pickStationPage for the shipped recipe with this id. */
+export async function pickRecipeStationPage(recipeId: string, options: StationRequest): Promise<StationPage> {
+    return pickStationPage(getRecipe(recipeId), options);
 }

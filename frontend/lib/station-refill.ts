@@ -1,10 +1,14 @@
 /**
  * A station keeps playing by fetching another batch whenever its queue runs out.
  * The session remembers every track id it has queued, so a refill adds only tracks
- * not already played or queued, and it ends when a fetch brings nothing new.
+ * not already played or queued, and it ends when a fetch brings nothing new. A station
+ * the server orders (`serverOrdered`, stationBatches) never repeats a song until it has
+ * played them all and then starts over on purpose, so its refills are taken whole and it
+ * ends only when a fetch brings nothing.
  */
 export interface StationSession<T extends { id: string }> {
     fetchBatch: () => Promise<T[]>;
+    serverOrdered: boolean;
     seen: Set<string>;
     exhausted: boolean;
     loading: boolean;
@@ -18,9 +22,11 @@ export interface StationSession<T extends { id: string }> {
 export function startStationSession<T extends { id: string }>(
     queued: T[],
     fetchBatch: () => Promise<T[]>,
+    { serverOrdered = false }: { serverOrdered?: boolean } = {},
 ): StationSession<T> {
     return {
         fetchBatch,
+        serverOrdered,
         seen: new Set(queued.map((t) => t.id)),
         exhausted: false,
         loading: false,
@@ -45,7 +51,7 @@ export async function refillStation<T extends { id: string }>(
     try {
         const fresh: T[] = [];
         for (const track of await session.fetchBatch()) {
-            if (session.seen.has(track.id)) continue;
+            if (!session.serverOrdered && session.seen.has(track.id)) continue;
             session.seen.add(track.id);
             fresh.push(track);
         }
@@ -89,7 +95,7 @@ export async function refillAndResume<T extends { id: string }>(
  * A station's batches from the server. The server plays a station in its own order, spreading each artist's songs, and
  * for the stations that play every matching song (moods, Wildcard, workout) one order per seed: when a batch comes back
  * with `next`, the next fetch asks from there with the same seed, so refills carry on through that order instead of
- * starting a fresh one and losing the spread to the repeats a session drops.
+ * starting a fresh one and losing the spread to the repeats a session drops. Such a station is `serverOrdered`.
  */
 export function stationBatches<T>(
     get: (query: string) => Promise<{ tracks: T[]; next?: number }>,

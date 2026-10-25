@@ -160,7 +160,9 @@ export function useRadioPlayer() {
                 return;
             }
 
-            playStation(response.tracks, async () => (await fetchTracks()).tracks ?? []);
+            playStation(response.tracks, async () => (await fetchTracks()).tracks ?? [], {
+                serverOrdered: response.next !== undefined,
+            });
         } catch (error) {
             console.error("Failed to start radio:", error);
             notify.error("Failed to start radio station");

@@ -44,7 +44,7 @@ interface AudioControlsContextType {
     playTrack: (track: Track) => void;
     playTracks: (tracks: Track[], startIndex?: number) => void;
     /** Plays a station: when its last track starts, fetchBatch is asked for more and the new tracks are appended. */
-    playStation: (tracks: Track[], fetchBatch: () => Promise<Track[]>) => void;
+    playStation: (tracks: Track[], fetchBatch: () => Promise<Track[]>, options?: { serverOrdered?: boolean }) => void;
 
     // Audiobook methods
     playAudiobook: (audiobook: Audiobook) => void;
@@ -320,9 +320,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     );
 
     const playStation = useCallback(
-        (tracks: Track[], fetchBatch: () => Promise<Track[]>) => {
+        (tracks: Track[], fetchBatch: () => Promise<Track[]>, options?: { serverOrdered?: boolean }) => {
             playTracks(tracks, 0);
-            if (tracks.length > 0) stationRef.current = startStationSession(tracks, fetchBatch);
+            if (tracks.length > 0) stationRef.current = startStationSession(tracks, fetchBatch, options);
         },
         [playTracks]
     );

@@ -16,9 +16,10 @@ import { shuffleArray } from "../../utils/shuffle";
 import { drawIds, drawWeighted, sampleTrackIds, unplayedTrackIds } from "../../services/mixes/helpers";
 import {
   UnrankableLibraryError,
-  pickRecipeStation,
-  pickWildcardStation,
+  pickRecipeStationPage,
+  pickWildcardPage,
   songArtistKey,
+  type StationPage,
   type StationRequest,
 } from "../../services/mixes/recipes";
 import { spreadByArtist } from "../../utils/artistSpread";
@@ -725,24 +726,52 @@ const MOOD_STATIONS = new Map([
   ["nostalgic", "nostalgic"],
   ["epic", "epic"],
 ]);
-/** The station of the songs without a mood tag (pickWildcardStation). */
+/** The station of the songs without a mood tag (pickWildcardPage). */
 const WILDCARD_STATION = "wildcard";
 
-/** A recipe station's refill; empty when the library cannot rank its songs for the recipe. */
-async function stationTracks(recipe: string, request: StationRequest): Promise<string[]> {
+/** A recipe station's refill; no songs when the library cannot rank its songs for the recipe. */
+async function recipeStationPage(recipe: string, request: StationRequest): Promise<StationPage> {
   try {
-    return await pickRecipeStation(recipe, request);
+    return await pickRecipeStationPage(recipe, request);
   } catch (error) {
     if (!(error instanceof UnrankableLibraryError)) throw error;
     logger.debug(error.message);
-    return [];
+    return { trackIds: [], next: request.offset ?? 0 };
   }
 }
 
 /**
+ * A station's refill with songs that can still play. The pool holds only playable songs when a session reads it, but a
+ * file can go missing later; a page left with none is passed over, as an empty page tells the player the station has
+ * nothing more. Songs left out of a page can put two songs by one artist side by side; that needs a file to go missing
+ * after the session started, and costs one bunch, not the order.
+ */
+async function playableStationPage(
+  read: (request: StationRequest) => Promise<StationPage>,
+  request: StationRequest,
+): Promise<StationPage> {
+  let page = await read(request);
+  for (;;) {
+    const playable = await prisma.track.findMany({
+      where: { id: { in: page.trackIds }, ...PLAYABLE },
+      select: { id: true },
+    });
+    const ids = new Set(playable.map((t) => t.id));
+    const trackIds = page.trackIds.filter((id) => ids.has(id));
+    if (trackIds.length > 0 || page.trackIds.length === 0 || request.seed === undefined) {
+      return { trackIds, next: page.next };
+    }
+    page = await read({ ...request, offset: page.next });
+  }
+}
+
+const BAD_STATION_REQUEST = "A station's offset needs its seed, and both must be short plain values";
+
+/**
  * A mood, Wildcard or workout station plays every matching song in one order that spreads each artist's songs
- * (StationRequest): a player that sends the same `seed` with `offset` set to the `next` of its last refill hears each
- * song once. Without a seed every refill is a fresh order. Null when the query's seed or offset cannot be used.
+ * (stationOrder.ts): a player that sends the same `seed` with `offset` set to the `next` of its last refill hears each
+ * song once before the station starts over. Without a seed every refill is a fresh order. Null when the query's seed
+ * or offset cannot be used; the other radios do not read them.
  */
 function parseStationRequest(query: Record<string, unknown>, limit: number): StationRequest | null {
   const { seed, offset } = query;
@@ -760,11 +789,6 @@ router.get("/radio", async (req, res) => {
     if (!type) {
       return res.status(400).json({ error: "Radio type is required" });
     }
-    const station = parseStationRequest(req.query, limitNum);
-    if (!station) {
-      return res.status(400).json({ error: "A station's offset needs its seed, and both must be short plain values" });
-    }
-
     let trackIds: string[] = [];
     // Set by the stations that play every matching song: their ids come in play order, and the offset to ask from next.
     let next: number | null = null;
@@ -869,23 +893,26 @@ router.get("/radio", async (req, res) => {
 
       case "mood": {
         const moodValue = ((value as string) || "").toLowerCase();
-        if (moodValue === WILDCARD_STATION) {
-          trackIds = await pickWildcardStation(station);
-        } else {
-          const recipe = MOOD_STATIONS.get(moodValue);
-          if (!recipe) {
-            return res.status(400).json({ error: `Unknown mood: ${moodValue}` });
-          }
-          trackIds = await stationTracks(recipe, station);
+        const recipe = MOOD_STATIONS.get(moodValue);
+        if (moodValue !== WILDCARD_STATION && !recipe) {
+          return res.status(400).json({ error: `Unknown mood: ${moodValue}` });
         }
-        next = station.offset! + trackIds.length;
+        const request = parseStationRequest(req.query, limitNum);
+        if (!request) return res.status(400).json({ error: BAD_STATION_REQUEST });
+        const page = await playableStationPage(
+          recipe ? (r) => recipeStationPage(recipe, r) : pickWildcardPage,
+          request,
+        );
+        ({ trackIds, next } = page);
         break;
       }
 
-      case "workout":
-        trackIds = await stationTracks("workout", station);
-        next = station.offset! + trackIds.length;
+      case "workout": {
+        const request = parseStationRequest(req.query, limitNum);
+        if (!request) return res.status(400).json({ error: BAD_STATION_REQUEST });
+        ({ trackIds, next } = await playableStationPage((r) => recipeStationPage("workout", r), request));
         break;
+      }
 
       case "artist":
         const artistId = value as string;

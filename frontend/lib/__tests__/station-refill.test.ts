@@ -159,6 +159,18 @@ describe("refillAndResume", () => {
     });
 });
 
+describe("a station the server orders", () => {
+    it("takes each refill whole, songs it played before included, as the server starts its pool over on purpose", async () => {
+        const batches = [t("a", "b"), t("a", "c"), []];
+        const session = startStationSession(t("a", "b"), async () => batches.shift()!, { serverOrdered: true });
+        expect(await refillStation(session, "1")).toEqual(t("a", "b"));
+        expect(await refillStation(session, "2")).toEqual(t("a", "c"));
+        expect(session.exhausted).toBe(false);
+        expect(await refillStation(session, "3")).toEqual([]);
+        expect(session.exhausted).toBe(true);
+    });
+});
+
 describe("stationBatches", () => {
     it("sends one seed and asks each refill from the `next` the last batch returned", async () => {
         const queries: string[] = [];
