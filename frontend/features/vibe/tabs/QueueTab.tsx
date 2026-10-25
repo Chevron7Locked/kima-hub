@@ -3,8 +3,9 @@
 import { useAudioState } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
+import { useState } from "react";
 import { cn } from "@/lib/cn";
-import { Play, Pause } from "lucide-react";
+import { Play, Pause, Music } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatTime } from "@/lib/format";
 import { CachedImage } from "@/components/ui/CachedImage";
@@ -17,13 +18,21 @@ const OPERATION_STYLES: Record<string, { label: string; borderColor: string }> =
 };
 
 function QueueCover({ coverArt }: { coverArt?: string | null }) {
+    const [failed, setFailed] = useState(false);
     return (
         <div className="relative w-8 h-8 rounded overflow-hidden bg-[#181818] shrink-0">
-            {coverArt ? (
-                <CachedImage src={api.getCoverArtUrl(coverArt, 64)} alt="" fill sizes="32px" className="object-cover" />
+            {coverArt && !failed ? (
+                <CachedImage
+                    src={api.getCoverArtUrl(coverArt, 64)}
+                    alt=""
+                    fill
+                    sizes="32px"
+                    className="object-cover"
+                    onError={() => setFailed(true)}
+                />
             ) : (
                 <div className="w-full h-full flex items-center justify-center">
-                    <div className="w-2 h-2 rounded-full bg-white/10" />
+                    <Music className="w-3.5 h-3.5 text-white/25" />
                 </div>
             )}
         </div>

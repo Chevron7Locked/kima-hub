@@ -2,7 +2,6 @@
 
 import { usePlayerControls } from "@/hooks/usePlayerControls";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
-import { PlayCountLine } from "@/features/stats/PlayCountLine";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import Link from "next/link";
 import {
@@ -80,8 +79,6 @@ export function MiniPlayer() {
     }
 
     const { title, subtitle, coverUrl, mediaLink, hasMedia } = useMediaInfo(100);
-
-    const countedTrackId = playbackType === "track" ? currentTrack?.id : null;
 
     // Check if controls should be enabled (only for tracks)
     const canSkip = playbackType === "track";
@@ -207,32 +204,23 @@ export function MiniPlayer() {
                 onTouchMove={handleTouchMove}
                 onTouchEnd={handleTouchEnd}
             >
-                {/* Page content melts into the bar instead of clipping at its edge. */}
+                {/* A raised neutral card with a hairline edge and a faint accent wash
+                    from the leading edge — the iOS mini player's shell. */}
                 <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute bottom-full inset-x-4 h-6 rounded-t-full bg-gradient-to-b from-transparent to-[#15100a]/85"
-                />
-
-                {/* Gradient border container - uses padding technique for gradient border */}
-                <div
-                    className="rounded-2xl p-[2px]"
-                    style={{
-                        background: "linear-gradient(90deg, #fca200 0%, #d48c00 50%, #fca200 100%)",
-                    }}
+                    className="relative overflow-hidden rounded-[14px] border border-[rgba(255,240,214,0.08)] shadow-[0_5px_14px_rgba(0,0,0,0.5)]"
+                    style={{ background: "var(--bg-secondary)" }}
                 >
-                    {/* Inner container with overflow hidden for proper clipping */}
-                    <div className="rounded-xl overflow-hidden">
-                        {/* Single solid background with gradient overlay - prevents corner bleed */}
-                        <div className="relative bg-gradient-to-r from-[#1a1508] via-[#1a1200] to-[#1a1508]">
-                            <div className="absolute inset-0 bg-gradient-to-r from-brand/25 via-brand-dark/35 to-brand/25" />
-
-                            {/* Progress bar at top - inside the clipped container */}
-                            <div className="relative h-[2px] bg-white/20 w-full">
-                                <div
-                                    className="h-full bg-brand transition-all duration-150"
-                                    style={{ width: `${progress}%` }}
-                                />
-                            </div>
+                    <div
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0"
+                        style={{ background: "linear-gradient(90deg, rgba(252,162,0,0.10), transparent 55%)" }}
+                    />
+                    <div className="relative h-[2px] w-full bg-white/10">
+                        <div
+                            className="h-full bg-[var(--color-brand)] transition-all duration-150"
+                            style={{ width: `${progress}%` }}
+                        />
+                    </div>
 
                             {/* Player content - more spacious padding */}
                             <div
@@ -241,7 +229,7 @@ export function MiniPlayer() {
                             >
                                 {/* Album Art - expand button for keyboard/AT users */}
                                 <button
-                                    className="relative w-12 h-12 flex-shrink-0 rounded-lg overflow-hidden bg-black/30 landscape-short:w-10 landscape-short:h-10"
+                                    className="relative w-12 h-12 flex-shrink-0 rounded-[12px] overflow-hidden bg-black/30 shadow-[0_3px_6px_rgba(0,0,0,0.45)] landscape-short:w-10 landscape-short:h-10"
                                     aria-label="Expand player"
                                     onClick={(e) => {
                                         e.stopPropagation();
@@ -278,18 +266,12 @@ export function MiniPlayer() {
                                         </>
                                     ) : (
                                         <>
-                                            <p data-player-title className="text-white text-sm font-medium truncate leading-tight">
+                                            <p data-player-title className="text-[15px] font-semibold text-[var(--text-primary)] truncate leading-tight">
                                                 {title}
                                             </p>
-                                            <div className="landscape-short:flex landscape-short:min-w-0 landscape-short:items-baseline landscape-short:gap-2">
-                                                <p className="text-gray-300/70 text-xs truncate leading-tight mt-0.5">
-                                                    {subtitle}
-                                                </p>
-                                                <PlayCountLine
-                                                    trackId={countedTrackId}
-                                                    className="mt-0.5 shrink-0"
-                                                />
-                                            </div>
+                                            <p className="text-[13px] text-[var(--text-secondary)] truncate leading-tight mt-0.5">
+                                                {subtitle}
+                                            </p>
                                         </>
                                     )}
                                 </div>
@@ -357,8 +339,6 @@ export function MiniPlayer() {
                                     </button>
                                 </div>
                             </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         );

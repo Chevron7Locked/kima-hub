@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { motion, useDragControls, type PanInfo } from "framer-motion";
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from "react";
+import Link from "next/link";
 import { ActivityIconBar, type ActivityType } from "./ActivityIconBar";
 import {
     type VibeTab,
@@ -10,21 +10,28 @@ import {
     TabBar,
     TabContent,
 } from "./panel-shared";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
-import Link from "next/link";
-import { Waypoints, Sparkles, AudioWaveform, Play, type LucideIcon } from "lucide-react";
+import type { LibraryMatches } from "./librarySearch";
+import { usePlayerControls } from "@/hooks/usePlayerControls";
+import { useMediaInfo } from "@/hooks/useMediaInfo";
+import { CachedImage } from "@/components/ui/CachedImage";
+import { normalizeNFC } from "@/lib/format";
+import { Waypoints, Sparkles, AudioWaveform, Play, Pause, Search, X, Music, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 type SnapPoint = "peek" | "half" | "full";
 
-/** The closed sheet's handle. */
-const SHEET_PEEK = 28;
+/** The grab strip. A finger-sized target, and the sheet's own handle. */
+const HANDLE = 44;
+/** The search row (an h-11 field plus its 8px foot), which stays reachable while the sheet is closed. */
+const SEARCH_ROW = 52;
+/** The now-playing row (an h-11 row plus its 8px foot), shown above the search while something plays. */
+const PLAYER_ROW = 52;
 
 function SheetAction({ icon: Icon, label, primary = false, ...props }: { icon: LucideIcon; label: string; primary?: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
     return (
         <button
             className={cn(
-                "flex-1 flex flex-col items-center gap-1 min-h-[52px] py-2 px-1 rounded-lg landscape-short:flex-row landscape-short:justify-center landscape-short:gap-1.5 landscape-short:min-h-11 landscape-short:py-1 border text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2",
+                "flex-1 flex flex-col items-center gap-1 min-h-[52px] py-2 px-1 rounded-lg border text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2",
                 primary
                     ? "bg-[var(--color-brand)]/15 border-[var(--color-brand)]/40 focus-visible:ring-[var(--color-brand)]/60"
                     : "bg-white/[0.06] hover:bg-white/[0.12] border-white/10 focus-visible:ring-white/40",
@@ -37,7 +44,7 @@ function SheetAction({ icon: Icon, label, primary = false, ...props }: { icon: L
     );
 }
 
-export interface VibePanelSheetProps {
+interface VibePanelSheetProps {
     selectedTrackId?: string | null;
     selectedTrackTitle?: string | null;
     selectedTrackArtist?: string | null;
@@ -46,12 +53,22 @@ export interface VibePanelSheetProps {
     songPathActive?: boolean;
     onPlay?: () => void;
     selectedArtistId?: string | null;
-    /** Leave the space the floating mini player covers (--mini-clearance). */
-    aboveMiniPlayer?: boolean;
-    /** First-visit help, shown under the handle while no track is selected. */
+    /** Debounced by the sheet; the page owns what a query means. */
+    onSearch: (query: string) => void;
+    /** Matches for the current query, or null when not searching. */
+    results: LibraryMatches | null;
+    onPickResult: (trackId: string) => void;
+    /** Bumped by the page whenever everything is cleared, so the field empties too. */
+    clearSignal: number;
+    /** First-visit help, shown at the top of the open sheet. */
     intro?: React.ReactNode;
 }
 
+/**
+ * The phone's one bottom surface: now-playing, search, actions and tabs, with
+ * no floating mini player under it. Three stops from the page content: peek,
+ * half, and full at three quarters up, so the blurred map stays in view.
+ */
 export function VibePanelSheet({
     selectedTrackId,
     selectedTrackTitle,
@@ -59,63 +76,170 @@ export function VibePanelSheet({
     onTrackOperation,
     onStartSongPath,
     songPathActive = false,
-    aboveMiniPlayer = false,
     onPlay,
     selectedArtistId,
+    onSearch,
+    results,
+    onPickResult,
+    clearSignal,
     intro,
 }: VibePanelSheetProps) {
+    const { playbackType, isPlaying, pause, resumeWithGesture, setPlayerMode } = usePlayerControls();
+    const { title: playingTitle, subtitle: playingSubtitle, coverUrl } = useMediaInfo(100);
+    const hasPlayback = !!playbackType;
+
+    const hostRef = useRef<HTMLDivElement>(null);
+    const sheetRef = useRef<HTMLDivElement>(null);
+    const [hostHeight, setHostHeight] = useState(0);
+    const [contentFloor, setContentFloor] = useState(0);
     const [snap, setSnap] = useState<SnapPoint>("peek");
+    const [dragHeight, setDragHeight] = useState<number | null>(null);
     const [activeTab, setActiveTab] = useState<VibeTab>("now-playing");
     const [expandedActivity, setExpandedActivity] = useState<ActivityType | null>(null);
-    const [sheetHeight, setSheetHeight] = useState(600);
-    const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
-    const dragControls = useDragControls();
 
-    const sheetRef = useRef<HTMLDivElement>(null);
-    // Size against the area above the mini player, which the sheet's frame already is.
+    const [query, setQuery] = useState("");
+    const [active, setActive] = useState(0);
+    const [seenClear, setSeenClear] = useState(clearSignal);
+    if (clearSignal !== seenClear) {
+        setSeenClear(clearSignal);
+        setQuery("");
+        setActive(0);
+    }
+    const onSearchRef = useRef(onSearch);
+    useEffect(() => { onSearchRef.current = onSearch; }, [onSearch]);
     useEffect(() => {
-        const update = () => {
-            const host = sheetRef.current?.offsetParent as HTMLElement | null;
-            const available = host?.clientHeight ?? window.innerHeight;
-            setSheetHeight(Math.max(SHEET_PEEK * 6, available * 0.94));
-        };
-        update();
-        window.addEventListener("resize", update);
-        return () => window.removeEventListener("resize", update);
-    }, [aboveMiniPlayer]);
+        const timer = setTimeout(() => onSearchRef.current(query.trim()), 150);
+        return () => clearTimeout(timer);
+    }, [query]);
 
-    // The closed sheet shows, under the handle, the selected track's actions or the
-    // first-visit help, at their measured height.
-    const [peekContentHeight, setPeekContentHeight] = useState(0);
-    const hasActions = !!(selectedTrackId && onTrackOperation && onStartSongPath);
-    const hasPeekContent = hasActions || !!intro;
-    const peekContentRef = useCallback((el: HTMLDivElement | null) => {
+    // The host is the page content; its height is the sheet's full extent, so
+    // the stops follow the viewport without ever measuring the sheet's content.
+    useEffect(() => {
+        const el = hostRef.current;
         if (!el) return;
-        const observer = new ResizeObserver(() => setPeekContentHeight(el.offsetHeight));
+        const update = () => setHostHeight(el.clientHeight);
+        update();
+        const observer = new ResizeObserver(update);
         observer.observe(el);
         return () => observer.disconnect();
     }, []);
-    const peekHeight = SHEET_PEEK + (hasPeekContent ? peekContentHeight : 0);
-    const snapY = useMemo(() => ({
-        peek: sheetHeight - peekHeight,
-        half: sheetHeight * 0.5,
-        full: 0,
-    }), [sheetHeight, peekHeight]);
 
-    const handleDragEnd = useCallback((_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
-        const currentY = snapY[snap] + info.offset.y;
-        const vy = info.velocity.y;
+    const peekHeight = HANDLE + (hasPlayback ? PLAYER_ROW : 0) + SEARCH_ROW;
+    const hasActions = !!(selectedTrackId && onTrackOperation && onStartSongPath);
+    const stops = useMemo(() => {
+        // Full is the whole page: the queue and lyrics need the height, and a
+        // three-quarters stop left the tab bar under the sheet's bottom edge.
+        const full = hostHeight;
+        // Half has to clear the selected track's actions, the activity row and
+        // the tab bar, or the tabs land under the content's bottom edge. The
+        // sheet is clipped at peek, so its scrollHeight is the real content
+        // height — measured there, before the selection opens it to half.
+        const half = Math.max(
+            peekHeight,
+            Math.round(hostHeight * 0.56),
+            Math.min(full, contentFloor)
+        );
+        return { peek: peekHeight, half, full } as Record<SnapPoint, number>;
+    }, [hostHeight, peekHeight, contentFloor]);
 
-        if (vy > 500) {
+    // Below full the sheet is clipped, so its scrollHeight is the content's
+    // true height. Half is measured too: typing opens the sheet before a
+    // selection adds the actions, so peek alone would miss the taller content.
+    useLayoutEffect(() => {
+        const el = sheetRef.current;
+        if (!el || snap === "full") return;
+        setContentFloor(el.scrollHeight);
+    }, [snap, hasPlayback, hasActions, selectedTrackId, expandedActivity, intro]);
+
+    const searching = results !== null && query.trim().length >= 2;
+    const clampedActive = results && results.top.length > 0 ? Math.min(active, results.top.length - 1) : 0;
+
+    // The snap belongs to the selection it was chosen for: a new selection opens
+    // the sheet, and a cleared one closes it. Measured on the real library: a
+    // state update issued during render is discarded here, so this has to run
+    // after commit. Verified — a tap takes the sheet from peek to half.
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setSnap((current) => {
+            if (selectedTrackId && current === "peek") return "half";
+            if (!selectedTrackId && current !== "peek") return "peek";
+            return current;
+        });
+    }, [selectedTrackId]);
+
+    const height = dragHeight ?? stops[snap];
+
+    const nearest = useCallback((value: number): SnapPoint => {
+        const entries = Object.entries(stops) as [SnapPoint, number][];
+        entries.sort((a, b) => Math.abs(a[1] - value) - Math.abs(b[1] - value));
+        return entries[0][0];
+    }, [stops]);
+
+    // Escape steps the sheet down before the page's own Escape handling runs.
+    // The page's listener is registered at mount and this one is re-registered
+    // on every snap change, so bubble order would let the page clear the
+    // selection first and consume the key; capture order is fixed.
+    useEffect(() => {
+        if (snap === "peek") return;
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key !== "Escape" || event.defaultPrevented) return;
+            event.preventDefault();
             setSnap(snap === "full" ? "half" : "peek");
-        } else if (vy < -500) {
-            setSnap(snap === "peek" ? "half" : "full");
+        };
+        document.addEventListener("keydown", onKey, { capture: true });
+        return () => document.removeEventListener("keydown", onKey, { capture: true });
+    }, [snap, setSnap]);
+
+    const drag = useRef<{ startY: number; startHeight: number; samples: { t: number; h: number }[] } | null>(null);
+    const liveHeight = useRef(0);
+
+    const onHandleDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        drag.current = { startY: event.clientY, startHeight: height, samples: [{ t: event.timeStamp, h: height }] };
+        liveHeight.current = height;
+    }, [height]);
+
+    const onHandleMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        if (!drag.current) return;
+        const raw = drag.current.startHeight - (event.clientY - drag.current.startY);
+        // Beyond the ends the sheet gives, then stops, so it feels held rather
+        // than hitting a wall.
+        let next = raw;
+        if (raw > stops.full) next = stops.full + (raw - stops.full) * 0.25;
+        else if (raw < stops.peek) next = stops.peek - (stops.peek - raw) * 0.25;
+        liveHeight.current = next;
+        drag.current.samples.push({ t: event.timeStamp, h: next });
+        if (drag.current.samples.length > 10) drag.current.samples.shift();
+        setDragHeight(next);
+    }, [stops]);
+
+    const onHandleUp = useCallback(() => {
+        const state = drag.current;
+        if (!state) return;
+        drag.current = null;
+
+        // A flick continues in the direction it was thrown; a slow release falls
+        // to the nearest stop. Without this the sheet lands wherever the finger
+        // happened to stop.
+        const last = state.samples[state.samples.length - 1];
+        const first = state.samples.find((sample) => last.t - sample.t <= 110) ?? state.samples[0];
+        const elapsed = Math.max(1, last.t - first.t);
+        const velocity = (last.h - first.h) / elapsed; // px per ms, positive opens
+        const from = liveHeight.current;
+        const order: SnapPoint[] = ["peek", "half", "full"];
+
+        let target: SnapPoint;
+        if (Math.abs(velocity) > 0.45) {
+            const opening = velocity > 0;
+            const candidates = order.filter((point) => (opening ? stops[point] > from + 1 : stops[point] < from - 1));
+            target = opening ? candidates[0] ?? "full" : candidates[candidates.length - 1] ?? "peek";
         } else {
-            const entries = Object.entries(snapY) as [SnapPoint, number][];
-            entries.sort((a, b) => Math.abs(a[1] - currentY) - Math.abs(b[1] - currentY));
-            setSnap(entries[0][0]);
+            target = nearest(from);
         }
-    }, [snap, snapY]);
+
+        setSnap(target);
+        setDragHeight(null);
+    }, [nearest, setSnap, stops]);
 
     const handleToggleActivity = (type: ActivityType) => {
         setExpandedActivity((prev) => (prev === type ? null : type));
@@ -129,100 +253,249 @@ export function VibePanelSheet({
     };
 
     return (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-(--z-scene-panel) overflow-hidden" style={{ bottom: aboveMiniPlayer ? "var(--mini-clearance)" : 0 }}>
-        <motion.div
-            ref={sheetRef}
-            className="pointer-events-auto absolute bottom-0 left-0 right-0 bg-[var(--bg-primary)] rounded-t-2xl border-t border-white/10 flex flex-col"
-            style={{ height: sheetHeight }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1, y: snapY[snap] }}
-            transition={prefersReducedMotion
-                ? { duration: 0 }
-                : { type: "spring", damping: 30, stiffness: 300 }
-            }
-            drag="y"
-            dragControls={dragControls}
-            dragListener={false}
-            dragConstraints={{ top: 0, bottom: snapY.peek }}
-            dragElastic={0.2}
-            onDragEnd={handleDragEnd}
-        >
-            <div
-                className="flex justify-center py-3 cursor-grab active:cursor-grabbing touch-none shrink-0"
-                onPointerDown={(e) => dragControls.start(e)}
-            >
-                <div className="w-10 h-1 bg-white/20 rounded-full" />
-            </div>
-
-            {!hasActions && intro && (
-                <div ref={peekContentRef} className="shrink-0 px-4 pb-3 border-b border-white/5">{intro}</div>
+        <div ref={hostRef} className="pointer-events-none absolute inset-0 z-(--z-sheet)">
+            {snap !== "peek" && (
+                <div
+                    data-testid="vibe-sheet-scrim"
+                    aria-hidden="true"
+                    onClick={() => setSnap("peek")}
+                    className="pointer-events-auto absolute inset-0 bg-black/40 backdrop-blur-sm"
+                />
             )}
 
-            {hasActions && onTrackOperation && onStartSongPath && (
-                <div ref={peekContentRef} className="shrink-0 px-3 pb-2 border-b border-white/5 landscape-short:flex landscape-short:items-center landscape-short:gap-3">
-                    {(selectedTrackTitle || selectedTrackArtist) && (
-                        <p className="text-xs text-[var(--text-muted)] truncate mb-2 mt-0.5 landscape-short:m-0 landscape-short:w-44 landscape-short:shrink-0">
-                            <span className="text-[var(--text-secondary)]">{selectedTrackTitle}</span>
-                            {selectedTrackArtist && (
-                                <> &middot; {selectedArtistId
-                                    ? <Link href={`/artist/${selectedArtistId}`} className="underline-offset-2 hover:underline">{selectedTrackArtist}</Link>
-                                    : selectedTrackArtist}</>
-                            )}
-                        </p>
-                    )}
-                    <div className="flex gap-2 landscape-short:min-w-0 landscape-short:flex-1">
-                        {onPlay && <SheetAction primary icon={Play} label="Play" onClick={onPlay} aria-label="Play this track" />}
-                        <SheetAction
-                            icon={Sparkles}
-                            label="Match Vibe"
-                            onClick={() => onTrackOperation("vibe")}
-                            aria-label="Match Vibe -- build a queue of similar-sounding tracks"
-                        />
-                        <SheetAction
-                            icon={AudioWaveform}
-                            label="Similar"
-                            onClick={() => onTrackOperation("similar")}
-                            aria-label="Similar -- highlight similar tracks on the map"
-                        />
-                        <SheetAction
-                            icon={Waypoints}
-                            label="Song Path"
-                            onClick={onStartSongPath}
-                            aria-label="Song Path -- set this track as the start of a song path, then tap the destination"
-                        />
+            <div
+                ref={sheetRef}
+                data-testid="vibe-sheet"
+                data-snap={snap}
+                className="pointer-events-auto absolute inset-x-0 bottom-0 flex flex-col overflow-clip rounded-t-2xl border-t border-white/10 bg-[var(--bg-primary)] shadow-[0_-20px_48px_-16px_rgba(0,0,0,0.85)]"
+                style={{
+                    height,
+                    transition: dragHeight === null ? "height 340ms cubic-bezier(0.32, 0.72, 0, 1)" : "none",
+                }}
+            >
+                <div
+                    onPointerDown={onHandleDown}
+                    onPointerMove={onHandleMove}
+                    onPointerUp={onHandleUp}
+                    onPointerCancel={onHandleUp}
+                    role="separator"
+                    aria-orientation="horizontal"
+                    aria-label="vibe panel"
+                    className="flex h-11 shrink-0 cursor-grab touch-none items-center justify-center active:cursor-grabbing"
+                >
+                    <span className="h-1 w-10 rounded-full bg-white/20" />
+                </div>
+
+                {hasPlayback && (
+                    <div
+                        data-testid="vibe-peek-player"
+                        role="region"
+                        aria-label="now playing"
+                        className="flex shrink-0 items-center gap-3 px-3 pb-2"
+                        style={{ minHeight: PLAYER_ROW }}
+                    >
+                        <button
+                            type="button"
+                            onClick={() => setPlayerMode("overlay")}
+                            className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                            aria-label="Open the full player"
+                        >
+                            <span className="relative h-9 w-9 shrink-0 overflow-hidden rounded-md bg-black/40">
+                                {coverUrl ? (
+                                    <CachedImage src={coverUrl} alt={playingTitle} fill sizes="36px" className="object-cover" />
+                                ) : (
+                                    <span className="flex h-full w-full items-center justify-center">
+                                        <Music className="h-4 w-4 text-[var(--text-secondary)]" />
+                                    </span>
+                                )}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-medium text-[var(--text-primary)]">{playingTitle}</span>
+                                <span className="block truncate text-xs text-[var(--text-secondary)]">{playingSubtitle}</span>
+                            </span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => (isPlaying ? pause() : resumeWithGesture())}
+                            aria-label={isPlaying ? "pause" : "play"}
+                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-brand)] text-black transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                        >
+                            {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="ml-0.5 h-5 w-5" />}
+                        </button>
                     </div>
-                    {songPathActive && (
-                        <p className="text-micro text-[var(--text-secondary)] text-center mt-2 animate-pulse">
-                            Tap another track to complete the song path
-                        </p>
+                )}
+
+                <div className="relative shrink-0 px-3 pb-2">
+                    <Search className="pointer-events-none absolute left-6 top-1/2 h-4 w-4 -translate-y-1/2 text-white/55" />
+                    <input
+                        type="text"
+                        role="combobox"
+                        aria-expanded={searching}
+                        aria-controls="vibe-search-results"
+                        aria-autocomplete="list"
+                        aria-activedescendant={searching && results.top.length > 0 ? `vibe-result-${clampedActive}` : undefined}
+                        value={query}
+                        onChange={(event) => {
+                            const next = event.target.value;
+                            setQuery(next);
+                            setActive(0);
+                            // Typing opens the sheet far enough to read the results.
+                            if (next.trim().length >= 2) setSnap((current) => (current === "peek" ? "half" : current));
+                        }}
+                        onKeyDown={(event) => {
+                            if (event.key === "Escape" && query) {
+                                event.preventDefault();
+                                setQuery("");
+                                return;
+                            }
+                            if (!searching || results.top.length === 0) return;
+                            if (event.key === "ArrowDown") {
+                                event.preventDefault();
+                                setActive((current) => Math.min(results.top.length - 1, current + 1));
+                            } else if (event.key === "ArrowUp") {
+                                event.preventDefault();
+                                setActive((current) => Math.max(0, current - 1));
+                            } else if (event.key === "Enter") {
+                                event.preventDefault();
+                                const track = results.top[clampedActive];
+                                if (track) {
+                                    onPickResult(track.id);
+                                    setQuery("");
+                                }
+                            }
+                        }}
+                        placeholder="find a track or artist"
+                        aria-label="Search tracks or artists"
+                        className="h-11 w-full rounded-full bg-white/[0.06] pl-10 pr-10 text-[15px] text-white placeholder-white/55 caret-[var(--color-brand)] outline-none focus:bg-white/[0.09]"
+                    />
+                    {query && (
+                        <button
+                            type="button"
+                            onClick={() => setQuery("")}
+                            aria-label="Clear search"
+                            className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-white/60 hover:text-white"
+                        >
+                            <X className="h-3.5 w-3.5" />
+                        </button>
                     )}
                 </div>
-            )}
 
-            <div className="shrink-0">
-                <ActivityIconBar
-                    expandedActivity={expandedActivity}
-                    onToggleActivity={handleToggleActivity}
-                />
-            </div>
-
-            {expandedActivity ? (
-                <>
-                    <ActivityHeader
-                        type={expandedActivity}
-                        onClose={() => setExpandedActivity(null)}
-                    />
-                    <div className="flex-1 overflow-y-auto overscroll-contain">
-                        <ActivityContent type={expandedActivity} />
+                {searching ? (
+                    <div
+                        id="vibe-search-results"
+                        role="listbox"
+                        aria-label="Matching tracks"
+                        inert={snap === "peek"}
+                        className="flex-1 overflow-y-auto overscroll-contain border-t border-white/5 py-1"
+                    >
+                        <p className="px-3 pb-1 pt-1.5 text-[11px] text-white/60" aria-live="polite">
+                            {results.count === 0
+                                ? `no tracks match "${query.trim()}"`
+                                : `${results.count.toLocaleString()} ${results.count === 1 ? "match" : "matches"}${results.count > results.top.length ? `, showing the first ${results.top.length}` : ""}`}
+                        </p>
+                        {results.top.map((track, index) => (
+                            <button
+                                key={track.id}
+                                id={`vibe-result-${index}`}
+                                type="button"
+                                role="option"
+                                aria-selected={index === clampedActive}
+                                onMouseEnter={() => setActive(index)}
+                                onClick={() => {
+                                    onPickResult(track.id);
+                                    setQuery("");
+                                }}
+                                className={cn(
+                                    "block w-full px-3 py-2 text-left",
+                                    index === clampedActive ? "bg-white/[0.08]" : "hover:bg-white/[0.06]",
+                                )}
+                            >
+                                <span className="block truncate text-sm text-[var(--text-primary)]">{normalizeNFC(track.title)}</span>
+                                <span className="block truncate text-xs text-white/60">{normalizeNFC(track.artist)}</span>
+                            </button>
+                        ))}
                     </div>
-                </>
-            ) : (
-                <>
-                    <TabBar activeTab={activeTab} onTabClick={handleTabClick} />
-                    <TabContent activeTab={activeTab} />
-                </>
-            )}
-        </motion.div>
+                ) : (
+                    <div
+                        inert={snap === "peek"}
+                        className="flex min-h-0 flex-1 flex-col"
+                    >
+                        {hasActions && onTrackOperation && onStartSongPath && (
+                            <div
+                                data-testid="vibe-sheet-actions"
+                                className="shrink-0 border-b border-white/5 px-3 pb-2"
+                            >
+                                {(selectedTrackTitle || selectedTrackArtist) && (
+                                    <p className="mb-2 mt-0.5 truncate text-xs text-[var(--text-muted)]">
+                                        <span className="text-[var(--text-secondary)]">{selectedTrackTitle}</span>
+                                        {selectedTrackArtist && (
+                                            <> &middot; {selectedArtistId
+                                                ? <Link href={`/artist/${selectedArtistId}`} className="underline-offset-2 hover:underline">{selectedTrackArtist}</Link>
+                                                : selectedTrackArtist}</>
+                                        )}
+                                    </p>
+                                )}
+                                <div className="flex gap-2">
+                                    {onPlay && <SheetAction primary icon={Play} label="Play" onClick={onPlay} aria-label="Play this track" />}
+                                    <SheetAction
+                                        icon={Sparkles}
+                                        label="Match Vibe"
+                                        onClick={() => onTrackOperation("vibe")}
+                                        aria-label="Match Vibe -- build a queue of similar-sounding tracks"
+                                    />
+                                    <SheetAction
+                                        icon={AudioWaveform}
+                                        label="Similar"
+                                        onClick={() => onTrackOperation("similar")}
+                                        aria-label="Similar -- highlight similar tracks on the map"
+                                    />
+                                    <SheetAction
+                                        icon={Waypoints}
+                                        label="Song Path"
+                                        onClick={onStartSongPath}
+                                        aria-label="Song Path -- set this track as the start of a song path, then tap the destination"
+                                    />
+                                </div>
+                                {songPathActive && (
+                                    <p className="mt-2 text-center text-micro text-[var(--text-secondary)] animate-pulse">
+                                        tap another track to complete the song path
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
+                        {!hasActions && intro && (
+                            <div className="shrink-0 border-b border-white/5 px-4 pb-3">{intro}</div>
+                        )}
+
+                        <div className="shrink-0">
+                            <ActivityIconBar
+                                expandedActivity={expandedActivity}
+                                onToggleActivity={handleToggleActivity}
+                            />
+                        </div>
+
+                        {expandedActivity ? (
+                            <>
+                                <ActivityHeader
+                                    type={expandedActivity}
+                                    onClose={() => setExpandedActivity(null)}
+                                />
+                                <div className="flex-1 overflow-y-auto overscroll-contain">
+                                    <ActivityContent type={expandedActivity} />
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <TabBar activeTab={activeTab} onTabClick={handleTabClick} />
+                                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
+                                    <TabContent activeTab={activeTab} />
+                                </div>
+                            </>
+                        )}
+                    </div>
+                )}
+            </div>
         </div>
     );
 }

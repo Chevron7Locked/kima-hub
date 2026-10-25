@@ -112,10 +112,18 @@ export function OverlayPlayer() {
 
     return (
         <div
-            className="fixed inset-0 bg-gradient-to-b from-[#141210] via-[#0a0a0a] to-[#000000] z-(--z-overlay) flex flex-col overflow-hidden"
+            className="fixed inset-0 bg-[#020104] z-(--z-overlay) flex flex-col overflow-hidden"
             role="region"
             aria-label="now playing"
         >
+            {/* Ambient backdrop: the base canvas and the song's accent glow. */}
+            <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+                <div
+                    className="absolute inset-0"
+                    style={{ background: "radial-gradient(circle at 50% 38%, rgba(252,162,0,0.16), transparent 75%)" }}
+                />
+            </div>
+
             <div
                 className="flex items-center justify-between px-4 py-3 flex-shrink-0"
                 style={{ paddingTop: "calc(12px + env(safe-area-inset-top))" }}
@@ -138,14 +146,14 @@ export function OverlayPlayer() {
             </div>
 
             {/* Main Content - Portrait vs Landscape */}
-            <div className="flex-1 flex flex-col landscape:flex-row items-center justify-center px-6 pb-6 landscape:px-8 landscape:gap-8 overflow-hidden">
+            <div className="flex-1 flex flex-col landscape:flex-row items-center justify-start px-6 pb-6 landscape:px-8 landscape:gap-12 overflow-hidden">
                 {isLyricsActive ? (
-                    <div className="w-full max-w-[280px] landscape:flex-1 aspect-square flex-shrink-0 relative mb-6 landscape:mb-0 rounded-2xl bg-[var(--bg-primary)]/90 border border-white/[0.06]">
+                    <div className="w-full max-w-[min(340px,calc(100vh-26rem))] landscape:w-[min(340px,calc(100vh-9rem))] landscape:max-w-none landscape:flex-none aspect-square flex-shrink-0 relative mb-6 landscape:mb-0 rounded-2xl bg-[var(--bg-primary)]/90 border border-white/[0.06]">
                         <LyricsView variant="compact" />
                     </div>
                 ) : (
                     <div
-                        className="w-full max-w-[280px] landscape:flex-1 aspect-square flex-shrink-0 relative mb-6 landscape:mb-0"
+                        className="w-full max-w-[min(340px,calc(100vh-26rem))] landscape:w-[min(340px,calc(100vh-9rem))] landscape:max-w-none landscape:flex-none aspect-square flex-shrink-0 relative mb-6 landscape:mb-0"
                         style={{
                             transform: `translateX(${swipeOffset * 0.5}px)`,
                             opacity: 1 - Math.abs(swipeOffset) / 200,
@@ -203,20 +211,20 @@ export function OverlayPlayer() {
                     </div>
                 )}
 
-                <div className="w-full max-w-[320px] landscape:max-w-[280px] landscape:flex-1 flex flex-col">
-                    <div className="text-center landscape:text-left mb-6">
+                <div className="w-full landscape:flex-1 landscape:max-w-[460px] flex flex-col">
+                    <div className="text-center mb-6">
                         {mediaLink ? (
                             <Link
                                 href={mediaLink}
                                 onClick={returnToPreviousMode}
                                 className="block hover:underline"
                             >
-                                <p data-player-title className="text-xl font-bold text-white mb-1 truncate tracking-tight">
+                                <p data-player-title className="text-[23px] font-semibold text-[var(--text-primary)] mb-1 tracking-[-0.2px] line-clamp-2">
                                     {title}
                                 </p>
                             </Link>
                         ) : (
-                            <p data-player-title className="text-xl font-bold text-white mb-1 truncate tracking-tight">
+                            <p data-player-title className="text-[23px] font-semibold text-[var(--text-primary)] mb-1 tracking-[-0.2px] line-clamp-2">
                                 {title}
                             </p>
                         )}
@@ -226,12 +234,12 @@ export function OverlayPlayer() {
                                 onClick={returnToPreviousMode}
                                 className="block hover:underline"
                             >
-                                <p className="text-base text-[var(--text-secondary)] truncate">
+                                <p className="text-[15px] text-[var(--text-secondary)] truncate">
                                     {subtitle}
                                 </p>
                             </Link>
                         ) : (
-                            <p className="text-base text-[var(--text-secondary)] truncate">
+                            <p className="text-[15px] text-[var(--text-secondary)] truncate">
                                 {subtitle}
                             </p>
                         )}

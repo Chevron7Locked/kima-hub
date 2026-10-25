@@ -131,9 +131,10 @@
 /* Stacking order: one ladder, named by what sits on each rung. */
     --z-raised: 10;            /* overlay inside a component: hover play, scrim */
     --z-scene: 20;             /* overlays within the vibe canvas */
-    --z-scene-panel: 30;       /* the vibe sheet */
+    --z-scene-panel: 30;       /* the song-path and blend panels over the map */
     --z-nav: 40;               /* bottom navigation */
     --z-player: 45;            /* mini player, above the nav it overlaps */
+    --z-sheet: 47;             /* the phone vibe sheet: over the map's controls, under the top bar */
     --z-header: 50;            /* fixed top bar */
     --z-dropdown: 55;          /* menus and popovers anchored to a control */
     --z-drawer-backdrop: 70;   /* mobile sidebar backdrop */

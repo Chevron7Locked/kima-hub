@@ -2,30 +2,83 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useEffect, useRef } from "react";
-import { Plus } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+    BookAudio,
+    ChartNoAxesColumn,
+    ChevronLeft,
+    ChevronRight,
+    Compass,
+    LayoutGrid,
+    Library,
+    ListMusic,
+    Orbit,
+    Plus,
+    Podcast,
+    Radio,
+    RefreshCw,
+    type LucideIcon,
+} from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { queryKeys } from "@/hooks/useQueries";
+import {
+    queryKeys,
+    useMixesQuery,
+    useRefreshMixesMutation,
+} from "@/hooks/useQueries";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { notify } from "@/lib/notify";
 import { useFeatures } from "@/lib/features-context";
+import { mosaicCovers } from "@/features/playlist/coverMosaic";
+import { CachedImage } from "@/components/ui/CachedImage";
 import { MobileSidebar } from "./MobileSidebar";
-import { Button } from "@/components/ui/Button";
 
-const allNavigation = [
-    { name: "Collection", href: "/collection", feature: null },
-    { name: "Queue", href: "/queue", feature: null },
-    { name: "Radio", href: "/radio", feature: null },
-    { name: "Discovery", href: "/discover", feature: null },
-    { name: "Vibe", href: "/vibe", feature: null },
-    { name: "Audiobooks", href: "/audiobooks", feature: "audiobookshelfEnabled" as const },
-    { name: "Podcasts", href: "/podcasts", feature: null },
-    { name: "Browse", href: "/browse/playlists", feature: null },
-    { name: "Stats", href: "/stats", feature: null },
+interface NavItem {
+    name: string;
+    href: string;
+    icon: LucideIcon;
+    /** Routes that belong to this destination, so a detail page keeps its parent lit. */
+    match: string[];
+    feature?: "audiobookshelfEnabled";
+}
+
+const primaryNavigation: NavItem[] = [
+    {
+        name: "collection",
+        href: "/collection",
+        icon: Library,
+        match: ["/collection", "/library", "/album", "/artist", "/mix"],
+    },
+    { name: "queue", href: "/queue", icon: ListMusic, match: ["/queue"] },
+    { name: "radio", href: "/radio", icon: Radio, match: ["/radio"] },
+    { name: "discovery", href: "/discover", icon: Compass, match: ["/discover"] },
+    { name: "vibe", href: "/vibe", icon: Orbit, match: ["/vibe"] },
+];
+
+const secondaryNavigation: NavItem[] = [
+    {
+        name: "audiobooks",
+        href: "/audiobooks",
+        icon: BookAudio,
+        match: ["/audiobooks"],
+        feature: "audiobookshelfEnabled",
+    },
+    { name: "podcasts", href: "/podcasts", icon: Podcast, match: ["/podcasts"] },
+    {
+        name: "browse",
+        href: "/browse/playlists",
+        icon: LayoutGrid,
+        match: ["/browse", "/playlists"],
+    },
+    {
+        name: "stats",
+        href: "/stats",
+        icon: ChartNoAxesColumn,
+        match: ["/stats"],
+    },
 ];
 
 interface Playlist {
@@ -35,7 +88,22 @@ interface Playlist {
     isHidden?: boolean;
     isOwner?: boolean;
     user?: { username: string };
+    items?: {
+        track?: { album?: { coverUrl?: string } };
+    }[];
 }
+
+interface Mix {
+    id: string;
+    name: string;
+    description?: string;
+    trackCount?: number;
+    color?: string;
+}
+
+const COLLAPSE_KEY = "kima:library-collapsed";
+const OPEN_WIDTH = 256;
+const CLOSED_WIDTH = 74;
 
 export function Sidebar() {
     const pathname = usePathname();
@@ -50,15 +118,80 @@ export function Sidebar() {
     const [showCreatePlaylist, setShowCreatePlaylist] = useState(false);
     const [newPlaylistName, setNewPlaylistName] = useState("");
     const [isCreating, setIsCreating] = useState(false);
-    const createPopoverRef = useRef<HTMLDivElement>(null);
+    const [filter, setFilter] = useState("");
+    const [collapsed, setCollapsed] = useState(false);
+    const createButtonRef = useRef<HTMLButtonElement>(null);
+    const createInputRef = useRef<HTMLInputElement>(null);
+    const handleRef = useRef<HTMLButtonElement>(null);
+    const collapseButtonRef = useRef<HTMLButtonElement>(null);
 
-    const { data: playlists = [], isLoading: isLoadingPlaylists } = useQuery<
-        Playlist[]
-    >({
+    const {
+        data: playlists = [],
+        isLoading: isLoadingPlaylists,
+        isError: isErrorPlaylists,
+        refetch: refetchPlaylists,
+    } = useQuery<Playlist[]>({
         queryKey: ["playlists"],
         queryFn: () => api.getPlaylists(),
         enabled: isAuthenticated,
     });
+
+    const {
+        data: mixes = [],
+        isLoading: isLoadingMixes,
+        isError: isErrorMixes,
+    } = useMixesQuery();
+    const { mutate: refreshMixes, isPending: isRefreshingMixes } =
+        useRefreshMixesMutation();
+
+    const visiblePlaylists = playlists.filter((p) => !p.isHidden);
+    const ownPlaylists = visiblePlaylists.filter((p) => p.isOwner !== false);
+    const sharedPlaylists = visiblePlaylists.filter((p) => p.isOwner === false);
+    const dailyMixes = mixes as unknown as Mix[];
+
+    const query = filter.trim().toLowerCase();
+    const matches = (name: string) =>
+        query.length === 0 || name.toLowerCase().includes(query);
+
+    const shownOwn = ownPlaylists.filter((p) => matches(p.name));
+    const shownShared = sharedPlaylists.filter((p) => matches(p.name));
+    const shownMixes = dailyMixes.filter((m) => matches(m.name));
+    const nothingMatches =
+        query.length > 0 &&
+        shownOwn.length === 0 &&
+        shownShared.length === 0 &&
+        shownMixes.length === 0;
+
+    const isCurrent = (item: NavItem) =>
+        item.match.some(
+            (path) => pathname === path || pathname.startsWith(`${path}/`)
+        );
+
+    const secondaryItems = secondaryNavigation.filter(
+        (item) =>
+            !item.feature ||
+            (item.feature === "audiobookshelfEnabled" && audiobookshelfEnabled)
+    );
+
+    // The stored choice is read before the first paint: the server has no
+    // localStorage, so a passive effect would paint the open shelf at 256px and
+    // then animate it shut on every load. A layout effect lands at 72px.
+    useLayoutEffect(() => {
+        try {
+            setCollapsed(localStorage.getItem(COLLAPSE_KEY) === "1");
+        } catch {
+            // A blocked storage API leaves the shelf open, which is the safe default.
+        }
+    }, []);
+
+    const setLibraryCollapsed = (next: boolean) => {
+        setCollapsed(next);
+        try {
+            localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+        } catch {
+            // The choice simply does not survive this session.
+        }
+    };
 
     useEffect(() => {
         setIsMobileMenuOpen(false);
@@ -90,13 +223,19 @@ export function Sidebar() {
     }, []);
 
     useClickOutside(
-        [createPopoverRef],
+        [createButtonRef, createInputRef],
         () => {
             setShowCreatePlaylist(false);
             setNewPlaylistName("");
         },
         showCreatePlaylist,
     );
+
+    const closeCreate = () => {
+        setShowCreatePlaylist(false);
+        setNewPlaylistName("");
+        createButtonRef.current?.focus();
+    };
 
     const handleCreatePlaylist = async () => {
         const name = newPlaylistName.trim();
@@ -117,241 +256,429 @@ export function Sidebar() {
         }
     };
 
-    if (pathname === "/login") {
-        return null;
-    }
+    const collapse = () => {
+        setLibraryCollapsed(true);
+        requestAnimationFrame(() => handleRef.current?.focus());
+    };
+
+    const coverFor = (playlist: Playlist) =>
+        mosaicCovers(
+            (playlist.items ?? []).map((item) => item.track?.album?.coverUrl)
+        )[0];
+
+    const playlistRow = (playlist: Playlist) => {
+        const isActive = pathname === `/playlist/${playlist.id}`;
+        const cover = coverFor(playlist);
+        const shared = playlist.isOwner === false;
+        return (
+            <Link
+                key={playlist.id}
+                href={`/playlist/${playlist.id}`}
+                prefetch={false}
+                aria-current={isActive ? "page" : undefined}
+                aria-label={`${playlist.name}, ${playlist.trackCount} ${
+                    playlist.trackCount === 1 ? "song" : "songs"
+                }${shared ? `, shared by ${playlist.user?.username || "someone else"}` : ""}`}
+                title={playlist.name}
+                className={cn(
+                    "group flex h-10 items-center gap-2 rounded-[9px] px-2 outline-none transition-colors duration-150",
+                    "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60",
+                    isActive
+                        ? "bg-brand/[0.08]"
+                        : "hover:bg-white/[0.055]"
+                )}
+            >
+                <span className="relative h-7 w-7 shrink-0 overflow-hidden rounded-md bg-white/[0.05]">
+                    {cover ? (
+                        <CachedImage
+                            src={api.getCoverArtUrl(cover, 96)}
+                            alt=""
+                            fill
+                            sizes="28px"
+                            className="object-cover"
+                        />
+                    ) : (
+                        <ListMusic
+                            aria-hidden="true"
+                            className="absolute inset-0 m-auto h-3.5 w-3.5 text-[var(--text-muted)]"
+                        />
+                    )}
+                </span>
+                <span
+                    className={cn(
+                        "min-w-0 flex-1 truncate text-[13px] tracking-[-0.01em] transition-colors duration-150",
+                        isActive
+                            ? "font-medium text-brand"
+                            : "text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]"
+                    )}
+                >
+                    {playlist.name}
+                </span>
+                <span
+                    className={cn(
+                        "shrink-0 text-[11px] tabular-nums transition-colors duration-150",
+                        isActive
+                            ? "text-brand/70"
+                            : "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]"
+                    )}
+                >
+                    {playlist.trackCount}
+                </span>
+            </Link>
+        );
+    };
+
+    const sectionLabel = (label: string, count: number) => (
+        <div className="sticky top-0 z-[2] flex items-center justify-between bg-[#0e0e0e] px-2 pb-1 pt-2.5 text-micro text-[#6f6f6f]">
+            <span className="tracking-[0.06em]">{label}</span>
+            <span className="tabular-nums text-[#5e5e5e]">{count}</span>
+        </div>
+    );
+
+    const mixTiles = (items: Mix[]) => (
+        <div className="grid grid-cols-2 gap-2 px-0 pb-1 pt-0.5">
+            {items.map((mix) => (
+                <Link
+                    key={mix.id}
+                    href={`/mix/${mix.id}`}
+                    prefetch={false}
+                    title={mix.description || mix.name}
+                    className="group min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-brand/60 rounded-lg"
+                >
+                    <span
+                        aria-hidden="true"
+                        className="block aspect-square rounded-lg shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]"
+                        style={{
+                            background:
+                                mix.color ||
+                                "linear-gradient(160deg,#2a2a2a,#141414)",
+                        }}
+                    />
+                    <span className="mt-1 block truncate text-[11px] leading-tight text-[var(--text-muted)] transition-colors duration-150 group-hover:text-[var(--text-secondary)]">
+                        {mix.name}
+                    </span>
+                </Link>
+            ))}
+            <button
+                type="button"
+                onClick={() => refreshMixes()}
+                disabled={isRefreshingMixes}
+                aria-label="refresh mixes"
+                title="refresh today's mixes"
+                className="group min-w-0 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+            >
+                <span
+                    aria-hidden="true"
+                    className="flex aspect-square items-center justify-center rounded-lg bg-white/[0.03] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] transition-colors duration-150 group-hover:bg-white/[0.06]"
+                >
+                    <RefreshCw
+                        className={cn(
+                            "h-4 w-4 text-[#6f6f6f] transition-colors group-hover:text-[var(--text-secondary)]",
+                            isRefreshingMixes && "animate-spin text-brand"
+                        )}
+                    />
+                </span>
+                <span className="mt-1 block truncate text-[11px] leading-tight text-[var(--text-muted)] transition-colors duration-150 group-hover:text-[var(--text-secondary)]">
+                    refresh mixes
+                </span>
+            </button>
+        </div>
+    );
+
+    const railLink = (item: NavItem) => {
+        const isActive = isCurrent(item);
+        const Icon = item.icon;
+        return (
+            <Link
+                key={item.href}
+                href={item.href}
+                prefetch={false}
+                aria-current={isActive ? "page" : undefined}
+                aria-label={item.name}
+                title={item.name}
+                className={cn(
+                    "group flex h-10 w-10 items-center justify-center rounded-xl outline-none transition-[background-color,color,box-shadow] duration-150",
+                    "focus-visible:ring-2 focus-visible:ring-brand/60",
+                    isActive
+                        ? "bg-[linear-gradient(100deg,rgba(252,162,0,0.16),rgba(252,162,0,0.04))] text-brand shadow-[inset_0_0_0_1px_rgba(252,162,0,0.2)]"
+                        : "text-[#6f6f6f] hover:bg-white/[0.05] hover:text-[var(--text-secondary)]"
+                )}
+            >
+                <Icon
+                    aria-hidden="true"
+                    strokeWidth={isActive ? 2 : 1.6}
+                    className="h-5 w-5 transition-transform duration-150 group-hover:scale-[1.06]"
+                />
+            </Link>
+        );
+    };
 
     // Render sidebar content inline to prevent component recreation
     const sidebarContent = (
         <>
-
+            {/* The rail: surfaces at the top, the four corners of the library at
+                the foot. */}
             <nav
-                className="pt-6 px-3"
-                role="navigation"
-                aria-label="Main navigation"
+                className="flex w-14 shrink-0 flex-col items-center justify-between border-r border-white/[0.05] bg-[#070707] py-2.5"
+                aria-label="main navigation"
             >
-                <div className="mb-3 flex items-center gap-2 px-2 animate-rise">
-                    <div className="w-1.5 h-1.5 bg-brand rounded-full" />
-                    <span className="t-eyebrow">
-                        Navigation Index
-                    </span>
+                <div className="flex flex-col items-center gap-1">
+                    {primaryNavigation.map(railLink)}
                 </div>
-                <div className="space-y-0.5">
-                    {allNavigation.filter((item) =>
-                        item.feature === null || (item.feature === "audiobookshelfEnabled" && audiobookshelfEnabled)
-                    ).map((item, index) => {
-                        const isActive = pathname === item.href;
-
-                        return (
-                            <Link
-                                key={item.name}
-                                href={item.href}
-                                prefetch={false}
-                                aria-current={isActive ? "page" : undefined}
-                                className={cn(
-                                    "flex items-center gap-3 py-2.5 px-2 border-l-2 transition-all duration-200 group relative",
-                                    isActive ?
-                                        "bg-[var(--bg-primary)] border-brand text-white"
-                                    :   "border-transparent text-[var(--text-muted)] hover:text-white hover:bg-white/5 hover:border-white/20",
-                                )}
-                            >
-                                <span
-                                    className={cn(
-                                        "w-6 text-xs tabular-nums font-semibold text-center shrink-0 transition-colors duration-200",
-                                        isActive ? "text-brand" : (
-                                            "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]"
-                                        ),
-                                    )}
-                                >
-                                    {String(index + 1).padStart(2, "0")}
-                                </span>
-
-                                <div
-                                    className={cn(
-                                        "w-px h-4 shrink-0",
-                                        isActive ? "bg-brand/30" : (
-                                            "bg-white/10 group-hover:bg-white/20"
-                                        ),
-                                    )}
-                                />
-
-                                <span
-                                    className={cn(
-                                        "font-bold text-sm tracking-tight",
-                                        isActive ? "text-white" : (
-                                            "group-hover:text-white"
-                                        ),
-                                    )}
-                                >
-                                    {item.name}
-                                </span>
-                            </Link>
-                        );
-                    })}
+                <div className="flex flex-col items-center gap-1">
+                    {secondaryItems.map(railLink)}
                 </div>
-
-                <div className="mt-4 mb-4 border-t-2 border-white/10" />
             </nav>
 
-            {/* Playlists Section - Data Stack */}
-            <div className="flex-1 overflow-hidden flex flex-col">
-                <div
-                    className="mb-3 flex items-center justify-between px-3"
-                >
-                    <div className="flex items-center gap-2 px-2 animate-rise">
-                        <div className="w-1.5 h-1.5 bg-type-track rounded-full" />
-                        <Link
-                            href="/playlists"
-                            prefetch={false}
-                            className="group/link"
-                        >
-                            <span className="text-xs font-medium text-[var(--text-muted)] group-hover/link:text-brand transition-colors">
-                                Playlist Stack
-                            </span>
-                        </Link>
-                    </div>
-                    <div className="relative" ref={createPopoverRef}>
+            <div
+                className={cn(
+                    "flex min-w-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,#101010_0%,#0a0a0a_40%,#090909_100%)] transition-opacity duration-150",
+                    collapsed && "pointer-events-none opacity-0"
+                )}
+                inert={collapsed}
+                aria-hidden={collapsed || undefined}
+            >
+                <div className="flex h-11 shrink-0 items-center justify-between pl-2.5 pr-1.5">
+                    <span className="truncate text-[13px] font-semibold tracking-[-0.01em] text-[var(--text-secondary)]">
+                        library
+                    </span>
+                    <span className="flex items-center gap-0.5">
                         <button
+                            ref={createButtonRef}
+                            type="button"
                             onClick={() => {
                                 setShowCreatePlaylist((v) => !v);
                                 setNewPlaylistName("");
                             }}
-                            className="w-6 h-6 flex items-center justify-center bg-[var(--bg-primary)] border-2 border-white/10 text-[var(--text-muted)] hover:text-brand hover:border-brand/50 hover:bg-brand/5 transition-all duration-200"
                             aria-label="Create playlist"
+                            aria-expanded={showCreatePlaylist}
                             title="create playlist"
+                            className={cn(
+                                "flex h-6 w-6 items-center justify-center rounded-md outline-none transition-colors duration-150",
+                                "text-[var(--text-muted)] hover:bg-white/[0.06] hover:text-brand",
+                                "focus-visible:ring-2 focus-visible:ring-brand/60",
+                                showCreatePlaylist && "text-brand"
+                            )}
                         >
-                            <Plus className="w-3.5 h-3.5" />
+                            <Plus
+                                aria-hidden="true"
+                                strokeWidth={2}
+                                className={cn(
+                                    "h-3.5 w-3.5 transition-transform duration-200 ease-[cubic-bezier(0.25,1,0.5,1)]",
+                                    showCreatePlaylist && "rotate-45"
+                                )}
+                            />
                         </button>
-                        {showCreatePlaylist && (
-                            <div className="absolute right-0 top-8 z-(--z-dropdown) w-56 bg-[var(--bg-hover)] border border-white/10 rounded-lg p-3">
-                                <input
-                                    type="text"
-                                    value={newPlaylistName}
-                                    onChange={(e) =>
-                                        setNewPlaylistName(e.target.value)
-                                    }
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter")
-                                            handleCreatePlaylist();
-                                        if (e.key === "Escape") {
-                                            e.preventDefault();
-                                            setShowCreatePlaylist(false);
-                                            setNewPlaylistName("");
-                                        }
-                                    }}
-                                    placeholder="Playlist name"
-                                    autoFocus
-                                    className="w-full bg-[var(--bg-primary)] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white placeholder-gray-600 outline-none focus:border-brand/50 transition-colors"
-                                />
-                                <Button
-                                    variant="primary"
-                                    size="sm"
-                                    onClick={handleCreatePlaylist}
-                                    disabled={
-                                        !newPlaylistName.trim() || isCreating
-                                    }
-                                    className="mt-2 w-full"
-                                >
-                                    {isCreating ? "Creating..." : "Create"}
-                                </Button>
-                            </div>
-                        )}
-                    </div>
+                        <button
+                            ref={collapseButtonRef}
+                            type="button"
+                            onClick={collapse}
+                            aria-label="hide library"
+                            title="hide library"
+                            className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-muted)] outline-none transition-colors duration-150 hover:bg-white/[0.06] hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/60"
+                        >
+                            <ChevronLeft
+                                aria-hidden="true"
+                                className="h-4 w-4"
+                            />
+                        </button>
+                    </span>
                 </div>
-                <div
-                    className="flex-1 overflow-y-auto space-y-0.5 scrollbar-thin scrollbar-thumb-[#1c1c1c] scrollbar-track-transparent px-3"
+
+                <div className="mx-2 mb-1 flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-white/[0.05] bg-white/[0.035] px-2 text-[var(--text-muted)] focus-within:border-brand/45 focus-within:bg-white/[0.05]">
+                    <svg
+                        aria-hidden="true"
+                        viewBox="0 0 24 24"
+                        className="h-3 w-3 shrink-0"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={1.8}
+                        strokeLinecap="round"
+                    >
+                        <circle cx="11" cy="11" r="8" />
+                        <path d="m21 21-4.3-4.3" />
+                    </svg>
+                    <input
+                        type="text"
+                        value={filter}
+                        onChange={(e) => setFilter(e.target.value)}
+                        placeholder="filter library"
+                        aria-label="filter library"
+                        className="min-w-0 flex-1 bg-transparent text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+                    />
+                </div>
+
+                {showCreatePlaylist && (
+                    <input
+                        ref={createInputRef}
+                        type="text"
+                        value={newPlaylistName}
+                        onChange={(e) => setNewPlaylistName(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") handleCreatePlaylist();
+                            if (e.key === "Escape") {
+                                e.preventDefault();
+                                closeCreate();
+                            }
+                        }}
+                        placeholder="Playlist name"
+                        autoFocus
+                        enterKeyHint="done"
+                        aria-label="new playlist name"
+                        className="mx-2 mb-1 h-8 shrink-0 rounded-lg border border-white/10 bg-[var(--bg-tertiary)] px-2 text-[13px] text-[var(--text-primary)] outline-none transition-colors duration-150 placeholder:text-[var(--text-muted)] focus:border-brand/50"
+                    />
+                )}
+
+                <nav
+                    className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2 [scrollbar-color:rgba(255,255,255,0.12)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-track]:bg-transparent"
+                    aria-label="library"
                 >
-                    {isLoadingPlaylists ?
-                        <>
-                            {[1, 2, 3, 4, 5].map((i) => (
+                    {isLoadingPlaylists ? (
+                        <div className="space-y-1 pt-1">
+                            {[1, 2, 3].map((i) => (
                                 <div
                                     key={i}
-                                    className="px-2 py-2 bg-[var(--bg-primary)] border-l-2 border-transparent"
+                                    className="flex h-10 animate-pulse items-center gap-2 rounded-[9px] px-2"
                                 >
-                                    <div className="h-3.5 bg-white/5 rounded w-3/4 mb-1.5"></div>
-                                    <div className="h-2.5 bg-white/5 rounded w-1/2"></div>
+                                    <div className="h-7 w-7 rounded-md bg-white/[0.05]" />
+                                    <div className="h-2.5 flex-1 rounded bg-white/[0.05]" />
                                 </div>
                             ))}
-                        </>
-                    : playlists.filter((p) => !p.isHidden).length > 0 ?
-                        playlists
-                            .filter((p) => !p.isHidden)
-                            .map((playlist, index) => {
-                                const isActive =
-                                    pathname === `/playlist/${playlist.id}`;
-                                const isShared = playlist.isOwner === false;
-                                return (
-                                    <Link
-                                        key={playlist.id}
-                                        href={`/playlist/${playlist.id}`}
-                                        prefetch={false}
-                                        className={cn(
-                                            "flex items-center gap-3 py-2 px-2 border-l-2 transition-all duration-200 group",
-                                            isActive ?
-                                                "bg-[var(--bg-primary)] border-brand text-white"
-                                            :   "border-transparent text-[var(--text-muted)] hover:text-white hover:bg-white/5 hover:border-white/20",
-                                        )}
-                                    >
-                                        <span
-                                            className={cn(
-                                                "w-5 t-meta font-semibold text-center shrink-0 transition-colors duration-200",
-                                                isActive ? "text-brand" : (
-                                                    "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]"
-                                                ),
-                                            )}
-                                        >
-                                            {String(index + 1).padStart(2, "0")}
-                                        </span>
-
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-1.5">
-                                                <div
-                                                    className={cn(
-                                                        "text-xs font-semibold tracking-tight truncate transition-colors duration-200",
-                                                        isActive ? "text-white"
-                                                        :   "group-hover:text-white",
-                                                    )}
-                                                >
-                                                    {playlist.name}
-                                                </div>
-                                                {isShared && (
-                                                    <span
-                                                        className="shrink-0 w-1 h-1 rounded-full bg-brand"
-                                                        title={`Shared by ${
-                                                            playlist.user
-                                                                ?.username ||
-                                                            "someone"
-                                                        }`.toLowerCase()}
-                                                    />
-                                                )}
-                                            </div>
-                                            <div
-                                                className={cn(
-                                                    "t-meta truncate mt-0.5 transition-colors duration-200",
-                                                    isActive ? ""
-                                                    : "group-hover:text-[var(--text-secondary)]",
-                                                )}
-                                            >
-                                                {playlist.trackCount}{" "}
-                                                {playlist.trackCount === 1 ? "track" : "tracks"}
-                                                {isShared &&
-                                                    ` • ${playlist.user?.username || "Shared"}`}
-                                            </div>
-                                        </div>
-                                    </Link>
-                                );
-                            })
-                    :   <div className="px-2 py-6 border-l-2 border-transparent">
-                            <div className="text-xs text-[var(--text-muted)] mb-1">
-                                Empty Stack
-                            </div>
-                            <div className="text-micro text-[var(--text-muted)]">
-                                Create first entry
-                            </div>
                         </div>
-                    }
+                    ) : (
+                        <>
+                            {(query.length === 0 || shownOwn.length > 0 || isErrorPlaylists) && (
+                            <section>
+                                {sectionLabel("playlists", shownOwn.length)}
+                                {isErrorPlaylists ? (
+                                    <div className="px-2 py-3">
+                                        <p className="text-xs text-[var(--text-muted)]">
+                                            couldn&apos;t load playlists
+                                        </p>
+                                        <button
+                                            type="button"
+                                            onClick={() => refetchPlaylists()}
+                                            className="mt-1 rounded text-xs text-[var(--text-secondary)] outline-none transition-colors hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/60"
+                                        >
+                                            try again
+                                        </button>
+                                    </div>
+                                ) : shownOwn.length > 0 ? (
+                                    shownOwn.map(playlistRow)
+                                ) : query.length === 0 ? (
+                                    <div className="px-2 py-2">
+                                        <p className="text-xs text-[var(--text-muted)]">
+                                            none of your own yet
+                                        </p>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowCreatePlaylist(true);
+                                                setNewPlaylistName("");
+                                            }}
+                                            className="mt-1 rounded text-xs text-[var(--text-secondary)] outline-none transition-colors hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/60"
+                                        >
+                                            make the first one
+                                        </button>
+                                    </div>
+                                ) : null}
+                            </section>
+                            )}
+
+                            {(shownShared.length > 0 ||
+                                (query.length === 0 &&
+                                    sharedPlaylists.length === 0)) && (
+                                <section>
+                                    {sectionLabel(
+                                        "shared",
+                                        shownShared.length
+                                    )}
+                                    {shownShared.length > 0 ? (
+                                        shownShared.map(playlistRow)
+                                    ) : (
+                                        <p className="px-2 py-2 text-xs text-[var(--text-muted)]">
+                                            nothing shared with you yet
+                                        </p>
+                                    )}
+                                </section>
+                            )}
+
+                            {(shownMixes.length > 0 ||
+                                (query.length === 0 &&
+                                    (isLoadingMixes ||
+                                        isErrorMixes ||
+                                        dailyMixes.length === 0))) && (
+                                <section>
+                                    {sectionLabel(
+                                        "daily mixes",
+                                        shownMixes.length
+                                    )}
+                                    {isLoadingMixes ? (
+                                        <div className="grid grid-cols-2 gap-2 pb-1 pt-0.5">
+                                            {[1, 2, 3, 4, 5, 6].map((i) => (
+                                                <div key={i}>
+                                                    <div className="aspect-square animate-pulse rounded-lg bg-white/[0.05]" />
+                                                    <div className="mt-1 h-2 w-3/4 animate-pulse rounded bg-white/[0.04]" />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : isErrorMixes ? (
+                                        <p className="px-2 py-2 text-xs text-[var(--text-muted)]">
+                                            mixes unavailable right now
+                                        </p>
+                                    ) : shownMixes.length > 0 ? (
+                                        mixTiles(shownMixes)
+                                    ) : (
+                                        <p className="px-2 py-2 text-xs text-[var(--text-muted)]">
+                                            no mixes yet
+                                        </p>
+                                    )}
+                                </section>
+                            )}
+
+                            {nothingMatches && (
+                                <p className="px-2 py-3 text-xs text-[var(--text-muted)]">
+                                    nothing matches that filter
+                                </p>
+                            )}
+                        </>
+                    )}
+                </nav>
+
+                <div className="flex h-9 shrink-0 items-center justify-between border-t border-white/[0.05] px-3 text-xs text-[var(--text-muted)]">
+                    <Link
+                        href="/playlists"
+                        prefetch={false}
+                        className="rounded outline-none transition-colors duration-150 hover:text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-brand/60"
+                    >
+                        all playlists
+                    </Link>
+                    <span className="text-[11px] tabular-nums">
+                        {visiblePlaylists.length}
+                    </span>
                 </div>
             </div>
+
+            {collapsed && (
+                <button
+                    ref={handleRef}
+                    type="button"
+                    onClick={() => {
+                        setLibraryCollapsed(false);
+                        requestAnimationFrame(() =>
+                            collapseButtonRef.current?.focus()
+                        );
+                    }}
+                    aria-label="show library"
+                    title="show library"
+                    className="group flex w-4 shrink-0 flex-col items-center border-l border-white/[0.05] bg-[#0b0b0b] pt-3 outline-none transition-colors duration-150 hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60"
+                >
+                    <ChevronRight
+                        aria-hidden="true"
+                        className="h-3.5 w-3.5 text-[var(--text-muted)] transition-colors duration-150 group-hover:text-brand"
+                    />
+                </button>
+            )}
         </>
     );
 
@@ -365,7 +692,10 @@ export function Sidebar() {
             )}
 
             {!isMobileOrTablet && (
-                <aside className="w-64 bg-[var(--bg-primary)] flex flex-col overflow-hidden relative z-(--z-raised) rounded-lg">
+                <aside
+                    className="relative z-(--z-raised) flex shrink-0 overflow-hidden rounded-lg border border-[var(--border-subtle)] transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]"
+                    style={{ width: collapsed ? CLOSED_WIDTH : OPEN_WIDTH }}
+                >
                     {sidebarContent}
                 </aside>
             )}

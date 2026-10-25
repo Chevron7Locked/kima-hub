@@ -13,7 +13,7 @@ import { useReducedMotion } from "@/hooks/useMediaQuery";
 import { normalizeNFC } from "@/lib/format";
 import { MOOD_COLORS, moodIndex } from "../mapUtils";
 import type { MapTrack } from "../types";
-import { createGlowTexture, createStarMaterial, emphasisScale, setStarFocus, STAR_MIN_PX, STAR_SIZE_SCALE, tickStars, type StarUniforms } from "./starShader";
+import { createStarMaterial, emphasisScale, setStarFocus, STAR_MIN_PX, STAR_SIZE_SCALE, tickStars, type StarUniforms } from "./starShader";
 import { buildTrackField, easeEmphasis, FIELD_RADIUS, toWorld, type TrackField } from "./trackField";
 import { buildQueueChart, CHART_RINGED, createChartMaterial, tickChart, type ChartUniforms } from "./queueChart";
 import { buildSkyField } from "./skyField";
@@ -55,11 +55,6 @@ const OPERATION_RING: Partial<Record<VibeOperation["type"], string>> = {
 };
 const QUEUE_COLOR = "#c9b184";
 
-/** Two faint, far nebula wisps: depth at the edges only. */
-const NEBULA_WISPS: Array<{ p: [number, number, number]; s: number; c: string }> = [
-    { p: [-165, 26, -150], s: 150, c: "#5f2f8e" },
-    { p: [160, -44, 120], s: 150, c: "#7d2f66" },
-];
 const DRAG_TOLERANCE_PX = 5;
 const PICK_RADIUS_PX = 12;
 const HOVER_DWELL_MS = 400;
@@ -261,7 +256,6 @@ function Scene(props: VibeMapSceneProps & { apiRef: MutableRefObject<SceneApi | 
     );
     const picker = useMemo(() => new ScreenPicker(field.positions), [field]);
     const sky = useMemo(() => buildSkyField(), []);
-    const glow = useMemo(() => createGlowTexture(), []);
     const trackStars = useMemo(() => createStarMaterial({ sizeScale: STAR_SIZE_SCALE, opacity: 0.9, minPx: STAR_MIN_PX }), []);
     const skyStars = useMemo(() => createStarMaterial({ sizeScale: STAR_SIZE_SCALE, opacity: 0.9, minPx: STAR_MIN_PX, revealFade: 0.9 }), []);
     const chartInk = useMemo(() => createChartMaterial(QUEUE_COLOR, trackStars.uniforms), [trackStars]);
@@ -269,11 +263,10 @@ function Scene(props: VibeMapSceneProps & { apiRef: MutableRefObject<SceneApi | 
     useEffect(() => () => { field.geometry.dispose(); }, [field]);
     useEffect(() => () => {
         sky.dispose();
-        glow.dispose();
         trackStars.material.dispose();
         skyStars.material.dispose();
         chartInk.material.dispose();
-    }, [sky, glow, trackStars, skyStars, chartInk]);
+    }, [sky, trackStars, skyStars, chartInk]);
 
     // ── emphasis: search/similar/path/mood highlights, selection, now playing ──
     const emphasisGoal = useMemo(() => {
@@ -537,12 +530,6 @@ function Scene(props: VibeMapSceneProps & { apiRef: MutableRefObject<SceneApi | 
     return (
         <>
             <points geometry={sky} material={skyStars.material} renderOrder={0} />
-            {NEBULA_WISPS.map((n, i) => (
-                <sprite key={i} position={n.p} scale={n.s} renderOrder={1}>
-                    <spriteMaterial map={glow} color={n.c} transparent opacity={0.04} blending={THREE.AdditiveBlending} depthWrite={false} />
-                </sprite>
-            ))}
-
             {queueChart && <points geometry={queueChart.geometry} material={chartInk.material} renderOrder={2} />}
 
             <points geometry={field.geometry} material={trackStars.material} renderOrder={3} />

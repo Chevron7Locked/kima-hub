@@ -8,7 +8,7 @@ import type { VibeMode } from "./types";
 
 interface VibeToolbarProps {
     mode: VibeMode;
-    /** Phones and tablets: the search becomes a pill across the top and the tools a rail on the right edge. */
+    /** Phones and tablets: the tools become a rail on the right edge and the search lives in the sheet. */
     compact: boolean;
     onSearch: (query: string) => void;
     /** Matches for the current query, or null when not searching. */
@@ -40,9 +40,10 @@ export function VibeToolbar({ mode, compact, onSearch, results, onPickResult, on
     useEffect(() => { onSearchRef.current = onSearch; }, [onSearch]);
 
     useEffect(() => {
+        if (compact) return; // phones search from inside the sheet
         const timer = setTimeout(() => onSearchRef.current(query.trim()), 150);
         return () => clearTimeout(timer);
-    }, [query]);
+    }, [query, compact]);
 
     const clearSearch = useCallback(() => {
         onReset();
@@ -61,8 +62,8 @@ export function VibeToolbar({ mode, compact, onSearch, results, onPickResult, on
     const blendOn = mode === "alchemy";
 
     const search = (
-        <div className={`relative ${compact ? "flex-1" : ""}`}>
-            <Search className={`pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-white/55 ${compact ? "left-3.5" : "left-2.5"}`} />
+        <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-white/55" />
             <input
                 ref={inputRef}
                 type="text"
@@ -82,13 +83,11 @@ export function VibeToolbar({ mode, compact, onSearch, results, onPickResult, on
                     else if (e.key === "Enter") { e.preventDefault(); pick(items[Math.min(active, items.length - 1)].id); }
                 }}
                 placeholder="Find a track or artist"
-                className={compact
-                    ? "h-11 w-full rounded-full bg-transparent pl-10 pr-10 text-[15px] text-white placeholder-white/55 caret-[var(--color-brand)] outline-none"
-                    : "h-9 w-64 rounded-lg bg-white/[0.04] pl-8 pr-8 text-sm text-white placeholder-white/55 caret-[var(--color-brand)] outline-none transition-colors focus:bg-white/[0.07]"}
+                className="h-9 w-64 rounded-lg bg-white/[0.04] pl-8 pr-8 text-sm text-white placeholder-white/55 caret-[var(--color-brand)] outline-none transition-colors focus:bg-white/[0.07]"
                 aria-label="Search tracks or artists"
             />
             {query && (
-                <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={clearSearch} className={`absolute top-1/2 -translate-y-1/2 flex items-center justify-center rounded-full text-white/60 hover:text-white ${compact ? "right-0 h-11 w-11" : "right-1.5 p-1"}`} aria-label="Clear search">
+                <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={clearSearch} className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center rounded-full p-1 text-white/60 hover:text-white" aria-label="Clear search">
                     <X className="h-3.5 w-3.5" />
                 </button>
             )}
@@ -98,7 +97,7 @@ export function VibeToolbar({ mode, compact, onSearch, results, onPickResult, on
                     id="vibe-search-results"
                     role="listbox"
                     aria-label="Matching tracks"
-                    className={`vibe-glass vibe-glass--solid absolute left-0 top-full z-10 mt-2 overflow-hidden rounded-xl py-1 ${compact ? "-right-[6.5rem] max-h-[60vh] overflow-y-auto overscroll-contain" : "w-full min-w-72"}`}
+                    className="vibe-glass vibe-glass--solid absolute left-0 top-full z-10 mt-2 w-full min-w-72 overflow-hidden rounded-xl py-1"
                 >
                     <p className="px-3 pb-1 pt-1.5 text-[11px] text-white/60" aria-live="polite">
                         {results.count === 0
@@ -127,11 +126,7 @@ export function VibeToolbar({ mode, compact, onSearch, results, onPickResult, on
 
     if (compact) {
         return (
-            <>
-                <div className="vibe-glass absolute left-3 right-[calc(0.75rem+6.5rem)] top-[max(0.75rem,env(safe-area-inset-top))] z-(--z-dropdown) rounded-full landscape-short:right-[calc(0.75rem+16.25rem)]">
-                    {search}
-                </div>
-                <div className="absolute right-3 top-[7.25rem] z-(--z-scene) flex flex-col gap-2 landscape-short:right-[calc(0.75rem+6.5rem)] landscape-short:top-[max(0.75rem,env(safe-area-inset-top))] landscape-short:flex-row" role="toolbar" aria-label="Map tools">
+            <div className="absolute right-3 top-[7.25rem] z-(--z-scene) flex flex-col gap-2 landscape-short:right-3 landscape-short:top-[max(0.75rem,env(safe-area-inset-top))] landscape-short:flex-row" role="toolbar" aria-label="Map tools">
                     <button
                         type="button"
                         onClick={onPathMode}
@@ -155,8 +150,7 @@ export function VibeToolbar({ mode, compact, onSearch, results, onPickResult, on
                             <X className="h-[18px] w-[18px]" />
                         </button>
                     )}
-                </div>
-            </>
+            </div>
         );
     }
 
