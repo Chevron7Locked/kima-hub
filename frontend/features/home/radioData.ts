@@ -99,8 +99,8 @@ const MOOD_STATION_STYLES: Record<string, { color: string; hoverBorder: string; 
     "intense": { color: "from-[#e0685e]/15 to-[#8c3a4a]/10", hoverBorder: "hover:border-[#e0685e]/40", accentGradient: "from-[#e0685e] to-[#8c3a4a]" },
     "happy": { color: "from-[#f0b25a]/15 to-[#e8875a]/10", hoverBorder: "hover:border-[#f0b25a]/40", accentGradient: "from-[#f0b25a] to-[#e8875a]" },
     "melancholy": { color: "from-[#b98fe0]/15 to-[#6f6fc4]/10", hoverBorder: "hover:border-[#b98fe0]/40", accentGradient: "from-[#b98fe0] to-[#6f6fc4]" },
-    "summer": { color: "from-[#f0c45a]/15 to-[#5bc2b4]/10", hoverBorder: "hover:border-[#f0c45a]/40", accentGradient: "from-[#f0c45a] to-[#5bc2b4]" },
-    "focus": { color: "from-[#7fa8d8]/15 to-[#5bc2b4]/10", hoverBorder: "hover:border-[#7fa8d8]/40", accentGradient: "from-[#7fa8d8] to-[#5bc2b4]" },
+    "focus-calm": { color: "from-[#7fa8d8]/15 to-[#5bc2b4]/10", hoverBorder: "hover:border-[#7fa8d8]/40", accentGradient: "from-[#7fa8d8] to-[#5bc2b4]" },
+    "focus-energy": { color: "from-[#7fa8d8]/15 to-[#e06ab0]/10", hoverBorder: "hover:border-[#7fa8d8]/40", accentGradient: "from-[#7fa8d8] to-[#e06ab0]" },
     "feel-good": { color: "from-[#f0a05a]/15 to-[#e06ab0]/10", hoverBorder: "hover:border-[#f0a05a]/40", accentGradient: "from-[#f0a05a] to-[#e06ab0]" },
     "late-night": { color: "from-[#6f6fc4]/15 to-[#3a3f7a]/10", hoverBorder: "hover:border-[#6f6fc4]/40", accentGradient: "from-[#6f6fc4] to-[#3a3f7a]" },
     "romantic": { color: "from-[#e0789a]/15 to-[#b98fe0]/10", hoverBorder: "hover:border-[#e0789a]/40", accentGradient: "from-[#e0789a] to-[#b98fe0]" },
@@ -191,6 +191,8 @@ export function useRadioPlayer() {
             params.set("type", station.filter.type);
             if (station.filter.value) params.set("value", station.filter.value);
             params.set("limit", "100");
+            // Late Night plays this listener's own songs from after dark, read in their time zone.
+            params.set("tz", Intl.DateTimeFormat().resolvedOptions().timeZone);
 
             // Played in the server's order (stationBatches).
             const fetchTracks = stationBatches(

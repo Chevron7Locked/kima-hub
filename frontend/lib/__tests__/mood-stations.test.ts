@@ -49,6 +49,16 @@ describe("the mood stations", () => {
         expect(fresh.color).toBe("from-[#6b7280]/15 to-[#4b5563]/10");
     });
 
+    it("every station the server lists has its own colours, none the default, so a renamed or replaced one is caught", () => {
+        const values = serverStationValues();
+        const tiles = buildMoodStations(values.map((value) => ({ value, name: value, description: value })));
+        const fallback = buildMoodStations([{ value: "no-such-station", name: "x", description: "x" }])[0].color;
+        tiles.forEach((tile) => expect(tile.color, tile.id).not.toBe(fallback));
+        expect(values).toEqual(expect.arrayContaining(["focus-calm", "focus-energy", "late-night"]));
+        expect(values).not.toContain("focus");
+        expect(values).not.toContain("summer");
+    });
+
     it("start with any songs at all, since a station plays however few match", () => {
         for (const station of [...buildMoodStations(server), STATIC_STATIONS.find((s) => s.id === "workout")!]) {
             expect(station.minTracks).toBe(1);

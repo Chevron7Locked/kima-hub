@@ -78,7 +78,8 @@ async function inputsFingerprint(tx: Prisma.TransactionClient): Promise<string> 
                COALESCE(sum(hashtextextended(
                    m.track_id || ':' || extract(epoch FROM m.embedded_at)::text || ':' ||
                    COALESCE(t.arousal::text, '') || ':' || COALESCE(t.instrumentalness::text, '') || ':' ||
-                   COALESCE(t.acousticness::text, ''), 0)), 0)::text AS h
+                   COALESCE(t.acousticness::text, '') || ':' || COALESCE(t.bpm::text, '') || ':' ||
+                   COALESCE(t."bpmConfidence"::text, '') || ':' || COALESCE(t."keyScale", ''), 0)), 0)::text AS h
         FROM track_moods m
         JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
         JOIN "Track" t ON t.id = m.track_id

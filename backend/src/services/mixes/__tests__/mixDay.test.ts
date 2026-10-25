@@ -85,7 +85,7 @@ describe("the daily rotation", () => {
 
     /** The day every generator was handed, minus a refresh's reroll. */
     const daysHanded = () =>
-        new Set(generators.flatMap((mock) => mock.mock.calls.flatMap((call) => call.slice(1).map((d: unknown) => String(d).slice(0, 10)))));
+        new Set(generators.flatMap((mock) => mock.mock.calls.flatMap((call) => call.slice(1, 2).map((d: unknown) => String(d).slice(0, 10)))));
 
     // A day no clock gives today, so a generator that took its day from anywhere but mixDay would show.
     const SERVER_DAY = "2031-01-05";

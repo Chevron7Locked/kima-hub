@@ -61,7 +61,7 @@ describe("the shipped stations", () => {
         // The approved names and order (kima-labs stations_2026-10-24.json; Kevin 10-24 01:19 named Wildcard).
         expect(stations.map((s) => [s.value, s.name])).toEqual([
             ["calm", "Calm"], ["energy", "Energy"], ["intense", "Intense"], ["happy", "Happy"],
-            ["melancholy", "Melancholy"], ["summer", "Summer"], ["focus", "Focus"], ["feel-good", "Feel-good"],
+            ["melancholy", "Melancholy"], ["focus-calm", "Focus: Calm"], ["focus-energy", "Focus: Energy"], ["feel-good", "Feel-good"],
             ["late-night", "Late Night"], ["romantic", "Romantic"], ["road-trip", "Road Trip"],
             ["nostalgic", "Nostalgic"], ["epic", "Epic"], ["wildcard", "Wildcard"],
         ]);
@@ -73,5 +73,7 @@ describe("the shipped stations", () => {
         expect(stations[13].description).toBe("Songs with no mood tag");
         // Kevin 10-25: the recipe's parts only, never what it pushes away. Feel-good's recipe is mostly "low:" parts.
         expect(stations[7].description).toBe("Uplifting, happy, epic");
+        // Late Night plays the listener's own night plays, so it says that instead of the fallback recipe's parts.
+        expect(stations[8].description).toBe("The songs you play after dark, and songs like them");
     });
 });

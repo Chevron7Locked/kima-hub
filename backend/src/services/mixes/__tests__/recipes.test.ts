@@ -15,12 +15,12 @@ describe("the shipped recipes", () => {
 
     it("has one recipe for every mood mix, rotating mix and mood page in W5's plan, and every station of 10-24", () => {
         expect([...RECIPES.keys()].sort()).toEqual([
-            "3am-thoughts", "acoustic", "calm", "calm-station", "chill", "coffee-shop", "dance-floor", "dreamy",
-            "energetic", "energy-station", "epic", "feel-good-station", "focus", "focus-station", "friday-night",
-            "golden-hour", "happy", "high-energy", "hot-girl-walk", "in-my-feelings", "instrumental", "intense",
+            "acoustic", "calm", "calm-station", "chill", "coffee-shop", "dance-floor", "dreamy",
+            "energetic", "energy-station", "epic", "feel-good-station", "focus", "focus-calm-station",
+            "focus-energy-station", "golden-hour", "happy", "high-energy", "hot-girl-walk", "in-my-feelings", "instrumental", "intense",
             "intense-station", "late-night", "main-character", "melancholy", "melancholy-station", "midnight-drive",
             "monday-motivation", "nostalgic", "party", "rage-cleaning", "road-trip", "romantic-station", "romanticize",
-            "sad-girl-sundays", "shower-karaoke", "sleep", "summer", "summer-station", "sunday-morning",
+            "sad-girl-sundays", "shower-karaoke", "sleep", "summer", "sunday-morning",
             "that-girl-era", "unhinged", "upbeat", "villain-era", "workout",
         ]);
     });
@@ -28,13 +28,17 @@ describe("the shipped recipes", () => {
     it("gives the stations of 10-24 the approved blends", () => {
         // kima-labs research/w5-mixes-2026-10-22/stations_2026-10-24.json, two of them.
         expect(getRecipe("feel-good-station").components).toHaveLength(15);
-        expect(getRecipe("focus-station")).toMatchObject({
-            components: [
-                { signal: "instrumental", weight: 0.428 },
-                { signal: "focus", weight: 0.422 },
-                { signal: "calm", weight: 0.15 },
-            ],
+        expect(getRecipe("focus-calm-station")).toMatchObject({
+            components: [{ signal: "focus", weight: 0.75 }, { signal: "calm", weight: 0.25 }],
             filters: { arousalPct: [0, 0.75] },
+        });
+        expect(getRecipe("focus-energy-station")).toMatchObject({
+            components: [
+                { signal: "focus", weight: 0.6 },
+                { signal: "energetic", weight: 0.25 },
+                { signal: "groovy", weight: 0.15 },
+            ],
+            filters: { arousalPct: [0.5, 1] },
         });
         expect(getRecipe("melancholy-station").components).toContainEqual({ signal: "arousal", weight: -0.175 });
     });

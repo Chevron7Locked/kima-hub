@@ -1676,7 +1676,7 @@ class ApiClient {
 
     // Programmatic Mixes
     async getMixes() {
-        return this.request<ApiData[]>("/mixes");
+        return this.request<ApiData[]>(`/mixes?tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`);
     }
 
     async getMix(id: string) {
@@ -1685,7 +1685,7 @@ class ApiClient {
 
     async refreshMixes() {
         return this.request<{ message: string; mixes: ApiData[] }>(
-            "/mixes/refresh",
+            `/mixes/refresh?tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`,
             {
                 method: "POST",
             }

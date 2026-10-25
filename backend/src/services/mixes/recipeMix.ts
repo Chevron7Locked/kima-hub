@@ -27,8 +27,12 @@ export interface RecipeMixSpec {
 export async function recipeMix(spec: RecipeMixSpec, userId: string, today: string): Promise<ProgrammaticMix | null> {
     if (spec.day !== undefined && weekdayOf(today) !== spec.day) return null;
     const mix = await pickRecipeTracks(spec.recipe, { userId, date: today });
-    if (!mix) return null;
-    const tracks = await tracksByIds(mix.trackIds, { album: { select: { coverUrl: true } } });
+    return mix ? mixFromTracks(spec, today, mix.trackIds) : null;
+}
+
+/** The mix `spec` names for `today`, holding these songs in this order. */
+export async function mixFromTracks(spec: RecipeMixSpec, today: string, trackIds: string[]): Promise<ProgrammaticMix> {
+    const tracks = await tracksByIds(trackIds, { album: { select: { coverUrl: true } } });
     return {
         id: `${spec.id}-${today}`,
         type: spec.type,

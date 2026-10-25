@@ -21,6 +21,14 @@ const getRequestUserId = (req: any): string | null => {
     return req.user?.id || req.session?.userId || null;
 };
 
+/**
+ * The listener's IANA time zone from `?tz=`, as GET /stats takes it: the night mixes (Late Night, Midnight Drive) read
+ * "after dark" in it. Absent, the server's own zone is used (nightPlays.nightZone).
+ */
+function requestedZone(req: { query: Record<string, unknown> }): string | undefined {
+    return typeof req.query.tz === "string" ? req.query.tz : undefined;
+}
+
 const MIXES_CACHE_TTL = 3600; // 1 hour
 
 function mixesCacheKey(userId: string): string {
@@ -28,13 +36,18 @@ function mixesCacheKey(userId: string): string {
 }
 
 /** All of the user's mixes: Redis first, regenerated and cached on a miss. */
-async function getMixesForUser(userId: string): Promise<any[]> {
+async function getMixesForUser(userId: string, timeZone?: string): Promise<any[]> {
     const cached = await redisClient.get(mixesCacheKey(userId));
     if (cached) {
         return JSON.parse(cached);
     }
 
-    const mixes = await programmaticPlaylistService.generateAllMixes(userId);
+    const mixes = await programmaticPlaylistService.generateAllMixes(
+        userId,
+        false,
+        new Date(),
+        timeZone
+    );
     await redisClient.setex(
         mixesCacheKey(userId),
         MIXES_CACHE_TTL,
@@ -69,7 +82,7 @@ router.get("/", async (req, res) => {
             return res.status(401).json({ error: "Not authenticated" });
         }
 
-        res.json(await getMixesForUser(userId));
+        res.json(await getMixesForUser(userId, requestedZone(req)));
     } catch (error) {
         logger.error("Get mixes error:", error);
         res.status(500).json({ error: "Failed to get mixes" });
@@ -227,7 +240,9 @@ router.post("/refresh", async (req, res) => {
         await redisClient.del(mixesCacheKey(userId));
         const mixes = await programmaticPlaylistService.generateAllMixes(
             userId,
-            true
+            true,
+            new Date(),
+            requestedZone(req)
         );
         await redisClient.setex(
             mixesCacheKey(userId),

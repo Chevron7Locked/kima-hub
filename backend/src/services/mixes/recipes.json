@@ -11,7 +11,6 @@
     "late-night": {
         "name": "Late Night",
         "components": {
-            "night": 30,
             "calm": 20,
             "low:arousal": 20,
             "groovy": 15,
@@ -60,15 +59,6 @@
         },
         "filters": {
             "instrumental_max": 0.5
-        }
-    },
-    "3am-thoughts": {
-        "name": "3AM Thoughts",
-        "components": {
-            "night": 0.35,
-            "dreamy": 0.25,
-            "sad": 0.2,
-            "low:arousal": 0.2
         }
     },
     "romanticize": {
@@ -138,12 +128,12 @@
             "uplifting": 0.25,
             "summer": 0.15,
             "low:instrumental": 0.15
-        }
+        },
+        "familiarity": 0.15
     },
     "midnight-drive": {
         "name": "Midnight Drive",
         "components": {
-            "night": 35,
             "driving": 20,
             "dark": 15,
             "dreamy": 10,
@@ -154,7 +144,8 @@
                 0.25,
                 0.75
             ]
-        }
+        },
+        "familiarity": 0.15
     },
     "instrumental": {
         "name": "Instrumental Focus",
@@ -330,7 +321,8 @@
                 0.35,
                 1
             ]
-        }
+        },
+        "familiarity": 0.15
     },
     "that-girl-era": {
         "name": "That Girl Era",
@@ -345,7 +337,6 @@
             "low:aggressive": 0.5,
             "low:dark": 0.4,
             "low:sad": 0.3,
-            "low:night": 0.2,
             "low:party": 0.1
         },
         "filters": {
@@ -434,21 +425,6 @@
             "low:sleep": 0.15
         }
     },
-    "friday-night": {
-        "name": "Friday Night",
-        "components": {
-            "night": 0.4,
-            "party": 0.25,
-            "sexy": 0.25,
-            "groovy": 0.1
-        },
-        "filters": {
-            "arousal_pct": [
-                0.35,
-                1
-            ]
-        }
-    },
     "unhinged": {
         "name": "Unhinged",
         "components": {
@@ -496,7 +472,6 @@
             "low:arousal": 0.2,
             "sleep": 0.08,
             "acoustic": 0.07,
-            "night": 0.07,
             "groovy": 0.06,
             "sad": 0.04,
             "romantic": 0.03,
@@ -556,32 +531,6 @@
             "nostalgic": 0.075
         }
     },
-    "summer-station": {
-        "name": "Summer station",
-        "components": {
-            "summer": 0.35,
-            "happy": 0.2,
-            "groovy": 0.175,
-            "dreamy": 0.075,
-            "party": 0.075,
-            "arousal": 0.075,
-            "romantic": 0.05
-        }
-    },
-    "focus-station": {
-        "name": "Focus station",
-        "components": {
-            "instrumental": 0.428,
-            "focus": 0.422,
-            "calm": 0.15
-        },
-        "filters": {
-            "arousal_pct": [
-                0.0,
-                0.75
-            ]
-        }
-    },
     "feel-good-station": {
         "name": "Feel-good station",
         "components": {
@@ -606,7 +555,8 @@
                 0.35,
                 1
             ]
-        }
+        },
+        "familiarity": 0.15
     },
     "romantic-station": {
         "name": "Romantic station",
@@ -620,6 +570,33 @@
             "happy": 0.075,
             "acoustic": 0.075,
             "nostalgic": 0.05
+        }
+    },
+    "focus-calm-station": {
+        "name": "Focus: Calm station",
+        "components": {
+            "focus": 0.75,
+            "calm": 0.25
+        },
+        "filters": {
+            "arousal_pct": [
+                0.0,
+                0.75
+            ]
+        }
+    },
+    "focus-energy-station": {
+        "name": "Focus: Energy station",
+        "components": {
+            "focus": 0.6,
+            "energetic": 0.25,
+            "groovy": 0.15
+        },
+        "filters": {
+            "arousal_pct": [
+                0.5,
+                1.0
+            ]
         }
     }
 }

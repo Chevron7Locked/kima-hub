@@ -1,0 +1,4 @@
+{
+    "focus": { "instrumental": 0.5, "calm": 0.3, "head:focus": 0.2 },
+    "driving": { "arousal": 0.35, "low:instrumental": 0.25, "pace": 0.25, "head:driving": 0.15 }
+}

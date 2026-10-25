@@ -10,6 +10,7 @@ import { redisClient, waitForRedisReady } from "../../../utils/redis";
 import { UNKNOWN_ARTIST, VARIOUS_ARTISTS_CANONICAL } from "../../../utils/artistNormalization";
 import { artistIdentityKey } from "../../artistIdentity";
 import { MOODS, MOOD_HEADS, type Mood } from "../../moods/heads";
+import { DEFINITIONS, PACE_BAND } from "../moodDefinitions";
 import { MOOD_STATE_VERSION, READINGS, buildMoodState, loadMoodState, type MoodState, type Reading } from "../../moods/state";
 import { writeMoodTags } from "../../moods/tags";
 import { moodBucketService } from "../../moodBucketService";
@@ -250,9 +251,10 @@ describe("the line", () => {
 
 describe("the Wildcard station", () => {
     // The tags come from the tag writer, on stored statistics of mean 0 and SD 1, so a mood's z is its score; sad has
-    // no spread, so it tags no one. Focus is tagged by the Focus Mix recipe (focus and instrumental) instead of the
-    // focus score: focusRecipe sits under the line on every score but is very instrumental, so it is tagged focus;
-    // focusHead has the highest focus score but almost no instrumental, so it has no tag.
+    // no spread, so it tags no one. Focus and driving are tagged by their definitions (moodDefinitions.json) instead
+    // of their head scores: focusRecipe is very instrumental, so it is tagged focus; focusHead has the highest focus
+    // head score but almost no instrumental, so it is not tagged focus, and being the least instrumental song it reads as
+    // driving.
     const SONGS: Song[] = [
         { name: "plain" },
         { name: "under", moods: { calm: 1.24 } },
@@ -270,7 +272,7 @@ describe("the Wildcard station", () => {
         { name: "corrupt", corrupt: true },
         { name: "pending", analysisStatus: "pending" },
     ];
-    const UNTAGGED = ["plain", "under", "lowEverywhere", "sadOnly", "focusHead", "copyA"];
+    const UNTAGGED = ["plain", "under", "lowEverywhere", "sadOnly", "copyA"];
     const wildcard = async (limit = 100) => names(await pickWildcardStation({ limit }));
     const tagged = async () => {
         await library(SONGS, { sad_sd: 0 });
@@ -282,8 +284,8 @@ describe("the Wildcard station", () => {
         const tags = new Map((await prisma.track.findMany({ where: { id: { in: [id("focusRecipe"), id("focusHead")] } } }))
             .map((t) => [t.id, t.moodTags]));
         expect(tags.get(id("focusRecipe"))).toEqual(["focus"]);
-        expect(tags.get(id("focusHead"))).toEqual([]);
-        // on (calm exactly 1.25), over (party 3) and focusRecipe (focus by its recipe) are tagged; the unscored,
+        expect(tags.get(id("focusHead"))).toEqual(["driving"]);
+        // on (calm exactly 1.25), over (party 3), focusRecipe (focus by its definition) and focusHead (driving) are tagged; the unscored,
         // out-of-date, missing, corrupt and unfinished songs are not the songs the statistics cover.
         expect(await wildcard()).toEqual(new Set(UNTAGGED));
     });
@@ -732,6 +734,36 @@ describe("the mix draw", () => {
     });
 });
 
+describe("Focus: Calm and Focus: Energy on a small library of one kind of music", () => {
+    // Thirty songs of one sort (middling instrumental, arousal 0.30 to 0.59), and two instrumental songs that stand
+    // out: a quiet one (arousal 0.05, calm) and a loud one (arousal 0.97, energetic and groovy). The quiet one is in the
+    // lowest 75% of the library for energy and the loud one in the top 50%, so each belongs to one station only.
+    const SMALL: Song[] = [
+        ...Array.from({ length: 30 }, (_, i) => ({
+            name: `bg${i}`, artist: `a${i}`, arousal: 0.3 + i * 0.01, instrumentalness: 0.45 + i * 0.003,
+        })),
+        { name: "quiet", artist: "aq", instrumentalness: 0.98, arousal: 0.05, moods: { calm: 3, focus: 2 } },
+        { name: "loud", artist: "al", instrumentalness: 0.98, arousal: 0.97, moods: { energetic: 3, groovy: 2, focus: 2 } },
+    ];
+
+    it("each hold the one instrumental song of its own energy, and the other station does not", async () => {
+        await library(SMALL);
+        expect(await membersOf(RECIPES.get("focus-calm-station")!)).toEqual(new Set(["quiet"]));
+        expect(await membersOf(RECIPES.get("focus-energy-station")!)).toEqual(new Set(["loud"]));
+    });
+
+    it("keep to their own side of the library's energy for every member they hold", async () => {
+        await library(SMALL);
+        const arousals = SMALL.map((s) => s.arousal ?? 0.5);
+        const pct = (name: string) => {
+            const a = SMALL.find((s) => s.name === name)!.arousal!;
+            return arousals.filter((x) => x < a).length / (SMALL.length - 1);
+        };
+        for (const name of await membersOf(RECIPES.get("focus-calm-station")!)) expect(pct(name)).toBeLessThanOrEqual(0.75);
+        for (const name of await membersOf(RECIPES.get("focus-energy-station")!)) expect(pct(name)).toBeGreaterThanOrEqual(0.5);
+    });
+});
+
 describe("every shipped recipe on the synthetic library", () => {
     const S = "crs_";
     let state: MoodState;
@@ -761,7 +793,46 @@ describe("every shipped recipe on the synthetic library", () => {
         const mean = xs.reduce((s, x) => s + x, 0) / xs.length;
         return { mean, sd: Math.sqrt(xs.reduce((s, x) => s + (x - mean) ** 2, 0) / xs.length) };
     };
+    /**
+     * Each defined mood's score for every library song, standardised over the songs that have one (mean 0, SD 1), as
+     * moodDefinitions.ts describes: the weights times the parts' z-scores (the stored statistics for a mood or reading,
+     * the library's own for the pace), over the sum of the weights' sizes; none for a song missing a reading a part uses.
+     */
+    let definedZ: Map<string, Map<string, number | null>>;
+    function defineMoods(): Map<string, Map<string, number | null>> {
+        const paceOf = (row: Row) => {
+            if (row.bpm === null || row.bpmConfidence === null || row.bpmConfidence < 2) return 0.5;
+            const inBand = (b: number) => b >= PACE_BAND[0] && b <= PACE_BAND[1];
+            return inBand(row.bpm) || inBand(row.bpm * 2) || inBand(row.bpm / 2) ? 1 : 0;
+        };
+        const paces = meanSd(rows.map(paceOf));
+        const out = new Map<string, Map<string, number | null>>();
+        for (const definition of DEFINITIONS.values()) {
+            const total = definition.parts.reduce((sum, part) => sum + Math.abs(part.weight), 0);
+            const raw = rows.map((row) => {
+                let sum = 0;
+                for (const part of definition.parts) {
+                    if (part.kind === "pace") {
+                        sum += paces.sd > 0 ? (part.weight * (paceOf(row) - paces.mean)) / paces.sd : 0;
+                    } else if (part.kind === "reading") {
+                        const v = value(row, part.reading);
+                        if (v === null) return null;
+                        const { mean, sd } = state.readings[READING_STATS[part.reading]]!;
+                        sum += (part.weight * (v - mean)) / sd;
+                    } else {
+                        const { mean, sd } = state.moods[part.mood];
+                        sum += (part.weight * (row.moods[part.mood] - mean)) / sd;
+                    }
+                }
+                return sum / total;
+            });
+            const spread = meanSd(raw.filter((v): v is number => v !== null));
+            out.set(definition.mood, new Map(rows.map((row, i) => [row.id, raw[i] === null ? null : (raw[i]! - spread.mean) / spread.sd])));
+        }
+        return out;
+    }
     const value = (row: Row, signal: Signal): number | null => {
+        if (definedZ?.has(signal)) return definedZ.get(signal)!.get(row.id) ?? null;
         if ((MOODS as readonly string[]).includes(signal)) return row.moods[signal as Mood];
         if (signal === "arousal") return row.arousal === null ? null : logit(row.arousal);
         if (signal === "instrumental") return row.instrumentalness === null ? null : logit(row.instrumentalness);
@@ -774,6 +845,7 @@ describe("every shipped recipe on the synthetic library", () => {
         const minor = meanSd(rows.map((row) => value(row, "minor")).filter((v): v is number => v !== null));
         const stats = (signal: Signal) => {
             if (signal === "minor") return minor;
+            if (definedZ.has(signal)) return { mean: 0, sd: 1 };
             if ((MOODS as readonly string[]).includes(signal)) return state.moods[signal as Mood];
             return state.readings[READING_STATS[signal as keyof typeof READING_STATS]]!;
         };
@@ -864,6 +936,7 @@ describe("every shipped recipe on the synthetic library", () => {
             bpmConfidence: t.bpmConfidence,
             keyScale: t.keyScale,
         }));
+        definedZ = defineMoods();
     });
 
     afterAll(async () => {

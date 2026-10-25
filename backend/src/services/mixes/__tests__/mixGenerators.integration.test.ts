@@ -311,8 +311,6 @@ const recipeCases: RecipeCase[] = [
       description: "Relax and unwind with mellow vibes", colorType: "chill" },
     { name: "High Energy", run: mood.generateHighEnergyMix, recipe: "high-energy", id: "high-energy", type: "workout",
       title: "High Energy", description: "Fast-paced tracks to get you moving", colorType: "workout" },
-    { name: "Late Night", run: mood.generateLateNightMix, recipe: "late-night", id: "late-night", type: "late-night",
-      title: "Late Night", description: "Mellow vibes for the quiet hours", colorType: "late-night" },
     { name: "Happy Vibes", run: mood.generateHappyMix, recipe: "happy", id: "happy", type: "happy", title: "Happy Vibes",
       description: "Feel-good tracks to brighten your day", colorType: "happy" },
     { name: "Melancholy", run: mood.generateMelancholyMix, recipe: "melancholy", id: "melancholy", type: "melancholy",
@@ -334,9 +332,6 @@ const recipeCases: RecipeCase[] = [
       description: "You're the protagonist today", colorType: "main-character" },
     { name: "Villain Era", run: mood.generateVillainEra, recipe: "villain-era", id: "villain-era", type: "villain-era",
       title: "Villain Era", description: "Embrace your dark side", colorType: "villain-era" },
-    { name: "3AM Thoughts", run: mood.generate3AMThoughts, recipe: "3am-thoughts", id: "3am-thoughts",
-      type: "3am-thoughts", title: "3AM Thoughts", description: "Late night overthinking companion",
-      colorType: "3am-thoughts" },
     { name: "Hot Girl Walk", run: mood.generateHotGirlWalk, recipe: "hot-girl-walk", id: "hot-girl-walk",
       type: "hot-girl-walk", title: "Hot Girl Walk", description: "Confidence boost for your walk",
       colorType: "confidence-boost" },
@@ -349,9 +344,6 @@ const recipeCases: RecipeCase[] = [
       colorType: "happy" },
     { name: "In My Feelings", run: mood.generateInMyFeelings, recipe: "in-my-feelings", id: "in-my-feelings",
       type: "in-my-feelings", title: "In My Feelings", description: "Let it all out", colorType: "heartbreak-hotel" },
-    { name: "Midnight Drive", run: mood.generateMidnightDrive, recipe: "midnight-drive", id: "midnight-drive",
-      type: "midnight-drive", title: "Midnight Drive", description: "Perfect for late night cruising",
-      colorType: "night-drive" },
     { name: "Coffee Shop Vibes", run: mood.generateCoffeeShopVibes, recipe: "coffee-shop", id: "coffee-shop",
       type: "coffee-shop", title: "Coffee Shop Vibes", description: "Cozy background music", colorType: "coffee-shop" },
     { name: "Romanticize Your Life", run: mood.generateRomanticizeYourLife, recipe: "romanticize", id: "romanticize",
@@ -384,9 +376,6 @@ const recipeCases: RecipeCase[] = [
     { name: "Day mix, Monday Motivation", run: time.generateDayMix, recipe: "monday-motivation", id: "monday",
       type: "confidence-boost", title: "Monday Motivation", description: "Start your week with energy",
       colorType: "confidence-boost", day: 1 },
-    { name: "Day mix, Friday Night", run: time.generateDayMix, recipe: "friday-night", id: "friday",
-      type: "dance-floor", title: "Friday Night", description: "Weekend vibes to kick off the party",
-      colorType: "dance-floor", day: 5 },
 ];
 
 const RECIPE_DATES = dates.slice(0, 5);
@@ -451,8 +440,8 @@ describe.each(recipeCases)("$name (recipe $recipe)", (c) => {
 
     if (c.day !== undefined) {
         it("has no mix on the other days of the week", async () => {
-            // The day mix has another day's recipe on Sunday, Monday and Friday, and nothing on the other days.
-            const otherMixDays = c.run === time.generateDayMix ? [0, 1, 5] : [];
+            // The day mix has another day's recipe on Sunday and Monday, and nothing on the other days.
+            const otherMixDays = c.run === time.generateDayMix ? [0, 1] : [];
             for (const day of [0, 1, 2, 3, 4, 5, 6].filter((x) => x !== c.day)) {
                 const mix = await c.run(lib.user1, datesOn(day, 1)[0]);
                 if (otherMixDays.includes(day)) {

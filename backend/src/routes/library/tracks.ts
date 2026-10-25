@@ -22,6 +22,7 @@ import {
   type StationPage,
   type StationRequest,
 } from "../../services/mixes/recipes";
+import { pickNightStationPage } from "../../services/mixes/nightPlays";
 import { SEED_PATTERN, emptyPage } from "../../services/mixes/stationOrder";
 import { MOOD_STATIONS, moodStationList } from "../../services/mixes/stations";
 import { spreadByArtist } from "../../utils/artistSpread";
@@ -869,7 +870,13 @@ router.get("/radio", async (req, res) => {
         const recipe = moodStation.recipe;
         const request = parseStationRequest(req.query, limitNum, req.user?.id);
         if (!request) return res.status(400).json({ error: BAD_STATION_REQUEST });
-        ({ trackIds, next } = await (recipe ? recipeStationPage(recipe, request) : pickWildcardPage(request)));
+        if (moodStation.personal?.kind === "night" && recipe) {
+          // Late Night plays this listener's own night plays; the recipe is its cold-start fallback (nightPlays.ts).
+          const tz = typeof req.query.tz === "string" ? req.query.tz : undefined;
+          ({ trackIds, next } = await pickNightStationPage(recipe, tz, request));
+        } else {
+          ({ trackIds, next } = await (recipe ? recipeStationPage(recipe, request) : pickWildcardPage(request)));
+        }
         station = true;
         break;
       }

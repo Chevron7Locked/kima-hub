@@ -14,6 +14,16 @@ export const MOODS = [
 
 export type Mood = (typeof MOODS)[number];
 
+/**
+ * Moods the heads still score (moodHeads.json and the stored scores and statistics are unchanged, so nothing is
+ * retrained) that no tag, recipe or definition may use. Night is each person's own night plays now, not a sound
+ * (mixes/nightPlays.ts).
+ */
+export const RETIRED_MOODS: readonly Mood[] = ["night"];
+
+/** The moods a recipe, a definition or a tag may use: every learned mood but the retired ones. */
+export const LIVE_MOODS: readonly Mood[] = MOODS.filter((mood) => !RETIRED_MOODS.includes(mood));
+
 export interface MoodHead {
     weights: number[];
     bias: number;

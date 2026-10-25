@@ -22,7 +22,6 @@ import {
     generateSadGirlSundays,
     generateMainCharacterEnergy,
     generateVillainEra,
-    generate3AMThoughts,
     generateHotGirlWalk,
     generateRageCleaning,
     generateGoldenHour,
@@ -59,7 +58,8 @@ class ProgrammaticPlaylistService {
     async generateAllMixes(
         userId: string,
         forceRandom = false,
-        now = new Date()
+        now = new Date(),
+        timeZone?: string
     ): Promise<ProgrammaticMix[]> {
         // The server's calendar date: every mix's id, seed and weekday come from it.
         const today = mixDay(now);
@@ -120,7 +120,7 @@ class ProgrammaticPlaylistService {
                 name: "High Energy Mix",
             },
             {
-                fn: () => generateLateNightMix(userId, today + seedSuffix),
+                fn: () => generateLateNightMix(userId, today + seedSuffix, timeZone),
                 name: "Late Night Mix",
             },
             {
@@ -165,10 +165,6 @@ class ProgrammaticPlaylistService {
                 name: "Villain Era",
             },
             {
-                fn: () => generate3AMThoughts(userId, today + seedSuffix),
-                name: "3AM Thoughts",
-            },
-            {
                 fn: () => generateHotGirlWalk(userId, today + seedSuffix),
                 name: "Hot Girl Walk",
             },
@@ -189,7 +185,7 @@ class ProgrammaticPlaylistService {
                 name: "In My Feelings",
             },
             {
-                fn: () => generateMidnightDrive(userId, today + seedSuffix),
+                fn: () => generateMidnightDrive(userId, today + seedSuffix, timeZone),
                 name: "Midnight Drive",
             },
             {

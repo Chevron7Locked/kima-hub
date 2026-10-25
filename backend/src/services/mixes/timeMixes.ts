@@ -20,14 +20,6 @@ const DAY_MIXES: Record<number, RecipeMixSpec> = {
         description: "Start your week with energy",
         colorType: "confidence-boost",
     },
-    5: {
-        recipe: "friday-night",
-        id: "friday",
-        type: "dance-floor",
-        name: "Friday Night",
-        description: "Weekend vibes to kick off the party",
-        colorType: "dance-floor",
-    },
 };
 
 /** The day mix of the day `today` names, or null on a day without one. */

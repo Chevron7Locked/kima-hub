@@ -3,6 +3,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
+import { nightMixGenerator } from "./nightPlays";
 import {
     ProgrammaticMix,
     albumCoverUrls,
@@ -37,9 +38,10 @@ export const generateHighEnergyMix = recipeMixGenerator({
     description: "Fast-paced tracks to get you moving", colorType: "workout",
 });
 
-export const generateLateNightMix = recipeMixGenerator({
+/** The songs this listener plays after dark (nightPlays.ts); the recipe is its cold-start fallback. */
+export const generateLateNightMix = nightMixGenerator({
     recipe: "late-night", id: "late-night", type: "late-night", name: "Late Night",
-    description: "Mellow vibes for the quiet hours", colorType: "late-night",
+    description: "The songs you play after dark", colorType: "late-night", ranking: "plays",
 });
 
 export const generateHappyMix = recipeMixGenerator({
@@ -87,11 +89,6 @@ export const generateVillainEra = recipeMixGenerator({
     description: "Embrace your dark side", colorType: "villain-era",
 });
 
-export const generate3AMThoughts = recipeMixGenerator({
-    recipe: "3am-thoughts", id: "3am-thoughts", type: "3am-thoughts", name: "3AM Thoughts",
-    description: "Late night overthinking companion", colorType: "3am-thoughts",
-});
-
 export const generateHotGirlWalk = recipeMixGenerator({
     recipe: "hot-girl-walk", id: "hot-girl-walk", type: "hot-girl-walk", name: "Hot Girl Walk",
     description: "Confidence boost for your walk", colorType: "confidence-boost",
@@ -117,9 +114,10 @@ export const generateInMyFeelings = recipeMixGenerator({
     description: "Let it all out", colorType: "heartbreak-hotel",
 });
 
-export const generateMidnightDrive = recipeMixGenerator({
+/** The listener's night songs ranked toward a steady beat at a middle pace and energy (nightPlays.ts). */
+export const generateMidnightDrive = nightMixGenerator({
     recipe: "midnight-drive", id: "midnight-drive", type: "midnight-drive", name: "Midnight Drive",
-    description: "Perfect for late night cruising", colorType: "night-drive",
+    description: "Your night songs that keep a steady pace", colorType: "night-drive", ranking: "drive",
 });
 
 export const generateCoffeeShopVibes = recipeMixGenerator({

@@ -9,8 +9,13 @@ export interface MoodStation {
     /** The radio route's `value` for `type=mood`. */
     value: string;
     name: string;
-    /** The recipe the station plays; none for Wildcard. */
+    /** The recipe the station plays; none for Wildcard. For a personal station, the one it falls back to. */
     recipe: string | null;
+    /**
+     * Set on a station whose songs come from the listener's own plays instead of the recipe (nightPlays.ts): the
+     * recipe is only its cold-start fallback, so the subtitle says what the station really is.
+     */
+    personal?: { kind: "night"; description: string };
 }
 
 /** The stations in the order they were approved (stations_2026-10-24.json); five share their mix's recipe. */
@@ -20,8 +25,8 @@ const STATIONS: MoodStation[] = [
     { value: "intense", name: "Intense", recipe: "intense-station" },
     { value: "happy", name: "Happy", recipe: "happy" },
     { value: "melancholy", name: "Melancholy", recipe: "melancholy-station" },
-    { value: "summer", name: "Summer", recipe: "summer-station" },
-    { value: "focus", name: "Focus", recipe: "focus-station" },
+    { value: "focus-calm", name: "Focus: Calm", recipe: "focus-calm-station" },
+    { value: "focus-energy", name: "Focus: Energy", recipe: "focus-energy-station" },
     { value: "feel-good", name: "Feel-good", recipe: "feel-good-station" },
     { value: "late-night", name: "Late Night", recipe: "late-night" },
     { value: "romantic", name: "Romantic", recipe: "romantic-station" },
@@ -30,6 +35,11 @@ const STATIONS: MoodStation[] = [
     { value: "epic", name: "Epic", recipe: "epic" },
     { value: "wildcard", name: "Wildcard", recipe: null },
 ];
+
+/** The stations whose songs come from the listener's own plays, by value (see MoodStation.personal). */
+const PERSONAL: Record<string, NonNullable<MoodStation["personal"]>> = {
+    "late-night": { kind: "night", description: "The songs you play after dark, and songs like them" },
+};
 
 const WILDCARD_SUBTITLE = "Songs with no mood tag";
 
@@ -67,7 +77,7 @@ function checkedStations(stations: MoodStation[]): ReadonlyMap<string, MoodStati
             if (!recipe) throw new Error(`Mood station ${station.value}: unknown recipe ${station.recipe}`);
             stationSubtitle(recipe);
         }
-        byValue.set(station.value, station);
+        byValue.set(station.value, { ...station, ...(PERSONAL[station.value] ? { personal: PERSONAL[station.value] } : {}) });
     }
     return byValue;
 }
@@ -76,9 +86,9 @@ export const MOOD_STATIONS = checkedStations(STATIONS);
 
 /** The stations as the apps list them, each with its generated subtitle. */
 export function moodStationList(): { value: string; name: string; description: string }[] {
-    return [...MOOD_STATIONS.values()].map(({ value, name, recipe }) => ({
+    return [...MOOD_STATIONS.values()].map(({ value, name, recipe, personal }) => ({
         value,
         name,
-        description: recipe === null ? WILDCARD_SUBTITLE : stationSubtitle(RECIPES.get(recipe)!),
+        description: personal ? personal.description : recipe === null ? WILDCARD_SUBTITLE : stationSubtitle(RECIPES.get(recipe)!),
     }));
 }

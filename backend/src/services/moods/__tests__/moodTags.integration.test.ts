@@ -7,7 +7,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../../utils/db";
 import { isWriteConflict } from "../../matching/state";
 import { MOODS, MOOD_HEADS, type Mood } from "../heads";
-import { getRecipe, pickStationTracks, recipeRankingSql } from "../../mixes/recipes";
+import { parseRecipes, recipeRankingSql } from "../../mixes/recipes";
 import { buildMoods, loadMoodState } from "../state";
 import { TAG_LINE_Z, writeMoodTags } from "../tags";
 import { rerunEnrichment } from "../../enrichmentRestart";
@@ -295,153 +295,174 @@ describe("an analysis re-run", () => {
     });
 });
 
-describe("the focus tag", () => {
-    const focusId = (n: number) => `${P}f${String(n).padStart(2, "0")}`;
-    /**
-     * Focus scores and CLAP instrumental readings. Focus: mean 0.16667, SD 1.00857 over all twelve. Instrumental, as
-     * the clipped logit: mean -0.78252, SD 2.28963 over the eleven with a reading. The Focus Mix recipe score is
-     * (z_focus + 1.25 z_instrumental) / 2.25 over the eleven it ranks (mean -0.07344, SD 0.67807), standardised again:
-     *   f00 vocal, focus 2.0:            focus z 1.818 (over the line alone), recipe z 0.187: no focus tag
-     *   f01 instrumental, focus 0.6:     focus z 0.430 (under the line alone), recipe z 2.063: focus tag
-     *   f02 no instrumental, focus 2.0:  focus z 1.818, not ranked by the recipe: no focus tag
-     *   f03 instrumental, focus 1.0:     focus z 0.826, recipe z 1.984: focus tag
-     *   the rest:                        recipe z under 0
-     * f00 is also at workout 3 and f04 at happy 3, z 3.317 each; every other score is 0.
-     */
-    const FOCUS = [2.0, 0.6, 2.0, 1.0, 0.0, -0.5, 0.2, -1.0, -0.8, 0.0, -0.5, -1.0];
-    const INSTRUMENTAL = [0.02, 0.98, null, 0.95, 0.1, 0.3, 0.05, 0.2, 0.6, 0.15, 0.08, 0.4];
-    const songs = FOCUS.map((_, n) => focusId(n));
-    const focusTagged = async () =>
-        (await prisma.track.findMany({
-            where: { id: { in: songs }, moodTags: { has: "focus" } }, select: { id: true }, orderBy: { id: "asc" },
-        })).map((t) => t.id);
-    /** Every member of the Focus Mix, as the engine picks them for a station refill large enough to hold them all. */
-    const focusMixMembers = async () => (await pickStationTracks(getRecipe("focus"), { limit: 1000 })).sort();
+describe("the tags of a defined mood", () => {
+    const dId = (n: number) => `${P}d${String(n).padStart(2, "0")}`;
+
+    interface Song {
+        focus: number;
+        calm: number;
+        driving: number;
+        night?: number;
+        instrumentalness: number | null;
+        arousal: number;
+        bpm: number | null;
+        bpmConfidence: number | null;
+    }
+
+    /** Fourteen songs from a fixed generator, so the spread is varied and the test repeats exactly. */
+    function songs(): Song[] {
+        let seed = 7;
+        const next = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+        const list: Song[] = Array.from({ length: 14 }, () => ({
+            focus: next() * 2 - 1,
+            calm: next() * 2 - 1,
+            driving: next() * 2 - 1,
+            instrumentalness: 0.05 + next() * 0.9,
+            arousal: 0.1 + next() * 0.8,
+            bpm: 60 + next() * 120,
+            bpmConfidence: 2 + next() * 2,
+        }));
+        // d00 stands out on every focus part and is a steady 100 BPM song that drives; d01 has the same focus parts but
+        // no instrumental reading; d02 has no tempo; d03 an unsteady beat; d04 is 65 BPM, which counts as 130 (double).
+        Object.assign(list[0], { focus: 2.5, calm: 2, instrumentalness: 0.97, arousal: 0.2 });
+        Object.assign(list[1], { focus: 2.5, calm: 2, instrumentalness: null });
+        Object.assign(list[2], { bpm: null, bpmConfidence: null, driving: 2.5 });
+        Object.assign(list[3], { bpmConfidence: 1.2, bpm: 110, driving: 2.5 });
+        Object.assign(list[4], { bpm: 65, bpmConfidence: 3, driving: 2.5, instrumentalness: 0.08, arousal: 0.85 });
+        Object.assign(list[5], { night: 4 });
+        return list;
+    }
+
+    // ---- the definitions, worked out again here from the weights in mixes/moodDefinitions.json ----------------------
+
+    const logit = (p: number) => {
+        const c = Math.min(0.99, Math.max(0.01, p));
+        return Math.log(c / (1 - c));
+    };
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    const sd = (xs: number[]) => Math.sqrt(mean(xs.map((x) => (x - mean(xs)) ** 2)));
+    /** z-scores of `values` against their own mean and SD over the entries that are not null; null stays null. */
+    const zs = (values: Array<number | null>): Array<number | null> => {
+        const present = values.filter((v): v is number => v !== null);
+        return values.map((v) => (v === null ? null : (v - mean(present)) / sd(present)));
+    };
+    /** The pace value: 1 inside 94-130 BPM (double or half counts) on a steady beat (confidence 2 or more), 0 outside. */
+    const pace = (s: Song) => {
+        if (s.bpm === null || s.bpmConfidence === null || s.bpmConfidence < 2) return 0.5;
+        const inBand = (x: number) => x >= 94 && x <= 130;
+        return inBand(s.bpm) || inBand(s.bpm * 2) || inBand(s.bpm / 2) ? 1 : 0;
+    };
+    /** Song indexes at or over the tag line for a defined score; a null score is never tagged. */
+    const tagged = (defined: Array<number | null>) => {
+        const z = zs(defined);
+        return z.flatMap((v, i) => (v !== null && v >= TAG_LINE_Z ? [i] : []));
+    };
+
+    function expectedFocus(list: Song[]): number[] {
+        const instrumental = zs(list.map((s) => (s.instrumentalness === null ? null : logit(s.instrumentalness))));
+        const calm = zs(list.map((s) => s.calm));
+        const head = zs(list.map((s) => s.focus));
+        return tagged(list.map((_, i) => (instrumental[i] === null ? null : 0.5 * instrumental[i]! + 0.3 * calm[i]! + 0.2 * head[i]!)));
+    }
+
+    function expectedDriving(list: Song[]): number[] {
+        const arousal = zs(list.map((s) => logit(s.arousal)));
+        const instrumental = zs(list.map((s) => (s.instrumentalness === null ? null : logit(s.instrumentalness))));
+        const paces = zs(list.map(pace));
+        const head = zs(list.map((s) => s.driving));
+        return tagged(
+            list.map((_, i) =>
+                instrumental[i] === null ? null : 0.35 * arousal[i]! - 0.25 * instrumental[i]! + 0.25 * paces[i]! + 0.15 * head[i]!,
+            ),
+        );
+    }
+
+    let list: Song[] = [];
+    const ids = () => list.map((_, i) => dId(i));
+    const tagsWith = async (mood: string) =>
+        (await tagsOf(ids())).flatMap((tags, i) => (tags.includes(mood) ? [i] : []));
 
     beforeAll(async () => {
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
         await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings`);
         await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${P}%'`);
-        for (const [n, id] of songs.entries()) {
-            await insertTrack(id, { instrumentalness: INSTRUMENTAL[n] });
-            await insertScores(id, { focus: FOCUS[n], workout: n === 0 ? 3 : 0, happy: n === 4 ? 3 : 0 });
+        list = songs();
+        for (const [i, s] of list.entries()) {
+            await insertTrack(dId(i), {
+                instrumentalness: s.instrumentalness, arousal: s.arousal, bpm: s.bpm, bpmConfidence: s.bpmConfidence,
+            });
+            await insertScores(dId(i), { focus: s.focus, calm: s.calm, driving: s.driving, night: s.night ?? 0 });
         }
         await pass();
     });
 
-    it("leaves out a vocal song the focus score alone puts over the line, and keeps its other tags", async () => {
-        expect(await tagsOf([focusId(0)])).toEqual([["workout"]]);
+    it("tags focus where its definition (instrumental, calm, the focus head) puts a song at the line", async () => {
+        const want = expectedFocus(list);
+        expect(want.length).toBeGreaterThan(0);
+        expect(want.length).toBeLessThan(list.length);
+        expect(want).toContain(0);
+        expect(await tagsWith("focus")).toEqual(want);
     });
 
-    it("tags an instrumental song with a moderate focus score", async () => {
-        expect(await tagsOf([focusId(1), focusId(3)])).toEqual([["focus"], ["focus"]]);
+    it("leaves a song without the instrumental reading untagged for focus, though its focus head is the highest", async () => {
+        expect(list[1].focus).toBe(2.5);
+        expect(await tagsWith("focus")).not.toContain(1);
     });
 
-    it("leaves out a song without the instrumental reading", async () => {
-        expect(await tagsOf([focusId(2)])).toEqual([[]]);
+    it("tags driving by its definition, a song with no tempo or an unsteady beat judged at the neutral pace", async () => {
+        const want = expectedDriving(list);
+        expect(want.length).toBeGreaterThan(0);
+        expect(want.length).toBeLessThan(list.length);
+        expect(await tagsWith("driving")).toEqual(want);
+        expect(pace(list[2])).toBe(0.5);
+        expect(pace(list[3])).toBe(0.5);
+        expect(pace(list[4])).toBe(1);
     });
 
-    it("tags every other mood from its own score", async () => {
-        expect(await tagsOf(songs)).toEqual([
-            ["workout"], ["focus"], [], ["focus"], ["happy"], [], [], [], [], [], [], [],
-        ]);
-    });
-
-    it("tags the songs the Focus Mix recipe ranks at the line, by the engine's own score", async () => {
-        const ranking = recipeRankingSql(getRecipe("focus"), (await loadMoodState())!);
-        const ranked = await prisma.$queryRaw<Array<{ id: string; recipe_z: number }>>`
-            WITH ${ranking} SELECT id, recipe_z FROM ranked ORDER BY id
-        `;
-        const z = new Map(ranked.map((r) => [r.id, r.recipe_z]));
-        expect(z.has(focusId(2))).toBe(false);
-        expect(z.get(focusId(0))).toBeCloseTo(0.187, 3);
-        expect(z.get(focusId(1))).toBeCloseTo(2.063, 3);
-        expect(z.get(focusId(3))).toBeCloseTo(1.984, 3);
-        expect(await focusTagged()).toEqual(ranked.filter((r) => r.recipe_z >= TAG_LINE_Z).map((r) => r.id));
-        expect(await focusTagged()).toEqual(await focusMixMembers());
-    });
-
-    it("leaves out a loud instrumental song, as the Focus Mix's energy filter does", async () => {
-        // The loudest of the eleven the recipe ranks: arousal percentile 1, past the Focus Mix's 0.75. Its recipe
-        // score is unchanged, since the recipe does not blend arousal.
-        await prisma.track.update({ where: { id: focusId(1) }, data: { arousal: 0.9 } });
-        await pass();
-        expect(await tagsOf([focusId(1), focusId(3)])).toEqual([[], ["focus"]]);
-        expect(await focusTagged()).toEqual(await focusMixMembers());
-        await prisma.track.update({ where: { id: focusId(1) }, data: { arousal: 0.5 } });
-        await pass();
-        expect(await tagsOf([focusId(1)])).toEqual([["focus"]]);
-    });
-
-    it("tags no song with focus when the library has no instrumental spread, and keeps the other tags", async () => {
-        await prisma.track.updateMany({
-            where: { id: { in: songs }, instrumentalness: { not: null } },
-            data: { instrumentalness: 0.5 },
-        });
-        expect(await pass()).toMatchObject({ stateChanged: true, tagged: 2 });
-        expect(await tagsOf(songs)).toEqual([["workout"], [], [], [], ["happy"], [], [], [], [], [], [], []]);
-    });
-});
-
-describe("the focus tag by the Focus Mix's own rules", () => {
-    const gId = (n: number) => `${P}g${String(n).padStart(2, "0")}`;
-    const focusMixMembers = async () => (await pickStationTracks(getRecipe("focus"), { limit: 1000 })).sort();
-    const focusTagged = async () =>
-        (await prisma.track.findMany({
-            where: { id: { startsWith: `${P}g` }, moodTags: { has: "focus" } },
-            select: { id: true },
-            orderBy: { id: "asc" },
-        })).map((t) => t.id);
-
-    type Song = { focus: number; instrumental: number | null; title?: string; happy?: number };
-
-    /** A fresh library of these songs (focus score, instrumental reading, title), scored and tagged. */
-    async function libraryOf(songs: Song[]) {
-        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
-        await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings`);
-        await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${P}%'`);
-        for (const [n, song] of songs.entries()) {
-            const title = song.title ? { title: song.title } : {};
-            await insertTrack(gId(n), { instrumentalness: song.instrumental, ...title });
-            await insertScores(gId(n), { focus: song.focus, happy: song.happy ?? 0 });
+    it("tags the same songs a recipe of just that mood ranks at the line: tags and recipes read one score", async () => {
+        const state = (await loadMoodState())!;
+        for (const mood of ["focus", "driving"] as const) {
+            const recipe = parseRecipes({ only: { name: "Only", components: { [mood]: 1 } } }).get("only")!;
+            const ranked = await prisma.$queryRaw<Array<{ id: string; recipe_z: number }>>`
+                WITH ${recipeRankingSql(recipe, state)} SELECT id, recipe_z FROM ranked
+                WHERE id LIKE ${`${P}d%`} ORDER BY id
+            `;
+            const atLine = ranked.filter((r) => r.recipe_z >= TAG_LINE_Z).map((r) => ids().indexOf(r.id));
+            expect(atLine.length).toBeGreaterThan(0);
+            expect(await tagsWith(mood)).toEqual(atLine);
         }
-        await pass();
-    }
-
-    it("tags every copy of a title the Focus Mix plays one copy of", async () => {
-        // The focus tag's twelve songs, and g12, a second copy of g01: same title, same artist, same scores.
-        const FOCUS = [2.0, 0.6, 2.0, 1.0, 0.0, -0.5, 0.2, -1.0, -0.8, 0.0, -0.5, -1.0, 0.6];
-        const INSTRUMENTAL = [0.02, 0.98, null, 0.95, 0.1, 0.3, 0.05, 0.2, 0.6, 0.15, 0.08, 0.4, 0.98];
-        await libraryOf(FOCUS.map((focus, n) => ({
-            focus, instrumental: INSTRUMENTAL[n], ...(n === 12 ? { title: `Tag ${gId(1)}` } : {}),
-        })));
-        expect(await focusTagged()).toEqual([gId(1), gId(3), gId(12)]);
-        const members = await focusMixMembers();
-        expect(members.filter((id) => id === gId(1) || id === gId(12))).toHaveLength(1);
-        expect(members).toContain(gId(3));
     });
 
-    it("tags no song while the Focus Mix ranks fewer than 8, though the library has more", async () => {
-        // Ten songs, six with an instrumental reading: g00 stands far out among those six (z 2.24), but a ranking of
-        // six makes no mix. g09's happy tag shows the other tags are still written.
-        await libraryOf([
-            { focus: 2, instrumental: 0.99 },
-            ...Array.from({ length: 5 }, () => ({ focus: 0, instrumental: 0.5 })),
-            ...Array.from({ length: 3 }, () => ({ focus: 0, instrumental: null })),
-            { focus: 0, instrumental: null, happy: 3 },
-        ]);
-        expect(await focusMixMembers()).toEqual([]);
-        expect(await focusTagged()).toEqual([]);
-        expect(await tagsOf([gId(9)])).toEqual([["happy"]]);
+    it("has no night tag, though a song scores 4 on it, and no song of this library carries it", async () => {
+        expect(list[5].night).toBe(4);
+        for (const tags of await tagsOf(ids())) expect(tags).not.toContain("night");
+    });
+
+    it("re-tags when only a tempo changes: the fingerprint covers it", async () => {
+        const before = await tagsWith("driving");
+        // d00 becomes a steady 100 BPM song and d04 a steady 40 BPM one (80 doubled is out of the band, 20 halved too).
+        await prisma.track.update({ where: { id: dId(4) }, data: { bpm: 40 } });
+        await prisma.track.update({ where: { id: dId(2) }, data: { bpm: 100, bpmConfidence: 3 } });
+        const result = await pass();
+        expect(result.stateChanged).toBe(true);
+        list[4].bpm = 40;
+        Object.assign(list[2], { bpm: 100, bpmConfidence: 3 });
+        expect(await tagsWith("driving")).toEqual(expectedDriving(list));
+        expect(before.length).toBeGreaterThan(0);
     });
 
     it("tags no song while the library holds fewer than 8 scored songs", async () => {
-        await libraryOf([
-            { focus: 2, instrumental: 0.99, happy: 3 },
-            ...Array.from({ length: 5 }, () => ({ focus: 0, instrumental: 0.5 })),
-        ]);
-        expect(await focusMixMembers()).toEqual([]);
-        expect(await focusTagged()).toEqual([]);
-        expect(await tagsOf([gId(0)])).toEqual([["happy"]]);
+        await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+        await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings`);
+        await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${P}d%'`);
+        list = songs().slice(0, 6);
+        for (const [i, s] of list.entries()) {
+            await insertTrack(dId(i), { instrumentalness: s.instrumentalness, arousal: s.arousal, bpm: s.bpm, bpmConfidence: s.bpmConfidence });
+            await insertScores(dId(i), { focus: s.focus, calm: s.calm, driving: s.driving, happy: i === 5 ? 3 : 0 });
+        }
+        await pass();
+        expect(await tagsWith("focus")).toEqual([]);
+        expect(await tagsWith("driving")).toEqual([]);
+        expect(await tagsOf([dId(5)])).toEqual([["happy"]]);
     });
 });
