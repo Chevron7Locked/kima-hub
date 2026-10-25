@@ -83,6 +83,15 @@ beforeEach(clearPlays);
 const spec = { fallbackRecipe: "late-night", ranking: "plays" } as const;
 const driveSpec = { fallbackRecipe: "midnight-drive", ranking: "drive" } as const;
 
+const daysOf = async (s: typeof spec | typeof driveSpec, days: number, limit = 20) => {
+    const lists: string[][] = [];
+    for (let d = 1; d <= days; d++) {
+        const day = `2026-04-${String(d).padStart(2, "0")}`;
+        lists.push((await nightMixTracks(s, lib.user1, day, "UTC", limit))!);
+    }
+    return lists;
+};
+
 describe("night songs", () => {
     it("are this listener's heard plays between 22:00 and 03:59 in the zone read, and nobody else's", async () => {
         await play(lib.user1, songs[0], 3);
@@ -133,15 +142,33 @@ describe("the time zone", () => {
 });
 
 describe("Late Night (the mix)", () => {
-    it("with enough night songs plays only them, most played first, and not another user's or a daytime play", async () => {
+    it("with enough night songs plays only them, and not another user's or a daytime play", async () => {
         const mine = songs.slice(0, 40);
         for (const [i, id] of mine.entries()) await play(lib.user1, id, 40 - i);
         await play(lib.user1, songs[60], 50, DAY);
         await play(lib.user2, songs[61], 50);
         const picked = (await nightMixTracks(spec, lib.user1, "2026-03-11", "UTC", 25))!;
-        expect(picked).toEqual(mine.slice(0, 25));
-        expect(picked).not.toContain(songs[60]);
-        expect(picked).not.toContain(songs[61]);
+        expect(picked).toHaveLength(25);
+        for (const id of picked) expect(mine).toContain(id);
+    });
+
+    it("changes from day to day for a listener with many night songs, and holds for one day", async () => {
+        for (const id of songs.slice(0, 40)) await play(lib.user1, id, 2);
+        const [one, two] = await daysOf(spec, 2);
+        expect(one).not.toEqual(two);
+        expect(await nightMixTracks(spec, lib.user1, "2026-04-01", "UTC", 20)).toEqual(one);
+    });
+
+    it("plays a much-played song on more days than a once-played one, and still lets every night song in", async () => {
+        const mine = songs.slice(0, 40);
+        for (const id of mine) await play(lib.user1, id, 1);
+        await play(lib.user1, mine[0], 9);
+        const lists = await daysOf(spec, 30);
+        const days = (id: string) => lists.filter((l) => l.includes(id)).length;
+        const others = mine.slice(1).map(days);
+        const mean = others.reduce((a, b) => a + b, 0) / others.length;
+        expect(days(mine[0])).toBeGreaterThan(mean + 5);
+        expect(Math.min(...others)).toBeGreaterThan(0);
     });
 
     it("gives the same listener the same list for the same day, and another listener a different one", async () => {
@@ -187,25 +214,22 @@ describe("Late Night (the mix)", () => {
 });
 
 describe("Midnight Drive", () => {
-    it("ranks night songs by fit to a steady middle pace and middle energy first, then by plays", async () => {
+    it("draws night songs of a better fit (steady middle pace, middle energy) on more days than a worse fit, all at equal plays", async () => {
         const mine = songs.slice(0, 60);
-        for (const [i, id] of mine.entries()) await play(lib.user1, id, 1 + ((i * 7) % 5));
+        for (const id of mine) await play(lib.user1, id, 1);
         const found = await nightSongs(lib.user1, "UTC", { energy: true });
         const fit = new Map(found.map((s) => [s.id, s.pace + s.energy]));
-        const plays = new Map(found.map((s) => [s.id, s.plays]));
-        const picked = (await nightMixTracks(driveSpec, lib.user1, "2026-03-11", "UTC", 25))!;
-        expect(picked).toHaveLength(25);
-        for (let i = 1; i < picked.length; i++) {
-            const [a, b] = [picked[i - 1], picked[i]];
-            expect(fit.get(a)!).toBeGreaterThanOrEqual(fit.get(b)!);
-            if (fit.get(a) === fit.get(b)) expect(plays.get(a)!).toBeGreaterThanOrEqual(plays.get(b)!);
-        }
-        // A rank, not a filter: asking for every song returns all 60, the lower fit tiers last, still non-increasing.
-        const all = (await nightMixTracks(driveSpec, lib.user1, "2026-03-11", "UTC", 60))!;
+        const tiers = [...new Set(fit.values())].sort();
+        expect(tiers.length).toBeGreaterThan(1);
+        const lists = await daysOf(driveSpec, 30, 20);
+        const meanDays = (tier: number) => {
+            const ids = mine.filter((id) => fit.get(id) === tier);
+            return ids.reduce((sum, id) => sum + lists.filter((l) => l.includes(id)).length, 0) / ids.length;
+        };
+        expect(meanDays(tiers[tiers.length - 1])).toBeGreaterThan(meanDays(tiers[0]) + 3);
+        // A draw, not a filter: asking for every song returns all 60.
+        const all = (await nightMixTracks(driveSpec, lib.user1, "2026-04-01", "UTC", 60))!;
         expect([...all].sort()).toEqual([...mine].sort());
-        const tiers = new Set(found.map((s) => s.pace + s.energy));
-        expect(tiers.size).toBeGreaterThan(1);
-        for (let i = 1; i < all.length; i++) expect(fit.get(all[i - 1])!).toBeGreaterThanOrEqual(fit.get(all[i])!);
     });
 
     it("reads energy as the middle half of the library's arousal, and only when asked", async () => {

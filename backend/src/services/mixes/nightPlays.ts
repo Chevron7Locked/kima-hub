@@ -12,6 +12,7 @@
  * A library with no mood statistics yet falls back to its playable songs, so the station never answers empty while the
  * library has songs.
  */
+import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
@@ -198,11 +199,30 @@ export async function nightStationPool(
 export type NightRanking = "plays" | "drive";
 
 /**
- * The songs a night mix plays, in order. "plays" ranks night songs by how often they were played at night. "drive"
- * ranks by fit first (a steady beat at a middle pace, 0 to 1, plus middle energy, 0 to 1) and by night plays within
- * the same fit, so every night song stays a candidate (no hard filter) and the listener's habit still decides among
- * songs that fit equally. Ties break by a hash of the day and the user, as every mix does. Under COLD_START_SONGS
- * night songs the rest is filled with similar songs, and with too few the fallback recipe's draw.
+ * A draw of every song without replacement, in an order fixed by `seed`, where a song's chance of coming early grows
+ * with its weight (Efraimidis and Spirakis: each song gets the key ln(u)/weight, u a hash of the seed and the song's
+ * id in (0, 1), and the highest keys come first). Every song with a positive weight can come first; a song with twice
+ * the weight comes up about twice as often.
+ */
+function weightedOrder<T extends { id: string }>(songs: T[], weight: (s: T) => number, seed: string): T[] {
+    return songs
+        .map((song) => {
+            const hex = crypto.createHash("sha256").update(`${seed}\0${song.id}`).digest("hex").slice(0, 13);
+            const u = (parseInt(hex, 16) + 0.5) / 2 ** 52;
+            return { song, key: Math.log(u) / weight(song) };
+        })
+        .sort((a, b) => b.key - a.key || (a.song.id < b.song.id ? -1 : 1))
+        .map(({ song }) => song);
+}
+
+/**
+ * The songs a night mix plays, in order. With COLD_START_SONGS or more night songs the mix is a fresh draw each day
+ * (seeded by mix, day and user, as every recipe mix is): every night song can appear, and a song comes up more often
+ * the more it was played at night. "drive" also favours fit (a steady beat at a middle pace, 0 to 1, plus middle
+ * energy, 0 to 1): a song's weight is its night plays times (1 + fit). The artist cap (2 per artist, relaxing as in
+ * drawMembers) applies to the drawn order. Under COLD_START_SONGS night songs there is too little to draw from: the
+ * listener's songs come first (for "drive" by fit, then plays; ties by the day's seeded order), the rest is filled with
+ * similar songs, and with too few the fallback recipe's draw.
  */
 export async function nightMixTracks(
     spec: { fallbackRecipe: string; ranking: NightRanking },
@@ -214,12 +234,17 @@ export async function nightMixTracks(
     const own = await nightSongs(userId, await nightZone(requestedZone), { energy: spec.ranking === "drive" });
     const seed = JSON.stringify([spec.fallbackRecipe, today, userId]);
     const fit = (s: NightSong) => (spec.ranking === "drive" ? s.pace + s.energy : 0);
-    // Every song gets a place in the day's seeded order, with no artist cap (the cap is applied once, below, to the
-    // ranked list): a song a cap would leave out of the order must not default to first place every day.
-    const tie = new Map(seededOrder(own, seed).map((s, i) => [s.id, i]));
-    const ordered = [...own].sort(
-        (a, b) => fit(b) - fit(a) || b.plays - a.plays || tie.get(a.id)! - tie.get(b.id)!,
-    );
+    let ordered: NightSong[];
+    if (own.length >= COLD_START_SONGS) {
+        ordered = weightedOrder(own, (s) => s.plays * (1 + fit(s)), seed);
+    } else {
+        // Every song gets a place in the day's seeded order, with no artist cap (the cap is applied once, below, to
+        // the ranked list): a song a cap would leave out of the order must not default to first place every day.
+        const tie = new Map(seededOrder(own, seed).map((s, i) => [s.id, i]));
+        ordered = [...own].sort(
+            (a, b) => fit(b) - fit(a) || b.plays - a.plays || tie.get(a.id)! - tie.get(b.id)!,
+        );
+    }
     let picked = capByArtist(ordered, limit);
     if (own.length < COLD_START_SONGS && picked.length < limit) {
         const have = ordered.filter((s) => picked.includes(s.id));
