@@ -22,7 +22,7 @@ import {
   type StationPage,
   type StationRequest,
 } from "../../services/mixes/recipes";
-import { SEED_PATTERN } from "../../services/mixes/stationOrder";
+import { SEED_PATTERN, emptyPage } from "../../services/mixes/stationOrder";
 import { spreadByArtist } from "../../utils/artistSpread";
 import { LIBRARY_TRACK_WHERE, LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { PLAYABLE } from "../../utils/libraryEligibility";
@@ -737,7 +737,7 @@ async function recipeStationPage(recipe: string, request: StationRequest): Promi
   } catch (error) {
     if (!(error instanceof UnrankableLibraryError)) throw error;
     logger.debug(error.message);
-    return { trackIds: [], next: request.offset ?? 0 };
+    return emptyPage(request);
   }
 }
 

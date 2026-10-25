@@ -293,7 +293,7 @@ describe("radio: every mood value and the workout station draw from their recipe
 /** Every station session's order kept in Redis, so each test's seeds start afresh. */
 async function forgetStationSessions() {
     await waitForRedisReady();
-    const keys = await redisClient.keys("station:*");
+    const keys = await redisClient.keys("station*");
     if (keys.length > 0) await redisClient.del(...keys);
 }
 
@@ -612,6 +612,9 @@ describe("radio: a station whose recipe the library cannot rank", () => {
         const res = await radio({ type: "mood", value: "happy", limit: LIMIT });
         expect(res.status).toBe(200);
         expect(res.body.tracks).toEqual([]);
+        // No seed, so no position to continue from; with a seed, the position asked for.
+        expect(res.body.next).toBeUndefined();
+        expect((await radio({ type: "mood", value: "happy", limit: LIMIT, seed: "s", offset: 7 })).body).toEqual({ tracks: [], next: 7 });
         // A station whose recipe does not use happy still plays.
         expect((await radio({ type: "mood", value: "late-night", limit: LIMIT })).body.tracks).toHaveLength(LIMIT);
     });

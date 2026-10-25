@@ -4,14 +4,24 @@
  * pages with nothing playable, and what happens without Redis.
  */
 import { redisClient, waitForRedisReady } from "../../../utils/redis";
-import { SESSION_TTL_S, stationPage, type StationRequest, type StationSong } from "../stationOrder";
+import * as artistSpread from "../../../utils/artistSpread";
+import {
+    REPLAY_PASSES,
+    REPLAY_SONGS,
+    SESSION_TTL_S,
+    STATIONS_KEPT,
+    replayPasses,
+    stationPage,
+    type StationRequest,
+    type StationSong,
+} from "../stationOrder";
 
 const pool = (n: number, perArtist = 3): StationSong[] =>
     Array.from({ length: n }, (_, i) => ({ id: `s${String(i).padStart(5, "0")}`, artistId: `a${Math.floor(i / perArtist)}` }));
 
 async function forget() {
     await waitForRedisReady();
-    const keys = await redisClient.keys("station:*");
+    const keys = await redisClient.keys("station*");
     if (keys.length > 0) await redisClient.del(...keys);
 }
 
@@ -167,13 +177,126 @@ describe("stationPage", () => {
         }
     });
 
-    it("forgets a session twelve hours after its last refill", async () => {
+    it("forgets a session twelve hours after its last refill: each refill sets the twelve hours again", async () => {
         expect(SESSION_TTL_S).toBe(12 * 3600);
+        const keys = ["station:t:u1", "station:t:u1:ids", "stations:u1"];
         await stationPage("t", async () => pool(50), { limit: 10, seed: "x", offset: 0, listener: "u1" });
-        for (const key of ["station:t:u1", "station:t:u1:ids"]) {
+        for (const key of keys) await redisClient.expire(key, 100);
+        await stationPage("t", async () => pool(50), { limit: 10, seed: "x", offset: 10, listener: "u1" });
+        for (const key of keys) {
             const ttl = await redisClient.ttl(key);
             expect(ttl).toBeGreaterThan(SESSION_TTL_S - 60);
             expect(ttl).toBeLessThanOrEqual(SESSION_TTL_S);
+        }
+    });
+
+    it("keeps the sessions of a listener's three most recently used stations", async () => {
+        expect(STATIONS_KEPT).toBe(3);
+        const songs = pool(300);
+        const start = (station: string, listener = "u1") =>
+            stationPage(station, async () => songs, { limit: 10, seed: "x", offset: 0, listener });
+        for (const station of ["a", "b", "c"]) await start(station);
+        await start("a2", "u2");
+        // Using "a" again makes "b" the least recent, so a fourth station pushes out "b".
+        await stationPage("a", async () => songs, { limit: 10, seed: "x", offset: 10, listener: "u1" });
+        await start("d");
+        const held = (await redisClient.keys("station:*:u1")).sort();
+        expect(held).toEqual(["station:a:u1", "station:c:u1", "station:d:u1"]);
+        expect(await redisClient.exists("station:b:u1:ids")).toBe(0);
+        expect(await redisClient.zcard("stations:u1")).toBe(3);
+        expect(await redisClient.exists("station:a2:u2")).toBe(1);
+        // A station pushed out keeps playing in its order, rebuilt from the pool.
+        const pushedOut = await stationPage("b", async () => songs, { limit: 10, seed: "x", offset: 10, listener: "u1" });
+        expect(pushedOut.trackIds).toEqual((await listen("other", async () => songs, "x", 0, 20, { limit: 10 })).slice(10));
+    });
+
+    it("never keeps a session on a failed read: an older tab cannot push out the newer one while Redis stumbles", async () => {
+        const reader = counted(pool(400));
+        const old = await listen("t", reader.read, "old", 0, 300);
+        await stationPage("t", reader.read, { limit: 100, seed: "new", offset: 0, listener: "u1" });
+        const failOnce = jest.spyOn(redisClient, "multi").mockImplementationOnce(() => {
+            throw new Error("connection lost");
+        });
+        try {
+            const page = await stationPage("t", reader.read, { limit: 100, seed: "old", offset: 300, listener: "u1" });
+            expect(page.trackIds).toEqual((await listen("t2", reader.read, "old", 0, 400)).slice(300));
+        } finally {
+            failOnce.mockRestore();
+        }
+        expect(await redisClient.hget("station:t:u1", "seed")).toBe("new");
+        expect(old).toHaveLength(300);
+    });
+
+    it("never mixes two sessions in a page when another tab starts over between reading the session and its ids", async () => {
+        const reader = counted(pool(400));
+        const own = await listen("t2", reader.read, "old", 0, 200);
+        await forget();
+        await listen("t", reader.read, "old", 0, 100);
+        const realMulti = redisClient.multi.bind(redisClient);
+        let calls = 0;
+        const spy = jest.spyOn(redisClient, "multi").mockImplementation(((...args: Parameters<typeof redisClient.multi>) => {
+            const transaction = realMulti(...args);
+            if (++calls === 2) {
+                const exec = transaction.exec.bind(transaction);
+                transaction.exec = (async () => {
+                    spy.mockRestore();
+                    await stationPage("t", reader.read, { limit: 100, seed: "new", offset: 0, listener: "u1" });
+                    return exec();
+                }) as typeof transaction.exec;
+            }
+            return transaction;
+        }) as typeof redisClient.multi);
+        const page = await stationPage("t", reader.read, { limit: 100, seed: "old", offset: 100, listener: "u1" });
+        expect(page.trackIds).toEqual(own.slice(100, 200));
+        expect(await redisClient.hget("station:t:u1", "seed")).toBe("new");
+    });
+
+    it("replays the next pass when the end of the kept one cannot be read, and keeps it no further", async () => {
+        const reader = counted(pool(300));
+        const own = await listen("t2", reader.read, "x", 0, 400);
+        await forget();
+        await listen("t", reader.read, "x", 0, 300);
+        const realMulti = redisClient.multi.bind(redisClient);
+        let calls = 0;
+        const spy = jest.spyOn(redisClient, "multi").mockImplementation(((...args: Parameters<typeof redisClient.multi>) => {
+            // The first transaction reads the session; the second reads the end of its pass.
+            if (++calls === 2) throw new Error("connection lost");
+            return realMulti(...args);
+        }) as typeof redisClient.multi);
+        try {
+            const page = await stationPage("t", reader.read, { limit: 100, seed: "x", offset: 300, listener: "u1" });
+            expect(page.trackIds).toEqual(own.slice(300, 400));
+        } finally {
+            spy.mockRestore();
+        }
+        expect(await redisClient.hget("station:t:u1", "pass")).toBe("0");
+    });
+
+    it("replays at most REPLAY_PASSES passes and REPLAY_SONGS songs; deeper, the pass is built alone", () => {
+        const spread = jest.spyOn(artistSpread, "spreadByArtist");
+        try {
+            const ordered = () => spread.mock.calls.reduce((sum, [items]) => sum + items.length, 0);
+            const tiny = pool(1);
+            replayPasses("x", tiny, REPLAY_PASSES);
+            expect(spread).toHaveBeenCalledTimes(REPLAY_PASSES + 1);
+            spread.mockClear();
+            const alone = replayPasses("x", tiny, 999_999);
+            expect(spread).toHaveBeenCalledTimes(1);
+            expect(alone.start).toBe(999_999);
+            spread.mockClear();
+            const big = pool(REPLAY_SONGS / 4);
+            replayPasses("x", big, 3);
+            expect(ordered()).toBe(REPLAY_SONGS);
+            spread.mockClear();
+            replayPasses("x", big, 4);
+            expect(ordered()).toBe(big.length);
+            // A pass built alone is the pass's own seed order, without the seam rules.
+            const songs = pool(30);
+            expect(replayPasses("x", songs, 999).ids).toEqual(
+                artistSpread.spreadByArtist(songs, (s) => s.artistId, artistSpread.randomFromSeed("x\u0000999")).map((s) => s.id),
+            );
+        } finally {
+            spread.mockRestore();
         }
     });
 });
