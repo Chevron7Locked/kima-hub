@@ -5,6 +5,8 @@
  * 23:00 UTC is night there and 08:00 in Tokyo.
  */
 import { prisma } from "../../../utils/db";
+import { redisClient, waitForRedisReady } from "../../../utils/redis";
+import { buildMatching } from "../../matching/state";
 import {
     LibraryHandle,
     Row,
@@ -19,6 +21,7 @@ import { matchingContext } from "../../matching/rank";
 import { MIN_MIX_TRACKS, getRecipe, recipeMembers } from "../recipes";
 import {
     COLD_START_SONGS,
+    ENERGY_BAND_KEY,
     nightMixTracks,
     nightSongs,
     nightStationPool,
@@ -50,6 +53,7 @@ async function play(userId: string, trackId: string, times: number, at = NIGHT, 
 const clearPlays = () => prisma.play.deleteMany({ where: { userId: { startsWith: PREFIX } } });
 
 beforeAll(async () => {
+    await waitForRedisReady();
     lib = await seedSyntheticLibrary(PREFIX);
     await seedSyntheticMoods(PREFIX);
     await prisma.$transaction((tx) => buildMoodState(tx));
@@ -78,7 +82,10 @@ afterAll(async () => {
     await prisma.$disconnect();
 });
 
-beforeEach(clearPlays);
+beforeEach(async () => {
+    await clearPlays();
+    await redisClient.del(ENERGY_BAND_KEY);
+});
 
 const spec = { fallbackRecipe: "late-night", ranking: "plays" } as const;
 const driveSpec = { fallbackRecipe: "midnight-drive", ranking: "drive" } as const;
@@ -394,5 +401,84 @@ describe("night plays older than a year, and the clock around local midnight and
         for (const [iso, i] of plays) await play(lib.user1, songs[i], 1, day(iso));
         const found = (await nightSongs(lib.user1, "America/New_York", { now })).map((s) => s.id).sort();
         expect(found).toEqual([songs[0], songs[1], songs[4]].sort());
+    });
+});
+
+describe("the energy band", () => {
+    it("is read from the database once and then kept in Redis, and not at all for a listener with no night songs", async () => {
+        const queries = jest.spyOn(prisma, "$queryRaw");
+        expect(await nightSongs(lib.user1, "UTC", { energy: true })).toEqual([]);
+        expect(queries).toHaveBeenCalledTimes(1);
+        expect(await redisClient.exists(ENERGY_BAND_KEY)).toBe(0);
+
+        for (const id of songs.slice(0, 20)) await play(lib.user1, id, 1);
+        queries.mockClear();
+        const first = await nightSongs(lib.user1, "UTC", { energy: true });
+        expect(queries).toHaveBeenCalledTimes(2);
+        expect(await redisClient.ttl(ENERGY_BAND_KEY)).toBeGreaterThan(60);
+
+        queries.mockClear();
+        expect(await nightSongs(lib.user1, "UTC", { energy: true })).toEqual(first);
+        expect(queries).toHaveBeenCalledTimes(1);
+
+        // The kept band is the one read: one that no song's arousal is inside makes every song with a reading low energy.
+        await redisClient.setex(ENERGY_BAND_KEY, 600, JSON.stringify({ band: [-9, -8] }));
+        const outside = await nightSongs(lib.user1, "UTC", { energy: true });
+        expect(outside.every((s) => s.energy !== 1)).toBe(true);
+        expect(first.some((s) => s.energy === 1)).toBe(true);
+    });
+
+    it("is not asked for by a listener who does not need energy", async () => {
+        for (const id of songs.slice(0, 5)) await play(lib.user1, id, 1);
+        await nightSongs(lib.user1, "UTC");
+        expect(await redisClient.exists(ENERGY_BAND_KEY)).toBe(0);
+    });
+});
+
+describe("a night mix with 30 or more songs from a few artists", () => {
+    // 30 night songs by 3 artists: the artist cap (2, relaxed to 3 to reach the 8-song minimum) leaves 9, short of the 20
+    // asked for. The mix is filled with songs that sound like the listener's own, as a cold start is.
+    const FEW = Array.from({ length: 3 }, (_, a) => ({
+        artist: `${PREFIX}fewart${a}`,
+        album: `${PREFIX}fewalb${a}`,
+        tracks: Array.from({ length: 10 }, (_, i) => `${PREFIX}few${a}_${String(i).padStart(2, "0")}`),
+    }));
+    const own = FEW.flatMap((f) => f.tracks);
+
+    beforeAll(async () => {
+        for (const [a, f] of FEW.entries()) {
+            await prisma.artist.create({ data: { id: f.artist, name: `Few ${a}`, identityKey: `${PREFIX}fewak${a}` } });
+            await prisma.album.create({
+                data: { id: f.album, artistId: f.artist, rgMbid: `${PREFIX}fewrg${a}`, title: `Few ${a}`, primaryType: "Album" },
+            });
+            await prisma.track.createMany({
+                data: f.tracks.map((id, i) => ({
+                    id, albumId: f.album, title: `Few Song ${a}-${i}`, trackNo: i + 1, duration: 200,
+                    filePath: `/tmp/${id}.flac`, fileModified: new Date(), fileSize: 1000,
+                })),
+            });
+        }
+        await prisma.$executeRaw`
+            INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
+            SELECT n.id, e.embedding, e.model_version, e.analyzed_at
+            FROM unnest(${own}::text[]) WITH ORDINALITY AS n(id, ord)
+            JOIN track_embeddings e ON e.track_id = ${songs[0]}`;
+        await prisma.$executeRaw`DELETE FROM matching_state`;
+        await buildMatching();
+    });
+    afterAll(async () => {
+        await prisma.$executeRaw`DELETE FROM matching_state`;
+        await prisma.$executeRaw`DELETE FROM track_embeddings WHERE track_id = ANY(${own}::text[])`;
+    });
+
+    it("is filled to the limit with similar songs, in both mixes", async () => {
+        for (const id of own) await play(lib.user1, id, 2);
+        for (const s of [spec, driveSpec]) {
+            const picked = (await nightMixTracks(s, lib.user1, "2026-04-02", "UTC", 20))!;
+            expect(picked).toHaveLength(20);
+            expect(new Set(picked).size).toBe(20);
+            expect(picked.filter((id) => own.includes(id)).length).toBeLessThanOrEqual(9);
+            expect(picked.filter((id) => own.includes(id)).length).toBeGreaterThanOrEqual(6);
+        }
     });
 });

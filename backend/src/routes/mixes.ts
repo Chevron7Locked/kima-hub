@@ -36,23 +36,55 @@ function mixesCacheKey(userId: string): string {
     return `mixes:${userId}`;
 }
 
-/**
- * What the cache holds: the mixes and the time zone they were built for, since the night mixes depend on it. An entry
- * written before the zone was stored is a plain list of mixes and is still served, whatever zone is asked for.
- */
-async function cacheMixes(userId: string, zone: string, mixes: any[]): Promise<void> {
-    await redisClient.setex(mixesCacheKey(userId), MIXES_CACHE_TTL, JSON.stringify({ zone, mixes }));
+/** How many zones' lists one listener's entry holds; a listener on more than this at once drops the oldest. */
+const MAX_CACHED_ZONES = 4;
+
+interface CachedZone {
+    mixes: any[];
+    /** When this list was built, ms since epoch. */
+    at: number;
 }
 
-/** All of the user's mixes: Redis first (when built for the same zone), regenerated and cached on a miss. */
+/**
+ * What the cache holds under `mixes:<userId>`: one list of mixes per time zone, since the night mixes depend on it, so
+ * a listener whose clients send different zones (or none) is served from each zone's own list instead of every request
+ * rebuilding the other's. Older entries are still read: a plain list of mixes (written before the zone was stored)
+ * is served whatever zone is asked for, and `{ zone, mixes }` is the one zone's list.
+ */
+async function readZones(userId: string): Promise<{ plain: any[] | null; zones: Record<string, CachedZone> }> {
+    const cached = await redisClient.get(mixesCacheKey(userId));
+    if (!cached) return { plain: null, zones: {} };
+    const entry = JSON.parse(cached);
+    if (Array.isArray(entry)) return { plain: entry, zones: {} };
+    if (entry?.zones && typeof entry.zones === "object") return { plain: null, zones: entry.zones };
+    if (typeof entry?.zone === "string" && Array.isArray(entry.mixes)) {
+        return { plain: null, zones: { [entry.zone]: { mixes: entry.mixes, at: Date.now() } } };
+    }
+    return { plain: null, zones: {} };
+}
+
+/** Stores `mixes` as this zone's list, beside the other zones' that are still fresh. */
+async function cacheMixes(userId: string, zone: string, mixes: any[]): Promise<void> {
+    let kept: Record<string, CachedZone> = {};
+    try {
+        kept = (await readZones(userId)).zones;
+    } catch {
+        // An unreadable entry is replaced.
+    }
+    const now = Date.now();
+    delete kept[zone];
+    const fresh = Object.entries(kept).filter(([, z]) => now - z.at < MIXES_CACHE_TTL * 1000);
+    const zones = Object.fromEntries([...fresh, [zone, { mixes, at: now }]].slice(-MAX_CACHED_ZONES));
+    await redisClient.setex(mixesCacheKey(userId), MIXES_CACHE_TTL, JSON.stringify({ zones }));
+}
+
+/** All of the user's mixes: Redis first (the list built for the same zone), regenerated and cached on a miss. */
 async function getMixesForUser(userId: string, requested?: string): Promise<any[]> {
     const zone = await nightZone(requested);
-    const cached = await redisClient.get(mixesCacheKey(userId));
-    if (cached) {
-        const entry = JSON.parse(cached);
-        if (Array.isArray(entry)) return entry;
-        if (entry?.zone === zone && Array.isArray(entry.mixes)) return entry.mixes;
-    }
+    const { plain, zones } = await readZones(userId);
+    if (plain) return plain;
+    const hit = zones[zone];
+    if (hit && Array.isArray(hit.mixes) && Date.now() - hit.at < MIXES_CACHE_TTL * 1000) return hit.mixes;
 
     const mixes = await programmaticPlaylistService.generateAllMixes(userId, false, new Date(), zone);
     await cacheMixes(userId, zone, mixes);
@@ -239,9 +271,8 @@ router.post("/refresh", async (req, res) => {
             return res.status(401).json({ error: "Not authenticated" });
         }
 
-        // Regenerate with random selection (not date-based) and replace the cache
+        // Regenerate with random selection (not date-based) and replace this zone's list in the cache
         const zone = await nightZone(requestedZone(req));
-        await redisClient.del(mixesCacheKey(userId));
         const mixes = await programmaticPlaylistService.generateAllMixes(
             userId,
             true,

@@ -14,7 +14,8 @@ import { DEFINITIONS, PACE_BAND } from "../moodDefinitions";
 import { MOOD_STATE_VERSION, READINGS, buildMoodState, loadMoodState, type MoodState, type Reading } from "../../moods/state";
 import { writeMoodTags } from "../../moods/tags";
 import { buildMatching } from "../../matching/state";
-import { familiarBoost, familiarCacheKey } from "../familiarity";
+import * as matchingRank from "../../matching/rank";
+import { FAMILIAR_SEEDS, familiarBoost, familiarCacheKey, familiarTiming, seedsOf } from "../familiarity";
 import { moodBucketService } from "../../moodBucketService";
 import {
     MIN_MIX_TRACKS,
@@ -861,6 +862,130 @@ describe("familiarity: songs that sound like what the listener plays most", () =
         // A new seed changes the signature, so the entry is rebuilt.
         await heard("bg5", 30);
         expect((await familiarBoost(USER_ID))!.ids).toEqual(expect.arrayContaining([id("bg5"), id("bg0")]));
+    });
+});
+
+describe("familiarity: the kept result, the scan shared between callers, ties and failures", () => {
+    const USER_ID = `${P}famuser2`;
+    const LIB: Song[] = [...background(10), { name: "near", moods: { calm: 2.45 } }, { name: "top", moods: { calm: 5 } }];
+    const lockKey = `mixes:familiar-lock:${USER_ID}`;
+    const heard = (name: string, times: number, playedAt?: Date) =>
+        prisma.play.createMany({
+            data: Array.from({ length: times }, () => ({ userId: USER_ID, trackId: id(name), heard: true, ...(playedAt ? { playedAt } : {}) })),
+        });
+    const clearKeys = () => Promise.all([redisClient.del(familiarCacheKey(USER_ID)), redisClient.del(lockKey)]);
+    const timing = { ...familiarTiming };
+
+    beforeEach(async () => {
+        await library(LIB);
+        await prisma.$executeRaw`DELETE FROM matching_state`;
+        await buildMatching();
+        await prisma.user.deleteMany({ where: { id: USER_ID } });
+        await prisma.user.create({ data: { id: USER_ID, username: USER_ID, passwordHash: "x" } });
+        await clearKeys();
+    });
+    afterEach(async () => {
+        jest.restoreAllMocks();
+        Object.assign(familiarTiming, timing);
+        await clearKeys();
+    });
+    afterAll(async () => {
+        await prisma.user.deleteMany({ where: { id: USER_ID } });
+        await prisma.$executeRaw`DELETE FROM matching_state`;
+    });
+
+    it("keeps its result when the listener plays a seed song again, and rebuilds only when a new song becomes a seed", async () => {
+        await heard("bg0", 5);
+        await heard("bg1", 2);
+        await familiarBoost(USER_ID);
+        const kept = JSON.parse((await redisClient.get(familiarCacheKey(USER_ID)))!);
+        const doctored = { ...kept, boost: { ids: [id("top")], boosts: [1] } };
+        await redisClient.setex(familiarCacheKey(USER_ID), 600, JSON.stringify(doctored));
+        await heard("bg0", 3);
+        await heard("bg1", 9);
+        expect((await familiarBoost(USER_ID))!.ids).toEqual([id("top")]);
+        await heard("bg7", 1);
+        expect((await familiarBoost(USER_ID))!.ids).toEqual(expect.arrayContaining([id("bg0"), id("bg7")]));
+    });
+
+    it("runs one scan for callers that ask at once", async () => {
+        await heard("bg0", 5);
+        const context = jest.spyOn(matchingRank, "matchingContext");
+        const got = await Promise.all([familiarBoost(USER_ID), familiarBoost(USER_ID), familiarBoost(USER_ID), familiarBoost(USER_ID)]);
+        expect(context).toHaveBeenCalledTimes(1);
+        for (const boost of got) expect(boost).toEqual(got[0]);
+        expect(got[0]!.ids).toContain(id("bg0"));
+    });
+
+    it("waits for another process that holds the scan lock and uses its result, without scanning", async () => {
+        await heard("bg0", 5);
+        await familiarBoost(USER_ID);
+        const kept = JSON.parse((await redisClient.get(familiarCacheKey(USER_ID)))!);
+        await redisClient.del(familiarCacheKey(USER_ID));
+        await redisClient.set(lockKey, "1", "EX", 30);
+        familiarTiming.pollMs = 20;
+        const context = jest.spyOn(matchingRank, "matchingContext");
+        const waiting = familiarBoost(USER_ID);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await redisClient.setex(familiarCacheKey(USER_ID), 600, JSON.stringify({ ...kept, boost: { ids: [id("top")], boosts: [1] } }));
+        expect((await waiting)!.ids).toEqual([id("top")]);
+        expect(context).not.toHaveBeenCalled();
+    });
+
+    it("scans itself when the lock holder gives no result within the wait, and takes then releases the lock otherwise", async () => {
+        await heard("bg0", 5);
+        await redisClient.set(lockKey, "1", "EX", 30);
+        Object.assign(familiarTiming, { waitMs: 200, pollMs: 20 });
+        expect((await familiarBoost(USER_ID))!.ids).toContain(id("bg0"));
+        await redisClient.del(lockKey);
+        await redisClient.del(familiarCacheKey(USER_ID));
+        await familiarBoost(USER_ID);
+        expect(await redisClient.exists(lockKey)).toBe(0);
+    });
+
+    it("breaks ties between equally heard songs by the most recent listen, not by id", async () => {
+        const album = (await prisma.track.findUniqueOrThrow({ where: { id: id("bg0") } })).albumId;
+        const extra = FAMILIAR_SEEDS + 1;
+        const ids = Array.from({ length: extra }, (_, i) => id(`tie${String(i).padStart(3, "0")}`));
+        await prisma.track.createMany({
+            data: ids.map((tid, i) => ({
+                id: tid, albumId: album, title: tid, trackNo: 100 + i, duration: 200, filePath: `/tmp/${tid}.flac`,
+                fileModified: new Date(), fileSize: 1000,
+            })),
+        });
+        // tie000 was heard longest ago and tie200 most recently: by id the last one would be dropped, by recency the first.
+        const now = Date.now();
+        await prisma.play.createMany({
+            data: ids.map((tid, i) => ({ userId: USER_ID, trackId: tid, heard: true, playedAt: new Date(now - (extra - i) * 3_600_000) })),
+        });
+        const seeds = await seedsOf(USER_ID, new Date());
+        expect(seeds).toHaveLength(FAMILIAR_SEEDS);
+        const chosen = new Set(seeds.map((s) => s.id));
+        expect(chosen.has(ids[0])).toBe(false);
+        expect(chosen.has(ids[extra - 1])).toBe(true);
+    });
+
+    it("gives no boost, and keeps that for a minute at most, while the similarity data is not built", async () => {
+        await heard("bg0", 5);
+        await prisma.$executeRaw`DELETE FROM matching_state`;
+        expect(await familiarBoost(USER_ID)).toBeNull();
+        const ttl = await redisClient.ttl(familiarCacheKey(USER_ID));
+        expect(ttl).toBeGreaterThan(0);
+        expect(ttl).toBeLessThanOrEqual(60);
+        await buildMatching();
+        await redisClient.del(familiarCacheKey(USER_ID));
+        expect((await familiarBoost(USER_ID))!.ids).toContain(id("bg0"));
+        expect(await redisClient.ttl(familiarCacheKey(USER_ID))).toBeGreaterThan(60);
+    });
+
+    it("gives no boost, rather than failing, when the scan throws, and keeps that for a minute at most", async () => {
+        await heard("bg0", 5);
+        jest.spyOn(matchingRank, "topScores").mockRejectedValueOnce(new Error("connection dropped"));
+        await expect(familiarBoost(USER_ID)).resolves.toBeNull();
+        expect(await redisClient.ttl(familiarCacheKey(USER_ID))).toBeLessThanOrEqual(60);
+        await redisClient.del(familiarCacheKey(USER_ID));
+        jest.spyOn(matchingRank, "matchingContext").mockRejectedValueOnce(new Error("no vectors"));
+        await expect(familiarBoost(USER_ID)).resolves.toBeNull();
     });
 });
 

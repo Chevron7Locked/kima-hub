@@ -118,4 +118,60 @@ describe("the cached mixes and the zone they were built for", () => {
         await request(app()).get("/mixes").query({ tz: "Asia/Tokyo" }).expect(200);
         expect([...store.keys()]).toEqual(["mixes:tz_user"]);
     });
+
+    it("keep one list per zone, so two clients in different zones do not rebuild each other's on every request", async () => {
+        generate.mockImplementation(async (_u: string, _r: boolean, _d: Date, zone: string) => [{ id: `mix-${zone}`, name: zone, trackIds: [] }]);
+        await request(app()).get("/mixes").query({ tz: "Asia/Tokyo" }).expect(200);
+        await request(app()).get("/mixes").query({ tz: "America/New_York" }).expect(200);
+        const again = await request(app()).get("/mixes").query({ tz: "Asia/Tokyo" }).expect(200);
+        await request(app()).get("/mixes").query({ tz: "America/New_York" }).expect(200);
+        await request(app()).get("/mixes").expect(200);
+        await request(app()).get("/mixes").expect(200);
+        expect(generate).toHaveBeenCalledTimes(3);
+        expect(again.body.map((m: any) => m.id)).toEqual(["mix-Asia/Tokyo"]);
+        expect([...store.keys()]).toEqual(["mixes:tz_user"]);
+    });
+
+    it("let GET /mixes/:id and the save use the list of the zone asked for, not the one written last", async () => {
+        generate.mockImplementation(async (_u: string, _r: boolean, _d: Date, zone: string) => [{ id: "m1", name: `Mix for ${zone}`, trackIds: [] }]);
+        await request(app()).get("/mixes").query({ tz: "Asia/Tokyo" }).expect(200);
+        await request(app()).get("/mixes").query({ tz: "America/New_York" }).expect(200);
+        jest.spyOn(prisma.track, "findMany").mockResolvedValue([]);
+        const tokyo = await request(app()).get("/mixes/m1").query({ tz: "Asia/Tokyo" }).expect(200);
+        expect(tokyo.body.name).toBe("Mix for Asia/Tokyo");
+        jest.spyOn(prisma.playlist, "findFirst").mockResolvedValue({ id: "p0", name: "x" } as any);
+        await request(app()).post("/mixes/m1/save").query({ tz: "Asia/Tokyo" }).expect(409);
+        expect(generate).toHaveBeenCalledTimes(2);
+    });
+
+    it("keep a refreshed list of one zone beside the other zones' lists", async () => {
+        generate.mockImplementation(async (_u: string, random: boolean, _d: Date, zone: string) => [{ id: `${random ? "r" : "d"}-${zone}`, name: zone, trackIds: [] }]);
+        await request(app()).get("/mixes").query({ tz: "Asia/Tokyo" }).expect(200);
+        await request(app()).post("/mixes/refresh").query({ tz: "America/New_York" }).expect(200);
+        const tokyo = await request(app()).get("/mixes").query({ tz: "Asia/Tokyo" }).expect(200);
+        const newYork = await request(app()).get("/mixes").query({ tz: "America/New_York" }).expect(200);
+        expect(tokyo.body[0].id).toBe("d-Asia/Tokyo");
+        expect(newYork.body[0].id).toBe("r-America/New_York");
+        expect(generate).toHaveBeenCalledTimes(2);
+    });
+
+    it("hold at most four zones, dropping the oldest, and drop a zone's list once it is an hour old", async () => {
+        const zones = ["Z/One", "Z/Two", "Z/Three", "Z/Four", "Z/Five"];
+        for (const zone of zones) await request(app()).get("/mixes").query({ tz: zone }).expect(200);
+        const held = Object.keys(JSON.parse(store.get("mixes:tz_user")!).zones);
+        expect(held).toEqual(zones.slice(1));
+        const entry = JSON.parse(store.get("mixes:tz_user")!);
+        entry.zones["Z/Five"].at -= 3_600_001;
+        store.set("mixes:tz_user", JSON.stringify(entry));
+        generate.mockClear();
+        await request(app()).get("/mixes").query({ tz: "Z/Five" }).expect(200);
+        expect(generate).toHaveBeenCalledTimes(1);
+    });
+
+    it("serve the single zone of an entry written before there was one list per zone", async () => {
+        store.set("mixes:tz_user", JSON.stringify({ zone: "Asia/Tokyo", mixes: [{ id: "old", name: "Old", trackIds: [] }] }));
+        const res = await request(app()).get("/mixes").query({ tz: "Asia/Tokyo" }).expect(200);
+        expect(generate).not.toHaveBeenCalled();
+        expect(res.body.map((m: any) => m.id)).toEqual(["old"]);
+    });
 });

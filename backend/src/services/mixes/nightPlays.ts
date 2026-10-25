@@ -16,6 +16,7 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
+import { redisClient } from "../../utils/redis";
 import { matchingContext, rankMatches } from "../matching/rank";
 import { safeZone } from "../stats/listening";
 import type { ProgrammaticMix } from "./helpers";
@@ -32,6 +33,7 @@ import {
     seededOrder,
 } from "./recipes";
 import { TRACK_LIMIT } from "./helpers";
+import { FAMILIAR_SEEDS } from "./familiarity";
 import { stationPage, type StationPage, type StationRequest, type StationSong } from "./stationOrder";
 
 /** A play counts as night from this local hour (inclusive) ... */
@@ -70,14 +72,39 @@ export async function nightZone(requested?: string): Promise<string> {
     return safeZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
 }
 
-/** The arousal readings that bound the middle half of the library's energy, or null with no readings. */
+/** Where the library's energy band is kept; under `mixes:` so the enrichment re-run that clears the mixes cache clears it. */
+export const ENERGY_BAND_KEY = "mixes:energy-band";
+export const ENERGY_BAND_CACHE_SECONDS = 3 * 3600;
+/** A library with no readings yet is asked again soon, since the readings arrive with analysis. */
+const ENERGY_BAND_EMPTY_CACHE_SECONDS = 60;
+
+/**
+ * The arousal readings that bound the middle half of the library's energy, or null with no readings. Sorting every
+ * song's arousal is the cost, and the two numbers move only when analysis finishes, so they are kept in Redis.
+ */
 async function energyBand(): Promise<[number, number] | null> {
+    try {
+        const kept = await redisClient.get(ENERGY_BAND_KEY);
+        if (kept) return (JSON.parse(kept) as { band: [number, number] | null }).band;
+    } catch (error) {
+        logger.debug(`[Mixes] energy band cache unreadable: ${error instanceof Error ? error.message : error}`);
+    }
     const [row] = await prisma.$queryRaw<Array<{ band: number[] | null }>>`
         SELECT percentile_cont(ARRAY[0.25, 0.75]) WITHIN GROUP (ORDER BY t.arousal) AS band
         FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
         WHERE t.arousal IS NOT NULL AND t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY'
     `;
-    return row?.band ? [row.band[0], row.band[1]] : null;
+    const band: [number, number] | null = row?.band ? [row.band[0], row.band[1]] : null;
+    try {
+        await redisClient.setex(
+            ENERGY_BAND_KEY,
+            band ? ENERGY_BAND_CACHE_SECONDS : ENERGY_BAND_EMPTY_CACHE_SECONDS,
+            JSON.stringify({ band }),
+        );
+    } catch (error) {
+        logger.debug(`[Mixes] energy band cache not written: ${error instanceof Error ? error.message : error}`);
+    }
+    return band;
 }
 
 /**
@@ -90,19 +117,13 @@ export async function nightSongs(
     zone: string,
     { energy = false, now = new Date() }: { energy?: boolean; now?: Date } = {},
 ): Promise<NightSong[]> {
-    const band = energy ? await energyBand() : null;
     const since = new Date(now.getTime() - NIGHT_LOOKBACK_DAYS * 86_400_000);
-    const energySql = band
-        ? Prisma.sql`CASE WHEN t.arousal IS NULL THEN 0.5::float8
-                          WHEN t.arousal BETWEEN ${band[0]}::float8 AND ${band[1]}::float8 THEN 1::float8
-                          ELSE 0::float8 END`
-        : Prisma.sql`0.5::float8`;
     const rows = await prisma.$queryRaw<
-        Array<{ id: string; artist_key: string; title_key: string; plays: number; pace: number; energy: number }>
+        Array<{ id: string; artist_key: string; title_key: string; plays: number; pace: number; arousal: number | null }>
     >`
         WITH night AS (
             SELECT t.id, ${artistSql()} AS artist_key, lower(t.title) AS title_key,
-                   ${Prisma.raw(PACE_SQL)} AS pace, ${energySql} AS energy
+                   ${Prisma.raw(PACE_SQL)} AS pace, t.arousal
             FROM "Play" p
             JOIN "Track" t ON t.id = p."trackId"
             JOIN "Album" a ON a.id = t."albumId"
@@ -112,19 +133,23 @@ export async function nightSongs(
               AND (EXTRACT(HOUR FROM p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${zone}) >= ${NIGHT_START_HOUR}
                    OR EXTRACT(HOUR FROM p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${zone}) < ${NIGHT_END_HOUR})
         )
-        SELECT id, artist_key, title_key, pace, energy, count(*)::int AS plays
-        FROM night GROUP BY id, artist_key, title_key, pace, energy
+        SELECT id, artist_key, title_key, pace, arousal, count(*)::int AS plays
+        FROM night GROUP BY id, artist_key, title_key, pace, arousal
     `;
+    // The band is looked up only for a listener who has night songs to place in it.
+    const band = energy && rows.length > 0 ? await energyBand() : null;
+    const energyOf = (arousal: number | null) =>
+        !band || arousal === null ? 0.5 : arousal >= band[0] && arousal <= band[1] ? 1 : 0;
     const byTitle = new Map<string, NightSong & { best: number }>();
     for (const r of rows) {
         const key = `${r.title_key}\0${r.artist_key}`;
         const seen = byTitle.get(key);
         if (!seen) {
-            byTitle.set(key, { id: r.id, artistId: r.artist_key, plays: r.plays, pace: r.pace, energy: r.energy, best: r.plays });
+            byTitle.set(key, { id: r.id, artistId: r.artist_key, plays: r.plays, pace: r.pace, energy: energyOf(r.arousal), best: r.plays });
         } else {
             seen.plays += r.plays;
             if (r.plays > seen.best || (r.plays === seen.best && r.id < seen.id)) {
-                Object.assign(seen, { id: r.id, pace: r.pace, energy: r.energy, best: r.plays });
+                Object.assign(seen, { id: r.id, pace: r.pace, energy: energyOf(r.arousal), best: r.plays });
             }
         }
     }
@@ -204,7 +229,7 @@ export type NightRanking = "plays" | "drive";
  * id in (0, 1), and the highest keys come first). Every song with a positive weight can come first; a song with twice
  * the weight comes up about twice as often.
  */
-function weightedOrder<T extends { id: string }>(songs: T[], weight: (s: T) => number, seed: string): T[] {
+export function weightedOrder<T extends { id: string }>(songs: T[], weight: (s: T) => number, seed: string): T[] {
     return songs
         .map((song) => {
             const hex = crypto.createHash("sha256").update(`${seed}\0${song.id}`).digest("hex").slice(0, 13);
@@ -221,8 +246,9 @@ function weightedOrder<T extends { id: string }>(songs: T[], weight: (s: T) => n
  * the more it was played at night. "drive" also favours fit (a steady beat at a middle pace, 0 to 1, plus middle
  * energy, 0 to 1): a song's weight is its night plays times (1 + fit). The artist cap (2 per artist, relaxing as in
  * drawMembers) applies to the drawn order. Under COLD_START_SONGS night songs there is too little to draw from: the
- * listener's songs come first (for "drive" by fit, then plays; ties by the day's seeded order), the rest is filled with
- * similar songs, and with too few the fallback recipe's draw.
+ * listener's songs come first (for "drive" by fit, then plays; ties by the day's seeded order). Either way a list still
+ * short of the limit (a cold start, or few artists whose songs the cap leaves out) is filled with songs that sound like
+ * the most-played night songs, and with too few the fallback recipe's draw.
  */
 export async function nightMixTracks(
     spec: { fallbackRecipe: string; ranking: NightRanking },
@@ -246,9 +272,11 @@ export async function nightMixTracks(
         );
     }
     let picked = capByArtist(ordered, limit);
-    if (own.length < COLD_START_SONGS && picked.length < limit) {
+    // Short of the limit (a cold start, or a few artists whose songs the cap leaves out): fill with songs that sound like
+    // the listener's most-played night songs.
+    if (picked.length < limit) {
         const have = ordered.filter((s) => picked.includes(s.id));
-        const extra = without(await similarSongs(own, limit * 2), own);
+        const extra = without(await similarSongs(own.slice(0, FAMILIAR_SEEDS), limit * 2), own);
         const merged = [...have, ...extra];
         picked = capByArtist(merged, limit);
     }
