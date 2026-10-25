@@ -47,6 +47,7 @@ import router from "../tracks";
 jest.setTimeout(600_000);
 
 const PREFIX = "rad_";
+const LISTENER = `${PREFIX}listener`;
 const LIMIT = 20;
 const CALLS = 10;
 
@@ -56,6 +57,11 @@ let byId: Map<string, Row>;
 
 const app = express();
 app.use(express.json());
+// The signed-in listener a station session is kept for (requireAuthOrToken sets it in the app).
+app.use((req, _res, next) => {
+    req.user = { id: LISTENER } as typeof req.user;
+    next();
+});
 app.use("/", router);
 
 /** The recipe behind each station value, as the product names them (Kevin 10-24); Wildcard has its own tests. */
@@ -330,6 +336,19 @@ describe("radio: the play order", () => {
         expect(again.heard.every((id) => members.get(recipe)!.has(id))).toBe(true);
     });
 
+    it("keeps the session for the signed-in listener, one per station", async () => {
+        await radio({ type: "mood", value: "calm", limit: LIMIT, seed: "one" });
+        await radio({ type: "mood", value: "calm", limit: LIMIT, seed: "two" });
+        await radio({ type: "workout", limit: LIMIT, seed: "three" });
+        expect((await redisClient.keys("station:*")).sort()).toEqual([
+            `station:recipe:calm-station:${LISTENER}`,
+            `station:recipe:calm-station:${LISTENER}:ids`,
+            `station:recipe:workout:${LISTENER}`,
+            `station:recipe:workout:${LISTENER}:ids`,
+        ]);
+        expect(await redisClient.hget(`station:recipe:calm-station:${LISTENER}`, "seed")).toBe("two");
+    });
+
     it("passes over a refill whose songs all went missing after the session started", async () => {
         const first = await radio({ type: "mood", value: "calm", limit: LIMIT, seed: "gone" });
         const order = await pickRecipeStation("calm-station", { limit: 100_000, seed: "gone" });
@@ -348,7 +367,8 @@ describe("radio: the play order", () => {
     it("plays a station without a seed in a fresh spread order each refill", async () => {
         const first = await radio({ type: "mood", value: "calm", limit: 100 });
         const second = await radio({ type: "mood", value: "calm", limit: 100 });
-        expect(first.body.next).toBe(first.body.tracks.length);
+        // No seed, no session: nothing to continue from.
+        expect(first.body.next).toBeUndefined();
         expect(first.body.tracks.map((t: RadioTrack) => t.id)).not.toEqual(second.body.tracks.map((t: RadioTrack) => t.id));
         expect(spreadWhereItCan(first.body.tracks)).toBe(true);
         expect(spreadWhereItCan(second.body.tracks)).toBe(true);
@@ -369,6 +389,7 @@ describe("radio: the play order", () => {
         expect((await radio({ type: "mood", value: "calm", seed: "s", offset: "abc" })).status).toBe(400);
         expect((await radio({ type: "mood", value: "calm", seed: "s", offset: -1 })).status).toBe(400);
         expect((await radio({ type: "mood", value: "calm", seed: "s".repeat(129) })).status).toBe(400);
+        expect((await radio({ type: "mood", value: "calm", seed: "abc:ids" })).status).toBe(400);
         expect((await radio({ type: "workout", offset: 5 })).status).toBe(400);
         expect((await radio({ type: "mood", value: "wildcard", offset: 5 })).status).toBe(400);
         expect((await radio({ type: "mood", value: "calm", seed: "s", offset: 0 })).status).toBe(200);

@@ -470,11 +470,11 @@ describe("the station order", () => {
         const heard: string[] = [];
         let at = offset;
         while (heard.length < count) {
-            const page = await pickStationPage(CALM, { limit, seed, offset: at });
+            const page = await pickStationPage(CALM, { limit, seed, offset: at, listener: USER });
             expect(page.trackIds.length).toBeGreaterThan(0);
             expect(page.next).toBe(at + page.trackIds.length);
             heard.push(...ordered(page.trackIds));
-            at = page.next;
+            at = page.next!;
         }
         return heard;
     };
@@ -559,18 +559,25 @@ describe("the station order", () => {
         expect(new Set(next)).toEqual(new Set([...before.filter((n) => n !== "o00"), "late"]));
     });
 
-    it("rebuilds a forgotten session, or one Redis cannot serve, in the same order while the pool is unchanged", async () => {
+    it("rebuilds a forgotten session, later passes included, or one Redis cannot serve, in the same order", async () => {
         await library([...background(100), ...big, ...others]);
-        const whole = await listen("forgotten", 0, 45);
-        await forgetStationSessions();
-        expect(await listen("forgotten", 20, 25)).toEqual(whole.slice(20));
-        const spy = jest.spyOn(redisClient, "hgetall").mockRejectedValue(new Error("connection lost"));
-        try {
-            expect(await listen("forgotten", 10, 20)).toEqual(whole.slice(10, 30));
+        // Three passes, then Redis forgets: each pass comes back song for song while the pool is unchanged.
+        const whole = await listen("forgotten", 0, 135);
+        for (const from of [20, 60, 100]) {
             await forgetStationSessions();
-            expect(await listen("no-redis", 0, 45)).toHaveLength(45);
+            expect(await listen("forgotten", from, 135 - from)).toEqual(whole.slice(from));
+        }
+        await forgetStationSessions();
+        const failures = [
+            jest.spyOn(redisClient, "multi").mockImplementation(() => {
+                throw new Error("connection lost");
+            }),
+            jest.spyOn(redisClient, "lrange").mockRejectedValue(new Error("connection lost")),
+        ];
+        try {
+            expect(await listen("forgotten", 10, 80)).toEqual(whole.slice(10, 90));
         } finally {
-            spy.mockRestore();
+            failures.forEach((spy) => spy.mockRestore());
         }
     });
 
@@ -601,19 +608,19 @@ describe("the station order", () => {
         ];
         await library(plain);
         await writeMoodTags();
-        const whole = ordered(await pickWildcardStation({ limit: 100, seed: "w" }));
+        const whole = ordered(await pickWildcardStation({ limit: 100, seed: "w", listener: USER }));
         expect(new Set(whole)).toEqual(new Set(plain.map((s) => s.name)));
         // 20 in 6 runs: 2 of 4 and 4 of 3.
         expect(runsOfBig(whole).sort()).toEqual([3, 3, 3, 3, 4, 4]);
         await forgetStationSessions();
         const pages: string[] = [];
         for (let offset = 0; offset < 25; offset += 7) {
-            pages.push(...ordered(await pickWildcardStation({ limit: 7, seed: "w", offset })));
+            pages.push(...ordered(await pickWildcardStation({ limit: 7, seed: "w", offset, listener: USER })));
         }
         expect(pages).toEqual(whole);
         // The last page of a pass stops at its end; the next starts the pool over.
-        expect(await pickWildcardStation({ limit: 7, seed: "w", offset: 21 })).toHaveLength(4);
-        expect(new Set(ordered(await pickWildcardStation({ limit: 100, seed: "w", offset: 25 })))).toEqual(new Set(whole));
+        expect(await pickWildcardStation({ limit: 7, seed: "w", offset: 21, listener: USER })).toHaveLength(4);
+        expect(new Set(ordered(await pickWildcardStation({ limit: 100, seed: "w", offset: 25, listener: USER })))).toEqual(new Set(whole));
     });
 });
 

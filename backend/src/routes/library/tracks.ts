@@ -22,6 +22,7 @@ import {
   type StationPage,
   type StationRequest,
 } from "../../services/mixes/recipes";
+import { SEED_PATTERN } from "../../services/mixes/stationOrder";
 import { spreadByArtist } from "../../utils/artistSpread";
 import { LIBRARY_TRACK_WHERE, LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { PLAYABLE } from "../../utils/libraryEligibility";
@@ -740,32 +741,13 @@ async function recipeStationPage(recipe: string, request: StationRequest): Promi
   }
 }
 
-/**
- * A station's refill with songs that can still play. The pool holds only playable songs when a session reads it, but a
- * file can go missing later; a page left with none is passed over, as an empty page tells the player the station has
- * nothing more. Songs left out of a page can put two songs by one artist side by side; that needs a file to go missing
- * after the session started, and costs one bunch, not the order.
- */
-async function playableStationPage(
-  read: (request: StationRequest) => Promise<StationPage>,
-  request: StationRequest,
-): Promise<StationPage> {
-  let page = await read(request);
-  for (;;) {
-    const playable = await prisma.track.findMany({
-      where: { id: { in: page.trackIds }, ...PLAYABLE },
-      select: { id: true },
-    });
-    const ids = new Set(playable.map((t) => t.id));
-    const trackIds = page.trackIds.filter((id) => ids.has(id));
-    if (trackIds.length > 0 || page.trackIds.length === 0 || request.seed === undefined) {
-      return { trackIds, next: page.next };
-    }
-    page = await read({ ...request, offset: page.next });
-  }
+/** The ids of these songs that can still play: the file is present and not corrupt. */
+async function stillPlayable(ids: string[]): Promise<Set<string>> {
+  const rows = await prisma.track.findMany({ where: { id: { in: ids }, ...PLAYABLE }, select: { id: true } });
+  return new Set(rows.map((t) => t.id));
 }
 
-const BAD_STATION_REQUEST = "A station's offset needs its seed, and both must be short plain values";
+const BAD_STATION_REQUEST = "A station's offset needs its seed, and a seed is 1 to 128 letters, digits, - or _";
 
 /**
  * A mood, Wildcard or workout station plays every matching song in one order that spreads each artist's songs
@@ -773,13 +755,13 @@ const BAD_STATION_REQUEST = "A station's offset needs its seed, and both must be
  * song once before the station starts over. Without a seed every refill is a fresh order. Null when the query's seed
  * or offset cannot be used; the other radios do not read them.
  */
-function parseStationRequest(query: Record<string, unknown>, limit: number): StationRequest | null {
+function parseStationRequest(query: Record<string, unknown>, limit: number, listener?: string): StationRequest | null {
   const { seed, offset } = query;
-  if (seed !== undefined && (typeof seed !== "string" || seed.length < 1 || seed.length > 128)) return null;
+  if (seed !== undefined && (typeof seed !== "string" || !SEED_PATTERN.test(seed))) return null;
   if (offset !== undefined && (typeof offset !== "string" || !/^\d{1,9}$/.test(offset))) return null;
   const at = offset === undefined ? 0 : Number(offset);
   if (seed === undefined && at > 0) return null;
-  return { limit, seed, offset: at };
+  return { limit, seed, offset: at, listener, playable: stillPlayable };
 }
 
 router.get("/radio", async (req, res) => {
@@ -790,8 +772,10 @@ router.get("/radio", async (req, res) => {
       return res.status(400).json({ error: "Radio type is required" });
     }
     let trackIds: string[] = [];
-    // Set by the stations that play every matching song: their ids come in play order, and the offset to ask from next.
-    let next: number | null = null;
+    // The stations that play every matching song give their songs in play order, already checked playable, and with a
+    // seed the position to ask from next.
+    let station = false;
+    let next: number | undefined;
 
     switch (type) {
       case "discovery":
@@ -897,20 +881,18 @@ router.get("/radio", async (req, res) => {
         if (moodValue !== WILDCARD_STATION && !recipe) {
           return res.status(400).json({ error: `Unknown mood: ${moodValue}` });
         }
-        const request = parseStationRequest(req.query, limitNum);
+        const request = parseStationRequest(req.query, limitNum, req.user?.id);
         if (!request) return res.status(400).json({ error: BAD_STATION_REQUEST });
-        const page = await playableStationPage(
-          recipe ? (r) => recipeStationPage(recipe, r) : pickWildcardPage,
-          request,
-        );
-        ({ trackIds, next } = page);
+        ({ trackIds, next } = await (recipe ? recipeStationPage(recipe, request) : pickWildcardPage(request)));
+        station = true;
         break;
       }
 
       case "workout": {
-        const request = parseStationRequest(req.query, limitNum);
+        const request = parseStationRequest(req.query, limitNum, req.user?.id);
         if (!request) return res.status(400).json({ error: BAD_STATION_REQUEST });
-        ({ trackIds, next } = await playableStationPage((r) => recipeStationPage("workout", r), request));
+        ({ trackIds, next } = await recipeStationPage("workout", request));
+        station = true;
         break;
       }
 
@@ -1174,19 +1156,11 @@ router.get("/radio", async (req, res) => {
         trackIds = await sampleTrackIds({ where: {}, take: 300 });
     }
 
-    // Every station draws only tracks that can play: the file is present and not corrupt.
-    const playable = await prisma.track.findMany({
-      where: { id: { in: trackIds }, ...PLAYABLE },
-      select: { id: true },
-    });
-    const playableIds = new Set(playable.map((t) => t.id));
-    const finalIds =
-      next === null
-        ? shuffleArray([...playableIds]).slice(0, limitNum)
-        : trackIds.filter((id) => playableIds.has(id));
+    // Every radio plays only tracks that can play: the file is present and not corrupt. The stations checked theirs.
+    const finalIds = station ? trackIds : shuffleArray([...(await stillPlayable(trackIds))]).slice(0, limitNum);
 
     if (finalIds.length === 0) {
-      return res.json(next === null ? { tracks: [] } : { tracks: [], next });
+      return res.json(next === undefined ? { tracks: [] } : { tracks: [], next });
     }
 
     const tracks = await prisma.track.findMany({
@@ -1215,8 +1189,7 @@ router.get("/radio", async (req, res) => {
 
     // The stations' own order, or for the other radios the same artist spread over this refill.
     const rank = new Map(finalIds.map((id, i) => [id, i]));
-    const ordered =
-      next === null
+    const ordered = !station
         ? spreadByArtist(tracks, (t) => songArtistKey(t.id, t.album.artist.id, t.album.artist.identityKey))
         : [...tracks].sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
 
@@ -1239,7 +1212,7 @@ router.get("/radio", async (req, res) => {
       },
     }));
 
-    res.json(next === null ? { tracks: transformedTracks } : { tracks: transformedTracks, next });
+    res.json(next === undefined ? { tracks: transformedTracks } : { tracks: transformedTracks, next });
   } catch (error) {
     logger.error("Radio endpoint error:", error);
     res.status(500).json({ error: "Failed to get radio tracks" });
