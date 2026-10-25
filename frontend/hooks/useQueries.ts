@@ -735,6 +735,8 @@ export function useMoodStationsQuery(enabled: boolean) {
             api.get<{ stations: Array<{ value: string; name: string; description: string }> }>("/library/radio/stations"),
         staleTime: 10 * 60 * 1000,
         enabled,
+        // A list that failed keeps being asked for, so the tiles come back on their own.
+        refetchInterval: (query) => (query.state.status === "error" ? 30_000 : false),
     });
 }
 

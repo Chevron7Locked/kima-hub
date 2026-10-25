@@ -19,16 +19,34 @@ import {
     useRadioPlayer,
 } from "../radioData";
 
+/** A tile in the row: a station, a mood station still loading, or the mood list's retry. */
+type RowItem = { kind: "station"; station: RadioStation } | { kind: "placeholder"; key: string } | { kind: "retry" };
+
+/** Tiles the mood stations hold while their list loads. */
+const MOOD_PLACEHOLDERS = 4;
+
+const RETRY_STYLE = {
+    color: "from-[#6b7280]/15 to-[#4b5563]/10",
+    hoverBorder: "hover:border-[#6b7280]/40",
+    accentGradient: "from-[#6b7280] to-[#4b5563]",
+};
+
 export function LibraryRadioStations() {
     const { loadingStation, startRadio } = useRadioPlayer();
     const { data: genresData, isLoading: genresLoading } = useLibraryGenresQuery();
     const { data: decadesData, isLoading: decadesLoading } = useLibraryDecadesQuery();
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
-    const { data: moodData, isLoading: moodLoading } = useMoodStationsQuery(!featuresLoading && vibeEmbeddings);
+    const {
+        data: moodData,
+        isLoading: moodLoading,
+        isError: moodError,
+        isFetching: moodFetching,
+        refetch: refetchMoods,
+    } = useMoodStationsQuery(!featuresLoading && vibeEmbeddings);
 
     // Until the feature check answers, which stations can play is unknown: the row waits rather than letting
-    // Workout and the mood stations pop in among tiles already shown.
-    const isLoading = genresLoading || decadesLoading || featuresLoading || moodLoading;
+    // Workout pop in among tiles already shown. The mood stations' own list does not hold the row up.
+    const isLoading = genresLoading || decadesLoading || featuresLoading;
     const genres = useMemo(
         () => (genresData?.genres || []).filter((g) => g.count >= 15).slice(0, 6),
         [genresData],
@@ -38,15 +56,24 @@ export function LibraryRadioStations() {
         [decadesData],
     );
 
-    const allStations = useMemo(() => {
-        if (featuresLoading || moodLoading) return [];
+    const allItems = useMemo((): RowItem[] => {
+        if (featuresLoading) return [];
+        const station = (s: RadioStation): RowItem => ({ kind: "station", station: s });
+        // The mood stations hold their place while their list loads, and a list that failed says so there.
+        const moods: RowItem[] = !vibeEmbeddings
+            ? []
+            : moodLoading
+              ? Array.from({ length: MOOD_PLACEHOLDERS }, (_, i) => ({ kind: "placeholder" as const, key: `mood-wait-${i}` }))
+              : moodError
+                ? [{ kind: "retry" }]
+                : buildMoodStations(moodData?.stations ?? []).map(station);
         return [
-            ...playableStations(STATIC_STATIONS, vibeEmbeddings),
-            ...playableStations(buildMoodStations(moodData?.stations ?? []), vibeEmbeddings),
-            ...buildGenreStations(genres),
-            ...buildDecadeStations(decades),
+            ...playableStations(STATIC_STATIONS, vibeEmbeddings).map(station),
+            ...moods,
+            ...buildGenreStations(genres).map(station),
+            ...buildDecadeStations(decades).map(station),
         ];
-    }, [genres, decades, vibeEmbeddings, featuresLoading, moodLoading, moodData]);
+    }, [genres, decades, vibeEmbeddings, featuresLoading, moodLoading, moodError, moodData]);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const [currentPage, setCurrentPage] = useState(0);
@@ -55,12 +82,12 @@ export function LibraryRadioStations() {
     const isMobileOrTablet = isMobile || isTablet;
 
     const stationPages = useMemo(() => {
-        const pages: RadioStation[][] = [];
-        for (let i = 0; i < allStations.length; i += 6) {
-            pages.push(allStations.slice(i, i + 6));
+        const pages: RowItem[][] = [];
+        for (let i = 0; i < allItems.length; i += 6) {
+            pages.push(allItems.slice(i, i + 6));
         }
         return pages;
-    }, [allStations]);
+    }, [allItems]);
 
     const updatePage = useCallback(() => {
         const el = scrollRef.current;
@@ -103,10 +130,39 @@ export function LibraryRadioStations() {
         />
     );
 
+    const tileSize = (compact: boolean) => (compact ? "flex-shrink-0 snap-start w-[180px] h-[80px]" : "w-full aspect-[5/3]");
+
+    const renderItem = (item: RowItem, compact: boolean, globalIdx: number, delayIdx = globalIdx) => {
+        if (item.kind === "station") return renderCard(item.station, compact, globalIdx, delayIdx);
+        if (item.kind === "placeholder") {
+            return (
+                <div
+                    key={item.key}
+                    className={cn(tileSize(compact), "rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse")}
+                />
+            );
+        }
+        return (
+            <TileCard
+                key="mood-retry"
+                title="Mood stations"
+                subtitle="Didn't load. Try again"
+                wrapSubtitle={!compact}
+                tint={RETRY_STYLE.color}
+                hoverBorder={RETRY_STYLE.hoverBorder}
+                accent={RETRY_STYLE.accentGradient}
+                onClick={() => void refetchMoods()}
+                busy={moodFetching}
+                index={delayIdx}
+                className={tileSize(compact)}
+            />
+        );
+    };
+
     if (!isMobileOrTablet) {
         return (
-            <HorizontalCarousel style={cascadeStyle(allStations.length)}>
-                {allStations.map((station, i) => renderCard(station, true, i))}
+            <HorizontalCarousel style={cascadeStyle(allItems.length)}>
+                {allItems.map((item, i) => renderItem(item, true, i))}
                 {isLoading &&
                     Array.from({ length: 6 }).map((_, i) => (
                         <div key={i} className="flex-shrink-0 w-[180px] h-[80px] rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse" />
@@ -128,7 +184,7 @@ export function LibraryRadioStations() {
                         className="flex-shrink-0 snap-start w-full grid grid-cols-2 grid-rows-3 sm:grid-cols-3 sm:grid-rows-2 gap-2"
                         style={cascadeStyle(page.length)}
                     >
-                        {page.map((station, i) => renderCard(station, false, pageIndex * 6 + i, i))}
+                        {page.map((item, i) => renderItem(item, false, pageIndex * 6 + i, i))}
                         {page.length < 6 &&
                             Array.from({ length: 6 - page.length }).map((_, i) => (
                                 <div key={`empty-${i}`} className="aspect-[5/3]" />

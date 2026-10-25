@@ -34,23 +34,27 @@ const STATIONS: MoodStation[] = [
 const WILDCARD_SUBTITLE = "Songs with no mood tag";
 
 /**
- * A part as its recipe names it, underscores read as spaces; arousal, the felt-energy reading, as "high energy" or
- * "low energy", and any other "low:" part as "not" before its name.
+ * A part the subtitle names: what the recipe leans toward, not what it pushes away (Kevin 10-25), so a "low:" part
+ * is left out, except arousal, the felt-energy reading, which reads either way.
  */
+const named = ({ signal, weight }: RecipeComponent): boolean => weight > 0 || signal === "arousal";
+
+/** A part as its recipe names it, underscores read as spaces; arousal as "high energy" or "low energy". */
 function partWords({ signal, weight }: RecipeComponent): string {
     if (signal === "arousal") return weight > 0 ? "high energy" : "low energy";
-    const name = signal.replace(/_/g, " ");
-    return weight > 0 ? name : `not ${name}`;
+    return signal.replace(/_/g, " ");
 }
 
-/** The recipe's three heaviest parts, ties in the recipe's own order, as one line. */
+/** The recipe's three heaviest named parts, ties in the recipe's own order, as one line. */
 export function stationSubtitle(recipe: Recipe): string {
     const line = recipe.components
         .map((component, order) => ({ component, order }))
+        .filter(({ component }) => named(component))
         .sort((a, b) => Math.abs(b.component.weight) - Math.abs(a.component.weight) || a.order - b.order)
         .slice(0, 3)
         .map(({ component }) => partWords(component))
         .join(", ");
+    if (line.length === 0) throw new Error(`Recipe ${recipe.id}: no part leans toward anything, so no subtitle`);
     return line.charAt(0).toUpperCase() + line.slice(1);
 }
 
@@ -58,8 +62,10 @@ function checkedStations(stations: MoodStation[]): ReadonlyMap<string, MoodStati
     const byValue = new Map<string, MoodStation>();
     for (const station of stations) {
         if (byValue.has(station.value)) throw new Error(`Mood station ${station.value} appears twice`);
-        if (station.recipe !== null && !RECIPES.has(station.recipe)) {
-            throw new Error(`Mood station ${station.value}: unknown recipe ${station.recipe}`);
+        if (station.recipe !== null) {
+            const recipe = RECIPES.get(station.recipe);
+            if (!recipe) throw new Error(`Mood station ${station.value}: unknown recipe ${station.recipe}`);
+            stationSubtitle(recipe);
         }
         byValue.set(station.value, station);
     }

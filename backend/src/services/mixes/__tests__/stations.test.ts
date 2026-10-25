@@ -1,23 +1,31 @@
 /**
- * The mood stations' subtitles come from their recipes by one rule: the three heaviest parts, ties in the recipe's
- * order, each part by its recipe name (underscores as spaces), "not" before a "low:" part, and arousal as "high energy"
- * or "low energy". Wildcard, which has no recipe, says it plays the songs with no mood tag.
+ * The mood stations' subtitles come from their recipes by one rule: the three heaviest parts the recipe leans toward,
+ * ties in the recipe's order, each by its recipe name (underscores as spaces); a "low:" part is left out, except
+ * arousal, which reads "high energy" or "low energy". Wildcard, which has no recipe, says it plays the songs with no
+ * mood tag.
  */
 import express from "express";
 import request from "supertest";
 import { parseRecipes } from "../recipes";
-import { MOOD_STATIONS, moodStationList, stationSubtitle } from "../stations";
+import { MOOD_STATIONS, stationSubtitle } from "../stations";
 
 const recipe = (components: Record<string, number>) => parseRecipes({ test: { name: "Test", components } }).get("test")!;
 
 describe("a station's subtitle", () => {
-    it("names the three heaviest parts, a low: part with not and arousal as energy", () => {
-        expect(stationSubtitle(recipe({ calm: 0.1, "low:sleep": 0.5, arousal: 0.3, dark: 0.2 }))).toBe(
-            "Not sleep, high energy, dark",
+    it("names the three heaviest parts it leans toward, leaving out what it pushes away", () => {
+        expect(stationSubtitle(recipe({ "low:sleep": 0.175, "low:dark": 0.15, uplifting: 0.125, happy: 0.112 }))).toBe(
+            "Uplifting, happy",
         );
-        expect(stationSubtitle(recipe({ "low:arousal": 0.4, fun_quirky: 0.3, happy: 0.1 }))).toBe(
-            "Low energy, fun quirky, happy",
-        );
+        expect(stationSubtitle(recipe({ calm: 0.1, "low:sleep": 0.5, dark: 0.2, epic: 0.15 }))).toBe("Dark, epic, calm");
+    });
+
+    it("reads arousal either way, as high or low energy", () => {
+        expect(stationSubtitle(recipe({ "low:arousal": 0.4, calm: 0.3, dreamy: 0.1 }))).toBe("Low energy, calm, dreamy");
+        expect(stationSubtitle(recipe({ epic: 0.45, arousal: 0.2, uplifting: 0.15 }))).toBe("Epic, high energy, uplifting");
+    });
+
+    it("reads underscores as spaces", () => {
+        expect(stationSubtitle(recipe({ aggressive: 0.3, fun_quirky: 0.2 }))).toBe("Aggressive, fun quirky");
     });
 
     it("keeps ties in the recipe's order, whatever their names", () => {
@@ -30,43 +38,40 @@ describe("a station's subtitle", () => {
         expect(stationSubtitle(recipe({ summer: 0.35, happy: 0.2, groovy: 0.25 }))).toBe("Summer, groovy, happy");
     });
 
-    it("names every part a recipe has when it has fewer than three", () => {
+    it("names every part when there are fewer than three, and refuses a recipe that leans toward nothing", () => {
         expect(stationSubtitle(recipe({ epic: 1 }))).toBe("Epic");
+        expect(() => stationSubtitle(recipe({ "low:sleep": 1, "low:dark": 1 }))).toThrow(/no subtitle/);
     });
 });
 
 describe("the shipped stations", () => {
-    it("are the 13 approved recipe stations and Wildcard, each with its generated line", () => {
-        // What the rule makes of recipes.json today, written out so a reader sees the actual lines.
-        expect(moodStationList()).toEqual([
-            { value: "calm", name: "Calm", description: "Calm, dreamy, low energy" },
-            { value: "energy", name: "Energy", description: "Party, energetic, groovy" },
-            { value: "intense", name: "Intense", description: "Aggressive, dark, fun quirky" },
-            { value: "happy", name: "Happy", description: "Happy, uplifting, high energy" },
-            { value: "melancholy", name: "Melancholy", description: "Sad, low energy, romantic" },
-            { value: "summer", name: "Summer", description: "Summer, happy, groovy" },
-            { value: "focus", name: "Focus", description: "Instrumental, focus, calm" },
-            { value: "feel-good", name: "Feel-good", description: "Not sleep, not dark, uplifting" },
-            { value: "late-night", name: "Late Night", description: "Night, calm, low energy" },
-            { value: "romantic", name: "Romantic", description: "Romantic, sad, groovy" },
-            { value: "road-trip", name: "Road Trip", description: "Driving, uplifting, summer" },
-            { value: "nostalgic", name: "Nostalgic", description: "Nostalgic, high energy, happy" },
-            { value: "epic", name: "Epic", description: "Epic, high energy, uplifting" },
-            { value: "wildcard", name: "Wildcard", description: "Songs with no mood tag" },
-        ]);
-    });
-
-    it("are the ones the radio route plays", () => {
+    it("play the recipes the radio route expects; Wildcard has none", () => {
         expect(MOOD_STATIONS.get("wildcard")?.recipe).toBeNull();
         expect(MOOD_STATIONS.get("late-night")?.recipe).toBe("late-night");
     });
 
-    it("are listed at GET /radio/stations", async () => {
+    it("are listed at GET /radio/stations: the 13 approved stations then Wildcard, each with its subtitle", async () => {
         const { default: tracksRoutes } = await import("../../../routes/library/tracks");
         const app = express();
         app.use(tracksRoutes);
         const res = await request(app).get("/radio/stations");
         expect(res.status).toBe(200);
-        expect(res.body).toEqual({ stations: moodStationList() });
+
+        const stations: Array<Record<string, unknown>> = res.body.stations;
+        // The approved names and order (kima-labs stations_2026-10-24.json; Kevin 10-24 01:19 named Wildcard).
+        expect(stations.map((s) => [s.value, s.name])).toEqual([
+            ["calm", "Calm"], ["energy", "Energy"], ["intense", "Intense"], ["happy", "Happy"],
+            ["melancholy", "Melancholy"], ["summer", "Summer"], ["focus", "Focus"], ["feel-good", "Feel-good"],
+            ["late-night", "Late Night"], ["romantic", "Romantic"], ["road-trip", "Road Trip"],
+            ["nostalgic", "Nostalgic"], ["epic", "Epic"], ["wildcard", "Wildcard"],
+        ]);
+        for (const station of stations) {
+            expect(Object.keys(station).sort()).toEqual(["description", "name", "value"]);
+            expect(typeof station.description).toBe("string");
+            expect((station.description as string).length).toBeGreaterThan(0);
+        }
+        expect(stations[13].description).toBe("Songs with no mood tag");
+        // Kevin 10-25: the recipe's parts only, never what it pushes away. Feel-good's recipe is mostly "low:" parts.
+        expect(stations[7].description).toBe("Uplifting, happy, epic");
     });
 });
