@@ -61,11 +61,13 @@ const CHUNK = 1000;
 /**
  * How deep replayPasses goes to rebuild a later pass: at most REPLAY_PASSES passes after the first and REPLAY_SONGS
  * songs ordered in all. Any request can name an offset, and a seed Redis has never seen looks like a lost session,
- * so these bound the work one request can cause: 200,000 songs is the first page of a 200,000-song pool, and 20
- * passes of even a one-song pool cost almost nothing. A real session gets that deep only after 20 full passes or
- * 200,000 songs, months of listening; past either, the pass is rebuilt alone and can differ from the one it had.
+ * so these bound the work one request can cause: 200,000 songs is the first page of a 200,000-song pool (about
+ * 0.1 s measured), and 1,000 passes of a one-song pool cost a few milliseconds. A real session gets that deep only
+ * after 200,000 songs (about 15 months of continuous play at the 202-second average) or 1,000 full passes (70 days
+ * for a 30-song pool, longer for any larger one); past either, the pass is rebuilt alone, without the seam rules, and
+ * can differ from the one it had.
  */
-export const REPLAY_PASSES = 20;
+export const REPLAY_PASSES = 1000;
 export const REPLAY_SONGS = 200_000;
 /** What a seed may be: it names a session, so only plain characters. */
 export const SEED_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -152,9 +154,17 @@ export async function stationPage(
     if (held && held !== FAILED && held.seed === seed) {
         current = held.pass;
     } else {
-        // Kept when this refill starts the session, or the listener holds none for this station; never on a failed read.
-        const keep = session !== null && held !== FAILED && (offset === 0 || held === null);
-        current = await rebuild(seed, pool, offset, keep ? session : null);
+        // Kept when this refill starts the session (replacing any other), or the listener holds none for this station
+        // (only if still none by the time it is written); never on a failed read.
+        const keep: Keep | null =
+            session === null || held === FAILED
+                ? null
+                : offset === 0
+                  ? { session, mode: { replace: true } }
+                  : held === null
+                    ? { session, mode: { absent: true } }
+                    : null;
+        current = await rebuild(seed, pool, offset, keep);
     }
     if (!current) return { trackIds: [], next: offset };
 
@@ -168,7 +178,9 @@ export async function stationPage(
             const next = await startOver(session, seed, pool, current);
             if (!next) return { trackIds: [], next: at };
             current = next;
-            at = current.start;
+            // The client's position when it falls in the new pass: a pass served without being kept is built again
+            // on the next refill, which asks from after this page, not from the pass's start.
+            if (at >= current.start + current.length) at = current.start;
         }
         const from = at - current.start;
         const to = Math.min(from + limit, current.length);
@@ -187,17 +199,27 @@ export async function stationPage(
     }
 }
 
+/**
+ * Reads a session and sets its twelve hours again, marking it the listener's most recently used station by Redis's
+ * clock (one clock for every backend process). KEYS: the session, its ids, the listener's stations. ARGV: ttl.
+ */
+const TOUCH = `
+local fields = redis.call("HGETALL", KEYS[1])
+if #fields == 0 then return fields end
+redis.call("EXPIRE", KEYS[1], ARGV[1])
+redis.call("EXPIRE", KEYS[2], ARGV[1])
+local now = redis.call("TIME")
+redis.call("ZADD", KEYS[3], "XX", now[1] * 1000 + math.floor(now[2] / 1000), KEYS[1])
+redis.call("EXPIRE", KEYS[3], ARGV[1])
+return fields
+`;
+
 async function readPass({ key, stations }: Session): Promise<{ seed: string; pass: Pass } | null | typeof FAILED> {
     try {
-        const [[, meta]] = (await redisClient
-            .multi()
-            .hgetall(key)
-            .expire(key, SESSION_TTL_S)
-            .expire(`${key}:ids`, SESSION_TTL_S)
-            .zadd(stations, "XX", Date.now(), key)
-            .expire(stations, SESSION_TTL_S)
-            .exec())! as [[unknown, Record<string, string>]];
-        if (Object.keys(meta).length === 0) return null;
+        const fields = (await redisClient.eval(TOUCH, 3, key, `${key}:ids`, stations, String(SESSION_TTL_S))) as string[];
+        if (fields.length === 0) return null;
+        const meta: Record<string, string> = {};
+        for (let i = 0; i < fields.length; i += 2) meta[fields[i]] = fields[i + 1];
         return {
             seed: meta.seed,
             pass: {
@@ -239,28 +261,33 @@ async function readIds({ key }: Session, seed: string, start: number, from: numb
 }
 
 /**
- * Writes a pass for a session and marks it the listener's most recent station, dropping the sessions of all but their
- * STATIONS_KEPT most recent. With an `after` seed and start (a pass following the kept one), it writes only if the
- * session still holds that pass, so an older tab cannot overwrite a newer start. Returns 1 when written.
- * KEYS: the session, its ids, the listener's stations. ARGV: after seed, after start ("" to replace), seed, start,
- * pass, length, last artist, ttl, stations kept, now, then the id chunks.
+ * Writes a pass for a session and marks it the listener's most recent station by Redis's clock, dropping the sessions
+ * of all but their STATIONS_KEPT most recent. Mode "replace" writes whatever is there (a start); "absent" only if the
+ * listener holds no session for the station (another tab may have started one meanwhile); "continue" only if the
+ * session still holds the pass it follows, named by seed and start. Returns 1 when written.
+ * KEYS: the session, its ids, the listener's stations. ARGV: mode, after seed, after start, seed, start, pass,
+ * length, last artist, ttl, stations kept, then the id chunks.
+ * The dropped sessions' keys are named inside the script, which Redis Cluster refuses; Kima runs one Redis (the
+ * compose files and the all-in-one image), where it is allowed.
  */
 const SAVE = `
-if ARGV[1] ~= "" then
+if ARGV[1] == "absent" and redis.call("EXISTS", KEYS[1]) == 1 then return 0 end
+if ARGV[1] == "continue" then
     local held = redis.call("HMGET", KEYS[1], "seed", "start")
-    if held[1] ~= ARGV[1] or held[2] ~= ARGV[2] then return 0 end
+    if held[1] ~= ARGV[2] or held[2] ~= ARGV[3] then return 0 end
 end
 redis.call("DEL", KEYS[1], KEYS[2])
 for i = 11, #ARGV do redis.call("RPUSH", KEYS[2], ARGV[i]) end
-redis.call("HSET", KEYS[1], "seed", ARGV[3], "start", ARGV[4], "pass", ARGV[5], "length", ARGV[6], "lastArtist", ARGV[7])
-redis.call("EXPIRE", KEYS[1], ARGV[8])
-redis.call("EXPIRE", KEYS[2], ARGV[8])
-redis.call("ZADD", KEYS[3], ARGV[10], KEYS[1])
+redis.call("HSET", KEYS[1], "seed", ARGV[4], "start", ARGV[5], "pass", ARGV[6], "length", ARGV[7], "lastArtist", ARGV[8])
+redis.call("EXPIRE", KEYS[1], ARGV[9])
+redis.call("EXPIRE", KEYS[2], ARGV[9])
+local now = redis.call("TIME")
+redis.call("ZADD", KEYS[3], now[1] * 1000 + math.floor(now[2] / 1000), KEYS[1])
 local older = redis.call("ZREVRANGE", KEYS[3], 0, -1)
 local kept = 1
 for _, key in ipairs(older) do
     if key ~= KEYS[1] then
-        if kept < tonumber(ARGV[9]) then
+        if kept < tonumber(ARGV[10]) then
             kept = kept + 1
         else
             redis.call("DEL", key, key .. ":ids")
@@ -268,12 +295,20 @@ for _, key in ipairs(older) do
         end
     end
 end
-redis.call("EXPIRE", KEYS[3], ARGV[8])
+redis.call("EXPIRE", KEYS[3], ARGV[9])
 return 1
 `;
 
+/** When SAVE writes: see its modes. */
+type SaveMode = { replace: true } | { absent: true } | { after: { seed: string; start: number } };
+
+interface Keep {
+    session: Session;
+    mode: SaveMode;
+}
+
 /** Keeps a pass for the session (SAVE); on failure the pass still serves this refill. */
-async function save({ key, stations }: Session, seed: string, pass: Pass, after?: { seed: string; start: number }): Promise<void> {
+async function save({ key, stations }: Session, seed: string, pass: Pass, mode: SaveMode): Promise<void> {
     try {
         const ids = pass.ids!;
         const chunks: string[] = [];
@@ -284,8 +319,9 @@ async function save({ key, stations }: Session, seed: string, pass: Pass, after?
             key,
             `${key}:ids`,
             stations,
-            after?.seed ?? "",
-            after ? String(after.start) : "",
+            "replace" in mode ? "replace" : "absent" in mode ? "absent" : "continue",
+            "after" in mode ? mode.after.seed : "",
+            "after" in mode ? String(mode.after.start) : "",
             seed,
             String(pass.start),
             String(pass.pass),
@@ -293,7 +329,6 @@ async function save({ key, stations }: Session, seed: string, pass: Pass, after?
             pass.lastArtist,
             String(SESSION_TTL_S),
             String(STATIONS_KEPT),
-            String(Date.now()),
             ...chunks,
         );
         pass.kept = written === 1;
@@ -302,17 +337,17 @@ async function save({ key, stations }: Session, seed: string, pass: Pass, after?
     }
 }
 
-/** The pass holding `offset` for a session Redis does not hold, kept for `keepFor` when given. */
+/** The pass holding `offset` for a session Redis does not hold, kept as `keep` says when given. */
 async function rebuild(
     seed: string,
     pool: () => Promise<StationSong[] | null>,
     offset: number,
-    keepFor: Session | null,
+    keep: Keep | null,
 ): Promise<Pass | null> {
     const songs = await pool();
     if (!songs || songs.length === 0) return null;
     const pass = replayPasses(seed, songs, Math.floor(offset / songs.length));
-    if (keepFor) await save(keepFor, seed, pass);
+    if (keep) await save(keep.session, seed, pass, keep.mode);
     return pass;
 }
 
@@ -374,6 +409,6 @@ async function startOver(
     // The tail stands in for the whole pass: orderPass reads only its last songs and last artist.
     const next = orderPass(seed, songs, done.pass + 1, { ...done, ids: tail, length: tail.length });
     next.start = done.start + done.length;
-    if (session && done.kept) await save(session, seed, next, { seed, start: done.start });
+    if (session && done.kept) await save(session, seed, next, { after: { seed, start: done.start } });
     return next;
 }

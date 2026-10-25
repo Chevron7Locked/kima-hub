@@ -569,10 +569,10 @@ describe("the station order", () => {
         }
         await forgetStationSessions();
         const failures = [
+            jest.spyOn(redisClient, "eval").mockRejectedValue(new Error("connection lost")),
             jest.spyOn(redisClient, "multi").mockImplementation(() => {
                 throw new Error("connection lost");
             }),
-            jest.spyOn(redisClient, "lrange").mockRejectedValue(new Error("connection lost")),
         ];
         try {
             expect(await listen("forgotten", 10, 80)).toEqual(whole.slice(10, 90));

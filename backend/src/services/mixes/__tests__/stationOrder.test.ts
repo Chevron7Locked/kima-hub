@@ -163,10 +163,10 @@ describe("stationPage", () => {
         const whole = await listen("t", reader.read, "x", 0, 1_000);
         await forget();
         const failures = [
+            jest.spyOn(redisClient, "eval").mockRejectedValue(new Error("connection lost")),
             jest.spyOn(redisClient, "multi").mockImplementation(() => {
                 throw new Error("connection lost");
             }),
-            jest.spyOn(redisClient, "lrange").mockRejectedValue(new Error("connection lost")),
         ];
         try {
             expect(await listen("t", reader.read, "x", 150, 100)).toEqual(whole.slice(150, 250));
@@ -214,9 +214,8 @@ describe("stationPage", () => {
         const reader = counted(pool(400));
         const old = await listen("t", reader.read, "old", 0, 300);
         await stationPage("t", reader.read, { limit: 100, seed: "new", offset: 0, listener: "u1" });
-        const failOnce = jest.spyOn(redisClient, "multi").mockImplementationOnce(() => {
-            throw new Error("connection lost");
-        });
+        // The first Redis call of the refill, reading the session, fails.
+        const failOnce = jest.spyOn(redisClient, "eval").mockRejectedValueOnce(new Error("connection lost"));
         try {
             const page = await stationPage("t", reader.read, { limit: 100, seed: "old", offset: 300, listener: "u1" });
             expect(page.trackIds).toEqual((await listen("t2", reader.read, "old", 0, 400)).slice(300));
@@ -236,7 +235,8 @@ describe("stationPage", () => {
         let calls = 0;
         const spy = jest.spyOn(redisClient, "multi").mockImplementation(((...args: Parameters<typeof redisClient.multi>) => {
             const transaction = realMulti(...args);
-            if (++calls === 2) {
+            // The session is read by a script; the first transaction reads the page's ids.
+            if (++calls === 1) {
                 const exec = transaction.exec.bind(transaction);
                 transaction.exec = (async () => {
                     spy.mockRestore();
@@ -253,23 +253,60 @@ describe("stationPage", () => {
 
     it("replays the next pass when the end of the kept one cannot be read, and keeps it no further", async () => {
         const reader = counted(pool(300));
-        const own = await listen("t2", reader.read, "x", 0, 400);
+        const own = await listen("t2", reader.read, "x", 0, 500);
         await forget();
         await listen("t", reader.read, "x", 0, 300);
         const realMulti = redisClient.multi.bind(redisClient);
         let calls = 0;
         const spy = jest.spyOn(redisClient, "multi").mockImplementation(((...args: Parameters<typeof redisClient.multi>) => {
-            // The first transaction reads the session; the second reads the end of its pass.
-            if (++calls === 2) throw new Error("connection lost");
+            // The session is read by a script; the first transaction reads the end of its pass.
+            if (++calls === 1) throw new Error("connection lost");
             return realMulti(...args);
         }) as typeof redisClient.multi);
         try {
             const page = await stationPage("t", reader.read, { limit: 100, seed: "x", offset: 300, listener: "u1" });
             expect(page.trackIds).toEqual(own.slice(300, 400));
+            expect(page.next).toBe(400);
         } finally {
             spy.mockRestore();
         }
         expect(await redisClient.hget("station:t:u1", "pass")).toBe("0");
+        // Redis answers again: the next refill builds and keeps the same next pass and goes on from 400, not 300.
+        const after = await stationPage("t", reader.read, { limit: 100, seed: "x", offset: 400, listener: "u1" });
+        expect(after.trackIds).toEqual(own.slice(400, 500));
+        expect(after.next).toBe(500);
+        expect(await redisClient.hget("station:t:u1", "pass")).toBe("1");
+    });
+
+    it("keeps a found-missing session only if the other tab has not started one while the pool was read", async () => {
+        const songs = pool(400);
+        let other: Promise<unknown> | null = null;
+        const slowRead = async () => {
+            // The other tab starts the station while this refill reads the pool.
+            other ??= stationPage("t", async () => songs, { limit: 100, seed: "new", offset: 0, listener: "u1" });
+            await other;
+            return songs;
+        };
+        const page = await stationPage("t", slowRead, { limit: 100, seed: "old", offset: 100, listener: "u1" });
+        expect(page.trackIds).toEqual((await listen("t2", async () => songs, "old", 0, 200)).slice(100));
+        expect(await redisClient.hget("station:t:u1", "seed")).toBe("new");
+    });
+
+    it("orders a listener's stations by Redis's clock, not the backend's", async () => {
+        const songs = pool(50);
+        const start = (station: string) => stationPage(station, async () => songs, { limit: 10, seed: "x", offset: 0, listener: "u1" });
+        await start("a");
+        await start("b");
+        await start("c");
+        // A backend clock an hour slow when "d" starts changes nothing: the oldest go, "a" then "b", and "d" stays.
+        const slow = jest.spyOn(Date, "now").mockReturnValue(Date.now() - 3_600_000);
+        try {
+            await start("d");
+        } finally {
+            slow.mockRestore();
+        }
+        await start("e");
+        expect((await redisClient.keys("station:*:u1")).sort()).toEqual(["station:c:u1", "station:d:u1", "station:e:u1"]);
     });
 
     it("replays at most REPLAY_PASSES passes and REPLAY_SONGS songs; deeper, the pass is built alone", () => {
@@ -292,8 +329,10 @@ describe("stationPage", () => {
             expect(ordered()).toBe(big.length);
             // A pass built alone is the pass's own seed order, without the seam rules.
             const songs = pool(30);
-            expect(replayPasses("x", songs, 999).ids).toEqual(
-                artistSpread.spreadByArtist(songs, (s) => s.artistId, artistSpread.randomFromSeed("x\u0000999")).map((s) => s.id),
+            expect(replayPasses("x", songs, REPLAY_PASSES + 1).ids).toEqual(
+                artistSpread
+                    .spreadByArtist(songs, (s) => s.artistId, artistSpread.randomFromSeed(`x\u0000${REPLAY_PASSES + 1}`))
+                    .map((s) => s.id),
             );
         } finally {
             spread.mockRestore();
