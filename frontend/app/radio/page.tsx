@@ -9,13 +9,16 @@ import {
     DecadeCount,
     RadioStation,
     STATIC_STATIONS,
+    MOOD_STATIONS,
     buildGenreStations,
+    playableStations,
     buildDecadeStations,
     useRadioPlayer,
 } from "@/features/home/radioData";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { useFeatures } from "@/lib/features-context";
 
 function SectionSkeleton() {
     return (
@@ -41,6 +44,7 @@ function StationGrid({ stations, loadingStation, onStart }: StationGridProps) {
                     key={station.id}
                     title={station.name}
                     subtitle={station.description}
+                    wrapSubtitle
                     tint={station.color}
                     hoverBorder={station.hoverBorder}
                     accent={station.accentGradient}
@@ -95,6 +99,7 @@ function StationSection({ title, unit, noun, stations, isLoading, isError, onRet
 
 export default function RadioPage() {
     const { loadingStation, startRadio } = useRadioPlayer();
+    const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
 
     const { data: genresData, isLoading: genresLoading, isError: genresError, refetch: refetchGenres } = useQuery({
         queryKey: ["library", "genres"],
@@ -112,6 +117,9 @@ export default function RadioPage() {
 
     const isLoading = genresLoading || decadesLoading;
 
+    const quickStations = useMemo(() => playableStations(STATIC_STATIONS, vibeEmbeddings), [vibeEmbeddings]);
+    const moodStations = useMemo(() => playableStations(MOOD_STATIONS, vibeEmbeddings), [vibeEmbeddings]);
+
     const genreStations = useMemo(() => buildGenreStations(genresData ?? []), [genresData]);
     const decadeStations = useMemo(() => buildDecadeStations(decadesData ?? []), [decadesData]);
 
@@ -122,9 +130,9 @@ export default function RadioPage() {
                     eyebrow="Your library"
                     title="Radio"
                     description={
-                        isLoading
+                        isLoading || featuresLoading
                             ? "Endless shuffles from your own music"
-                            : `${STATIC_STATIONS.length + genreStations.length + decadeStations.length} stations, each an endless shuffle from your own music`
+                            : `${quickStations.length + moodStations.length + genreStations.length + decadeStations.length} stations, each an endless shuffle from your own music`
                     }
                 />
 
@@ -132,8 +140,20 @@ export default function RadioPage() {
                     <div className="section-stack">
                         <section>
                             <SectionHeader title="Quick Start" />
-                            <StationGrid stations={STATIC_STATIONS} loadingStation={loadingStation} onStart={startRadio} />
+                            <StationGrid stations={quickStations} loadingStation={loadingStation} onStart={startRadio} />
                         </section>
+
+                        <StationSection
+                            title="By Mood"
+                            unit="stations"
+                            noun="mood"
+                            stations={moodStations}
+                            isLoading={featuresLoading}
+                            isError={false}
+                            onRetry={() => {}}
+                            loadingStation={loadingStation}
+                            onStart={startRadio}
+                        />
 
                         <StationSection
                             title="By Genre"

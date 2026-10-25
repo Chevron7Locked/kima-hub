@@ -1,0 +1,139 @@
+/**
+ * The Library Enrichment section shows the mood step between vibe embeddings and similarity, names the step a run is
+ * on in the list's words, and the moods re-run says the vibe map stays (it is the one step that does not lay it out).
+ */
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createRoot, type Root } from "react-dom/client";
+import React, { act } from "react";
+
+const progress = {
+    source: "TrackStage",
+    artists: { total: 10, completed: 10, pending: 0, failed: 0, progress: 100 },
+    trackTags: { total: 100, enriched: 100, pending: 0, waiting: 0, waitingMissing: 0, progress: 100 },
+    audioAnalysis: {
+        total: 100, completed: 100, pending: 0, queued: 0, processing: 0, failed: 0, permanentlyFailed: 0,
+        waitingMissing: 0, progress: 100, isBackground: true,
+    },
+    clapEmbeddings: {
+        total: 100, completed: 100, pending: 0, processing: 0, failed: 0, waitingMissing: 0, progress: 100,
+        isBackground: true,
+    },
+    moods: { total: 100, completed: 40, pending: 60, progress: 40, isBackground: true },
+    similarity: { total: 100, completed: 0, pending: 100, progress: 0, isBackground: true },
+    coreComplete: true,
+    isFullyComplete: false,
+};
+
+const rerun = vi.fn();
+
+vi.mock("@/lib/api", () => ({
+    api: {
+        getEnrichmentState: async () => ({ status: "running", currentPhase: "mood", hung: false }),
+        getEnrichmentProgress: async () => progress,
+        getEnrichmentFailureCounts: async () => ({ total: 0 }),
+        getEnrichmentFailures: async () => ({ failures: [] }),
+        getEnrichmentConcurrency: async () => ({ concurrency: 1, artistsPerMin: 10 }),
+        getAnalysisWorkers: async () => ({ workers: 2, cpuCores: 8 }),
+        getClapWorkers: async () => ({ workers: 1, cpuCores: 8 }),
+        getGpuStatus: async () => ({ supported: false }),
+        rerunEnrichment: (...a: unknown[]) => rerun(...a),
+    },
+}));
+vi.mock("@/lib/features-context", () => ({
+    useFeatures: () => ({ musicCNN: true, vibeEmbeddings: true, loading: false }),
+}));
+vi.mock("@/lib/auth-context", () => ({ useAuth: () => ({ user: { role: "admin" } }) }));
+vi.mock("@/components/enrichment/BothAtOnceSwitch", () => ({
+    BothAtOnceSwitch: () => null,
+    BOTH_AT_ONCE_LABEL: "",
+    BOTH_AT_ONCE_DESCRIPTION: "",
+}));
+
+import { CacheSection, backgroundStepRunning, phaseLabel } from "@/features/settings/components/sections/CacheSection";
+import type { SystemSettings } from "@/features/settings/types";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+let container: HTMLDivElement;
+let root: Root;
+const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
+beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+});
+
+afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.clearAllMocks();
+});
+
+async function render() {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const settings = { autoEnrichMetadata: false, maxCacheSizeMb: 1024, transcodeCacheMaxGb: 5 } as SystemSettings;
+    await act(async () => {
+        root.render(<QueryClientProvider client={client}><CacheSection settings={settings} onUpdate={() => {}} /></QueryClientProvider>);
+    });
+    await settle();
+    await settle();
+}
+
+describe("the enrichment steps", () => {
+    it("show Moods between Vibe Embeddings and Similarity, with its count", async () => {
+        await render();
+        const text = container.textContent ?? "";
+        const steps = Array.from(container.querySelectorAll("span.text-sm.font-medium")).map((s) => s.textContent);
+        expect(steps).toEqual([
+            "Artist Metadata", "Song Identification", "Audio Analysis", "Vibe Embeddings", "Moods", "Similarity",
+        ]);
+        expect(text).toContain("40 / 100");
+        expect(text).toContain("Moods running");
+        expect(text).toContain("Processing moods...");
+    });
+
+    it("say the vibe map stays when the moods are re-run, and is laid out again for the others", async () => {
+        await render();
+        const select = container.querySelector("[data-testid=enrichment-rerun-select]") as HTMLSelectElement;
+        const rerunButton = container.querySelector("[data-testid=enrichment-rerun]") as HTMLButtonElement;
+
+        await act(async () => {
+            select.value = "moods";
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        await act(async () => rerunButton.click());
+        expect(document.body.textContent).toContain("The vibe map stays as it is.");
+        expect(document.body.textContent).not.toContain("The vibe map is laid out again");
+        const cancel = Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Cancel")!;
+        await act(async () => cancel.click());
+
+        await act(async () => {
+            select.value = "vectors";
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        await act(async () => rerunButton.click());
+        expect(document.body.textContent).toContain("then the moods and the vibe map");
+        expect(document.body.textContent).toContain("The vibe map is laid out again when it finishes.");
+        expect(rerun).not.toHaveBeenCalled();
+    });
+});
+
+describe("the running step's name", () => {
+    it("is the first background step with work left", () => {
+        expect(backgroundStepRunning(progress)).toBe("Moods running");
+        expect(backgroundStepRunning({ ...progress, moods: { ...progress.moods, pending: 0 } })).toBe("Similarity running");
+        expect(
+            backgroundStepRunning({ ...progress, audioAnalysis: { ...progress.audioAnalysis, processing: 3 } }),
+        ).toBe("Audio analysis running");
+    });
+
+    it("uses the step list's words for every phase", () => {
+        expect(phaseLabel("mood")).toBe("moods");
+        expect(phaseLabel("vibe")).toBe("vibe embeddings");
+        expect(phaseLabel("tracks")).toBe("song identification");
+        expect(phaseLabel(null)).toBe("enrichment");
+    });
+});

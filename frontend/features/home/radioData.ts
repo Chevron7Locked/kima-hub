@@ -14,10 +14,12 @@ export interface RadioStation {
     hoverBorder: string;
     accentGradient: string;
     filter: {
-        type: "genre" | "decade" | "discovery" | "favorites" | "all" | "workout";
+        type: "genre" | "decade" | "discovery" | "favorites" | "all" | "workout" | "mood";
         value?: string;
     };
     minTracks?: number;
+    /** Plays from the learned moods, which are scored from sound vectors: nothing to play without the vibe analyzer. */
+    needsMoods?: boolean;
 }
 
 export interface GenreCount {
@@ -50,6 +52,7 @@ export const STATIC_STATIONS: RadioStation[] = [
         accentGradient: "from-[#ef4444] to-[#f97316]",
         filter: { type: "workout" },
         minTracks: 15,
+        needsMoods: true,
     },
     {
         id: "discovery",
@@ -70,6 +73,155 @@ export const STATIC_STATIONS: RadioStation[] = [
         accentGradient: "from-[#f43f5e] to-[#e11d48]",
         filter: { type: "favorites" },
         minTracks: 10,
+    },
+];
+
+/**
+ * The mood stations the server plays (MOOD_STATIONS and Wildcard in backend/src/routes/library/tracks.ts), in the
+ * order they were approved. Each subtitle names the three strongest parts of the station's recipe
+ * (backend/src/services/mixes/recipes.json); Wildcard plays the songs with no mood tag. The colours follow the vibe
+ * map's muted mood palette (features/vibe/mapUtils.ts), written out in full so Tailwind finds the classes.
+ */
+export const MOOD_STATIONS: RadioStation[] = [
+    {
+        id: "mood-calm",
+        name: "Calm",
+        description: "Calm, dreamy, low energy",
+        color: "from-[#5bc2b4]/15 to-[#3f8f9c]/10",
+        hoverBorder: "hover:border-[#5bc2b4]/40",
+        accentGradient: "from-[#5bc2b4] to-[#3f8f9c]",
+        filter: { type: "mood", value: "calm" },
+        needsMoods: true,
+    },
+    {
+        id: "mood-energy",
+        name: "Energy",
+        description: "Party, energetic, groovy",
+        color: "from-[#e06ab0]/15 to-[#f0905a]/10",
+        hoverBorder: "hover:border-[#e06ab0]/40",
+        accentGradient: "from-[#e06ab0] to-[#f0905a]",
+        filter: { type: "mood", value: "energy" },
+        needsMoods: true,
+    },
+    {
+        id: "mood-intense",
+        name: "Intense",
+        description: "Aggressive, dark, quirky",
+        color: "from-[#e0685e]/15 to-[#8c3a4a]/10",
+        hoverBorder: "hover:border-[#e0685e]/40",
+        accentGradient: "from-[#e0685e] to-[#8c3a4a]",
+        filter: { type: "mood", value: "intense" },
+        needsMoods: true,
+    },
+    {
+        id: "mood-happy",
+        name: "Happy",
+        description: "Happy, uplifting, high energy",
+        color: "from-[#f0b25a]/15 to-[#e8875a]/10",
+        hoverBorder: "hover:border-[#f0b25a]/40",
+        accentGradient: "from-[#f0b25a] to-[#e8875a]",
+        filter: { type: "mood", value: "happy" },
+        needsMoods: true,
+    },
+    {
+        id: "mood-melancholy",
+        name: "Melancholy",
+        description: "Sad, low energy, romantic",
+        color: "from-[#b98fe0]/15 to-[#6f6fc4]/10",
+        hoverBorder: "hover:border-[#b98fe0]/40",
+        accentGradient: "from-[#b98fe0] to-[#6f6fc4]",
+        filter: { type: "mood", value: "melancholy" },
+        needsMoods: true,
+    },
+    {
+        id: "mood-summer",
+        name: "Summer",
+        description: "Summery, happy, groovy",
+        color: "from-[#f0c45a]/15 to-[#5bc2b4]/10",
+        hoverBorder: "hover:border-[#f0c45a]/40",
+        accentGradient: "from-[#f0c45a] to-[#5bc2b4]",
+        filter: { type: "mood", value: "summer" },
+        needsMoods: true,
+    },
+    {
+        id: "mood-focus",
+        name: "Focus",
+        description: "Instrumental, focused, calm",
+        color: "from-[#7fa8d8]/15 to-[#5bc2b4]/10",
+        hoverBorder: "hover:border-[#7fa8d8]/40",
+        accentGradient: "from-[#7fa8d8] to-[#5bc2b4]",
+        filter: { type: "mood", value: "focus" },
+        needsMoods: true,
+    },
+    {
+        id: "mood-feel-good",
+        name: "Feel-good",
+        description: "Uplifting, happy, epic",
+        color: "from-[#f0a05a]/15 to-[#e06ab0]/10",
+        hoverBorder: "hover:border-[#f0a05a]/40",
+        accentGradient: "from-[#f0a05a] to-[#e06ab0]",
+        filter: { type: "mood", value: "feel-good" },
+        needsMoods: true,
+    },
+    {
+        id: "mood-late-night",
+        name: "Late Night",
+        description: "Night-time, calm, low energy",
+        color: "from-[#6f6fc4]/15 to-[#3a3f7a]/10",
+        hoverBorder: "hover:border-[#6f6fc4]/40",
+        accentGradient: "from-[#6f6fc4] to-[#3a3f7a]",
+        filter: { type: "mood", value: "late-night" },
+        needsMoods: true,
+    },
+    {
+        id: "mood-romantic",
+        name: "Romantic",
+        description: "Romantic, sad, groovy",
+        color: "from-[#e0789a]/15 to-[#b98fe0]/10",
+        hoverBorder: "hover:border-[#e0789a]/40",
+        accentGradient: "from-[#e0789a] to-[#b98fe0]",
+        filter: { type: "mood", value: "romantic" },
+        needsMoods: true,
+    },
+    {
+        id: "mood-road-trip",
+        name: "Road Trip",
+        description: "Driving, uplifting, summery",
+        color: "from-[#e8875a]/15 to-[#f0b25a]/10",
+        hoverBorder: "hover:border-[#e8875a]/40",
+        accentGradient: "from-[#e8875a] to-[#f0b25a]",
+        filter: { type: "mood", value: "road-trip" },
+        needsMoods: true,
+    },
+    {
+        id: "mood-nostalgic",
+        name: "Nostalgic",
+        description: "Nostalgic, high energy, happy",
+        color: "from-[#d8a878]/15 to-[#b98fe0]/10",
+        hoverBorder: "hover:border-[#d8a878]/40",
+        accentGradient: "from-[#d8a878] to-[#b98fe0]",
+        filter: { type: "mood", value: "nostalgic" },
+        needsMoods: true,
+    },
+    {
+        id: "mood-epic",
+        name: "Epic",
+        description: "Epic, high energy, uplifting",
+        color: "from-[#e0685e]/15 to-[#f0b25a]/10",
+        hoverBorder: "hover:border-[#e0685e]/40",
+        accentGradient: "from-[#e0685e] to-[#f0b25a]",
+        filter: { type: "mood", value: "epic" },
+        needsMoods: true,
+    },
+    {
+        id: "mood-wildcard",
+        name: "Wildcard",
+        description: "Songs with no mood tag",
+        color: "from-[#a3a3a3]/15 to-[#6b7280]/10",
+        hoverBorder: "hover:border-[#a3a3a3]/40",
+        accentGradient: "from-[#a3a3a3] to-[#6b7280]",
+        filter: { type: "mood", value: "wildcard" },
+        needsMoods: true,
     },
 ];
 
@@ -172,6 +324,11 @@ export function useRadioPlayer() {
     };
 
     return { loadingStation, startRadio };
+}
+
+/** The stations this server can play: the mood-built ones only where the vibe analyzer runs. */
+export function playableStations(stations: RadioStation[], moodsAvailable: boolean): RadioStation[] {
+    return moodsAvailable ? stations : stations.filter((station) => !station.needsMoods);
 }
 
 export function buildGenreStations(genres: GenreCount[]): RadioStation[] {

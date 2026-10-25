@@ -8,10 +8,13 @@ import { cn } from "@/lib/cn";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { cascadeStyle } from "@/lib/motion";
 import { useLibraryGenresQuery, useLibraryDecadesQuery } from "@/hooks/useQueries";
+import { useFeatures } from "@/lib/features-context";
 import {
     RadioStation,
     STATIC_STATIONS,
+    MOOD_STATIONS,
     buildGenreStations,
+    playableStations,
     buildDecadeStations,
     useRadioPlayer,
 } from "../radioData";
@@ -20,6 +23,7 @@ export function LibraryRadioStations() {
     const { loadingStation, startRadio } = useRadioPlayer();
     const { data: genresData, isLoading: genresLoading } = useLibraryGenresQuery();
     const { data: decadesData, isLoading: decadesLoading } = useLibraryDecadesQuery();
+    const { vibeEmbeddings } = useFeatures();
 
     const isLoading = genresLoading || decadesLoading;
     const genres = useMemo(
@@ -33,11 +37,12 @@ export function LibraryRadioStations() {
 
     const allStations = useMemo(() => {
         return [
-            ...STATIC_STATIONS,
+            ...playableStations(STATIC_STATIONS, vibeEmbeddings),
+            ...playableStations(MOOD_STATIONS, vibeEmbeddings),
             ...buildGenreStations(genres),
             ...buildDecadeStations(decades),
         ];
-    }, [genres, decades]);
+    }, [genres, decades, vibeEmbeddings]);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const [currentPage, setCurrentPage] = useState(0);
@@ -75,6 +80,7 @@ export function LibraryRadioStations() {
             key={station.id}
             title={station.name}
             subtitle={station.description}
+            wrapSubtitle={!compact}
             eyebrow={
                 <span className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
                     <Radio className="w-3 h-3" />

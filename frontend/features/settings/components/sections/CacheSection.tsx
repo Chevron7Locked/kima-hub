@@ -31,6 +31,7 @@ import {
     AlertTriangle,
     Waves,
     Network,
+    Smile,
     ChevronDown,
     type LucideIcon,
 } from "lucide-react";
@@ -250,41 +251,52 @@ function EnrichmentFailuresList({ active = false }: { active?: boolean }) {
 type QueueResult = "retry" | "everything" | "wipe" | "rerun";
 type ConfirmTarget = "retryFailedAndBlocked" | "redecideEverything" | "wipeAndRerun" | null;
 
-/** What each step a re-run can start from redoes; a step added to the API must be described here. */
-const RERUN_STEPS: Record<EnrichmentRerunStep, { label: string; message: string }> = {
+/**
+ * What each step a re-run can start from redoes (services/enrichmentRestart.ts); a step added to the API must be
+ * described here. `relaysMap`: the re-run lays the vibe map out again, which every step but the moods does.
+ */
+const RERUN_STEPS: Record<EnrichmentRerunStep, { label: string; message: string; relaysMap: boolean }> = {
     moods: {
         label: "moods",
-        message: "Recomputes every song's moods from its stored sound vector. No audio is re-read.",
+        message:
+            "Recomputes every song's moods from its stored sound vector; the mood mixes, stations and song tags " +
+            "follow. No audio is re-read.",
+        relaysMap: false,
     },
     similarity: {
         label: "similarity + map",
         message:
             "Rebuilds the feel, the library statistics and the vibe map from scratch. " +
             "Nothing about your tracks is measured again, so this is the quickest one.",
+        relaysMap: true,
     },
     vectors: {
         label: "sound vectors",
         message:
-            "Re-runs sound vectors for every track, then rebuilds the vibe map. " +
+            "Re-runs sound vectors for every track, then the moods and the vibe map. " +
             "Audio analysis and identification are kept.",
+        relaysMap: true,
     },
     analysis: {
         label: "audio analysis",
         message:
-            "Re-runs audio analysis for every track, then sound vectors and the vibe map. " +
+            "Re-runs audio analysis for every track, then sound vectors, the moods and the vibe map. " +
             "Identification (which recording each track is) is kept.",
+        relaysMap: true,
     },
     artists: {
         label: "artists",
         message:
             "Re-runs artist bios, genres and similar artists, then rebuilds the vibe map " +
-            "(its formula reads artist genres). Audio analysis and sound vectors are kept.",
+            "(its formula reads artist genres). Audio analysis, sound vectors and moods are kept.",
+        relaysMap: true,
     },
     identification: {
         label: "identification (everything)",
         message:
             "Same as wiping and re-running everything: identification, artists, audio analysis, " +
-            "sound vectors and the vibe map, all from the start.",
+            "sound vectors, the moods and the vibe map, all from the start.",
+        relaysMap: true,
     },
 };
 
@@ -292,7 +304,7 @@ const RERUN_STEPS: Record<EnrichmentRerunStep, { label: string; message: string 
 const RERUN_ORDER = Object.keys(RERUN_STEPS) as EnrichmentRerunStep[];
 
 const WIPE_MESSAGE =
-    "Clears what Kima worked out about your music: which recording each track is, audio analysis, vibe data, the vibe map, " +
+    "Clears what Kima worked out about your music: which recording each track is, audio analysis, vibe data, moods, the vibe map, " +
     "artist bios and similar artists. " +
     "Then it works it all out again with the new engine. Your music, playlists, plays, likes and edits stay. " +
     "Takes a few hours on a large library; the vibe map is back when it finishes.";
@@ -319,6 +331,45 @@ const confirmMeta: Record<
         confirmText: "Wipe and Re-run",
     },
 };
+
+type EnrichmentProgress = Awaited<ReturnType<typeof api.getEnrichmentProgress>>;
+type EnrichmentPhase = NonNullable<NonNullable<Awaited<ReturnType<typeof api.getEnrichmentState>>>["currentPhase"]>;
+
+/** The steps that run after the core enrichment, in the order a cycle runs them. */
+const BACKGROUND_STEPS: { label: string; done: (p: EnrichmentProgress) => boolean }[] = [
+    {
+        label: "Audio analysis",
+        done: (p) => (p.audioAnalysis?.pending ?? 0) === 0 && (p.audioAnalysis?.processing ?? 0) === 0,
+    },
+    {
+        label: "Vibe embeddings",
+        done: (p) => (p.clapEmbeddings?.pending ?? 0) === 0 && (p.clapEmbeddings?.processing ?? 0) === 0,
+    },
+    { label: "Moods", done: (p) => (p.moods?.pending ?? 0) === 0 },
+    { label: "Similarity", done: (p) => (p.similarity?.pending ?? 0) === 0 },
+];
+
+/** "<step> running" for the first background step with work left. */
+export function backgroundStepRunning(p: EnrichmentProgress): string {
+    const step = BACKGROUND_STEPS.find((s) => !s.done(p)) ?? BACKGROUND_STEPS[BACKGROUND_STEPS.length - 1];
+    return `${step.label} running`;
+}
+
+const PHASE_LABELS: Record<EnrichmentPhase, string> = {
+    artists: "artist metadata",
+    tracks: "song identification",
+    fingerprint: "fingerprints",
+    audio: "audio analysis",
+    podcasts: "podcasts",
+    vibe: "vibe embeddings",
+    mood: "moods",
+    similarity: "similarity",
+};
+
+/** The enrichment step a cycle is on, in the words the step list uses. */
+export function phaseLabel(phase: EnrichmentPhase | null | undefined): string {
+    return phase ? PHASE_LABELS[phase] : "enrichment";
+}
 
 // The analyzer installs the runtime while either switch is on and keeps it when both are off, so the
 // status keeps polling until the runtime matches the switches.
@@ -721,9 +772,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 !enrichmentProgress.isFullyComplete && (
                                     <span className="text-xs tabular-nums text-brand flex items-center gap-1">
                                         <GradientSpinner size="sm" />
-                                        {(enrichmentProgress.audioAnalysis?.pending ?? 0) > 0 || (enrichmentProgress.audioAnalysis?.processing ?? 0) > 0
-                                            ? "Audio analysis running"
-                                            : "Vibe embeddings running"}
+                                        {backgroundStepRunning(enrichmentProgress)}
                                     </span>
                                 )}
                             {enrichmentProgress.isFullyComplete && (
@@ -796,13 +845,24 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                         <EnrichmentStage
                                             icon={Waves}
                                             label="Vibe Embeddings"
-                                            description="CLAP audio embeddings for similarity search"
+                                            description="CLAP sound vectors for similarity search and moods"
                                             completed={enrichmentProgress.clapEmbeddings.completed}
                                             total={enrichmentProgress.clapEmbeddings.total}
                                             progress={enrichmentProgress.clapEmbeddings.progress}
                                             processing={enrichmentProgress.clapEmbeddings.processing}
                                             failed={enrichmentProgress.clapEmbeddings.failed}
                                             missing={enrichmentProgress.clapEmbeddings.waitingMissing}
+                                            isBackground={true}
+                                        />
+                                    )}
+                                    {enrichmentProgress.moods && (
+                                        <EnrichmentStage
+                                            icon={Smile}
+                                            label="Moods"
+                                            description="The 22 learned moods for each song, scored from its sound vector, behind the mood mixes, stations and song tags"
+                                            completed={enrichmentProgress.moods.completed}
+                                            total={enrichmentProgress.moods.total}
+                                            progress={enrichmentProgress.moods.progress}
                                             isBackground={true}
                                         />
                                     )}
@@ -990,7 +1050,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                             <span className="text-[var(--text-secondary)] tabular-nums">
                                                 {enrichmentState.status ===
                                                     "running" &&
-                                                    `Processing ${enrichmentState.currentPhase}...`}
+                                                    `Processing ${phaseLabel(enrichmentState.currentPhase)}...`}
                                                 {enrichmentState.status ===
                                                 "paused" && "Enrichment paused"}
                                                 {enrichmentState.status ===
@@ -1086,7 +1146,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                 {settings.autoEnrichMetadata && (
                     <SettingsRow
                         label="Metadata Fetch Speed"
-                        description="Parallel MusicBrainz/enrichment requests for artist bios and mood tags"
+                        description="Parallel MusicBrainz/enrichment requests for artist bios and song identification"
                     >
                         <div className="flex items-center gap-3">
                             <input
@@ -1285,7 +1345,10 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                     title={`Re-run from ${RERUN_STEPS[rerunConfirmStep].label}?`}
                     message={
                         RERUN_STEPS[rerunConfirmStep].message +
-                        " The vibe map is laid out again when it finishes. Your music, playlists, plays, likes and edits stay."
+                        (RERUN_STEPS[rerunConfirmStep].relaysMap
+                            ? " The vibe map is laid out again when it finishes."
+                            : " The vibe map stays as it is.") +
+                        " Your music, playlists, plays, likes and edits stay."
                     }
                     confirmText="Re-run"
                     cancelText="Cancel"

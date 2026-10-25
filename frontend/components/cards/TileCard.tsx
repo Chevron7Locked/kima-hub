@@ -8,6 +8,8 @@ import { cn } from "@/lib/cn";
 interface TileCardProps {
     title: string;
     subtitle?: string;
+    /** Let the subtitle take a second line instead of cutting it off, for tiles tall enough to hold it. */
+    wrapSubtitle?: boolean;
     eyebrow?: ReactNode;
     imageUrl?: string | null;
     tint: string;
@@ -24,6 +26,7 @@ interface TileCardProps {
 export const TileCard = memo(function TileCard({
     title,
     subtitle,
+    wrapSubtitle = false,
     eyebrow,
     imageUrl,
     tint,
@@ -64,7 +67,11 @@ export const TileCard = memo(function TileCard({
                 <div>{eyebrow}</div>
                 <div>
                     <h3 className="text-sm font-bold text-white truncate tracking-tight leading-tight">{title}</h3>
-                    {subtitle && <p className="text-xs text-[var(--text-muted)] truncate">{subtitle}</p>}
+                    {subtitle && (
+                        <p className={cn("text-xs text-[var(--text-muted)]", wrapSubtitle ? "line-clamp-2" : "truncate")}>
+                            {subtitle}
+                        </p>
+                    )}
                 </div>
             </div>
 
