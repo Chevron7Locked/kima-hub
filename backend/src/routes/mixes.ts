@@ -2,6 +2,7 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAuthOrToken, requireAdmin } from "../middleware/auth";
 import { programmaticPlaylistService } from "../services/mixes";
+import { nightZone } from "../services/mixes/nightPlays";
 import {
     moodBucketService,
     VALID_MOODS,
@@ -35,24 +36,26 @@ function mixesCacheKey(userId: string): string {
     return `mixes:${userId}`;
 }
 
-/** All of the user's mixes: Redis first, regenerated and cached on a miss. */
-async function getMixesForUser(userId: string, timeZone?: string): Promise<any[]> {
+/**
+ * What the cache holds: the mixes and the time zone they were built for, since the night mixes depend on it. An entry
+ * written before the zone was stored is a plain list of mixes and is still served, whatever zone is asked for.
+ */
+async function cacheMixes(userId: string, zone: string, mixes: any[]): Promise<void> {
+    await redisClient.setex(mixesCacheKey(userId), MIXES_CACHE_TTL, JSON.stringify({ zone, mixes }));
+}
+
+/** All of the user's mixes: Redis first (when built for the same zone), regenerated and cached on a miss. */
+async function getMixesForUser(userId: string, requested?: string): Promise<any[]> {
+    const zone = await nightZone(requested);
     const cached = await redisClient.get(mixesCacheKey(userId));
     if (cached) {
-        return JSON.parse(cached);
+        const entry = JSON.parse(cached);
+        if (Array.isArray(entry)) return entry;
+        if (entry?.zone === zone && Array.isArray(entry.mixes)) return entry.mixes;
     }
 
-    const mixes = await programmaticPlaylistService.generateAllMixes(
-        userId,
-        false,
-        new Date(),
-        timeZone
-    );
-    await redisClient.setex(
-        mixesCacheKey(userId),
-        MIXES_CACHE_TTL,
-        JSON.stringify(mixes)
-    );
+    const mixes = await programmaticPlaylistService.generateAllMixes(userId, false, new Date(), zone);
+    await cacheMixes(userId, zone, mixes);
     return mixes;
 }
 
@@ -237,18 +240,15 @@ router.post("/refresh", async (req, res) => {
         }
 
         // Regenerate with random selection (not date-based) and replace the cache
+        const zone = await nightZone(requestedZone(req));
         await redisClient.del(mixesCacheKey(userId));
         const mixes = await programmaticPlaylistService.generateAllMixes(
             userId,
             true,
             new Date(),
-            requestedZone(req)
+            zone
         );
-        await redisClient.setex(
-            mixesCacheKey(userId),
-            MIXES_CACHE_TTL,
-            JSON.stringify(mixes)
-        );
+        await cacheMixes(userId, zone, mixes);
 
         res.json({ message: "Mixes refreshed", mixes });
     } catch (error) {
@@ -266,7 +266,7 @@ router.post("/:id/save", async (req, res) => {
         const mixId = req.params.id;
         const customName = req.body.name;
 
-        const mixes = await getMixesForUser(userId);
+        const mixes = await getMixesForUser(userId, requestedZone(req));
 
         const mix = mixes.find((m: any) => m.id === mixId);
 
@@ -345,7 +345,7 @@ router.get("/:id", async (req, res) => {
         }
         const mixId = req.params.id;
 
-        const mixes = await getMixesForUser(userId);
+        const mixes = await getMixesForUser(userId, requestedZone(req));
 
         // Find the specific mix
         const mix = mixes.find((m: any) => m.id === mixId);

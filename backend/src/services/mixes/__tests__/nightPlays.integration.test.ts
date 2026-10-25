@@ -15,6 +15,7 @@ import {
 } from "../../../__tests__/fixtures/syntheticLibrary";
 import { generateLateNightMix, generateMidnightDrive } from "../moodMixes";
 import { buildMoodState } from "../../moods/state";
+import { matchingContext } from "../../matching/rank";
 import { MIN_MIX_TRACKS, getRecipe, recipeMembers } from "../recipes";
 import {
     COLD_START_SONGS,
@@ -33,8 +34,13 @@ let rows: Row[];
 /** Owned, playable songs by distinct artists with distinct titles, in id order: no cap or title merge touches them. */
 let songs: string[];
 
-const NIGHT = new Date("2026-03-10T23:00:00Z");
-const DAY = new Date("2026-03-10T12:00:00Z");
+// Plays are dated a few days back from the clock, so they stay inside the lookback whenever the suite runs.
+const BASE = new Date();
+BASE.setUTCHours(0, 0, 0, 0);
+BASE.setUTCDate(BASE.getUTCDate() - 3);
+const at = (hh: number, mm = 0) => new Date(BASE.getTime() + (hh * 60 + mm) * 60_000);
+const NIGHT = at(23);
+const DAY = at(12);
 
 async function play(userId: string, trackId: string, times: number, at = NIGHT, heard = true) {
     await prisma.play.createMany({
@@ -80,8 +86,8 @@ const driveSpec = { fallbackRecipe: "midnight-drive", ranking: "drive" } as cons
 describe("night songs", () => {
     it("are this listener's heard plays between 22:00 and 03:59 in the zone read, and nobody else's", async () => {
         await play(lib.user1, songs[0], 3);
-        await play(lib.user1, songs[1], 1, new Date("2026-03-10T03:59:00Z"));
-        await play(lib.user1, songs[2], 1, new Date("2026-03-10T04:00:00Z"));
+        await play(lib.user1, songs[1], 1, at(3, 59));
+        await play(lib.user1, songs[2], 1, at(4));
         await play(lib.user1, songs[3], 2, DAY);
         await play(lib.user1, songs[4], 2, NIGHT, false);
         await play(lib.user2, songs[5], 4);
@@ -164,10 +170,12 @@ describe("Late Night (the mix)", () => {
         const picked = (await nightMixTracks(spec, lib.user1, "2026-03-11", "UTC"))!;
         expect(picked.slice(0, 2)).toEqual([songs[0], songs[1]]);
         expect(picked.length).toBeGreaterThanOrEqual(MIN_MIX_TRACKS);
+        // No similarity data in this library, so everything after the listener's own songs is the recipe's draw.
+        expect(await matchingContext([songs[0]])).toBeNull();
         const members = new Set((await recipeMembers(getRecipe("late-night"), lib.user1))!.map((m) => m.id));
-        const added = picked.slice(2).filter((id) => !members.has(id));
-        // Songs not from the recipe can only be similarity fill, which needs the listener's own songs as seeds.
-        expect(added.length).toBeLessThan(picked.length - 2);
+        const added = picked.slice(2);
+        expect(added.length).toBeGreaterThan(0);
+        for (const id of added) expect(members.has(id)).toBe(true);
     });
 
     it("with no night plays and no zone sent is built from the fallback recipe on the server's clock", async () => {
@@ -182,7 +190,7 @@ describe("Midnight Drive", () => {
     it("ranks night songs by fit to a steady middle pace and middle energy first, then by plays", async () => {
         const mine = songs.slice(0, 60);
         for (const [i, id] of mine.entries()) await play(lib.user1, id, 1 + ((i * 7) % 5));
-        const found = await nightSongs(lib.user1, "UTC");
+        const found = await nightSongs(lib.user1, "UTC", { energy: true });
         const fit = new Map(found.map((s) => [s.id, s.pace + s.energy]));
         const plays = new Map(found.map((s) => [s.id, s.plays]));
         const picked = (await nightMixTracks(driveSpec, lib.user1, "2026-03-11", "UTC", 25))!;
@@ -192,10 +200,74 @@ describe("Midnight Drive", () => {
             expect(fit.get(a)!).toBeGreaterThanOrEqual(fit.get(b)!);
             if (fit.get(a) === fit.get(b)) expect(plays.get(a)!).toBeGreaterThanOrEqual(plays.get(b)!);
         }
-        // A rank, not a filter: the lower fit tiers are still night songs, played when the better tiers run out.
+        // A rank, not a filter: asking for every song returns all 60, the lower fit tiers last, still non-increasing.
         const all = (await nightMixTracks(driveSpec, lib.user1, "2026-03-11", "UTC", 60))!;
-        expect(new Set(all).size).toBe(all.length);
-        for (const id of all) expect(fit.has(id) || !mine.includes(id)).toBe(true);
+        expect([...all].sort()).toEqual([...mine].sort());
+        const tiers = new Set(found.map((s) => s.pace + s.energy));
+        expect(tiers.size).toBeGreaterThan(1);
+        for (let i = 1; i < all.length; i++) expect(fit.get(all[i - 1])!).toBeGreaterThanOrEqual(fit.get(all[i])!);
+    });
+
+    it("reads energy as the middle half of the library's arousal, and only when asked", async () => {
+        const mine = songs.slice(0, 60);
+        for (const id of mine) await play(lib.user1, id, 1);
+        const arousals = (await prisma.$queryRaw<Array<{ arousal: number }>>`
+            SELECT t.arousal FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
+            WHERE t.id LIKE ${PREFIX + "%"} AND t.arousal IS NOT NULL AND t."missingSince" IS NULL AND t.corrupt = false
+              AND a.location = 'LIBRARY'`).map((r) => r.arousal).sort((a, b) => a - b);
+        const quantile = (q: number) => {
+            const x = q * (arousals.length - 1);
+            const lo = Math.floor(x);
+            return arousals[lo] + (x - lo) * ((arousals[lo + 1] ?? arousals[lo]) - arousals[lo]);
+        };
+        const [lo, hi] = [quantile(0.25), quantile(0.75)];
+        const arousalOf = new Map((await prisma.track.findMany({ where: { id: { in: mine } }, select: { id: true, arousal: true } }))
+            .map((t) => [t.id, t.arousal]));
+        const withEnergy = await nightSongs(lib.user1, "UTC", { energy: true });
+        expect(withEnergy.length).toBe(60);
+        const energies = new Set<number>();
+        for (const s of withEnergy) {
+            const a = arousalOf.get(s.id);
+            const expected = a === null || a === undefined ? 0.5 : a >= lo && a <= hi ? 1 : 0;
+            expect(s.energy).toBe(expected);
+            energies.add(s.energy);
+        }
+        expect(energies.has(0) && energies.has(1)).toBe(true);
+        expect((await nightSongs(lib.user1, "UTC")).every((s) => s.energy === 0.5)).toBe(true);
+    });
+});
+
+describe("the tie order between night songs that rank the same", () => {
+    // 20 songs by one artist and 15 by others, each played once: every song ranks the same, so the day's seeded order
+    // alone chooses, and the artist cap (2) is applied once to that order. The 18 big-artist songs beyond the cap used to
+    // sit ahead of every other song on every day, so the same two were always picked.
+    let big: string[];
+    beforeAll(async () => {
+        await prisma.artist.create({ data: { id: `${PREFIX}bigart`, name: "Big Artist", identityKey: `${PREFIX}bigak` } });
+        await prisma.album.create({
+            data: { id: `${PREFIX}bigalb`, artistId: `${PREFIX}bigart`, rgMbid: `${PREFIX}bigrg`, title: "Big", primaryType: "Album" },
+        });
+        big = Array.from({ length: 20 }, (_, i) => `${PREFIX}big${String(i).padStart(2, "0")}`);
+        await prisma.track.createMany({
+            data: big.map((id, i) => ({
+                id, albumId: `${PREFIX}bigalb`, title: `Big Song ${i}`, trackNo: i + 1, duration: 200,
+                filePath: `/tmp/${id}.flac`, fileModified: new Date(), fileSize: 1000,
+            })),
+        });
+    });
+
+    it("rotates which of the big artist's songs are picked from day to day, two at a time", async () => {
+        for (const id of big) await play(lib.user1, id, 1);
+        for (const id of songs.slice(0, 15)) await play(lib.user1, id, 1);
+        const seen = new Set<string>();
+        for (let day = 1; day <= 10; day++) {
+            const picked = (await nightMixTracks(spec, lib.user1, `2026-03-${String(day).padStart(2, "0")}`, "UTC", 25))!;
+            const fromBig = picked.filter((id) => big.includes(id));
+            expect(fromBig).toHaveLength(2);
+            expect(picked.filter((id) => songs.slice(0, 15).includes(id))).toHaveLength(15);
+            fromBig.forEach((id) => seen.add(id));
+        }
+        expect(seen.size).toBeGreaterThan(4);
     });
 });
 
@@ -265,20 +337,38 @@ describe("the Late Night station", () => {
     });
 });
 
-describe("familiarity", () => {
-    it("is a boost, not a filter: a listener who has heard nothing still gets the same full Road Trip list", async () => {
-        const road = getRecipe("road-trip");
-        expect(road.familiarity).toBeGreaterThan(0);
-        const without = (await recipeMembers(road))!;
-        const fresh = (await recipeMembers(road, lib.user1))!;
-        expect(without.length).toBeGreaterThanOrEqual(MIN_MIX_TRACKS);
-        expect(fresh.map((m) => m.id).sort()).toEqual(without.map((m) => m.id).sort());
+describe("night plays older than a year, and the clock around local midnight and a change of clocks", () => {
+    const day = (iso: string) => new Date(iso);
+
+    it("ignore plays older than the lookback and count those inside it", async () => {
+        const now = new Date("2026-06-01T12:00:00Z");
+        await play(lib.user1, songs[0], 2, day("2025-05-20T23:00:00Z"));
+        await play(lib.user1, songs[1], 2, day("2025-06-02T23:00:00Z"));
+        expect((await nightSongs(lib.user1, "UTC", { now })).map((s) => s.id)).toEqual([songs[1]]);
     });
 
-    it("never lets heard plays shrink the list below a mix", async () => {
-        const road = getRecipe("road-trip");
-        for (const id of songs.slice(0, 50)) await play(lib.user1, id, 12, DAY);
-        const heard = (await recipeMembers(road, lib.user1))!;
-        expect(heard.length).toBeGreaterThanOrEqual(MIN_MIX_TRACKS);
+    it("read the night in the listener's zone across local midnight (Tokyo is UTC+9)", async () => {
+        const now = new Date("2026-06-01T12:00:00Z");
+        // Local: 21:59 (out), 22:00 (in), 23:30 (in), 00:30 the next day (in), 03:59 (in), 04:00 (out).
+        const plays: Array<[string, number]> = [
+            ["2026-05-20T12:59:00Z", 0], ["2026-05-20T13:00:00Z", 1], ["2026-05-20T14:30:00Z", 2],
+            ["2026-05-20T15:30:00Z", 3], ["2026-05-20T18:59:00Z", 4], ["2026-05-20T19:00:00Z", 5],
+        ];
+        for (const [iso, i] of plays) await play(lib.user1, songs[i], 1, day(iso));
+        const found = (await nightSongs(lib.user1, "Asia/Tokyo", { now })).map((s) => s.id).sort();
+        expect(found).toEqual([songs[1], songs[2], songs[3], songs[4]].sort());
+    });
+
+    it("keep the same local hours on the day the clocks go forward (New York, 8 March 2026: 02:00 EST becomes 03:00 EDT)", async () => {
+        const now = new Date("2026-06-01T12:00:00Z");
+        // Local: 01:30 EST (in, 06:30Z), 03:30 EDT (in, 07:30Z), 04:00 EDT (out, 08:00Z), 21:59 EDT (out, 01:59Z next
+        // day), 22:00 EDT (in, 02:00Z next day).
+        const plays: Array<[string, number]> = [
+            ["2026-03-08T06:30:00Z", 0], ["2026-03-08T07:30:00Z", 1], ["2026-03-08T08:00:00Z", 2],
+            ["2026-03-09T01:59:00Z", 3], ["2026-03-09T02:00:00Z", 4],
+        ];
+        for (const [iso, i] of plays) await play(lib.user1, songs[i], 1, day(iso));
+        const found = (await nightSongs(lib.user1, "America/New_York", { now })).map((s) => s.id).sort();
+        expect(found).toEqual([songs[0], songs[1], songs[4]].sort());
     });
 });

@@ -1680,7 +1680,7 @@ class ApiClient {
     }
 
     async getMix(id: string) {
-        return this.request<ApiData>(`/mixes/${id}`);
+        return this.request<ApiData>(`/mixes/${id}?tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`);
     }
 
     async refreshMixes() {
@@ -1694,7 +1694,7 @@ class ApiClient {
 
     async saveMixAsPlaylist(mixId: string, customName?: string) {
         return this.request<{ id: string; name: string; trackCount: number }>(
-            `/mixes/${mixId}/save`,
+            `/mixes/${mixId}/save?tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`,
             {
                 method: "POST",
                 body: customName

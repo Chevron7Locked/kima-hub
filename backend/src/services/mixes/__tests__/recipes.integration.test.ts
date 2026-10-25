@@ -13,11 +13,14 @@ import { MOODS, MOOD_HEADS, type Mood } from "../../moods/heads";
 import { DEFINITIONS, PACE_BAND } from "../moodDefinitions";
 import { MOOD_STATE_VERSION, READINGS, buildMoodState, loadMoodState, type MoodState, type Reading } from "../../moods/state";
 import { writeMoodTags } from "../../moods/tags";
+import { buildMatching } from "../../matching/state";
+import { familiarBoost, familiarCacheKey } from "../familiarity";
 import { moodBucketService } from "../../moodBucketService";
 import {
     MIN_MIX_TRACKS,
     RECIPES,
     recipeMembers,
+    recipeRankingSql,
     UnrankableLibraryError,
     pageMemberCount,
     parseRecipes,
@@ -76,6 +79,7 @@ const or = <T,>(value: T | undefined, fallback: T) => (value === undefined ? fal
 /** The rows a test wrote, and every sound vector, so the library holds only what the next test writes. */
 async function cleanup() {
     await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+    await prisma.$executeRawUnsafe(`DELETE FROM matching_state`);
     await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${P}%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id LIKE '${P}%'`);
@@ -735,62 +739,128 @@ describe("the mix draw", () => {
     });
 });
 
-describe("familiarity", () => {
+describe("familiarity: songs that sound like what the listener plays most", () => {
     const USER_ID = `${P}famuser`;
     const FAMILIAR = parseRecipes({ fam: { name: "Fam", components: { calm: 1 }, familiarity: 0.3 } }).get("fam")!;
-    // The "draws the line" library: z120 sits just under the line without a boost (z 1.205), z128 and z269 over it.
+    // Ten background songs score 0, "near" and "far" 2.45 (z 1.19, just under the 1.25 line; near's boost of 0.5 as the second closest lifts it to 1.29) and "top" 5. The
+    // listener's seed is bg0. Its sound vector and near's are alike; every other song's is at right angles to them. The
+    // library holds 14 songs, so its closest tenth is 2 songs: the seed and near.
     const LIB: Song[] = [
         ...background(10),
-        { name: "z120", moods: { calm: 2.6875 } },
-        { name: "z128", moods: { calm: 2.8125 } },
-        { name: "z269", moods: { calm: 5 } },
+        { name: "near", moods: { calm: 2.45 } },
+        { name: "far", moods: { calm: 2.45 } },
+        { name: "top", moods: { calm: 5 } },
+        { name: "zz", moods: {} },
     ];
-    const heard = (name: string, times: number, heardFlag = true) =>
+    const SIMILAR = ["bg0", "near"];
+
+    const heard = (name: string, times: number, extra: { heard?: boolean; playedAt?: Date } = {}) =>
         prisma.play.createMany({
-            data: Array.from({ length: times }, () => ({ userId: USER_ID, trackId: id(name), heard: heardFlag })),
+            data: Array.from({ length: times }, () => ({
+                userId: USER_ID, trackId: id(name), heard: extra.heard ?? true, ...(extra.playedAt ? { playedAt: extra.playedAt } : {}),
+            })),
         });
+    const zScores = async (userId?: string, recipeUnderTest: Recipe = FAMILIAR) => {
+        const state = (await loadMoodState())!;
+        const boost = userId ? await familiarBoost(userId) : null;
+        const rows = await prisma.$queryRaw<Array<{ id: string; recipe_z: number }>>`
+            WITH ${recipeRankingSql(recipeUnderTest, state, boost)} SELECT id, recipe_z FROM ranked`;
+        return new Map(rows.map((r) => [r.id.slice(P.length), r.recipe_z]));
+    };
     const members = async (userId?: string) =>
         names((await recipeMembers(FAMILIAR, userId))!.map((m) => m.id));
 
     beforeEach(async () => {
         await library(LIB);
+        const others = [...LIB.map((s) => id(s.name))].filter((x) => !SIMILAR.map(id).includes(x));
+        await prisma.$executeRaw`
+            UPDATE track_embeddings SET embedding = ${`[0,1${",0".repeat(MOOD_HEADS.dims - 2)}]`}::vector
+            WHERE track_id = ANY(${others}::text[])`;
+        await prisma.$executeRaw`
+            UPDATE track_embeddings SET embedding = ${`[1,0,0.1${",0".repeat(MOOD_HEADS.dims - 3)}]`}::vector
+            WHERE track_id = ${id("near")}`;
+        await prisma.$executeRaw`DELETE FROM matching_state`;
+        await buildMatching();
         await prisma.user.deleteMany({ where: { id: USER_ID } });
         await prisma.user.create({ data: { id: USER_ID, username: USER_ID, passwordHash: "x" } });
+        await redisClient.del(familiarCacheKey(USER_ID));
     });
     afterAll(async () => {
         await prisma.user.deleteMany({ where: { id: USER_ID } });
+        await prisma.$executeRaw`DELETE FROM matching_state`;
+        await redisClient.del(familiarCacheKey(USER_ID));
     });
 
-    it("changes nothing for a listener who has heard nothing, or for no listener", async () => {
-        expect(await members()).toEqual(new Set(["z128", "z269"]));
-        expect(await members(USER_ID)).toEqual(new Set(["z128", "z269"]));
+    it("gives a listener with no plays exactly the ranking of no listener", async () => {
+        expect(await zScores(USER_ID)).toEqual(await zScores());
+        expect(await members()).toEqual(new Set(["top"]));
+        expect(await members(USER_ID)).toEqual(new Set(["top"]));
     });
 
-    it("lets a song just under the line in once the listener has heard it often", async () => {
-        await heard("z120", 10);
-        // The boost moves the library's scores too (the line is standardised over them), so a song just over the line
-        // without it, z128, may fall under; the song heard and the top song are in.
-        const got = await members(USER_ID);
-        expect(got.has("z120") && got.has("z269")).toBe(true);
-        expect(got.has("bg0")).toBe(false);
+    it("lifts an unheard song that sounds like the listener's most-heard song above an unheard one that does not", async () => {
+        await heard("bg0", 20);
+        const base = await zScores();
+        const got = await zScores(USER_ID);
+        expect(got.get("near")!).toBeGreaterThan(base.get("near")!);
+        // Same recipe score, so only the boost separates them.
+        expect(base.get("near")!).toBeCloseTo(base.get("far")!, 9);
+        expect(got.get("near")!).toBeGreaterThan(got.get("far")!);
+        // An unheard song that sounds nothing like the seeds scores exactly as it does for a listener with no plays.
+        expect(got.get("far")!).toBe(base.get("far")!);
+        expect(got.get("top")!).toBe(base.get("top")!);
     });
 
-    it("is a boost, not a filter: songs the listener never heard stay in, and heard songs far under the line stay out", async () => {
-        await heard("bg0", 10);
-        const got = await members(USER_ID);
-        expect(got.has("z128") && got.has("z269")).toBe(true);
-        expect(got.has("bg0")).toBe(false);
+    it("gives the listener's own most-heard song the largest boost", async () => {
+        await heard("bg0", 20);
+        const base = await zScores();
+        const got = await zScores(USER_ID);
+        const lift = (name: string) => got.get(name)! - base.get(name)!;
+        for (const name of ["near", "far", "top", "bg1"]) expect(lift("bg0")).toBeGreaterThanOrEqual(lift(name));
+        expect(lift("bg0")).toBeGreaterThan(0);
     });
 
-    it("counts only plays marked as heard", async () => {
-        await heard("z120", 10, false);
-        expect(await members(USER_ID)).toEqual(new Set(["z128", "z269"]));
+    it("lets a song just under the line in when it sounds like what the listener plays, and keeps the one that does not out", async () => {
+        expect(await members()).toEqual(new Set(["top"]));
+        await heard("bg0", 20);
+        expect(await members(USER_ID)).toEqual(new Set(["top", "near"]));
+    });
+
+    it("is a boost, not a filter: no song's score falls, and no song at the line without it leaves", async () => {
+        await heard("near", 5);
+        await heard("bg3", 12);
+        const base = await zScores();
+        const got = await zScores(USER_ID);
+        for (const [name, z] of base) expect(got.get(name)!).toBeGreaterThanOrEqual(z);
+        const plain = await members();
+        const boosted = await members(USER_ID);
+        for (const name of plain) expect(boosted.has(name)).toBe(true);
+    });
+
+    it("counts only plays marked as heard, and only those of the last 365 days", async () => {
+        await heard("bg0", 20, { heard: false });
+        await heard("bg0", 20, { playedAt: new Date(Date.now() - 400 * 86_400_000) });
+        expect(await zScores(USER_ID)).toEqual(await zScores());
     });
 
     it("does nothing for a recipe without a familiarity share", async () => {
-        await heard("z120", 10);
+        await heard("bg0", 20);
         const plain = recipe({ calm: 1 });
-        expect(names((await recipeMembers(plain, USER_ID))!.map((m) => m.id))).toEqual(new Set(["z128", "z269"]));
+        expect(names((await recipeMembers(plain, USER_ID))!.map((m) => m.id))).toEqual(new Set(["top"]));
+        expect(await zScores(USER_ID, plain)).toEqual(await zScores(undefined, plain));
+    });
+
+    it("keeps the closest songs in Redis for the same seeds, and builds them again when the seeds change", async () => {
+        await heard("bg0", 20);
+        await members(USER_ID);
+        const kept = JSON.parse((await redisClient.get(familiarCacheKey(USER_ID)))!);
+        expect(kept.boost.ids).toEqual(expect.arrayContaining([id("bg0"), id("near")]));
+        expect(await redisClient.ttl(familiarCacheKey(USER_ID))).toBeGreaterThan(0);
+        // A kept result is used while the seeds are unchanged: a doctored entry with the right signature is returned.
+        await redisClient.setex(familiarCacheKey(USER_ID), 600, JSON.stringify({ ...kept, boost: { ids: [id("top")], boosts: [1] } }));
+        expect((await familiarBoost(USER_ID))!.ids).toEqual([id("top")]);
+        // A new seed changes the signature, so the entry is rebuilt.
+        await heard("bg5", 30);
+        expect((await familiarBoost(USER_ID))!.ids).toEqual(expect.arrayContaining([id("bg5"), id("bg0")]));
     });
 });
 

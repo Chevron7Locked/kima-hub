@@ -9,12 +9,14 @@
 import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
+import { logger } from "../../utils/logger";
 import { stationPage, type StationPage, type StationRequest, type StationSong } from "./stationOrder";
 import { UNKNOWN_ARTIST, VARIOUS_ARTISTS_CANONICAL } from "../../utils/artistNormalization";
 import { artistIdentityKey } from "../artistIdentity";
 import { LIVE_MOODS, MOOD_HEADS, type Mood } from "../moods/heads";
 import { READING_SQL, loadMoodState, type MoodState, type MoodStats, type Reading } from "../moods/state";
 import { TRACK_LIMIT } from "./helpers";
+import { familiarBoost, type FamiliarBoost } from "./familiarity";
 import recipeFile from "./recipes.json";
 import { DEFINITIONS, NEUTRAL_PACE, PACE_BAND, type DefinitionPart, type MoodDefinition } from "./moodDefinitions";
 
@@ -78,15 +80,18 @@ export interface Recipe {
     components: RecipeComponent[];
     filters: RecipeFilters;
     /**
-     * How much the songs this person has heard more often are boosted, as a share of the recipe's score: a song heard
-     * FAMILIAR_PLAYS times or more gains this much, in the units of the average component z-score. A boost, never a
-     * filter: a person with no plays ranks as the library does. Left out when the recipe has none.
+     * How much the songs that sound like this person's most-heard songs are boosted (familiarity.ts), as a share of
+     * the recipe's score: the closest gain this much, in the units of the average component z-score. A boost, never a
+     * filter, added after the library's scores are standardised, so a song this person never heard scores exactly as
+     * it does for a person with no plays. Left out when the recipe has none.
      */
     familiarity?: number;
 }
 
-/** A song heard this many times counts as fully familiar; fewer count by the log of their plays, 0 for none. */
-export const FAMILIAR_PLAYS = 10;
+/** The familiarity boost for this listener, only for a recipe that carries a familiarity share (familiarity.ts). */
+async function boostFor(recipe: Recipe, userId?: string): Promise<FamiliarBoost | null> {
+    return recipe.familiarity !== undefined && userId !== undefined ? familiarBoost(userId) : null;
+}
 
 function band(value: unknown, where: string, min: number, max: number): [number, number] {
     const finite = (x: unknown) => typeof x === "number" && Number.isFinite(x);
@@ -351,8 +356,8 @@ export function definedZSql(mood: Mood, row = "l"): string {
 /**
  * The recipe's score for every song it ranks, against `state`, as the common table expressions of a WITH clause:
  * `library` (the songs the statistics cover: current scores, a present readable file, finished analysis), `defined`
- * (the library with the scores of the defined moods the recipe reads, and with `userId` and a familiarity boost, how
- * often this person heard each song), `key_scale`, `eligible` (the library songs with every reading the recipe's
+ * (the library with the scores of the defined moods the recipe reads, and, with a familiarity `boost`, each song's
+ * boost, 0 for a song it does not list), `key_scale`, `eligible` (the library songs with every reading the recipe's
  * components and filters use; a song missing one is left out of this recipe only), `spread`, `ranked`, each eligible
  * song with `recipe_z`, its score standardised over the eligible songs (null when they all score the same), and
  * `placed`, each ranked song with its arousal percentile among them and `in_filters`, whether it passes the recipe's
@@ -362,7 +367,7 @@ export function definedZSql(mood: Mood, row = "l"): string {
  * even where a query reads them once and the planner would otherwise recompute them for every song. A component that
  * is absent or has no spread in `state` cannot be scored against: UnrankableLibraryError.
  */
-export function recipeRankingSql(recipe: Recipe, state: MoodState, userId?: string): Prisma.Sql {
+export function recipeRankingSql(recipe: Recipe, state: MoodState, boost?: FamiliarBoost | null): Prisma.Sql {
     const { components, filters } = recipe;
     const definitions = [
         ...new Set(components.flatMap(({ signal }) => DEFINITIONS.get(signal as Mood) ?? [])),
@@ -381,16 +386,14 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState, userId?: stri
         scales.set(signal, stats);
     }
 
-    const familiar = recipe.familiarity !== undefined && userId !== undefined;
+    const active = recipe.familiarity !== undefined && boost && boost.ids.length > 0 ? boost : null;
+    const familiar = active !== null;
     const defined = definedCtes(recipe.id, state, definitions, "library", {
-        columns: familiar
-            ? Prisma.sql`, LEAST(1::float8, ln(1 + COALESCE(pc.n, 0))::float8 / ln(${1 + FAMILIAR_PLAYS}::float8)) AS fam`
-            : Prisma.empty,
+        columns: familiar ? Prisma.sql`, COALESCE(fb.boost, 0::float8) AS fam` : Prisma.empty,
         joins: familiar
             ? Prisma.sql`LEFT JOIN (
-                SELECT p."trackId" AS id, count(*)::int AS n FROM "Play" p
-                WHERE p."userId" = ${userId} AND p.heard GROUP BY p."trackId"
-            ) pc ON pc.id = l.id`
+                SELECT * FROM unnest(${active?.ids ?? []}::text[], ${active?.boosts ?? []}::float8[]) AS u(id, boost)
+            ) fb ON fb.id = l.id`
             : Prisma.empty,
     });
 
@@ -463,9 +466,7 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState, userId?: stri
             SELECT avg(minor) AS mean, stddev_pop(minor) AS sd FROM defined
         ),
         eligible AS (
-            SELECT l.*, (${terms}) / ${totalWeight}::float8 ${
-                familiar ? Prisma.sql`+ ${recipe.familiarity}::float8 * l.fam` : Prisma.empty
-            } AS score
+            SELECT l.*, (${terms}) / ${totalWeight}::float8 AS score
             FROM defined l CROSS JOIN key_scale k ${definitions.length > 0 ? Prisma.sql`CROSS JOIN def_stats ds` : Prisma.empty}
             WHERE ${Prisma.raw(present.length > 0 ? present.join(" AND ") : "true")}
         ),
@@ -473,7 +474,9 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState, userId?: stri
             SELECT count(*)::int AS eligible, avg(score) AS mean, stddev_pop(score) AS sd FROM eligible
         ),
         ranked AS (
-            SELECT e.*, (e.score - s.mean) / NULLIF(s.sd, 0) AS recipe_z
+            SELECT e.*, (e.score - s.mean ${
+                familiar ? Prisma.sql`+ ${recipe.familiarity!}::float8 * e.fam` : Prisma.empty
+            }) / NULLIF(s.sd, 0) AS recipe_z
             FROM eligible e CROSS JOIN spread s
         ),
         placed AS (
@@ -511,7 +514,13 @@ interface RankingSummary {
 
 /** False when the recipe ranks fewer than MIN_MIX_TRACKS songs; an error when the ranking cannot set any apart. */
 function ranksEnough(recipe: Recipe, summary: RankingSummary): boolean {
-    if (summary.eligible < MIN_MIX_TRACKS) return false;
+    if (summary.eligible < MIN_MIX_TRACKS) {
+        const defined = recipe.components.filter((c) => DEFINITIONS.has(c.signal as Mood)).map((c) => c.signal);
+        if (defined.length > 0) {
+            logger.debug(`[Mixes] ${recipe.id}: ${summary.eligible} eligible songs; a defined mood (${defined.join(", ")}) may have no readings to score`);
+        }
+        return false;
+    }
     if (recipe.components.some((c) => c.signal === "minor") && !((summary.minor_sd ?? 0) > 0)) {
         throw new UnrankableLibraryError(recipe.id, "the library's key scale has no spread to score against");
     }
@@ -530,7 +539,7 @@ export async function recipeMembers(recipe: Recipe, userId?: string): Promise<Me
     const state = await loadMoodState();
     if (!state || state.trackCount < MIN_MIX_TRACKS) return null;
     const rows = await prisma.$queryRaw<Array<RankingSummary & { id: string | null; artist_id: string | null }>>`
-        WITH ${recipeRankingSql(recipe, state, userId)}, ${MEMBERS_SQL}
+        WITH ${recipeRankingSql(recipe, state, await boostFor(recipe, userId))}, ${MEMBERS_SQL}
         SELECT s.eligible, s.sd AS score_sd, k.sd AS minor_sd, mb.id, mb.artist_id
         FROM spread s CROSS JOIN key_scale k LEFT JOIN members mb ON true
         ORDER BY mb.id
@@ -544,7 +553,7 @@ async function recipeMemberCount(recipe: Recipe, userId?: string): Promise<numbe
     const state = await loadMoodState();
     if (!state || state.trackCount < MIN_MIX_TRACKS) return null;
     const [summary] = await prisma.$queryRaw<Array<RankingSummary & { members: number }>>`
-        WITH ${recipeRankingSql(recipe, state, userId)}, ${MEMBERS_SQL}
+        WITH ${recipeRankingSql(recipe, state, await boostFor(recipe, userId))}, ${MEMBERS_SQL}
         SELECT s.eligible, s.sd AS score_sd, k.sd AS minor_sd, (SELECT count(*)::int FROM members) AS members
         FROM spread s CROSS JOIN key_scale k
     `;
@@ -563,13 +572,18 @@ function pagePlays(members: number | null): members is number {
  * rises to 3, then lifts.
  */
 export function drawMembers(members: Member[], seed: string, limit: number): string[] {
-    const ranked = members
+    return capByArtist(seededOrder(members, seed), limit);
+}
+
+/** Every member in the order `seed` fixes (a hash of the seed and its id), with no artist cap. */
+export function seededOrder<T extends Member>(members: T[], seed: string): T[] {
+    return members
         .map((member) => ({
-            ...member,
+            member,
             key: crypto.createHash("sha256").update(`${seed}\0${member.id}`).digest("hex"),
         }))
-        .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-    return capByArtist(ranked, limit);
+        .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+        .map(({ member }) => member);
 }
 
 /**

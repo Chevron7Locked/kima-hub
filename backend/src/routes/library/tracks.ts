@@ -40,6 +40,9 @@ const TRACK_SORT_MAP: Record<string, any> = {
 
 const router = Router();
 
+/** Mood stations that no longer exist (Summer; the 3AM Thoughts and Friday Night mixes' stations). */
+const RETIRED_MOOD_STATIONS = new Set(["summer", "3am-thoughts", "friday-night"]);
+
 router.get("/recently-listened", async (req, res) => {
   try {
     const { limit = "10" } = req.query;
@@ -861,7 +864,14 @@ router.get("/radio", async (req, res) => {
         break;
 
       case "mood": {
-        const moodValue = ((value as string) || "").toLowerCase();
+        let moodValue = ((value as string) || "").toLowerCase();
+        // Focus split into Focus: Calm and Focus: Energy; an older app asking for "focus" gets the calm one.
+        if (moodValue === "focus") moodValue = "focus-calm";
+        // Stations the app no longer offers answer an empty list, not an error, so an older app that still lists
+        // them shows an empty station instead of a failure.
+        if (RETIRED_MOOD_STATIONS.has(moodValue)) {
+          return res.json({ tracks: [], message: `The ${moodValue} station has been retired` });
+        }
         // A station with no recipe is Wildcard (pickWildcardPage).
         const moodStation = MOOD_STATIONS.get(moodValue);
         if (!moodStation) {

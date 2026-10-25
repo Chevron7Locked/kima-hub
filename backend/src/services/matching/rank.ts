@@ -167,7 +167,7 @@ function scoreQuery(
         LEFT JOIN bonus b ON b.artist_id = ar.id
         WHERE te.model_version = ${MATCHING_MODEL}
           AND t."missingSince" IS NULL
-          AND te.track_id <> ALL(${exclude})
+          AND te.track_id <> ALL(${exclude}::text[])
     `;
 }
 
@@ -231,6 +231,23 @@ export async function rankMatches(
         inputs.map((i) => i.trackId),
     );
     return capRanked(scored, opts.counted.map((id) => ctx.tracks.get(id)!), opts.limit);
+}
+
+/**
+ * The `limit` eligible tracks closest to one input set, best first, with no artist or album cap and the inputs
+ * themselves included (an input is among its own closest matches). The ordering and the limit are applied in the
+ * database, so only `limit` rows come back whatever the library's size.
+ */
+export async function topScores(
+    ctx: MatchingContext,
+    inputs: WeightedInput[],
+    limit: number,
+): Promise<Array<{ id: string; score: number }>> {
+    const scored = scoreQuery(ctx, [weightedTracks(ctx, inputs)], ["score"], Prisma.sql`t.id`, []);
+    return prisma.$queryRaw<Array<{ id: string; score: number }>>(Prisma.sql`
+        WITH scored AS (${scored})
+        SELECT id, score FROM scored ORDER BY score DESC, id LIMIT ${limit}
+    `);
 }
 
 /** Every eligible track except `exclude`, with one score per input set, in input-set order. */

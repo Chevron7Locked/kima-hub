@@ -28,6 +28,7 @@ import {
     drawMembers,
     getRecipe,
     recipeMembers,
+    seededOrder,
 } from "./recipes";
 import { TRACK_LIMIT } from "./helpers";
 import { stationPage, type StationPage, type StationRequest, type StationSong } from "./stationOrder";
@@ -43,6 +44,11 @@ export const COLD_START_SONGS = 30;
  * does not hear the same five come round. Songs that are the listener's own come first and are never dropped.
  */
 export const STATION_FILL = 100;
+/**
+ * Only plays this recent count as night plays. A habit is read from the recent past, and the bound lets the database
+ * use the (user, play time) index instead of reading every play the user has ever made (years of them, for some).
+ */
+export const NIGHT_LOOKBACK_DAYS = 365;
 
 /** A song the listener played at night, with how often. */
 export interface NightSong extends StationSong {
@@ -63,30 +69,44 @@ export async function nightZone(requested?: string): Promise<string> {
     return safeZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
 }
 
+/** The arousal readings that bound the middle half of the library's energy, or null with no readings. */
+async function energyBand(): Promise<[number, number] | null> {
+    const [row] = await prisma.$queryRaw<Array<{ band: number[] | null }>>`
+        SELECT percentile_cont(ARRAY[0.25, 0.75]) WITHIN GROUP (ORDER BY t.arousal) AS band
+        FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
+        WHERE t.arousal IS NOT NULL AND t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY'
+    `;
+    return row?.band ? [row.band[0], row.band[1]] : null;
+}
+
 /**
- * This listener's night songs, one copy per title and artist (plays summed, the most-played copy kept), most played
- * first. Only owned, playable songs.
+ * This listener's night songs from the last NIGHT_LOOKBACK_DAYS, one copy per title and artist (plays summed, the
+ * most-played copy kept), most played first. Only owned, playable songs. `energy` is read (the library's middle half)
+ * only when asked for, since only Midnight Drive ranks by it; otherwise every song carries 0.5.
  */
-export async function nightSongs(userId: string, zone: string): Promise<NightSong[]> {
+export async function nightSongs(
+    userId: string,
+    zone: string,
+    { energy = false, now = new Date() }: { energy?: boolean; now?: Date } = {},
+): Promise<NightSong[]> {
+    const band = energy ? await energyBand() : null;
+    const since = new Date(now.getTime() - NIGHT_LOOKBACK_DAYS * 86_400_000);
+    const energySql = band
+        ? Prisma.sql`CASE WHEN t.arousal IS NULL THEN 0.5::float8
+                          WHEN t.arousal BETWEEN ${band[0]}::float8 AND ${band[1]}::float8 THEN 1::float8
+                          ELSE 0::float8 END`
+        : Prisma.sql`0.5::float8`;
     const rows = await prisma.$queryRaw<
         Array<{ id: string; artist_key: string; title_key: string; plays: number; pace: number; energy: number }>
     >`
-        WITH library_energy AS (
-            SELECT t.id, percent_rank() OVER (ORDER BY t.arousal) AS pct
-            FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
-            WHERE t.arousal IS NOT NULL AND t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY'
-        ),
-        night AS (
+        WITH night AS (
             SELECT t.id, ${artistSql()} AS artist_key, lower(t.title) AS title_key,
-                   ${Prisma.raw(PACE_SQL)} AS pace,
-                   CASE WHEN le.pct IS NULL THEN 0.5::float8
-                        WHEN le.pct BETWEEN 0.25 AND 0.75 THEN 1::float8 ELSE 0::float8 END AS energy
+                   ${Prisma.raw(PACE_SQL)} AS pace, ${energySql} AS energy
             FROM "Play" p
             JOIN "Track" t ON t.id = p."trackId"
             JOIN "Album" a ON a.id = t."albumId"
             JOIN "Artist" ar ON ar.id = a."artistId"
-            LEFT JOIN library_energy le ON le.id = t.id
-            WHERE p."userId" = ${userId} AND p.heard
+            WHERE p."userId" = ${userId} AND p."playedAt" >= ${since} AND p.heard
               AND t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY'
               AND (EXTRACT(HOUR FROM p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${zone}) >= ${NIGHT_START_HOUR}
                    OR EXTRACT(HOUR FROM p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${zone}) < ${NIGHT_END_HOUR})
@@ -191,12 +211,14 @@ export async function nightMixTracks(
     requestedZone: string | undefined,
     limit = TRACK_LIMIT,
 ): Promise<string[] | null> {
-    const own = await nightSongs(userId, await nightZone(requestedZone));
+    const own = await nightSongs(userId, await nightZone(requestedZone), { energy: spec.ranking === "drive" });
     const seed = JSON.stringify([spec.fallbackRecipe, today, userId]);
     const fit = (s: NightSong) => (spec.ranking === "drive" ? s.pace + s.energy : 0);
-    const tie = new Map(drawMembers(own, seed, own.length).map((id, i) => [id, i]));
+    // Every song gets a place in the day's seeded order, with no artist cap (the cap is applied once, below, to the
+    // ranked list): a song a cap would leave out of the order must not default to first place every day.
+    const tie = new Map(seededOrder(own, seed).map((s, i) => [s.id, i]));
     const ordered = [...own].sort(
-        (a, b) => fit(b) - fit(a) || b.plays - a.plays || (tie.get(a.id) ?? 0) - (tie.get(b.id) ?? 0),
+        (a, b) => fit(b) - fit(a) || b.plays - a.plays || tie.get(a.id)! - tie.get(b.id)!,
     );
     let picked = capByArtist(ordered, limit);
     if (own.length < COLD_START_SONGS && picked.length < limit) {

@@ -515,6 +515,19 @@ describe("radio: bad requests", () => {
             expect((await radio({ type: "mood", value })).status).toBe(400);
         }
     });
+    it("answers an older app's request for Focus with Focus: Calm, and the stations that no longer exist with an empty list", async () => {
+        const old = await radio({ type: "mood", value: "focus", limit: LIMIT, seed: "same" });
+        const calm = await radio({ type: "mood", value: "focus-calm", limit: LIMIT, seed: "same" });
+        expect(old.status).toBe(200);
+        expect(old.body.tracks.length).toBeGreaterThan(0);
+        expect(old.body.tracks.map((t: any) => t.id)).toEqual(calm.body.tracks.map((t: any) => t.id));
+        for (const value of ["summer", "3am-thoughts", "friday-night"]) {
+            const res = await radio({ type: "mood", value });
+            expect(res.status).toBe(200);
+            expect(res.body.tracks).toEqual([]);
+            expect(res.body.message).toContain(value);
+        }
+    });
     it("400 for artist radio without an artist", async () => {
         expect((await radio({ type: "artist" })).status).toBe(400);
     });
