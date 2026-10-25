@@ -23,6 +23,7 @@ import {
   type StationRequest,
 } from "../../services/mixes/recipes";
 import { SEED_PATTERN, emptyPage } from "../../services/mixes/stationOrder";
+import { MOOD_STATIONS, moodStationList } from "../../services/mixes/stations";
 import { spreadByArtist } from "../../utils/artistSpread";
 import { LIBRARY_TRACK_WHERE, LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { PLAYABLE } from "../../utils/libraryEligibility";
@@ -708,27 +709,10 @@ router.get("/decades", async (_req, res) => {
   }
 });
 
-/**
- * The recipe each mood station draws from (recipes.json): everything above its line, in a fresh order. Five stations
- * share their mix's recipe; Wildcard has none (WILDCARD_STATION).
- */
-const MOOD_STATIONS = new Map([
-  ["calm", "calm-station"],
-  ["energy", "energy-station"],
-  ["intense", "intense-station"],
-  ["happy", "happy"],
-  ["melancholy", "melancholy-station"],
-  ["summer", "summer-station"],
-  ["focus", "focus-station"],
-  ["feel-good", "feel-good-station"],
-  ["late-night", "late-night"],
-  ["romantic", "romantic-station"],
-  ["road-trip", "road-trip"],
-  ["nostalgic", "nostalgic"],
-  ["epic", "epic"],
-]);
-/** The station of the songs without a mood tag (pickWildcardPage). */
-const WILDCARD_STATION = "wildcard";
+/** The mood stations and their subtitles, for the apps' radio pages; generated from the recipes (stations.ts). */
+router.get("/radio/stations", (_req, res) => {
+  res.json({ stations: moodStationList() });
+});
 
 /** A recipe station's refill; no songs when the library cannot rank its songs for the recipe. */
 async function recipeStationPage(recipe: string, request: StationRequest): Promise<StationPage> {
@@ -877,10 +861,12 @@ router.get("/radio", async (req, res) => {
 
       case "mood": {
         const moodValue = ((value as string) || "").toLowerCase();
-        const recipe = MOOD_STATIONS.get(moodValue);
-        if (moodValue !== WILDCARD_STATION && !recipe) {
+        // A station with no recipe is Wildcard (pickWildcardPage).
+        const moodStation = MOOD_STATIONS.get(moodValue);
+        if (!moodStation) {
           return res.status(400).json({ error: `Unknown mood: ${moodValue}` });
         }
+        const recipe = moodStation.recipe;
         const request = parseStationRequest(req.query, limitNum, req.user?.id);
         if (!request) return res.status(400).json({ error: BAD_STATION_REQUEST });
         ({ trackIds, next } = await (recipe ? recipeStationPage(recipe, request) : pickWildcardPage(request)));

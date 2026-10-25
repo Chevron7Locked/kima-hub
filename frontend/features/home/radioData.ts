@@ -82,170 +82,46 @@ export const STATIC_STATIONS: RadioStation[] = [
     },
 ];
 
+/** One mood station as the server lists it (GET /library/radio/stations): its subtitle is generated from its recipe. */
+export interface MoodStationInfo {
+    value: string;
+    name: string;
+    description: string;
+}
+
 /**
- * The mood stations the server plays (MOOD_STATIONS and Wildcard in backend/src/routes/library/tracks.ts), in the
- * order they were approved. Each subtitle names the three heaviest parts of the station's recipe
- * (backend/src/services/mixes/recipes.json), ties in the recipe's order, a "low:" part as "not …" and the arousal
- * reading as "high energy" or "low energy" (mood-stations.test.ts holds them to it); Wildcard plays the songs with
- * no mood tag. The colours follow the vibe
- * map's muted mood palette (features/vibe/mapUtils.ts), written out in full so Tailwind finds the classes.
+ * Each mood station's tile colours, from the vibe map's muted mood palette (features/vibe/mapUtils.ts), written out in
+ * full so Tailwind finds the classes. A station the server adds later plays in the default colours until it has a row.
  */
-export const MOOD_STATIONS: RadioStation[] = [
-    {
-        id: "mood-calm",
-        name: "Calm",
-        description: "Calm, dreamy, low energy",
-        color: "from-[#5bc2b4]/15 to-[#3f8f9c]/10",
-        hoverBorder: "hover:border-[#5bc2b4]/40",
-        accentGradient: "from-[#5bc2b4] to-[#3f8f9c]",
-        filter: { type: "mood", value: "calm" },
+const MOOD_STATION_STYLES: Record<string, { color: string; hoverBorder: string; accentGradient: string }> = {
+    "calm": { color: "from-[#5bc2b4]/15 to-[#3f8f9c]/10", hoverBorder: "hover:border-[#5bc2b4]/40", accentGradient: "from-[#5bc2b4] to-[#3f8f9c]" },
+    "energy": { color: "from-[#e06ab0]/15 to-[#f0905a]/10", hoverBorder: "hover:border-[#e06ab0]/40", accentGradient: "from-[#e06ab0] to-[#f0905a]" },
+    "intense": { color: "from-[#e0685e]/15 to-[#8c3a4a]/10", hoverBorder: "hover:border-[#e0685e]/40", accentGradient: "from-[#e0685e] to-[#8c3a4a]" },
+    "happy": { color: "from-[#f0b25a]/15 to-[#e8875a]/10", hoverBorder: "hover:border-[#f0b25a]/40", accentGradient: "from-[#f0b25a] to-[#e8875a]" },
+    "melancholy": { color: "from-[#b98fe0]/15 to-[#6f6fc4]/10", hoverBorder: "hover:border-[#b98fe0]/40", accentGradient: "from-[#b98fe0] to-[#6f6fc4]" },
+    "summer": { color: "from-[#f0c45a]/15 to-[#5bc2b4]/10", hoverBorder: "hover:border-[#f0c45a]/40", accentGradient: "from-[#f0c45a] to-[#5bc2b4]" },
+    "focus": { color: "from-[#7fa8d8]/15 to-[#5bc2b4]/10", hoverBorder: "hover:border-[#7fa8d8]/40", accentGradient: "from-[#7fa8d8] to-[#5bc2b4]" },
+    "feel-good": { color: "from-[#f0a05a]/15 to-[#e06ab0]/10", hoverBorder: "hover:border-[#f0a05a]/40", accentGradient: "from-[#f0a05a] to-[#e06ab0]" },
+    "late-night": { color: "from-[#6f6fc4]/15 to-[#3a3f7a]/10", hoverBorder: "hover:border-[#6f6fc4]/40", accentGradient: "from-[#6f6fc4] to-[#3a3f7a]" },
+    "romantic": { color: "from-[#e0789a]/15 to-[#b98fe0]/10", hoverBorder: "hover:border-[#e0789a]/40", accentGradient: "from-[#e0789a] to-[#b98fe0]" },
+    "road-trip": { color: "from-[#e8875a]/15 to-[#f0b25a]/10", hoverBorder: "hover:border-[#e8875a]/40", accentGradient: "from-[#e8875a] to-[#f0b25a]" },
+    "nostalgic": { color: "from-[#d8a878]/15 to-[#b98fe0]/10", hoverBorder: "hover:border-[#d8a878]/40", accentGradient: "from-[#d8a878] to-[#b98fe0]" },
+    "epic": { color: "from-[#e0685e]/15 to-[#f0b25a]/10", hoverBorder: "hover:border-[#e0685e]/40", accentGradient: "from-[#e0685e] to-[#f0b25a]" },
+    "wildcard": { color: "from-[#a3a3a3]/15 to-[#6b7280]/10", hoverBorder: "hover:border-[#a3a3a3]/40", accentGradient: "from-[#a3a3a3] to-[#6b7280]" },
+};
+
+/** The server's mood stations as tiles, in its order. */
+export function buildMoodStations(stations: MoodStationInfo[]): RadioStation[] {
+    return stations.map(({ value, name, description }) => ({
+        id: `mood-${value}`,
+        name,
+        description,
+        ...(MOOD_STATION_STYLES[value] ?? DEFAULT_STYLE),
+        filter: { type: "mood" as const, value },
         minTracks: STATION_MIN_TRACKS,
         needsMoods: true,
-    },
-    {
-        id: "mood-energy",
-        name: "Energy",
-        description: "Party, energetic, groovy",
-        color: "from-[#e06ab0]/15 to-[#f0905a]/10",
-        hoverBorder: "hover:border-[#e06ab0]/40",
-        accentGradient: "from-[#e06ab0] to-[#f0905a]",
-        filter: { type: "mood", value: "energy" },
-        minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
-    },
-    {
-        id: "mood-intense",
-        name: "Intense",
-        description: "Aggressive, dark, quirky",
-        color: "from-[#e0685e]/15 to-[#8c3a4a]/10",
-        hoverBorder: "hover:border-[#e0685e]/40",
-        accentGradient: "from-[#e0685e] to-[#8c3a4a]",
-        filter: { type: "mood", value: "intense" },
-        minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
-    },
-    {
-        id: "mood-happy",
-        name: "Happy",
-        description: "Happy, uplifting, high energy",
-        color: "from-[#f0b25a]/15 to-[#e8875a]/10",
-        hoverBorder: "hover:border-[#f0b25a]/40",
-        accentGradient: "from-[#f0b25a] to-[#e8875a]",
-        filter: { type: "mood", value: "happy" },
-        minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
-    },
-    {
-        id: "mood-melancholy",
-        name: "Melancholy",
-        description: "Sad, low energy, romantic",
-        color: "from-[#b98fe0]/15 to-[#6f6fc4]/10",
-        hoverBorder: "hover:border-[#b98fe0]/40",
-        accentGradient: "from-[#b98fe0] to-[#6f6fc4]",
-        filter: { type: "mood", value: "melancholy" },
-        minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
-    },
-    {
-        id: "mood-summer",
-        name: "Summer",
-        description: "Summery, happy, groovy",
-        color: "from-[#f0c45a]/15 to-[#5bc2b4]/10",
-        hoverBorder: "hover:border-[#f0c45a]/40",
-        accentGradient: "from-[#f0c45a] to-[#5bc2b4]",
-        filter: { type: "mood", value: "summer" },
-        minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
-    },
-    {
-        id: "mood-focus",
-        name: "Focus",
-        description: "Instrumental, focused, calm",
-        color: "from-[#7fa8d8]/15 to-[#5bc2b4]/10",
-        hoverBorder: "hover:border-[#7fa8d8]/40",
-        accentGradient: "from-[#7fa8d8] to-[#5bc2b4]",
-        filter: { type: "mood", value: "focus" },
-        minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
-    },
-    {
-        id: "mood-feel-good",
-        name: "Feel-good",
-        description: "Not sleepy, not dark, uplifting",
-        color: "from-[#f0a05a]/15 to-[#e06ab0]/10",
-        hoverBorder: "hover:border-[#f0a05a]/40",
-        accentGradient: "from-[#f0a05a] to-[#e06ab0]",
-        filter: { type: "mood", value: "feel-good" },
-        minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
-    },
-    {
-        id: "mood-late-night",
-        name: "Late Night",
-        description: "Night-time, calm, low energy",
-        color: "from-[#6f6fc4]/15 to-[#3a3f7a]/10",
-        hoverBorder: "hover:border-[#6f6fc4]/40",
-        accentGradient: "from-[#6f6fc4] to-[#3a3f7a]",
-        filter: { type: "mood", value: "late-night" },
-        minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
-    },
-    {
-        id: "mood-romantic",
-        name: "Romantic",
-        description: "Romantic, sad, groovy",
-        color: "from-[#e0789a]/15 to-[#b98fe0]/10",
-        hoverBorder: "hover:border-[#e0789a]/40",
-        accentGradient: "from-[#e0789a] to-[#b98fe0]",
-        filter: { type: "mood", value: "romantic" },
-        minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
-    },
-    {
-        id: "mood-road-trip",
-        name: "Road Trip",
-        description: "Driving, uplifting, summery",
-        color: "from-[#e8875a]/15 to-[#f0b25a]/10",
-        hoverBorder: "hover:border-[#e8875a]/40",
-        accentGradient: "from-[#e8875a] to-[#f0b25a]",
-        filter: { type: "mood", value: "road-trip" },
-        minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
-    },
-    {
-        id: "mood-nostalgic",
-        name: "Nostalgic",
-        description: "Nostalgic, high energy, happy",
-        color: "from-[#d8a878]/15 to-[#b98fe0]/10",
-        hoverBorder: "hover:border-[#d8a878]/40",
-        accentGradient: "from-[#d8a878] to-[#b98fe0]",
-        filter: { type: "mood", value: "nostalgic" },
-        minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
-    },
-    {
-        id: "mood-epic",
-        name: "Epic",
-        description: "Epic, high energy, uplifting",
-        color: "from-[#e0685e]/15 to-[#f0b25a]/10",
-        hoverBorder: "hover:border-[#e0685e]/40",
-        accentGradient: "from-[#e0685e] to-[#f0b25a]",
-        filter: { type: "mood", value: "epic" },
-        minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
-    },
-    {
-        id: "mood-wildcard",
-        name: "Wildcard",
-        description: "Songs with no mood tag",
-        color: "from-[#a3a3a3]/15 to-[#6b7280]/10",
-        hoverBorder: "hover:border-[#a3a3a3]/40",
-        accentGradient: "from-[#a3a3a3] to-[#6b7280]",
-        filter: { type: "mood", value: "wildcard" },
-        minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
-    },
-];
+    }));
+}
 
 const GENRE_STYLES: Record<string, { color: string; hoverBorder: string; accentGradient: string }> = {
     rock: { color: "from-[#ef4444]/15 to-[#f97316]/10", hoverBorder: "hover:border-[#ef4444]/40", accentGradient: "from-[#ef4444] to-[#f97316]" },

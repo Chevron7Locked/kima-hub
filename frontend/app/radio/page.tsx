@@ -9,7 +9,7 @@ import {
     DecadeCount,
     RadioStation,
     STATIC_STATIONS,
-    MOOD_STATIONS,
+    buildMoodStations,
     buildGenreStations,
     playableStations,
     buildDecadeStations,
@@ -19,6 +19,7 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useFeatures } from "@/lib/features-context";
+import { useMoodStationsQuery } from "@/hooks/useQueries";
 
 function SectionSkeleton() {
     return (
@@ -118,7 +119,16 @@ export default function RadioPage() {
     const isLoading = genresLoading || decadesLoading;
 
     const quickStations = useMemo(() => playableStations(STATIC_STATIONS, vibeEmbeddings), [vibeEmbeddings]);
-    const moodStations = useMemo(() => playableStations(MOOD_STATIONS, vibeEmbeddings), [vibeEmbeddings]);
+    const {
+        data: moodData,
+        isLoading: moodLoading,
+        isError: moodError,
+        refetch: refetchMoods,
+    } = useMoodStationsQuery(!featuresLoading && vibeEmbeddings);
+    const moodStations = useMemo(
+        () => playableStations(buildMoodStations(moodData?.stations ?? []), vibeEmbeddings),
+        [moodData, vibeEmbeddings],
+    );
 
     const genreStations = useMemo(() => buildGenreStations(genresData ?? []), [genresData]);
     const decadeStations = useMemo(() => buildDecadeStations(decadesData ?? []), [decadesData]);
@@ -130,7 +140,7 @@ export default function RadioPage() {
                     eyebrow="Your library"
                     title="Radio"
                     description={
-                        isLoading || featuresLoading
+                        isLoading || featuresLoading || moodLoading
                             ? "Endless shuffles from your own music"
                             : `${quickStations.length + moodStations.length + genreStations.length + decadeStations.length} stations, each an endless shuffle from your own music`
                     }
@@ -153,9 +163,9 @@ export default function RadioPage() {
                             unit="stations"
                             noun="mood"
                             stations={moodStations}
-                            isLoading={featuresLoading}
-                            isError={false}
-                            onRetry={() => {}}
+                            isLoading={featuresLoading || moodLoading}
+                            isError={moodError}
+                            onRetry={() => refetchMoods()}
                             loadingStation={loadingStation}
                             onStart={startRadio}
                         />

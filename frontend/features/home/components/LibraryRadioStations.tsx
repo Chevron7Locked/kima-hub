@@ -7,12 +7,12 @@ import { HorizontalCarousel } from "@/components/ui/HorizontalCarousel";
 import { cn } from "@/lib/cn";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { cascadeStyle } from "@/lib/motion";
-import { useLibraryGenresQuery, useLibraryDecadesQuery } from "@/hooks/useQueries";
+import { useLibraryGenresQuery, useLibraryDecadesQuery, useMoodStationsQuery } from "@/hooks/useQueries";
 import { useFeatures } from "@/lib/features-context";
 import {
     RadioStation,
     STATIC_STATIONS,
-    MOOD_STATIONS,
+    buildMoodStations,
     buildGenreStations,
     playableStations,
     buildDecadeStations,
@@ -24,10 +24,11 @@ export function LibraryRadioStations() {
     const { data: genresData, isLoading: genresLoading } = useLibraryGenresQuery();
     const { data: decadesData, isLoading: decadesLoading } = useLibraryDecadesQuery();
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
+    const { data: moodData, isLoading: moodLoading } = useMoodStationsQuery(!featuresLoading && vibeEmbeddings);
 
     // Until the feature check answers, which stations can play is unknown: the row waits rather than letting
     // Workout and the mood stations pop in among tiles already shown.
-    const isLoading = genresLoading || decadesLoading || featuresLoading;
+    const isLoading = genresLoading || decadesLoading || featuresLoading || moodLoading;
     const genres = useMemo(
         () => (genresData?.genres || []).filter((g) => g.count >= 15).slice(0, 6),
         [genresData],
@@ -38,14 +39,14 @@ export function LibraryRadioStations() {
     );
 
     const allStations = useMemo(() => {
-        if (featuresLoading) return [];
+        if (featuresLoading || moodLoading) return [];
         return [
             ...playableStations(STATIC_STATIONS, vibeEmbeddings),
-            ...playableStations(MOOD_STATIONS, vibeEmbeddings),
+            ...playableStations(buildMoodStations(moodData?.stations ?? []), vibeEmbeddings),
             ...buildGenreStations(genres),
             ...buildDecadeStations(decades),
         ];
-    }, [genres, decades, vibeEmbeddings, featuresLoading]);
+    }, [genres, decades, vibeEmbeddings, featuresLoading, moodLoading, moodData]);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const [currentPage, setCurrentPage] = useState(0);

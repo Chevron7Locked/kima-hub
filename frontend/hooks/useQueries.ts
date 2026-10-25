@@ -69,6 +69,7 @@ export const queryKeys = {
     // Library radio data
     libraryGenres: () => ["library", "genres"] as const,
     libraryDecades: () => ["library", "decades"] as const,
+    moodStations: () => ["library", "radio", "stations"] as const,
 };
 
 export function useRecentlyListenedQuery(limit: number = 10) {
@@ -723,6 +724,17 @@ export function useLibraryGenresQuery() {
             return api.get<{ genres: Array<{ genre: string; count: number }> }>("/library/genres");
         },
         staleTime: 10 * 60 * 1000,
+    });
+}
+
+/** The mood stations and their generated subtitles; asked only where they can play (`enabled`). */
+export function useMoodStationsQuery(enabled: boolean) {
+    return useQuery({
+        queryKey: queryKeys.moodStations(),
+        queryFn: () =>
+            api.get<{ stations: Array<{ value: string; name: string; description: string }> }>("/library/radio/stations"),
+        staleTime: 10 * 60 * 1000,
+        enabled,
     });
 }
 
