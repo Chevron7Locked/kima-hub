@@ -30,7 +30,7 @@ export const FEATURES_ONLY_WEIGHTS = {
  * On installs without CLAP the stored valence and arousal are the mood analyzer's alone. Its fitted mapping
  * (analyzer.py VA_MAP) spreads a library 4.78x (valence) and 2.90x (arousal) narrower than the stretch the weights
  * above were set on, measured as the mean difference between two of 8,971 library tracks
- * (services/audio-analyzer-clap/eval/music-switch-2026-10-17/followup.json). A difference counts this many times
+ * (the music-switch-2026-10-17 followup.json, in the lab archive). A difference counts this many times
  * over, so these two terms keep the share of the score they had.
  */
 export const FEATURES_ONLY_VA_SCALE = {

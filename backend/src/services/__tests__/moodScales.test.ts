@@ -1,5 +1,5 @@
 /**
- * The feature-only similarity's spread scales are measured values (eval/music-switch-2026-10-17/followup.json), not
+ * The feature-only similarity's spread scales are measured values (the music-switch-2026-10-17 followup.json, in the lab archive), not
  * free parameters. The formula tests multiply by the imported constant, so they would pass with any value; this pins
  * the values.
  */

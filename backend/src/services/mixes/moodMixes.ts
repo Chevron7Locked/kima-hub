@@ -1,5 +1,5 @@
 // Vocal Detox's instrumental cut-off is its launch value; the record is
-// services/audio-analyzer-clap/eval/music-switch-2026-10-17/cutoffs.json.
+// music-switch-2026-10-17 cutoffs.json, in the lab archive.
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";

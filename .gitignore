@@ -118,3 +118,6 @@ services/audio-analyzer-clap/models/
 
 # Model caches are large binaries, not source
 services/audio-analyzer-clap/cache/
+
+# Lab experiment folders stay out of the product repo; the archive lives in kima-labs research/hub-eval-archive-2026-10.
+services/audio-analyzer-clap/eval/*-20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
