@@ -28,6 +28,7 @@ import { DEFAULT_REFINE, PER_PAGE_OPTIONS, sortOptionsFor } from "@/features/lib
 import { Pagination } from "@/components/ui/Pagination";
 import { latchTotal, parsePageParam } from "@/lib/pagination";
 import { scrollMainToTop } from "@/lib/scroll";
+import { stillRequested, viewToChange } from "@/lib/requested-views";
 
 const FILTERS: LibraryFilter[] = ["owned", "discovery", "all"];
 
@@ -37,6 +38,9 @@ interface LibraryView {
     itemsPerPage: number;
 }
 const DEFAULT_VIEW: LibraryView = DEFAULT_REFINE;
+
+const sameView = (a: LibraryView, b: LibraryView) =>
+    a.filter === b.filter && a.sortBy === b.sortBy && a.itemsPerPage === b.itemsPerPage;
 
 /** The address carries tab, page, filter, sort and page size, so refresh and Back keep them; defaults are left out. */
 function libraryUrl(tab: Tab, page: number, view: LibraryView): string {
@@ -223,17 +227,23 @@ export default function LibraryPage() {
 
     // Changing filter/sort/page-size starts again at page 1 and remounts the
     // grid. Done in the handlers, so the URL changes only on user action.
-    // Quick changes in a row (arrow keys in the Refine panel) land before the address re-renders the page, so each
-    // builds on the last one asked for, kept here, not on the view the page last rendered.
-    const viewRef = useRef<LibraryView>({ filter, sortBy, itemsPerPage });
+    // Quick changes in a row build on each other, not on the last render (lib/requested-views.ts).
+    const requested = useRef<LibraryView[]>([]);
+    const rendered = useRef<LibraryView>({ filter, sortBy, itemsPerPage });
     useLayoutEffect(() => {
-        viewRef.current = { filter, sortBy, itemsPerPage };
+        const view = { filter, sortBy, itemsPerPage };
+        rendered.current = view;
+        requested.current = stillRequested(requested.current, view, sameView);
     }, [filter, sortBy, itemsPerPage]);
+    useLayoutEffect(() => {
+        requested.current = [];
+    }, [activeTab]);
     const changeView = useCallback(
         (next: Partial<LibraryView>) => {
-            viewRef.current = { ...viewRef.current, ...next };
+            const view = { ...viewToChange(requested.current, rendered.current), ...next };
+            requested.current = [...requested.current, view];
             setGridKey((k) => k + 1);
-            router.replace(libraryUrl(activeTab, 1, viewRef.current), { scroll: false });
+            router.replace(libraryUrl(activeTab, 1, view), { scroll: false });
         },
         [activeTab, router],
     );

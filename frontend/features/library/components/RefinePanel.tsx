@@ -61,11 +61,14 @@ const GAP = 8;
 /** sm:w-96, the panel's width beside a phone. */
 const PANEL_WIDTH = 384;
 
-type Placement = { top: number; left: number; maxHeight: number };
+/** Where the panel goes beside a phone; `sheet` when it is the phone's bottom sheet instead. */
+type Placement = { top: number; left: number; maxHeight: number; sheet: boolean };
 
 /**
  * Where the panel sits above a phone-width screen: under its button, kept inside the page's scrolling area (which
- * ends above the player bar and the bottom navigation) and scrolling inside itself when that area is shorter. When
+ * ends above the desktop player bar, and above the bottom navigation where there is one; on a tablet the floating
+ * mini player sits inside that area, and the panel is drawn over it) and scrolling inside itself when that area is
+ * shorter. When
  * the page scrolls the button out of that area, `onLost` is called (the panel would otherwise follow it under the
  * top bar). On a phone the panel is a sheet placed by CSS, so nothing is measured.
  */
@@ -83,7 +86,7 @@ function usePanelPlacement(
             if (!button) return;
             if (e?.target instanceof Node && panelRef.current?.contains(e.target)) return;
             if (!window.matchMedia("(min-width: 640px)").matches) {
-                setPlace((prev) => prev ?? { top: 0, left: 0, maxHeight: 0 });
+                setPlace((prev) => (prev?.sheet ? prev : { top: 0, left: 0, maxHeight: 0, sheet: true }));
                 return;
             }
             const rect = button.getBoundingClientRect();
@@ -98,9 +101,9 @@ function usePanelPlacement(
             const left = Math.round(Math.max(GAP, Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 2 * GAP)));
             const maxHeight = Math.max(Math.round(areaBottom - top - GAP), 0);
             setPlace((prev) =>
-                prev && prev.top === top && prev.left === left && prev.maxHeight === maxHeight
+                prev && !prev.sheet && prev.top === top && prev.left === left && prev.maxHeight === maxHeight
                     ? prev
-                    : { top, left, maxHeight },
+                    : { top, left, maxHeight, sheet: false },
             );
         },
         [buttonRef, panelRef, onLost],
@@ -294,7 +297,9 @@ export function RefinePanel({
             <div
                 id="refine-panel"
                 ref={panelRef}
-                role="group"
+                // The phone sheet covers the page behind a scrim, so it is a modal dialog there.
+                role={place?.sheet ? "dialog" : "group"}
+                aria-modal={place?.sheet || undefined}
                 aria-label="Refine options"
                 onKeyDown={onPanelKeyDown}
                 // Tabbing out of the panel closes it, as clicking outside does.

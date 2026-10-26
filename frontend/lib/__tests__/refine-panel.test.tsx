@@ -182,4 +182,77 @@ describe("RefinePanel", () => {
         open();
         expect(trigger().getAttribute("aria-controls")).toBe("refine-panel");
     });
+
+    describe("placement", () => {
+        const rect = (top: number, left: number, height: number, width: number) =>
+            ({ top, left, bottom: top + height, right: left + width, height, width, x: left, y: top, toJSON() {} }) as DOMRect;
+        let main: HTMLElement;
+        let buttonRect: DOMRect;
+        let wide = true;
+
+        beforeEach(() => {
+            wide = true;
+            vi.stubGlobal("matchMedia", (q: string) => ({ matches: wide && q === "(min-width: 640px)", media: q }));
+            vi.stubGlobal("innerWidth", 1280);
+            vi.stubGlobal("innerHeight", 800);
+            main = document.createElement("main");
+            main.id = "main-content";
+            host.replaceWith(main);
+            main.appendChild(host);
+            buttonRect = rect(284, 304, 44, 100);
+            vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+                if (this.id === "main-content") return rect(64, 272, 632, 944); // ends at 696, above the player bar
+                if (this.hasAttribute("aria-expanded")) return buttonRect;
+                return rect(0, 0, 0, 0);
+            });
+        });
+
+        afterEach(() => {
+            vi.restoreAllMocks();
+            vi.unstubAllGlobals();
+            document.body.appendChild(host);
+            main.remove();
+        });
+
+        const vars = () => {
+            const style = panel()!.style;
+            return ["--refine-top", "--refine-left", "--refine-max-h"].map((v) => style.getPropertyValue(v));
+        };
+
+        it("sits under its button and ends inside the page's scrolling area", () => {
+            show();
+            open();
+            // 284 + 44 + 8 = 336 down; 696 - 336 - 8 = 352 tall at most.
+            expect(vars()).toEqual(["336px", "304px", "352px"]);
+            expect(panel()!.getAttribute("role")).toBe("group");
+        });
+
+        it("keeps clear of the right edge", () => {
+            buttonRect = rect(284, 1100, 44, 100);
+            show();
+            open();
+            // 1280 - 384 - 16 = 880.
+            expect(vars()[1]).toBe("880px");
+        });
+
+        it("closes when its button scrolls out of the page's scrolling area", () => {
+            show();
+            open();
+            buttonRect = rect(30, 304, 44, 100);
+            act(() => {
+                main.dispatchEvent(new Event("scroll"));
+            });
+            expect(panel()).toBeNull();
+            expect(trigger().getAttribute("aria-expanded")).toBe("false");
+        });
+
+        it("is a modal sheet on a phone, placed by CSS rather than measured", () => {
+            wide = false;
+            show();
+            open();
+            expect(panel()!.getAttribute("role")).toBe("dialog");
+            expect(panel()!.getAttribute("aria-modal")).toBe("true");
+            expect(vars()).toEqual(["0px", "0px", "0px"]);
+        });
+    });
 });
