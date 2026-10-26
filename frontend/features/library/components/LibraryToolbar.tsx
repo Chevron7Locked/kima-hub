@@ -13,6 +13,7 @@ interface LibraryToolbarProps {
     onFilterChange: (filter: LibraryFilter) => void;
     onSortChange: (sort: SortOption) => void;
     onItemsPerPageChange: (items: number) => void;
+    onReset: () => void;
     onShuffleLibrary: () => void;
 }
 
@@ -24,6 +25,7 @@ export function LibraryToolbar({
     onFilterChange,
     onSortChange,
     onItemsPerPageChange,
+    onReset,
     onShuffleLibrary,
 }: LibraryToolbarProps) {
     return (
@@ -36,6 +38,7 @@ export function LibraryToolbar({
                 onFilterChange={onFilterChange}
                 onSortChange={onSortChange}
                 onItemsPerPageChange={onItemsPerPageChange}
+                onReset={onReset}
             />
 
             {/* Shuffle button -- stays primary, always visible */}

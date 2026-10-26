@@ -146,6 +146,7 @@ describe("a control closed by Escape marks the key as used", () => {
                 onFilterChange={() => undefined}
                 onSortChange={() => undefined}
                 onItemsPerPageChange={() => undefined}
+                onReset={() => undefined}
             />,
         );
         const button = find<HTMLButtonElement>("button[aria-expanded]")!;

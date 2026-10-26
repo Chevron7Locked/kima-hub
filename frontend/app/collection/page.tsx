@@ -223,16 +223,24 @@ export default function LibraryPage() {
 
     // Changing filter/sort/page-size starts again at page 1 and remounts the
     // grid. Done in the handlers, so the URL changes only on user action.
+    // Quick changes in a row (arrow keys in the Refine panel) land before the address re-renders the page, so each
+    // builds on the last one asked for, kept here, not on the view the page last rendered.
+    const viewRef = useRef<LibraryView>({ filter, sortBy, itemsPerPage });
+    useLayoutEffect(() => {
+        viewRef.current = { filter, sortBy, itemsPerPage };
+    }, [filter, sortBy, itemsPerPage]);
     const changeView = useCallback(
         (next: Partial<LibraryView>) => {
+            viewRef.current = { ...viewRef.current, ...next };
             setGridKey((k) => k + 1);
-            router.replace(libraryUrl(activeTab, 1, { filter, sortBy, itemsPerPage, ...next }), { scroll: false });
+            router.replace(libraryUrl(activeTab, 1, viewRef.current), { scroll: false });
         },
-        [activeTab, filter, sortBy, itemsPerPage, router],
+        [activeTab, router],
     );
     const changeFilter = useCallback((next: LibraryFilter) => changeView({ filter: next }), [changeView]);
     const changeSort = useCallback((next: SortOption) => changeView({ sortBy: next }), [changeView]);
     const changeItemsPerPage = useCallback((next: number) => changeView({ itemsPerPage: next }), [changeView]);
+    const resetView = useCallback(() => changeView(DEFAULT_VIEW), [changeView]);
 
     // A ?page= past the end is moved back to the last real page once a response
     // lands. The URL stays the single source of truth, so one empty frame shows.
@@ -401,6 +409,7 @@ export default function LibraryPage() {
                         onFilterChange={changeFilter}
                         onSortChange={changeSort}
                         onItemsPerPageChange={changeItemsPerPage}
+                        onReset={resetView}
                         onShuffleLibrary={handleShuffleLibrary}
                     />
                 </div>
