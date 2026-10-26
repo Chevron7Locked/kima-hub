@@ -161,8 +161,12 @@ const DECADE_ACCENT_COLORS: Record<number, { color: string; hoverBorder: string;
     2020: { color: "from-[#f97316]/15 to-[#d97706]/10", hoverBorder: "hover:border-[#f97316]/40", accentGradient: "from-[#f97316] to-[#d97706]" },
 };
 
-/** A genre name without case, spaces, hyphens, dashes, underscores, slashes, dots or apostrophes, as the server merges spellings. */
-const genreKey = (genre: string) => genre.toLowerCase().replace(/[\s_/.'\u2018\u2019\u2010-\u2015-]+/g, "");
+/** A genre name as the server keys it (genreKeySql in backend/src/utils/genreSql.ts), so every spelling gets one colour. */
+const genreKey = (genre: string) =>
+    genre
+        .normalize("NFKC")
+        .toLowerCase()
+        .replace(/[\s\u00a0\u202f\u00ad\u200b\ufeff_/.\u00b7'\u2018\u2019\u2010-\u2015\u2043\u2212-]+/g, "");
 
 const GENRE_STYLES_BY_KEY = new Map(Object.entries(GENRE_STYLES).map(([name, style]) => [genreKey(name), style]));
 

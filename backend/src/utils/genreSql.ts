@@ -44,4 +44,3 @@ export function genreKeySql(name: Prisma.Sql): Prisma.Sql {
 export function likeLiteral(value: string): string {
     return value.replace(/[\\%]/g, "\\$&");
 }
-

@@ -636,7 +636,9 @@ router.get("/genres", async (_req, res) => {
     // of the libraryFilters rule). Spellings of one genre count as one genre,
     // listed under the spelling most of its tracks carry (genreKeySql). A track
     // belongs to one artist, so a genre's tracks are its artists' tracks summed.
-    // A genre that is some artist's name, in any spelling, is not a genre.
+    // An artist tagged with its own name (Nirvana tagged "nirvana") is not a
+    // genre: that tag is dropped from that artist only, so a band named "Jazz"
+    // does not hide everyone else's jazz.
     // Each step is computed once (MATERIALIZED): right after a bulk scan, before the
     // planner has statistics, an inlined plan ran 3x slower.
     const genreResults = await prisma.$queryRaw<
@@ -655,23 +657,20 @@ router.get("/genres", async (_req, res) => {
                 CROSS JOIN LATERAL jsonb_array_elements_text(${genreArraySql("ar.genres")}) AS g(genre)
                 WHERE ar.genres IS NOT NULL
                   AND ar.id IN (SELECT artist_id FROM artist_tracks)
-            ),
-            artist_names AS MATERIALIZED (
-                SELECT ${genreKeySql(Prisma.sql`name`)} AS key FROM "Artist"
-                UNION
-                SELECT ${genreKeySql(Prisma.sql`"normalizedName"`)} FROM "Artist" WHERE "normalizedName" IS NOT NULL
+                  AND ${genreKeySql(Prisma.sql`g.genre`)} <> ${genreKeySql(Prisma.sql`ar.name`)}
+                  AND ${genreKeySql(Prisma.sql`g.genre`)} IS DISTINCT FROM ${genreKeySql(Prisma.sql`ar."normalizedName"`)}
             ),
             named AS MATERIALIZED (
                 SELECT DISTINCT ON (key) key, spelling
                 FROM (
-                    SELECT tg.key, tg.spelling, SUM(at.n) AS n
+                    SELECT tg.key, tg.spelling, SUM(at.n)::bigint AS n
                     FROM tagged tg JOIN artist_tracks at USING (artist_id)
                     GROUP BY tg.key, tg.spelling
                 ) s
                 ORDER BY key, n DESC, spelling
             ),
             counted AS MATERIALIZED (
-                SELECT k.key, SUM(at.n) AS n
+                SELECT k.key, SUM(at.n)::bigint AS n
                 FROM (SELECT DISTINCT artist_id, key FROM tagged) k
                 JOIN artist_tracks at USING (artist_id)
                 GROUP BY k.key
@@ -681,7 +680,6 @@ router.get("/genres", async (_req, res) => {
             JOIN named USING (key)
             WHERE counted.key <> ''
               AND counted.n >= ${minTracks}
-              AND NOT EXISTS (SELECT 1 FROM artist_names an WHERE an.key = counted.key)
             ORDER BY track_count DESC, genre
             LIMIT 20
         `;
@@ -869,7 +867,7 @@ router.get("/radio", async (req, res) => {
                     FROM "Artist" ar
                     JOIN "Album" a ON a."artistId" = ar.id
                     JOIN "Track" t ON t."albumId" = a.id
-                    WHERE ${genreKey} <> '' AND (
+                    WHERE a.location = 'LIBRARY' AND ${genreKey} <> '' AND (
                         (ar.genres IS NOT NULL AND EXISTS (
                             SELECT 1 FROM jsonb_array_elements_text(${genreArraySql("ar.genres")}) AS g(genre)
                             WHERE ${genreKeySql(Prisma.sql`g.genre`)} LIKE '%' || ${genreKey} || '%' ESCAPE '\\'

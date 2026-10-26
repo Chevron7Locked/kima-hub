@@ -35,12 +35,18 @@ const ARTISTS: [number, string, number][] = [
     [14, "hip\u2212hop", 1],
     // An artist tagged with its own name, spelled another way ("Synth-Wave" tagged "synth wave").
     [10, "synth wave", 16],
+    // A band named like a genre ("Jazz") must not hide everyone else's jazz; its own self-tag is not counted.
+    [15, "jazz", 4],
+    [16, "jazz", 16],
 ];
 /** Artists whose name is not "Spelling Artist <n>". */
-const NAMES: Record<number, string> = { 10: "Synth-Wave" };
+const NAMES: Record<number, string> = { 10: "Synth-Wave", 15: "Jazz" };
 const trackIdsOf = (artist: number) =>
     Array.from({ length: ARTISTS.find(([a]) => a === artist)![2] }, (_, i) => `${P}trk_${artist}_${i}`);
 const HIP_HOP = [1, 2, 3, 4, 8, 9, 13, 14].flatMap(trackIdsOf);
+
+/** Tracks on Discover albums: artist 1 (Hip Hop) has one, and artist 17 is in Discover only. */
+const DISCOVER_TRACKS = [`${P}trk_d1_0`, `${P}trk_d1_1`, `${P}trk_d17_0`];
 
 async function cleanup() {
     await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
@@ -86,6 +92,40 @@ beforeAll(async () => {
     }
 });
 
+beforeAll(async () => {
+    await prisma.artist.create({
+        data: { id: `${P}art_17`, name: "Spelling Artist 17", normalizedName: "spelling artist 17", identityKey: `${P}ak_17`, genres: ["hip hop"] },
+    });
+    for (const [album, artist, tracks] of [
+        ["d1", 1, DISCOVER_TRACKS.slice(0, 2)],
+        ["d17", 17, DISCOVER_TRACKS.slice(2)],
+    ] as const) {
+        await prisma.album.create({
+            data: {
+                id: `${P}alb_${album}`,
+                rgMbid: `${P}rg_${album}`,
+                artistId: `${P}art_${artist}`,
+                identityKey: `${P}ik_${album}`,
+                title: `Discover Album ${album}`,
+                primaryType: "Album",
+                location: "DISCOVER",
+            },
+        });
+        await prisma.track.createMany({
+            data: tracks.map((id, i) => ({
+                id,
+                albumId: `${P}alb_${album}`,
+                title: `Discover Track ${id}`,
+                trackNo: i + 1,
+                duration: 200,
+                filePath: `/tmp/${id}.flac`,
+                fileModified: new Date(),
+                fileSize: 1000,
+            })),
+        });
+    }
+});
+
 afterAll(async () => {
     await cleanup();
     await prisma.$disconnect();
@@ -109,8 +149,13 @@ describe("GET /genres", () => {
         expect(genres.find((g) => g.genre.normalize("NFC") === "\u00e9lectro")?.count).toBe(18);
     });
 
-    it("leaves out a genre that is an artist's name, however either is spelled", () => {
+    it("leaves out an artist's tag of its own name, however either is spelled", () => {
         expect(genres.find((g) => g.genre === "synth wave")).toBeUndefined();
+    });
+
+    it("keeps a genre that only happens to be some other artist's name", () => {
+        // 16 from artist 16 tagged "jazz"; the band "Jazz" tagged with its own name adds nothing.
+        expect(genres.find((g) => g.genre === "jazz")?.count).toBe(16);
     });
 
     it("keeps genres apart that are different words, in any script", () => {
@@ -131,9 +176,12 @@ describe("GET /radio?type=genre", () => {
         return new Set((res.body.tracks as { id: string }[]).map((t) => t.id).filter((id) => id.startsWith(P)));
     };
 
-    it.each(["hip hop", "Hip-Hop", "hiphop", "HIP_HOP"])("%s plays every spelling, and genres that contain it", async (value) => {
-        expect([...(await own(value))].sort()).toEqual([...HIP_HOP].sort());
-    });
+    it.each(["hip hop", "Hip-Hop", "hiphop", "HIP_HOP"])(
+        "%s plays every spelling, and genres that contain it, from the library only",
+        async (value) => {
+            expect([...(await own(value))].sort()).toEqual([...HIP_HOP].sort());
+        },
+    );
 
     it("reads % and \\ in the name as letters, not as patterns", async () => {
         expect((await own("h%p")).size).toBe(0);
