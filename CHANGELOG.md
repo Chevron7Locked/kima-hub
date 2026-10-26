@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Genre stations no longer split one genre by its spelling** (#235). "Hip Hop", "hip-hop", "HipHop" and the like (any case, spaces, hyphens and dashes, underscores, slashes, dots, apostrophes, an accent typed as its own mark) are one station, named by the spelling most of its songs carry, and it plays every spelling. A genre station named only with punctuation plays nothing instead of the whole library, and a `%` in a genre name is a letter, not a wildcard. The genre list is also faster: about 0.7 s instead of 1.0 s on 200,000 songs, and 0.8 s instead of 2.1 s right after a large scan.
 - **The Fire TV remote's Back button works.** Fire TV sends Back as its own key, which Kima ignored; on the TV layout it now does what Escape does: closes what's open, then returns to the tab row.
 - **Podcast search counts against Apple's limit like Kima's other Apple requests.** It called Apple directly, outside the queue that keeps Kima within Apple's limit; it now goes through it, ahead of background work, and still gives up after 5 seconds, waiting included.
 - **A podcast download cut off by the host no longer leaves a half file in the cache.** Kima deleted the partial file while it was still being closed, so it could reappear; it now waits for the file to close first.

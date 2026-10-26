@@ -127,7 +127,6 @@ const GENRE_STYLES: Record<string, { color: string; hoverBorder: string; accentG
     rock: { color: "from-[#ef4444]/15 to-[#f97316]/10", hoverBorder: "hover:border-[#ef4444]/40", accentGradient: "from-[#ef4444] to-[#f97316]" },
     pop: { color: "from-[#facc15]/15 to-[#f43f5e]/10", hoverBorder: "hover:border-[#facc15]/40", accentGradient: "from-[#facc15] to-[#f43f5e]" },
     "hip hop": { color: "from-[#a855f7]/15 to-[#6366f1]/10", hoverBorder: "hover:border-[#a855f7]/40", accentGradient: "from-[#a855f7] to-[#6366f1]" },
-    "hip-hop": { color: "from-[#a855f7]/15 to-[#6366f1]/10", hoverBorder: "hover:border-[#a855f7]/40", accentGradient: "from-[#a855f7] to-[#6366f1]" },
     rap: { color: "from-[#a855f7]/15 to-[#6366f1]/10", hoverBorder: "hover:border-[#a855f7]/40", accentGradient: "from-[#a855f7] to-[#6366f1]" },
     electronic: { color: "from-[#06b6d4]/15 to-[#3b82f6]/10", hoverBorder: "hover:border-[#06b6d4]/40", accentGradient: "from-[#06b6d4] to-[#3b82f6]" },
     jazz: { color: "from-[#f59e0b]/15 to-[#eab308]/10", hoverBorder: "hover:border-[#f59e0b]/40", accentGradient: "from-[#f59e0b] to-[#eab308]" },
@@ -162,8 +161,13 @@ const DECADE_ACCENT_COLORS: Record<number, { color: string; hoverBorder: string;
     2020: { color: "from-[#f97316]/15 to-[#d97706]/10", hoverBorder: "hover:border-[#f97316]/40", accentGradient: "from-[#f97316] to-[#d97706]" },
 };
 
+/** A genre name without case, spaces, hyphens, dashes, underscores, slashes, dots or apostrophes, as the server merges spellings. */
+const genreKey = (genre: string) => genre.toLowerCase().replace(/[\s_/.'\u2018\u2019\u2010-\u2015-]+/g, "");
+
+const GENRE_STYLES_BY_KEY = new Map(Object.entries(GENRE_STYLES).map(([name, style]) => [genreKey(name), style]));
+
 function getGenreStyle(genre: string) {
-    return GENRE_STYLES[genre.toLowerCase()] || DEFAULT_STYLE;
+    return GENRE_STYLES_BY_KEY.get(genreKey(genre)) || DEFAULT_STYLE;
 }
 
 function getDecadeStyle(decade: number) {
