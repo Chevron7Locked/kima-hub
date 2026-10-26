@@ -17,6 +17,7 @@ import {
 } from "../../../__tests__/fixtures/syntheticLibrary";
 import { generateLateNightMix, generateMidnightDrive } from "../moodMixes";
 import { buildMoodState } from "../../moods/state";
+import * as matchingRank from "../../matching/rank";
 import { matchingContext } from "../../matching/rank";
 import { MIN_MIX_TRACKS, getRecipe, recipeMembers } from "../recipes";
 import {
@@ -479,6 +480,32 @@ describe("a night mix with 30 or more songs from a few artists", () => {
             expect(new Set(picked).size).toBe(20);
             expect(picked.filter((id) => own.includes(id)).length).toBeLessThanOrEqual(9);
             expect(picked.filter((id) => own.includes(id)).length).toBeGreaterThanOrEqual(6);
+        }
+    });
+
+    it("is filled to the limit for a listener whose night songs are all by one artist, with that artist's own share kept", async () => {
+        await prisma.play.deleteMany({ where: { userId: lib.user1 } });
+        for (const id of FEW[0].tracks) await play(lib.user1, id, 5);
+        for (const s of [spec, driveSpec]) {
+            const picked = (await nightMixTracks(s, lib.user1, "2026-04-03", "UTC", 20))!;
+            expect(picked).toHaveLength(20);
+            expect(new Set(picked).size).toBe(20);
+            const byArtist = picked.filter((id) => FEW[0].tracks.includes(id)).length;
+            expect(byArtist).toBeGreaterThanOrEqual(2);
+            expect(byArtist).toBeLessThanOrEqual(3);
+        }
+    });
+
+    it("still answers when the similar-song search fails, from the fallback recipe", async () => {
+        await prisma.play.deleteMany({ where: { userId: lib.user1 } });
+        for (const id of FEW[0].tracks) await play(lib.user1, id, 5);
+        const spy = jest.spyOn(matchingRank, "rankMatches").mockRejectedValue(new Error("database dropped"));
+        try {
+            const picked = await nightMixTracks(spec, lib.user1, "2026-04-04", "UTC", 20);
+            expect(spy).toHaveBeenCalled();
+            expect(picked === null || picked.length >= MIN_MIX_TRACKS).toBe(true);
+        } finally {
+            spy.mockRestore();
         }
     });
 });

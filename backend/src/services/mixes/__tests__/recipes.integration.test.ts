@@ -811,12 +811,14 @@ describe("familiarity: songs that sound like what the listener plays most", () =
         expect(got.get("top")!).toBe(base.get("top")!);
     });
 
-    it("gives the listener's own most-heard song the largest boost", async () => {
+    it("gives the listener's own most-heard song the full boost, no smaller than any song's", async () => {
         await heard("bg0", 20);
         const base = await zScores();
         const got = await zScores(USER_ID);
         const lift = (name: string) => got.get(name)! - base.get(name)!;
-        for (const name of ["near", "far", "top", "bg1"]) expect(lift("bg0")).toBeGreaterThanOrEqual(lift(name));
+        // The closest unheard song ("near") also takes the full boost now that the seeds are outside the ranked share,
+        // so it ties with the seed up to rounding.
+        for (const name of ["near", "far", "top", "bg1"]) expect(lift("bg0")).toBeGreaterThanOrEqual(lift(name) - 1e-9);
         expect(lift("bg0")).toBeGreaterThan(0);
     });
 
@@ -965,6 +967,33 @@ describe("familiarity: the kept result, the scan shared between callers, ties an
         expect(chosen.has(ids[extra - 1])).toBe(true);
     });
 
+    it("never writes no-boost over a boost already kept for the same seeds", async () => {
+        await heard("bg0", 5);
+        await familiarBoost(USER_ID);
+        const kept = JSON.parse((await redisClient.get(familiarCacheKey(USER_ID)))!);
+        await redisClient.del(familiarCacheKey(USER_ID));
+        // While this caller's scan runs, another process stores a good result; this scan then fails.
+        jest.spyOn(matchingRank, "topScores").mockImplementationOnce(async () => {
+            await redisClient.setex(familiarCacheKey(USER_ID), 600, JSON.stringify(kept));
+            throw new Error("connection dropped");
+        });
+        expect(await familiarBoost(USER_ID)).toEqual(kept.boost);
+        expect(JSON.parse((await redisClient.get(familiarCacheKey(USER_ID)))!)).toEqual(kept);
+        expect(await redisClient.ttl(familiarCacheKey(USER_ID))).toBeGreaterThan(60);
+    });
+
+    it("frees the scan lock only while it still holds this caller's token", async () => {
+        await heard("bg0", 5);
+        jest.spyOn(matchingRank, "topScores").mockImplementationOnce(async () => {
+            expect(await redisClient.get(lockKey)).toMatch(/^[0-9a-f]{32}$/);
+            // The lock expires mid-scan and another process takes it.
+            await redisClient.set(lockKey, "someone-else", "EX", 30);
+            return [];
+        });
+        await familiarBoost(USER_ID);
+        expect(await redisClient.get(lockKey)).toBe("someone-else");
+    });
+
     it("gives no boost, and keeps that for a minute at most, while the similarity data is not built", async () => {
         await heard("bg0", 5);
         await prisma.$executeRaw`DELETE FROM matching_state`;
@@ -986,6 +1015,51 @@ describe("familiarity: the kept result, the scan shared between callers, ties an
         await redisClient.del(familiarCacheKey(USER_ID));
         jest.spyOn(matchingRank, "matchingContext").mockRejectedValueOnce(new Error("no vectors"));
         await expect(familiarBoost(USER_ID)).resolves.toBeNull();
+    });
+});
+
+describe("familiarity: a library where the listener has played a large share of the songs", () => {
+    // 500 songs, the closest tenth is 50. The listener has played 150 of them (the seeds), and 40 unheard songs sound
+    // like those 150. With the seeds counted in the 50 they would fill it; the budget goes to the unheard instead.
+    const USER_ID = `${P}famuser3`;
+    const LIB: Song[] = [
+        ...Array.from({ length: 150 }, (_, i) => ({ name: `seed${i}`, artist: `sa${i % 30}` })),
+        ...Array.from({ length: 40 }, (_, i) => ({ name: `like${i}`, artist: `la${i % 10}` })),
+        ...Array.from({ length: 310 }, (_, i) => ({ name: `other${i}`, artist: `oa${i % 40}` })),
+    ];
+    const seedIds = LIB.slice(0, 150).map((s) => id(s.name));
+    const likeIds = LIB.slice(150, 190).map((s) => id(s.name));
+
+    beforeAll(async () => {
+        await library(LIB);
+        const set = (ids: string[], v: string) => prisma.$executeRaw`UPDATE track_embeddings SET embedding = ${v}::vector WHERE track_id = ANY(${ids}::text[])`;
+        const vec = (a: number, b: number) => `[${a},${b}${",0".repeat(MOOD_HEADS.dims - 2)}]`;
+        await set(seedIds, vec(1, 0));
+        await set(likeIds, vec(1, 0.05));
+        await set(LIB.slice(190).map((s) => id(s.name)), vec(0, 1));
+        await prisma.$executeRaw`DELETE FROM matching_state`;
+        await buildMatching();
+        await prisma.user.deleteMany({ where: { id: USER_ID } });
+        await prisma.user.create({ data: { id: USER_ID, username: USER_ID, passwordHash: "x" } });
+        await prisma.play.createMany({ data: seedIds.map((trackId) => ({ userId: USER_ID, trackId, heard: true })) });
+        await redisClient.del(familiarCacheKey(USER_ID));
+    });
+    afterAll(async () => {
+        await prisma.user.deleteMany({ where: { id: USER_ID } });
+        await prisma.$executeRaw`DELETE FROM matching_state`;
+        await redisClient.del(familiarCacheKey(USER_ID));
+    });
+
+    it("still boosts the unheard songs that sound like what was played, and gives every played song the full boost", async () => {
+        const boost = (await familiarBoost(USER_ID))!;
+        const by = new Map(boost.ids.map((x, i) => [x, boost.boosts[i]]));
+        for (const x of seedIds) expect(by.get(x)).toBe(1);
+        for (const x of likeIds) expect(by.get(x)).toBeGreaterThan(0);
+        // The budget is 50 unheard songs: the 40 alike first, then 10 of the rest, each boosted below every alike one.
+        const unheard = boost.ids.filter((x) => !seedIds.includes(x));
+        expect(unheard).toHaveLength(50);
+        const lowestAlike = Math.min(...likeIds.map((x) => by.get(x)!));
+        for (const x of unheard.filter((u) => !likeIds.includes(u))) expect(by.get(x)!).toBeLessThan(lowestAlike);
     });
 });
 

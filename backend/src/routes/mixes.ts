@@ -48,43 +48,49 @@ interface CachedZone {
 /**
  * What the cache holds under `mixes:<userId>`: one list of mixes per time zone, since the night mixes depend on it, so
  * a listener whose clients send different zones (or none) is served from each zone's own list instead of every request
- * rebuilding the other's. Older entries are still read: a plain list of mixes (written before the zone was stored)
- * is served whatever zone is asked for, and `{ zone, mixes }` is the one zone's list.
+ * rebuilding the other's. An entry that cannot be read (corrupt JSON, a shape from before the lists were kept per zone,
+ * which also carries no build time) is a miss, and so is a Redis error: the mixes are built instead.
  */
-async function readZones(userId: string): Promise<{ plain: any[] | null; zones: Record<string, CachedZone> }> {
-    const cached = await redisClient.get(mixesCacheKey(userId));
-    if (!cached) return { plain: null, zones: {} };
-    const entry = JSON.parse(cached);
-    if (Array.isArray(entry)) return { plain: entry, zones: {} };
-    if (entry?.zones && typeof entry.zones === "object") return { plain: null, zones: entry.zones };
-    if (typeof entry?.zone === "string" && Array.isArray(entry.mixes)) {
-        return { plain: null, zones: { [entry.zone]: { mixes: entry.mixes, at: Date.now() } } };
+async function readZones(userId: string): Promise<Record<string, CachedZone>> {
+    try {
+        const cached = await redisClient.get(mixesCacheKey(userId));
+        if (!cached) return {};
+        const entry = JSON.parse(cached);
+        return entry?.zones && typeof entry.zones === "object" && !Array.isArray(entry.zones) ? entry.zones : {};
+    } catch (error) {
+        logger.debug(`[Mixes] mixes cache unreadable for ${userId}: ${error instanceof Error ? error.message : error}`);
+        return {};
     }
-    return { plain: null, zones: {} };
 }
 
-/** Stores `mixes` as this zone's list, beside the other zones' that are still fresh. */
+/**
+ * Stores `mixes` as this zone's list, beside the other zones' that are still fresh. This reads the entry and writes it
+ * back, so two requests for different zones that build at the same moment can each write back without the other's
+ * list, and the lost one is built again by its next request. That costs one rebuild and never serves a wrong list
+ * (each zone's list is read only for its own zone), so it is accepted rather than locked or split over hash fields,
+ * which would need the old string entries and every clear of `mixes:<userId>` to change with it. A cache that cannot
+ * be written does not fail the request.
+ */
 async function cacheMixes(userId: string, zone: string, mixes: any[]): Promise<void> {
-    let kept: Record<string, CachedZone> = {};
-    try {
-        kept = (await readZones(userId)).zones;
-    } catch {
-        // An unreadable entry is replaced.
-    }
+    const kept = await readZones(userId);
     const now = Date.now();
     delete kept[zone];
     const fresh = Object.entries(kept).filter(([, z]) => now - z.at < MIXES_CACHE_TTL * 1000);
     const zones = Object.fromEntries([...fresh, [zone, { mixes, at: now }]].slice(-MAX_CACHED_ZONES));
-    await redisClient.setex(mixesCacheKey(userId), MIXES_CACHE_TTL, JSON.stringify({ zones }));
+    try {
+        await redisClient.setex(mixesCacheKey(userId), MIXES_CACHE_TTL, JSON.stringify({ zones }));
+    } catch (error) {
+        logger.debug(`[Mixes] mixes cache not written for ${userId}: ${error instanceof Error ? error.message : error}`);
+    }
 }
 
 /** All of the user's mixes: Redis first (the list built for the same zone), regenerated and cached on a miss. */
 async function getMixesForUser(userId: string, requested?: string): Promise<any[]> {
     const zone = await nightZone(requested);
-    const { plain, zones } = await readZones(userId);
-    if (plain) return plain;
-    const hit = zones[zone];
-    if (hit && Array.isArray(hit.mixes) && Date.now() - hit.at < MIXES_CACHE_TTL * 1000) return hit.mixes;
+    const hit = (await readZones(userId))[zone];
+    if (hit && Array.isArray(hit.mixes) && typeof hit.at === "number" && Date.now() - hit.at < MIXES_CACHE_TTL * 1000) {
+        return hit.mixes;
+    }
 
     const mixes = await programmaticPlaylistService.generateAllMixes(userId, false, new Date(), zone);
     await cacheMixes(userId, zone, mixes);

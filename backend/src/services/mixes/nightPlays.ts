@@ -162,7 +162,7 @@ export async function nightSongs(
  * Up to `count` songs that sound like `seeds` (weighted by plays), never one of the seeds, in rank order. Empty when
  * none of the seeds has similarity data yet.
  */
-async function similarSongs(seeds: NightSong[], count: number): Promise<StationSong[]> {
+async function similarSongs(seeds: NightSong[], count: number, counted?: string[]): Promise<StationSong[]> {
     if (seeds.length === 0 || count <= 0) return [];
     const ctx = await matchingContext(seeds.map((s) => s.id));
     if (!ctx) return [];
@@ -172,7 +172,9 @@ async function similarSongs(seeds: NightSong[], count: number): Promise<StationS
     const ranked = await rankMatches(
         ctx,
         withData.map((s) => ({ trackId: s.id, weight: s.plays / total })),
-        { limit: count, counted: withData.map((s) => s.id) },
+        // The seeds take places in their album and artist caps unless the caller says none do (a caller that caps the
+        // merged list itself).
+        { limit: count, counted: counted ?? withData.map((s) => s.id) },
     );
     return ranked.map((t) => ({ id: t.id, artistId: t.artistId }));
 }
@@ -276,7 +278,14 @@ export async function nightMixTracks(
     // the listener's most-played night songs.
     if (picked.length < limit) {
         const have = ordered.filter((s) => picked.includes(s.id));
-        const extra = without(await similarSongs(own.slice(0, FAMILIAR_SEEDS), limit * 2), own);
+        let similar: StationSong[] = [];
+        try {
+            // Nothing is counted: the merged list is capped once, below, with the listener's own songs first.
+            similar = await similarSongs(own.slice(0, FAMILIAR_SEEDS), limit * 2, []);
+        } catch (error) {
+            logger.debug(`[Mixes] ${spec.fallbackRecipe}: no similar songs: ${error instanceof Error ? error.message : error}`);
+        }
+        const extra = without(similar, own);
         const merged = [...have, ...extra];
         picked = capByArtist(merged, limit);
     }

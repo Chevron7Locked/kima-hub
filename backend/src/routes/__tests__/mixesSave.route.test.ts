@@ -14,6 +14,7 @@ import express from "express";
 import request from "supertest";
 import mixRoutes from "../mixes";
 import { prisma } from "../../utils/db";
+import { nightZone } from "../../services/mixes/nightPlays";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { eventBus, type SSEEvent } from "../../services/eventBus";
 
@@ -32,8 +33,8 @@ app.use((req: any, _res, next) => {
 app.use("/mixes", mixRoutes);
 
 /** The user's cached mixes, as the mixes route stores them. */
-const cacheMixes = (mixes: Array<{ id: string; name: string; trackIds: string[] }>) =>
-    redisClient.setex(`mixes:${userId}`, 3600, JSON.stringify(mixes));
+const cacheMixes = async (mixes: Array<{ id: string; name: string; trackIds: string[] }>) =>
+    redisClient.setex(`mixes:${userId}`, 3600, JSON.stringify({ zones: { [await nightZone()]: { mixes, at: Date.now() } } }));
 
 const announced = () => heard.filter((e) => e.type === "playlist:updated").map((e) => e.payload);
 

@@ -3,14 +3,18 @@
  * Road Trip, Main Character, Feel-good, Midnight Drive). The listener's most-heard songs of the last
  * FAMILIAR_LOOKBACK_DAYS are the seeds, weighted by how often each was heard, and the songs closest to those seeds by
  * the vibe similarity every similar-song feature uses (services/matching) get a boost from 1 (closest) down to just
- * above 0 (the last of the closest FAMILIAR_SHARE of the library, at most FAMILIAR_MATCHES). The recipe adds it after its own scores are standardised
+ * above 0 (the last of the closest FAMILIAR_SHARE of the library, at most FAMILIAR_MATCHES; the seeds are not counted
+ * in that share, they take 1 themselves). The recipe adds it after its own scores are standardised
  * (recipes.ts recipeRankingSql), so it only lifts songs, never removes one, and a listener with no plays, or a library
  * with no similarity data yet, gets exactly the recipe's own ranking.
  *
  * Finding the closest songs is one exact scan of the library's sound vectors, so the result is kept in Redis for
  * FAMILIAR_CACHE_SECONDS, under a `mixes:` key so the enrichment re-run that clears the mixes cache clears it too. A
  * kept result is used while the set of seed songs is the one it was built from; how often each was heard moves every
- * listen, so it is not part of that check, and a kept result's weights can be up to FAMILIAR_CACHE_SECONDS old.
+ * listen, so it is not part of that check, and a kept result's weights can be up to FAMILIAR_CACHE_SECONDS old. The
+ * set is stable for a listener with a stable top FAMILIAR_SEEDS. A listener with fewer repeated songs than that (the
+ * rest of the seeds are songs heard once, the latest first) changes it with each new song they hear, and the next
+ * Home build scans again.
  * Callers that ask at once (the mixes of one Home load run side by side) share one scan: in this process through one
  * shared promise per listener, across processes through a short Redis lock the others wait on. A boost is an extra, so
  * a scan that fails (or finds no similarity data yet) gives no boost, is kept only FAMILIAR_EMPTY_CACHE_SECONDS, and
@@ -97,38 +101,56 @@ async function readKept(userId: string, signature: string): Promise<Kept | null>
     }
 }
 
-async function writeKept(userId: string, entry: Kept): Promise<void> {
+/** Keeps `entry`, except that "no boost" is never written over a boost kept for the same seeds. */
+async function writeKept(userId: string, entry: Kept): Promise<FamiliarBoost | null> {
+    if (!entry.boost) {
+        const existing = await readKept(userId, entry.signature);
+        if (existing?.boost) return existing.boost;
+    }
     const seconds = entry.boost ? FAMILIAR_CACHE_SECONDS : FAMILIAR_EMPTY_CACHE_SECONDS;
     try {
         await redisClient.setex(familiarCacheKey(userId), seconds, JSON.stringify(entry));
     } catch (error) {
         logger.debug(`[Mixes] familiarity cache not written: ${error instanceof Error ? error.message : error}`);
     }
+    return entry.boost;
 }
 
+/** Deletes the lock only if it still holds the caller's token (it may have expired and been taken by another scan). */
+const RELEASE_LOCK = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`;
+
+type Lock = { state: "mine"; token: string } | { state: "busy" } | { state: "unavailable" };
+
 /** "mine": this caller scans; "busy": another process is scanning; "unavailable": no Redis to lock with, so scan. */
-async function takeLock(userId: string): Promise<"mine" | "busy" | "unavailable"> {
+async function takeLock(userId: string): Promise<Lock> {
     try {
-        const got = await redisClient.set(familiarLockKey(userId), "1", "EX", familiarTiming.lockSeconds, "NX");
-        return got === "OK" ? "mine" : "busy";
+        const token = crypto.randomBytes(16).toString("hex");
+        const got = await redisClient.set(familiarLockKey(userId), token, "EX", familiarTiming.lockSeconds, "NX");
+        return got === "OK" ? { state: "mine", token } : { state: "busy" };
     } catch (error) {
         logger.debug(`[Mixes] familiarity lock unavailable: ${error instanceof Error ? error.message : error}`);
-        return "unavailable";
+        return { state: "unavailable" };
     }
 }
 
-/** The result another process writes while it holds the lock, or null when it has not by the end of the wait or released without one. */
+/**
+ * The result another process writes while it holds the lock, or null when it has not by the end of the wait or the lock
+ * is gone with no result. The lock is looked at before the result: the holder writes the result and then frees the
+ * lock, so a lock seen gone means any result is already there to read.
+ */
 async function waitForKept(userId: string, signature: string): Promise<Kept | null> {
     const until = Date.now() + familiarTiming.waitMs;
     while (Date.now() < until) {
         await new Promise((resolve) => setTimeout(resolve, familiarTiming.pollMs));
-        const kept = await readKept(userId, signature);
-        if (kept) return kept;
+        let held: boolean;
         try {
-            if (!(await redisClient.exists(familiarLockKey(userId)))) return null;
+            held = (await redisClient.exists(familiarLockKey(userId))) > 0;
         } catch {
             return null;
         }
+        const kept = await readKept(userId, signature);
+        if (kept) return kept;
+        if (!held) return null;
     }
     return null;
 }
@@ -143,7 +165,7 @@ async function resolveBoost(userId: string, now: Date): Promise<FamiliarBoost | 
 
     const lock = await takeLock(userId);
     try {
-        if (lock === "busy") {
+        if (lock.state === "busy") {
             const waited = await waitForKept(userId, signature);
             if (waited) return waited.boost;
         }
@@ -153,10 +175,11 @@ async function resolveBoost(userId: string, now: Date): Promise<FamiliarBoost | 
         } catch (error) {
             logger.debug(`[Mixes] familiarity boost failed: ${error instanceof Error ? error.message : error}`);
         }
-        await writeKept(userId, { signature, boost });
-        return boost;
+        return await writeKept(userId, { signature, boost });
     } finally {
-        if (lock === "mine") await redisClient.del(familiarLockKey(userId)).catch(() => undefined);
+        if (lock.state === "mine") {
+            await redisClient.eval(RELEASE_LOCK, 1, familiarLockKey(userId), lock.token).catch(() => undefined);
+        }
     }
 }
 
@@ -181,7 +204,10 @@ export function familiarBoost(userId: string, now = new Date()): Promise<Familia
     return run;
 }
 
-/** The seeds themselves take the full boost; the other closest songs take it by rank. */
+/**
+ * The seeds themselves take the full boost; the closest songs that are not seeds take it by rank, so the budget (a share
+ * of the library) goes to songs the listener has not played.
+ */
 async function closestToSeeds(seeds: SeedRow[]): Promise<FamiliarBoost | null> {
     const ctx = await matchingContext(seeds.map((s) => s.id));
     if (!ctx) return null;
@@ -193,6 +219,7 @@ async function closestToSeeds(seeds: SeedRow[]): Promise<FamiliarBoost | null> {
         ctx,
         withData.map((s) => ({ trackId: s.id, weight: s.plays / total })),
         matches,
+        withData.map((s) => s.id),
     );
     const boosts = new Map<string, number>();
     closest.forEach((row, rank) => boosts.set(row.id, 1 - rank / matches));

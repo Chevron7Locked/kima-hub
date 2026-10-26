@@ -29,6 +29,7 @@ import request from "supertest";
 import mixRoutes from "../mixes";
 import { programmaticPlaylistService } from "../../services/mixes";
 import { prisma } from "../../utils/db";
+import { redisClient } from "../../utils/redis";
 
 const generate = programmaticPlaylistService.generateAllMixes as jest.Mock;
 const MIX = { id: "m1", name: "Mix One", trackIds: [] as string[] };
@@ -107,11 +108,29 @@ describe("the cached mixes and the zone they were built for", () => {
         expect(generate).toHaveBeenCalledTimes(2);
     });
 
-    it("from before the zone was stored (a plain list) are still served", async () => {
+    it("from before the zone was stored (a plain list) are a miss, as they carry no build time", async () => {
         store.set("mixes:tz_user", JSON.stringify([{ id: "old", name: "Old", trackIds: [] }]));
         const res = await request(app()).get("/mixes").query({ tz: "Asia/Tokyo" }).expect(200);
-        expect(generate).not.toHaveBeenCalled();
-        expect(res.body.map((m: any) => m.id)).toEqual(["old"]);
+        expect(generate).toHaveBeenCalledTimes(1);
+        expect(res.body.map((m: any) => m.id)).toEqual(["m1"]);
+    });
+
+    it("that cannot be read (broken JSON, an unknown shape) are a miss and are replaced, not a 500", async () => {
+        for (const bad of ["{not json", "null", "42", JSON.stringify({ zones: [] }), JSON.stringify({ zones: { "Asia/Tokyo": { mixes: "x" } } })]) {
+            generate.mockClear();
+            store.set("mixes:tz_user", bad);
+            const res = await request(app()).get("/mixes").query({ tz: "Asia/Tokyo" }).expect(200);
+            expect(generate).toHaveBeenCalledTimes(1);
+            expect(res.body.map((m: any) => m.id)).toEqual(["m1"]);
+            expect(JSON.parse(store.get("mixes:tz_user")!).zones["Asia/Tokyo"].mixes).toHaveLength(1);
+        }
+    });
+
+    it("are built when Redis fails on the read or the write, not a 500", async () => {
+        (redisClient.get as jest.Mock).mockRejectedValueOnce(new Error("redis down"));
+        (redisClient.setex as jest.Mock).mockRejectedValueOnce(new Error("redis down"));
+        const res = await request(app()).get("/mixes").query({ tz: "Asia/Tokyo" }).expect(200);
+        expect(res.body.map((m: any) => m.id)).toEqual(["m1"]);
     });
 
     it("keep the key the enrichment re-run and the releases step clear", async () => {
@@ -168,10 +187,10 @@ describe("the cached mixes and the zone they were built for", () => {
         expect(generate).toHaveBeenCalledTimes(1);
     });
 
-    it("serve the single zone of an entry written before there was one list per zone", async () => {
+    it("treat an entry of the single-zone shape written before one list per zone as a miss", async () => {
         store.set("mixes:tz_user", JSON.stringify({ zone: "Asia/Tokyo", mixes: [{ id: "old", name: "Old", trackIds: [] }] }));
         const res = await request(app()).get("/mixes").query({ tz: "Asia/Tokyo" }).expect(200);
-        expect(generate).not.toHaveBeenCalled();
-        expect(res.body.map((m: any) => m.id)).toEqual(["old"]);
+        expect(generate).toHaveBeenCalledTimes(1);
+        expect(res.body.map((m: any) => m.id)).toEqual(["m1"]);
     });
 });

@@ -235,15 +235,16 @@ export async function rankMatches(
 
 /**
  * The `limit` eligible tracks closest to one input set, best first, with no artist or album cap and the inputs
- * themselves included (an input is among its own closest matches). The ordering and the limit are applied in the
- * database, so only `limit` rows come back whatever the library's size.
+ * themselves included (an input is among its own closest matches) unless `exclude` names them. The ordering and the
+ * limit are applied in the database, so only `limit` rows come back whatever the library's size.
  */
 export async function topScores(
     ctx: MatchingContext,
     inputs: WeightedInput[],
     limit: number,
+    exclude: string[] = [],
 ): Promise<Array<{ id: string; score: number }>> {
-    const scored = scoreQuery(ctx, [weightedTracks(ctx, inputs)], ["score"], Prisma.sql`t.id`, []);
+    const scored = scoreQuery(ctx, [weightedTracks(ctx, inputs)], ["score"], Prisma.sql`t.id`, exclude);
     return prisma.$queryRaw<Array<{ id: string; score: number }>>(Prisma.sql`
         WITH scored AS (${scored})
         SELECT id, score FROM scored ORDER BY score DESC, id LIMIT ${limit}
