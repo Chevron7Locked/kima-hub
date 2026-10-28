@@ -1,7 +1,9 @@
 import { Router, Request, Response } from "express";
 import { prisma } from "../../utils/db";
 import { subsonicError, subsonicOk, SubsonicError } from "../../utils/subsonicResponse";
-import { parseRepeatedQueryParam, wrap } from "./mappers";
+import { DIRECT_PARAMS, knownSuffix, parseRepeatedQueryParam, songFormat, transcodeParamsFor, wrap } from "./mappers";
+import { planSubsonicSong } from "./streamPlan";
+import { resolveWithinMusicRoot } from "../library/trackPath";
 import {
     createShareLink,
     deleteShareLink,
@@ -237,9 +239,8 @@ compatRouter.all("/jukeboxControl.view", (req: Request, res: Response) => {
     return notSupported(req, res, "Jukebox mode");
 });
 
-// Answers from the track's real format instead of claiming canDirectPlay for
-// every id regardless of what it is. A blanket "direct play" told clients they
-// could stream formats they cannot decode.
+// Answers from the track's real format. Kima transcodes only to MP3, so any other
+// asked-for format that is not the source's own can neither play directly nor be made.
 compatRouter.all("/getTranscodeDecision.view", wrap(async (req: Request, res: Response) => {
     const mediaId = req.query.mediaId as string | undefined;
     const mediaType = req.query.mediaType as string | undefined;
@@ -250,26 +251,57 @@ compatRouter.all("/getTranscodeDecision.view", wrap(async (req: Request, res: Re
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: mediaType");
     }
 
+    const format = req.query.format as string | undefined;
+    const wanted = format?.toLowerCase();
+
+    // A podcast episode is served from its own feed as it is (getTranscodeStream redirects to it), never transcoded.
+    if (mediaType.toLowerCase() === "podcast") {
+        const episode = await prisma.podcastEpisode.findUnique({ where: { id: mediaId }, select: { mimeType: true } });
+        if (!episode) {
+            return subsonicError(req, res, SubsonicError.NOT_FOUND, "Media not found");
+        }
+        const source = knownSuffix(episode.mimeType);
+        const asIs = !wanted || wanted === "raw" || wanted === source;
+        return subsonicOk(req, res, {
+            transcodeDecision: {
+                canDirectPlay: asIs,
+                canTranscode: false,
+                transcodeReason: asIs ? [] : [`episode is ${source ?? "of unknown format"}, client asked for ${wanted}`],
+                errorReason: asIs ? "" : "Kima plays podcast episodes as their feed serves them",
+                ...(asIs && { transcodeParams: DIRECT_PARAMS }),
+            },
+        });
+    }
+
+    if (mediaType.toLowerCase() !== "song") {
+        return subsonicError(req, res, SubsonicError.GENERIC, "Unsupported mediaType");
+    }
+
     const track = await prisma.track.findUnique({
         where: { id: mediaId },
-        select: { mime: true },
+        select: { filePath: true, mime: true },
     });
-    if (!track) {
+    const absolutePath = track?.filePath ? resolveWithinMusicRoot(track.filePath) : null;
+    if (!track || !absolutePath) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Media not found");
     }
 
-    // What the client asked to be given, if it said.
-    const wanted = (req.query.format as string | undefined)?.toLowerCase();
-    const source = (track.mime || "").toLowerCase();
-    const canDirectPlay = !wanted || wanted === "raw" || wanted === source;
+    // The same plan stream.view and getTranscodeStream follow, so the stream is what this answer says.
+    const source = songFormat(track);
+    const plan = await planSubsonicSong(format, req.query.maxBitRate as string | undefined, track, absolutePath);
+    const canDirectPlay = "direct" in plan && plan.direct;
 
     return subsonicOk(req, res, {
         transcodeDecision: {
             canDirectPlay,
-            canTranscode: true,
-            transcodeReason: canDirectPlay ? [] : [`source is ${source || "unknown"}, client asked for ${wanted}`],
-            errorReason: "",
-            transcodeParams: canDirectPlay ? "" : `format=${wanted}`,
+            canTranscode: !("refused" in plan),
+            transcodeReason: canDirectPlay
+                ? []
+                : [wanted && wanted !== source ? `source is ${source || "unknown"}, client asked for ${wanted}` : `client capped the bitrate at ${req.query.maxBitRate}`],
+            errorReason: "refused" in plan ? plan.refused : "",
+            // Direct play still gets a value: getTranscodeStream requires one.
+            ...(canDirectPlay && { transcodeParams: DIRECT_PARAMS }),
+            ...("serve" in plan && { transcodeParams: transcodeParamsFor(plan.serve) }),
         },
     });
 }));

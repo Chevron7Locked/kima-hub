@@ -622,3 +622,81 @@ describe("transcodeQueue max concurrency", () => {
         jest.restoreAllMocks();
     });
 });
+
+// ---------------------------------------------------------------------------
+// The web player's order (no Subsonic options): original as is; else a cached
+// transcode before any look at the file; else the file itself when already
+// within the tier; else a transcode.
+// ---------------------------------------------------------------------------
+
+describe("getStreamFilePath without options (the web player)", () => {
+    let tmpDir: string;
+    let svc: AudioStreamingService;
+    const { parseFile } = require("music-metadata");
+
+    beforeEach(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kima-web-order-"));
+        svc = new AudioStreamingService(tmpDir, 10);
+        (parseFile as jest.Mock).mockReset();
+    });
+
+    afterEach(() => {
+        svc.destroy();
+        jest.restoreAllMocks();
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it("original is the file, with no look at its bitrate or the cache", async () => {
+        const cache = jest.spyOn(svc as any, "getCachedTranscode");
+        const src = makeTmpFile(tmpDir, "orig.flac");
+        expect((await svc.getStreamFilePath("t1", "original", new Date(), src)).filePath).toBe(src);
+        expect(parseFile).not.toHaveBeenCalled();
+        expect(cache).not.toHaveBeenCalled();
+    });
+
+    it("a cached transcode is served before the file is read", async () => {
+        const cached = path.join(tmpDir, "cached.mp3");
+        jest.spyOn(svc as any, "getCachedTranscode").mockResolvedValue(cached);
+        const out = await svc.getStreamFilePath("t2", "medium", new Date(), makeTmpFile(tmpDir, "src.flac"));
+        expect(out).toEqual({ filePath: cached, mimeType: "audio/mpeg" });
+        expect(parseFile).not.toHaveBeenCalled();
+    });
+
+    it("with nothing cached, a file already within the tier is served as it is, in its own format", async () => {
+        jest.spyOn(svc as any, "getCachedTranscode").mockResolvedValue(null);
+        (parseFile as jest.Mock).mockResolvedValue({ format: { bitrate: 96_000 } });
+        const src = path.join(tmpDir, "small.m4a");
+        fs.writeFileSync(src, "audio data");
+        expect(await svc.getStreamFilePath("t3", "medium", new Date(), src)).toEqual({ filePath: src, mimeType: "audio/mp4" });
+    });
+});
+
+describe("a file's bitrate read", () => {
+    let tmpDir: string;
+    let svc: AudioStreamingService;
+    const { parseFile } = require("music-metadata");
+
+    beforeEach(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kima-kbps-"));
+        svc = new AudioStreamingService(tmpDir, 10);
+        (parseFile as jest.Mock).mockReset();
+    });
+
+    afterEach(() => {
+        svc.destroy();
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it("is kept while the file is unchanged, and a failed one is tried again", async () => {
+        const src = path.join(tmpDir, "song.m4a");
+        fs.writeFileSync(src, "audio data");
+        (parseFile as jest.Mock)
+            .mockRejectedValueOnce(Object.assign(new Error("too many open files"), { code: "EMFILE" }))
+            .mockResolvedValue({ format: { bitrate: 96_000 } });
+
+        expect(await svc.servesOriginal(src, "medium", { keepUnderKbps: 128 })).toBe(false);
+        expect(await svc.servesOriginal(src, "medium", { keepUnderKbps: 128 })).toBe(true);
+        expect(await svc.servesOriginal(src, "medium", { keepUnderKbps: 128 })).toBe(true);
+        expect(parseFile).toHaveBeenCalledTimes(2);
+    });
+});

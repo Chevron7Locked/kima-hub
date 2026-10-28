@@ -126,33 +126,89 @@ function estimateBitrateFromMime(mime: string | null): number {
     return 192;
 }
 
-function mimeToSuffix(mime: string | null): string {
+const SUFFIXES: Record<string, string> = {
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+    "audio/ogg": "ogg",
+    "audio/vorbis": "ogg",
+    "audio/mp4": "m4a",
+    "audio/aac": "aac",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/opus": "opus",
+};
+
+/** The suffix for a mime type Kima knows, or null for none or one it does not. */
+export function knownSuffix(mime: string | null): string | null {
     const m = normalizeMime(mime);
-    if (!m) return "mp3";
-    const map: Record<string, string> = {
-        "audio/flac": "flac",
-        "audio/x-flac": "flac",
-        "audio/ogg": "ogg",
-        "audio/vorbis": "ogg",
-        "audio/mp4": "m4a",
-        "audio/aac": "aac",
-        "audio/mpeg": "mp3",
-        "audio/mp3": "mp3",
-        "audio/wav": "wav",
-        "audio/x-wav": "wav",
-        "audio/opus": "opus",
-    };
-    return map[m] || "mp3";
+    return m && Object.prototype.hasOwnProperty.call(SUFFIXES, m) ? SUFFIXES[m] : null;
 }
 
-export function bitrateToQuality(
-    maxBitRate: string | undefined
-): "original" | "high" | "medium" | "low" {
+export function mimeToSuffix(mime: string | null): string {
+    return knownSuffix(mime) ?? "mp3";
+}
+
+type StreamQuality = "original" | "high" | "medium" | "low";
+type Tier = Exclude<StreamQuality, "original">;
+
+/** A client's maxBitRate in kbps, or null for none (absent, 0 or not a number). */
+export function capKbps(maxBitRate: string | undefined): number | null {
     const br = parseInt(maxBitRate || "0", 10);
-    if (br === 0 || br >= 320) return "original";
-    if (br >= 192) return "high";
-    if (br >= 128) return "medium";
+    return br > 0 ? br : null;
+}
+
+/** The highest MP3 tier (high 320, medium 192, low 128 kbps; audioStreaming.ts QUALITY_SETTINGS) within a cap. A cap
+ * under 128 has none; this answers low, and the caller decides whether that is acceptable. */
+export function tierFor(cap: number): Tier {
+    if (cap >= 320) return "high";
+    if (cap >= 192) return "medium";
     return "low";
+}
+
+/** The lowest MP3 bitrate Kima makes. */
+export const LOWEST_TIER_KBPS = 128;
+
+/** An MP3 Kima makes for a Subsonic client. */
+export interface SubsonicServe {
+    quality: Tier;
+    /** The client asked for MP3: a file in another format is never served as it is. */
+    mp3Only: boolean;
+    /** The client's cap: a file within it is still served as it is (a FLAC under a 1000 cap). */
+    capKbps: number | null;
+}
+
+/** The transcodeParams for direct play: the file as it is. */
+export const DIRECT_PARAMS = "q-original";
+
+/** getTranscodeDecision's opaque transcodeParams for an MP3 it will make. */
+export function transcodeParamsFor(serve: SubsonicServe): string {
+    return `${serve.mp3Only ? "mp3" : "q"}-${serve.quality}${serve.capKbps === null ? "" : `-${serve.capKbps}`}`;
+}
+
+/**
+ * What a transcodeParams value names: "direct", an MP3, or null when it is not exactly a value the decision hands out
+ * (a cap must match its tier and be at least 128; an uncapped MP3 is only the top tier asked for as mp3).
+ */
+export function serveFromTranscodeParams(value: string): "direct" | SubsonicServe | null {
+    if (value === DIRECT_PARAMS) return "direct";
+    const match = /^(q|mp3)-(high|medium|low)(?:-(\d{1,5}))?$/.exec(value);
+    if (!match) return null;
+    const mp3Only = match[1] === "mp3";
+    const quality = match[2] as Tier;
+    const cap = match[3] ? Number(match[3]) : null;
+    const valid = cap === null ? mp3Only && quality === "high" : cap >= LOWEST_TIER_KBPS && tierFor(cap) === quality;
+    return valid ? { quality, mp3Only, capKbps: cap } : null;
+}
+
+/** A song's format as Kima lists it to clients (getSong's suffix) when its mime is a known one, else its file
+ * extension. */
+export function songFormat(track: { mime: string | null; filePath: string | null }): string {
+    const known = knownSuffix(track.mime);
+    if (known) return known;
+    const dot = (track.filePath ?? "").lastIndexOf(".");
+    return dot >= 0 ? (track.filePath ?? "").slice(dot + 1).toLowerCase() : "";
 }
 
 export function wrap(fn: (req: Request, res: Response) => Promise<void | Response>) {

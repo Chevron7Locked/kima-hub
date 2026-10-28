@@ -7,7 +7,8 @@ import { logger } from "../../utils/logger";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { getAudioStreamingService } from "../../services/audioStreaming";
 import { config } from "../../config";
-import { bitrateToQuality, firstArtistGenre, mapSong, wrap } from "./mappers";
+import { firstArtistGenre, mapSong, serveFromTranscodeParams, type SubsonicServe, wrap } from "./mappers";
+import { planSubsonicSong } from "./streamPlan";
 import { normalizeArtistName } from "../../services/artistIdentity";
 import { foldedPattern, hasNonAscii } from "../../services/textMatch";
 import { resolveWithinMusicRoot } from "../library/trackPath";
@@ -16,11 +17,14 @@ import { getLiveState, publicUserId, reportLive } from "../../services/liveListe
 
 export const playbackRouter = Router();
 
+type SongTrack = { mime: string | null; filePath: string | null };
+
+/** Streams a song: the file as it is ("direct") or the MP3 `choose` names for it. */
 async function streamTrackById(
     req: Request,
     res: Response,
     id: string,
-    quality: "original" | "high" | "medium" | "low"
+    choose: (track: SongTrack, absolutePath: string) => Promise<"direct" | SubsonicServe> | "direct" | SubsonicServe,
 ) {
     const track = await prisma.track.findUnique({ where: { id } });
     if (!track || !track.filePath) {
@@ -37,12 +41,13 @@ async function streamTrackById(
         config.music.transcodeCacheMaxGb,
     );
 
-    const { filePath, mimeType } = await streamingService.getStreamFilePath(
-        track.id,
-        quality,
-        track.fileModified,
-        absolutePath,
-    );
+    const pick = await choose(track, absolutePath);
+    const { filePath, mimeType } = pick === "direct"
+        ? await streamingService.getStreamFilePath(track.id, "original", track.fileModified, absolutePath)
+        : await streamingService.getStreamFilePath(track.id, pick.quality, track.fileModified, absolutePath, 0, {
+              mp3Only: pick.mp3Only,
+              keepUnderKbps: pick.capKbps ?? undefined,
+          });
     await streamingService.streamFileWithRangeSupport(req, res, filePath, mimeType);
 }
 
@@ -162,8 +167,11 @@ playbackRouter.all("/getTranscodeStream.view", wrap(async (req, res) => {
     }
 
     if (mediaType === "song") {
-        const quality = bitrateToQuality(req.query.maxBitRate as string | undefined);
-        return streamTrackById(req, res, mediaId, quality);
+        const serve = serveFromTranscodeParams(transcodeParams);
+        if (!serve) {
+            return subsonicError(req, res, SubsonicError.GENERIC, "Invalid transcodeParams: ask getTranscodeDecision again");
+        }
+        return streamTrackById(req, res, mediaId, () => serve);
     }
 
     if (mediaType === "podcast") {
@@ -184,23 +192,30 @@ playbackRouter.all("/stream.view", wrap(async (req, res) => {
     const id = req.query.id as string;
     if (!id) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
 
+    // The same rule as getTranscodeDecision (planSubsonicSong). A refusal is not an error here: older clients send a
+    // format by habit and expect a stream, so they get what no format would have given them, and under a cap below
+    // Kima's smallest MP3 they get that smallest one.
     const format = req.query.format as string | undefined;
-    const quality = format === "raw"
-        ? "original"
-        : bitrateToQuality(req.query.maxBitRate as string | undefined);
+    const maxBitRate = req.query.maxBitRate as string | undefined;
+    const choose = async (track: SongTrack, absolutePath: string): Promise<"direct" | SubsonicServe> => {
+        let plan = await planSubsonicSong(format, maxBitRate, track, absolutePath);
+        if ("refused" in plan) plan = await planSubsonicSong(undefined, maxBitRate, track, absolutePath);
+        if ("refused" in plan) return { quality: "low", mp3Only: false, capKbps: null };
+        return plan.direct ? "direct" : plan.serve;
+    };
 
     // Play logging is handled exclusively by scrobble.view to avoid double-counting.
     // Subsonic clients call scrobble.view on track completion; logging here would produce
     // two Play rows per listen for clients that implement both behaviors (Symfonium, DSub).
 
-    await streamTrackById(req, res, id, quality);
+    await streamTrackById(req, res, id, choose);
 }));
 
 playbackRouter.all("/download.view", wrap(async (req, res) => {
     const id = req.query.id as string;
     if (!id) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
 
-    return streamTrackById(req, res, id, "original");
+    return streamTrackById(req, res, id, () => "direct");
 }));
 
 // ===================== COVER ART =====================

@@ -25,6 +25,14 @@ const QUALITY_SETTINGS = {
 
 export type Quality = keyof typeof QUALITY_SETTINGS;
 
+/** How a Subsonic request bends the tiers: see servesOriginal. */
+export interface StreamOptions {
+    /** An MP3 was promised: a source in another format is never served as it is. */
+    mp3Only?: boolean;
+    /** The client's cap: a source within it is served as it is, whatever the tier. */
+    keepUnderKbps?: number;
+}
+
 export function isQuality(value: unknown): value is Quality {
     return typeof value === "string" && Object.prototype.hasOwnProperty.call(QUALITY_SETTINGS, value);
 }
@@ -64,6 +72,58 @@ export class AudioStreamingService {
         }, 6 * 60 * 60 * 1000);
     }
 
+    /** Bitrates already read, by path, kept while the file's modification time is unchanged; the oldest go first. */
+    private sourceKbpsSeen = new Map<string, { mtimeMs: number; kbps: Promise<number | null> }>();
+    private static readonly SOURCE_KBPS_KEPT = 2000;
+
+    /** A file's own bitrate in kbps, or null when its metadata does not say. Read once per file version: a client
+     * seeking through a capped stream asks again for every range. */
+    private async sourceKbps(sourceAbsolutePath: string): Promise<number | null> {
+        let mtimeMs: number;
+        try {
+            mtimeMs = (await fsPromises.stat(sourceAbsolutePath)).mtimeMs;
+        } catch {
+            return null;
+        }
+        const seen = this.sourceKbpsSeen.get(sourceAbsolutePath);
+        if (seen && seen.mtimeMs === mtimeMs) return seen.kbps;
+        // The read itself is kept, so requests arriving together share one.
+        const kbps = parseFile(sourceAbsolutePath).then(
+            (metadata) => (metadata.format.bitrate ? Math.round(metadata.format.bitrate / 1000) : null),
+            (err) => {
+                logger.warn(`[STREAM] Failed to read source metadata, will transcode anyway:`, err);
+                // A failed read may be passing (a busy disk, too many open files): the next request reads again.
+                if (this.sourceKbpsSeen.get(sourceAbsolutePath)?.kbps === kbps) this.sourceKbpsSeen.delete(sourceAbsolutePath);
+                return null;
+            },
+        );
+        this.sourceKbpsSeen.delete(sourceAbsolutePath);
+        this.sourceKbpsSeen.set(sourceAbsolutePath, { mtimeMs, kbps });
+        if (this.sourceKbpsSeen.size > AudioStreamingService.SOURCE_KBPS_KEPT) {
+            this.sourceKbpsSeen.delete(this.sourceKbpsSeen.keys().next().value!);
+        }
+        return kbps;
+    }
+
+    /**
+     * Whether a request is answered with the source file itself rather than an MP3: at "original", unless an MP3 was
+     * promised and the source is not one; otherwise when the source's own bitrate is within `keepUnderKbps` (the
+     * client's cap) or, without one, within the tier's. Subsonic's transcode decision asks this, so the stream keeps
+     * the decision's promise.
+     */
+    async servesOriginal(sourceAbsolutePath: string, quality: Quality, options: StreamOptions = {}): Promise<boolean> {
+        const sourceIsMp3 = path.extname(sourceAbsolutePath).toLowerCase() === ".mp3";
+        if (options.mp3Only && !sourceIsMp3) return false;
+        if (quality === "original") return true;
+        const limit = options.keepUnderKbps ?? QUALITY_SETTINGS[quality].bitrate;
+        const kbps = await this.sourceKbps(sourceAbsolutePath);
+        if (kbps !== null && kbps <= limit) {
+            logger.debug(`[STREAM] Source bitrate (${kbps}kbps) <= ${limit}kbps, serving original`);
+            return true;
+        }
+        return false;
+    }
+
     /**
      * Get file path for streaming (either original or transcoded)
      */
@@ -72,31 +132,32 @@ export class AudioStreamingService {
         quality: Quality,
         sourceModified: Date,
         sourceAbsolutePath: string,
-        priority = 0
+        priority = 0,
+        options: StreamOptions = {},
     ): Promise<StreamFileInfo> {
         logger.debug(`[AudioStreaming] Request: trackId=${trackId}, quality=${quality}, source=${path.basename(sourceAbsolutePath)}`);
+        const original = () => ({ filePath: sourceAbsolutePath, mimeType: this.getMimeType(sourceAbsolutePath) });
 
-        // If original quality requested, return source file
-        if (quality === "original") {
-            const mimeType = this.getMimeType(sourceAbsolutePath);
-            logger.debug(`[AudioStreaming] Serving original: mimeType=${mimeType}`);
-            return {
-                filePath: sourceAbsolutePath,
-                mimeType,
-            };
+        // A Subsonic answer (an MP3 promised, or a client's cap) is planned before the cache, so a transcode cached
+        // for another request never stands in for the file the decision said it would get.
+        const planned = options.mp3Only !== undefined || options.keepUnderKbps !== undefined;
+        if (planned || quality === "original") {
+            if (await this.servesOriginal(sourceAbsolutePath, quality, options)) return original();
         }
+        // "original" with an MP3 promised for a source that is not one: the top tier.
+        const target: Quality = quality === "original" ? "high" : quality;
 
         // Check if we have a valid cached transcode
         const cachedPath = await this.getCachedTranscode(
             trackId,
-            quality,
+            target,
             sourceModified,
             sourceAbsolutePath
         );
 
         if (cachedPath) {
             logger.debug(
-                `[STREAM] Using cached transcode: ${quality} (${cachedPath})`
+                `[STREAM] Using cached transcode: ${target} (${cachedPath})`
             );
             return {
                 filePath: cachedPath,
@@ -104,31 +165,8 @@ export class AudioStreamingService {
             };
         }
 
-        // Check source file bitrate to avoid pointless upsampling
-        const targetBitrate = QUALITY_SETTINGS[quality].bitrate;
-        if (targetBitrate) {
-            try {
-                const metadata = await parseFile(sourceAbsolutePath);
-                const sourceBitrate = metadata.format.bitrate
-                    ? Math.round(metadata.format.bitrate / 1000)
-                    : null;
-
-                if (sourceBitrate && sourceBitrate <= targetBitrate) {
-                    logger.debug(
-                        `[STREAM] Source bitrate (${sourceBitrate}kbps) <= target (${targetBitrate}kbps), serving original`
-                    );
-                    return {
-                        filePath: sourceAbsolutePath,
-                        mimeType: this.getMimeType(sourceAbsolutePath),
-                    };
-                }
-            } catch (err) {
-                logger.warn(
-                    `[STREAM] Failed to read source metadata, will transcode anyway:`,
-                    err
-                );
-            }
-        }
+        // The web player's tiers: a source already within the tier is not upsampled.
+        if (!planned && (await this.servesOriginal(sourceAbsolutePath, target))) return original();
 
         // Need to transcode - check cache size first
         const currentSize = await this.getCacheSize();
@@ -144,7 +182,7 @@ export class AudioStreamingService {
         // Transcode to cache (deduplicated for concurrent requests).
         // inFlightTranscodes dedup lives OUTSIDE the queue so waiting callers
         // share one queue slot instead of each occupying their own.
-        const dedupeKey = `${trackId}-${quality}`;
+        const dedupeKey = `${trackId}-${target}`;
         let transcodedPath: string;
 
         if (this.inFlightTranscodes.has(dedupeKey)) {
@@ -152,12 +190,12 @@ export class AudioStreamingService {
             transcodedPath = await this.inFlightTranscodes.get(dedupeKey)!;
         } else {
             logger.debug(
-                `[STREAM] Transcoding to ${quality} quality: ${sourceAbsolutePath}`
+                `[STREAM] Transcoding to ${target} quality: ${sourceAbsolutePath}`
             );
             // Queue cap (240s) is shorter than socket timeout (300s) so a
             // request queued behind a burst gets a clean 500 before connection reset.
             const promise = this.transcodeQueue.add(
-                () => this.transcodeToCache(trackId, quality, sourceAbsolutePath, sourceModified),
+                () => this.transcodeToCache(trackId, target, sourceAbsolutePath, sourceModified),
                 { timeout: 240_000, priority }
             ) as Promise<string>;
             this.inFlightTranscodes.set(dedupeKey, promise);
