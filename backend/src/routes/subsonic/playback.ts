@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import fs from "fs";
 import path from "path";
-import { ListenSource } from "@prisma/client";
+import { ListenSource, Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
@@ -9,6 +9,7 @@ import { getAudioStreamingService } from "../../services/audioStreaming";
 import { config } from "../../config";
 import { bitrateToQuality, firstArtistGenre, mapSong, wrap } from "./mappers";
 import { normalizeArtistName } from "../../services/artistIdentity";
+import { foldedPattern, hasNonAscii } from "../../services/textMatch";
 import { resolveWithinMusicRoot } from "../library/trackPath";
 import { recordPlay } from "../../services/playRecording";
 import { getLiveState, publicUserId, reportLive } from "../../services/liveListening";
@@ -407,15 +408,31 @@ playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
 
     const normalizedArtist = artist ? normalizeArtistName(artist) : undefined;
 
+    const ofArtist: Prisma.TrackWhereInput = normalizedArtist
+        ? { album: { artist: { normalizedName: normalizedArtist } } }
+        : {};
+    // A title with a non-ASCII letter is matched by the database with a case-blind pattern, since it folds ASCII case
+    // only; only the artist's songs are looked at when an artist is given.
+    let titleMatch: Prisma.TrackWhereInput = {};
+    if (title && hasNonAscii(title)) {
+        const pattern = foldedPattern(title);
+        const [hit] = normalizedArtist
+            ? await prisma.$queryRaw<{ id: string }[]>`
+                SELECT t.id FROM "Track" t
+                  JOIN "Album" al ON al.id = t."albumId"
+                  JOIN "Artist" ar ON ar.id = al."artistId"
+                 WHERE ar."normalizedName" = ${normalizedArtist} AND t.title ~ ${pattern}
+                 ORDER BY t.id LIMIT 1`
+            : await prisma.$queryRaw<{ id: string }[]>`
+                SELECT t.id FROM "Track" t WHERE t.title ~ ${pattern} ORDER BY t.id LIMIT 1`;
+        if (!hit) return subsonicOk(req, res, { lyrics: {} });
+        titleMatch = { id: hit.id };
+    } else if (title) {
+        titleMatch = { title: { contains: title, mode: "insensitive" } };
+    }
+
     const track = await prisma.track.findFirst({
-        where: {
-            ...(title ? { title: { contains: title, mode: "insensitive" as const } } : {}),
-            ...(normalizedArtist ? {
-                album: {
-                    artist: { normalizedName: normalizedArtist },
-                },
-            } : {}),
-        },
+        where: { ...titleMatch, ...ofArtist },
         include: { trackLyrics: true, album: { include: { artist: true } } },
     });
 

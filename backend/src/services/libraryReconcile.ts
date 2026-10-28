@@ -124,19 +124,24 @@ export async function reconcileDeletedTracks(
  * copy, or a playlist already holding it, stays as it is; the retiring row's duplicate goes with it.
  */
 async function carryHistoryToReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Map<string, string>> {
-    const pairs = await tx.$queryRaw<Array<{ gone: string; kept: string }>>`
-        SELECT DISTINCT ON (g.id) g.id AS gone, k.id AS kept
+    // Titles are compared here, not in SQL: the database lower-cases ASCII only.
+    const sameSlot = await tx.$queryRaw<Array<{ gone: string; kept: string; goneTitle: string; keptTitle: string }>>`
+        SELECT g.id AS gone, k.id AS kept, g.title AS "goneTitle", k.title AS "keptTitle"
           FROM "Track" g
           JOIN "Track" k
             ON k."albumId" = g."albumId"
            AND k."trackNo" = g."trackNo"
            AND k."discNumber" IS NOT DISTINCT FROM g."discNumber"
-           AND lower(k.title) = lower(g.title)
            AND k."missingSince" IS NULL
            AND k.id <> g.id
          WHERE g.id IN (${Prisma.join(ids)})
          ORDER BY g.id, k.id
     `;
+    const pairs: Array<{ gone: string; kept: string }> = [];
+    for (const row of sameSlot) {
+        if (row.goneTitle.toLowerCase() !== row.keptTitle.toLowerCase()) continue;
+        if (pairs.at(-1)?.gone !== row.gone) pairs.push({ gone: row.gone, kept: row.kept });
+    }
     for (const { gone, kept } of pairs) {
         await tx.play.updateMany({ where: { trackId: gone }, data: { trackId: kept } });
         await tx.$executeRaw`

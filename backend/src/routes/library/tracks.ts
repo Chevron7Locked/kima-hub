@@ -6,7 +6,7 @@ import { logger } from "../../utils/logger";
 import { lrclibService } from "../../services/lrclib";
 import { rateLimiter } from "../../services/rateLimiter";
 import { getMergedGenres } from "../../utils/metadataOverrides";
-import { genreArraySql, genreKeySql, likeLiteral } from "../../utils/genreSql";
+import { computeGenreTotals, libraryArtistIdsForGenre } from "../../utils/genreSql";
 import {
   getEffectiveYear,
   getEffectiveDecadeWhereClause,
@@ -27,7 +27,7 @@ import { SEED_PATTERN, emptyPage } from "../../services/mixes/stationOrder";
 import { MOOD_STATIONS, moodStationList } from "../../services/mixes/stations";
 import { spreadByArtist } from "../../utils/artistSpread";
 import { LIBRARY_TRACK_WHERE, LIBRARY_LOCATION } from "../../services/libraryFilters";
-import { PLAYABLE } from "../../utils/libraryEligibility";
+import { LIBRARY_PLAYABLE, PLAYABLE } from "../../utils/libraryEligibility";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
 import { resolveWithinMusicRoot } from "./trackPath";
 import { parseLimit, parseOffset } from "./paging";
@@ -631,63 +631,31 @@ router.delete("/tracks/:id", requireAdmin, async (req, res) => {
 router.get("/genres", async (_req, res) => {
   try {
     const minTracks = 15;
-    // An artist's tracks may live in the DISCOVER pile as well as the owned
-    // library; only owned tracks may feed the genre tallies (the whole point
-    // of the libraryFilters rule). Spellings of one genre count as one genre,
-    // listed under the spelling most of its tracks carry (genreKeySql). A track
-    // belongs to one artist, so a genre's tracks are its artists' tracks summed.
-    // An artist tagged with its own name (Nirvana tagged "nirvana") is not a
-    // genre: that tag is dropped from that artist only, so a band named "Jazz"
-    // does not hide everyone else's jazz.
-    // Each step is computed once (MATERIALIZED): right after a bulk scan, before the
-    // planner has statistics, an inlined plan ran 3x slower.
-    const genreResults = await prisma.$queryRaw<
-      { genre: string; track_count: bigint }[]
+    // Only library songs feed the tallies (Discover albums are Discover's). One rule for every
+    // surface: the shared list (computeGenreTotals) merges each artist's genres through
+    // getMergedGenres (a person's tags replace the enriched ones when they set any), treats
+    // spellings of one genre as one genre (genreKey), counts each artist once per genre, names each
+    // genre by the spelling
+    // most of its songs carry, and drops an artist's tag of its own name (a band named "Jazz"
+    // adds its songs to nothing; nobody else's jazz is hidden by it). The web's own choices on
+    // top of the shared list: lowercase spelling, a 15-song minimum, twenty genres at most.
+    const artists = await prisma.$queryRaw<
+      { name: string; normalizedName: string | null; genres: unknown; userGenres: unknown; n: bigint }[]
     >`
-            WITH artist_tracks AS MATERIALIZED (
-                SELECT a."artistId" AS artist_id, COUNT(t.id) AS n
-                FROM "Album" a
-                JOIN "Track" t ON t."albumId" = a.id
-                WHERE a.location = 'LIBRARY'
-                GROUP BY a."artistId"
-            ),
-            tagged AS MATERIALIZED (
-                SELECT DISTINCT ar.id AS artist_id, LOWER(g.genre) AS spelling, ${genreKeySql(Prisma.sql`g.genre`)} AS key
-                FROM "Artist" ar
-                CROSS JOIN LATERAL jsonb_array_elements_text(${genreArraySql("ar.genres")}) AS g(genre)
-                WHERE ar.genres IS NOT NULL
-                  AND ar.id IN (SELECT artist_id FROM artist_tracks)
-                  AND ${genreKeySql(Prisma.sql`g.genre`)} <> ${genreKeySql(Prisma.sql`ar.name`)}
-                  AND ${genreKeySql(Prisma.sql`g.genre`)} IS DISTINCT FROM ${genreKeySql(Prisma.sql`ar."normalizedName"`)}
-            ),
-            named AS MATERIALIZED (
-                SELECT DISTINCT ON (key) key, spelling
-                FROM (
-                    SELECT tg.key, tg.spelling, SUM(at.n)::bigint AS n
-                    FROM tagged tg JOIN artist_tracks at USING (artist_id)
-                    GROUP BY tg.key, tg.spelling
-                ) s
-                ORDER BY key, n DESC, spelling
-            ),
-            counted AS MATERIALIZED (
-                SELECT k.key, SUM(at.n)::bigint AS n
-                FROM (SELECT DISTINCT artist_id, key FROM tagged) k
-                JOIN artist_tracks at USING (artist_id)
-                GROUP BY k.key
-            )
-            SELECT named.spelling AS genre, counted.n AS track_count
-            FROM counted
-            JOIN named USING (key)
-            WHERE counted.key <> ''
-              AND counted.n >= ${minTracks}
-            ORDER BY track_count DESC, genre
-            LIMIT 20
+            SELECT ar.name, ar."normalizedName", ar.genres, ar."userGenres", COUNT(t.id)::bigint AS n
+            FROM "Artist" ar
+            JOIN "Album" a ON a."artistId" = ar.id
+            JOIN "Track" t ON t."albumId" = a.id
+            WHERE a.location = 'LIBRARY' AND (ar.genres IS NOT NULL OR ar."userGenres" IS NOT NULL)
+            GROUP BY ar.id
         `;
-
-    const genres = genreResults.map((row) => ({
-      genre: row.genre,
-      count: Number(row.track_count),
-    }));
+    const genres = computeGenreTotals(
+      artists.map((a) => ({ ...a, songs: Number(a.n), albums: 0 })),
+    )
+      .filter((g) => g.songs >= minTracks)
+      .map((g) => ({ genre: g.name.toLowerCase(), count: g.songs }))
+      .sort((x, y) => y.count - x.count || (x.genre < y.genre ? -1 : x.genre > y.genre ? 1 : 0))
+      .slice(0, 20);
 
     logger.debug(
       `[Genres] Found ${genres.length} genres from Artist.genres (min ${minTracks} tracks)`,
@@ -703,6 +671,7 @@ router.get("/genres", async (_req, res) => {
 router.get("/decades", async (_req, res) => {
   try {
     const albums = await prisma.album.findMany({
+      where: { location: LIBRARY_LOCATION },
       select: {
         year: true,
         originalYear: true,
@@ -754,7 +723,7 @@ async function recipeStationPage(recipe: string, request: StationRequest): Promi
 
 /** The ids of these songs that can still play: the file is present and not corrupt. */
 async function stillPlayable(ids: string[]): Promise<Set<string>> {
-  const rows = await prisma.track.findMany({ where: { id: { in: ids }, ...PLAYABLE }, select: { id: true } });
+  const rows = await prisma.track.findMany({ where: { id: { in: ids }, ...LIBRARY_PLAYABLE }, select: { id: true } });
   return new Set(rows.map((t) => t.id));
 }
 
@@ -824,8 +793,9 @@ router.get("/radio", async (req, res) => {
         >`
                     SELECT t.id, COUNT(p.id) as play_count
                     FROM "Track" t
+                    JOIN "Album" a ON a.id = t."albumId"
                     LEFT JOIN "Play" p ON p."trackId" = t.id
-                    WHERE t."missingSince" IS NULL AND t.corrupt = false
+                    WHERE t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY'
                     GROUP BY t.id
                     HAVING COUNT(p.id) > 0
                     ORDER BY -LN(1 - random()) / COUNT(p.id) ASC
@@ -859,26 +829,14 @@ router.get("/radio", async (req, res) => {
       case "genre":
         const genreValue = (value as string) || "";
         // Every spelling of the genre plays, and genres that contain it ("hip hop" plays "alternative hip-hop").
-        // A name made only of spaces and punctuation ("-", "") is no genre and plays nothing.
-        const genreKey = genreKeySql(Prisma.sql`${likeLiteral(genreValue)}`);
-
-        const genreTracks = await prisma.$queryRaw<{ id: string }[]>`
-                    SELECT DISTINCT t.id
-                    FROM "Artist" ar
-                    JOIN "Album" a ON a."artistId" = ar.id
-                    JOIN "Track" t ON t."albumId" = a.id
-                    WHERE a.location = 'LIBRARY' AND ${genreKey} <> '' AND (
-                        (ar.genres IS NOT NULL AND EXISTS (
-                            SELECT 1 FROM jsonb_array_elements_text(${genreArraySql("ar.genres")}) AS g(genre)
-                            WHERE ${genreKeySql(Prisma.sql`g.genre`)} LIKE '%' || ${genreKey} || '%' ESCAPE '\\'
-                        ))
-                        OR
-                        (ar."userGenres" IS NOT NULL AND EXISTS (
-                            SELECT 1 FROM jsonb_array_elements_text(${genreArraySql('ar."userGenres"')}) AS ug(genre)
-                            WHERE ${genreKeySql(Prisma.sql`ug.genre`)} LIKE '%' || ${genreKey} || '%' ESCAPE '\\'
-                        ))
-                    )
-                `;
+        // A name made only of spaces and punctuation ("-", "") is no genre and plays nothing. The names are compared
+        // by genreKey (libraryArtistIdsForGenre), the database only lists the library's artists.
+        const artistIds = await libraryArtistIdsForGenre(genreValue);
+        const genreTracks = artistIds.length
+          ? await prisma.$queryRaw<{ id: string }[]>`
+              SELECT t.id FROM "Track" t JOIN "Album" al ON al.id = t."albumId"
+               WHERE al.location = ${LIBRARY_LOCATION}::"AlbumLocation" AND al."artistId" = ANY(${artistIds}::text[])`
+          : [];
         trackIds = drawIds(
           genreTracks.map((t) => t.id),
           limitNum * 2,
@@ -936,7 +894,7 @@ router.get("/radio", async (req, res) => {
         logger.debug(`[Radio:artist] Starting artist radio for: ${artistId}`);
 
         const artistTracks = await prisma.track.findMany({
-          where: { album: { artistId } },
+          where: { album: { artistId, location: LIBRARY_LOCATION } },
           select: {
             id: true,
             bpm: true,
@@ -1057,7 +1015,7 @@ router.get("/radio", async (req, res) => {
         if (similarArtistIds.length > 0) {
           similarTracks = await prisma.track.findMany({
             where: {
-              album: { artistId: { in: similarArtistIds } },
+              album: { artistId: { in: similarArtistIds }, location: LIBRARY_LOCATION },
               ...PLAYABLE,
             },
             select: {

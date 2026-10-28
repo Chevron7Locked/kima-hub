@@ -5,7 +5,7 @@ import { mapArtist, mapAlbum, mapSong, firstArtistGenre, wrap, clamp, parseIntPa
 import { LEADING_ARTICLES } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { PLAYABLE } from "../../utils/libraryEligibility";
-import { artistGenresSql } from "../../utils/genreSql";
+import { computeGenreTotals, libraryArtistIdsForGenre } from "../../utils/genreSql";
 
 export const libraryRouter = Router();
 
@@ -386,13 +386,13 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
             if (!genre) {
                 return subsonicError(req, res, SubsonicError.MISSING_PARAM, "byGenre requires genre");
             }
-            // Genre lives on Artist, not Album — filter via artist's enriched genres
+            // Genre lives on Artist, not Album — the artists carrying the genre, matched by genreKey
+            // exactly as the web's genre filters do. A genre nothing carries has no albums.
+            const genreArtistIds = await libraryArtistIdsForGenre(genre);
             const rows = await prisma.$queryRaw<AlbumWithArtist[]>(Prisma.sql`
                 ${ALBUM_LIST_SELECT}
                 WHERE a."location" = 'LIBRARY'
-                  AND EXISTS (
-                    SELECT 1 FROM jsonb_array_elements_text(${artistGenresSql("ar")}) g WHERE g ILIKE '%' || ${genre} || '%'
-                )
+                  AND ${genreArtistIds.length > 0 ? Prisma.sql`a."artistId" = ANY(${genreArtistIds}::text[])` : Prisma.sql`1 = 0`}
                   AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id)
                 ORDER BY a."sortName" ASC
                 LIMIT ${size} OFFSET ${offset}
@@ -491,10 +491,17 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
 // ===================== GENRES =====================
 
 libraryRouter.all("/getGenres.view", wrap(async (req, res) => {
-    // Genres live on artists (from enrichment), not on albums.
+    // Genres live on artists (from enrichment), not on albums. One rule for every surface: the
+    // shared list (computeGenreTotals) merges the spellings of one genre (genreKey), names each
+    // genre by the spelling carrying the most songs, counts each artist once per genre, reads each
+    // artist's genres through getMergedGenres (a person's tags replace the enriched ones when
+    // they set any), and
+    // drops an artist's tag of its own name. Subsonic lists every genre with its album counts.
     const artists = await prisma.artist.findMany({
         where: { libraryAlbumCount: { gt: 0 } },
         select: {
+            name: true,
+            normalizedName: true,
             genres: true,
             userGenres: true,
             libraryAlbumCount: true,
@@ -502,22 +509,13 @@ libraryRouter.all("/getGenres.view", wrap(async (req, res) => {
         },
     });
 
-    const genreCounts: Record<string, { albums: number; songs: number }> = {};
-    for (const artist of artists) {
-        const genres = ((artist.userGenres ?? artist.genres) as string[] | null) || [];
-        for (const g of genres) {
-            if (!g || g.startsWith("_")) continue;
-            if (!genreCounts[g]) genreCounts[g] = { albums: 0, songs: 0 };
-            genreCounts[g].albums += artist.libraryAlbumCount;
-            genreCounts[g].songs += artist.totalTrackCount;
-        }
-    }
-
-    const sorted = Object.entries(genreCounts)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([name, counts]) => ({
-            "@_songCount": counts.songs,
-            "@_albumCount": counts.albums,
+    const sorted = computeGenreTotals(
+        artists.map((a) => ({ ...a, songs: a.totalTrackCount, albums: a.libraryAlbumCount })),
+    )
+        .sort((x, y) => x.name.localeCompare(y.name))
+        .map(({ name, albums, songs }) => ({
+            "@_songCount": songs,
+            "@_albumCount": albums,
             "#text": name,
         }));
 

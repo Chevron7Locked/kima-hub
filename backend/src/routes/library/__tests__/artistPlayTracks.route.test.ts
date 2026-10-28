@@ -12,6 +12,7 @@ import request from "supertest";
 import { prisma } from "../../../utils/db";
 import artistRoutes from "../artists";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import { artistIdentityKey } from "../../../services/artistIdentity";
 
 const P = "zz-playtracks";
 
@@ -74,7 +75,7 @@ const ARTIST_MBID = "6b4a1a3e-2c9b-4f5e-9d7a-1f2e3d4c5b6a";
 beforeAll(async () => {
     await cleanup();
     await prisma.artist.create({
-        data: { id: `${P}art`, name: "Play Tracks Artist", identityKey: `${P}-identity`, mbid: ARTIST_MBID },
+        data: { id: `${P}art`, name: "Play Tracks Artist", identityKey: artistIdentityKey("Play Tracks Artist"), mbid: ARTIST_MBID },
     });
     // Newest by effective year (displayYear wins over year).
     await makeAlbum(`${P}alb-newest`, "Zea", { year: 2010, displayYear: 2024 });

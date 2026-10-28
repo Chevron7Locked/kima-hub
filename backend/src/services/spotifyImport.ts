@@ -20,7 +20,9 @@ import { redisClient } from "../utils/redis";
 import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";
 import { sourcePauseController } from "./sourcePauseController";
-import { normalizeArtistName } from "./artistIdentity";
+import { artistNamed, normalizeArtistName } from "./artistIdentity";
+import { sameName } from "./discovery/discoverEvidence";
+import { containsText, foldedPattern, hasNonAscii } from "./textMatch";
 import { parseCredit } from "./artistIdentity";
 import { rankAfter, rankForPosition } from "../utils/lexoRank";
 import { allocateAppendRanks } from "./playlistService";
@@ -313,18 +315,44 @@ function notifyImportFailed(job: ImportJob): void {
 }
 
 
-/** Library tracks whose artist's name begins with one of `words` (the candidate pool both import paths match against). */
+/**
+ * Library tracks whose artist's name begins with one of `words` (the candidate pool both import paths match against).
+ * `normalizedName` is stored already folded to lower case, and `words` are normalized the same way, so a plain
+ * comparison is exact for every script.
+ */
 function tracksOfArtistsStartingWith(words: string[]): Prisma.TrackWhereInput {
   return {
     album: {
       artist: {
-        OR: words.flatMap((w) => [
-          { normalizedName: { equals: w, mode: "insensitive" as const } },
-          { normalizedName: { startsWith: `${w} `, mode: "insensitive" as const } },
-        ]),
+        OR: words.flatMap((w) => [{ normalizedName: w }, { normalizedName: { startsWith: `${w} ` } }]),
       },
     },
   };
+}
+
+/** The most title-only candidates one lookup reads. */
+const TITLE_CANDIDATES_MAX = 500;
+
+/**
+ * Library tracks whose title holds one of `terms`, in any letter case. The database folds case for ASCII only, so a
+ * term with a non-ASCII letter is matched with a case-blind pattern (foldedPattern), at most the candidate limit of ids.
+ */
+async function tracksTitledLike<I extends Prisma.TrackInclude>(terms: string[], include: I) {
+  const asciiTerms = terms.filter((t) => !hasNonAscii(t));
+  const otherTerms = terms.filter(hasNonAscii);
+  const titleMatches: Prisma.TrackWhereInput[] = asciiTerms.map((term) => ({
+    title: { contains: term, mode: "insensitive" as const },
+  }));
+  if (otherTerms.length > 0) {
+    const ids = new Set<string>();
+    for (const term of otherTerms) {
+      const rows = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "Track" WHERE title ~ ${foldedPattern(term)} ORDER BY id LIMIT ${TITLE_CANDIDATES_MAX}`;
+      for (const row of rows) ids.add(row.id);
+    }
+    titleMatches.push({ id: { in: [...ids].slice(0, TITLE_CANDIDATES_MAX) } });
+  }
+  return prisma.track.findMany({ where: { OR: titleMatches }, include, take: TITLE_CANDIDATES_MAX });
 }
 
 /** Titles this short ("Intro", "Home") are too common to match without the artist. */
@@ -1751,10 +1779,7 @@ class SpotifyImportService {
     // All artists, for debug logging
     const allArtists = await prisma.artist.findMany({
       where: {
-        normalizedName: {
-          in: allArtistFirstWords,
-          mode: "insensitive",
-        },
+        normalizedName: { in: allArtistFirstWords },
       },
       select: { name: true, normalizedName: true },
     });
@@ -1861,14 +1886,8 @@ class SpotifyImportService {
       const titleSearchTerms = unmatchedForTitleOnly.map(
         (u) => u.strippedTitle.split(" ").slice(0, 4).join(" "),
       );
-      const titleCandidateRows = await prisma.track.findMany({
-        where: {
-          OR: titleSearchTerms.map((term) => ({
-            title: { contains: term, mode: "insensitive" as const },
-          })),
-        },
-        include: { album: { include: { artist: { select: { name: true, normalizedName: true } } } } },
-        take: 500,
+      const titleCandidateRows = await tracksTitledLike(titleSearchTerms, {
+        album: { include: { artist: { select: { name: true, normalizedName: true } } } },
       });
       const titleCandidates: MatchCandidate[] = titleCandidateRows.map(toMatchCandidate);
 
@@ -1938,27 +1957,19 @@ class SpotifyImportService {
 
     // Recalculate unmatched - tracks that weren't added to playlist
     const matchedTitlesNormalized = new Set<string>();
+    const matchedTracks = await prisma.track.findMany({
+      where: { id: { in: uniqueTrackIds } },
+      select: { title: true, album: { select: { artist: { select: { normalizedName: true } } } } },
+    });
     for (const pendingTrack of job.pendingTracks) {
       const dbArtist = normalizeArtistName(pendingTrack.artist);
       const strippedTitle = stripTrackSuffix(pendingTrack.title);
 
-      const found = await prisma.track.findFirst({
-        where: {
-          id: { in: uniqueTrackIds },
-          title: {
-            contains: strippedTitle.split(" ")[0],
-            mode: "insensitive",
-          },
-          album: {
-            artist: {
-              normalizedName: {
-                contains: dbArtist.split(" ")[0],
-                mode: "insensitive",
-              },
-            },
-          },
-        },
-      });
+      const found = matchedTracks.some(
+        (t) =>
+          containsText(t.title, strippedTitle.split(" ")[0]) &&
+          t.album.artist.normalizedName.includes(dbArtist.split(" ")[0]),
+      );
 
       if (found) {
         matchedTitlesNormalized.add(
@@ -2492,12 +2503,8 @@ class SpotifyImportService {
         // Various Artists), and only for titles long enough to be distinctive.
         if (!match && normalizeTrackTitle(pendingTrack.spotifyTitle).length >= MIN_TITLE_ONLY_LENGTH) {
           const strippedTitle = stripTrackSuffix(pendingTrack.spotifyTitle);
-          const titleCandidateRows = await prisma.track.findMany({
-            where: {
-              title: { contains: strippedTitle.split(" ").slice(0, 4).join(" "), mode: "insensitive" },
-            },
-            include: { album: { include: { artist: true } } },
-            take: 500,
+          const titleCandidateRows = await tracksTitledLike([strippedTitle.split(" ").slice(0, 4).join(" ")], {
+            album: { include: { artist: true } },
           });
           const titleCandidates: MatchCandidate[] = titleCandidateRows.map(toMatchCandidate);
           match = matchTrackToLibrary(
@@ -2747,33 +2754,13 @@ class SpotifyImportService {
 
       // Tier 3: Exact metadata match (artist + title from EXTINF)
       if (!track && entry.artist && entry.title) {
-        track = await prisma.track.findFirst({
-          where: {
-            title: { equals: entry.title, mode: "insensitive" },
-            album: {
-              artist: {
-                name: { equals: entry.artist, mode: "insensitive" },
-              },
-            },
-          },
-          select: { id: true },
+        // The artist by its stored identity key, the title by nameKey: both fold case and accents in TypeScript.
+        const ofArtist = await prisma.track.findMany({
+          where: { album: { artist: artistNamed(entry.artist) } },
+          select: { id: true, title: true },
+          orderBy: { id: "asc" },
         });
-
-        // Also try with normalizedName
-        if (!track) {
-          const dbArtist = normalizeArtistName(entry.artist);
-          track = await prisma.track.findFirst({
-            where: {
-              title: { equals: entry.title, mode: "insensitive" },
-              album: {
-                artist: {
-                  normalizedName: dbArtist,
-                },
-              },
-            },
-            select: { id: true },
-          });
-        }
+        track = ofArtist.find((t) => sameName(t.title, entry.title)) ?? null;
       }
 
       // Tier 4: Fuzzy metadata match (fuzzball >= 80 threshold)

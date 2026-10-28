@@ -142,24 +142,29 @@ class QueueCleanerService {
         if (wanted.length === 0) return { reconciled: 0 };
 
         const names = [...new Set(wanted.map((job) => (job.metadata as any)?.artistName).filter(Boolean))] as string[];
+        // A name with no letters or digits has no identity key; it is matched by its exact name instead, never by "".
+        const keys = names.map((n) => artistIdentityKey(n)).filter(Boolean);
+        const keyless = names.filter((n) => !artistIdentityKey(n));
         const localAlbums = await prisma.album.findMany({
             where: {
                 tracks: { some: {} },
                 OR: [
                     { rgMbid: { in: wanted.map((job) => job.targetMbid).filter((m): m is string => !!m) } },
-                    { artist: { name: { in: names, mode: "insensitive" } } },
+                    { artist: { identityKey: { in: keys } } },
+                    ...(keyless.length > 0 ? [{ artist: { name: { in: keyless } } }] : []),
                 ],
             },
             select: { rgMbid: true, title: true, artist: { select: { name: true } } },
         });
         const mbids = new Set(localAlbums.map((a) => a.rgMbid));
-        const owned = new Set(localAlbums.map((a) => `${artistIdentityKey(a.artist.name)}|${editionlessKey(a.title)}`));
+        const artistKey = (name: string) => artistIdentityKey(name) || `name:${name}`;
+        const owned = new Set(localAlbums.map((a) => `${artistKey(a.artist.name)}|${editionlessKey(a.title)}`));
 
         const found = wanted.filter((job) => {
             const meta = (job.metadata as any) ?? {};
             return (
                 (!!job.targetMbid && mbids.has(job.targetMbid)) ||
-                (!!meta.artistName && !!meta.albumTitle && owned.has(`${artistIdentityKey(meta.artistName)}|${editionlessKey(meta.albumTitle)}`))
+                (!!meta.artistName && !!meta.albumTitle && owned.has(`${artistKey(meta.artistName)}|${editionlessKey(meta.albumTitle)}`))
             );
         });
         const reconciled = await simpleDownloadManager.completeJobs(found);

@@ -21,22 +21,33 @@ function jsonArrayOrEmpty(value: unknown): string[] {
 }
 
 /**
- * Get merged genres (user + canonical) for functional use in mixes/discovery
- * User-added genres take precedence and are merged with canonical genres
+ * Get the genres of an entity (artist, album, ...) for functional use in mixes, discovery and
+ * genre filtering: the genres a person set, or the enriched ones when the person set none.
+ *
+ * A person's list REPLACES the enriched one — it is not added to it. The artist editor saves the
+ * whole edited list, so a genre the person removed must disappear from every surface, not come
+ * back from the enriched column. Both columns are read with jsonArrayOrEmpty, so anything that is
+ * not a list of strings (null, an object, JSON null) counts as an empty list and falls back to the
+ * enriched genres. The returned list is deduplicated, keeping the person's order.
  *
  * CRITICAL: This is used for mix generation, discovery, and genre filtering.
- * User genres always take precedence.
+ * The person's genres win whenever they are a non-empty list.
  */
 export function getMergedGenres(entity: {
     genres?: unknown;
     userGenres?: unknown;
 }): string[] {
-    const canonical = jsonArrayOrEmpty(entity.genres);
-    const userAdded = jsonArrayOrEmpty(entity.userGenres);
-
-    // Merge and deduplicate (user genres first for priority)
-    const merged = [...new Set([...userAdded, ...canonical])];
-    return merged;
+    const userGenres = jsonArrayOrEmpty(entity.userGenres);
+    if (userGenres.length > 0) {
+        // Deduplicate, keeping the person's order (indexOf-based: no Set iteration, so the
+        // function compiles at every target).
+        const deduped: string[] = [];
+        for (const genre of userGenres) {
+            if (deduped.indexOf(genre) === -1) deduped.push(genre);
+        }
+        return deduped;
+    }
+    return jsonArrayOrEmpty(entity.genres);
 }
 
 /**

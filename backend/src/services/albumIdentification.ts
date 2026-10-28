@@ -12,6 +12,7 @@ import { redisClient } from "../utils/redis";
 import { topVoted } from "../utils/votes";
 import { acoustidService } from "./acoustidService";
 import { albumIdentityKey, editionlessKey, isGenericAlbumTitle } from "./albumIdentity";
+import { lookupKey } from "./discovery/discoverEvidence";
 import { findAlbumArtwork } from "./artwork";
 import { LIBRARY_LOCATION } from "./libraryFilters";
 import { DuplicateMbidError, reassignAlbumRgMbid } from "./mbidReassign";
@@ -146,8 +147,8 @@ interface CandidateAlbum {
 }
 
 /**
- * LIBRARY albums with a placeholder id that Discover is not managing (by id, or by artist and
- * title for an album Discover fetched), with every present song's fingerprint settled.
+ * LIBRARY albums with a placeholder id that no Discover suggestion holds by id, with every present
+ * song's fingerprint settled. Albums Discover holds by artist and title are skipped by the caller.
  */
 function candidateAlbums(filter: Prisma.Sql, order: Prisma.Sql, limit: number): Promise<CandidateAlbum[]> {
     return prisma.$queryRaw<CandidateAlbum[]>`
@@ -157,9 +158,7 @@ function candidateAlbums(filter: Prisma.Sql, order: Prisma.Sql, limit: number): 
            AND a."rgMbid" LIKE 'temp-%'
            AND ${filter}
            AND NOT EXISTS (SELECT 1 FROM "DiscoveryAlbum" d
-                            WHERE d.status IN ('ACTIVE', 'LIKED')
-                              AND (d."rgMbid" = a."rgMbid"
-                                   OR (lower(d."albumTitle") = lower(a.title) AND lower(d."artistName") = lower(ar.name))))
+                            WHERE d.status IN ('ACTIVE', 'LIKED') AND d."rgMbid" = a."rgMbid")
            AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t."missingSince" IS NULL)
            AND NOT EXISTS (
                 SELECT 1 FROM "Track" t
@@ -184,7 +183,14 @@ export async function identifyAlbumsBySound(windowAlbumIds: string[]): Promise<s
     const assigned: string[] = [];
     let worked = 0;
     const spent = () => worked >= ALBUMS_PER_ROUND || Date.now() - started > ROUND_BUDGET_MS;
+    // Albums Discover manages by artist and title are Discover's, not the library's to identify.
+    const suggestions = await prisma.discoveryAlbum.findMany({
+        where: { status: { in: ["ACTIVE", "LIKED"] } },
+        select: { artistName: true, albumTitle: true },
+    });
+    const discoverNames = new Set(suggestions.map((d) => lookupKey(d.artistName, d.albumTitle)));
     const work = async (album: CandidateAlbum) => {
+        if (discoverNames.has(lookupKey(album.artist, album.title))) return;
         try {
             const outcome = await identifyAlbum(album);
             if (outcome !== "already-decided") worked += 1;

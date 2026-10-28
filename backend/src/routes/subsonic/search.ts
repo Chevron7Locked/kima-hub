@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
+import { artistIdentityKey } from "../../services/artistIdentity";
+import { foldedPattern } from "../../services/textMatch";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { searchService } from "../../services/search";
 import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong } from "./mappers";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
-import { artistGenresSql } from "../../utils/genreSql";
+import { libraryArtistIdsForGenre } from "../../utils/genreSql";
 
 export const searchRouter = Router();
 
@@ -199,10 +201,13 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
     }
 
     if (genre) {
-        // Genre lives on Artist, not Album — filter via artist's enriched genres
-        whereConditions.push(Prisma.sql`EXISTS (
-            SELECT 1 FROM jsonb_array_elements_text(${artistGenresSql("ar")}) g WHERE g ILIKE '%' || ${genre} || '%'
-        )`);
+        // Genre lives on Artist, not Album — the artists carrying the genre, matched by genreKey
+        // exactly as the web's genre filters do. A genre nothing carries (an empty name, a genre
+        // no artist has) matches no song.
+        const tagged = await libraryArtistIdsForGenre(genre);
+        whereConditions.push(
+            tagged.length > 0 ? Prisma.sql`ar.id = ANY(${tagged}::text[])` : Prisma.sql`1 = 0`,
+        );
     }
 
     const whereClause = Prisma.join(whereConditions, " AND ");
@@ -269,6 +274,10 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
     const count = clamp(parseIntParam(req.query.count as string | undefined, 50), 1, 500);
     const offset = Math.max(0, parseIntParam(req.query.offset as string | undefined, 0));
 
+    // The artists carrying the genre, matched by genreKey exactly as the web's genre filters do;
+    // a genre nothing carries has no songs.
+    const genreArtistIds = await libraryArtistIdsForGenre(genre);
+
     const rows = await prisma.$queryRaw<{
         id: string;
         title: string;
@@ -297,9 +306,7 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
         WHERE t.corrupt = false
           AND t."missingSince" IS NULL
           AND al.location = 'LIBRARY'
-          AND EXISTS (
-            SELECT 1 FROM jsonb_array_elements_text(${artistGenresSql("ar")}) g WHERE g ILIKE '%' || ${genre} || '%'
-          )
+          AND ${genreArtistIds.length > 0 ? Prisma.sql`al."artistId" = ANY(${genreArtistIds}::text[])` : Prisma.sql`1 = 0`}
         ORDER BY LOWER(t.title) ASC, t.title ASC
         OFFSET ${offset}
         LIMIT ${count}
@@ -346,18 +353,35 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
 
     const count = clamp(parseIntParam(req.query.count as string | undefined, 50), 1, 500);
 
-    const artist = await prisma.artist.findFirst({
-        where: {
-            OR: [
-                { name: { equals: artistParam, mode: "insensitive" } },
-                { displayName: { equals: artistParam, mode: "insensitive" } },
-                { name: { contains: artistParam, mode: "insensitive" } },
-                { displayName: { contains: artistParam, mode: "insensitive" } },
-            ],
-            libraryAlbumCount: { gt: 0 },
-        },
-        select: { id: true, name: true, displayName: true, genres: true, userGenres: true },
-    });
+    // The exact name is found by its identity key (indexed, built in TypeScript); a display name is compared the same
+    // way over the few artists that have one; otherwise the text is matched inside a name with a case-blind pattern,
+    // since the database folds ASCII case only.
+    const inLibrary = { libraryAlbumCount: { gt: 0 } };
+    const wantedKey = artistIdentityKey(artistParam);
+    let chosenId: string | undefined = wantedKey
+        ? (await prisma.artist.findFirst({ where: { ...inLibrary, identityKey: wantedKey }, select: { id: true }, orderBy: { id: "asc" } }))?.id
+        : (await prisma.artist.findFirst({ where: { ...inLibrary, name: artistParam }, select: { id: true }, orderBy: { id: "asc" } }))?.id;
+    if (!chosenId) {
+        const named = await prisma.artist.findMany({
+            where: { ...inLibrary, displayName: { not: null } },
+            select: { id: true, displayName: true },
+            orderBy: { id: "asc" },
+        });
+        chosenId = named.find((a) => (wantedKey ? artistIdentityKey(a.displayName) === wantedKey : a.displayName === artistParam))?.id;
+    }
+    if (!chosenId) {
+        const pattern = foldedPattern(artistParam);
+        [{ id: chosenId } = { id: undefined }] = await prisma.$queryRaw<{ id: string | undefined }[]>`
+            SELECT a.id FROM "Artist" a
+             WHERE a."libraryAlbumCount" > 0 AND (a.name ~ ${pattern} OR a."displayName" ~ ${pattern})
+             ORDER BY a.id LIMIT 1`;
+    }
+    const artist = chosenId
+        ? await prisma.artist.findUnique({
+              where: { id: chosenId },
+              select: { id: true, name: true, displayName: true, genres: true, userGenres: true },
+          })
+        : null;
 
     if (!artist) {
         return subsonicOk(req, res, { topSongs: {} });

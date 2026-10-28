@@ -1,8 +1,8 @@
 /**
  * The Subsonic genre filters (getRandomSongs, getSongsByGenre, getAlbumList2 byGenre) on a real database where some
  * artists' genre columns hold JSON that is not an array: a bare string, an object. Such a value counts as no genres
- * (utils/genreSql.ts) instead of failing the whole request; a person's genres win when there are any, else the
- * enriched ones.
+ * (utils/genreSql.ts) instead of failing the whole request; a person's non-empty genre list REPLACES the enriched
+ * ones (getMergedGenres), so an artist person-tagged with another genre is no longer found under the enriched one.
  */
 import express from "express";
 import request from "supertest";
@@ -19,7 +19,9 @@ const ARTISTS: { name: string; genres: unknown; userGenres?: unknown; found: boo
     { name: "array", genres: ["Sgjrock"], found: true },
     { name: "bareString", genres: GENRE, found: false },
     { name: "object", genres: { [GENRE]: true }, found: false },
+    // The person's list replaces the enriched one: GENRE, enriched-only here, no longer selects this artist.
     { name: "personSet", genres: ["sgjjazz"], userGenres: [GENRE], found: true },
+    { name: "personSetOverEnriched", genres: [GENRE], userGenres: ["sgjjazz"], found: false },
     { name: "personSetNone", genres: [GENRE], userGenres: [], found: true },
     { name: "personBareString", genres: ["sgjjazz"], userGenres: GENRE, found: false },
     { name: "personBareStringEnriched", genres: [GENRE], userGenres: GENRE, found: true },

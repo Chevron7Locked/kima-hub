@@ -180,8 +180,11 @@ describe('subsonic getAlbumList byGenre', () => {
             .get('/getAlbumList.view?type=byGenre&genre=rock')
             .expect(200);
 
-        const call = (prisma.$queryRaw as jest.Mock).mock.calls[0];
-        const sql: string = call[0].sql;
+        // The request runs two queries: the artists carrying the genre, then the album list they
+        // answer for. The sort order under test is the album list's — the last raw query.
+        const calls = (prisma.$queryRaw as jest.Mock).mock.calls;
+        const sql: string = calls[calls.length - 1][0].sql;
+        expect(sql).toContain('FROM "Album"');
         expect(sql).toContain('a."sortName" ASC');
         expect(sql).not.toContain('a.title ASC');
     });
