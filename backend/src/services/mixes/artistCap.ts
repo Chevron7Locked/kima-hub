@@ -30,6 +30,11 @@ export function artistSql(): Prisma.Sql {
     return Prisma.sql`CASE WHEN ar."identityKey" IN (${Prisma.join(noOneKeys())}) THEN 'song:' || t.id ELSE a."artistId" END`;
 }
 
+/** artistSql for an album rather than a song: a compilation by no one counts as its own artist. Aliases a, ar. */
+export function albumArtistSql(): Prisma.Sql {
+    return Prisma.sql`CASE WHEN ar."identityKey" IN (${Prisma.join(noOneKeys())}) THEN 'album:' || a.id ELSE a."artistId" END`;
+}
+
 /** artistSql for a song already read: its id, its album's artist id and that artist's identity key. */
 export function songArtistKey(trackId: string, albumArtistId: string, albumArtistIdentityKey: string): string {
     return noOneKeys().includes(albumArtistIdentityKey) ? `song:${trackId}` : albumArtistId;

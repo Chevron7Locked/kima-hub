@@ -491,12 +491,15 @@ describe("Random Discovery", () => {
         }
     });
 
-    it("takes at most 2 songs per artist from at most 5 albums, repeating no track", () => {
+    it("takes 20 songs, at most 2 per artist, from 10 albums by 10 different artists, repeating no track", () => {
         expect(mixes).toHaveLength(wide.length);
         for (const mix of mixes) {
-            expect(mix.trackIds.length).toBeGreaterThanOrEqual(8);
+            expect(mix.trackIds).toHaveLength(20);
             expect(new Set(mix.trackIds).size).toBe(mix.trackIds.length);
-            expect(new Set(mix.trackIds.map((id) => byId.get(id)!.album.id)).size).toBeLessThanOrEqual(5);
+            const albums = new Set(mix.trackIds.map((id) => byId.get(id)!.album.id));
+            expect(albums.size).toBeLessThanOrEqual(10);
+            const artistsOfAlbums = new Set(mix.trackIds.map((id) => byId.get(id)!.album.artistId));
+            expect(artistsOfAlbums.size).toBe(albums.size);
             const perArtist = new Map<string, number>();
             for (const id of mix.trackIds) {
                 const artist = byId.get(id)!.album.artistId;

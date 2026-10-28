@@ -2,7 +2,7 @@
  * The day's seeded draws made in the database (seededTrackIds, seededKeySql) against the same draws made in memory
  * (drawIds, seededOrder) on a real Postgres. Each mix that now draws in the database is checked against the draw its
  * old filter, read through Prisma, gives in memory, so the SQL filters are proven to pick the same songs. The library
- * has ten artists; the mixes with the per-artist cap (all but Rediscover) are checked against that draw capped at 2 per
+ * has twelve artists; the mixes with the per-artist cap (all but Rediscover) are checked against that draw capped at 2 per
  * artist, worked out here.
  */
 import { Prisma } from "@prisma/client";
@@ -31,7 +31,9 @@ const OTHER = `${PREFIX}other`;
 // A Monday, so Minor Key Mondays runs.
 const DAY = "2026-10-19";
 const KEYS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
-const ARTISTS = 10;
+const ARTISTS = 12;
+/** The decades this library offers a decade mix (worked out once from the fixture, checked against the rule below). */
+const PINNED_DECADES = [1980, 1990, 2000];
 const tid = (i: number) => `${PREFIX}trk_${String(i).padStart(4, "0")}`;
 const mine = Prisma.sql`t.id LIKE ${`${PREFIX}%`}`;
 
@@ -206,15 +208,21 @@ describe("each mix that draws in the database picks what its old filter picks in
         }
     });
 
-    it("Random Discovery: the songs of five of the albums with a song that is there", async () => {
+    it("Random Discovery: the songs of the day's first album by each of ten artists, at 2 per artist", async () => {
         const albums = await prisma.album.findMany({
             where: { location: "LIBRARY", tracks: { some: NOT_MISSING }, id: { startsWith: PREFIX } },
-            select: { id: true },
+            select: { id: true, artistId: true },
         });
-        const picked = drawIds(albums.map((a) => a.id), 5, seedOf(`random-${DAY}`));
+        const seen = new Set<string>();
+        const picked = seededOrder(albums, seedOf(`random-${DAY}`), (a) => a.id)
+            .filter((a) => !seen.has(a.artistId) && seen.add(a.artistId))
+            .slice(0, 10)
+            .map((a) => a.id);
+        expect(picked).toHaveLength(10);
         const songs = await idsWhere({ ...NOT_MISSING, albumId: { in: picked } });
         const mix = await generateRandomDiscoveryMix(USER, DAY);
         expect(mix?.trackIds).toEqual(await capped(seededOrder(songs, seedOf(`random-discovery-${DAY}`), (id) => id)));
+        expect(mix?.trackIds).toHaveLength(20);
     });
 
     it("Vocal Detox: the analysed instrumental songs", async () => {
@@ -242,15 +250,29 @@ describe("each mix that draws in the database picks what its old filter picks in
             const matching = await idsWhere({ ...NOT_MISSING, album: getEffectiveDecadeWhereClause(decade) });
             expect(mix!.trackIds).toEqual(await capped(drawIds(matching, matching.length, seedOf(mix!.id))));
         }
-        // The 1980s and 1990s are where the display and original years disagree on some albums. The 1970s hold songs by
-        // fewer than 4 artists, too few for a mix at 2 per artist, so they are never picked.
-        expect(decades).toEqual(new Set([1980, 1990, 2000, 2010]));
-        const seventies = await prisma.album.findMany({
-            where: { id: { startsWith: PREFIX }, location: "LIBRARY", tracks: { some: NOT_MISSING }, ...getEffectiveDecadeWhereClause(1970) },
-            select: { artistId: true },
+        // A decade is offered when it has 15 songs and its artists can fill 8 songs at 2 each; worked out here from every
+        // library song. Every decade picked is one of those, and the 40 days reach several.
+        const tracks = await prisma.track.findMany({
+            where: { ...NOT_MISSING, album: { location: "LIBRARY" } },
+            select: { album: { select: { artistId: true, displayYear: true, originalYear: true, year: true } } },
         });
-        expect(seventies.length).toBeGreaterThan(0);
-        expect(new Set(seventies.map((a) => a.artistId)).size).toBeLessThan(4);
+        const perDecade = new Map<number, Map<string, number>>();
+        for (const { album } of tracks) {
+            const year = album.displayYear ?? album.originalYear ?? album.year;
+            if (!year) continue;
+            const decade = Math.floor(year / 10) * 10;
+            const artists = perDecade.get(decade) ?? new Map<string, number>();
+            artists.set(album.artistId, (artists.get(album.artistId) ?? 0) + 1);
+            perDecade.set(decade, artists);
+        }
+        const reach = (decade: number) => [...(perDecade.get(decade)?.values() ?? [])].reduce((sum, n) => sum + Math.min(n, 2), 0);
+        const songs = (decade: number) => [...(perDecade.get(decade)?.values() ?? [])].reduce((sum, n) => sum + n, 0);
+        const offered = new Set([...perDecade.keys()].filter((d) => songs(d) >= 15 && reach(d) >= 8));
+        expect(decades).toEqual(offered);
+        // This library: the 1970s and 2010s songs are by too few artists for 8 at 2 each, and are never picked. The 1980s
+        // and 1990s are where the display and original years disagree on some albums.
+        expect(decades).toEqual(new Set(PINNED_DECADES));
+        for (const thin of [1970, 2010]) expect([thin, songs(thin) > 0, reach(thin) < 8]).toEqual([thin, true, true]);
     });
 
     it("Genre: the songs of the day's genre", async () => {

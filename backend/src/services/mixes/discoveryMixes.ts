@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { normalizeArtistName } from "../artistIdentity";
+import { MIN_MIX_TRACKS, albumArtistSql, capByArtist } from "./artistCap";
 import { getSimilarArtists } from "../artistSimilarity";
 import { LIBRARY_LOCATION } from "../libraryFilters";
 import { IN_LIBRARY, NOT_MISSING } from "../../utils/libraryEligibility";
@@ -10,7 +11,6 @@ import {
     albumCoverUrls,
     sampleMix,
     MIX_SONG_ALBUM,
-    cappedByArtist,
     getMixColor,
     getSeededRandom,
     seededKeySql,
@@ -222,19 +222,24 @@ export async function generateRandomDiscoveryMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    // The first ten, in the day's order, of the albums with a song that is there: none when fewer than ten exist, and
-    // the first five are the day's albums. Asking for ten, not counting them all, lets the database stop at ten.
+    // The day's albums: in the day's order, the first album by each artist (a compilation by no one is its own), ten of
+    // them, so the mix's 20 songs at 2 per artist come from ten artists. None when the library has fewer than ten.
+    const key = seededKeySql(getSeededRandom(`random-${today}`), Prisma.sql`a.id`);
     const drawn = await prisma.$queryRaw<{ id: string }[]>`
-        SELECT a.id
-        FROM "Album" a
-        WHERE a.location = 'LIBRARY'
-          AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t."missingSince" IS NULL)
-        ORDER BY ${seededKeySql(getSeededRandom(`random-${today}`), Prisma.sql`a.id`)}
+        SELECT id FROM (
+            SELECT a.id, ${key} AS k, row_number() OVER (PARTITION BY ${albumArtistSql()} ORDER BY ${key}) AS n
+            FROM "Album" a
+            JOIN "Artist" ar ON ar.id = a."artistId"
+            WHERE a.location = 'LIBRARY'
+              AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t."missingSince" IS NULL)
+        ) ranked
+        WHERE n = 1
+        ORDER BY k
         LIMIT 10
     `;
     if (drawn.length < 10) return null;
 
-    const albumIds = drawn.slice(0, 5).map((a) => a.id);
+    const albumIds = drawn.map((a) => a.id);
     const drawnAlbums = await prisma.album.findMany({
         where: { id: { in: albumIds } },
         include: {
@@ -247,12 +252,13 @@ export async function generateRandomDiscoveryMix(
     const randomAlbums = albumIds.flatMap((id) => drawnAlbums.filter((a) => a.id === id));
 
     const tracks = randomAlbums.flatMap((album) => album.tracks);
-    if (tracks.length < 5) return null;
 
-    const selectedTracks = cappedByArtist(
-        seededOrder(tracks, getSeededRandom(`random-discovery-${today}`), (t) => t.id),
-        TRACK_LIMIT
-    );
+    // 2 songs per album: each album is a different artist, and a compilation, whose songs are each their own artist,
+    // takes no more room than the others.
+    const ordered = seededOrder(tracks, getSeededRandom(`random-discovery-${today}`), (t) => t.id);
+    const byId = new Map(ordered.map((t) => [t.id, t]));
+    const selectedTracks = capByArtist(ordered.map((t) => ({ id: t.id, artistId: t.albumId })), TRACK_LIMIT).map((id) => byId.get(id)!);
+    if (selectedTracks.length < MIN_MIX_TRACKS) return null;
     const coverUrls = albumCoverUrls(selectedTracks);
 
     return {
