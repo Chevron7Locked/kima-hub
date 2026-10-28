@@ -66,7 +66,7 @@ type SimilarArtistSource = {
 
 // Flags each similar artist that is in the library (with its owned album count)
 // and gives it an image: the library's own, else whatever findArtistArtwork finds.
-async function resolveSimilarArtists(similar: SimilarArtistSource[]) {
+export async function resolveSimilarArtists(similar: SimilarArtistSource[]) {
   // normalizeArtistName writes normalizedName and folds accents and
   // ampersands, so lowercasing alone would miss "Sigur Rós" or "Hall & Oates".
   const similarNames = similar.map((s) => normalizeArtistName(s.name));
@@ -101,10 +101,7 @@ async function resolveSimilarArtists(similar: SimilarArtistSource[]) {
   });
 
   const libraryByName = new Map(
-    libraryMatches.map((a) => [
-      a.normalizedName?.toLowerCase() || a.name.toLowerCase(),
-      a,
-    ]),
+    libraryMatches.map((a) => [a.normalizedName || normalizeArtistName(a.name), a]),
   );
   const libraryByMbid = new Map(
     libraryMatches.filter((a) => a.mbid).map((a) => [a.mbid!, a]),
@@ -115,7 +112,7 @@ async function resolveSimilarArtists(similar: SimilarArtistSource[]) {
     similar.map((s) => imageLimit(async () => {
       const libraryArtist =
         (s.mbid && libraryByMbid.get(s.mbid)) ||
-        libraryByName.get(s.name.toLowerCase());
+        libraryByName.get(normalizeArtistName(s.name));
 
       let image = libraryArtist?.heroUrl || null;
       if (!image) {
