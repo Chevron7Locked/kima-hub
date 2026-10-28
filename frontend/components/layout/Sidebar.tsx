@@ -396,6 +396,7 @@ export function Sidebar() {
                             )}
                         >
                             <CoverArt
+                                key={mix.id}
                                 imageUrl={(mix.coverUrls ?? []).slice(0, 4).map((url) => api.getCoverArtUrl(url, 200))}
                                 title=""
                                 sizes="112px"

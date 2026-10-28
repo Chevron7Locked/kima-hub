@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { shuffleArray } from "../../utils/shuffle";
 import { IN_LIBRARY } from "../../utils/libraryEligibility";
+import { ARTIST_CAPS, MIN_MIX_TRACKS, artistSql, capByArtist, songArtistKey } from "./artistCap";
 
 export interface ProgrammaticMix {
     id: string;
@@ -117,14 +118,11 @@ export function randomSample<T>(array: T[], count: number): T[] {
 /** Tracks in a finished generated mix. */
 export const TRACK_LIMIT = 20;
 
-/** Up to four album covers, in track order, for a mix's cover mosaic. */
+/** Up to four different album covers, in track order, for a mix's cover mosaic. */
 export function albumCoverUrls(
     tracks: { album: { coverUrl: string | null } }[]
 ): string[] {
-    return tracks
-        .filter((t) => t.album.coverUrl)
-        .slice(0, 4)
-        .map((t) => t.album.coverUrl!);
+    return [...new Set(tracks.map((t) => t.album.coverUrl).filter((url): url is string => !!url))].slice(0, 4);
 }
 
 export function getSeededRandom(seed: string): number {
@@ -203,27 +201,22 @@ interface MixSpec {
     seed?: number;
 }
 
-/** A mix of `limit` randomly sampled tracks. */
-export function sampleMix(
-    spec: MixSpec,
-    tracks: { id: string; album: { coverUrl: string | null } }[],
-    limit: number
-): ProgrammaticMix {
-    const sample =
-        spec.seed === undefined
-            ? randomSample(tracks, limit)
-            : seededTake(tracks, spec.seed, (t) => t.id, limit);
+/** A song as a drawn mix reads it: its album's cover and the artist the per-artist cap counts. */
+export const MIX_SONG_ALBUM = { select: { coverUrl: true, artistId: true, artist: { select: { identityKey: true } } } } as const;
 
-    return {
-        id: spec.id,
-        type: spec.type,
-        name: spec.name,
-        description: spec.description,
-        trackIds: sample.map((t) => t.id),
-        coverUrls: albumCoverUrls(sample),
-        trackCount: sample.length,
-        color: getMixColor(spec.colorType),
-    };
+type MixSong = { id: string; album: { coverUrl: string | null; artistId: string; artist: { identityKey: string } } };
+
+/** Up to `limit` of `ordered`, in that order, at most 2 per artist (capByArtist). */
+export function cappedByArtist<T extends MixSong>(ordered: T[], limit: number): T[] {
+    const byId = new Map(ordered.map((t) => [t.id, t]));
+    const keyed = ordered.map((t) => ({ id: t.id, artistId: songArtistKey(t.id, t.album.artistId, t.album.artist.identityKey) }));
+    return capByArtist(keyed, limit).map((id) => byId.get(id)!);
+}
+
+/** A mix of up to `limit` randomly drawn tracks, at most 2 per artist. */
+export function sampleMix(spec: MixSpec, tracks: MixSong[], limit: number): ProgrammaticMix {
+    const ordered = spec.seed === undefined ? shuffleArray(tracks) : seededOrder(tracks, spec.seed, (t) => t.id);
+    return mixOf(spec, cappedByArtist(ordered, limit));
 }
 
 /** A draw of zero or a negative count would slice from the end and hand back most of the set. */
@@ -311,6 +304,33 @@ export async function seededTrackIds(where: Prisma.Sql, take: number, seed: numb
     return rows.map((r) => r.id);
 }
 
+/**
+ * seededTrackIds over every match, at most 2 per artist (capByArtist's ladder: 3 when 2 leaves fewer than
+ * MIN_MIX_TRACKS, or than `limit` if smaller, then no cap). Each artist's songs are numbered in the database in the
+ * day's order, so only the first three of each artist reach the server, however large the match.
+ */
+export async function seededCappedTrackIds(where: Prisma.Sql, limit: number, seed: number): Promise<string[]> {
+    assertTake(limit);
+    const key = seededKeySql(seed, Prisma.sql`t.id`);
+    const rows = await prisma.$queryRaw<{ id: string; n: number }[]>`
+        SELECT id, n FROM (
+            SELECT t.id, ${key} AS k, row_number() OVER (PARTITION BY ${artistSql()} ORDER BY ${key})::int AS n
+            FROM "Track" t
+            JOIN "Album" a ON a.id = t."albumId"
+            JOIN "Artist" ar ON ar.id = a."artistId"
+            WHERE t."missingSince" IS NULL AND a.location = 'LIBRARY' AND ${where}
+        ) ranked
+        WHERE n <= 3
+        ORDER BY k
+    `;
+    for (const cap of ARTIST_CAPS) {
+        if (cap === Infinity) break;
+        const picked = rows.filter((r) => r.n <= cap).slice(0, limit).map((r) => r.id);
+        if (picked.length >= Math.min(limit, MIN_MIX_TRACKS)) return picked;
+    }
+    return seededTrackIds(where, limit, seed);
+}
+
 /** The tracks of seededTrackIds, in the order drawn. */
 export async function seededTracks<I extends Prisma.TrackInclude>(args: {
     where: Prisma.Sql;
@@ -357,27 +377,40 @@ export async function sampleTracks<I extends Prisma.TrackInclude>(args: {
     return tracksByIds(await sampleTrackIds(args), args.include);
 }
 
-/** A mix drawn for the day from the tracks that match a filter (seededTrackIds), or null when too few do. */
+/**
+ * A mix drawn for the day from the tracks that match a filter, at most 2 per artist (seededCappedTrackIds), or null when
+ * fewer than `minTracks` match.
+ */
 export async function sampledMix(
     spec: MixSpec & {
         seed: number;
         where: Prisma.Sql;
-        /** How many matching tracks to draw before sampling. */
-        take: number;
-        /** Fewest drawn tracks that still make a mix. */
+        /** Fewest matching tracks that still make a mix. */
         minTracks: number;
         /** Tracks in the finished mix. */
         limit: number;
     }
 ): Promise<ProgrammaticMix | null> {
-    const tracks = await seededTracks({
-        where: spec.where,
-        include: { album: { select: { coverUrl: true } } },
-        take: spec.take,
-        seed: spec.seed,
-    });
+    const [{ matching }] = await prisma.$queryRaw<{ matching: number }[]>`
+        SELECT count(*)::int AS matching FROM (
+            SELECT 1 FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
+            WHERE t."missingSince" IS NULL AND a.location = 'LIBRARY' AND ${spec.where}
+            LIMIT ${spec.minTracks}
+        ) enough`;
+    if (matching < spec.minTracks) return null;
+    return mixOf(spec, await tracksByIds(await seededCappedTrackIds(spec.where, spec.limit, spec.seed), { album: MIX_SONG_ALBUM }));
+}
 
-    if (tracks.length < spec.minTracks) return null;
-
-    return sampleMix(spec, tracks, spec.limit);
+/** A mix of `tracks`, in that order. */
+function mixOf(spec: MixSpec, tracks: { id: string; album: { coverUrl: string | null } }[]): ProgrammaticMix {
+    return {
+        id: spec.id,
+        type: spec.type,
+        name: spec.name,
+        description: spec.description,
+        trackIds: tracks.map((t) => t.id),
+        coverUrls: albumCoverUrls(tracks),
+        trackCount: tracks.length,
+        color: getMixColor(spec.colorType),
+    };
 }

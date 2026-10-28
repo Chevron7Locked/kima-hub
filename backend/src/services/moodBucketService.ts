@@ -9,7 +9,7 @@
 import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
-import { getMixColor, tracksByIds } from "./mixes/helpers";
+import { albumCoverUrls, getMixColor, tracksByIds } from "./mixes/helpers";
 import { RECIPE_LINE, UnrankableLibraryError, getRecipe, pageMemberCount, pickPageTracks } from "./mixes/recipes";
 import { MOOD_HEADS, type Mood } from "./moods/heads";
 import { MOOD_STATE_VERSION, loadMoodState, type MoodStats } from "./moods/state";
@@ -338,10 +338,7 @@ class MoodBucketService {
             return null;
         }
         const orderedTracks = await tracksByIds(drawn, { album: { select: { coverUrl: true } } });
-        const coverUrls = orderedTracks
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
+        const coverUrls = albumCoverUrls(orderedTracks);
 
         const timestamp = Date.now();
         return {
@@ -394,10 +391,7 @@ class MoodBucketService {
                 .map((id) => tracks.find((t) => t.id === id))
                 .filter(Boolean);
 
-            const coverUrls = orderedTracks
-                .filter((t) => t?.album.coverUrl)
-                .slice(0, 4)
-                .map((t) => t!.album.coverUrl!);
+            const coverUrls = albumCoverUrls(orderedTracks.map((t) => t!));
 
             const persistedTrackIds = orderedTracks.map((t) => t!.id);
 

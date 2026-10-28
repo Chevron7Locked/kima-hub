@@ -106,6 +106,9 @@ describe("getMoodMix draws from the mood page's recipe (database)", () => {
         // A thin mix would be worse than repeating: the draw falls back to every member rather than returning null.
         expect(mix).not.toBeNull();
         expect(mix!.trackIds).toHaveLength(15);
+        // Each album's cover once.
+        expect(mix!.coverUrls.length).toBeGreaterThan(0);
+        expect(new Set(mix!.coverUrls).size).toBe(mix!.coverUrls.length);
     });
 
     it("shows each preset's count as the songs its page plays", async () => {

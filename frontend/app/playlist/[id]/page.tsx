@@ -50,6 +50,7 @@ import { useDoubleTapList } from "@/hooks/useDoubleTap";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Button } from "@/components/ui/Button";
 import { CachedImage } from "@/components/ui/CachedImage";
+import { CoverArt } from "@/components/cards/MediaCard";
 import { PageMessage } from "@/components/ui/PageMessage";
 import { copyText } from "@/lib/clipboard";
 import { openActivityPanel } from "@/hooks/useActivityPanel";
@@ -855,37 +856,14 @@ export default function PlaylistDetailPage() {
                         </div>
 
                         <div className="flex items-end gap-6">
-                            <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[var(--bg-primary)] rounded-lg shrink-0 overflow-hidden relative border-2 border-white/10">
-                                {coverUrls.length === 1 ? (
-                                    <CachedImage
-                                        src={api.getCoverArtUrl(coverUrls[0], 400)}
-                                        alt=""
-                                        fill
-                                        className="object-cover"
-                                        sizes="192px"
-                                    />
-                                ) : coverUrls.length > 1 ? (
-                                    <div className="grid grid-cols-2 gap-0 w-full h-full">
-                                        {coverUrls.map((url, index) => {
-                                            const proxiedUrl = api.getCoverArtUrl(url, 200);
-                                            return (
-                                                <div key={index} className="relative bg-[var(--bg-primary)]">
-                                                    <CachedImage
-                                                        src={proxiedUrl}
-                                                        alt=""
-                                                        fill
-                                                        className="object-cover"
-                                                        sizes="96px"
-                                                    />
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                ) : (
-                                    <div className="w-full h-full flex items-center justify-center">
-                                        <ListMusic className="w-16 h-16 text-white/10" />
-                                    </div>
-                                )}
+                            <div className="relative flex items-center justify-center w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[var(--bg-primary)] rounded-lg shrink-0 overflow-hidden border-2 border-white/10">
+                                <CoverArt
+                                    key={playlistId}
+                                    imageUrl={coverUrls.map((url) => api.getCoverArtUrl(url, 300))}
+                                    title=""
+                                    sizes="192px"
+                                    FallbackIcon={ListMusic}
+                                />
                             </div>
 
                             <div className="flex-1 min-w-0 pb-1">

@@ -9,7 +9,6 @@ import {
     getMixColor,
     sampledMix,
     seededTracks,
-    sampleMix,
     getSeededRandom,
     seededOrder,
 } from "./helpers";
@@ -165,57 +164,23 @@ export async function generateDeepCuts(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    const seed = getSeededRandom(`deep-cuts-${today}`);
-    const tracks = await seededTracks({
-        where: Prisma.sql`NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id)`,
-        include: {
-            album: {
-                select: {
-                    coverUrl: true,
-                    artist: { select: { id: true } },
-                },
-            },
-        },
-        take: 200,
-        seed,
-    });
-
-    if (tracks.length < 15) {
-        // Songs played three times or fewer: every song but those played more, in one hashed list.
-        const filtered = await seededTracks({
+    const spec = {
+        id: `deep-cuts-${today}`,
+        type: "deep-cuts",
+        name: "Deep Cuts",
+        description: "Hidden gems waiting to be discovered",
+        colorType: "rediscover",
+        seed: getSeededRandom(`deep-cuts-${today}`),
+        minTracks: 15,
+        limit: WEEKLY_TRACK_LIMIT,
+    };
+    // Songs nobody has played; when fewer than 15 are, songs played three times or fewer.
+    return (
+        (await sampledMix({ ...spec, where: Prisma.sql`NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id)` })) ??
+        sampledMix({
+            ...spec,
             where: Prisma.sql`t.id NOT IN (SELECT p."trackId" FROM "Play" p GROUP BY p."trackId" HAVING count(*) > 3)`,
-            include: { album: { select: { coverUrl: true } } },
-            take: 200,
-            seed,
-        });
-
-        if (filtered.length < 15) return null;
-
-        return sampleMix(
-            {
-                id: `deep-cuts-${today}`,
-                type: "deep-cuts",
-                name: "Deep Cuts",
-                description: "Hidden gems waiting to be discovered",
-                colorType: "rediscover",
-                seed,
-            },
-            filtered,
-            WEEKLY_TRACK_LIMIT
-        );
-    }
-
-    return sampleMix(
-        {
-            id: `deep-cuts-${today}`,
-            type: "deep-cuts",
-            name: "Deep Cuts",
-            description: "Hidden gems waiting to be discovered",
-            colorType: "rediscover",
-            seed,
-        },
-        tracks,
-        WEEKLY_TRACK_LIMIT
+        })
     );
 }
 
@@ -344,7 +309,6 @@ export async function generateVocalDetox(
         name: "Vocal Detox",
         description: "Pure instrumental escape",
         colorType: "instrumental",
-        take: 100,
         minTracks: 15,
         limit: WEEKLY_TRACK_LIMIT,
         seed: getSeededRandom(`vocal-detox-${today}`),
@@ -373,7 +337,6 @@ export async function generateMinorKeyMix(
         name: "Minor Key Mondays",
         description: "All minor key bangers",
         colorType: "melancholy",
-        take: 100,
         minTracks: 15,
         limit: WEEKLY_TRACK_LIMIT,
         seed: getSeededRandom(`minor-key-${today}`),

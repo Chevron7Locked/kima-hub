@@ -11,11 +11,12 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { stationPage, type StationPage, type StationRequest, type StationSong } from "./stationOrder";
-import { UNKNOWN_ARTIST, VARIOUS_ARTISTS_CANONICAL } from "../../utils/artistNormalization";
-import { artistIdentityKey } from "../artistIdentity";
 import { LIVE_MOODS, MOOD_HEADS, type Mood } from "../moods/heads";
 import { READING_SQL, loadMoodState, type MoodState, type MoodStats, type Reading } from "../moods/state";
 import { TRACK_LIMIT } from "./helpers";
+import { MIN_MIX_TRACKS, artistSql, capByArtist } from "./artistCap";
+
+export { MIN_MIX_TRACKS, artistSql, capByArtist, songArtistKey } from "./artistCap";
 import { familiarBoost, type FamiliarBoost } from "./familiarity";
 import recipeFile from "./recipes.json";
 import { DEFINITIONS, NEUTRAL_PACE, PACE_BAND, type DefinitionPart, type MoodDefinition } from "./moodDefinitions";
@@ -24,10 +25,6 @@ export type { StationPage, StationRequest };
 
 /** A song is a member at this many library standard deviations above the average recipe score. */
 export const RECIPE_LINE = 1.25;
-/** Fewest songs a mix ships with; a recipe with fewer members has no mix. */
-export const MIN_MIX_TRACKS = 8;
-/** Songs per artist in a mix; each next cap is used only while the one before leaves fewer than MIN_MIX_TRACKS. */
-const ARTIST_CAPS = [2, 3, Infinity];
 /** A tempo counts toward a BPM band only on a steady beat: the tempo extractor's confidence at least this. */
 export const STEADY_BEAT = 2;
 
@@ -220,30 +217,6 @@ export const SCORED_SONGS = Prisma.sql`
     WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model}
       AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY') AND t.corrupt = false AND t."analysisStatus" = 'completed'
 `;
-
-/**
- * The identity keys of the album artist rows that name no one (artistSql). Worked out on each call, not at load, as
- * before: tests that mock artistIdentity with only artistSortName still load this module.
- */
-function noOneKeys(): string[] {
-    return [artistIdentityKey(VARIOUS_ARTISTS_CANONICAL), artistIdentityKey(UNKNOWN_ARTIST)];
-}
-
-/**
- * The artist a song counts toward for the per-artist cap and the one-title-per-artist rule: its album's artist, except
- * on the album artist rows that name no one, Various Artists (every spelling of it is filed under one row) and the
- * Unknown Artist the scanner falls back to, where each song counts as its own artist. So a compilation can fill a mix
- * past the cap, and two songs with one title by different performers both stay. An artist actually named "Unknown
- * Artist" shares that row and is treated the same. A stopgap until each song carries its own artist.
- */
-export function artistSql(): Prisma.Sql {
-    return Prisma.sql`CASE WHEN ar."identityKey" IN (${Prisma.join(noOneKeys())}) THEN 'song:' || t.id ELSE a."artistId" END`;
-}
-
-/** artistSql for a song already read: its id, its album's artist id and that artist's identity key. */
-export function songArtistKey(trackId: string, albumArtistId: string, albumArtistIdentityKey: string): string {
-    return noOneKeys().includes(albumArtistIdentityKey) ? `song:${trackId}` : albumArtistId;
-}
 
 // ---- mood definitions (moodDefinitions.ts) ---------------------------------------------------------------------
 
@@ -584,28 +557,6 @@ export function seededOrder<T extends Member>(members: T[], seed: string): T[] {
         }))
         .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
         .map(({ member }) => member);
-}
-
-/**
- * The first `limit` of `ordered`, in that order, with drawMembers's artist cap: at most 2 per artist; while that
- * leaves fewer than MIN_MIX_TRACKS (or than `limit`, if smaller), 3, then no cap.
- */
-export function capByArtist(ordered: Member[], limit: number): string[] {
-    let picked: string[] = [];
-    for (const cap of ARTIST_CAPS) {
-        const perArtist = new Map<string, number>();
-        picked = [];
-        for (const { id, artistId } of ordered) {
-            if (picked.length === limit) break;
-            const count = perArtist.get(artistId) ?? 0;
-            if (count >= cap) continue;
-            perArtist.set(artistId, count + 1);
-            picked.push(id);
-        }
-        // A draw asked for fewer than MIN_MIX_TRACKS (a short mood page) keeps its cap once it has them all.
-        if (picked.length >= Math.min(limit, MIN_MIX_TRACKS)) break;
-    }
-    return picked;
 }
 
 export interface RecipeMix {

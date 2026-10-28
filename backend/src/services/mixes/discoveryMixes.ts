@@ -9,6 +9,8 @@ import {
     ProgrammaticMix,
     albumCoverUrls,
     sampleMix,
+    MIX_SONG_ALBUM,
+    cappedByArtist,
     getMixColor,
     getSeededRandom,
     seededKeySql,
@@ -173,9 +175,7 @@ export async function generateArtistSimilarMix(
                     include: {
                         tracks: {
                             where: NOT_MISSING,
-                            include: {
-                                album: { select: { coverUrl: true } },
-                            },
+                            include: { album: MIX_SONG_ALBUM },
                         },
                     },
                 },
@@ -240,9 +240,7 @@ export async function generateRandomDiscoveryMix(
         include: {
             tracks: {
                 where: NOT_MISSING,
-                include: {
-                    album: { select: { coverUrl: true } },
-                },
+                include: { album: MIX_SONG_ALBUM },
             },
         },
     });
@@ -251,14 +249,11 @@ export async function generateRandomDiscoveryMix(
     const tracks = randomAlbums.flatMap((album) => album.tracks);
     if (tracks.length < 5) return null;
 
-    const selectedTracks = seededOrder(tracks, getSeededRandom(`random-discovery-${today}`), (t) => t.id).slice(
-        0,
+    const selectedTracks = cappedByArtist(
+        seededOrder(tracks, getSeededRandom(`random-discovery-${today}`), (t) => t.id),
         TRACK_LIMIT
     );
-    const coverUrls = randomAlbums
-        .filter((a) => a.coverUrl)
-        .slice(0, 4)
-        .map((a) => a.coverUrl!);
+    const coverUrls = albumCoverUrls(selectedTracks);
 
     return {
         id: `random-discovery-${today}`,

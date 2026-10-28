@@ -313,6 +313,7 @@ export interface Row {
         year: number | null;
         originalYear: number | null;
         location: string;
+        coverUrl: string | null;
         artist: { id: string; name: string; normalizedName: string; genres: unknown; userGenres: unknown };
     };
     /** Names from the Genre/TrackGenre tables. */
@@ -359,6 +360,7 @@ export async function loadRows(prefix: string, user1: string): Promise<Row[]> {
             year: t.album.year,
             originalYear: t.album.originalYear,
             location: t.album.location,
+            coverUrl: t.album.coverUrl,
             artist: t.album.artist,
         },
         genreNames: t.trackGenres.map((g) => g.genre.name),

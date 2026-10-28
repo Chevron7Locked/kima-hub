@@ -53,8 +53,9 @@ function stop(handler: () => void) {
 }
 
 /**
- * A card's artwork: one cover, or for a list of covers (a mix, a playlist) a 2x2 mosaic. The sidebar's mix tiles draw
- * the same one, so a mix looks the same wherever it is.
+ * A card's artwork: one cover, or for a list of covers (a mix, a playlist) each different cover once, the tile fitted
+ * to how many there are: two side by side, three as one tall and two small, four in a 2x2 grid. The sidebar's mix
+ * tiles and the mix and playlist pages draw the same one, so a mix looks the same wherever it is.
  */
 export function CoverArt({
     imageUrl,
@@ -67,37 +68,53 @@ export function CoverArt({
     sizes: string;
     FallbackIcon: LucideIcon;
 }) {
-    const [broken, setBroken] = useState(false);
-    const urls = (Array.isArray(imageUrl) ? imageUrl : [imageUrl]).filter(
-        (url): url is string => !!url,
-    );
+    // A cover that fails to load drops out and the tile refits; with none left, the icon. Remembered by address, so
+    // another mix's covers start fresh.
+    const [failed, setFailed] = useState<ReadonlySet<string>>(new Set());
+    const fail = (url: string) => setFailed((prev) => new Set(prev).add(url));
+    const urls = [
+        ...new Set((Array.isArray(imageUrl) ? imageUrl : [imageUrl]).filter((url): url is string => !!url)),
+    ]
+        .filter((url) => !failed.has(url))
+        .slice(0, 4);
 
-    if (urls.length === 0 || broken) {
+    if (urls.length === 0) {
         return <FallbackIcon className="w-10 h-10 text-[var(--text-muted)]" />;
     }
 
     if (urls.length === 1) {
         return (
             <CachedImage
+                key={urls[0]}
                 src={urls[0]}
                 alt={title}
                 fill
                 sizes={sizes}
                 className="object-cover cover-zoom"
-                onError={() => setBroken(true)}
+                onError={() => fail(urls[0])}
             />
         );
     }
 
     return (
-        <div className="grid grid-cols-2 w-full h-full cover-zoom">
-            {Array.from({ length: 4 }, (_, i) => (
-                <div key={i} className="relative flex items-center justify-center">
-                    {urls[i] ? (
-                        <CachedImage src={urls[i]} alt="" fill sizes="100px" className="object-cover" />
-                    ) : (
-                        <FallbackIcon className="w-6 h-6 text-[var(--text-muted)]" />
-                    )}
+        <div
+            data-cover-count={urls.length}
+            className={cn("grid grid-cols-2 w-full h-full cover-zoom", urls.length > 2 && "grid-rows-2")}
+        >
+            {urls.map((url, i) => (
+                <div
+                    key={url}
+                    data-cover-cell
+                    className={cn("relative bg-[#181818]", urls.length === 3 && i === 0 && "row-span-2")}
+                >
+                    <CachedImage
+                        src={url}
+                        alt=""
+                        fill
+                        sizes={urls.length === 2 || (urls.length === 3 && i === 0) ? sizes : "100px"}
+                        className="object-cover"
+                        onError={() => fail(url)}
+                    />
                 </div>
             ))}
         </div>

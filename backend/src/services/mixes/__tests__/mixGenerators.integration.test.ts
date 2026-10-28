@@ -131,9 +131,22 @@ interface Case {
      * and judge the spread over the mixes that picked what the first one did.
      */
     spread?: "dates" | "repeat" | "grouped";
+    /** At most 2 songs per artist (mixes/artistCap.ts), as the mood mixes; Your Top 20 and Rediscover have no cap. */
+    capped?: boolean;
 }
 
 const year = (r: Row) => r.album.originalYear ?? r.album.year;
+
+/** How many of `match` a capped mix of `limit` holds (mixes/artistCap.ts capByArtist), worked out independently. */
+function cappedSize(match: Row[], limit: number): number {
+    const perArtist = new Map<string, number>();
+    for (const r of match) perArtist.set(r.album.artistId, (perArtist.get(r.album.artistId) ?? 0) + 1);
+    for (const cap of [2, 3, Infinity]) {
+        const held = Math.min(limit, [...perArtist.values()].reduce((sum, n) => sum + Math.min(n, cap), 0));
+        if (held >= Math.min(limit, 8)) return held;
+    }
+    return Math.min(limit, match.length);
+}
 
 const cases: Case[] = [
     // ---- weekly mixes (20 tracks) ----
@@ -149,19 +162,19 @@ const cases: Case[] = [
       clause: (r) => done(r) && r.keyScale === "minor" && ge(r.arousal, medianArousal()) },
 
     // ---- genre mixes ----
-    { name: "Era (decade)", size: 20, seeded: true, spread: "grouped", run: (d) => genre.generateEraMix(lib.user1, d),
+    { name: "Era (decade)", size: 20, seeded: true, spread: "grouped", capped: true, run: (d) => genre.generateEraMix(lib.user1, d),
       clause: (r, mix) => {
           const decade = Number(/^era-(\d+)-/.exec(mix.id)![1]);
           const y = year(r);
           return y !== null && y >= decade && y < decade + 10;
       } },
-    { name: "Genre", size: 20, seeded: true, spread: "grouped", run: (d) => genre.generateGenreMix(lib.user1, d),
+    { name: "Genre", size: 20, seeded: true, spread: "grouped", capped: true, run: (d) => genre.generateGenreMix(lib.user1, d),
       clause: (r, mix) => r.genreIds.includes(/^genre-(.+)-\d{4}-\d{2}-\d{2}$/.exec(mix.id)![1]) },
 
     // ---- discovery mixes ----
     { name: "Rediscover", size: 20, seeded: true, run: (d) => discovery.generateRediscoverMix(lib.user1, d),
       clause: (r) => r.album.location === "LIBRARY" && r.playsUser1 <= 2 },
-    { name: "Artist Similar", size: 20, seeded: false, spread: "repeat", run: () => discovery.generateArtistSimilarMix(lib.user1),
+    { name: "Artist Similar", size: 20, seeded: false, spread: "repeat", capped: true, run: () => discovery.generateArtistSimilarMix(lib.user1),
       clause: (r) => SIMILAR.includes(r.album.artist.normalizedName) },
 ];
 
@@ -202,8 +215,10 @@ describe.each(cases)("$name", (c) => {
     it("returns a mix of the documented size, or every match when fewer, with no repeated track", () => {
         expect(mixes).toHaveLength(callDates.length);
         for (const mix of mixes) {
-            // A decade the date picks can hold fewer songs than a mix (the 1950s, from a few albums' original years).
-            const size = Math.min(c.size, rows.filter((r) => !r.missingSince && c.clause(r, mix)).length);
+            // A decade the date picks can hold fewer songs than a mix (the 1950s, from a few albums' original years); a
+            // capped mix holds at most 2 per artist, rising to 3 and then no cap only while that leaves fewer than 8.
+            const match = rows.filter((r) => !r.missingSince && c.clause(r, mix));
+            const size = c.capped ? cappedSize(match, c.size) : Math.min(c.size, match.length);
             expect(mix.trackIds).toHaveLength(size);
             expect(new Set(mix.trackIds).size).toBe(size);
             expect(mix.trackCount).toBe(size);
@@ -221,6 +236,28 @@ describe.each(cases)("$name", (c) => {
         const missing = mixes.flatMap((mix) => mix.trackIds.filter((id) => byId.get(id)!.missingSince !== null));
         expect(missing).toEqual([]);
     });
+
+    it("shows each album cover once, the covers of its songs' albums", () => {
+        for (const mix of mixes) {
+            expect(new Set(mix.coverUrls).size).toBe(mix.coverUrls.length);
+            const songCovers = new Set(mix.trackIds.map((id) => byId.get(id)!.album.coverUrl).filter(Boolean));
+            expect(mix.coverUrls.length).toBe(Math.min(4, songCovers.size));
+            for (const url of mix.coverUrls) expect(songCovers.has(url)).toBe(true);
+        }
+    });
+
+    if (c.capped) {
+        it("takes at most 2 songs from one artist", () => {
+            for (const mix of mixes) {
+                const perArtist = new Map<string, number>();
+                for (const id of mix.trackIds) {
+                    const artist = byId.get(id)!.album.artistId;
+                    perArtist.set(artist, (perArtist.get(artist) ?? 0) + 1);
+                }
+                expect(Math.max(...perArtist.values())).toBeLessThanOrEqual(2);
+            }
+        });
+    }
 
     it("draws from the whole match, not the first rows", () => {
         const match = matching();
@@ -454,12 +491,19 @@ describe("Random Discovery", () => {
         }
     });
 
-    it("returns 20 tracks from at most 5 albums, repeating no track", () => {
+    it("takes at most 2 songs per artist from at most 5 albums, repeating no track", () => {
         expect(mixes).toHaveLength(wide.length);
         for (const mix of mixes) {
-            expect(mix.trackIds).toHaveLength(20);
-            expect(new Set(mix.trackIds).size).toBe(20);
+            expect(mix.trackIds.length).toBeGreaterThanOrEqual(8);
+            expect(new Set(mix.trackIds).size).toBe(mix.trackIds.length);
             expect(new Set(mix.trackIds.map((id) => byId.get(id)!.album.id)).size).toBeLessThanOrEqual(5);
+            const perArtist = new Map<string, number>();
+            for (const id of mix.trackIds) {
+                const artist = byId.get(id)!.album.artistId;
+                perArtist.set(artist, (perArtist.get(artist) ?? 0) + 1);
+            }
+            expect(Math.max(...perArtist.values())).toBeLessThanOrEqual(2);
+            expect(new Set(mix.coverUrls).size).toBe(mix.coverUrls.length);
         }
     });
 
@@ -577,6 +621,17 @@ describe("a day's draw when one song leaves the candidates", () => {
 });
 
 describe("Era mix", () => {
+    it("never picks a decade that one artist holds, however many songs it has", async () => {
+        const artist = rows[0].album.artistId;
+        await prisma.album.updateMany({ where: { id: { startsWith: PREFIX }, artistId: artist }, data: { displayYear: 1705 } });
+        try {
+            expect(rows.filter((r) => r.album.artistId === artist && !r.missingSince).length).toBeGreaterThanOrEqual(15);
+            for (const d of dates) expect((await genre.generateEraMix(lib.user1, d))!.id).not.toMatch(/^era-1700-/);
+        } finally {
+            await prisma.album.updateMany({ where: { id: { startsWith: PREFIX }, artistId: artist }, data: { displayYear: null } });
+        }
+    });
+
     it("picks different decades on different dates", async () => {
         const ids = new Set<string>();
         for (const d of dates) ids.add((await genre.generateEraMix(lib.user1, d))!.id.replace(/-\d{4}-\d{2}-\d{2}$/, ""));

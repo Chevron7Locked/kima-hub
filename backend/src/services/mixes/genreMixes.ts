@@ -1,32 +1,43 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import { getEffectiveYear, getDecadeFromYear } from "../../utils/dateFilters";
 import { IN_LIBRARY, NOT_MISSING } from "../../utils/libraryEligibility";
 import { ProgrammaticMix, sampledMix, getSeededRandom, seededOrder, TRACK_LIMIT } from "./helpers";
 import { recipeMixGenerator } from "./recipeMix";
+import { MIN_MIX_TRACKS, artistSql } from "./artistCap";
 
 const ERA_MIN_TRACKS = 15;
+
+/**
+ * The decades with enough library songs (ERA_MIN_TRACKS) for a mix, whose artists can fill MIN_MIX_TRACKS at 2 songs
+ * each: picking one with too few gave no mix that day, or one artist's songs. A decade is the album's display year, then
+ * original year, then year (getEffectiveYear), and artists are counted as the cap counts them (artistSql).
+ */
+export async function mixableDecades(): Promise<number[]> {
+    const reach = await prisma.$queryRaw<{ decade: number; songs: number; capped: number }[]>`
+        SELECT decade, sum(n)::int AS songs, sum(least(n, 2))::int AS capped
+        FROM (
+            SELECT (floor(COALESCE(a."displayYear", a."originalYear", a.year) / 10.0) * 10)::int AS decade,
+                   ${artistSql()} AS artist, count(*) AS n
+            FROM "Track" t
+            JOIN "Album" a ON a.id = t."albumId"
+            JOIN "Artist" ar ON ar.id = a."artistId"
+            WHERE t."missingSince" IS NULL AND a.location = 'LIBRARY'
+              AND COALESCE(a."displayYear", a."originalYear", a.year) IS NOT NULL
+              AND COALESCE(a."displayYear", a."originalYear", a.year) <> 0
+            GROUP BY 1, 2
+        ) per_artist
+        GROUP BY decade`;
+    return reach
+        .filter((d) => d.songs >= ERA_MIN_TRACKS && d.capped >= MIN_MIX_TRACKS)
+        .map((d) => d.decade);
+}
 
 export async function generateEraMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    // The decades with enough library songs for a mix (ERA_MIN_TRACKS): picking one with too few gave no mix that day.
-    const albums = await prisma.album.findMany({
-        where: { location: "LIBRARY", tracks: { some: NOT_MISSING } },
-        select: { year: true, originalYear: true, displayYear: true, _count: { select: { tracks: { where: NOT_MISSING } } } },
-    });
-    const songsIn = new Map<number, number>();
-    for (const album of albums) {
-        const effectiveYear = getEffectiveYear(album);
-        if (effectiveYear) {
-            const decade = getDecadeFromYear(effectiveYear);
-            songsIn.set(decade, (songsIn.get(decade) ?? 0) + album._count.tracks);
-        }
-    }
-    const decades = [...songsIn].filter(([, songs]) => songs >= ERA_MIN_TRACKS).map(([decade]) => decade);
-
+    const decades = await mixableDecades();
     if (decades.length === 0) return null;
 
     // Ranked by the day's seed, so a decade appearing or leaving changes the pick only if it is the one picked.
@@ -38,7 +49,6 @@ export async function generateEraMix(
         name: `Your ${selectedDecade}s Mix`,
         description: `Random picks from the ${selectedDecade}s`,
         colorType: "era",
-        take: 100,
         minTracks: ERA_MIN_TRACKS,
         limit: TRACK_LIMIT,
         seed: getSeededRandom(`era-${selectedDecade}-${today}`),
@@ -48,10 +58,11 @@ export async function generateEraMix(
     });
 }
 
-export async function generateGenreMix(
-    _userId: string,
-    today: string
-): Promise<ProgrammaticMix | null> {
+/**
+ * Of the 20 genres with the most library songs, those with at least 5, whose artists can fill MIN_MIX_TRACKS at 2 songs
+ * each (counted as the cap counts them, artistSql), so a genre's mix is not one artist's songs.
+ */
+export async function mixableGenres(): Promise<{ id: string; name: string }[]> {
     const genres = await prisma.genre.findMany({
         include: {
             _count: { select: { trackGenres: { where: { track: { ...NOT_MISSING, ...IN_LIBRARY } } } } },
@@ -63,7 +74,30 @@ export async function generateGenreMix(
     });
 
     logger.debug(`[GENRE MIX] Found ${genres.length} genres total`);
-    const validGenres = genres.filter((g) => g._count.trackGenres >= 5);
+    const reach = genres.length
+        ? await prisma.$queryRaw<{ genreId: string; capped: number }[]>`
+              SELECT "genreId", sum(least(n, 2))::int AS capped
+              FROM (
+                  SELECT tg."genreId", ${artistSql()} AS artist, count(*) AS n
+                  FROM "TrackGenre" tg
+                  JOIN "Track" t ON t.id = tg."trackId"
+                  JOIN "Album" a ON a.id = t."albumId"
+                  JOIN "Artist" ar ON ar.id = a."artistId"
+                  WHERE tg."genreId" IN (${Prisma.join(genres.map((g) => g.id))})
+                    AND a.location = 'LIBRARY' AND t."missingSince" IS NULL
+                  GROUP BY 1, 2
+              ) per_artist
+              GROUP BY "genreId"`
+        : [];
+    const cappedIn = new Map(reach.map((r) => [r.genreId, r.capped]));
+    return genres.filter((g) => g._count.trackGenres >= 5 && (cappedIn.get(g.id) ?? 0) >= MIN_MIX_TRACKS);
+}
+
+export async function generateGenreMix(
+    _userId: string,
+    today: string
+): Promise<ProgrammaticMix | null> {
+    const validGenres = await mixableGenres();
     logger.debug(
         `[GENRE MIX] ${validGenres.length} genres have >= 5 tracks`
     );
@@ -80,7 +114,6 @@ export async function generateGenreMix(
         name: `Your ${selectedGenre.name} Mix`,
         description: `Random ${selectedGenre.name} picks`,
         colorType: "genre",
-        take: 100,
         minTracks: 5,
         limit: TRACK_LIMIT,
         seed: getSeededRandom(`genre-${selectedGenre.id}-${today}`),

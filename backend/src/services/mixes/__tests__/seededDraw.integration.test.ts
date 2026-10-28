@@ -1,7 +1,9 @@
 /**
  * The day's seeded draws made in the database (seededTrackIds, seededKeySql) against the same draws made in memory
  * (drawIds, seededOrder) on a real Postgres. Each mix that now draws in the database is checked against the draw its
- * old filter, read through Prisma, gives in memory, so the SQL filters are proven to pick the same songs.
+ * old filter, read through Prisma, gives in memory, so the SQL filters are proven to pick the same songs. The library
+ * has ten artists; the mixes with the per-artist cap (all but Rediscover) are checked against that draw capped at 2 per
+ * artist, worked out here.
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../../utils/db";
@@ -29,6 +31,7 @@ const OTHER = `${PREFIX}other`;
 // A Monday, so Minor Key Mondays runs.
 const DAY = "2026-10-19";
 const KEYS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+const ARTISTS = 10;
 const tid = (i: number) => `${PREFIX}trk_${String(i).padStart(4, "0")}`;
 const mine = Prisma.sql`t.id LIKE ${`${PREFIX}%`}`;
 
@@ -52,10 +55,12 @@ async function cleanup() {
 beforeAll(async () => {
     await cleanup();
     await prisma.user.createMany({ data: [USER, OTHER].map((id) => ({ id, username: id, passwordHash: "x" })) });
-    await prisma.artist.create({ data: { id: `${PREFIX}art`, name: "Seed Artist", identityKey: `${PREFIX}ak` } });
+    await prisma.artist.createMany({
+        data: Array.from({ length: ARTISTS }, (_, a) => ({ id: `${PREFIX}art_${a}`, name: `Seed Artist ${a}`, identityKey: `${PREFIX}ak_${a}` })),
+    });
     await prisma.album.createMany({
         data: Array.from({ length: ALBUMS }, (_, b) => ({
-            id: `${PREFIX}alb_${b}`, rgMbid: `${PREFIX}rg_${b}`, artistId: `${PREFIX}art`, identityKey: `${PREFIX}ik_${b}`,
+            id: `${PREFIX}alb_${b}`, rgMbid: `${PREFIX}rg_${b}`, artistId: `${PREFIX}art_${b % ARTISTS}`, identityKey: `${PREFIX}ik_${b}`,
             title: `Seed Album ${b}`, primaryType: "Album",
             // Every combination of the three years the effective year reads, across decades.
             displayYear: b % 4 === 0 ? 1980 + (b % 3) * 10 : null,
@@ -111,6 +116,28 @@ async function idsWhere(where: Prisma.TrackWhereInput): Promise<string[]> {
     return rows.map((r) => r.id);
 }
 
+/**
+ * The first `limit` of `ordered` at most 2 per album artist; while that leaves fewer than 8, 3, then no cap: the mixes'
+ * cap (mixes/artistCap.ts), written out here.
+ */
+async function capped(ordered: string[], limit = 20): Promise<string[]> {
+    const rows = await prisma.track.findMany({ where: { id: { in: ordered } }, select: { id: true, album: { select: { artistId: true } } } });
+    const artistOf = new Map(rows.map((r) => [r.id, r.album.artistId]));
+    for (const cap of [2, 3, Infinity]) {
+        const taken = new Map<string, number>();
+        const picked: string[] = [];
+        for (const id of ordered) {
+            if (picked.length === limit) break;
+            const n = taken.get(artistOf.get(id)!) ?? 0;
+            if (n >= cap) continue;
+            taken.set(artistOf.get(id)!, n + 1);
+            picked.push(id);
+        }
+        if (picked.length >= Math.min(limit, 8)) return picked;
+    }
+    return [];
+}
+
 describe("the database draw and the in-memory draw", () => {
     it("pick the same songs in the same order, for any seed and size", async () => {
         const every = await idsWhere(NOT_MISSING);
@@ -163,7 +190,7 @@ describe("each mix that draws in the database picks what its old filter picks in
     it("Deep Cuts: songs nobody has played, and songs played three times or fewer when too few are", async () => {
         const seed = seedOf(`deep-cuts-${DAY}`);
         const unplayed = (await unplayedTrackIds({ excludeMissing: true })).filter((id) => id.startsWith(PREFIX));
-        expect((await generateDeepCuts(USER, DAY))?.trackIds).toEqual(drawIds(unplayed, 20, seed));
+        expect((await generateDeepCuts(USER, DAY))?.trackIds).toEqual(await capped(drawIds(unplayed, unplayed.length, seed)));
 
         // Everyone has played every song once more: nobody's songs are unplayed, the low-play songs are drawn.
         await prisma.play.createMany({ data: unplayed.map((id) => ({ id: `${PREFIX}x_${id}`, userId: OTHER, trackId: id })) });
@@ -173,7 +200,7 @@ describe("each mix that draws in the database picks what its old filter picks in
                 select: { id: true, _count: { select: { plays: true } } },
             });
             const lowPlay = counts.filter((t) => t._count.plays <= 3).map((t) => t.id);
-            expect((await generateDeepCuts(USER, DAY))?.trackIds).toEqual(drawIds(lowPlay, 20, seed));
+            expect((await generateDeepCuts(USER, DAY))?.trackIds).toEqual(await capped(drawIds(lowPlay, lowPlay.length, seed)));
         } finally {
             await prisma.play.deleteMany({ where: { id: { startsWith: `${PREFIX}x_` } } });
         }
@@ -187,12 +214,12 @@ describe("each mix that draws in the database picks what its old filter picks in
         const picked = drawIds(albums.map((a) => a.id), 5, seedOf(`random-${DAY}`));
         const songs = await idsWhere({ ...NOT_MISSING, albumId: { in: picked } });
         const mix = await generateRandomDiscoveryMix(USER, DAY);
-        expect(mix?.trackIds).toEqual(seededOrder(songs, seedOf(`random-discovery-${DAY}`), (id) => id).slice(0, 20));
+        expect(mix?.trackIds).toEqual(await capped(seededOrder(songs, seedOf(`random-discovery-${DAY}`), (id) => id)));
     });
 
     it("Vocal Detox: the analysed instrumental songs", async () => {
         const matching = await idsWhere({ ...NOT_MISSING, analysisStatus: "completed", instrumentalness: { gte: 0.75 } });
-        expect((await generateVocalDetox(USER, DAY))?.trackIds).toEqual(drawIds(matching, 20, seedOf(`vocal-detox-${DAY}`)));
+        expect((await generateVocalDetox(USER, DAY))?.trackIds).toEqual(await capped(drawIds(matching, matching.length, seedOf(`vocal-detox-${DAY}`))));
     });
 
     it("Minor Key Mondays: analysed minor songs at or above the library's median felt energy", async () => {
@@ -202,7 +229,7 @@ describe("each mix that draws in the database picks what its old filter picks in
             WHERE t."missingSince" IS NULL AND t."analysisStatus" = 'completed' AND t.arousal IS NOT NULL
               AND a.location = 'LIBRARY'`;
         const matching = await idsWhere({ ...NOT_MISSING, analysisStatus: "completed", keyScale: "minor", arousal: { gte: median } });
-        expect((await generateMinorKeyMix(USER, DAY))?.trackIds).toEqual(drawIds(matching, 20, seedOf(`minor-key-${DAY}`)));
+        expect((await generateMinorKeyMix(USER, DAY))?.trackIds).toEqual(await capped(drawIds(matching, matching.length, seedOf(`minor-key-${DAY}`))));
     });
 
     it("Era: the decade by the album's display year, then original year, then year, on every decade it picks", async () => {
@@ -213,17 +240,24 @@ describe("each mix that draws in the database picks what its old filter picks in
             const decade = Number(/^era-(\d+)-/.exec(mix!.id)![1]);
             decades.add(decade);
             const matching = await idsWhere({ ...NOT_MISSING, album: getEffectiveDecadeWhereClause(decade) });
-            expect(mix!.trackIds).toEqual(drawIds(matching, 20, seedOf(mix!.id)));
+            expect(mix!.trackIds).toEqual(await capped(drawIds(matching, matching.length, seedOf(mix!.id))));
         }
-        // The 1980s and 1990s are where the display and original years disagree on some albums.
-        expect(decades).toEqual(new Set([1970, 1980, 1990, 2000, 2010]));
+        // The 1980s and 1990s are where the display and original years disagree on some albums. The 1970s hold songs by
+        // fewer than 4 artists, too few for a mix at 2 per artist, so they are never picked.
+        expect(decades).toEqual(new Set([1980, 1990, 2000, 2010]));
+        const seventies = await prisma.album.findMany({
+            where: { id: { startsWith: PREFIX }, location: "LIBRARY", tracks: { some: NOT_MISSING }, ...getEffectiveDecadeWhereClause(1970) },
+            select: { artistId: true },
+        });
+        expect(seventies.length).toBeGreaterThan(0);
+        expect(new Set(seventies.map((a) => a.artistId)).size).toBeLessThan(4);
     });
 
     it("Genre: the songs of the day's genre", async () => {
         const mix = await generateGenreMix(USER, DAY);
         const genre = /^genre-(.+)-\d{4}-\d{2}-\d{2}$/.exec(mix!.id)![1];
         const matching = await idsWhere({ ...NOT_MISSING, trackGenres: { some: { genreId: genre } } });
-        expect(mix!.trackIds).toEqual(drawIds(matching, 20, seedOf(`genre-${genre}-${DAY}`)));
+        expect(mix!.trackIds).toEqual(await capped(drawIds(matching, matching.length, seedOf(`genre-${genre}-${DAY}`))));
     });
 
     it("Key Journey and Tempo Flow: every song from the day's draw of their old filters", async () => {
@@ -245,16 +279,16 @@ describe("sampledMix", () => {
     const spec = { id: "m", type: "t", name: "n", description: "d", colorType: "default", seed: 5 };
     const only = (ids: string[]) => Prisma.sql`t.id IN (${Prisma.join(ids)})`;
 
-    it("is `limit` songs when `take` or more match, the first of the day's draw", async () => {
-        const mix = await sampledMix({ ...spec, where: mine, take: 50, minTracks: 8, limit: 10 });
-        expect(mix?.trackIds).toEqual(await seededTrackIds(mine, 10, 5));
+    it("is `limit` songs when `take` or more match, the first of the day's draw at 2 per artist", async () => {
+        const mix = await sampledMix({ ...spec, where: mine, minTracks: 8, limit: 10 });
+        expect(mix?.trackIds).toEqual(await capped(await seededTrackIds(mine, TRACKS, 5), 10));
         expect(mix?.trackCount).toBe(10);
     });
 
     it("is null when fewer than minTracks match, and every match when fewer than `limit` do", async () => {
         const nine = await seededTrackIds(mine, 9, 77);
-        expect(await sampledMix({ ...spec, where: only(nine.slice(0, 7)), take: 50, minTracks: 8, limit: 10 })).toBeNull();
-        const mix = await sampledMix({ ...spec, where: only(nine), take: 50, minTracks: 8, limit: 10 });
+        expect(await sampledMix({ ...spec, where: only(nine.slice(0, 7)), minTracks: 8, limit: 10 })).toBeNull();
+        const mix = await sampledMix({ ...spec, where: only(nine), minTracks: 8, limit: 10 });
         expect(new Set(mix?.trackIds)).toEqual(new Set(nine));
     });
 });

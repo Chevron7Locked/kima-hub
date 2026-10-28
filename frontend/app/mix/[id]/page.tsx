@@ -13,6 +13,7 @@ import { notify } from "@/lib/notify";
 import { useMixQuery } from "@/hooks/useQueries";
 import { useDoubleTapList } from "@/hooks/useDoubleTap";
 import { CachedImage } from "@/components/ui/CachedImage";
+import { CoverArt } from "@/components/cards/MediaCard";
 import { PageMessage } from "@/components/ui/PageMessage";
 import { EmptyState } from "@/components/ui/EmptyState";
 
@@ -182,34 +183,14 @@ export default function MixPage() {
                 }}
             >
                 <div className="flex items-end gap-6">
-                        <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shrink-0 overflow-hidden">
-                            {mix.coverUrls && mix.coverUrls.length > 0 ? (
-                                <div className="grid grid-cols-2 gap-0 w-full h-full">
-                                    {mix.coverUrls.slice(0, 4).map((url: string, index: number) => {
-                                        const proxiedUrl = api.getCoverArtUrl(url, 200);
-                                        return (
-                                            <div key={index} className="relative bg-[#181818]">
-                                                <CachedImage
-                                                    src={proxiedUrl}
-                                                    alt=""
-                                                    fill
-                                                    className="object-cover"
-                                                    sizes="96px"
-                                                />
-                                            </div>
-                                        );
-                                    })}
-                                    {Array.from({
-                                        length: Math.max(0, 4 - (mix.coverUrls?.length || 0)),
-                                    }).map((_, index) => (
-                                        <div key={`empty-${index}`} className="relative bg-[#282828]" />
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="w-full h-full flex items-center justify-center">
-                                    <Music className="w-16 h-16 text-[var(--text-muted)]" />
-                                </div>
-                            )}
+                        <div className="relative flex items-center justify-center w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shrink-0 overflow-hidden">
+                            <CoverArt
+                                key={mix.id}
+                                imageUrl={(mix.coverUrls ?? []).map((url: string) => api.getCoverArtUrl(url, 300))}
+                                title=""
+                                sizes="192px"
+                                FallbackIcon={Music}
+                            />
                         </div>
 
                         <div className="flex-1 min-w-0 pb-1">
