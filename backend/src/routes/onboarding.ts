@@ -153,10 +153,10 @@ router.post("/register", async (req, res) => {
         });
     } catch (err: any) {
         if (err instanceof z.ZodError) {
-            logger.error("[ONBOARDING] Validation error:", err.errors);
+            logger.error("[ONBOARDING] Validation error:", err.issues);
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: err.errors });
+                .json({ error: "Invalid request", details: err.issues });
         }
         logger.error("[ONBOARDING] Registration error:", { message: err.message, code: err.code, stack: err.stack });
         res.status(500).json({ error: "Failed to create account" });
@@ -233,7 +233,7 @@ router.post("/lidarr", requireAuth, requireAdmin, async (req, res) => {
         if (err instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: err.errors });
+                .json({ error: "Invalid request", details: err.issues });
         }
         logger.error("Lidarr config error:", err);
         res.status(500).json({ error: "Failed to save configuration" });
@@ -311,7 +311,7 @@ router.post("/audiobookshelf", requireAuth, requireAdmin, async (req, res) => {
         if (err instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: err.errors });
+                .json({ error: "Invalid request", details: err.issues });
         }
         logger.error("Audiobookshelf config error:", err);
         res.status(500).json({ error: "Failed to save configuration" });
@@ -392,7 +392,7 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
         if (err instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: err.errors });
+                .json({ error: "Invalid request", details: err.issues });
         }
         logger.error("Soulseek config error:", err);
         res.status(500).json({ error: "Failed to save configuration" });
@@ -423,7 +423,7 @@ router.post("/enrichment", requireAuth, requireAdmin, async (req, res) => {
         if (err instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: err.errors });
+                .json({ error: "Invalid request", details: err.issues });
         }
         logger.error("Enrichment config error:", err);
         res.status(500).json({ error: "Failed to save configuration" });

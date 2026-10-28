@@ -107,7 +107,7 @@ router.post("/albums/:id/download", async (req, res) => {
         if (error instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: error.errors });
+                .json({ error: "Invalid request", details: error.issues });
         }
         logger.error("Create download job error:", error);
         res.status(500).json({ error: "Failed to create download job" });

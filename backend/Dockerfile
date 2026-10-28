@@ -1,5 +1,5 @@
 # Stage 1: Dependencies (all deps for tsx runtime)
-FROM node:20-slim AS deps
+FROM node:24-slim AS deps
 
 WORKDIR /app
 
@@ -15,7 +15,7 @@ RUN npm ci && \
 RUN npx prisma generate
 
 # Stage 2: Production runtime (Hardened)
-FROM node:20-slim
+FROM node:24-slim
 
 WORKDIR /app
 

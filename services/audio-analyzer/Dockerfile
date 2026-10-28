@@ -2,7 +2,7 @@
 # Built from the repository root (docker-compose.yml), so it can carry the shared
 # GPU wrapper from the CLAP service.
 
-# MusiCNN and its ten heads ship as converted ONNX checked into the repo
+# MusiCNN and its three heads (danceability, DEAM and emoMusic valence/arousal) ship as converted ONNX checked into the repo
 # (services/audio-analyzer/models/), together with the reference answers
 # recorded from the validated pipeline. The build gate below runs the vendored
 # graphs on this image's own ONNX Runtime and fails unless they answer within

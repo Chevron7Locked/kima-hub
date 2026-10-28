@@ -61,11 +61,11 @@ export function errorHandler(
 
     // A failed Zod parse is a bad request: 400 with the issues.
     if (err instanceof ZodError) {
-        logger.warn(`[ZodError] ${req.method} ${req.path}: ${err.errors.length} issue(s)`);
+        logger.warn(`[ZodError] ${req.method} ${req.path}: ${err.issues.length} issue(s)`);
 
         return res.status(400).json({
             error: "Invalid request",
-            details: err.errors,
+            details: err.issues,
         });
     }
 

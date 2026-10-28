@@ -7,13 +7,14 @@ yarn-error.log
 .next/cache
 out
 
-# Environment files
-.env
-.env.local
-.env.*.local
+# Environment files (.env.test holds the e2e password)
+.env*
 
-# Testing
+# Testing (test output keeps sign-in tokens in its traces; the saved sign-in is a live session)
 coverage
+test-results
+playwright-report
+tests/e2e/.auth
 *.test.ts
 *.test.tsx
 **/__tests__

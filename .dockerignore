@@ -5,12 +5,25 @@
 logs
 docs
 scripts
-*.md
-*.log
+**/*.md
+**/*.log
 **/node_modules
 **/.next
-.env*
-coverage
+**/.env*
+**/coverage
+**/*.tsbuildinfo
+# Test output keeps sign-in tokens and typed passwords in its traces, and the saved sign-in is a live session.
+**/test-results
+**/playwright-report
+**/tests/e2e/.auth
+# macOS metadata files a Mac tar or copy leaves beside every file.
+**/._*
+**/.DS_Store
+# Local tool and assistant folders.
+**/.fallow
+**/.impeccable
+**/.cleanup-scan
+**/handoff
 *.test.ts
 __tests__
 android

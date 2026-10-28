@@ -1,5 +1,5 @@
 # Stage 1: Dependencies
-FROM node:20-slim AS deps
+FROM node:24-slim AS deps
 
 WORKDIR /app
 
@@ -11,7 +11,7 @@ RUN npm ci && \
     npm cache clean --force
 
 # Stage 2: Builder
-FROM node:20-slim AS builder
+FROM node:24-slim AS builder
 
 WORKDIR /app
 
@@ -34,7 +34,7 @@ ENV NEXT_PUBLIC_BACKEND_URL=$NEXT_PUBLIC_BACKEND_URL
 RUN npm run build
 
 # Stage 3: Production (Hardened)
-FROM node:20-slim
+FROM node:24-slim
 
 WORKDIR /app
 

@@ -35,7 +35,7 @@ RUN python3 export_music_onnx.py --ckpt ckpt/music_audioset_epoch_15_esc_90.14.p
 
 # ============================================================
 # MUSICNN MODELS (vendored ONNX + reference answers)
-# MusiCNN and its ten heads ship as converted ONNX checked into the repo
+# MusiCNN and its three heads (danceability, DEAM and emoMusic valence/arousal) ship as converted ONNX checked into the repo
 # (services/audio-analyzer/models/), together with the reference answers
 # recorded from the validated pipeline. The build gate below runs the vendored
 # graphs on this image's own ONNX Runtime and fails unless they answer within
@@ -118,10 +118,8 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 # ML dependencies -- ONNX Runtime for CLAP (audio + text) and MusiCNN.
 # Exact versions: the sound vectors and the MusiCNN parity were validated on these, and a
 # rebuild must not drift onto others (onnxruntime 1.30.0, librosa 0.11.0, soundfile 0.14.0).
-# The PyTorch stack (torch/torchaudio/torchvision/laion-clap) is NOT installed:
-# since v1.11.0 the shipped images run the ONNX CLAP backend (CLAP_BACKEND=onnx,
-# the analyzer default) and are torch-free. The legacy torch backend remains
-# available in code; restore it with services/audio-analyzer-clap/requirements-torch.txt.
+# The PyTorch stack is not installed: the analyzer runs CLAP through ONNX Runtime only.
+# PyTorch lives in the export stage above, which builds the ONNX model.
 # transformers supplies the tokenizer (RobertaTokenizer) for the text encoder;
 # the sound model's front end is numpy and librosa's mel filter bank
 # (music_clap_mel.py). The same pins as services/audio-analyzer-clap/

@@ -1,5 +1,5 @@
-# CLAP and ML -- ONNX only; the shipped images carry no PyTorch (requirements-torch.txt adds it
-# for the torch backend).
+# CLAP and ML: ONNX Runtime only; the shipped images carry no PyTorch (the model is built from
+# requirements-export.txt).
 librosa==0.11.0
 soundfile==0.14.0
 

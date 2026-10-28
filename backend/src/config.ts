@@ -28,7 +28,7 @@ try {
 } catch (error) {
     if (error instanceof z.ZodError) {
         logger.error(" Environment validation failed:");
-        error.errors.forEach((err) => {
+        error.issues.forEach((err) => {
             logger.error(`   - ${err.path.join(".")}: ${err.message}`);
         });
         logger.error(

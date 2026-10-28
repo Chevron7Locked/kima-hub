@@ -125,7 +125,7 @@ router.post("/login", async (req, res) => {
         if (err instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: err.errors });
+                .json({ error: "Invalid request", details: err.issues });
         }
         logger.error("Login error:", err);
         res.status(500).json({ error: "Internal error" });

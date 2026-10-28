@@ -108,7 +108,7 @@ router.post("/mood-mixes/decision", async (req, res) => {
         res.json(await decideMoodMixes(req.user!.id, decision));
     } catch (error) {
         if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: "Invalid request", details: error.errors });
+            return res.status(400).json({ error: "Invalid request", details: error.issues });
         }
         if (error instanceof MoodMixCannotKeepError) {
             return res.status(400).json({
@@ -129,7 +129,7 @@ router.post("/mood-mixes/save", async (req, res) => {
         res.json(await saveMoodMixAsPlaylist(req.user!.id, mixId));
     } catch (error) {
         if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: "Invalid request", details: error.errors });
+            return res.status(400).json({ error: "Invalid request", details: error.issues });
         }
         if (error instanceof MoodMixNotFoundError) {
             return res.status(404).json({ error: "Mood mix not found" });
@@ -164,7 +164,7 @@ router.post("/:version/choice", async (req, res) => {
         res.json({ key, enabled, decidedBy: "EXPLICIT" });
     } catch (error) {
         if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: "Invalid request", details: error.errors });
+            return res.status(400).json({ error: "Invalid request", details: error.issues });
         }
         if (error instanceof UnknownChoiceError) {
             return res.status(400).json({ error: "Unknown choice" });

@@ -36,7 +36,7 @@ router.post("/", async (req, res) => {
         if (error instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: error.errors });
+                .json({ error: "Invalid request", details: error.issues });
         }
         logger.error("Create play error:", error);
         res.status(500).json({ error: "Failed to log play" });
