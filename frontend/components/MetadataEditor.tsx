@@ -281,10 +281,10 @@ export function MetadataEditor({
                                 {currentData._originalGenres &&
                                     currentData._originalGenres.length > 0 &&
                                     JSON.stringify(
-                                        currentData._originalGenres.sort()
+                                        [...currentData._originalGenres].sort()
                                     ) !==
                                         JSON.stringify(
-                                            (formData.genres || []).sort()
+                                            [...(formData.genres || [])].sort()
                                         ) && (
                                         <p className="mt-1 text-xs text-[var(--text-muted)]">
                                             Original:{" "}
