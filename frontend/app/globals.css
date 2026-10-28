@@ -32,9 +32,6 @@
     /* Glyphs and text that sit on an amber fill. */
     --color-on-brand: #160a02;
 
-    /* The violet cosmos bleed behind page headers and hero backdrops. */
-    --color-ambient: #773b97;
-
     /* One colour per content type, used only to mark the type: section bars,
      * type dots. Controls and the playing state always use brand. */
     --color-type-track: #773b97;
@@ -143,6 +140,7 @@
     --z-panel-backdrop: 75;    /* activity panel scrim */
     --z-panel: 76;             /* activity panel, below any dialog it opens */
     --z-overlay: 200;          /* full-screen player */
+    --z-tooltip: 210;          /* a control's name on hover or focus, over everything */
 }
 
 * {
@@ -776,6 +774,15 @@ body.tv-mode .tv-content {
      * standalone); in a browser the chrome already clears the notch. */
     --standalone-safe-area-top: 0px;
     --standalone-safe-area-bottom: 0px;
+}
+
+/* The signed-in app scrolls inside <main>; the document itself must not, or iOS Safari slides the whole page up
+ * under the fixed top bar (the shell is the visible height, but the page behind it is the taller 100vh). */
+html:has(#main-content),
+body:has(#main-content) {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
 }
 
 /* When running as installed PWA */

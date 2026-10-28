@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Settings, RefreshCw, LogOut, Compass, X, Radio, ChartNoAxesColumn } from "lucide-react";
+import { Settings, RefreshCw, LogOut, Compass, X, Radio, ChartNoAxesColumn, CalendarClock } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -50,7 +50,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
             await api.scanLibrary();
             onClose();
         } catch {
-            notify.error("Could not start the library scan");
+            notify.error("couldn't start the library scan");
         } finally {
             syncTimeoutRef.current = setTimeout(() => setIsSyncing(false), 2000);
         }
@@ -61,7 +61,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
             await logout();
             onClose();
         } catch {
-            notify.error("Failed to logout");
+            notify.error("couldn't log out");
         }
     };
 
@@ -89,13 +89,13 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                     >
                         <KimaMark size={32} />
                         <span className="text-lg font-bold text-white tracking-tight">
-                            Kima
+                            kima
                         </span>
                     </Link>
                     <button
                         onClick={onClose}
                 className="w-9 h-9 flex items-center justify-center text-[var(--text-muted)] hover:text-white transition-colors duration-200 rounded-full hover:bg-white/10"
-                        aria-label="Close menu"
+                        aria-label="close menu"
                     >
                         <X className="w-5 h-5" />
                     </button>
@@ -104,11 +104,11 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                 <nav
                     className="flex-1 overflow-y-auto py-4"
                     role="navigation"
-                    aria-label="Mobile menu"
+                    aria-label="menu"
                 >
                     <div className="px-3 mb-6">
                         <div className="text-xs font-semibold text-[var(--text-muted)] px-3 mb-2">
-                            Quick Links
+                            quick links
                         </div>
 
                         <Link
@@ -116,7 +116,6 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             aria-current={
                                 pathname === "/discover" ? "page" : undefined
                             }
-                            aria-label="Discover"
                             className={cn(
                                 "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200",
                                 pathname === "/discover" ?
@@ -126,7 +125,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                         >
                             <Compass className="w-5 h-5" />
                             <span className="text-sm font-medium">
-                                Discover
+                                discovery
                             </span>
                         </Link>
 
@@ -135,7 +134,6 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             aria-current={
                                 pathname === "/radio" ? "page" : undefined
                             }
-                            aria-label="Radio"
                             className={cn(
                                 "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200",
                                 pathname === "/radio" ?
@@ -145,7 +143,25 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                         >
                             <Radio className="w-5 h-5" />
                             <span className="text-sm font-medium">
-                                Radio
+                                radio
+                            </span>
+                        </Link>
+
+                        <Link
+                            href="/releases"
+                            aria-current={
+                                pathname === "/releases" ? "page" : undefined
+                            }
+                            className={cn(
+                                "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200",
+                                pathname === "/releases" ?
+                                    "bg-white/10 text-white"
+                                :   "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
+                            )}
+                        >
+                            <CalendarClock className="w-5 h-5" />
+                            <span className="text-sm font-medium">
+                                releases
                             </span>
                         </Link>
 
@@ -154,7 +170,6 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             aria-current={
                                 pathname === "/stats" ? "page" : undefined
                             }
-                            aria-label="Stats"
                             className={cn(
                                 "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200",
                                 pathname === "/stats" ?
@@ -164,14 +179,14 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                         >
                             <ChartNoAxesColumn className="w-5 h-5" />
                             <span className="text-sm font-medium">
-                                Stats
+                                stats
                             </span>
                         </Link>
                     </div>
 
                     <div className="px-3">
                         <div className="text-xs font-semibold text-[var(--text-muted)] px-3 mb-2">
-                            Actions
+                            actions
                         </div>
 
                         <button
@@ -191,7 +206,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                                 )}
                             />
                             <span className="text-sm font-medium">
-                                {isSyncing ? "Syncing..." : "Sync Library"}
+                                {isSyncing ? "syncing..." : "sync library"}
                             </span>
                         </button>
 
@@ -209,7 +224,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                         >
                             <Settings className="w-5 h-5" />
                             <span className="text-sm font-medium">
-                                Settings
+                                settings
                             </span>
                         </Link>
                     </div>
@@ -242,7 +257,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                         className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-danger-light hover:brightness-125 hover:bg-danger/10 transition-colors duration-200"
                     >
                         <LogOut className="w-5 h-5" />
-                        <span className="text-sm font-medium">Logout</span>
+                        <span className="text-sm font-medium">log out</span>
                     </button>
                 </div>
             </div>

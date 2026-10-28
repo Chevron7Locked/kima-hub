@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { useActivityPanelSettings } from "@/lib/activity-panel-settings-context";
 import { useAudioState } from "@/lib/audio-state-context";
-import { openActivityPanel, setActivityPanelTab } from "@/hooks/useActivityPanel";
+import { leaveActivityPanelSettings, openActivityPanel } from "@/hooks/useActivityPanel";
 import { LyricsPanel } from "@/components/lyrics/LyricsPanel";
 
 interface UseLyricsToggleOptions {
@@ -28,7 +28,7 @@ export function useLyricsToggle({ inline }: UseLyricsToggleOptions) {
 
     const closeLyrics = useCallback(() => {
         setSettingsContent(null);
-        setActivityPanelTab("active");
+        leaveActivityPanelSettings();
     }, [setSettingsContent]);
 
     const handleLyricsToggle = useCallback(() => {

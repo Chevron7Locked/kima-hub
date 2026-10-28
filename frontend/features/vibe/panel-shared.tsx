@@ -9,14 +9,15 @@ import { ImportsTab } from "@/components/activity/ImportsTab";
 import { HistoryTab } from "@/components/activity/HistoryTab";
 import type { ActivityType } from "./ActivityIconBar";
 import { cn } from "@/lib/cn";
+import { tabListKeyDown } from "@/lib/tabListKeys";
 import { X } from "lucide-react";
 
 export type VibeTab = "now-playing" | "queue" | "lyrics";
 
 const TABS: { key: VibeTab; label: string }[] = [
-    { key: "now-playing", label: "Now Playing" },
-    { key: "queue", label: "Queue" },
-    { key: "lyrics", label: "Lyrics" },
+    { key: "now-playing", label: "now playing" },
+    { key: "queue", label: "queue" },
+    { key: "lyrics", label: "lyrics" },
 ];
 
 const ACTIVITY_LABELS: Record<ActivityType, string> = {
@@ -65,10 +66,19 @@ export function TabBar({
     onTabClick: (tab: VibeTab) => void;
 }) {
     return (
-        <div className="flex border-b border-white/5 shrink-0">
+        <div
+            role="tablist"
+            onKeyDown={(e) => tabListKeyDown(e, TABS.map((t) => t.key), activeTab, onTabClick)}
+            className="flex border-b border-white/5 shrink-0"
+        >
             {TABS.map((tab) => (
                 <button
                     key={tab.key}
+                    type="button"
+                    role="tab"
+                    data-tab-key={tab.key}
+                    aria-selected={activeTab === tab.key}
+                    tabIndex={activeTab === tab.key ? 0 : -1}
                     onClick={() => onTabClick(tab.key)}
                     className={cn(
                         "flex-1 px-3 py-2.5 text-xs font-medium transition-colors",

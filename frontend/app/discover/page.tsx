@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { notify } from "@/lib/notify";
@@ -23,7 +23,7 @@ import { api } from "@/lib/api";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Button } from "@/components/ui/Button";
 import { plural } from "@/lib/format";
-import { openActivityPanel, setActivityPanelTab } from "@/hooks/useActivityPanel";
+import { leaveActivityPanelSettings, openActivityPanel } from "@/hooks/useActivityPanel";
 
 export default function DiscoverWeeklyPage() {
     // Use split hooks to avoid re-renders from currentTime updates
@@ -75,11 +75,13 @@ export default function DiscoverWeeklyPage() {
     // Build discover settings element (stable across renders via the effect dep array)
     const discoverSettingsRef = useRef<React.ReactNode>(null);
     const settingsOwnerRef = useRef(settingsOwner);
-    settingsOwnerRef.current = settingsOwner;
+    useLayoutEffect(() => {
+        settingsOwnerRef.current = settingsOwner;
+    }, [settingsOwner]);
 
     useEffect(() => {
         const handleBackToActivity = () => {
-            setActivityPanelTab("active");
+            leaveActivityPanelSettings();
         };
 
         const handlePlaylistCleared = async () => {

@@ -96,6 +96,8 @@ const nextConfig: NextConfig = {
         return [
             { source: "/setup", destination: "/login", permanent: true },
             { source: "/import/spotify", destination: "/import/playlist", permanent: true },
+            // The queue lives in the right-hand panel now; an old bookmark lands on home, where the panel is.
+            { source: "/queue", destination: "/", permanent: true },
         ];
     },
     // /api/* goes to the backend. Images set NEXT_PUBLIC_BACKEND_URL; the

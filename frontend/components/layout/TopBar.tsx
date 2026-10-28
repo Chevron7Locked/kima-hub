@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import {
     Home,
@@ -31,6 +31,7 @@ const scanEnded = (status?: string) => status === "completed" || status === "fai
 export function TopBar() {
     const pathname = usePathname();
     const router = useRouter();
+    const searchParams = useSearchParams();
     const { logout, user } = useAuth();
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
@@ -67,12 +68,9 @@ export function TopBar() {
 
     const isPolling = !!scanJobId && !scanEnded(scanStatus?.status);
 
-    useEffect(() => {
-        if (!scanStatus || !scanJobId) return;
-        if (scanEnded(scanStatus.status)) {
-            setScanJobId(null);
-        }
-    }, [scanStatus, scanJobId]);
+    if (scanStatus && scanJobId && scanEnded(scanStatus.status)) {
+        setScanJobId(null);
+    }
 
     // Track download status from context (single source of truth)
     const { pendingDownloads, downloadStatus } = useDownloadContext();
@@ -80,9 +78,18 @@ export function TopBar() {
     // pendingDownloads is optimistic local state that can become stale
     const hasActiveDownloads = downloadStatus.hasActiveDownloads;
 
-    const hasPendingUploads =
-        pendingDownloads.length > 0 &&
-        pendingDownloads.some((p) => Date.now() - p.timestamp < 30000); // Only count recent pending
+    // Only count recent pending uploads; `now` advances when the oldest one ages out
+    const [now, setNow] = useState(() => Date.now());
+    const hasPendingUploads = pendingDownloads.some((p) => now - p.timestamp < 30000);
+
+    useEffect(() => {
+        const t = Date.now();
+        const recent = pendingDownloads.filter((p) => t - p.timestamp < 30000);
+        if (recent.length === 0) return;
+        const nextExpiry = Math.min(...recent.map((p) => p.timestamp + 30000));
+        const id = setTimeout(() => setNow(Date.now()), nextExpiry - t + 1);
+        return () => clearTimeout(id);
+    }, [pendingDownloads, now]);
 
     const handleSync = async () => {
         if (isPolling) return;
@@ -152,9 +159,10 @@ export function TopBar() {
     }, [searchQuery, router, pathname]);
 
     // Sync search query with URL on page change
-    useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        const q = params.get("q");
+    const [syncedPathname, setSyncedPathname] = useState<string | null>(null);
+    if (pathname !== syncedPathname) {
+        setSyncedPathname(pathname);
+        const q = searchParams.get("q");
 
         if (pathname === "/search" && q) {
             // Only update if different to avoid loops
@@ -165,8 +173,7 @@ export function TopBar() {
             // Clear search when leaving search page
             setSearchQuery("");
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pathname]); // Only re-run when pathname changes
+    }
 
     // Global "/" keyboard shortcut to focus search
     useEffect(() => {

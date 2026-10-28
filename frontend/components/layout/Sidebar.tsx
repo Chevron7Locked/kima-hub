@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
     BookAudio,
+    CalendarClock,
     ChartNoAxesColumn,
     ChevronLeft,
     ChevronRight,
@@ -12,6 +13,7 @@ import {
     LayoutGrid,
     Library,
     ListMusic,
+    Music,
     Orbit,
     Plus,
     Podcast,
@@ -34,6 +36,8 @@ import { notify } from "@/lib/notify";
 import { useFeatures } from "@/lib/features-context";
 import { mosaicCovers } from "@/features/playlist/coverMosaic";
 import { CachedImage } from "@/components/ui/CachedImage";
+import { SideTooltip } from "@/components/ui/SideTooltip";
+import { CoverArt } from "@/components/cards/MediaCard";
 import { MobileSidebar } from "./MobileSidebar";
 
 interface NavItem {
@@ -52,9 +56,9 @@ const primaryNavigation: NavItem[] = [
         icon: Library,
         match: ["/collection", "/library", "/album", "/artist", "/mix"],
     },
-    { name: "queue", href: "/queue", icon: ListMusic, match: ["/queue"] },
     { name: "radio", href: "/radio", icon: Radio, match: ["/radio"] },
     { name: "discovery", href: "/discover", icon: Compass, match: ["/discover"] },
+    { name: "releases", href: "/releases", icon: CalendarClock, match: ["/releases"] },
     { name: "vibe", href: "/vibe", icon: Orbit, match: ["/vibe"] },
 ];
 
@@ -98,12 +102,47 @@ interface Mix {
     name: string;
     description?: string;
     trackCount?: number;
-    color?: string;
+    coverUrls?: string[];
 }
 
 const COLLAPSE_KEY = "kima:library-collapsed";
 const OPEN_WIDTH = 256;
 const CLOSED_WIDTH = 74;
+
+// The stored choice is read before the first paint: the server has no
+// localStorage, so the server snapshot is the open shelf and the client snapshot
+// replaces it before paint instead of animating the shelf shut on every load.
+let storedCollapsed: boolean | null = null;
+const collapseListeners = new Set<() => void>();
+
+function readCollapsed(): boolean {
+    if (storedCollapsed === null) {
+        try {
+            storedCollapsed = localStorage.getItem(COLLAPSE_KEY) === "1";
+        } catch {
+            // A blocked storage API leaves the shelf open, which is the safe default.
+            return false;
+        }
+    }
+    return storedCollapsed;
+}
+
+function subscribeCollapsed(listener: () => void) {
+    collapseListeners.add(listener);
+    return () => {
+        collapseListeners.delete(listener);
+    };
+}
+
+function writeCollapsed(next: boolean) {
+    storedCollapsed = next;
+    try {
+        localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+    } catch {
+        // The choice simply does not survive this session.
+    }
+    collapseListeners.forEach((listener) => listener());
+}
 
 export function Sidebar() {
     const pathname = usePathname();
@@ -119,7 +158,7 @@ export function Sidebar() {
     const [newPlaylistName, setNewPlaylistName] = useState("");
     const [isCreating, setIsCreating] = useState(false);
     const [filter, setFilter] = useState("");
-    const [collapsed, setCollapsed] = useState(false);
+    const collapsed = useSyncExternalStore(subscribeCollapsed, readCollapsed, () => false);
     const createButtonRef = useRef<HTMLButtonElement>(null);
     const createInputRef = useRef<HTMLInputElement>(null);
     const handleRef = useRef<HTMLButtonElement>(null);
@@ -140,6 +179,7 @@ export function Sidebar() {
         data: mixes = [],
         isLoading: isLoadingMixes,
         isError: isErrorMixes,
+        refetch: refetchMixes,
     } = useMixesQuery();
     const { mutate: refreshMixes, isPending: isRefreshingMixes } =
         useRefreshMixesMutation();
@@ -173,29 +213,11 @@ export function Sidebar() {
             (item.feature === "audiobookshelfEnabled" && audiobookshelfEnabled)
     );
 
-    // The stored choice is read before the first paint: the server has no
-    // localStorage, so a passive effect would paint the open shelf at 256px and
-    // then animate it shut on every load. A layout effect lands at 72px.
-    useLayoutEffect(() => {
-        try {
-            setCollapsed(localStorage.getItem(COLLAPSE_KEY) === "1");
-        } catch {
-            // A blocked storage API leaves the shelf open, which is the safe default.
-        }
-    }, []);
-
-    const setLibraryCollapsed = (next: boolean) => {
-        setCollapsed(next);
-        try {
-            localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
-        } catch {
-            // The choice simply does not survive this session.
-        }
-    };
-
-    useEffect(() => {
+    const [lastPathname, setLastPathname] = useState(pathname);
+    if (pathname !== lastPathname) {
+        setLastPathname(pathname);
         setIsMobileMenuOpen(false);
-    }, [pathname]);
+    }
 
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
@@ -250,14 +272,14 @@ export function Sidebar() {
             setNewPlaylistName("");
             router.push(`/playlist/${result.id}`);
         } catch {
-            notify.error("Failed to create playlist");
+            notify.error("couldn't create the playlist");
         } finally {
             setIsCreating(false);
         }
     };
 
     const collapse = () => {
-        setLibraryCollapsed(true);
+        writeCollapsed(true);
         requestAnimationFrame(() => handleRef.current?.focus());
     };
 
@@ -328,60 +350,71 @@ export function Sidebar() {
         );
     };
 
-    const sectionLabel = (label: string, count: number) => (
-        <div className="sticky top-0 z-[2] flex items-center justify-between bg-[#0e0e0e] px-2 pb-1 pt-2.5 text-micro text-[#6f6f6f]">
+    const sectionLabel = (label: string, count: number, action?: ReactNode) => (
+        <h2 className="sticky top-0 z-[2] flex items-center justify-between gap-2 bg-[var(--bg-secondary)] px-2 pb-1 pt-2.5 text-micro font-normal text-[var(--text-muted)]">
             <span className="tracking-[0.06em]">{label}</span>
-            <span className="tabular-nums text-[#5e5e5e]">{count}</span>
-        </div>
+            <span className="flex items-center gap-1.5">
+                {action}
+                <span className="tabular-nums">{count}</span>
+            </span>
+        </h2>
     );
 
+    const refreshMixesButton = (
+        <button
+            type="button"
+            onClick={() => refreshMixes()}
+            disabled={isRefreshingMixes}
+            aria-label="refresh today's mixes"
+            className="-my-1 flex h-6 w-6 items-center justify-center rounded-md outline-none transition-colors duration-150 hover:bg-white/[0.06] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-brand/60 disabled:pointer-events-none"
+        >
+            <RefreshCw
+                aria-hidden="true"
+                className={cn("h-3 w-3", isRefreshingMixes && "animate-spin text-brand")}
+            />
+        </button>
+    );
+
+    // The same artwork as the home page's mixes: the covers of the mix's albums, as one cover or a 2x2 mosaic.
     const mixTiles = (items: Mix[]) => (
-        <div className="grid grid-cols-2 gap-2 px-0 pb-1 pt-0.5">
-            {items.map((mix) => (
-                <Link
-                    key={mix.id}
-                    href={`/mix/${mix.id}`}
-                    prefetch={false}
-                    title={mix.description || mix.name}
-                    className="group min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-brand/60 rounded-lg"
-                >
-                    <span
-                        aria-hidden="true"
-                        className="block aspect-square rounded-lg shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]"
-                        style={{
-                            background:
-                                mix.color ||
-                                "linear-gradient(160deg,#2a2a2a,#141414)",
-                        }}
-                    />
-                    <span className="mt-1 block truncate text-[11px] leading-tight text-[var(--text-muted)] transition-colors duration-150 group-hover:text-[var(--text-secondary)]">
-                        {mix.name}
-                    </span>
-                </Link>
-            ))}
-            <button
-                type="button"
-                onClick={() => refreshMixes()}
-                disabled={isRefreshingMixes}
-                aria-label="refresh mixes"
-                title="refresh today's mixes"
-                className="group min-w-0 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
-            >
-                <span
-                    aria-hidden="true"
-                    className="flex aspect-square items-center justify-center rounded-lg bg-white/[0.03] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] transition-colors duration-150 group-hover:bg-white/[0.06]"
-                >
-                    <RefreshCw
-                        className={cn(
-                            "h-4 w-4 text-[#6f6f6f] transition-colors group-hover:text-[var(--text-secondary)]",
-                            isRefreshingMixes && "animate-spin text-brand"
-                        )}
-                    />
-                </span>
-                <span className="mt-1 block truncate text-[11px] leading-tight text-[var(--text-muted)] transition-colors duration-150 group-hover:text-[var(--text-secondary)]">
-                    refresh mixes
-                </span>
-            </button>
+        <div className="grid grid-cols-2 gap-x-2 gap-y-2.5 pb-1 pt-0.5">
+            {items.map((mix) => {
+                const isActive = pathname === `/mix/${mix.id}`;
+                return (
+                    <Link
+                        key={mix.id}
+                        href={`/mix/${mix.id}`}
+                        prefetch={false}
+                        aria-current={isActive ? "page" : undefined}
+                        title={mix.description || mix.name}
+                        className="group min-w-0 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+                    >
+                        <span
+                            className={cn(
+                                "relative flex aspect-square items-center justify-center overflow-hidden rounded-lg bg-white/[0.04] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]",
+                                isActive && "ring-2 ring-brand/70"
+                            )}
+                        >
+                            <CoverArt
+                                imageUrl={(mix.coverUrls ?? []).slice(0, 4).map((url) => api.getCoverArtUrl(url, 200))}
+                                title=""
+                                sizes="112px"
+                                FallbackIcon={Music}
+                            />
+                        </span>
+                        <span
+                            className={cn(
+                                "mt-1 line-clamp-2 text-[11px] leading-[1.25] transition-colors duration-150",
+                                isActive
+                                    ? "text-brand"
+                                    : "text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]"
+                            )}
+                        >
+                            {mix.name}
+                        </span>
+                    </Link>
+                );
+            })}
         </div>
     );
 
@@ -389,19 +422,18 @@ export function Sidebar() {
         const isActive = isCurrent(item);
         const Icon = item.icon;
         return (
+            <SideTooltip key={item.href} label={item.name}>
             <Link
-                key={item.href}
                 href={item.href}
                 prefetch={false}
                 aria-current={isActive ? "page" : undefined}
                 aria-label={item.name}
-                title={item.name}
                 className={cn(
                     "group flex h-10 w-10 items-center justify-center rounded-xl outline-none transition-[background-color,color,box-shadow] duration-150",
                     "focus-visible:ring-2 focus-visible:ring-brand/60",
                     isActive
                         ? "bg-[linear-gradient(100deg,rgba(252,162,0,0.16),rgba(252,162,0,0.04))] text-brand shadow-[inset_0_0_0_1px_rgba(252,162,0,0.2)]"
-                        : "text-[#6f6f6f] hover:bg-white/[0.05] hover:text-[var(--text-secondary)]"
+                        : "text-[var(--text-muted)] hover:bg-white/[0.05] hover:text-[var(--text-secondary)]"
                 )}
             >
                 <Icon
@@ -410,6 +442,7 @@ export function Sidebar() {
                     className="h-5 w-5 transition-transform duration-150 group-hover:scale-[1.06]"
                 />
             </Link>
+            </SideTooltip>
         );
     };
 
@@ -432,7 +465,7 @@ export function Sidebar() {
 
             <div
                 className={cn(
-                    "flex min-w-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,#101010_0%,#0a0a0a_40%,#090909_100%)] transition-opacity duration-150",
+                    "flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-secondary)] transition-opacity duration-150",
                     collapsed && "pointer-events-none opacity-0"
                 )}
                 inert={collapsed}
@@ -450,7 +483,7 @@ export function Sidebar() {
                                 setShowCreatePlaylist((v) => !v);
                                 setNewPlaylistName("");
                             }}
-                            aria-label="Create playlist"
+                            aria-label="create playlist"
                             aria-expanded={showCreatePlaylist}
                             title="create playlist"
                             className={cn(
@@ -521,7 +554,7 @@ export function Sidebar() {
                                 closeCreate();
                             }
                         }}
-                        placeholder="Playlist name"
+                        placeholder="playlist name"
                         autoFocus
                         enterKeyHint="done"
                         aria-label="new playlist name"
@@ -611,7 +644,8 @@ export function Sidebar() {
                                 <section>
                                     {sectionLabel(
                                         "daily mixes",
-                                        shownMixes.length
+                                        shownMixes.length,
+                                        refreshMixesButton
                                     )}
                                     {isLoadingMixes ? (
                                         <div className="grid grid-cols-2 gap-2 pb-1 pt-0.5">
@@ -623,14 +657,23 @@ export function Sidebar() {
                                             ))}
                                         </div>
                                     ) : isErrorMixes ? (
-                                        <p className="px-2 py-2 text-xs text-[var(--text-muted)]">
-                                            mixes unavailable right now
-                                        </p>
+                                        <div className="px-2 py-3">
+                                            <p className="text-xs text-[var(--text-muted)]">
+                                                couldn&apos;t load today&apos;s mixes
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={() => refetchMixes()}
+                                                className="mt-1 rounded text-xs text-[var(--text-secondary)] outline-none transition-colors hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/60"
+                                            >
+                                                try again
+                                            </button>
+                                        </div>
                                     ) : shownMixes.length > 0 ? (
                                         mixTiles(shownMixes)
                                     ) : (
                                         <p className="px-2 py-2 text-xs text-[var(--text-muted)]">
-                                            no mixes yet
+                                            no mixes yet: refresh to make today&apos;s
                                         </p>
                                     )}
                                 </section>
@@ -664,7 +707,7 @@ export function Sidebar() {
                     ref={handleRef}
                     type="button"
                     onClick={() => {
-                        setLibraryCollapsed(false);
+                        writeCollapsed(false);
                         requestAnimationFrame(() =>
                             collapseButtonRef.current?.focus()
                         );

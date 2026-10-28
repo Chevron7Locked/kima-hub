@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Download, Loader2, X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useActiveDownloads } from "@/hooks/useNotifications";
-import { EmptyState } from "../ui/EmptyState";
 import { GradientSpinner } from "../ui/GradientSpinner";
 import { DownloadRow, RowAction } from "./DownloadRow";
 
@@ -51,13 +50,7 @@ export function ActiveDownloadsTab() {
     }
 
     if (downloads.length === 0) {
-        return (
-            <EmptyState
-                icon={<Download className="w-8 h-8" />}
-                title="No active downloads"
-                description="Downloads will appear here"
-            />
-        );
+        return <p className="px-3 py-4 text-xs text-[var(--text-muted)]">nothing downloading right now</p>;
     }
 
     return (
@@ -72,7 +65,7 @@ export function ActiveDownloadsTab() {
                     onClick={handleCancelAll}
                     className="rounded-full px-2.5 py-1 text-xs font-medium text-[var(--text-muted)] transition-colors hover:bg-white/10 hover:text-danger-light"
                 >
-                    Cancel all
+                    cancel all
                 </button>
             </div>
 
@@ -84,7 +77,7 @@ export function ActiveDownloadsTab() {
                         tone="active"
                         actions={
                             <RowAction
-                                label={`Cancel ${download.subject}`}
+                                label={`cancel ${download.subject}`}
                                 onClick={() => handleCancel(download.id)}
                                 disabled={cancelling.has(download.id)}
                                 danger

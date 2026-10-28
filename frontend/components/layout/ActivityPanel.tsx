@@ -7,27 +7,24 @@ import { NotificationsTab } from "@/components/activity/NotificationsTab";
 import { ActiveDownloadsTab } from "@/components/activity/ActiveDownloadsTab";
 import { HistoryTab } from "@/components/activity/HistoryTab";
 import { ImportsTab } from "@/components/activity/ImportsTab";
-import {
-    Bell,
-    Download,
-    History,
-    ListMusic,
-    X,
-    type LucideIcon,
-} from "lucide-react";
+import { Bell, X } from "lucide-react";
+import { ActivityFeed } from "@/components/activity/ActivityFeed";
+import type { ActivityType } from "@/features/vibe/ActivityIconBar";
+import { PanelOptions, panelTabId } from "./panelChrome";
 import { cn } from "@/lib/cn";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { useActivityPanelSettings } from "@/lib/activity-panel-settings-context";
 import { useActivityPanelOpen } from "@/hooks/useActivityPanel";
 
-type ActivityTab = "notifications" | "active" | "imports" | "history" | "settings";
+type ActivityTab = "all" | "notifications" | "active" | "imports" | "history" | "settings";
 
-const TABS: { id: ActivityTab; label: string; icon: LucideIcon }[] = [
-    { id: "notifications", label: "Notifications", icon: Bell },
-    { id: "active", label: "Active", icon: Download },
-    { id: "imports", label: "Imports", icon: ListMusic },
-    { id: "history", label: "History", icon: History },
-];
+/** The merged list's rows name the panel's activity kinds; the sheet's tab for each. */
+const SHEET_TAB: Record<ActivityType, ActivityTab> = {
+    notifications: "notifications",
+    downloads: "active",
+    imports: "imports",
+    history: "history",
+};
 
 interface ActivityPanelProps {
     isOpen: boolean;
@@ -84,60 +81,45 @@ export function ActivityPanel({
                 className="fixed inset-y-0 right-0 w-full max-w-md bg-[var(--bg-primary)] z-(--z-panel) flex flex-col"
                 style={{ paddingTop: "var(--standalone-safe-area-top, 0px)" }}
             >
-                <div className="flex items-center justify-between px-4 py-4 border-b border-white/10">
-                    <h2 className="text-lg font-semibold text-white">
-                        Activity
-                    </h2>
+                <div className="flex items-center justify-between px-4 py-3">
+                    <h2 className="text-lg font-semibold text-[var(--text-primary)]">activity</h2>
                     <button
+                        type="button"
                         onClick={onToggle}
-                        className="p-2 hover:bg-white/10 rounded-full transition-colors"
-                        title="close"
+                        aria-label="close activity"
+                        className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--text-secondary)] outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-brand/60"
                     >
-                        <X className="w-5 h-5 text-[var(--text-secondary)]" />
+                        <X aria-hidden="true" className="h-5 w-5" />
                     </button>
                 </div>
 
-                <div className="flex border-b border-white/10">
-                    {TABS.map((tab) => {
-                        const Icon = tab.icon;
-                        const badge =
-                            tab.id === "notifications"
-                                ? notificationBadge
-                                : tab.id === "active"
-                                ? activeBadge
-                                : null;
+                <PanelOptions<Exclude<ActivityTab, "settings">>
+                    label="activity"
+                    controls="activity-sheet-content"
+                    value={resolvedActiveTab === "settings" ? null : resolvedActiveTab}
+                    onChange={handleTabClick}
+                    options={[
+                        { key: "all", label: "all" },
+                        { key: "notifications", label: "alerts", count: notificationBadge ?? 0, urgent: true },
+                        { key: "active", label: "downloads", count: activeBadge ?? 0, urgent: true },
+                        { key: "imports", label: "imports" },
+                        { key: "history", label: "history" },
+                    ]}
+                />
 
-                        return (
-                            <button
-                                key={tab.id}
-                                onClick={() => handleTabClick(tab.id)}
-                                className={cn(
-                                    "flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors duration-200 relative",
-                                    resolvedActiveTab === tab.id
-                                        ? "text-white border-b-2 border-[#f5c518]"
-                                        : "text-[var(--text-secondary)] hover:text-white/70"
-                                )}
-                            >
-                                <Icon className="w-4 h-4" />
-                                <span>{tab.label}</span>
-                                {badge && (
-                                    <span
-                                        className={cn(
-                                            "min-w-[18px] h-[18px] px-1 rounded-full text-xs font-semibold flex items-center justify-center ml-1",
-                                            tab.id === "active"
-                                                ? "bg-brand text-black"
-                                                : "bg-white/15 text-white"
-                                        )}
-                                    >
-                                        {badge > 99 ? "99+" : badge}
-                                    </span>
-                                )}
-                            </button>
-                        );
-                    })}
-                </div>
-
-                <div className="flex-1 overflow-hidden">
+                {/* A page's settings are not one of the tabs: while they show, no tab is chosen and the region is named for them. */}
+                <div
+                    id="activity-sheet-content"
+                    {...(resolvedActiveTab === "settings"
+                        ? { role: "region", "aria-label": "settings" }
+                        : { role: "tabpanel", "aria-labelledby": panelTabId("activity-sheet-content", resolvedActiveTab) })}
+                    className="flex-1 overflow-hidden"
+                >
+                    {resolvedActiveTab === "all" && (
+                        <div className="h-full overflow-y-auto">
+                            <ActivityFeed onOpen={(type) => handleTabClick(SHEET_TAB[type])} />
+                        </div>
+                    )}
                     {resolvedActiveTab === "notifications" && (
                         <NotificationsTab />
                     )}

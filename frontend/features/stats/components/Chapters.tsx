@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useReveal } from "../useReveal";
 import { FitPanel } from "./FitPanel";
 import { Shortcuts } from "./Shortcuts";
+import { tabListKeyDown } from "@/lib/tabListKeys";
 
 export interface Chapter {
     id: string;
@@ -30,8 +31,6 @@ export function Chapters({ chapters, aside }: { chapters: Chapter[]; aside?: Rea
         activeRef.current = active;
         chaptersRef.current = chapters;
     });
-
-    const index = Math.max(0, chapters.findIndex((c) => c.id === active));
 
     const show = useCallback((id: string) => {
         setActive(id);
@@ -105,19 +104,8 @@ export function Chapters({ chapters, aside }: { chapters: Chapter[]; aside?: Rea
         }
     }, [active]);
 
-    const onTabKey = (e: React.KeyboardEvent) => {
-        const last = chapters.length - 1;
-        const next =
-            e.key === "ArrowRight" ? Math.min(last, index + 1)
-            : e.key === "ArrowLeft" ? Math.max(0, index - 1)
-            : e.key === "Home" ? 0
-            : e.key === "End" ? last
-            : null;
-        if (next === null) return;
-        e.preventDefault();
-        go(next);
-        tabRow.current?.querySelector<HTMLElement>(`[data-chapter="${chapters[next].id}"]`)?.focus();
-    };
+    const onTabKey = (e: React.KeyboardEvent<HTMLElement>) =>
+        tabListKeyDown(e, chapters.map((c) => c.id), active, (id) => go(chapters.findIndex((c) => c.id === id)));
 
     return (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -136,6 +124,7 @@ export function Chapters({ chapters, aside }: { chapters: Chapter[]; aside?: Rea
                                 key={c.id}
                                 id={`tab-${c.id}`}
                                 data-chapter={c.id}
+                                data-tab-key={c.id}
                                 type="button"
                                 role="tab"
                                 aria-selected={open}

@@ -2,9 +2,8 @@
 
 import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Trash2, RotateCcw, History } from "lucide-react";
+import { Trash2, RotateCcw } from "lucide-react";
 import { api } from "@/lib/api";
-import { EmptyState } from "../ui/EmptyState";
 import { GradientSpinner } from "../ui/GradientSpinner";
 import { cn } from "@/lib/cn";
 import { useDownloadHistory, type DownloadHistoryItem } from "@/hooks/useNotifications";
@@ -71,13 +70,7 @@ export function HistoryTab() {
     }
 
     if (history.length === 0) {
-        return (
-            <EmptyState
-                icon={<History className="w-8 h-8" />}
-                title="No download history"
-                description="Completed downloads will appear here"
-            />
-        );
+        return <p className="px-3 py-4 text-xs text-[var(--text-muted)]">no finished downloads yet</p>;
     }
 
     return (
@@ -88,13 +81,13 @@ export function HistoryTab() {
                     onClick={handleClearAll}
                     className="rounded-full px-2.5 py-1 text-xs font-medium text-[var(--text-muted)] transition-colors hover:bg-white/10 hover:text-white"
                 >
-                    Clear all
+                    clear all
                 </button>
             </div>
 
             <div className="flex-1 overflow-y-auto">
                 {failed.length > 0 && (
-                    <Section label="Failed" count={failed.length}>
+                    <Section label="failed" count={failed.length}>
                         {failed.map((item) => (
                             <DownloadRow
                                 key={item.id}
@@ -105,14 +98,14 @@ export function HistoryTab() {
                                     <>
                                         {canAcquire && (
                                             <RowAction
-                                                label={`Retry ${item.subject}`}
+                                                label={`retry ${item.subject}`}
                                                 onClick={() => handleRetry(item.id)}
                                                 disabled={retrying.has(item.id)}
                                             >
                                                 <RotateCcw className={cn("size-4", retrying.has(item.id) && "animate-spin")} />
                                             </RowAction>
                                         )}
-                                        <RowAction label={`Remove ${item.subject} from history`} onClick={() => handleClear(item.id)} danger>
+                                        <RowAction label={`remove ${item.subject} from history`} onClick={() => handleClear(item.id)} danger>
                                             <Trash2 className="size-4" />
                                         </RowAction>
                                     </>
@@ -122,14 +115,14 @@ export function HistoryTab() {
                     </Section>
                 )}
                 {completed.length > 0 && (
-                    <Section label="Completed" count={completed.length}>
+                    <Section label="completed" count={completed.length}>
                         {completed.map((item) => (
                             <DownloadRow
                                 key={item.id}
                                 item={item}
                                 tone="completed"
                                 actions={
-                                    <RowAction label={`Remove ${item.subject} from history`} onClick={() => handleClear(item.id)} danger>
+                                    <RowAction label={`remove ${item.subject} from history`} onClick={() => handleClear(item.id)} danger>
                                         <Trash2 className="size-4" />
                                     </RowAction>
                                 }

@@ -33,7 +33,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
     const isTV = useIsTV();
     const isMobileOrTablet = isMobile || isTablet;
     const activityPanel = useActivityPanel();
-    const { toggle, open, close, setActiveTab } = activityPanel;
+    const { toggle, open, close, setActiveTab, leaveSettings } = activityPanel;
 
     useEffect(() => {
         const handleToggle = () => toggle();
@@ -51,6 +51,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
             "set-activity-panel-tab",
             handleSetTab as EventListener
         );
+        window.addEventListener("leave-activity-panel-settings", leaveSettings);
 
         return () => {
             window.removeEventListener("toggle-activity-panel", handleToggle);
@@ -60,8 +61,9 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                 "set-activity-panel-tab",
                 handleSetTab as EventListener
             );
+            window.removeEventListener("leave-activity-panel-settings", leaveSettings);
         };
-    }, [toggle, open, close, setActiveTab]);
+    }, [toggle, open, close, setActiveTab, leaveSettings]);
 
     const isPublicPage = publicPaths.some(
         (p) => pathname === p || pathname.startsWith(p + "/")
@@ -112,7 +114,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                     >
                         Skip to main content
                     </a>
-                    <div className="h-screen bg-black overflow-hidden flex flex-col">
+                    <div className="h-dvh bg-black overflow-hidden flex flex-col">
                         <MediaControlsHandler />
                     <WhatsNewGate />
                         <TopBar />
@@ -161,7 +163,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                     Skip to main content
                 </a>
                 <div
-                    className="h-screen bg-black overflow-hidden flex flex-col"
+                    className="h-dvh bg-black overflow-hidden flex flex-col"
                     style={{ paddingTop: "calc(64px + var(--titlebar-height, 0px))" }}
                 >
                     <MediaControlsHandler />

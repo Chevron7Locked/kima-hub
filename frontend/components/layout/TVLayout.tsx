@@ -210,14 +210,16 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
     }, [focusedTabIndex, isNavFocused]);
 
     // On initial mount and pathname change, set the correct focused tab
-    useEffect(() => {
+    const [syncedPathname, setSyncedPathname] = useState<string | null>(null);
+    if (pathname !== syncedPathname) {
+        setSyncedPathname(pathname);
         const currentIndex = tvNavigation.findIndex(n =>
             n.href === pathname || (n.href !== "/" && pathname.startsWith(n.href))
         );
         if (currentIndex >= 0) {
             setFocusedTabIndex(currentIndex);
         }
-    }, [pathname]);
+    }
 
     return (
         <>

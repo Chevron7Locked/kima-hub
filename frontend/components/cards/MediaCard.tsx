@@ -52,7 +52,11 @@ function stop(handler: () => void) {
     };
 }
 
-function Cover({
+/**
+ * A card's artwork: one cover, or for a list of covers (a mix, a playlist) a 2x2 mosaic. The sidebar's mix tiles draw
+ * the same one, so a mix looks the same wherever it is.
+ */
+export function CoverArt({
     imageUrl,
     title,
     sizes,
@@ -132,7 +136,7 @@ export const MediaCard = memo(function MediaCard({
                     aspect === "portrait" ? "aspect-[2/3]" : "aspect-square",
                 )}
             >
-                <Cover key={String(imageUrl)} imageUrl={imageUrl} title={title} sizes={sizes} FallbackIcon={fallbackIcon} />
+                <CoverArt key={String(imageUrl)} imageUrl={imageUrl} title={title} sizes={sizes} FallbackIcon={fallbackIcon} />
 
                 {badge && <div className="absolute top-2 left-2">{badge}</div>}
                 {corner && <div className="absolute top-2 right-2">{corner}</div>}
