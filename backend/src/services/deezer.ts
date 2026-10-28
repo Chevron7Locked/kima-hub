@@ -2,7 +2,7 @@ import { AxiosRequestConfig } from "axios";
 import { logger } from "../utils/logger";
 import { CacheWrapper } from "../utils/cacheWrapper";
 import { rateLimitedGet } from "./httpClient";
-import { normalizeString } from "../utils/normalization";
+import { nameWords } from "./nameFold";
 import { UpstreamReplyError } from "../utils/upstream";
 import type { SimilarArtist } from "./listenBrainz";
 
@@ -15,8 +15,8 @@ const DEEZER_API = "https://api.deezer.com";
 // must match exactly).
 function namesAgree(found: string | undefined, wanted: string): boolean {
     if (found === undefined) return false;
-    const a = normalizeString(found);
-    const b = normalizeString(wanted);
+    const a = nameWords(found);
+    const b = nameWords(wanted);
     if (a === "" || b === "") return found === wanted;
     return a === b;
 }

@@ -7,6 +7,7 @@
 import { Prisma } from "@prisma/client";
 import { foldIdentityText, artistSortName } from "./artistIdentity";
 import { pgCollapseSpace, pgLower, pgTrim, stripNonAlnum } from "./pgTextRules";
+import { nameKey } from "./nameFold";
 import { LIBRARY_LOCATION } from "./libraryFilters";
 import { musicBrainzService } from "./musicbrainz";
 import { stripAlbumEdition } from "../utils/artistNormalization";
@@ -209,26 +210,12 @@ export async function resolveAlbum(
  * "Playing the Angel (Deluxe)" stays distinct locally.
  */
 export function titlesAgree(a: string, b: string): boolean {
-    const bare = (t: string) => foldTitle(musicBrainzService.normalizeForSearch(t));
+    const bare = (t: string) => nameKey(musicBrainzService.normalizeForSearch(t));
     if (!a || !b) return false;
     // Identical text is the same title even when nothing survives the fold
     // (an album called "!!!"); the empty-fold guard below is for DIFFERENT text.
     const exact = (t: string) => t.normalize("NFKC").toLowerCase().trim();
     if (exact(a) !== "" && exact(a) === exact(b)) return true;
     const same = (x: string, y: string) => x !== "" && x === y;
-    return same(foldTitle(a), foldTitle(b)) || same(bare(a), bare(b));
-}
-
-/**
- * Keep the letters, numbers and combining marks of any script (marks change
- * words in Devanagari, Thai, Japanese), dropping only Latin accents so "Café"
- * matches "Cafe". An empty fold never agrees with anything.
- */
-function foldTitle(t: string): string {
-    return t
-        .normalize("NFKD")
-        .replace(/(\p{Script=Latin})\p{M}+/gu, "$1")
-        .normalize("NFKC")
-        .toLowerCase()
-        .replace(/[^\p{L}\p{M}\p{N}]/gu, "");
+    return same(nameKey(a), nameKey(b)) || same(bare(a), bare(b));
 }

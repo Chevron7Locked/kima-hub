@@ -24,6 +24,7 @@ import {
 } from "../utils/metrics";
 import { sourcePauseController } from "./sourcePauseController";
 import { soulseekConfigured } from "../utils/soulseekConfigured";
+import { nameKey, nameWords } from "./nameFold";
 
 export interface SearchResult {
     user: string;
@@ -973,16 +974,9 @@ class SoulseekService {
         artistName: string,
         trackTitle: string
     ): Promise<TrackMatch[]> {
-        const normalizedArtist = artistName
-            .toLowerCase()
-            .replace(/^the\s+/, "")
-            .replace(/\s*&\s*/g, " and ")
-            .replace(/[^a-z0-9\s]/g, "");
-        const normalizedTitle = trackTitle
-            .toLowerCase()
-            .replace(/\s*&\s*/g, " and ")
-            .replace(/[^a-z0-9\s]/g, "")
-            .replace(/^\d+\s*[-.]?\s*/, "");
+        // Names fold the one way (nameFold), so an artist or title in any script keeps its letters.
+        const normalizedArtist = nameWords(artistName.replace(/\s*&\s*/g, " and ")).replace(/^the\s+/, "");
+        const normalizedTitle = nameWords(trackTitle.replace(/\s*&\s*/g, " and ")).replace(/^\d+\s*/, "");
 
         const artistWords = normalizedArtist.split(/\s+/);
         const artistFirstWord = artistWords[0];
@@ -1014,7 +1008,7 @@ class SoulseekService {
 
         const scored = availableResults.map((file) => {
             const filename = (file.file || "").toLowerCase();
-            const normalizedFilename = filename.replace(/[^a-z0-9]/g, "");
+            const normalizedFilename = nameKey(filename);
             const shortFilename = filename.split(/[/\\]/).pop() || filename;
 
             // Score: free upload slot +40, fast connection +15; artist exact +50 or
@@ -1027,11 +1021,8 @@ class SoulseekService {
             if (file.speed > 1000000) score += 15;
             else if (file.speed > 500000) score += 5;
 
-            if (
-                normalizedFilename.includes(
-                    normalizedArtist.replace(/\s/g, "")
-                )
-            ) {
+            const artistNoSpaces = normalizedArtist.replace(/\s/g, "");
+            if (artistNoSpaces.length > 0 && normalizedFilename.includes(artistNoSpaces)) {
                 score += 50;
             } else if (
                 (artistFirstWord.length >= 3 &&
@@ -1397,9 +1388,8 @@ class SoulseekService {
             return results;
         }
 
-        const { prepareArtistForSearch, normalizeTrackTitleForSearch } = await import("./soulseek-search-strategies");
+        const { prepareArtistForSearch, titleFileScore, titleMatchKey } = await import("./soulseek-search-strategies");
         const { stripAlbumEdition, canonicalizeVariousArtists, VARIOUS_ARTISTS_CANONICAL } = await import("../utils/artistNormalization");
-        const fuzz = await import("fuzzball");
 
         // Album-level search (1-2 network calls)
         const isVA = canonicalizeVariousArtists(artistName) === VARIOUS_ARTISTS_CANONICAL;
@@ -1550,6 +1540,7 @@ class SoulseekService {
         };
 
         const scoredGroups: GroupScore[] = [];
+        const trackKeys = tracks.map((t) => titleMatchKey(t.title));
 
         for (const [key, files] of groups) {
             const fileInfos = files.map(f => {
@@ -1562,39 +1553,15 @@ class SoulseekService {
                         stripped = stripped.substring(dashIdx + 3);
                     }
                 }
-                const normalized = normalizeTrackTitleForSearch(stripped, 'aggressive').toLowerCase().replace(/[^a-z0-9\s]/g, "");
-                return { file: f, base, stripped, normalized };
+                return { file: f, base, stripped, key: titleMatchKey(stripped) };
             });
 
             type MatchCandidate = { trackIdx: number; fileIdx: number; score: number };
             const candidates: MatchCandidate[] = [];
 
             for (let ti = 0; ti < tracks.length; ti++) {
-                const trackNorm = normalizeTrackTitleForSearch(tracks[ti].title, 'aggressive').toLowerCase().replace(/[^a-z0-9\s]/g, "");
-
                 for (let fi = 0; fi < fileInfos.length; fi++) {
-                    const fileNorm = fileInfos[fi].normalized;
-                    let score = 0;
-
-                    if (fileNorm === trackNorm) {
-                        score = 1.0;
-                    } else if (fileNorm.includes(trackNorm) || trackNorm.includes(fileNorm)) {
-                        score = 0.9;
-                    } else {
-                        const trackWords = trackNorm.split(/\s+/).filter(w => w.length > 1);
-                        const allPresent = trackWords.length > 0 && trackWords.every(w => fileNorm.includes(w));
-                        if (allPresent) {
-                            score = 0.8;
-                        } else {
-                            const ratio = fuzz.ratio(trackNorm, fileNorm);
-                            if (ratio >= 80) {
-                                score = 0.7;
-                            } else if (ratio >= 60) {
-                                score = 0.5;
-                            }
-                        }
-                    }
-
+                    const score = titleFileScore(trackKeys[ti], fileInfos[fi].key);
                     if (score >= 0.5) {
                         candidates.push({ trackIdx: ti, fileIdx: fi, score });
                     }

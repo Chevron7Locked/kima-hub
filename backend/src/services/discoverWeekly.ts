@@ -8,6 +8,7 @@ import { artistNamed, normalizeArtistName } from "./artistIdentity";
 import { sameName } from "./discovery/discoverEvidence";
 import { isMbid } from "./artistIdentity";
 import { titlesAgree } from "./albumIdentity";
+import { nameWords } from "./nameFold";
 import type { SeedArtist } from "./discovery/discoverySeeding";
 import { prisma } from "../utils/db";
 import { removeFailedDownload } from "./lidarrFailures";
@@ -74,17 +75,6 @@ function getTierFromSimilarity(
     if (similarity >= TIER_THRESHOLDS.medium) return "medium";
     if (similarity >= TIER_THRESHOLDS.explore) return "explore";
     return "wildcard";
-}
-
-/** Lowercase, accents removed, punctuation turned into a space, so a name can be searched word by word. */
-function foldToSearchWords(s: string): string {
-    return s
-        .toLowerCase()
-        .normalize("NFKD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^\p{L}\p{N}_\s]/gu, " ")
-        .replace(/\s+/g, " ")
-        .trim();
 }
 
 class DiscoverWeeklyService {
@@ -858,7 +848,7 @@ class DiscoverWeeklyService {
 
             // By normalised name, for Unicode and special characters
             if (tracks.length === 0) {
-                const normalizedArtist = foldToSearchWords(criteria.artistName);
+                const normalizedArtist = nameWords(criteria.artistName);
 
                 // Albums by this artist, matched on the full normalised name when it
                 // has several words: a first word like "the" or "dj" matches too much.
@@ -875,7 +865,7 @@ class DiscoverWeeklyService {
                       })
                     : [];
                 const artistAlbumIds = discoverAlbums
-                    .filter((a) => foldToSearchWords(a.artist.name).includes(artistSearchTerm))
+                    .filter((a) => nameWords(a.artist.name).includes(artistSearchTerm))
                     .slice(0, 20)
                     .map((a) => a.id);
                 const artistAlbums = await prisma.album.findMany({

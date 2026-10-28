@@ -63,7 +63,7 @@ jest.mock('../../services/fpcalc', () => ({
 // music-metadata is pure ESM; provide a CJS-compatible stub
 jest.mock('music-metadata', () => ({ parseFile: jest.fn() }), { virtual: true });
 
-import { nameKey } from '../discovery/discoverEvidence';
+import { nameKey } from '../nameFold';
 import { normalizeArtistName } from '../artistIdentity';
 import {
     canonicalizeVariousArtists,
@@ -73,7 +73,7 @@ import {
 } from '../../utils/artistNormalization';
 
 // ---------------------------------------------------------------------------
-// nameKey: how Discover's records and an album's names are compared (discoverEvidence)
+// nameKey: the one name fold (nameFold), as Discover's records and an album's names are compared
 // ---------------------------------------------------------------------------
 
 describe('nameKey', () => {

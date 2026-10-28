@@ -64,13 +64,14 @@ export function matchTrackToLibrary(
     ? candidates.filter(artistMatches)
     : candidates;
 
-  // Precompute the source's title forms once.
+  // Precompute the source's title forms once. A title with no letters or digits folds to nothing and matches only
+  // its own text.
   const strippedTitle = stripTrackSuffix(source.title);
   const cleanedTitle = normalizeTrackTitle(source.title);
   const rawTitleLower = normalizeApostrophes(source.title).toLowerCase();
   const sameTitle = (c: MatchCandidate): boolean =>
     normalizeApostrophes(c.title).toLowerCase() === rawTitleLower ||
-    normalizeTrackTitle(c.title) === cleanedTitle;
+    (cleanedTitle !== "" && normalizeTrackTitle(c.title) === cleanedTitle);
 
   const albumUnknown = !source.album || source.album === "Unknown Album";
   const sourceAlbum = normalizeAlbumForMatching(source.album ?? "").toLowerCase();
@@ -110,9 +111,9 @@ export function matchTrackToLibrary(
   // 2. Normalized containment: "Sordid Affair" matches
   //    "Sordid Affair (Feat. Ryan James)". Confidence is the measured
   //    similarity, floored at 80 because containment is strong evidence.
-  for (const c of strictPool) {
-    const cNorm = normalizeTrackTitle(c.title).toLowerCase();
-    if (cNorm === cleanedTitle) continue; // strategy 1 owns the equal case
+  for (const c of cleanedTitle === "" ? [] : strictPool) {
+    const cNorm = normalizeTrackTitle(c.title);
+    if (cNorm === "" || cNorm === cleanedTitle) continue; // strategy 1 owns the equal case
     if (cNorm.startsWith(cleanedTitle) || cleanedTitle.startsWith(cNorm)) {
       return {
         candidate: c,

@@ -31,8 +31,8 @@ import {
     discoverEvidence,
     isDiscoverEvidence,
     loadDiscoverRecords,
-    nameKey,
 } from "./discoverEvidence";
+import { nameKey } from "../nameFold";
 
 /** A Discover download played this much is a listener's: KEEP_PLAYS plays across KEEP_SONGS different songs. */
 export const KEEP_PLAYS = 3;

@@ -1,4 +1,4 @@
-import { normalizeTrackTitleForSearch, prepareArtistForSearch } from "../soulseek-search-strategies";
+import { normalizeTrackTitleForSearch, prepareArtistForSearch, titleFileScore, titleMatchKey } from "../soulseek-search-strategies";
 
 describe("normalizeTrackTitleForSearch - Classical Music", () => {
     it("should strip movement numbers from classical music titles", () => {
@@ -69,5 +69,32 @@ describe("prepareArtistForSearch", () => {
     it('should normalize unicode quotes', () => {
         expect(prepareArtistForSearch("Artist\u2019s Name")).toBe("Artist's Name");
         expect(prepareArtistForSearch("\u201CArtist\u201D")).toBe('"Artist"');
+    });
+});
+
+describe("titleFileScore: how well a file name matches a track title in an album folder", () => {
+    const score = (title: string, file: string) => titleFileScore(titleMatchKey(title), titleMatchKey(file));
+
+    it("scores an exact title as a full match, accents and case aside", () => {
+        expect(score("Sigur Rós", "sigur ros")).toBe(1);
+    });
+
+    it("scores the right Japanese file fully and a different Japanese title not at all", () => {
+        expect(score("道", "道")).toBe(1);
+        expect(score("道", "花束を君に")).toBe(0);
+    });
+
+    it("scores a Russian title against its own file, not another", () => {
+        expect(score("Группа крови", "Группа крови")).toBe(1);
+        expect(score("Группа крови", "Звезда по имени Солнце")).toBe(0);
+    });
+
+    it("gives no score when either side has no letters or digits", () => {
+        expect(score("!!!", "???")).toBe(0);
+        expect(score("Song", "!!!")).toBe(0);
+    });
+
+    it("matches a title stored decomposed (as macOS names files) against its usual form", () => {
+        expect(score("한국", "한국".normalize("NFD"))).toBe(1);
     });
 });

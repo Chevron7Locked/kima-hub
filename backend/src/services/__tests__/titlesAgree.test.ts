@@ -68,4 +68,19 @@ describe("titlesAgree", () => {
     it("still matches a punctuation-only title against itself", () => {
         expect(titlesAgree("!!!", "!!!")).toBe(true);
     });
+
+    it("folds ß, Æ and Ё the way the stored album keys do", () => {
+        expect(titlesAgree("Straße", "Strasse")).toBe(true);
+        expect(titlesAgree("Ænima", "Aenima")).toBe(true);
+        expect(titlesAgree("Ёлка", "Елка")).toBe(true);
+    });
+
+    it("keeps Hindi vowel signs meaningful", () => {
+        expect(titlesAgree("आशा", "आश")).toBe(false);
+    });
+
+    it("matches a title stored decomposed against its usual form", () => {
+        expect(titlesAgree("한국", "한국".normalize("NFD"))).toBe(true);
+        expect(titlesAgree("ｱｲｳ", "アイウ")).toBe(true);
+    });
 });

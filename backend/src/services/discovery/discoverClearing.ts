@@ -21,7 +21,8 @@ import { notificationService } from "../notificationService";
 import { announcePlaylistsChanged, playlistsHoldingTracks } from "../playlistEvents";
 import { resolveWithinMusicRoot } from "../../routes/library/trackPath";
 import { removeDiscoveryAlbum } from "./lidarrRemoval";
-import { lookupKey, nameKey, sameName } from "./discoverEvidence";
+import { lookupKey, sameName } from "./discoverEvidence";
+import { nameKey } from "../nameFold";
 
 /** A suggestion row's names, for comparing with a record's. */
 interface NamedRow {

@@ -9,18 +9,7 @@
 import { prisma } from "../../utils/db";
 import { parseCredit } from "../artistIdentity";
 import { updateArtistCounts } from "../artistCountsService";
-
-/**
- * A name as one name: no case, accents, or anything but letters and digits of any script. A name with none of them
- * has no key and matches nothing.
- */
-export function nameKey(name: string | null | undefined): string {
-    return (name ?? "")
-        .normalize("NFKD")
-        .replace(/[̀-ͯ]/g, "")
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}]+/gu, "");
-}
+import { nameKey } from "../nameFold";
 
 /** What the records say about one album (by id, or by artist and title). */
 interface Mark {

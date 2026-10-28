@@ -1,14 +1,4 @@
-export function normalizeString(str: string): string {
-  return (
-    str
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^\w\s]/g, "")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
-}
+import { nameWords } from "../services/nameFold";
 
 export function normalizeApostrophes(str: string): string {
   return str
@@ -40,7 +30,7 @@ export function stripTrackSuffix(str: string): string {
 }
 
 export function normalizeTrackTitle(str: string): string {
-  return normalizeString(stripTrackSuffix(str));
+  return nameWords(stripTrackSuffix(str));
 }
 
 export function normalizeAlbumForMatching(str: string): string {
@@ -53,10 +43,12 @@ export function normalizeForMatching(str: string): string {
   return normalizeTrackTitle(str.replace(/^(the|a|an)\s+/i, ""));
 }
 
+/** 0-100. A name with no letters or digits is similar only to its own text. */
 export function stringSimilarity(a: string, b: string): number {
-  const s1 = normalizeString(a);
-  const s2 = normalizeString(b);
+  const s1 = nameWords(a);
+  const s2 = nameWords(b);
 
+  if (s1 === "" || s2 === "") return a.trim() !== "" && a.trim() === b.trim() ? 100 : 0;
   if (s1 === s2) return 100;
 
   if (s1.includes(s2) || s2.includes(s1)) {

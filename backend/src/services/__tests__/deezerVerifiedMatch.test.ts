@@ -35,6 +35,20 @@ beforeEach(() => {
 });
 
 describe("deezerService.getAlbumCover — verified match only", () => {
+    it("does not take a title that only matches once a letter outside English is thrown away", async () => {
+        mockRateLimitedGet.mockResolvedValue({
+            data: [{ title: "Nima", artist: { name: "Tool" }, cover_xl: "https://deezer/nima.jpg" }],
+        });
+        await expect(deezerService.getAlbumCover("Tool", "Ænima")).resolves.toBeNull();
+    });
+
+    it("matches a Russian album whatever its letter case", async () => {
+        mockRateLimitedGet.mockResolvedValue({
+            data: [{ title: "Группа крови", artist: { name: "КИНО" }, cover_xl: "https://deezer/kino.jpg" }],
+        });
+        await expect(deezerService.getAlbumCover("Кино", "ГРУППА КРОВИ")).resolves.toBe("https://deezer/kino.jpg");
+    });
+
     it("returns the cover when artist and title agree with the query", async () => {
         mockRateLimitedGet.mockResolvedValue({
             data: [

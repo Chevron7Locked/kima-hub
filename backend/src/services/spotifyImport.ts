@@ -39,11 +39,8 @@ import {
   matchTrackToLibrary,
   type MatchCandidate,
 } from "./trackMatching";
-import {
-  normalizeString,
-  stripTrackSuffix,
-  normalizeTrackTitle,
-} from "../utils/normalization";
+import { stripTrackSuffix, normalizeTrackTitle } from "../utils/normalization";
+import { nameWords } from "./nameFold";
 
 const jobLoggers = new Map<string, ReturnType<typeof createPlaylistLogger>>();
 
@@ -2787,12 +2784,12 @@ class SpotifyImportService {
 
           for (const candidate of candidates) {
             const titleScore = fuzz.token_set_ratio(
-              normalizeString(entry.title),
-              normalizeString(candidate.title),
+              nameWords(entry.title),
+              nameWords(candidate.title),
             );
             const artistScore = fuzz.token_set_ratio(
-              normalizeString(entry.artist),
-              normalizeString(candidate.album.artist.name),
+              nameWords(entry.artist),
+              nameWords(candidate.album.artist.name),
             );
             const combined = titleScore * 0.6 + artistScore * 0.4;
 

@@ -114,4 +114,48 @@ describe("matchTrackToLibrary", () => {
     expect(result?.candidate.id).toBe("t1");
     expect(result?.matchType).toBe("fuzzy");
   });
+
+  describe("titles outside English letters", () => {
+    const pool = [
+      candidate("first-love", "First Love", "宇多田ヒカル", "First Love"),
+      candidate("hanataba", "花束を君に", "宇多田ヒカル", "Fantôme"),
+      candidate("michi", "道", "宇多田ヒカル", "Fantôme"),
+    ];
+
+    it("matches the song asked for, not the artist's first such song", () => {
+      const result = matchTrackToLibrary({ title: "道", artist: "宇多田ヒカル", album: "Fantôme" }, pool);
+      expect(result?.candidate.id).toBe("michi");
+      expect(result?.confidence).toBe(100);
+    });
+
+    it("matches nothing when the library lacks the song", () => {
+      expect(matchTrackToLibrary({ title: "桜流し", artist: "宇多田ヒカル" }, pool)).toBeNull();
+    });
+
+    it("matches nothing across artists and scripts when the title differs", () => {
+      expect(
+        matchTrackToLibrary({ title: "Группа крови", artist: "Кино" }, pool, { requireArtistMatch: false }),
+      ).toBeNull();
+    });
+
+    it("matches a Russian title by its words, ignoring case", () => {
+      const result = matchTrackToLibrary({ title: "ГРУППА КРОВИ", artist: "Кино" }, [
+        candidate("other", "Звезда по имени Солнце", "Кино"),
+        candidate("blood", "Группа крови", "Кино"),
+      ]);
+      expect(result?.candidate.id).toBe("blood");
+    });
+
+    it("never lets two titles with no letters or digits match through the fold", () => {
+      expect(matchTrackToLibrary({ title: "???", artist: "Artist" }, [candidate("t1", "!!!", "Artist")])).toBeNull();
+    });
+  });
+
+  it("treats a no-break space as a space between words", () => {
+    const result = matchTrackToLibrary({ title: "Je t\u2019aime\u00A0moi non plus", artist: "Serge Gainsbourg" }, [
+      candidate("t1", "Je t'aime moi non plus", "Serge Gainsbourg"),
+    ]);
+    expect(result?.candidate.id).toBe("t1");
+    expect(result?.matchType).toBe("exact");
+  });
 });

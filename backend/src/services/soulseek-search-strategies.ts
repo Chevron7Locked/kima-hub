@@ -5,7 +5,9 @@
  */
 
 import type { FileSearchResponse } from "../lib/soulseek/messages/from/peer";
+import * as fuzz from "fuzzball";
 import { sessionLog } from "../utils/playlistLogger";
+import { nameWords } from "./nameFold";
 
 export type SearchFn = (
     query: string,
@@ -38,6 +40,28 @@ function stripFeaturingArtists(title: string): string {
         .replace(/\s*[\(\[]?\s*(feat\.|ft\.|featuring|with)\s+[^\)\]]+[\)\]]?\s*/gi, " ")
         .replace(/\s+/g, " ")
         .trim();
+}
+
+/** A track title or file name (track number and extension stripped) folded for titleFileScore. */
+export function titleMatchKey(title: string): string {
+    return nameWords(normalizeTrackTitleForSearch(title, "aggressive"));
+}
+
+/**
+ * How well a file matches a track in an album folder, from their titleMatchKey folds: 1 the same title, 0.9 one holding
+ * the other, 0.8 every word of the title present, 0.7 or 0.5 by fuzzy ratio, else 0. A side with no letters or digits
+ * scores 0.
+ */
+export function titleFileScore(trackKey: string, fileKey: string): number {
+    if (trackKey === "" || fileKey === "") return 0;
+    if (fileKey === trackKey) return 1;
+    if (fileKey.includes(trackKey) || trackKey.includes(fileKey)) return 0.9;
+    const trackWords = trackKey.split(" ").filter((w) => w.length > 1);
+    if (trackWords.length > 0 && trackWords.every((w) => fileKey.includes(w))) return 0.8;
+    const ratio = fuzz.ratio(trackKey, fileKey);
+    if (ratio >= 80) return 0.7;
+    if (ratio >= 60) return 0.5;
+    return 0;
 }
 
 /**
