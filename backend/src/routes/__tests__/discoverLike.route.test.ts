@@ -13,7 +13,9 @@ jest.mock('../../utils/db', () => ({
             updateMany: jest.fn(),
         },
         album: {
-            findFirst: jest.fn(),
+            // The exact-id lookup comes first; null sends the route to the title match.
+            findUnique: jest.fn().mockResolvedValue(null),
+            findMany: jest.fn(),
             update: jest.fn(),
         },
         ownedAlbum: {
@@ -44,6 +46,12 @@ jest.mock('../../middleware/auth', () => ({
         next();
     },
 }));
+
+// A like wakes enrichment (discoveryAlbumLifecycle.takeIntoLibrary); the worker itself is not under test.
+jest.mock('../../workers/unifiedEnrichment', () => ({
+    triggerEnrichmentNow: jest.fn().mockResolvedValue({ artists: 0, tracks: 0, audioQueued: 0 }),
+}));
+jest.mock('../../services/artistCountsService', () => ({ updateArtistCounts: jest.fn().mockResolvedValue(undefined) }));
 
 // Module-load-time imports in discover.ts that we do not exercise here.
 jest.mock('../../workers/queues', () => ({
@@ -170,7 +178,7 @@ describe('POST /discover/like -- symmetric claim guard', () => {
         mockRemoveDiscoveryTagByMbid.mockResolvedValue(true);
         // No scanned Album match -> the OwnedAlbum branch is skipped, but the
         // claim/tag-removal still prove the success path executes past the guard.
-        (prisma.album.findFirst as jest.Mock).mockResolvedValue(null);
+        (prisma.album.findMany as jest.Mock).mockResolvedValue([]);
         (prisma.discoveryTrack.findMany as jest.Mock).mockResolvedValue([]);
 
         const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });

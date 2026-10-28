@@ -25,7 +25,6 @@ router.post("/", requireAcquirePermission, async (req, res) => {
             subject,
             artistName,
             albumTitle,
-            downloadType = "library",
         } = req.body;
         const userId = req.user!.id;
 
@@ -45,12 +44,6 @@ router.post("/", requireAcquirePermission, async (req, res) => {
                 .json({ error: "Type must be 'artist' or 'album'" });
         }
 
-        if (downloadType !== "library" && downloadType !== "discovery") {
-            return res.status(400).json({
-                error: "downloadType must be 'library' or 'discovery'",
-            });
-        }
-
         const lidarrEnabled = await lidarrService.isEnabled();
         if (!lidarrEnabled) {
             return res.status(400).json({
@@ -58,26 +51,23 @@ router.post("/", requireAcquirePermission, async (req, res) => {
             });
         }
 
+        // Every download a person asks for goes to the music folder as "library"; a downloadType a client
+        // still sends is ignored. Discover's own jobs are marked "discovery" in acquisitionService.
         const settings = await getSystemSettings();
-        const baseMusicPath = settings?.musicPath || config.music.musicPath;
-        const rootFolderPath =
-            downloadType === "discovery"
-                ? `${baseMusicPath}/discovery`
-                : baseMusicPath;
+        const rootFolderPath = settings?.musicPath || config.music.musicPath;
 
         if (type === "artist") {
             const jobs = await processArtistDownload(
                 userId,
                 mbid,
                 subject,
-                rootFolderPath,
-                downloadType
+                rootFolderPath
             );
 
             return res.json({
                 id: jobs[0]?.id || null,
                 status: "processing",
-                downloadType,
+                downloadType: "library",
                 rootFolderPath,
                 message: `Creating download jobs for ${jobs.length} album(s)...`,
                 albumCount: jobs.length,
@@ -133,7 +123,7 @@ router.post("/", requireAcquirePermission, async (req, res) => {
                     targetMbid: mbid,
                     status: "pending",
                     metadata: {
-                        downloadType,
+                        downloadType: "library",
                         rootFolderPath,
                         artistName: verifiedArtistName,
                         albumTitle,
@@ -148,7 +138,7 @@ router.post("/", requireAcquirePermission, async (req, res) => {
             return res.json({
                 id: jobResult.job.id,
                 status: jobResult.job.status,
-                downloadType,
+                downloadType: "library",
                 rootFolderPath,
                 message: "Download already in progress",
                 duplicate: true,
@@ -178,7 +168,7 @@ router.post("/", requireAcquirePermission, async (req, res) => {
         res.json({
             id: job.id,
             status: job.status,
-            downloadType,
+            downloadType: "library",
             rootFolderPath,
             message: "Download job created. Processing in background.",
         });
@@ -195,11 +185,14 @@ router.post("/", requireAcquirePermission, async (req, res) => {
                 },
             });
             if (existingJob) {
+                const settings = await getSystemSettings();
                 return res.json({
                     id: existingJob.id,
                     status: existingJob.status,
-                    duplicate: true,
+                    downloadType: "library",
+                    rootFolderPath: settings?.musicPath || config.music.musicPath,
                     message: "Download already in progress",
+                    duplicate: true,
                 });
             }
         }
@@ -216,8 +209,7 @@ async function processArtistDownload(
     userId: string,
     artistMbid: string,
     artistName: string,
-    rootFolderPath: string,
-    downloadType: string
+    rootFolderPath: string
 ): Promise<{ id: string; subject: string }[]> {
     logger.debug(`\nProcessing artist download: ${artistName}`);
     logger.debug(`   Artist MBID: ${artistMbid}`);
@@ -353,7 +345,7 @@ async function processArtistDownload(
                         artistMbid,
                         status: "pending",
                         metadata: {
-                            downloadType,
+                            downloadType: "library",
                             rootFolderPath,
                             artistName,
                             artistMbid,

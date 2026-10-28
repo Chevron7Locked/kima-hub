@@ -2,7 +2,7 @@
  * Discover deleting its albums takes their songs out of every playlist that held them (the database removes the
  * entries), so each such playlist's owner is told, whoever triggered the delete: clearing Discover (its active albums,
  * and Discover albums no record points at any more) and the rejected-album cleanup. Real database, real router,
- * service and event bus; Lidarr is not configured and its removal call is a stand-in; auth is passed through.
+ * service and event bus; Lidarr is not configured; auth is passed through.
  */
 
 jest.mock("../../middleware/auth", () => ({
@@ -11,7 +11,6 @@ jest.mock("../../middleware/auth", () => ({
     requireAdmin: (_req: any, _res: any, next: any) => next(),
     requireAcquirePermission: (_req: any, _res: any, next: any) => next(),
 }));
-jest.mock("../../services/discovery/lidarrRemoval", () => ({ removeDiscoveryAlbum: jest.fn() }));
 
 import express from "express";
 import request from "supertest";
@@ -19,7 +18,7 @@ import discoverRoutes from "../discover";
 import { prisma } from "../../utils/db";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { eventBus, type SSEEvent } from "../../services/eventBus";
-import { discoveryAlbumLifecycle } from "../../services/discovery/discoveryAlbumLifecycle";
+import { clearSuggestion } from "../../services/discovery/discoverClearing";
 
 const MARK = "zz-discover-delete";
 let listener: string;
@@ -36,6 +35,7 @@ app.use((req: any, _res, next) => {
 app.use("/discover", discoverRoutes);
 
 async function cleanup(): Promise<void> {
+    await prisma.downloadJob.deleteMany({ where: { user: { username: { startsWith: MARK } } } });
     await prisma.user.deleteMany({ where: { username: { startsWith: MARK } } });
     await prisma.track.deleteMany({ where: { title: { startsWith: MARK } } });
     await prisma.album.deleteMany({ where: { title: { startsWith: MARK } } });
@@ -50,6 +50,9 @@ async function discoverAlbum(tag: string, opts: { orphan?: boolean } = {}) {
     });
     const track = await prisma.track.create({
         data: { title: `${MARK} ${tag} song`, albumId: album.id, trackNo: 1, duration: 100, filePath: `/${MARK}-outside/${tag}.flac`, fileModified: new Date(), fileSize: 1000 },
+    });
+    await prisma.downloadJob.create({
+        data: { userId: listener, subject: `${artist.name} - ${album.title}`, type: "album", targetMbid: album.rgMbid, status: "completed", metadata: { currentSource: "soulseek" } },
     });
     const record = opts.orphan
         ? null
@@ -105,7 +108,7 @@ describe("Discover deleting albums tells the playlists that held their songs", (
         const rejected = await discoverAlbum("rejected");
         const theirs = await playlistOf(other, rejected.track);
 
-        await discoveryAlbumLifecycle.deleteRejectedAlbum({
+        await clearSuggestion({
             id: rejected.record!.id,
             rgMbid: rejected.record!.rgMbid,
             artistName: rejected.record!.artistName,

@@ -1,9 +1,10 @@
 import { Router } from "express";
 import fs from "fs";
 import path from "path";
-import { normalizeArtistName } from "../../services/artistIdentity";
+import { artistNamed, normalizeArtistName } from "../../services/artistIdentity";
 import { requireAdmin } from "../../middleware/auth";
 import { announcePlaylistsChanged, playlistsHoldingTracks } from "../../services/playlistEvents";
+import { AlbumLocation } from "@prisma/client";
 import { prisma, Prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { logger } from "../../utils/logger";
@@ -30,7 +31,7 @@ import { parseLimit, parseOffset } from "./paging";
 import { findArtistArtwork, withAlbumArtwork } from "../../services/artwork";
 import { listenBrainzService } from "../../services/listenBrainz";
 import { deezerService } from "../../services/deezer";
-import { LIBRARY_LOCATION } from "../../services/libraryFilters";
+import { CollectionFilter, LIBRARY_LOCATION, collectionFilter, yourDiscoverRgMbids } from "../../services/libraryFilters";
 import { editionlessKey } from "../../services/albumIdentity";
 import { getEffectiveYear } from "../../utils/dateFilters";
 import { PLAYABLE } from "../../utils/libraryEligibility";
@@ -139,32 +140,42 @@ async function resolveSimilarArtists(similar: SimilarArtistSource[]) {
 
 const router = Router();
 
-function buildArtistListWhereSql(filter: string, query: string): Prisma.Sql {
-  const clauses: Prisma.Sql[] = [];
-
-  if (filter === "owned") {
-    clauses.push(
-      Prisma.sql`(a."libraryAlbumCount" > 0 OR EXISTS (SELECT 1 FROM "OwnedAlbum" oa WHERE oa."artistId" = a.id))`,
-    );
-  } else if (filter === "discovery") {
-    clauses.push(
-      Prisma.sql`(a."discoveryAlbumCount" > 0 AND a."libraryAlbumCount" = 0)`,
-    );
-  } else {
-    clauses.push(
-      Prisma.sql`(a."libraryAlbumCount" > 0 OR a."discoveryAlbumCount" > 0)`,
-    );
+/**
+ * The artists the collection's "show" choice lists (collectionAlbumWhere): "owned" those with a library album that has
+ * a song, "discovery" those with one of this listener's Discover albums and no library album, "all" either.
+ */
+function artistListWhereSql(show: CollectionFilter, yourDiscover: string[], query: string): Prisma.Sql {
+  const library = Prisma.sql`EXISTS (
+    SELECT 1 FROM "Album" al
+    WHERE al."artistId" = a.id AND al.location = 'LIBRARY' AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = al.id)
+  )`;
+  const discover = Prisma.sql`EXISTS (
+    SELECT 1 FROM "Album" al
+    WHERE al."artistId" = a.id AND al.location = 'DISCOVER' AND al."rgMbid" = ANY(${yourDiscover}::text[])
+      AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = al.id)
+  )`;
+  const clauses: Prisma.Sql[] = [
+    show === "owned"
+      ? library
+      : show === "discovery"
+        ? Prisma.sql`(${discover} AND NOT ${library})`
+        : Prisma.sql`(${library} OR ${discover})`,
+  ];
+  const key = normalizeArtistName(query);
+  if (key) {
+    clauses.push(Prisma.sql`position(${key} in a."normalizedName") > 0`);
   }
-
-  if (query) {
-    clauses.push(Prisma.sql`a."name" ILIKE ${`%${query}%`}`);
-  }
-
-  if (clauses.length === 0) {
-    return Prisma.empty;
-  }
-
   return Prisma.sql`WHERE ${Prisma.join(clauses, " AND ")}`;
+}
+
+function artistListWhere(show: CollectionFilter, yourDiscover: string[]): Prisma.ArtistWhereInput {
+  const library: Prisma.ArtistWhereInput = { albums: { some: { location: "LIBRARY", tracks: { some: {} } } } };
+  const discover: Prisma.ArtistWhereInput = {
+    albums: { some: { location: "DISCOVER", rgMbid: { in: yourDiscover }, tracks: { some: {} } } },
+  };
+  if (show === "owned") return library;
+  if (show === "discovery") return { AND: [discover, { NOT: library }] };
+  return { OR: [library, discover] };
 }
 
 router.get("/artists", async (req, res) => {
@@ -185,32 +196,22 @@ router.get("/artists", async (req, res) => {
       sortName: "asc" as const,
     };
 
-    let where: any = {};
+    const show = collectionFilter(filter);
+    const yourDiscover = show === "owned" ? [] : await yourDiscoverRgMbids(req.user!.id);
+    const where: Prisma.ArtistWhereInput = artistListWhere(show, yourDiscover);
 
-    if (filter === "owned") {
-      where.OR = [
-        { libraryAlbumCount: { gt: 0 } },
-        { ownedAlbums: { some: {} } },
-      ];
-    } else if (filter === "discovery") {
-      where.discoveryAlbumCount = { gt: 0 };
-      where.libraryAlbumCount = 0;
-    } else {
-      where.OR = [
-        { libraryAlbumCount: { gt: 0 } },
-        { discoveryAlbumCount: { gt: 0 } },
-      ];
-    }
-
-    if (query) {
-      where.name = { contains: query as string, mode: "insensitive" };
+    // The filter matches the stored normalizedName (case and accents folded in TypeScript), not the database's own
+    // case folding, which only knows ASCII on the encoding real installs use.
+    const nameFilter = normalizeArtistName(query as string);
+    if (nameFilter) {
+      where.normalizedName = { contains: nameFilter };
     }
 
     let artists: ArtistListRow[];
     let total: number;
 
     if (sortBy === "name" || sortBy === "name-desc") {
-      const whereSql = buildArtistListWhereSql(filter as string, query as string);
+      const whereSql = artistListWhereSql(show, yourDiscover, query as string);
       const direction = sortBy === "name-desc"
         ? Prisma.sql`DESC`
         : Prisma.sql`ASC`;
@@ -278,15 +279,28 @@ router.get("/artists", async (req, res) => {
       })),
     );
 
+    // Under "recommended" and "all" an artist's Discover albums are this listener's, not every listener's.
+    const yourDiscoverCounts = new Map<string, number>();
+    if (show !== "owned" && artists.length > 0) {
+      const rows = await prisma.album.groupBy({
+        by: ["artistId"],
+        where: {
+          artistId: { in: artists.map((a) => a.id) },
+          location: "DISCOVER",
+          rgMbid: { in: yourDiscover },
+          tracks: { some: {} },
+        },
+        _count: { _all: true },
+      });
+      for (const row of rows) yourDiscoverCounts.set(row.artistId, row._count._all);
+    }
+
     const artistsWithImages = artists.map((artist) => {
       const coverArt = imageMap.get(artist.id) || artist.heroUrl || null;
 
+      const yours = yourDiscoverCounts.get(artist.id) ?? 0;
       const albumCount =
-        filter === "discovery"
-          ? artist.discoveryAlbumCount
-          : filter === "all"
-            ? artist.libraryAlbumCount + artist.discoveryAlbumCount
-            : artist.libraryAlbumCount;
+        show === "discovery" ? yours : show === "all" ? artist.libraryAlbumCount + yours : artist.libraryAlbumCount;
 
       return {
         id: artist.id,
@@ -398,9 +412,9 @@ router.post("/backfill-genres", requireAdmin, async (_req, res) => {
   }
 });
 
-/** An artist as a route names one: by id, by name (any case) or by MusicBrainz id. */
+/** An artist as a route names one: by id, by name (case and accents ignored) or by MusicBrainz id. */
 const artistRef = (idParam: string) => ({
-  OR: [{ id: idParam }, { name: { equals: idParam, mode: "insensitive" as const } }, { mbid: idParam }],
+  OR: [{ id: idParam }, artistNamed(idParam), { mbid: idParam }],
 });
 
 // One artist's play queue, in the order clients play it as given: owned albums by year desc, then title; disc
@@ -482,8 +496,10 @@ router.get("/artists/:id", async (req, res) => {
   try {
     const idParam = req.params.id;
 
+    // The page shows the artist's library albums; their Discover albums live in Discover.
     const artistInclude = {
       albums: {
+        where: { location: AlbumLocation.LIBRARY },
         orderBy: { year: Prisma.SortOrder.desc },
         include: {
           tracks: {
@@ -804,7 +820,7 @@ router.get("/artists/:id", async (req, res) => {
         JOIN "Album" a ON a.id = t."albumId"
         JOIN "Artist" ar ON ar.id = a."artistId"
         JOIN "Play" p ON p."trackId" = t.id AND p."userId" = ${userId}
-        WHERE a."artistId" = ${artist.id}
+        WHERE a."artistId" = ${artist.id} AND a.location = 'LIBRARY'
         GROUP BY t.id, t.title, t.duration, t."albumId", a.title, a."coverUrl", a."artistId", ar.name
         HAVING COUNT(p.id) > 0
         ORDER BY COUNT(p.id) DESC, MAX(p."playedAt") DESC
@@ -1095,7 +1111,6 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
     const commonPaths = [
       resolveWithinMusicRoot(artist.name),
       resolveWithinMusicRoot("Soulseek", artist.name),
-      resolveWithinMusicRoot("discovery", artist.name),
     ].filter((p): p is string => p !== null);
 
     for (const commonPath of commonPaths) {

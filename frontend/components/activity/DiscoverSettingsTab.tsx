@@ -101,9 +101,12 @@ export function DiscoverSettingsTab({
             const result = await api.clearDiscoverPlaylist();
 
             const albums = (n: number) => `${n} album${n !== 1 ? "s" : ""}`;
+            const kept = result.lidarrFailed?.length ?? 0;
             const parts = [
                 result.likedMoved > 0 && `Moved ${albums(result.likedMoved)} you liked to your library.`,
                 result.activeDeleted > 0 && `Deleted ${albums(result.activeDeleted)}.`,
+                // Lidarr refusing, a file Kima could not delete, or Lidarr off: the server's own alert lists them and why.
+                kept > 0 && `Kept ${albums(kept)} the clear could not finish; the alert says why.`,
             ].filter(Boolean);
             notify.info("Discover playlist cleared", {
                 message: parts.length > 0 ? parts.join(" ") : "There were no albums to clear.",

@@ -898,6 +898,13 @@ class LidarrService {
         }
     }
 
+    /** The album Lidarr holds under this release-group id, or null when it has none. Errors throw. */
+    async findAlbumByForeignId(albumMbid: string): Promise<LidarrAlbum | null> {
+        const client = await this.requireClient();
+        const albums: LidarrAlbum[] = (await client.get("/api/v1/album", { params: { foreignAlbumId: albumMbid } })).data ?? [];
+        return albums.find((album) => album.foreignAlbumId === albumMbid) ?? null;
+    }
+
     /** Whether Lidarr has this album with files already downloaded. */
     async isAlbumAvailable(albumMbid: string): Promise<boolean> {
         await this.ensureInitialized();
@@ -1167,6 +1174,21 @@ class LidarrService {
             );
             return [];
         }
+    }
+
+    /**
+     * The artists that still carry Discover's tag, read without changing anything: null when Lidarr is not set up,
+     * and an error when it does not answer, so a caller never mistakes an unreachable Lidarr for "no artist is
+     * tagged". A missing tag means none is.
+     */
+    async readDiscoveryTaggedArtists(): Promise<LidarrArtist[] | null> {
+        await this.ensureInitialized();
+        if (!this.enabled || !this.client) return null;
+        const tags: LidarrTag[] = (await this.client.get("/api/v1/tag")).data || [];
+        const tag = tags.find((t) => t.label === DISCOVERY_TAG_LABEL);
+        if (!tag) return [];
+        const artists: LidarrArtist[] = (await this.client.get("/api/v1/artist")).data || [];
+        return artists.filter((artist) => artist.tags?.includes(tag.id));
     }
 
     async getDiscoveryArtists(): Promise<LidarrArtist[]> {

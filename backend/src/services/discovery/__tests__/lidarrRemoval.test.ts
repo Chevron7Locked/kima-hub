@@ -22,6 +22,7 @@ import { prisma } from "../../../utils/db";
 import { lidarrService } from "../../lidarr";
 import { removeDiscoveryAlbum, removeDiscoveryArtist } from "../lidarrRemoval";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import { artistIdentityKey } from "../../artistIdentity";
 
 const USER = "lr_user";
 const ARTIST = "lr_artist";
@@ -69,7 +70,7 @@ const discovered = (rgMbid: string, status: "ACTIVE" | "LIKED" = "ACTIVE") =>
 
 const inLibrary = async (rgMbid: string) => {
     await prisma.artist.create({
-        data: { id: ARTIST, name: "Interpol", mbid: "artist-mbid", identityKey: "lr_interpol" },
+        data: { id: ARTIST, name: "Interpol", mbid: "artist-mbid", identityKey: artistIdentityKey("Interpol") },
     });
     await prisma.album.create({
         data: { rgMbid, artistId: ARTIST, title: "Owned", primaryType: "Album", location: "LIBRARY" },
@@ -80,14 +81,18 @@ describe("removeDiscoveryAlbum", () => {
     it("deletes the files of the album Discover asked for", async () => {
         lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
 
-        expect(await removeDiscoveryAlbum(7, "rg-asked")).toBe(true);
+        const outcome = await removeDiscoveryAlbum(7, "rg-asked");
+        expect(outcome.removed).toBe(true);
+        expect(outcome.reason).toBeNull();
         expect(lidarr.deleteAlbumById).toHaveBeenCalledWith(7, true);
     });
 
     it("only unmonitors an album whose MBID is not the one Discover asked for", async () => {
         lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-live-version"));
 
-        expect(await removeDiscoveryAlbum(7, "rg-asked")).toBe(false);
+        const kept = await removeDiscoveryAlbum(7, "rg-asked");
+        expect(kept.removed).toBe(false);
+        expect(kept.reason).toBe("Lidarr's record is not the album Discover fetched");
         expect(lidarr.deleteAlbumById).not.toHaveBeenCalled();
         expect(lidarr.unmonitorAlbum).toHaveBeenCalledWith(7);
     });
@@ -96,7 +101,8 @@ describe("removeDiscoveryAlbum", () => {
         lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
         lidarr.getArtistById.mockResolvedValue(lidarrArtist([]));
 
-        expect(await removeDiscoveryAlbum(7, "rg-asked")).toBe(false);
+        const kept = await removeDiscoveryAlbum(7, "rg-asked");
+        expect(kept.removed).toBe(false);
         expect(lidarr.deleteAlbumById).not.toHaveBeenCalled();
     });
 
@@ -104,14 +110,57 @@ describe("removeDiscoveryAlbum", () => {
         await inLibrary("rg-asked");
         lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
 
-        expect(await removeDiscoveryAlbum(7, "rg-asked")).toBe(false);
+        const kept = await removeDiscoveryAlbum(7, "rg-asked");
+        expect(kept.removed).toBe(false);
+        expect(lidarr.deleteAlbumById).not.toHaveBeenCalled();
+    });
+
+    it("keeps the files of a library album recorded under another id the caller knows", async () => {
+        await inLibrary("rg-other");
+        lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
+
+        const kept = await removeDiscoveryAlbum(7, "rg-asked", { rgMbids: ["rg-asked", "rg-other"] });
+        expect(kept.removed).toBe(false);
+        expect(lidarr.deleteAlbumById).not.toHaveBeenCalled();
+    });
+
+    it("keeps the files of a library album that matches only by artist and title, in any case", async () => {
+        await inLibrary("rg-unrelated");
+        lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
+
+        const kept = await removeDiscoveryAlbum(7, "rg-asked", { artistName: "INTERPOL", albumTitle: "owned" });
+        expect(kept.removed).toBe(false);
+        expect(lidarr.deleteAlbumById).not.toHaveBeenCalled();
+    });
+
+    it("keeps an album Lidarr no longer has, since its files may still be on disk", async () => {
+        lidarr.getAlbum.mockResolvedValue(null);
+
+        const kept = await removeDiscoveryAlbum(7, "rg-asked");
+        expect(kept.removed).toBe(false);
+        expect(kept.reason).toBe(
+            "Lidarr no longer knows this album, so its files may still be on disk; delete them by hand"
+        );
+        expect(lidarr.deleteAlbumById).not.toHaveBeenCalled();
+    });
+
+    it("reports the message when Lidarr cannot be reached", async () => {
+        lidarr.getAlbum.mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:80"));
+
+        const kept = await removeDiscoveryAlbum(7, "rg-asked");
+        expect(kept.removed).toBe(false);
+        expect(kept.reason).toBe(
+            "Lidarr could not be reached or answered with an error: connect ECONNREFUSED 127.0.0.1:80"
+        );
         expect(lidarr.deleteAlbumById).not.toHaveBeenCalled();
     });
 
     it("does nothing while Lidarr is off", async () => {
         lidarr.isEnabled.mockResolvedValue(false);
 
-        expect(await removeDiscoveryAlbum(7, "rg-asked")).toBe(false);
+        const kept = await removeDiscoveryAlbum(7, "rg-asked");
+        expect(kept.removed).toBe(false);
+        expect(kept.reason).toBe("Lidarr is turned off");
         expect(lidarr.getAlbum).not.toHaveBeenCalled();
     });
 });

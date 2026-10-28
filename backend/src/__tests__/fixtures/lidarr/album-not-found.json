@@ -1,0 +1,19 @@
+{
+ "name": "album-not-found",
+ "recordedWith": "Lidarr 3.1.6.5079 with a real library, recorded through scripts/record-lidarr.ts",
+ "exchanges": [
+  {
+   "seq": 4,
+   "at": "2026-10-27T22:55:32.876Z",
+   "method": "GET",
+   "path": "/api/v1/album/2147480000",
+   "request": null,
+   "status": 404,
+   "response": {
+    "message": "Album with ID 2147480000 does not exist",
+    "description": "NzbDrone.Core.Datastore.ModelNotFoundException: Album with ID 2147480000 does not exist\n   at NzbDrone.Core.Datastore.BasicRepository`1.Get(Int32 id) in ./NzbDrone.Core/Datastore/BasicRepository.cs:line 128\n   at Lidarr.Api.V1.Albums.AlbumControllerWithSignalR.GetResourceById(Int32 id) in ./Lidarr.Api.V1/Albums/AlbumControllerWithSignalR.cs:line 35\n   at lambda_method137(Closure, Object, Object[])\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.InvokeActionMethodAsync()\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.Next(State& next, Scope& scope, Object& state, Boolean& isCompleted)\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.InvokeNextActionFilterAsync()\n--- End of stack trace from previous location ---\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.Rethrow(ActionExecutedContextSealed context)\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.Next(State& next, Scope& scope, Object& state, Boolean& isCompleted)\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.InvokeInnerFilterAsync()\n--- End of stack trace from previous location ---\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ResourceInvoker.<InvokeFilterPipelineAsync>g__Awaited|20_0(ResourceInvoker invoker, Task lastTask, State next, Scope scope, Object state, Boolean isCompleted)\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ResourceInvoker.<InvokeAsync>g__Awaited|17_0(ResourceInvoker invoker, Task task, IDisposable scope)\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ResourceInvoker.<InvokeAsync>g__Awaited|17_0(ResourceInvoker invoker, Task task, IDisposable scope)\n   at Lidarr.Http.Middleware.BufferingMiddleware.InvokeAsync(HttpContext context) in ./Lidarr.Http/Middleware/BufferingMiddleware.cs:line 27\n   at Lidarr.Http.Middleware.IfModifiedMiddleware.InvokeAsync(HttpContext context) in ./Lidarr.Http/Middleware/IfModifiedMiddleware.cs:line 40\n   at Lidarr.Http.Middleware.CacheHeaderMiddleware.InvokeAsync(HttpContext context) in ./Lidarr.Http/Middleware/CacheHeaderMiddleware.cs:line 32\n   at Lidarr.Http.Middleware.StartingUpMiddleware.InvokeAsync(HttpContext context) in ./Lidarr.Http/Middleware/StartingUpMiddleware.cs:line 37\n   at Lidarr.Http.Middleware.UrlBaseMiddleware.InvokeAsync(HttpContext context) in ./Lidarr.Http/Middleware/UrlBaseMiddleware.cs:line 28\n   at Lidarr.Http.Middleware.VersionMiddleware.InvokeAsync(HttpContext context) in ./Lidarr.Http/Middleware/VersionMiddleware.cs:line 28\n   at Microsoft.AspNetCore.ResponseCompression.ResponseCompressionMiddleware.InvokeCore(HttpContext context)\n   at Microsoft.AspNetCore.Authorization.AuthorizationMiddleware.Invoke(HttpContext context)\n   at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)\n   at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.<Invoke>g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)"
+   }
+  }
+ ],
+ "webhooks": []
+}

@@ -23,3 +23,13 @@ export const NOT_MISSING = { missingSince: null } as const;
 
 /** A track that can be streamed: its file is there and was read. For Prisma `where` clauses on Track. */
 export const PLAYABLE = { ...NOT_MISSING, corrupt: false } as const;
+
+/**
+ * A song in the library: its album is a library album, not a Discover suggestion. Discover songs live only in Discover,
+ * so every query that picks, lists or measures songs outside Discover carries this. In raw SQL it is the literal fragment
+ * `location = 'LIBRARY'` on the song's album, held to by the same grep gate as `"missingSince" IS NULL`.
+ */
+export const IN_LIBRARY = { album: { location: "LIBRARY" } } as const;
+
+/** A library song that can be streamed (PLAYABLE and IN_LIBRARY). */
+export const LIBRARY_PLAYABLE = { ...PLAYABLE, ...IN_LIBRARY } as const;

@@ -11,7 +11,7 @@ import { parseLimit, parseOffset } from "./paging";
 import fs from "fs";
 import pLimit from "p-limit";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
-import { LIBRARY_LOCATION } from "../../services/libraryFilters";
+import { collectionAlbumWhere, collectionFilter, yourDiscoverRgMbids } from "../../services/libraryFilters";
 
 // Alphabetical sorts use `sortName` (article-stripped, unaccented,
 // lowercased), written wherever a title or displayTitle is written.
@@ -40,35 +40,15 @@ router.get("/albums", async (req, res) => {
       sortName: "asc" as const,
     };
 
-    let where: any = {
-      tracks: { some: {} },
+    // The collection's "show" choice (collectionAlbumWhere): the library, this listener's Discover albums, or both.
+    const show = collectionFilter(filter);
+    const where: Prisma.AlbumWhereInput = {
+      AND: [
+        collectionAlbumWhere(show, show === "owned" ? [] : await yourDiscoverRgMbids(req.user!.id)),
+        { tracks: { some: {} } },
+        ...(artistId ? [{ artistId: artistId as string }] : []),
+      ],
     };
-
-    if (filter === "owned") {
-      // Bounded so the query cannot fetch every row.
-      const ownedAlbumMbids = await prisma.ownedAlbum.findMany({
-        select: { rgMbid: true },
-        take: 20000,
-      });
-      const ownedMbids = ownedAlbumMbids.map((oa) => oa.rgMbid);
-
-      where.OR = [
-        { location: LIBRARY_LOCATION, tracks: { some: {} } },
-        { rgMbid: { in: ownedMbids }, tracks: { some: {} } },
-      ];
-    } else if (filter === "discovery") {
-      where.location = "DISCOVER";
-    }
-
-    if (artistId) {
-      if (where.OR) {
-        where = {
-          AND: [{ OR: where.OR }, { artistId: artistId as string }],
-        };
-      } else {
-        where.artistId = artistId as string;
-      }
-    }
 
     const [albumsData, total] = await Promise.all([
       prisma.album.findMany({

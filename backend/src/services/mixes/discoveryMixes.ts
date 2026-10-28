@@ -4,7 +4,7 @@ import { logger } from "../../utils/logger";
 import { normalizeArtistName } from "../artistIdentity";
 import { getSimilarArtists } from "../artistSimilarity";
 import { LIBRARY_LOCATION } from "../libraryFilters";
-import { NOT_MISSING } from "../../utils/libraryEligibility";
+import { IN_LIBRARY, NOT_MISSING } from "../../utils/libraryEligibility";
 import {
     ProgrammaticMix,
     albumCoverUrls,
@@ -23,7 +23,7 @@ export async function generateTopTracksMix(
 ): Promise<ProgrammaticMix | null> {
     const playStats = await prisma.play.groupBy({
         by: ["trackId"],
-        where: { userId },
+        where: { userId, track: { ...NOT_MISSING, ...IN_LIBRARY } },
         _count: { trackId: true },
         orderBy: { _count: { trackId: "desc" } },
         take: TRACK_LIMIT,
@@ -41,7 +41,7 @@ export async function generateTopTracksMix(
 
     const trackIds = playStats.map((p) => p.trackId);
     const tracks = await prisma.track.findMany({
-        where: { id: { in: trackIds }, ...NOT_MISSING },
+        where: { id: { in: trackIds }, ...NOT_MISSING, ...IN_LIBRARY },
         include: {
             album: { select: { coverUrl: true } },
         },
@@ -106,6 +106,7 @@ export async function generateArtistSimilarMix(
             playedAt: {
                 gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
             },
+            track: IN_LIBRARY,
         },
         include: {
             track: {
@@ -168,6 +169,7 @@ export async function generateArtistSimilarMix(
             where: { normalizedName: { in: similarArtistNormalized } },
             include: {
                 albums: {
+                    where: { location: "LIBRARY" },
                     include: {
                         tracks: {
                             where: NOT_MISSING,
@@ -225,7 +227,8 @@ export async function generateRandomDiscoveryMix(
     const drawn = await prisma.$queryRaw<{ id: string }[]>`
         SELECT a.id
         FROM "Album" a
-        WHERE EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t."missingSince" IS NULL)
+        WHERE a.location = 'LIBRARY'
+          AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t."missingSince" IS NULL)
         ORDER BY ${seededKeySql(getSeededRandom(`random-${today}`), Prisma.sql`a.id`)}
         LIMIT 10
     `;

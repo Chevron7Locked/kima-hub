@@ -1,0 +1,1450 @@
+{
+ "name": "discover-sort",
+ "recordedWith": "Lidarr 3.1.6.5079, qBittorrent, Brad Sucks albums (CC BY-NC 4.0); Lidarr after a Discover download of Guess Who’s a Mess",
+ "exchanges": [
+  {
+   "seq": 35,
+   "at": "2026-10-26T18:15:57.333Z",
+   "method": "GET",
+   "path": "/api/v1/tag",
+   "request": null,
+   "status": 200,
+   "response": [
+    {
+     "label": "lidify-discovery",
+     "id": 2
+    }
+   ]
+  },
+  {
+   "seq": 38,
+   "at": "2026-10-26T18:15:57.348Z",
+   "method": "GET",
+   "path": "/api/v1/artist",
+   "request": null,
+   "status": 200,
+   "response": [
+    {
+     "status": "continuing",
+     "ended": false,
+     "artistName": "Brad Sucks",
+     "foreignArtistId": "9c070e4f-28c1-4b98-b371-d8514c31ba55",
+     "tadbId": 0,
+     "discogsId": 0,
+     "artistType": "Person",
+     "disambiguation": "",
+     "links": [
+      {
+       "url": "http://www.bradsucks.net/",
+       "name": "bradsucks"
+      },
+      {
+       "url": "http://www.bradsucks.net/music/",
+       "name": "bradsucks"
+      },
+      {
+       "url": "http://www.bradsucks.net/store/",
+       "name": "bradsucks"
+      },
+      {
+       "url": "https://myspace.com/bradsucks",
+       "name": "myspace"
+      },
+      {
+       "url": "https://www.discogs.com/artist/368581",
+       "name": "discogs"
+      },
+      {
+       "url": "https://www.wikidata.org/wiki/Q896869",
+       "name": "wikidata"
+      },
+      {
+       "url": "https://soundcloud.com/bradsucks",
+       "name": "soundcloud"
+      },
+      {
+       "url": "http://brad.tumblr.com/",
+       "name": "tumblr"
+      },
+      {
+       "url": "https://twitter.com/bradsucks",
+       "name": "twitter"
+      },
+      {
+       "url": "https://www.facebook.com/pages/Brad-Sucks/5572237940",
+       "name": "facebook"
+      },
+      {
+       "url": "https://www.last.fm/music/Brad+Sucks",
+       "name": "last"
+      },
+      {
+       "url": "http://www.jamendo.com/artist/1333/brad-sucks",
+       "name": "jamendo"
+      },
+      {
+       "url": "http://www.jamendo.com/artist/1333/brad-sucks",
+       "name": "jamendo"
+      },
+      {
+       "url": "https://open.spotify.com/artist/13yy1c4aDXIWu2zfvtvGLn",
+       "name": "spotify"
+      },
+      {
+       "url": "https://www.deezer.com/artist/9610",
+       "name": "deezer"
+      },
+      {
+       "url": "https://www.patreon.com/bradsucks",
+       "name": "patreon"
+      },
+      {
+       "url": "https://www.youtube.com/user/bradsucks",
+       "name": "youtube"
+      },
+      {
+       "url": "https://www.instagram.com/bradsucks/",
+       "name": "instagram"
+      },
+      {
+       "url": "https://bradsucks.bandcamp.com/",
+       "name": "bandcamp"
+      },
+      {
+       "url": "https://www.allmusic.com/artist/mn0000306032",
+       "name": "allmusic"
+      },
+      {
+       "url": "https://www.imdb.com/name/nm9737510/",
+       "name": "imdb"
+      },
+      {
+       "url": "https://tidal.com/artist/6850645",
+       "name": "tidal"
+      }
+     ],
+     "nextAlbum": null,
+     "lastAlbum": null,
+     "images": [],
+     "path": "/music/Brad Sucks",
+     "qualityProfileId": 1,
+     "metadataProfileId": 1,
+     "monitored": true,
+     "monitorNewItems": "none",
+     "rootFolderPath": "/music",
+     "genres": [],
+     "cleanName": "bradsucks",
+     "sortName": "brad sucks",
+     "tags": [
+      2
+     ],
+     "added": "2026-10-26T17:37:36Z",
+     "ratings": {
+      "votes": 1,
+      "value": 10
+     },
+     "statistics": {
+      "albumCount": 5,
+      "trackFileCount": 11,
+      "trackCount": 11,
+      "totalTrackCount": 53,
+      "sizeOnDisk": 60511289,
+      "percentOfTracks": 100
+     },
+     "id": 65
+    }
+   ]
+  },
+  {
+   "seq": 41,
+   "at": "2026-10-26T18:15:57.355Z",
+   "method": "GET",
+   "path": "/api/v1/album?artistId=65",
+   "request": null,
+   "status": 200,
+   "response": [
+    {
+     "title": "I Don't Know What I'm Doing",
+     "disambiguation": "",
+     "overview": "",
+     "artistId": 65,
+     "foreignAlbumId": "10e85e9b-0f07-33d4-a927-18a273f86eca",
+     "monitored": false,
+     "anyReleaseOk": true,
+     "profileId": 1,
+     "duration": 2391063,
+     "albumType": "Album",
+     "secondaryTypes": [],
+     "ratings": {
+      "votes": 2,
+      "value": 10
+     },
+     "releaseDate": "2003-08-26T00:00:00Z",
+     "releases": [
+      {
+       "id": 1093,
+       "albumId": 325,
+       "foreignReleaseId": "3cf15bc0-2c3c-3572-add0-ca4e301e5910",
+       "title": "I Don't Know What I'm Doing",
+       "status": "Official",
+       "duration": 2391063,
+       "trackCount": 12,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "CD"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "United States"
+       ],
+       "label": [],
+       "format": "CD",
+       "monitored": true
+      },
+      {
+       "id": 1094,
+       "albumId": 325,
+       "foreignReleaseId": "649a409f-d8d9-37ee-bca5-00f6f946c94a",
+       "title": "I Don't Know What I'm Doing",
+       "status": "Official",
+       "duration": 2391063,
+       "trackCount": 12,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "Magnatune"
+       ],
+       "format": "Digital Media",
+       "monitored": false
+      },
+      {
+       "id": 1095,
+       "albumId": 325,
+       "foreignReleaseId": "2c5c403d-4980-31d0-bb1a-f7f677e25e9e",
+       "title": "I Don't Know What I'm Doing",
+       "status": "Official",
+       "duration": 2391063,
+       "trackCount": 12,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "[no label]"
+       ],
+       "format": "Digital Media",
+       "monitored": false
+      },
+      {
+       "id": 1096,
+       "albumId": 325,
+       "foreignReleaseId": "7198b51e-9f29-4111-ad8c-344182df9f54",
+       "title": "I Don't Know What I'm Doing",
+       "status": "Official",
+       "duration": 2391063,
+       "trackCount": 12,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "CD"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "United States"
+       ],
+       "label": [
+        "[no label]"
+       ],
+       "format": "CD",
+       "monitored": false
+      },
+      {
+       "id": 1097,
+       "albumId": 325,
+       "foreignReleaseId": "393052a6-980f-4f1e-b7a1-3eaeefcd8713",
+       "title": "I Don’t Know What I’m Doing",
+       "status": "Official",
+       "duration": 2454330,
+       "trackCount": 12,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "[no label]"
+       ],
+       "format": "Digital Media",
+       "monitored": false
+      }
+     ],
+     "genres": [
+      "Rock"
+     ],
+     "mediumCount": 1,
+     "media": [
+      {
+       "mediumNumber": 1,
+       "mediumName": "",
+       "mediumFormat": "CD"
+      }
+     ],
+     "artist": {
+      "status": "continuing",
+      "ended": false,
+      "artistName": "Brad Sucks",
+      "foreignArtistId": "9c070e4f-28c1-4b98-b371-d8514c31ba55",
+      "tadbId": 0,
+      "discogsId": 0,
+      "artistType": "Person",
+      "disambiguation": "",
+      "links": [
+       {
+        "url": "http://www.bradsucks.net/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "http://www.bradsucks.net/music/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "http://www.bradsucks.net/store/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "https://myspace.com/bradsucks",
+        "name": "myspace"
+       },
+       {
+        "url": "https://www.discogs.com/artist/368581",
+        "name": "discogs"
+       },
+       {
+        "url": "https://www.wikidata.org/wiki/Q896869",
+        "name": "wikidata"
+       },
+       {
+        "url": "https://soundcloud.com/bradsucks",
+        "name": "soundcloud"
+       },
+       {
+        "url": "http://brad.tumblr.com/",
+        "name": "tumblr"
+       },
+       {
+        "url": "https://twitter.com/bradsucks",
+        "name": "twitter"
+       },
+       {
+        "url": "https://www.facebook.com/pages/Brad-Sucks/5572237940",
+        "name": "facebook"
+       },
+       {
+        "url": "https://www.last.fm/music/Brad+Sucks",
+        "name": "last"
+       },
+       {
+        "url": "http://www.jamendo.com/artist/1333/brad-sucks",
+        "name": "jamendo"
+       },
+       {
+        "url": "http://www.jamendo.com/artist/1333/brad-sucks",
+        "name": "jamendo"
+       },
+       {
+        "url": "https://open.spotify.com/artist/13yy1c4aDXIWu2zfvtvGLn",
+        "name": "spotify"
+       },
+       {
+        "url": "https://www.deezer.com/artist/9610",
+        "name": "deezer"
+       },
+       {
+        "url": "https://www.patreon.com/bradsucks",
+        "name": "patreon"
+       },
+       {
+        "url": "https://www.youtube.com/user/bradsucks",
+        "name": "youtube"
+       },
+       {
+        "url": "https://www.instagram.com/bradsucks/",
+        "name": "instagram"
+       },
+       {
+        "url": "https://bradsucks.bandcamp.com/",
+        "name": "bandcamp"
+       },
+       {
+        "url": "https://www.allmusic.com/artist/mn0000306032",
+        "name": "allmusic"
+       },
+       {
+        "url": "https://www.imdb.com/name/nm9737510/",
+        "name": "imdb"
+       },
+       {
+        "url": "https://tidal.com/artist/6850645",
+        "name": "tidal"
+       }
+      ],
+      "nextAlbum": null,
+      "lastAlbum": null,
+      "images": [],
+      "path": "/music/Brad Sucks",
+      "qualityProfileId": 1,
+      "metadataProfileId": 1,
+      "monitored": true,
+      "monitorNewItems": "none",
+      "genres": [],
+      "cleanName": "bradsucks",
+      "sortName": "brad sucks",
+      "tags": [
+       2
+      ],
+      "added": "2026-10-26T17:37:36Z",
+      "ratings": {
+       "votes": 1,
+       "value": 10
+      },
+      "id": 65
+     },
+     "images": [
+      {
+       "coverType": "cover",
+       "url": "/MediaCover/Albums/325/cover.jpg?lastWrite=639286330569511890",
+       "remoteUrl": "https://images.lidarr.audio/cache/https://coverartarchive.org/release/393052a6-980f-4f1e-b7a1-3eaeefcd8713/36261224841-1200.jpg",
+       "extension": ".jpg"
+      }
+     ],
+     "links": [],
+     "statistics": {
+      "trackFileCount": 0,
+      "trackCount": 0,
+      "totalTrackCount": 12,
+      "sizeOnDisk": 0,
+      "percentOfTracks": 0
+     },
+     "id": 325
+    },
+    {
+     "title": "Out of It",
+     "disambiguation": "",
+     "overview": "",
+     "artistId": 65,
+     "foreignAlbumId": "16f30346-886a-3144-9377-cbfceb32fd34",
+     "monitored": false,
+     "anyReleaseOk": true,
+     "profileId": 1,
+     "duration": 2109490,
+     "albumType": "Album",
+     "secondaryTypes": [],
+     "ratings": {
+      "votes": 2,
+      "value": 8
+     },
+     "releaseDate": "2008-09-08T00:00:00Z",
+     "releases": [
+      {
+       "id": 1098,
+       "albumId": 326,
+       "foreignReleaseId": "49f17519-45ae-4ad9-bc7a-28afd7e97141",
+       "title": "Out of It",
+       "status": "Official",
+       "duration": 2109490,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "CD"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "Canada"
+       ],
+       "label": [
+        "Magnatune"
+       ],
+       "format": "CD",
+       "monitored": true
+      },
+      {
+       "id": 1099,
+       "albumId": 326,
+       "foreignReleaseId": "064dbf15-3ef8-3fe2-8b56-3b9287c61e17",
+       "title": "Out of It",
+       "status": "Official",
+       "duration": 2109490,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [],
+       "format": "Digital Media",
+       "monitored": false
+      },
+      {
+       "id": 1100,
+       "albumId": 326,
+       "foreignReleaseId": "08fe1f6f-fcc3-394e-b27c-07d1a8e2edd9",
+       "title": "Out of It",
+       "status": "Official",
+       "duration": 2109490,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "[no label]"
+       ],
+       "format": "Digital Media",
+       "monitored": false
+      },
+      {
+       "id": 1101,
+       "albumId": 326,
+       "foreignReleaseId": "516f82b8-7f57-49a9-adce-8815de24ed24",
+       "title": "Out of It",
+       "status": "Official",
+       "duration": 2109490,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "Magnatune"
+       ],
+       "format": "Digital Media",
+       "monitored": false
+      },
+      {
+       "id": 1102,
+       "albumId": 326,
+       "foreignReleaseId": "4949426a-9aa2-48b5-909c-8a3283e5a917",
+       "title": "Out of It",
+       "status": "Official",
+       "duration": 2109490,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "[no label]"
+       ],
+       "format": "Digital Media",
+       "monitored": false
+      }
+     ],
+     "genres": [
+      "Rock",
+      "Alternative Rock",
+      "Electro",
+      "Indie Rock"
+     ],
+     "mediumCount": 1,
+     "media": [
+      {
+       "mediumNumber": 1,
+       "mediumName": "",
+       "mediumFormat": "CD"
+      }
+     ],
+     "artist": {
+      "status": "continuing",
+      "ended": false,
+      "artistName": "Brad Sucks",
+      "foreignArtistId": "9c070e4f-28c1-4b98-b371-d8514c31ba55",
+      "tadbId": 0,
+      "discogsId": 0,
+      "artistType": "Person",
+      "disambiguation": "",
+      "links": [
+       {
+        "url": "http://www.bradsucks.net/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "http://www.bradsucks.net/music/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "http://www.bradsucks.net/store/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "https://myspace.com/bradsucks",
+        "name": "myspace"
+       },
+       {
+        "url": "https://www.discogs.com/artist/368581",
+        "name": "discogs"
+       },
+       {
+        "url": "https://www.wikidata.org/wiki/Q896869",
+        "name": "wikidata"
+       },
+       {
+        "url": "https://soundcloud.com/bradsucks",
+        "name": "soundcloud"
+       },
+       {
+        "url": "http://brad.tumblr.com/",
+        "name": "tumblr"
+       },
+       {
+        "url": "https://twitter.com/bradsucks",
+        "name": "twitter"
+       },
+       {
+        "url": "https://www.facebook.com/pages/Brad-Sucks/5572237940",
+        "name": "facebook"
+       },
+       {
+        "url": "https://www.last.fm/music/Brad+Sucks",
+        "name": "last"
+       },
+       {
+        "url": "http://www.jamendo.com/artist/1333/brad-sucks",
+        "name": "jamendo"
+       },
+       {
+        "url": "http://www.jamendo.com/artist/1333/brad-sucks",
+        "name": "jamendo"
+       },
+       {
+        "url": "https://open.spotify.com/artist/13yy1c4aDXIWu2zfvtvGLn",
+        "name": "spotify"
+       },
+       {
+        "url": "https://www.deezer.com/artist/9610",
+        "name": "deezer"
+       },
+       {
+        "url": "https://www.patreon.com/bradsucks",
+        "name": "patreon"
+       },
+       {
+        "url": "https://www.youtube.com/user/bradsucks",
+        "name": "youtube"
+       },
+       {
+        "url": "https://www.instagram.com/bradsucks/",
+        "name": "instagram"
+       },
+       {
+        "url": "https://bradsucks.bandcamp.com/",
+        "name": "bandcamp"
+       },
+       {
+        "url": "https://www.allmusic.com/artist/mn0000306032",
+        "name": "allmusic"
+       },
+       {
+        "url": "https://www.imdb.com/name/nm9737510/",
+        "name": "imdb"
+       },
+       {
+        "url": "https://tidal.com/artist/6850645",
+        "name": "tidal"
+       }
+      ],
+      "nextAlbum": null,
+      "lastAlbum": null,
+      "images": [],
+      "path": "/music/Brad Sucks",
+      "qualityProfileId": 1,
+      "metadataProfileId": 1,
+      "monitored": true,
+      "monitorNewItems": "none",
+      "genres": [],
+      "cleanName": "bradsucks",
+      "sortName": "brad sucks",
+      "tags": [
+       2
+      ],
+      "added": "2026-10-26T17:37:36Z",
+      "ratings": {
+       "votes": 1,
+       "value": 10
+      },
+      "id": 65
+     },
+     "images": [
+      {
+       "coverType": "cover",
+       "url": "/MediaCover/Albums/326/cover.jpg?lastWrite=639286330572883383",
+       "remoteUrl": "https://images.lidarr.audio/cache/https://coverartarchive.org/release/064dbf15-3ef8-3fe2-8b56-3b9287c61e17/4534500547-1200.jpg",
+       "extension": ".jpg"
+      }
+     ],
+     "links": [],
+     "statistics": {
+      "trackFileCount": 0,
+      "trackCount": 0,
+      "totalTrackCount": 10,
+      "sizeOnDisk": 0,
+      "percentOfTracks": 0
+     },
+     "id": 326
+    },
+    {
+     "title": "A New Low in Hi-Fi",
+     "disambiguation": "",
+     "overview": "",
+     "artistId": 65,
+     "foreignAlbumId": "4a5f42b4-0fe8-4fb8-bb46-bd0fe2ff1033",
+     "monitored": false,
+     "anyReleaseOk": true,
+     "profileId": 1,
+     "duration": 2340000,
+     "albumType": "Album",
+     "secondaryTypes": [],
+     "ratings": {
+      "votes": 0,
+      "value": 0
+     },
+     "releaseDate": "2021-06-10T00:00:00Z",
+     "releases": [
+      {
+       "id": 1103,
+       "albumId": 327,
+       "foreignReleaseId": "036e571b-d92d-47f2-a838-51cea8aef6fa",
+       "title": "A New Low in Hi-Fi",
+       "status": "Official",
+       "duration": 2340000,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "[no label]"
+       ],
+       "format": "Digital Media",
+       "monitored": true
+      }
+     ],
+     "genres": [
+      "Alternative Rock",
+      "Electronic Rock",
+      "Indie Rock",
+      "Rock"
+     ],
+     "mediumCount": 1,
+     "media": [
+      {
+       "mediumNumber": 1,
+       "mediumName": "",
+       "mediumFormat": "Digital Media"
+      }
+     ],
+     "artist": {
+      "status": "continuing",
+      "ended": false,
+      "artistName": "Brad Sucks",
+      "foreignArtistId": "9c070e4f-28c1-4b98-b371-d8514c31ba55",
+      "tadbId": 0,
+      "discogsId": 0,
+      "artistType": "Person",
+      "disambiguation": "",
+      "links": [
+       {
+        "url": "http://www.bradsucks.net/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "http://www.bradsucks.net/music/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "http://www.bradsucks.net/store/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "https://myspace.com/bradsucks",
+        "name": "myspace"
+       },
+       {
+        "url": "https://www.discogs.com/artist/368581",
+        "name": "discogs"
+       },
+       {
+        "url": "https://www.wikidata.org/wiki/Q896869",
+        "name": "wikidata"
+       },
+       {
+        "url": "https://soundcloud.com/bradsucks",
+        "name": "soundcloud"
+       },
+       {
+        "url": "http://brad.tumblr.com/",
+        "name": "tumblr"
+       },
+       {
+        "url": "https://twitter.com/bradsucks",
+        "name": "twitter"
+       },
+       {
+        "url": "https://www.facebook.com/pages/Brad-Sucks/5572237940",
+        "name": "facebook"
+       },
+       {
+        "url": "https://www.last.fm/music/Brad+Sucks",
+        "name": "last"
+       },
+       {
+        "url": "http://www.jamendo.com/artist/1333/brad-sucks",
+        "name": "jamendo"
+       },
+       {
+        "url": "http://www.jamendo.com/artist/1333/brad-sucks",
+        "name": "jamendo"
+       },
+       {
+        "url": "https://open.spotify.com/artist/13yy1c4aDXIWu2zfvtvGLn",
+        "name": "spotify"
+       },
+       {
+        "url": "https://www.deezer.com/artist/9610",
+        "name": "deezer"
+       },
+       {
+        "url": "https://www.patreon.com/bradsucks",
+        "name": "patreon"
+       },
+       {
+        "url": "https://www.youtube.com/user/bradsucks",
+        "name": "youtube"
+       },
+       {
+        "url": "https://www.instagram.com/bradsucks/",
+        "name": "instagram"
+       },
+       {
+        "url": "https://bradsucks.bandcamp.com/",
+        "name": "bandcamp"
+       },
+       {
+        "url": "https://www.allmusic.com/artist/mn0000306032",
+        "name": "allmusic"
+       },
+       {
+        "url": "https://www.imdb.com/name/nm9737510/",
+        "name": "imdb"
+       },
+       {
+        "url": "https://tidal.com/artist/6850645",
+        "name": "tidal"
+       }
+      ],
+      "nextAlbum": null,
+      "lastAlbum": null,
+      "images": [],
+      "path": "/music/Brad Sucks",
+      "qualityProfileId": 1,
+      "metadataProfileId": 1,
+      "monitored": true,
+      "monitorNewItems": "none",
+      "genres": [],
+      "cleanName": "bradsucks",
+      "sortName": "brad sucks",
+      "tags": [
+       2
+      ],
+      "added": "2026-10-26T17:37:36Z",
+      "ratings": {
+       "votes": 1,
+       "value": 10
+      },
+      "id": 65
+     },
+     "images": [
+      {
+       "coverType": "cover",
+       "url": "/MediaCover/Albums/327/cover.jpg?lastWrite=639286330583053560",
+       "remoteUrl": "https://images.lidarr.audio/cache/https://coverartarchive.org/release/036e571b-d92d-47f2-a838-51cea8aef6fa/29613477651-1200.jpg",
+       "extension": ".jpg"
+      }
+     ],
+     "links": [],
+     "statistics": {
+      "trackFileCount": 0,
+      "trackCount": 0,
+      "totalTrackCount": 10,
+      "sizeOnDisk": 0,
+      "percentOfTracks": 0
+     },
+     "id": 327
+    },
+    {
+     "title": "Guess Who’s a Mess",
+     "disambiguation": "",
+     "overview": "",
+     "artistId": 65,
+     "foreignAlbumId": "d0484284-1ee7-4157-951a-50f003cbcfb4",
+     "monitored": false,
+     "anyReleaseOk": true,
+     "profileId": 0,
+     "duration": 2318853,
+     "albumType": "Album",
+     "secondaryTypes": [],
+     "ratings": {
+      "votes": 0,
+      "value": 0
+     },
+     "releaseDate": "2012-11-02T00:00:00Z",
+     "releases": [
+      {
+       "id": 1104,
+       "albumId": 328,
+       "foreignReleaseId": "e6577867-6876-4f54-98b1-da0db635bd51",
+       "title": "Guess Who's a Mess",
+       "status": "Official",
+       "duration": 2106484,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "[no label]"
+       ],
+       "format": "Digital Media",
+       "monitored": false
+      },
+      {
+       "id": 1105,
+       "albumId": 328,
+       "foreignReleaseId": "e6c0d2f7-b551-4a72-b48c-03f0797d6a5e",
+       "title": "Guess Who's a Mess",
+       "status": "Official",
+       "duration": 2125493,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "CD"
+        }
+       ],
+       "disambiguation": "",
+       "country": [],
+       "label": [
+        "[no label]"
+       ],
+       "format": "CD",
+       "monitored": false
+      },
+      {
+       "id": 1106,
+       "albumId": 328,
+       "foreignReleaseId": "106765b5-13c3-477d-a0dc-fb6560759f76",
+       "title": "Guess Who’s a Mess",
+       "status": "Bootleg",
+       "duration": 2318853,
+       "trackCount": 11,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "mariteaux Remaster",
+       "country": [],
+       "label": [
+        "[no label]"
+       ],
+       "format": "Digital Media",
+       "monitored": true
+      },
+      {
+       "id": 1107,
+       "albumId": 328,
+       "foreignReleaseId": "68e77602-36de-481d-b8f9-d42346cf93cc",
+       "title": "Guess Who’s a Mess",
+       "status": "Official",
+       "duration": 2105748,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "[no label]"
+       ],
+       "format": "Digital Media",
+       "monitored": false
+      }
+     ],
+     "genres": [],
+     "mediumCount": 1,
+     "media": [
+      {
+       "mediumNumber": 1,
+       "mediumName": "",
+       "mediumFormat": "Digital Media"
+      }
+     ],
+     "artist": {
+      "status": "continuing",
+      "ended": false,
+      "artistName": "Brad Sucks",
+      "foreignArtistId": "9c070e4f-28c1-4b98-b371-d8514c31ba55",
+      "tadbId": 0,
+      "discogsId": 0,
+      "artistType": "Person",
+      "disambiguation": "",
+      "links": [
+       {
+        "url": "http://www.bradsucks.net/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "http://www.bradsucks.net/music/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "http://www.bradsucks.net/store/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "https://myspace.com/bradsucks",
+        "name": "myspace"
+       },
+       {
+        "url": "https://www.discogs.com/artist/368581",
+        "name": "discogs"
+       },
+       {
+        "url": "https://www.wikidata.org/wiki/Q896869",
+        "name": "wikidata"
+       },
+       {
+        "url": "https://soundcloud.com/bradsucks",
+        "name": "soundcloud"
+       },
+       {
+        "url": "http://brad.tumblr.com/",
+        "name": "tumblr"
+       },
+       {
+        "url": "https://twitter.com/bradsucks",
+        "name": "twitter"
+       },
+       {
+        "url": "https://www.facebook.com/pages/Brad-Sucks/5572237940",
+        "name": "facebook"
+       },
+       {
+        "url": "https://www.last.fm/music/Brad+Sucks",
+        "name": "last"
+       },
+       {
+        "url": "http://www.jamendo.com/artist/1333/brad-sucks",
+        "name": "jamendo"
+       },
+       {
+        "url": "http://www.jamendo.com/artist/1333/brad-sucks",
+        "name": "jamendo"
+       },
+       {
+        "url": "https://open.spotify.com/artist/13yy1c4aDXIWu2zfvtvGLn",
+        "name": "spotify"
+       },
+       {
+        "url": "https://www.deezer.com/artist/9610",
+        "name": "deezer"
+       },
+       {
+        "url": "https://www.patreon.com/bradsucks",
+        "name": "patreon"
+       },
+       {
+        "url": "https://www.youtube.com/user/bradsucks",
+        "name": "youtube"
+       },
+       {
+        "url": "https://www.instagram.com/bradsucks/",
+        "name": "instagram"
+       },
+       {
+        "url": "https://bradsucks.bandcamp.com/",
+        "name": "bandcamp"
+       },
+       {
+        "url": "https://www.allmusic.com/artist/mn0000306032",
+        "name": "allmusic"
+       },
+       {
+        "url": "https://www.imdb.com/name/nm9737510/",
+        "name": "imdb"
+       },
+       {
+        "url": "https://tidal.com/artist/6850645",
+        "name": "tidal"
+       }
+      ],
+      "nextAlbum": null,
+      "lastAlbum": null,
+      "images": [],
+      "path": "/music/Brad Sucks",
+      "qualityProfileId": 1,
+      "metadataProfileId": 1,
+      "monitored": true,
+      "monitorNewItems": "none",
+      "genres": [],
+      "cleanName": "bradsucks",
+      "sortName": "brad sucks",
+      "tags": [
+       2
+      ],
+      "added": "2026-10-26T17:37:36Z",
+      "ratings": {
+       "votes": 1,
+       "value": 10
+      },
+      "id": 65
+     },
+     "images": [
+      {
+       "coverType": "cover",
+       "url": "/MediaCover/Albums/328/cover.jpg?lastWrite=639286330587048952",
+       "remoteUrl": "https://images.lidarr.audio/cache/https://coverartarchive.org/release/e6577867-6876-4f54-98b1-da0db635bd51/18131773830-1200.jpg",
+       "extension": ".jpg"
+      }
+     ],
+     "links": [],
+     "lastSearchTime": "2026-10-26T17:37:43Z",
+     "statistics": {
+      "trackFileCount": 11,
+      "trackCount": 11,
+      "totalTrackCount": 11,
+      "sizeOnDisk": 60511289,
+      "percentOfTracks": 100
+     },
+     "id": 328
+    },
+    {
+     "title": "Naturally",
+     "disambiguation": "",
+     "overview": "",
+     "artistId": 65,
+     "foreignAlbumId": "75947e63-09d5-4652-b6c7-55cebf2b5fee",
+     "monitored": false,
+     "anyReleaseOk": true,
+     "profileId": 1,
+     "duration": 2095000,
+     "albumType": "Album",
+     "secondaryTypes": [],
+     "ratings": {
+      "votes": 0,
+      "value": 0
+     },
+     "releaseDate": "2024-11-08T00:00:00Z",
+     "releases": [
+      {
+       "id": 1108,
+       "albumId": 329,
+       "foreignReleaseId": "6e78c435-c0db-4e4e-a37f-a1024d084acd",
+       "title": "Naturally",
+       "status": "Official",
+       "duration": 2095000,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "[no label]"
+       ],
+       "format": "Digital Media",
+       "monitored": true
+      },
+      {
+       "id": 1109,
+       "albumId": 329,
+       "foreignReleaseId": "f11a86e7-e882-4d9c-8922-f3f9e7db8191",
+       "title": "Naturally",
+       "status": "Official",
+       "duration": 2100239,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "[no label]"
+       ],
+       "format": "Digital Media",
+       "monitored": false
+      }
+     ],
+     "genres": [
+      "Electronic Rock",
+      "Rock"
+     ],
+     "mediumCount": 1,
+     "media": [
+      {
+       "mediumNumber": 1,
+       "mediumName": "",
+       "mediumFormat": "Digital Media"
+      }
+     ],
+     "artist": {
+      "status": "continuing",
+      "ended": false,
+      "artistName": "Brad Sucks",
+      "foreignArtistId": "9c070e4f-28c1-4b98-b371-d8514c31ba55",
+      "tadbId": 0,
+      "discogsId": 0,
+      "artistType": "Person",
+      "disambiguation": "",
+      "links": [
+       {
+        "url": "http://www.bradsucks.net/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "http://www.bradsucks.net/music/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "http://www.bradsucks.net/store/",
+        "name": "bradsucks"
+       },
+       {
+        "url": "https://myspace.com/bradsucks",
+        "name": "myspace"
+       },
+       {
+        "url": "https://www.discogs.com/artist/368581",
+        "name": "discogs"
+       },
+       {
+        "url": "https://www.wikidata.org/wiki/Q896869",
+        "name": "wikidata"
+       },
+       {
+        "url": "https://soundcloud.com/bradsucks",
+        "name": "soundcloud"
+       },
+       {
+        "url": "http://brad.tumblr.com/",
+        "name": "tumblr"
+       },
+       {
+        "url": "https://twitter.com/bradsucks",
+        "name": "twitter"
+       },
+       {
+        "url": "https://www.facebook.com/pages/Brad-Sucks/5572237940",
+        "name": "facebook"
+       },
+       {
+        "url": "https://www.last.fm/music/Brad+Sucks",
+        "name": "last"
+       },
+       {
+        "url": "http://www.jamendo.com/artist/1333/brad-sucks",
+        "name": "jamendo"
+       },
+       {
+        "url": "http://www.jamendo.com/artist/1333/brad-sucks",
+        "name": "jamendo"
+       },
+       {
+        "url": "https://open.spotify.com/artist/13yy1c4aDXIWu2zfvtvGLn",
+        "name": "spotify"
+       },
+       {
+        "url": "https://www.deezer.com/artist/9610",
+        "name": "deezer"
+       },
+       {
+        "url": "https://www.patreon.com/bradsucks",
+        "name": "patreon"
+       },
+       {
+        "url": "https://www.youtube.com/user/bradsucks",
+        "name": "youtube"
+       },
+       {
+        "url": "https://www.instagram.com/bradsucks/",
+        "name": "instagram"
+       },
+       {
+        "url": "https://bradsucks.bandcamp.com/",
+        "name": "bandcamp"
+       },
+       {
+        "url": "https://www.allmusic.com/artist/mn0000306032",
+        "name": "allmusic"
+       },
+       {
+        "url": "https://www.imdb.com/name/nm9737510/",
+        "name": "imdb"
+       },
+       {
+        "url": "https://tidal.com/artist/6850645",
+        "name": "tidal"
+       }
+      ],
+      "nextAlbum": null,
+      "lastAlbum": null,
+      "images": [],
+      "path": "/music/Brad Sucks",
+      "qualityProfileId": 1,
+      "metadataProfileId": 1,
+      "monitored": true,
+      "monitorNewItems": "none",
+      "genres": [],
+      "cleanName": "bradsucks",
+      "sortName": "brad sucks",
+      "tags": [
+       2
+      ],
+      "added": "2026-10-26T17:37:36Z",
+      "ratings": {
+       "votes": 1,
+       "value": 10
+      },
+      "id": 65
+     },
+     "images": [
+      {
+       "coverType": "cover",
+       "url": "/MediaCover/Albums/329/cover.jpg?lastWrite=639286330589345273",
+       "remoteUrl": "https://images.lidarr.audio/cache/https://coverartarchive.org/release/f11a86e7-e882-4d9c-8922-f3f9e7db8191/43120322211-1200.jpg",
+       "extension": ".jpg"
+      }
+     ],
+     "links": [],
+     "statistics": {
+      "trackFileCount": 0,
+      "trackCount": 0,
+      "totalTrackCount": 10,
+      "sizeOnDisk": 0,
+      "percentOfTracks": 0
+     },
+     "id": 329
+    }
+   ]
+  }
+ ],
+ "webhooks": []
+}

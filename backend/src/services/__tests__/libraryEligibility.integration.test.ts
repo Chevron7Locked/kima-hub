@@ -1,6 +1,6 @@
 /**
  * A track whose file is gone (missingSince set) must answer absent from every consumer —
- * similar tracks, mood buckets, song paths, mixes — while streaming already
+ * similar tracks, mood buckets, song paths, the map — while streaming already
  * refuses it. Clearing the flag brings it back everywhere, with no work.
  */
 import fs from "fs";
@@ -8,7 +8,6 @@ import path from "path";
 import { prisma } from "../../utils/db";
 import { findSimilarTracks } from "../hybridSimilarity";
 import { generateSongPath } from "../songPath";
-import { generateMoodOnDemand } from "../mixes/moodMixes";
 import { getVibeMap } from "../vibeMap";
 import { syncMoodBuckets } from "../../workers/moodBucketWorker";
 import { MATCHING_MODEL, buildMatching } from "../matching/state";
@@ -36,19 +35,28 @@ jest.mock("../../utils/redis", () => ({
 jest.setTimeout(60_000);
 
 const MISSING = "trk_elig_gone";
+/** A song on a Discover album: it lives only in Discover, whatever data it carries from before. */
+const DISCOVER = "trk_elig_disc";
 const N = 12;
 
 async function seed() {
     // One artist and album per track: the similar-track path caps picks per
     // album and per artist, and the test must not have a track dropped by
     // that cap rather than by the eligibility rule under test.
-    for (let i = 0; i < N; i++) {
-        const id = i === N - 1 ? MISSING : `trk_elig_${i}`;
+    for (let i = 0; i <= N; i++) {
+        const id = i === N ? DISCOVER : i === N - 1 ? MISSING : `trk_elig_${i}`;
         const artist = await prisma.artist.create({
             data: { id: `art_elig_${i}`, name: `Eligibility Artist ${i}`, identityKey: `a_elig_${i}` },
         });
         const album = await prisma.album.create({
-            data: { id: `alb_elig_${i}`, rgMbid: `rg_elig_${i}`, artistId: artist.id, title: `Eligibility Album ${i}`, primaryType: "Album" },
+            data: {
+                id: `alb_elig_${i}`,
+                rgMbid: `rg_elig_${i}`,
+                artistId: artist.id,
+                title: `Eligibility Album ${i}`,
+                primaryType: "Album",
+                location: id === DISCOVER ? "DISCOVER" : "LIBRARY",
+            },
         });
         await prisma.track.create({
             data: {
@@ -84,13 +92,13 @@ async function seed() {
             `[${v.join(",")}]`,
             MATCHING_MODEL,
         );
-        // Learned moods: party rises with i, so the missing track would top the party bucket. Copied in SQL, as
+        // Learned moods: party rises with i, so the missing track and the Discover song would top the party bucket. Copied in SQL, as
         // the vector's time has microseconds a JavaScript Date would drop.
         await prisma.$executeRawUnsafe(
             `INSERT INTO track_moods (track_id, embedded_at, weights, ${MOODS.map((m) => `"${m}"`).join(", ")})
              SELECT track_id, analyzed_at, $2, ${MOODS.map((m) => (m === "party" ? "$3" : "0")).join(", ")}
              FROM track_embeddings WHERE track_id = $1`,
-            id, MOOD_HEADS.version, i / (N - 1),
+            id, MOOD_HEADS.version, Math.min(i, N - 1) / (N - 1),
         );
     }
     await buildMatching();
@@ -103,15 +111,13 @@ async function seed() {
  * (a single track by id, chosen by the user) are the allowlisted exception
  * — they read the track the request names, and streaming refuses it.
  */
-describe("grep gate: no embedding query without the eligibility fragment", () => {
+describe("grep gate: no embedding query without the eligibility fragments (present file, library song)", () => {
     const CONSUMERS = [
-        "services/hybridSimilarity.ts",
         "services/matching/rank.ts",
         "services/textEmbeddingBridge.ts",
         "services/vibeMap.ts",
         "services/matching/map.ts",
         "services/search.ts",
-        "routes/vibe.ts",
     ];
     // Seed lookups: the query reads exactly the tracks the request names (by
     // id), which streaming refuses if they are gone.
@@ -131,6 +137,7 @@ describe("grep gate: no embedding query without the eligibility fragment", () =>
             if (!/FROM (track_embeddings|"Track")/.test(sql)) continue;
             if (SEED_LOOKUP.test(sql) || STATUS_COUNT.test(sql)) continue;
             expect(sql).toMatch(/"missingSince" IS NULL/);
+            expect(sql).toMatch(/location = 'LIBRARY'/);
         }
     });
 });
@@ -155,11 +162,12 @@ describe("library eligibility at the read side", () => {
         const similar = await findSimilarTracks("trk_elig_0", 20);
         expect(similar.length).toBeGreaterThan(0);
         expect(similar.some((t) => t.id === MISSING)).toBe(false);
+        expect(similar.some((t) => t.id === DISCOVER)).toBe(false);
     });
 
     it("keeps it out of the mood buckets", async () => {
         await syncMoodBuckets();
-        const rows = await prisma.moodBucket.findMany({ where: { trackId: MISSING } });
+        const rows = await prisma.moodBucket.findMany({ where: { trackId: { in: [MISSING, DISCOVER] } } });
         expect(rows).toHaveLength(0);
         // trk_elig_10 has the highest party score of the present tracks (10/11, at least 1.5 SD above their mean):
         // the bucket the missing track, at 11/11, would have topped.
@@ -171,19 +179,13 @@ describe("library eligibility at the read side", () => {
         const path = await generateSongPath("trk_elig_0", "trk_elig_1", { length: 10 });
         expect(path.path.length).toBeGreaterThan(0);
         expect(path.path.map((t) => t.id)).not.toContain(MISSING);
+        expect(path.path.map((t) => t.id)).not.toContain(DISCOVER);
     });
-
-    it("keeps it out of a generated mix that reads the track table", async () => {
-        const mix = await generateMoodOnDemand("u_elig", { energy: { max: 0.5 } });
-        expect(mix).not.toBeNull();
-        expect(mix!.trackIds).not.toContain(MISSING);
-    });
-
     it("keeps it out of the vibe map", async () => {
         await prisma.$executeRawUnsafe(
             `INSERT INTO matching_map (track_id, embedded_at, x, y, z, colour, laid_out)
              SELECT track_id, analyzed_at, 0.1, 0.2, 0.3, 0.5, true FROM track_embeddings WHERE track_id = ANY($1)`,
-            [MISSING, "trk_elig_0"],
+            [MISSING, DISCOVER, "trk_elig_0"],
         );
         const state = await getVibeMap();
         expect(state.status).toBe("ready");

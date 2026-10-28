@@ -1,6 +1,5 @@
 /**
- * MusicScannerService's helpers, through a subclass that exposes them, and the
- * artistNormalization utilities it uses.
+ * The scanner's name helpers (nameKey) and the artistNormalization utilities it uses.
  */
 
 // All mocks must be before imports
@@ -64,7 +63,7 @@ jest.mock('../../services/fpcalc', () => ({
 // music-metadata is pure ESM; provide a CJS-compatible stub
 jest.mock('music-metadata', () => ({ parseFile: jest.fn() }), { virtual: true });
 
-import { MusicScannerService } from '../musicScanner';
+import { nameKey } from '../discovery/discoverEvidence';
 import { normalizeArtistName } from '../artistIdentity';
 import {
     canonicalizeVariousArtists,
@@ -73,90 +72,28 @@ import {
     extractArtistFromRelativePath,
 } from '../../utils/artistNormalization';
 
-// Expose private methods for direct testing
-class TestableMusicScanner extends MusicScannerService {
-    public isDiscovery(relativePath: string): boolean {
-        return (this as any).isDiscoveryPath(relativePath);
-    }
-
-    public normalize(str: string): string {
-        return (this as any).normalizeForMatching(str);
-    }
-}
-
-const scanner = new TestableMusicScanner();
-
 // ---------------------------------------------------------------------------
-// isDiscoveryPath
+// nameKey: how Discover's records and an album's names are compared (discoverEvidence)
 // ---------------------------------------------------------------------------
 
-describe('MusicScannerService.isDiscoveryPath', () => {
-    it('returns true for paths starting with "discovery/"', () => {
-        expect(scanner.isDiscovery('discovery/Artist/Album/01.flac')).toBe(true);
+describe('nameKey', () => {
+    it('ignores case, accents, spaces and punctuation', () => {
+        expect(nameKey('  Alice  In   Chains ')).toBe(nameKey('alice in chains'));
+        expect(nameKey('Café')).toBe('cafe');
+        expect(nameKey('Alt\u2013J')).toBe(nameKey('alt-j'));
+        expect(nameKey("It\u2019s")).toBe(nameKey("it's"));
+        expect(nameKey('Tool!')).toBe('tool');
     });
 
-    it('returns true for paths starting with "discover/"', () => {
-        expect(scanner.isDiscovery('discover/Artist/Album/01.mp3')).toBe(true);
+    it('keeps the letters of every script, so different names in other scripts stay different', () => {
+        expect(nameKey('Кино')).toBe('кино');
+        expect(nameKey('米津玄師')).toBe('米津玄師');
+        expect(nameKey('Кино')).not.toBe(nameKey('米津玄師'));
     });
 
-    it('returns true for mixed-case "Discovery/" prefix', () => {
-        expect(scanner.isDiscovery('Discovery/Radiohead/OK Computer/01.flac')).toBe(true);
-    });
-
-    it('returns true for mixed-case "DISCOVER/" prefix', () => {
-        expect(scanner.isDiscovery('DISCOVER/Tool/Lateralus/09.flac')).toBe(true);
-    });
-
-    it('returns false for standard library paths', () => {
-        expect(scanner.isDiscovery('Artist/Album/01.flac')).toBe(false);
-    });
-
-    it('returns false for paths containing "discovery" mid-string', () => {
-        // "nodiscovery/" does not start with discovery/
-        expect(scanner.isDiscovery('music/discovery/Artist/01.flac')).toBe(false);
-    });
-
-    it('returns false for Singles/ paths', () => {
-        expect(scanner.isDiscovery('Singles/Artist - Track.mp3')).toBe(false);
-    });
-});
-
-// ---------------------------------------------------------------------------
-// normalizeForMatching
-// ---------------------------------------------------------------------------
-
-describe('MusicScannerService.normalizeForMatching', () => {
-    it('lowercases input', () => {
-        expect(scanner.normalize('Radiohead')).toBe('radiohead');
-    });
-
-    it('trims leading and trailing whitespace', () => {
-        expect(scanner.normalize('  Tool  ')).toBe('tool');
-    });
-
-    it('strips diacritics (café -> cafe)', () => {
-        expect(scanner.normalize('café')).toBe('cafe');
-    });
-
-    it('normalizes various dash forms to hyphen', () => {
-        // em dash, en dash -> hyphen
-        const result = scanner.normalize('Alt\u2013J');
-        expect(result).toBe('alt-j');
-    });
-
-    it('strips unicode apostrophe forms not in the keep-set', () => {
-        // U+2019 right single quote is not in the character class [''´`], so
-        // it falls through to the final strip step and is removed
-        expect(scanner.normalize("it\u2019s")).toBe('its');
-    });
-
-    it('collapses multiple internal spaces', () => {
-        expect(scanner.normalize('Alice  In   Chains')).toBe('alice in chains');
-    });
-
-    it('removes characters outside word/space/quote/dash set', () => {
-        expect(scanner.normalize('Tool!')).toBe('tool');
-        expect(scanner.normalize('Artist (feat. Someone)')).toBe('artist feat someone');
+    it('gives a name with no letters or digits no key', () => {
+        expect(nameKey('!!!')).toBe('');
+        expect(nameKey(null)).toBe('');
     });
 });
 

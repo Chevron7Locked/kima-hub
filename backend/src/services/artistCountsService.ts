@@ -1,6 +1,7 @@
 /**
  * Denormalised Artist counts for filtering without joins: libraryAlbumCount
- * and discoveryAlbumCount (albums with tracks), and totalTrackCount.
+ * and discoveryAlbumCount (albums with tracks), and totalTrackCount (songs on library albums; Discover songs are not
+ * the library's).
  */
 
 import { prisma } from "../utils/db";
@@ -39,7 +40,7 @@ async function calculateArtistCounts(
     }),
     prisma.track.count({
       where: {
-        album: { artistId },
+        album: { artistId, location: LIBRARY_LOCATION },
       },
     }),
   ]);

@@ -5,26 +5,33 @@ import { prisma } from "../utils/db";
 import { listenBrainzService } from "../services/listenBrainz";
 import { startOfWeek, endOfWeek } from "date-fns";
 import { resolveViewWeek, resolveGenerationWeekStart, weekStartKey, weekBoundaryIso } from "../lib/discoveryWeek";
-import { createLidarrClient, isLidarrConfigured } from "../services/lidarrClient";
-import fs from "fs";
-import path from "path";
-import { resolveWithinMusicRoot } from "./library/trackPath";
+import { isLidarrConfigured } from "../services/lidarrClient";
 
 import { discoverQueue } from "../workers/queues";
 import { requestScan } from "../workers/scanRequest";
 import { getSystemSettings } from "../utils/systemSettings";
 import { lidarrService } from "../services/lidarr";
-import { discoveryArtistVerdict, removeDiscoveryAlbum, removeDiscoveryArtist } from "../services/discovery/lidarrRemoval";
+import { discoveryArtistVerdict, removeDiscoveryArtist } from "../services/discovery/lidarrRemoval";
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
+import { discoveryAlbumLifecycle, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
+import {
+  clearOrphanedDiscoverAlbums,
+  clearSuggestion,
+  clearUnsuggestedDownloads,
+  errorReason,
+  reportOrphanFailures,
+  findScannedAlbum,
+  reportLidarrFailures,
+  type ClearFailure,
+} from "../services/discovery/discoverClearing";
+import { relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 import {
   UserFacingError,
   IntegrationError,
   ConfigurationError,
 } from '../utils/errors';
 import { distributedLock } from '../utils/distributedLock';
-import { LIBRARY_LOCATION } from "../services/libraryFilters";
 import { withArtistArtwork } from "../services/artwork";
-import { announcePlaylistsChanged, playlistsHoldingTracks } from "../services/playlistEvents";
 
 const router = Router();
 
@@ -406,6 +413,9 @@ router.get("/current", async (req, res) => {
                     where: {
                         title: discoveryAlbum.albumTitle,
                         artist: { name: discoveryAlbum.artistName },
+                        // A liked suggestion's album is in the library now; any other's is a Discover album, never
+                        // a library album of the same name.
+                        ...(discoveryAlbum.status === "LIKED" ? {} : { location: "DISCOVER" as const }),
                     },
                     include: {
                         artist: true,
@@ -646,51 +656,10 @@ router.post("/like", async (req, res) => {
             }
         }
 
-        // Find the actual Album record and create OwnedAlbum so it appears in library immediately
-        // Match by artist name + album title since rgMbid may differ between DiscoveryAlbum and scanned Album
-        const dbAlbum = await prisma.album.findFirst({
-            where: {
-                OR: [
-                    { rgMbid: albumId },
-                    {
-                        title: {
-                            equals: discoveryAlbum.albumTitle,
-                            mode: "insensitive",
-                        },
-                        artist: {
-                            name: {
-                                equals: discoveryAlbum.artistName,
-                                mode: "insensitive",
-                            },
-                        },
-                    },
-                ],
-            },
-            include: { artist: true },
-        });
+        const dbAlbum = await findScannedAlbum(discoveryAlbum, "DISCOVER");
 
         if (dbAlbum) {
-            await prisma.album.update({
-                where: { id: dbAlbum.id },
-                data: { location: "LIBRARY" },
-            });
-
-            await prisma.ownedAlbum.upsert({
-                where: {
-                    artistId_rgMbid: {
-                        artistId: dbAlbum.artistId,
-                        rgMbid: dbAlbum.rgMbid,
-                    },
-                },
-                create: {
-                    artistId: dbAlbum.artistId,
-                    rgMbid: dbAlbum.rgMbid,
-                    source: "discovery_liked",
-                },
-                update: {
-                    source: "discovery_liked",
-                },
-            });
+            await takeIntoLibrary(dbAlbum);
             logger.debug(
                 `Added liked album to library: ${dbAlbum.artist.name} - ${dbAlbum.title} (matched from discovery)`
             );
@@ -759,12 +728,9 @@ router.delete("/unlike", async (req, res) => {
             },
         });
 
-        await prisma.ownedAlbum.deleteMany({
-            where: {
-                rgMbid: albumId,
-                source: "discovery_liked",
-            },
-        });
+        // Back to Discover with the ownership the like gave it, unless another listener's like still keeps it.
+        const dbAlbum = await findScannedAlbum(discoveryAlbum, "LIBRARY");
+        if (dbAlbum) await returnToDiscover(dbAlbum, albumId);
 
         const tracks = await prisma.discoveryTrack.findMany({
             where: { discoveryAlbumId: discoveryAlbum.id },
@@ -1186,318 +1152,47 @@ router.delete("/clear", async (req, res) => {
 
         logger.debug(`\nClearing Discover Weekly playlist for user ${userId}`);
 
+        const settings = await getSystemSettings();
+        if (!settings) {
+            return res.status(500).json({ error: "System settings unavailable" });
+        }
+
         const discoveryAlbums = await prisma.discoveryAlbum.findMany({
             where: {
                 userId,
                 status: { in: ["ACTIVE", "LIKED"] },
             },
         });
-
-        if (discoveryAlbums.length === 0) {
-            return res.json({
-                success: true,
-                message: "No discovery albums to clear",
-                likedMoved: 0,
-                activeDeleted: 0,
-            });
-        }
-
         const likedAlbums = discoveryAlbums.filter((a) => a.status === "LIKED");
-        const activeAlbums = discoveryAlbums.filter(
-            (a) => a.status === "ACTIVE"
-        );
-
-        logger.debug(
-            `  Found ${likedAlbums.length} liked albums to move to library`
-        );
-        logger.debug(`  Found ${activeAlbums.length} active albums to delete`);
-
-        const settings = await getSystemSettings();
-        if (!settings) {
-            return res.status(500).json({ error: "System settings unavailable" });
-        }
+        const activeAlbums = discoveryAlbums.filter((a) => a.status === "ACTIVE");
 
         let likedMoved = 0;
         let activeDeleted = 0;
+        // Albums Lidarr did not delete; each stays in Discover as it was, and the
+        // listener is told to clear again.
+        const lidarrFailed: ClearFailure[] = [];
 
-        if (likedAlbums.length > 0) {
-            logger.debug(`\n[LIBRARY] Moving liked albums to library...`);
-
-            for (const album of likedAlbums) {
-                try {
-                    const dbAlbum = await prisma.album.findFirst({
-                        where: {
-                            title: album.albumTitle,
-                            artist: { name: album.artistName },
-                        },
-                        include: { artist: true },
-                    });
-
-                    if (dbAlbum) {
-                        await prisma.album.update({
-                            where: { id: dbAlbum.id },
-                            data: { location: "LIBRARY" },
-                        });
-
-                        await prisma.ownedAlbum.upsert({
-                            where: {
-                                artistId_rgMbid: {
-                                    artistId: dbAlbum.artistId,
-                                    rgMbid: dbAlbum.rgMbid,
-                                },
-                            },
-                            create: {
-                                artistId: dbAlbum.artistId,
-                                rgMbid: dbAlbum.rgMbid,
-                                source: "discovery_liked",
-                            },
-                            update: {}, // No update needed if exists
-                        });
-
-                        if (isLidarrConfigured(settings) && album.lidarrAlbumId) {
-                            try {
-                                const lidarr = createLidarrClient(settings.lidarrUrl, settings.lidarrApiKey, 10_000);
-                                const albumResponse = await lidarr.get(`/api/v1/album/${album.lidarrAlbumId}`);
-                                const artistId = albumResponse.data.artistId;
-                                const artistResponse = await lidarr.get(`/api/v1/artist/${artistId}`);
-
-                                // Update artist's root folder path to main library if in discovery
-                                if (
-                                    artistResponse.data.path?.includes(
-                                        "/music/discovery"
-                                    )
-                                ) {
-                                    // Move artist to main library path
-                                    await lidarr.put(
-                                        `/api/v1/artist/${artistId}`,
-                                        {
-                                            ...artistResponse.data,
-                                            path: artistResponse.data.path.replace(
-                                                "/music/discovery",
-                                                "/music"
-                                            ),
-                                            moveFiles: true,
-                                        },
-                                        { timeout: 30_000 }
-                                    );
-                                    logger.debug(
-                                        `    Moved to library: ${album.artistName} - ${album.albumTitle}`
-                                    );
-                                }
-                            } catch (lidarrError: any) {
-                                logger.debug(
-                                    `  Lidarr move failed for ${album.albumTitle}: ${lidarrError.message}`
-                                );
-                            }
-                        }
-
-                        likedMoved++;
-                    }
-
-                    await prisma.discoveryAlbum.update({
-                        where: { id: album.id },
-                        data: { status: "MOVED" },
-                    });
-                } catch (error: any) {
-                    logger.error(
-                        `  ✗ Failed to move ${album.albumTitle}: ${error.message}`
-                    );
-                }
+        for (const album of likedAlbums) {
+            try {
+                if (await discoveryAlbumLifecycle.moveLikedAlbumToLibrary(album)) likedMoved++;
+            } catch (error: any) {
+                logger.error(`  Failed to move ${album.albumTitle}: ${error.message}`);
             }
         }
 
-        if (activeAlbums.length > 0) {
-            logger.debug(`\n[CLEANUP] Deleting non-liked albums...`);
-
-            for (const album of activeAlbums) {
-                try {
-                    // Claim the row before deleting anything: if the user liked it since the
-                    // snapshot (count 0), skip both the Lidarr/file delete and the row delete.
-                    const claimed = await prisma.discoveryAlbum.updateMany({
-                        where: { id: album.id, status: "ACTIVE" },
-                        data: { status: "DELETED" },
-                    });
-                    if (claimed.count === 0) {
-                        logger.debug(
-                            `    Skipped clear -- ${album.albumTitle} no longer ACTIVE (liked?)`
-                        );
-                        continue;
-                    }
-
-                    if (album.lidarrAlbumId) {
-                        await removeDiscoveryAlbum(album.lidarrAlbumId, album.rgMbid);
-                    }
-
-                    // Direct filesystem delete, in case Lidarr's deleteFiles left files behind
-                    try {
-                        // artistName and albumTitle come from tags and imports, so "../.." is
-                        // possible, and the result goes to rmSync(recursive). Contain it within the
-                        // discovery folder, not just the music root.
-                        const discoveryRoot = resolveWithinMusicRoot("discovery");
-                        const withinDiscovery = (p: string | null): p is string =>
-                            !!p &&
-                            !!discoveryRoot &&
-                            p.startsWith(discoveryRoot + path.sep);
-
-                        // Try common folder structures: /discovery/Artist/Album or /discovery/Artist - Album
-                        const possiblePaths = [
-                            resolveWithinMusicRoot(
-                                "discovery",
-                                album.artistName,
-                                album.albumTitle
-                            ),
-                            resolveWithinMusicRoot("discovery", album.artistName),
-                            resolveWithinMusicRoot(
-                                "discovery",
-                                `${album.artistName} - ${album.albumTitle}`
-                            ),
-                        ].filter(withinDiscovery);
-
-                        for (const albumPath of possiblePaths) {
-                            if (fs.existsSync(albumPath)) {
-                                fs.rmSync(albumPath, {
-                                    recursive: true,
-                                    force: true,
-                                });
-                                logger.debug(`    Direct deleted: ${albumPath}`);
-                                break; // Stop after first successful delete
-                            }
-                        }
-                    } catch (fsError: any) {
-                        logger.debug(
-                            `    Filesystem delete failed for ${album.albumTitle}: ${fsError.message}`
-                        );
-                    }
-
-                    // One transaction for the row deletes, so a crash cannot leave orphans. The
-                    // Lidarr and filesystem deletes above stay outside it.
-                    const playlists = await prisma.$transaction(async (tx) => {
-                        // Delete DiscoveryTrack records first (foreign key to Track)
-                        await tx.discoveryTrack.deleteMany({
-                            where: { discoveryAlbumId: album.id },
-                        });
-
-                        const dbAlbum = await tx.album.findFirst({
-                            where: {
-                                title: album.albumTitle,
-                                artist: { name: album.artistName },
-                                location: "DISCOVER",
-                            },
-                            include: { tracks: true },
-                        });
-
-                        if (!dbAlbum) return [];
-                        // The songs' playlist entries go with them: told once the transaction commits.
-                        const holding = await playlistsHoldingTracks(tx, { albumId: dbAlbum.id });
-                        await tx.track.deleteMany({
-                            where: { albumId: dbAlbum.id },
-                        });
-
-                        await tx.album.delete({
-                            where: { id: dbAlbum.id },
-                        });
-                        return holding;
-                    });
-                    announcePlaylistsChanged(playlists);
-
-                    activeDeleted++;
-                } catch (error: any) {
-                    logger.error(
-                        `  ✗ Failed to delete ${album.albumTitle}: ${error.message}`
-                    );
-                }
+        for (const album of activeAlbums) {
+            try {
+                const result = await clearSuggestion(album);
+                if (result.outcome === "cleared") activeDeleted++;
+                else if (result.outcome === "kept") lidarrFailed.push(result.failure);
+            } catch (error: any) {
+                logger.error(`  Failed to delete ${album.albumTitle}: ${error.message}`);
+                lidarrFailed.push({ artistName: album.artistName, albumTitle: album.albumTitle, reason: errorReason(error) });
             }
         }
 
-        // Clean up downloaded albums that missed the final playlist, unless the artist has liked content
-        if (isLidarrConfigured(settings)) {
-            const completedJobs = await prisma.downloadJob.findMany({
-                where: {
-                    userId,
-                    discoveryBatchId: { not: null },
-                    status: "completed",
-                },
-            });
-
-            const allDiscoveryAlbums = await prisma.discoveryAlbum.findMany({
-                where: { userId },
-                select: {
-                    rgMbid: true,
-                    artistName: true,
-                    albumTitle: true,
-                    status: true,
-                },
-            });
-            const discoveryMbids = new Set(
-                allDiscoveryAlbums.map((da) => da.rgMbid)
-            );
-
-            const likedArtistNames = new Set(
-                allDiscoveryAlbums
-                    .filter(
-                        (da) => da.status === "LIKED" || da.status === "MOVED"
-                    )
-                    .map((da) => da.artistName.toLowerCase())
-            );
-
-            const extraJobs = completedJobs.filter((job) => {
-                if (discoveryMbids.has(job.targetMbid!)) return false;
-
-                // If this job's artist has any LIKED albums, don't clean it up
-                const metadata = job.metadata as any;
-                const artistName = metadata?.artistName?.toLowerCase();
-                if (artistName && likedArtistNames.has(artistName)) {
-                    logger.debug(
-                        `    Skipping ${metadata?.albumTitle} - artist ${metadata?.artistName} has liked albums`
-                    );
-                    return false;
-                }
-
-                return true;
-            });
-
-            if (extraJobs.length > 0) {
-                logger.debug(
-                    `\n[CLEANUP] Found ${extraJobs.length} extra albums to clean from Lidarr...`
-                );
-
-                for (const job of extraJobs) {
-                    const metadata = job.metadata as any;
-                    const albumTitle = metadata?.albumTitle || job.subject;
-                    const artistName = metadata?.artistName;
-
-                    // Double-check: also check by artist name + album title for LIKED status
-                    const isLikedByName = await prisma.discoveryAlbum.findFirst(
-                        {
-                            where: {
-                                userId,
-                                artistName: {
-                                    equals: artistName,
-                                    mode: "insensitive",
-                                },
-                                albumTitle: {
-                                    equals: albumTitle,
-                                    mode: "insensitive",
-                                },
-                                status: { in: ["LIKED", "MOVED"] },
-                            },
-                        }
-                    );
-
-                    if (isLikedByName) {
-                        logger.debug(
-                            `    Skipping ${albumTitle} - marked as LIKED`
-                        );
-                        continue;
-                    }
-
-                    if (job.lidarrAlbumId && job.targetMbid) {
-                        await removeDiscoveryAlbum(job.lidarrAlbumId, job.targetMbid);
-                        logger.debug(`    Cleaned up extra album: ${albumTitle}`);
-                    }
-                }
-            }
-        }
+        // Albums Lidarr fetched that no suggestion names (they missed the final playlist).
+        lidarrFailed.push(...(await clearUnsuggestedDownloads(userId)));
 
         await prisma.unavailableAlbum.deleteMany({
             where: { userId },
@@ -1512,61 +1207,14 @@ router.delete("/clear", async (req, res) => {
             },
         });
 
-        // Albums and tracks located in DISCOVER that no DiscoveryAlbum row points at, left by failed downloads or a failed playlist build
-        logger.debug(`\nCleaning up orphaned discovery records...`);
-
-        const orphanedAlbums = await prisma.album.findMany({
-            where: {
-                location: "DISCOVER",
-            },
-            include: { artist: true, tracks: true },
-        });
-
-        let orphanedAlbumsDeleted = 0;
-        for (const orphanAlbum of orphanedAlbums) {
-            // Include MOVED status because liked albums are marked MOVED during clear
-            const hasDiscoveryRecord = await prisma.discoveryAlbum.findFirst({
-                where: {
-                    OR: [
-                        { rgMbid: orphanAlbum.rgMbid },
-                        {
-                            albumTitle: orphanAlbum.title,
-                            artistName: orphanAlbum.artist.name,
-                        },
-                    ],
-                    status: { in: ["ACTIVE", "LIKED", "MOVED"] }, // Keep if active, liked, or moved to library
-                },
-            });
-
-            // Also check if there's an OwnedAlbum record (user liked it)
-            const hasOwnedRecord = await prisma.ownedAlbum.findFirst({
-                where: {
-                    rgMbid: orphanAlbum.rgMbid,
-                },
-            });
-
-            if (!hasDiscoveryRecord && !hasOwnedRecord) {
-                // The songs' playlist entries go with them: tell those playlists once they are gone.
-                const playlists = await playlistsHoldingTracks(prisma, { albumId: orphanAlbum.id });
-                await prisma.track.deleteMany({
-                    where: { albumId: orphanAlbum.id },
-                });
-                await prisma.album.delete({
-                    where: { id: orphanAlbum.id },
-                });
-                announcePlaylistsChanged(playlists);
-                orphanedAlbumsDeleted++;
-                logger.debug(
-                    `    Deleted orphaned album: ${orphanAlbum.artist.name} - ${orphanAlbum.title}`
-                );
-            }
-        }
-
-        if (orphanedAlbumsDeleted > 0) {
-            logger.debug(
-                `  Cleaned up ${orphanedAlbumsDeleted} orphaned discovery albums`
-            );
-        }
+        // DISCOVER albums that no suggestion covers, left by failed downloads or a failed playlist build.
+        const orphans = await clearOrphanedDiscoverAlbums();
+        const orphanedAlbumsDeleted = orphans.cleared;
+        const strip = ({ userIds: _named, ...f }: (typeof orphans.failures)[number]): ClearFailure => f;
+        lidarrFailed.push(...orphans.failures.filter((f) => f.userIds.includes(userId)).map(strip));
+        // Orphans no record names go to the admins' row, not the caller's own.
+        const unnamedFailed = orphans.failures.filter((f) => f.userIds.length === 0).map(strip);
+        await reportOrphanFailures(userId, orphans.failures);
 
         // Artists left with no albums
         const orphanedArtists = await prisma.artist.findMany({
@@ -1665,13 +1313,18 @@ router.delete("/clear", async (req, res) => {
             `\nClear complete: ${likedMoved} moved to library, ${activeDeleted} deleted, ${orphanedAlbumsDeleted} orphans cleaned, ${lidarrArtistsRemoved} Lidarr artists removed`
         );
 
+        // This clear tried every Lidarr album Discover holds, so it writes the listener's
+        // tray row when any failed and clears the row when none did.
+        await reportLidarrFailures(userId, lidarrFailed, { complete: true, renotify: true });
+
         res.json({
             success: true,
-            message: "Discovery playlist cleared",
+            message: discoveryAlbums.length === 0 ? "No discovery albums to clear" : "Discovery playlist cleared",
             likedMoved,
             activeDeleted,
             orphanedAlbumsDeleted,
             lidarrArtistsRemoved,
+            lidarrFailed: [...lidarrFailed, ...unnamedFailed],
         });
     } catch (error: any) {
         logger.error(
@@ -1858,122 +1511,18 @@ router.post("/fix-tagging", requireAdmin, async (req, res) => {
             `\n[FIX-TAGGING] Starting album tagging repair (dryRun=${dryRun})...`
         );
 
-        const discoveryArtists = await prisma.discoveryAlbum.findMany({
-            distinct: ["artistMbid"],
-            select: { artistMbid: true, artistName: true },
-        });
+        // The albums Discover's records say came from Discover, by exact match only (discoverEvidence).
+        const relocated = await relocateDiscoverAlbums({ dryRun });
+        const albumsFixed = relocated.length;
+        const fixedArtists = [...new Set(relocated.map((a) => a.artist))];
 
-        logger.debug(
-            `[FIX-TAGGING] Found ${discoveryArtists.length} artists with discovery records`
-        );
-
-        // Pre-load both protection sets in two queries instead of two per artist.
-        const candidateMbids = discoveryArtists
-            .map((da) => da.artistMbid)
-            .filter((mbid): mbid is string => Boolean(mbid));
-
-        const protectedByOwnership = new Set(
-            (
-                await prisma.ownedAlbum.findMany({
-                    where: {
-                        artist: { mbid: { in: candidateMbids } },
-                        source: { in: ["native_scan", "discovery_liked"] },
-                    },
-                    select: { artist: { select: { mbid: true } } },
-                    distinct: ["artistId"],
-                })
-            )
-                .map((oa) => oa.artist.mbid)
-                .filter(Boolean) as string[]
-        );
-
-        const protectedByLikedDiscovery = new Set(
-            (
-                await prisma.discoveryAlbum.findMany({
-                    where: {
-                        artistMbid: { in: candidateMbids },
-                        status: { in: ["LIKED", "MOVED"] },
-                    },
-                    select: { artistMbid: true },
-                    distinct: ["artistMbid"],
-                })
-            ).map((da) => da.artistMbid)
-        );
-
-        let albumsFixed = 0;
-        let ownedRecordsRemoved = 0;
-        const fixedArtists: string[] = [];
-
-        for (const da of discoveryArtists) {
-            if (!da.artistMbid) continue;
-
-            // Protected content:
-            // 1. native_scan = real user library from before discovery
-            // 2. discovery_liked / LIKED / MOVED = user chose to keep it
-            if (protectedByOwnership.has(da.artistMbid)) {
-                logger.debug(
-                    `[FIX-TAGGING] Skipping ${da.artistName} - has protected content`
-                );
-                continue;
-            }
-
-            if (protectedByLikedDiscovery.has(da.artistMbid)) {
-                logger.debug(
-                    `[FIX-TAGGING] Skipping ${da.artistName} - has LIKED discovery albums`
-                );
-                continue;
-            }
-
-            // No protected content: a purely active discovery artist, so any album tagged LIBRARY is a mistag
-            const mistaggedCount = await prisma.album.count({
-                where: {
-                    artist: { mbid: da.artistMbid },
-                    location: LIBRARY_LOCATION,
-                },
-            });
-
-            if (mistaggedCount > 0) {
-                if (dryRun) {
-                    albumsFixed += mistaggedCount;
-                    fixedArtists.push(da.artistName);
-                    continue;
-                }
-
-                const updated = await prisma.album.updateMany({
-                    where: {
-                        artist: { mbid: da.artistMbid },
-                        location: LIBRARY_LOCATION,
-                    },
-                    data: { location: "DISCOVER" },
-                });
-
-                const removed = await prisma.ownedAlbum.deleteMany({
-                    where: {
-                        artist: { mbid: da.artistMbid },
-                        source: { notIn: ["native_scan", "discovery_liked"] },
-                    },
-                });
-
-                albumsFixed += updated.count;
-                ownedRecordsRemoved += removed.count;
-                fixedArtists.push(da.artistName);
-
-                logger.debug(
-                    `[FIX-TAGGING] Fixed ${updated.count} albums for ${da.artistName}`
-                );
-            }
-        }
-
-        logger.debug(
-            `[FIX-TAGGING] Complete: ${albumsFixed} albums fixed, ${ownedRecordsRemoved} OwnedAlbum records removed`
-        );
+        logger.debug(`[FIX-TAGGING] Complete: ${albumsFixed} albums ${dryRun ? "would move" : "moved"} to Discover`);
 
         res.json({
             success: true,
             dryRun,
             // In a dry run these are the counts that WOULD change; nothing was written.
             albumsFixed,
-            ownedRecordsRemoved,
             fixedArtists,
         });
     } catch (error: any) {

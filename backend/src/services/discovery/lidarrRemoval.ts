@@ -8,14 +8,29 @@ import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { lidarrService } from "../lidarr";
 import { LIBRARY_LOCATION } from "../libraryFilters";
+import { artistNamed } from "../artistIdentity";
+import { sameName } from "./discoverEvidence";
 import type { LidarrArtist } from "../../types/lidarr";
 
-async function libraryHolds(rgMbid: string): Promise<boolean> {
-    const album = await prisma.album.findFirst({
-        where: { rgMbid, location: LIBRARY_LOCATION },
+/** What names the album being removed, beyond the id Lidarr was asked about. */
+export interface RemovalNames {
+    rgMbids?: string[];
+    artistName?: string;
+    albumTitle?: string;
+}
+
+/** Whether the library holds the album, by any release-group id the caller knows or by artist and title with case and accents ignored. */
+async function libraryHolds(rgMbids: string[], names: RemovalNames): Promise<boolean> {
+    const byId = await prisma.album.findFirst({
+        where: { location: LIBRARY_LOCATION, rgMbid: { in: rgMbids } },
         select: { id: true },
     });
-    return album !== null;
+    if (byId || !names.artistName || !names.albumTitle) return byId !== null;
+    const ofArtist = await prisma.album.findMany({
+        where: { location: LIBRARY_LOCATION, artist: artistNamed(names.artistName) },
+        select: { title: true },
+    });
+    return ofArtist.some((a) => sameName(a.title, names.albumTitle));
 }
 
 async function fetchedByDiscover(rgMbids: string[]): Promise<Set<string>> {
@@ -30,14 +45,37 @@ async function fetchedByDiscover(rgMbids: string[]): Promise<Set<string>> {
 }
 
 /**
- * Delete a Discover album and its files. Anything that fails the identity check
- * is only unmonitored. Returns true when Lidarr no longer has the album.
+ * What Lidarr did with a Discover album, in words a listener can be shown. `reason`
+ * says why Lidarr did not delete it, and is null when it did.
  */
-export async function removeDiscoveryAlbum(lidarrAlbumId: number, rgMbid: string): Promise<boolean> {
+export interface LidarrRemovalResult {
+    removed: boolean;
+    reason: string | null;
+}
+
+/**
+ * Delete a Discover album and its files. Anything that fails the identity check
+ * is only unmonitored. Returns what happened, so a caller can keep the album where
+ * Lidarr did not delete it; an album Lidarr no longer has is not removed, as its files
+ * may still be on disk.
+ */
+export async function removeDiscoveryAlbum(
+    lidarrAlbumId: number,
+    rgMbid: string,
+    names: RemovalNames = {}
+): Promise<LidarrRemovalResult> {
     try {
-        if (!(await lidarrService.isEnabled())) return false;
+        if (!(await lidarrService.isEnabled())) {
+            return { removed: false, reason: "Lidarr is turned off" };
+        }
+
         const album = await lidarrService.getAlbum(lidarrAlbumId);
-        if (!album) return true;
+        if (!album) {
+            return {
+                removed: false,
+                reason: "Lidarr no longer knows this album, so its files may still be on disk; delete them by hand",
+            };
+        }
 
         const [artist, tagId] = await Promise.all([
             lidarrService.getArtistById(album.artistId),
@@ -47,21 +85,28 @@ export async function removeDiscoveryAlbum(lidarrAlbumId: number, rgMbid: string
             album.foreignAlbumId === rgMbid &&
             tagId !== null &&
             !!artist?.tags?.includes(tagId) &&
-            !(await libraryHolds(rgMbid));
+            !(await libraryHolds([...new Set([rgMbid, ...(names.rgMbids ?? [])])], names));
 
         if (!ours) {
             logger.warn(
                 `[Discover] Keeping Lidarr files for "${album.title}" (${lidarrAlbumId}): not the album Discover fetched`
             );
             await lidarrService.unmonitorAlbum(lidarrAlbumId);
-            return false;
+            return {
+                removed: false,
+                reason: "Lidarr's record is not the album Discover fetched",
+            };
         }
 
         await lidarrService.deleteAlbumById(lidarrAlbumId, true);
-        return true;
+        return { removed: true, reason: null };
     } catch (error: any) {
-        logger.warn(`[Discover] Lidarr album ${lidarrAlbumId} not removed: ${error.message}`);
-        return false;
+        const message = error?.message || "Lidarr gave no message";
+        logger.warn(`[Discover] Lidarr album ${lidarrAlbumId} not removed: ${message}`);
+        return {
+            removed: false,
+            reason: `Lidarr could not be reached or answered with an error: ${message}`,
+        };
     }
 }
 

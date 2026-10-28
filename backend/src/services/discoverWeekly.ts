@@ -4,7 +4,8 @@
  */
 
 import { logger } from "../utils/logger";
-import { normalizeArtistName } from "./artistIdentity";
+import { artistNamed, normalizeArtistName } from "./artistIdentity";
+import { sameName } from "./discovery/discoverEvidence";
 import { isMbid } from "./artistIdentity";
 import { titlesAgree } from "./albumIdentity";
 import type { SeedArtist } from "./discovery/discoverySeeding";
@@ -26,7 +27,6 @@ import { resolveGenerationWeekStart, weekStartKey } from "../lib/discoveryWeek";
 import { getSystemSettings } from "../utils/systemSettings";
 import { discoveryLogger } from "./discoveryLogger";
 import { acquisitionService } from "./acquisitionService";
-import { LIBRARY_LOCATION } from "./libraryFilters";
 import {
     discoveryBatchLogger,
     discoveryAlbumLifecycle,
@@ -82,12 +82,26 @@ function foldToSearchWords(s: string): string {
         .toLowerCase()
         .normalize("NFKD")
         .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^\w\s]/g, " ")
+        .replace(/[^\p{L}\p{N}_\s]/gu, " ")
         .replace(/\s+/g, " ")
         .trim();
 }
 
 class DiscoverWeeklyService {
+    /** The playable songs of the DISCOVER album an artist and title name, ignoring case and accents (nameKey). */
+    private async findDiscoverTracksByName(artistName: string, albumTitle: string) {
+        const albums = await prisma.album.findMany({
+            where: { location: "DISCOVER", artist: artistNamed(artistName) },
+            select: { id: true, title: true },
+        });
+        const albumIds = albums.filter((a) => sameName(a.title, albumTitle)).map((a) => a.id);
+        if (albumIds.length === 0) return [];
+        return prisma.track.findMany({
+            where: { ...NOT_MISSING, albumId: { in: albumIds } },
+            include: { album: { include: { artist: true } } },
+        });
+    }
+
     async generatePlaylist(userId: string, jobId?: number) {
         const logPath = discoveryLogger.start(userId, jobId);
         discoveryLogger.info(`Log file: ${logPath}`);
@@ -813,6 +827,7 @@ class DiscoverWeeklyService {
             );
         }
 
+        // Only albums filed as Discover: a library album of the same name is the listener's own.
         let allTracks: any[] = [];
         for (const criteria of searchCriteria) {
             let tracks: any[] = [];
@@ -822,7 +837,7 @@ class DiscoverWeeklyService {
                 tracks = await prisma.track.findMany({
                     where: {
                     ...NOT_MISSING,
-                        album: { rgMbid: criteria.albumMbid },
+                        album: { rgMbid: criteria.albumMbid, location: "DISCOVER" },
                     },
                     include: {
                         album: { include: { artist: true } },
@@ -835,28 +850,9 @@ class DiscoverWeeklyService {
                 }
             }
 
-            // By artist name and album title, case-insensitive
+            // By artist name and album title, ignoring case and accents
             if (tracks.length === 0) {
-                tracks = await prisma.track.findMany({
-                    where: {
-                    ...NOT_MISSING,
-                        album: {
-                            title: {
-                                equals: criteria.albumTitle,
-                                mode: "insensitive",
-                            },
-                            artist: {
-                                name: {
-                                    equals: criteria.artistName,
-                                    mode: "insensitive",
-                                },
-                            },
-                        },
-                    },
-                    include: {
-                        album: { include: { artist: true } },
-                    },
-                });
+                tracks = await this.findDiscoverTracksByName(criteria.artistName, criteria.albumTitle);
                 if (tracks.length > 0) {
                     logger.debug(
                         `     [NAME] Found ${tracks.length} tracks for "${criteria.albumTitle}"`
@@ -874,18 +870,22 @@ class DiscoverWeeklyService {
                 const artistSearchTerm =
                     artistTokens.length > 1 ? normalizedArtist : artistTokens[0];
 
+                // The artist's name is compared in TypeScript: the database folds case for ASCII only.
+                const discoverAlbums = artistSearchTerm
+                    ? await prisma.album.findMany({
+                          where: { location: "DISCOVER" },
+                          select: { id: true, title: true, artist: { select: { name: true } } },
+                          orderBy: { title: "asc" },
+                      })
+                    : [];
+                const artistAlbumIds = discoverAlbums
+                    .filter((a) => foldToSearchWords(a.artist.name).includes(artistSearchTerm))
+                    .slice(0, 20)
+                    .map((a) => a.id);
                 const artistAlbums = await prisma.album.findMany({
-                    where: {
-                        artist: {
-                            name: {
-                                mode: "insensitive",
-                                contains: artistSearchTerm,
-                            },
-                        },
-                    },
+                    where: { id: { in: artistAlbumIds } },
                     include: { artist: true, tracks: true },
                     orderBy: { title: "asc" },
-                    take: 20,
                 });
 
                 for (const album of artistAlbums) {
@@ -953,162 +953,12 @@ class DiscoverWeeklyService {
             onePerAlbum.push(randomTrack);
         }
 
-        const availableAlbums = onePerAlbum.length;
-        const anchorCount = Math.ceil(availableAlbums * 0.2); // Add 20% anchors on top
-
-        logger.debug(
-            `   Unique albums available: ${availableAlbums} (from ${allTracks.length} total tracks)`
-        );
-        logger.debug(
-            `   Target composition: ${availableAlbums} discovery + ${anchorCount} anchors = ${
-                availableAlbums + anchorCount
-            } total`
-        );
-
-        const shuffled = shuffleArray(onePerAlbum);
-
-        let discoverySelected = [...shuffled];
-        logger.debug(
-            `   Discovery tracks: ${discoverySelected.length} (ALL available, 1 per album)`
-        );
-
-        const seeds = await discoverySeeding.getSeedArtists(batch.userId);
-        const seedArtistNames = seeds.slice(0, 10).map((s) => s.name);
-        const seedArtistMbids = seeds
-            .slice(0, 10)
-            .map((s) => s.mbid)
-            .filter(Boolean) as string[];
-
-        let libraryAnchors: any[] = [];
-        const existingTrackIds = new Set(discoverySelected.map((t) => t.id));
-
-        // Seed-artist tracks first, skipping albums already used in discovery
-        const usedAlbumIds = new Set(discoverySelected.map((t) => t.album.id));
-
-        if (seedArtistNames.length > 0 || seedArtistMbids.length > 0) {
-            const libraryTracks = await prisma.track.findMany({
-                where: {
-                ...NOT_MISSING,
-                    album: {
-                        artist: {
-                            OR: [
-                                { normalizedName: { in: seedArtistNames.map(n => normalizeArtistName(n)) } },
-                                ...(seedArtistMbids.length > 0
-                                    ? [{ mbid: { in: seedArtistMbids } }]
-                                    : []),
-                            ],
-                        },
-                        location: LIBRARY_LOCATION,
-                        id: { notIn: Array.from(usedAlbumIds) }, // Exclude albums already in discovery
-                    },
-                    id: { notIn: Array.from(existingTrackIds) },
-                },
-                include: {
-                    album: { include: { artist: true } },
-                },
-                take: anchorCount * 10, // Get extra for 1-per-album selection
-            });
-
-            logger.debug(
-                `   Found ${libraryTracks.length} candidate library tracks from ${seedArtistNames.length} seed artists`
-            );
-
-            if (libraryTracks.length > 0) {
-                const anchorsByAlbum = new Map<
-                    string,
-                    (typeof libraryTracks)[0]
-                >();
-                for (const track of libraryTracks) {
-                    if (
-                        !anchorsByAlbum.has(track.album.id) &&
-                        !usedAlbumIds.has(track.album.id)
-                    ) {
-                        anchorsByAlbum.set(track.album.id, track);
-                    }
-                }
-
-                const uniqueAnchors = shuffleArray(Array.from(anchorsByAlbum.values()));
-                libraryAnchors = uniqueAnchors.slice(0, anchorCount);
-
-                for (const track of libraryAnchors) {
-                    usedAlbumIds.add(track.album.id);
-                }
-            }
-        }
-
-        // Top up from other library tracks when the seed artists don't supply enough anchors
-        if (libraryAnchors.length < anchorCount) {
-            const needed = anchorCount - libraryAnchors.length;
-            logger.debug(
-                `   Only ${libraryAnchors.length}/${anchorCount} anchors from seeds, adding ${needed} from popular library tracks`
-            );
-
-            const usedTrackIds = new Set([
-                ...existingTrackIds,
-                ...libraryAnchors.map((t) => t.id),
-            ]);
-
-            const popularLibraryTracks = await prisma.track.findMany({
-                where: {
-                ...NOT_MISSING,
-                    album: {
-                        location: LIBRARY_LOCATION,
-                        id: { notIn: Array.from(usedAlbumIds) }, // 1 per album
-                    },
-                    id: { notIn: Array.from(usedTrackIds) },
-                },
-                include: {
-                    album: { include: { artist: true } },
-                },
-                orderBy: {
-                    album: { artist: { name: "asc" } },
-                },
-                take: needed * 10, // Get extra for 1-per-album selection
-            });
-
-            if (popularLibraryTracks.length > 0) {
-                const popByAlbum = new Map<
-                    string,
-                    (typeof popularLibraryTracks)[0]
-                >();
-                for (const track of popularLibraryTracks) {
-                    if (
-                        !popByAlbum.has(track.album.id) &&
-                        !usedAlbumIds.has(track.album.id)
-                    ) {
-                        popByAlbum.set(track.album.id, track);
-                    }
-                }
-
-                const shuffledPopular = shuffleArray(Array.from(popByAlbum.values()));
-                const additionalAnchors = shuffledPopular.slice(0, needed);
-
-                for (const track of additionalAnchors) {
-                    usedAlbumIds.add(track.album.id);
-                }
-
-                libraryAnchors = [...libraryAnchors, ...additionalAnchors];
-                logger.debug(
-                    `   Added ${additionalAnchors.length} popular library tracks as anchors (1 per album)`
-                );
-            } else {
-                logger.debug(
-                    `   No additional library tracks available for anchors`
-                );
-            }
-        }
-
-        logger.debug(
-            `   Library anchors: ${libraryAnchors.length}/${anchorCount}`
-        );
-
-        let selected = [...discoverySelected, ...libraryAnchors];
-
-        selected = shuffleArray(selected);
+        // Only the albums Discover downloaded: library songs are never mixed into Discover.
+        const selected = shuffleArray(onePerAlbum);
 
         await discoveryBatchLogger.info(
             batchId,
-            `Playlist built: ${discoverySelected.length} discovery + ${libraryAnchors.length} anchors = ${selected.length} total`
+            `Playlist built: ${selected.length} albums`
         );
 
         const target = batch.targetSongCount; // For logging purposes only
@@ -1128,7 +978,7 @@ class DiscoverWeeklyService {
             );
         } else {
             logger.debug(
-                `   SUCCESS: Got ${selected.length} tracks (${discoverySelected.length} discovery + ${libraryAnchors.length} anchors)`
+                `   SUCCESS: Got ${selected.length} tracks`
             );
         }
 
@@ -1431,10 +1281,11 @@ class DiscoverWeeklyService {
                 // By release-group MBID
                 let tracks: any[] = [];
                 if (albumMbid) {
+                    // Only albums filed as Discover, as in buildFinalPlaylist: a library album is the listener's own.
                     tracks = await prisma.track.findMany({
                         where: {
                         ...NOT_MISSING,
-                            album: { rgMbid: albumMbid },
+                            album: { rgMbid: albumMbid, location: "DISCOVER" },
                         },
                         include: {
                             album: { include: { artist: true } },
@@ -1447,31 +1298,12 @@ class DiscoverWeeklyService {
                     }
                 }
 
-                // By artist name and album title, case-insensitive
+                // By artist name and album title, ignoring case and accents
                 if (tracks.length === 0 && artistName && albumTitle) {
                     logger.debug(
                         `       [NAME] Trying name-based search: "${artistName}" - "${albumTitle}"`
                     );
-                    tracks = await prisma.track.findMany({
-                        where: {
-                        ...NOT_MISSING,
-                            album: {
-                                title: {
-                                    equals: albumTitle,
-                                    mode: "insensitive",
-                                },
-                                artist: {
-                                    name: {
-                                        equals: artistName,
-                                        mode: "insensitive",
-                                    },
-                                },
-                            },
-                        },
-                        include: {
-                            album: { include: { artist: true } },
-                        },
-                    });
+                    tracks = await this.findDiscoverTracksByName(artistName, albumTitle);
                     if (tracks.length > 0) {
                         logger.debug(
                             `       [NAME] Found ${tracks.length} tracks in library`
@@ -1730,9 +1562,7 @@ class DiscoverWeeklyService {
         }
 
         const byName = await prisma.artist.findFirst({
-            where: {
-                name: { equals: artistName, mode: "insensitive" },
-            },
+            where: artistNamed(artistName),
             include: { albums: { take: 1 } },
         });
 

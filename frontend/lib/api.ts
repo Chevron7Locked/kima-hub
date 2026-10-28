@@ -1325,6 +1325,8 @@ class ApiClient {
             message: string;
             likedMoved: number;
             activeDeleted: number;
+            /** Albums the clear could not finish (Lidarr refused, a file could not be deleted); the server's alert names them. */
+            lidarrFailed: { artistName: string; albumTitle: string; reason: string }[];
         }>("/discover/clear", {
             method: "DELETE",
         });

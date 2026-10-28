@@ -18,10 +18,10 @@ import { normalizeIsrc } from "./recordingMatch";
 import { resolveAlbum } from "./albumIdentity";
 import { backfillAllArtistCounts } from "./artistCountsService";
 import { findLocalArtistImage } from "./imageStorage";
-import { LIBRARY_LOCATION } from "./libraryFilters";
 import { closeStagesForMissingTracks } from "./missingFileStages";
 import { runReconcile } from "./libraryReconcile";
 import { askedAgain } from "./stageReopen";
+import { discoverEvidence, isDiscoverEvidence, loadDiscoverRecords } from "./discovery/discoverEvidence";
 
 /**
  * The MusicBrainz id of a credit's primary artist, from the same tag the name came
@@ -397,213 +397,6 @@ export class MusicScannerService {
     }
 
     /**
-     * Check if a file path is within the discovery folder
-     * Discovery albums are stored in paths like "discovery/Artist/Album/track.flac"
-     * or "Discover/Artist/Album/track.flac" (case-insensitive)
-     */
-    private isDiscoveryPath(relativePath: string): boolean {
-        const normalizedPath = relativePath.toLowerCase().replace(/\\/g, "/");
-        // Check if path starts with "discovery/" or "discover/"
-        return (
-            normalizedPath.startsWith("discovery/") ||
-            normalizedPath.startsWith("discover/")
-        );
-    }
-
-    /**
-     * Normalize string for matching - handles encoding differences between
-     * file metadata and database records
-     */
-    private normalizeForMatching(str: string): string {
-        return str
-            .toLowerCase()
-            .trim()
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "") // Remove diacritics (café → cafe)
-            .replace(/[''´`]/g, "'") // Normalize apostrophes
-            .replace(/[""„]/g, '"') // Normalize quotes
-            .replace(/[–—−]/g, "-") // Normalize dashes
-            .replace(/\s+/g, " ") // Collapse whitespace
-            .replace(/[^\w\s'"-]/g, ""); // Remove other special chars
-    }
-
-    /**
-     * Check if an album is part of a discovery download by matching artist name + album title.
-     * Uses multi-pass matching: exact match first, then partial match as fallback.
-     */
-    private async isDiscoveryDownload(
-        artistName: string,
-        albumTitle: string
-    ): Promise<boolean> {
-        if (!artistName || !albumTitle) return false;
-
-        const normalizedArtist = this.normalizeForMatching(artistName);
-        const normalizedAlbum = this.normalizeForMatching(albumTitle);
-
-        // Also try without featured credits (handles "Artist A feat. Artist B")
-        const primaryArtist = parseCredit(artistName).primary || artistName;
-        const normalizedPrimaryArtist =
-            this.normalizeForMatching(primaryArtist);
-
-        logger.debug(
-            `[Scanner] Checking discovery: "${artistName}" -> "${normalizedArtist}"`
-        );
-        if (primaryArtist !== artistName) {
-            logger.debug(
-                `[Scanner]   Primary artist: "${primaryArtist}" -> "${normalizedPrimaryArtist}"`
-            );
-        }
-        logger.debug(
-            `[Scanner]   Album: "${albumTitle}" -> "${normalizedAlbum}"`
-        );
-
-        try {
-            // Get all discovery jobs (pending, processing, or recently completed)
-            const discoveryJobs = await prisma.downloadJob.findMany({
-                where: {
-                    discoveryBatchId: { not: null },
-                    status: { in: ["pending", "processing", "completed"] },
-                },
-            });
-
-            logger.debug(
-                `[Scanner]   Found ${discoveryJobs.length} discovery jobs to check`
-            );
-
-            // Pass 1: Exact match after normalization
-            for (const job of discoveryJobs) {
-                const metadata = job.metadata as any;
-                const jobArtist = this.normalizeForMatching(
-                    metadata?.artistName || ""
-                );
-                const jobAlbum = this.normalizeForMatching(
-                    metadata?.albumTitle || ""
-                );
-
-                if (
-                    (jobArtist === normalizedArtist ||
-                        jobArtist === normalizedPrimaryArtist) &&
-                    jobAlbum === normalizedAlbum
-                ) {
-                    logger.debug(`[Scanner] EXACT MATCH: job ${job.id}`);
-                    return true;
-                }
-            }
-
-            // Pass 2: Partial match fallback (handles "Album" vs "Album (Deluxe)")
-            for (const job of discoveryJobs) {
-                const metadata = job.metadata as any;
-                const jobArtist = this.normalizeForMatching(
-                    metadata?.artistName || ""
-                );
-                const jobAlbum = this.normalizeForMatching(
-                    metadata?.albumTitle || ""
-                );
-
-                // Try matching both full artist name and extracted primary artist
-                const artistMatch =
-                    jobArtist === normalizedArtist ||
-                    jobArtist === normalizedPrimaryArtist ||
-                    normalizedArtist.includes(jobArtist) ||
-                    jobArtist.includes(normalizedArtist) ||
-                    normalizedPrimaryArtist.includes(jobArtist) ||
-                    jobArtist.includes(normalizedPrimaryArtist);
-                const albumMatch =
-                    jobAlbum === normalizedAlbum ||
-                    normalizedAlbum.includes(jobAlbum) ||
-                    jobAlbum.includes(normalizedAlbum);
-
-                if (artistMatch && albumMatch) {
-                    logger.debug(`[Scanner] PARTIAL MATCH: job ${job.id}`);
-                    logger.debug(
-                        `[Scanner]   Job: "${jobArtist}" - "${jobAlbum}"`
-                    );
-                    return true;
-                }
-            }
-
-            // Pass 3: Album-only match (handles featured artists on discovery albums)
-            // If the album title matches exactly, this track is likely a featured artist on a discovery album
-            for (const job of discoveryJobs) {
-                const metadata = job.metadata as any;
-                const jobAlbum = this.normalizeForMatching(
-                    metadata?.albumTitle || ""
-                );
-
-                if (
-                    jobAlbum === normalizedAlbum &&
-                    normalizedAlbum.length > 3
-                ) {
-                    logger.debug(
-                        `[Scanner] ALBUM-ONLY MATCH (featured artist): job ${job.id}`
-                    );
-                    logger.debug(
-                        `[Scanner]   Track artist "${normalizedArtist}" is likely featured on "${jobAlbum}"`
-                    );
-                    return true;
-                }
-            }
-
-            // Pass 4: Check DiscoveryAlbum table (for already processed albums) by album title
-            const discoveryAlbumByTitle = await prisma.discoveryAlbum.findFirst(
-                {
-                    where: {
-                        albumTitle: { equals: albumTitle, mode: "insensitive" },
-                        status: { in: ["ACTIVE", "LIKED"] },
-                    },
-                }
-            );
-
-            if (discoveryAlbumByTitle) {
-                logger.debug(
-                    `[Scanner] DiscoveryAlbum match (by title): ${discoveryAlbumByTitle.id}`
-                );
-                return true;
-            }
-
-            // Pass 5: Check if artist name matches any discovery album
-            // This catches cases where Lidarr downloads a different album than requested
-            // e.g., requested "Broods - Broods" but got "Broods - Evergreen"
-            const discoveryAlbumByArtist =
-                await prisma.discoveryAlbum.findFirst({
-                    where: {
-                        artistName: { equals: artistName, mode: "insensitive" },
-                        status: { in: ["ACTIVE", "LIKED", "DELETED"] }, // Include DELETED to catch cleanup scenarios
-                    },
-                });
-
-            if (discoveryAlbumByArtist) {
-                // Double-check: only match if this artist has NO library albums yet
-                // This prevents marking albums from artists that exist in both library and discovery
-                const existingLibraryAlbum = await prisma.album.findFirst({
-                    where: {
-                        artist: {
-                            name: { equals: artistName, mode: "insensitive" },
-                        },
-                        location: LIBRARY_LOCATION,
-                    },
-                });
-
-                if (!existingLibraryAlbum) {
-                    logger.debug(
-                        `[Scanner] DiscoveryAlbum match (by artist): ${discoveryAlbumByArtist.id}`
-                    );
-                    logger.debug(
-                        `[Scanner]   Artist "${artistName}" is a discovery-only artist`
-                    );
-                    return true;
-                }
-            }
-
-            logger.debug(`[Scanner] No discovery match found`);
-            return false;
-        } catch (error) {
-            logger.error(`[Scanner] Error checking discovery status:`, error);
-            return false;
-        }
-    }
-
-    /**
      * Recursively find all audio files in a directory
      */
     private async findAudioFiles(dirPath: string): Promise<string[]> {
@@ -819,8 +612,6 @@ export class MusicScannerService {
         // Resolve the album through resolveAlbum, which checks rgMbid before the
         // normalised title so a release-group id always wins, and retries on a unique
         // violation.
-        let isDiscoveryAlbum = false;
-
         // Album identity comes from the file's own release-group tag; an untagged album keeps
         // a placeholder until identification's album step names it from its songs' AcoustID
         // answers (services/albumIdentification.ts). A tag later replaces that id, never the reverse.
@@ -835,35 +626,14 @@ export class MusicScannerService {
             // Runs only when a row is actually created: these checks cost several
             // queries and are pointless on a lookup hit.
             createData: async () => {
-                // 1. legacy /music/discovery/ folder
-                // 2. artist+album matches a discovery download job
-                // 3. artist is discovery-only (has albums, none LIBRARY)
-                const isDiscoveryByPath = this.isDiscoveryPath(relativePath);
-                const isDiscoveryByJob = await this.isDiscoveryDownload(
-                    artistName,
-                    albumTitle
+                // A Discover album is what Discover's records say (discoverEvidence); Discover has no folder of its own.
+                const evidence = discoverEvidence(
+                    { artistName, title: albumTitle, rgMbid: isMbid(taggedRgMbid) ? taggedRgMbid : null },
+                    // Read fresh for each album: Discover writes its download record before the
+                    // download starts, so a record written during a long scan still counts.
+                    await loadDiscoverRecords(),
                 );
-
-                let isDiscoveryArtist = false;
-                if (!isDiscoveryByPath && !isDiscoveryByJob) {
-                    const artistAlbums = await prisma.album.findMany({
-                        where: { artistId: artist.id },
-                        select: { location: true },
-                    });
-                    if (artistAlbums.length > 0) {
-                        isDiscoveryArtist = !artistAlbums.some(
-                            (a) => a.location === "LIBRARY"
-                        );
-                        if (isDiscoveryArtist) {
-                            logger.debug(
-                                `[Scanner] Discovery-only artist detected: ${artistName}`
-                            );
-                        }
-                    }
-                }
-
-                isDiscoveryAlbum =
-                    isDiscoveryByPath || isDiscoveryByJob || isDiscoveryArtist;
+                const isDiscoveryAlbum = isDiscoverEvidence(evidence);
 
                 return {
                     primaryType: "Album",
@@ -873,10 +643,11 @@ export class MusicScannerService {
         });
 
         // Only track ownership for library albums; discovery albums are
-        // provisional and must not appear as owned. Keyed on the album's OWN
-        // rgMbid rather than a locally recomputed one, so a row that resolveAlbum
-        // matched by identity is credited correctly.
-        if (!isDiscoveryAlbum) {
+        // provisional and must not appear as owned. Decided by the album's own
+        // location, which also holds on every later scan of its files. Keyed on
+        // the album's OWN rgMbid rather than a locally recomputed one, so a row
+        // that resolveAlbum matched by identity is credited correctly.
+        if (album.location === "LIBRARY") {
             await prisma.ownedAlbum.upsert({
                 where: {
                     artistId_rgMbid: {

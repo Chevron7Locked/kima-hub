@@ -1,0 +1,2328 @@
+{
+ "name": "discover-clear-delete",
+ "recordedWith": "Lidarr 3.1.6.5079 with a real library, recorded through scripts/record-lidarr.ts",
+ "exchanges": [
+  {
+   "seq": 28,
+   "at": "2026-10-27T22:56:41.483Z",
+   "method": "GET",
+   "path": "/api/v1/album/35543",
+   "request": null,
+   "status": 200,
+   "response": {
+    "title": "Moon Music",
+    "disambiguation": "",
+    "overview": "",
+    "artistId": 1108,
+    "foreignAlbumId": "3988c875-b35f-4c3e-b143-ccb484d45347",
+    "monitored": true,
+    "anyReleaseOk": true,
+    "profileId": 1,
+    "duration": 4739000,
+    "albumType": "Album",
+    "secondaryTypes": [],
+    "ratings": {
+     "votes": 7,
+     "value": 6.3
+    },
+    "releaseDate": "2024-10-03T00:00:00Z",
+    "releases": [
+     {
+      "id": 86055,
+      "albumId": 35543,
+      "foreignReleaseId": "4ffba374-fef9-4956-b8c5-6cf2ce868299",
+      "title": "Moon Music",
+      "status": "Official",
+      "duration": 2637000,
+      "trackCount": 10,
+      "mediumCount": 1,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       }
+      ],
+      "disambiguation": "",
+      "country": [],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "Digital Media",
+      "monitored": false
+     },
+     {
+      "id": 86056,
+      "albumId": 35543,
+      "foreignReleaseId": "5c89a215-ebb7-49a2-bc0b-b592798aebbc",
+      "title": "Moon Music (Full Moon edition)",
+      "status": "Official",
+      "duration": 4743000,
+      "trackCount": 20,
+      "mediumCount": 1,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "CD"
+       }
+      ],
+      "disambiguation": "",
+      "country": [
+       "United States"
+      ],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "CD",
+      "monitored": false
+     },
+     {
+      "id": 86057,
+      "albumId": 35543,
+      "foreignReleaseId": "1f67b59d-811c-4680-8e75-fa37f2a96f1a",
+      "title": "Moon Music",
+      "status": "Official",
+      "duration": 2637000,
+      "trackCount": 10,
+      "mediumCount": 1,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       }
+      ],
+      "disambiguation": "",
+      "country": [],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "Digital Media",
+      "monitored": false
+     },
+     {
+      "id": 86058,
+      "albumId": 35543,
+      "foreignReleaseId": "8102c17f-c21a-49f6-bc53-a8e5780a2a46",
+      "title": "MOON MUSiC TOUR EDITION",
+      "status": "Official",
+      "duration": 5618000,
+      "trackCount": 20,
+      "mediumCount": 2,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       },
+       {
+        "mediumNumber": 2,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       }
+      ],
+      "disambiguation": "",
+      "country": [
+       "[Worldwide]"
+      ],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "2xDigital Media",
+      "monitored": false
+     },
+     {
+      "id": 86059,
+      "albumId": 35543,
+      "foreignReleaseId": "3269d4f4-e46b-4b89-8bf0-eed474ded5d2",
+      "title": "Moon Music",
+      "status": "Official",
+      "duration": 2636000,
+      "trackCount": 10,
+      "mediumCount": 1,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       }
+      ],
+      "disambiguation": "",
+      "country": [
+       "[Worldwide]"
+      ],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "Digital Media",
+      "monitored": false
+     },
+     {
+      "id": 86060,
+      "albumId": 35543,
+      "foreignReleaseId": "663f60b0-b1d8-49a5-bc13-cc9808f6635c",
+      "title": "Moon Music (Full Moon edition)",
+      "status": "Official",
+      "duration": 4743000,
+      "trackCount": 20,
+      "mediumCount": 2,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       },
+       {
+        "mediumNumber": 2,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       }
+      ],
+      "disambiguation": "",
+      "country": [
+       "[Worldwide]"
+      ],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "2xDigital Media",
+      "monitored": false
+     },
+     {
+      "id": 86061,
+      "albumId": 35543,
+      "foreignReleaseId": "f8f56361-ae5b-468e-8858-9b5eefc243e0",
+      "title": "MOON MUSiC TOUR EDITION",
+      "status": "Official",
+      "duration": 2637000,
+      "trackCount": 20,
+      "mediumCount": 2,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "CD-R"
+       },
+       {
+        "mediumNumber": 2,
+        "mediumName": "",
+        "mediumFormat": "CD-R"
+       }
+      ],
+      "disambiguation": "",
+      "country": [
+       "United States"
+      ],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "2xCD-R",
+      "monitored": false
+     },
+     {
+      "id": 86062,
+      "albumId": 35543,
+      "foreignReleaseId": "942e9ffc-fbcd-4477-ae80-b8a281aff803",
+      "title": "Moon Music",
+      "status": "Official",
+      "duration": 3545354,
+      "trackCount": 20,
+      "mediumCount": 1,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "CD"
+       }
+      ],
+      "disambiguation": "Notebook Edition",
+      "country": [
+       "Europe"
+      ],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "CD",
+      "monitored": false
+     },
+     {
+      "id": 86063,
+      "albumId": 35543,
+      "foreignReleaseId": "2f60e3da-6243-458f-b9d5-b3daeba92f44",
+      "title": "Moon Music",
+      "status": "Official",
+      "duration": 2637000,
+      "trackCount": 10,
+      "mediumCount": 1,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "12\" Vinyl"
+       }
+      ],
+      "disambiguation": "First Edition LP - Green",
+      "country": [
+       "[Worldwide]"
+      ],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "12\" Vinyl",
+      "monitored": false
+     },
+     {
+      "id": 86064,
+      "albumId": 35543,
+      "foreignReleaseId": "c3b05210-a977-4bd3-a05f-78691c12a91c",
+      "title": "Moon Music",
+      "status": "Official",
+      "duration": 3546291,
+      "trackCount": 20,
+      "mediumCount": 2,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       },
+       {
+        "mediumNumber": 2,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       }
+      ],
+      "disambiguation": "Notebook Edition",
+      "country": [
+       "[Worldwide]"
+      ],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "2xDigital Media",
+      "monitored": false
+     },
+     {
+      "id": 86065,
+      "albumId": 35543,
+      "foreignReleaseId": "562e52af-c538-41c3-b24d-a4d760d1557f",
+      "title": "Moon Music",
+      "status": "Official",
+      "duration": 2640300,
+      "trackCount": 10,
+      "mediumCount": 1,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       }
+      ],
+      "disambiguation": "",
+      "country": [],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "Digital Media",
+      "monitored": false
+     },
+     {
+      "id": 86066,
+      "albumId": 35543,
+      "foreignReleaseId": "fad76017-ccd6-4317-af0e-4b9bdbedd551",
+      "title": "Moon Music (Christmas Moon edition)",
+      "status": "Official",
+      "duration": 2883000,
+      "trackCount": 11,
+      "mediumCount": 1,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       }
+      ],
+      "disambiguation": "",
+      "country": [],
+      "label": [],
+      "format": "Digital Media",
+      "monitored": false
+     },
+     {
+      "id": 86067,
+      "albumId": 35543,
+      "foreignReleaseId": "36d0d7cf-18b5-42fb-b11e-8f5b0ed1bb17",
+      "title": "MOON MUSiC",
+      "status": "Official",
+      "duration": 0,
+      "trackCount": 10,
+      "mediumCount": 1,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "12\" Vinyl"
+       }
+      ],
+      "disambiguation": "red translucent vinyl",
+      "country": [
+       "[Worldwide]"
+      ],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "12\" Vinyl",
+      "monitored": false
+     },
+     {
+      "id": 86068,
+      "albumId": 35543,
+      "foreignReleaseId": "0c8d4808-a7db-4eec-88a3-c36db1ef9844",
+      "title": "Moon Music",
+      "status": "Official",
+      "duration": 2640344,
+      "trackCount": 10,
+      "mediumCount": 1,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "CD"
+       }
+      ],
+      "disambiguation": "LiMiTED FiRST EDiTiON pressing",
+      "country": [
+       "[Worldwide]"
+      ],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "CD",
+      "monitored": false
+     },
+     {
+      "id": 86069,
+      "albumId": 35543,
+      "foreignReleaseId": "1830f41a-d5f2-4856-9bff-6c599d34b8f7",
+      "title": "Moon Music (Full Moon edition)",
+      "status": "Official",
+      "duration": 4739000,
+      "trackCount": 20,
+      "mediumCount": 2,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       },
+       {
+        "mediumNumber": 2,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       }
+      ],
+      "disambiguation": "",
+      "country": [],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "2xDigital Media",
+      "monitored": true
+     },
+     {
+      "id": 86070,
+      "albumId": 35543,
+      "foreignReleaseId": "bb9b4f2c-0fef-44d7-8446-87fc07004c78",
+      "title": "Moon Music (Full Moon edition)",
+      "status": "Official",
+      "duration": 4743000,
+      "trackCount": 20,
+      "mediumCount": 2,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       },
+       {
+        "mediumNumber": 2,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       }
+      ],
+      "disambiguation": "",
+      "country": [],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "2xDigital Media",
+      "monitored": false
+     },
+     {
+      "id": 86071,
+      "albumId": 35543,
+      "foreignReleaseId": "0e66da47-1a34-4f13-af0e-7bf53da77be5",
+      "title": "Moon Music (Full Moon edition)",
+      "status": "Official",
+      "duration": 4743000,
+      "trackCount": 20,
+      "mediumCount": 2,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       },
+       {
+        "mediumNumber": 2,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       }
+      ],
+      "disambiguation": "",
+      "country": [
+       "[Worldwide]"
+      ],
+      "label": [
+       "Parlophone"
+      ],
+      "format": "2xDigital Media",
+      "monitored": false
+     },
+     {
+      "id": 86072,
+      "albumId": 35543,
+      "foreignReleaseId": "f0487367-a5b9-4248-8f9d-a7ef9c4b62d0",
+      "title": "Moon Music (Notebook edition)",
+      "status": "Official",
+      "duration": 4412855,
+      "trackCount": 21,
+      "mediumCount": 1,
+      "media": [
+       {
+        "mediumNumber": 1,
+        "mediumName": "",
+        "mediumFormat": "Digital Media"
+       }
+      ],
+      "disambiguation": "w/ bonus track",
+      "country": [],
+      "label": [],
+      "format": "Digital Media",
+      "monitored": false
+     }
+    ],
+    "genres": [
+     "Rock"
+    ],
+    "mediumCount": 2,
+    "media": [
+     {
+      "mediumNumber": 1,
+      "mediumName": "",
+      "mediumFormat": "Digital Media"
+     },
+     {
+      "mediumNumber": 2,
+      "mediumName": "",
+      "mediumFormat": "Digital Media"
+     }
+    ],
+    "artist": {
+     "status": "continuing",
+     "ended": false,
+     "artistName": "Coldplay",
+     "foreignArtistId": "cc197bad-dc9c-440d-a5b5-d52ba2e14234",
+     "tadbId": 0,
+     "discogsId": 0,
+     "overview": "Coldplay are a British rock band formed in London in 1997. They consist of vocalist and pianist Chris Martin, guitarist Jonny Buckland, bassist Guy Berryman and drummer Will Champion; manager Phil Harvey is also credited as a full member. The group are known for their live performances and have had a significant impact on popular culture.",
+     "artistType": "Group",
+     "disambiguation": "",
+     "links": [
+      {
+       "url": "http://www.coldplay.com/",
+       "name": "coldplay"
+      },
+      {
+       "url": "https://musicmoz.org/Bands_and_Artists/C/Coldplay/",
+       "name": "musicmoz"
+      },
+      {
+       "url": "http://www.pleasureunit.com/coldplay/index.php",
+       "name": "pleasureunit"
+      },
+      {
+       "url": "https://www.discogs.com/artist/29735",
+       "name": "discogs"
+      },
+      {
+       "url": "https://myspace.com/coldplay",
+       "name": "myspace"
+      },
+      {
+       "url": "https://www.imdb.com/name/nm1095892/",
+       "name": "imdb"
+      },
+      {
+       "url": "https://twitter.com/coldplay",
+       "name": "twitter"
+      },
+      {
+       "url": "https://www.youtube.com/channel/UCfJOsk44wjzby9H64jDd4Nw",
+       "name": "youtube"
+      },
+      {
+       "url": "https://www.bbc.co.uk/music/artists/cc197bad-dc9c-440d-a5b5-d52ba2e14234",
+       "name": "bbc"
+      },
+      {
+       "url": "https://www.facebook.com/coldplay",
+       "name": "facebook"
+      },
+      {
+       "url": "https://www.youtube.com/channel/UCDPM_n1atn2ijUwHd0NNRQw",
+       "name": "youtube"
+      },
+      {
+       "url": "https://www.allmusic.com/artist/mn0000775877",
+       "name": "allmusic"
+      },
+      {
+       "url": "https://plus.google.com/+Coldplay",
+       "name": "google"
+      },
+      {
+       "url": "https://open.spotify.com/artist/4gzpq5DPGxSnKTe4SA8HAU",
+       "name": "spotify"
+      },
+      {
+       "url": "http://coldplay.tumblr.com/",
+       "name": "tumblr"
+      },
+      {
+       "url": "https://www.last.fm/music/Coldplay",
+       "name": "last"
+      },
+      {
+       "url": "https://www.wikidata.org/wiki/Q45188",
+       "name": "wikidata"
+      },
+      {
+       "url": "https://secondhandsongs.com/artist/10590",
+       "name": "secondhandsongs"
+      },
+      {
+       "url": "http://viaf.org/viaf/157712849",
+       "name": "viaf"
+      },
+      {
+       "url": "https://rateyourmusic.com/artist/coldplay",
+       "name": "rateyourmusic"
+      },
+      {
+       "url": "http://www.purevolume.com/coldplay",
+       "name": "purevolume"
+      },
+      {
+       "url": "https://www.musik-sammler.de/artist/3209/",
+       "name": "musik-sammler"
+      },
+      {
+       "url": "http://muzikum.eu/en/122-3547/coldplay/lyrics.html",
+       "name": "muzikum"
+      },
+      {
+       "url": "https://genius.com/artists/Coldplay",
+       "name": "genius"
+      },
+      {
+       "url": "https://imvdb.com/n/coldplay",
+       "name": "imvdb"
+      },
+      {
+       "url": "https://www.bandsintown.com/a/99",
+       "name": "bandsintown"
+      },
+      {
+       "url": "https://openlibrary.org/authors/OL2741867A/",
+       "name": "openlibrary"
+      },
+      {
+       "url": "https://www.whosampled.com/Coldplay/",
+       "name": "whosampled"
+      },
+      {
+       "url": "https://www.worldcat.org/identities/lccn-no99089189/",
+       "name": "worldcat"
+      },
+      {
+       "url": "https://play.google.com/store/music/artist?id=Aroavh4k5ypej6qdhyoo52q7bpm",
+       "name": "google"
+      },
+      {
+       "url": "https://www.setlist.fm/setlists/coldplay-3d6bde3.html",
+       "name": "setlist"
+      },
+      {
+       "url": "https://www.instagram.com/coldplay/",
+       "name": "instagram"
+      },
+      {
+       "url": "https://soundcloud.com/coldplay",
+       "name": "soundcloud"
+      },
+      {
+       "url": "https://d-nb.info/gnd/6501726-2",
+       "name": "d-nb"
+      },
+      {
+       "url": "http://id.loc.gov/authorities/names/no99089189",
+       "name": "loc"
+      },
+      {
+       "url": "https://catalogue.bnf.fr/ark:/12148/cb140349761",
+       "name": "bnf"
+      },
+      {
+       "url": "https://www.deezer.com/artist/892",
+       "name": "deezer"
+      },
+      {
+       "url": "https://www.songkick.com/artists/197928",
+       "name": "songkick"
+      },
+      {
+       "url": "http://coldplay.livejournal.com/",
+       "name": "livejournal"
+      },
+      {
+       "url": "https://vk.ru/coldplay",
+       "name": "vk"
+      },
+      {
+       "url": "https://tidal.com/artist/8812",
+       "name": "tidal"
+      },
+      {
+       "url": "https://us.napster.com/artist/coldplay",
+       "name": "napster"
+      },
+      {
+       "url": "https://uk.7digital.com/artist/coldplay",
+       "name": "7digital"
+      },
+      {
+       "url": "https://us.7digital.com/artist/coldplay",
+       "name": "7digital"
+      },
+      {
+       "url": "https://www.junodownload.com/artists/Coldplay/releases/",
+       "name": "junodownload"
+      },
+      {
+       "url": "https://www.beatport.com/artist/coldplay/162668",
+       "name": "beatport"
+      },
+      {
+       "url": "https://www.livefans.jp/artists/2236",
+       "name": "livefans"
+      },
+      {
+       "url": "https://www.musixmatch.com/artist/Coldplay",
+       "name": "musixmatch"
+      },
+      {
+       "url": "https://wmg.jp/coldplay/discography/",
+       "name": "wmg"
+      },
+      {
+       "url": "https://music.apple.com/gb/artist/471744",
+       "name": "apple"
+      },
+      {
+       "url": "https://music.apple.com/gb/artist/471744",
+       "name": "apple"
+      },
+      {
+       "url": "https://www.qobuz.com/gb-en/interpreter/coldplay/40226",
+       "name": "qobuz"
+      },
+      {
+       "url": "https://www.qobuz.com/gb-en/interpreter/coldplay/40226",
+       "name": "qobuz"
+      },
+      {
+       "url": "https://mora.jp/artist/254708/",
+       "name": "mora"
+      },
+      {
+       "url": "https://www.hdtracks.com/#/artist/Coldplay",
+       "name": "hdtracks"
+      },
+      {
+       "url": "https://www.tiktok.com/@coldplay",
+       "name": "tiktok"
+      },
+      {
+       "url": "https://www.livenation.co.uk/artist-8720",
+       "name": "livenation"
+      },
+      {
+       "url": "https://www.muziekweb.nl/Link/M00000124920/POPULAR/",
+       "name": "muziekweb"
+      },
+      {
+       "url": "https://music.youtube.com/channel/UCIaFw5VBEK8qaW6nRpx_qnw",
+       "name": "youtube"
+      },
+      {
+       "url": "https://www.ticketmaster.com/artist/806431",
+       "name": "ticketmaster"
+      },
+      {
+       "url": "https://music.amazon.co.uk/artists/B000QKGN8W",
+       "name": "amazon"
+      },
+      {
+       "url": "https://www.spirit-of-rock.com/en/band/Coldplay",
+       "name": "spirit-of-rock"
+      },
+      {
+       "url": "https://www.threads.com/@coldplay",
+       "name": "threads"
+      },
+      {
+       "url": "https://www.idref.fr/086228749",
+       "name": "idref"
+      },
+      {
+       "url": "https://jaxsta.com/profile/4e482690-dc02-4c85-9fbf-28907c20b928",
+       "name": "jaxsta"
+      },
+      {
+       "url": "https://www.weibo.com/7502254158",
+       "name": "weibo"
+      },
+      {
+       "url": "https://music.amazon.com/artists/B000QKGN8W",
+       "name": "amazon"
+      },
+      {
+       "url": "https://music.yandex.com/artist/671",
+       "name": "yandex"
+      },
+      {
+       "url": "https://mora.jp/artist/1473572/",
+       "name": "mora"
+      },
+      {
+       "url": "https://mora.jp/artist/503134/",
+       "name": "mora"
+      },
+      {
+       "url": "https://mora.jp/artist/1468413/",
+       "name": "mora"
+      },
+      {
+       "url": "https://mora.jp/artist/1992749/",
+       "name": "mora"
+      },
+      {
+       "url": "https://open.qobuz.com/artist/40226",
+       "name": "qobuz"
+      },
+      {
+       "url": "https://open.qobuz.com/artist/40226",
+       "name": "qobuz"
+      },
+      {
+       "url": "https://audiomack.com/coldplay",
+       "name": "audiomack"
+      },
+      {
+       "url": "https://www.deezer.com/artist/316813311",
+       "name": "deezer"
+      }
+     ],
+     "nextAlbum": null,
+     "lastAlbum": null,
+     "images": [
+      {
+       "coverType": "banner",
+       "remoteUrl": "https://images.lidarr.audio/cache/https://assets.fanart.tv/fanart/coldplay-59156d0d047c0.jpg",
+       "extension": ".jpg"
+      },
+      {
+       "coverType": "fanart",
+       "remoteUrl": "https://images.lidarr.audio/cache/https://assets.fanart.tv/fanart/coldplay-4fc0c681d6f25.jpg",
+       "extension": ".jpg"
+      },
+      {
+       "coverType": "clearlogo",
+       "remoteUrl": "https://images.lidarr.audio/cache/https://assets.fanart.tv/fanart/coldplay-55a52c710b9d7.png",
+       "extension": ".png"
+      },
+      {
+       "coverType": "poster",
+       "remoteUrl": "https://images.lidarr.audio/cache/https://assets.fanart.tv/fanart/coldplay-4fbba04929c5c.jpg",
+       "extension": ".jpg"
+      }
+     ],
+     "path": "/music/Coldplay",
+     "qualityProfileId": 1,
+     "metadataProfileId": 1,
+     "monitored": true,
+     "monitorNewItems": "none",
+     "genres": [
+      "Alternative Rock",
+      "Pop",
+      "Pop Rock",
+      "Rock",
+      "Post-Britpop",
+      "Britpop",
+      "Piano Rock",
+      "Indie Rock",
+      "Dream Pop",
+      "Art Pop"
+     ],
+     "cleanName": "coldplay",
+     "sortName": "coldplay",
+     "tags": [
+      24
+     ],
+     "added": "2026-10-26T05:10:10Z",
+     "ratings": {
+      "votes": 50,
+      "value": 8.2
+     },
+     "id": 1108
+    },
+    "images": [
+     {
+      "coverType": "cover",
+      "url": "/MediaCover/Albums/35543/cover.jpg?lastWrite=639285882369410802",
+      "remoteUrl": "https://images.lidarr.audio/cache/https://coverartarchive.org/release/0c8d4808-a7db-4eec-88a3-c36db1ef9844/40669565431-1200.jpg",
+      "extension": ".jpg"
+     },
+     {
+      "coverType": "disc",
+      "url": "/MediaCover/Albums/35543/disc.jpg",
+      "remoteUrl": "https://images.lidarr.audio/cache/https://coverartarchive.org/release/0c8d4808-a7db-4eec-88a3-c36db1ef9844/42852603723-1200.jpg",
+      "extension": ".jpg"
+     }
+    ],
+    "links": [
+     {
+      "url": "https://www.wikidata.org/wiki/Q126710155",
+      "name": "wikidata"
+     },
+     {
+      "url": "https://www.hs.fi/kulttuuri/art-2000010736718.html",
+      "name": "hs"
+     },
+     {
+      "url": "https://www.allmusic.com/album/mw0004311306",
+      "name": "allmusic"
+     },
+     {
+      "url": "https://rateyourmusic.com/release/album/coldplay/moon-music/",
+      "name": "rateyourmusic"
+     },
+     {
+      "url": "https://www.discogs.com/master/3614440",
+      "name": "discogs"
+     },
+     {
+      "url": "https://www.offiziellecharts.de/charts/album-details-541719",
+      "name": "offiziellecharts"
+     },
+     {
+      "url": "https://www.laut.de/Coldplay/Alben/Moon-Music-123881",
+      "name": "laut"
+     },
+     {
+      "url": "https://www.plattentests.de/rezi.php?show=20366",
+      "name": "plattentests"
+     },
+     {
+      "url": "https://pitchfork.com/reviews/albums/coldplay-moon-music/",
+      "name": "pitchfork"
+     },
+     {
+      "url": "https://www.last.fm/music/Coldplay/Moon+Music",
+      "name": "last"
+     }
+    ],
+    "lastSearchTime": "2026-10-26T05:10:53Z",
+    "statistics": {
+     "trackFileCount": 20,
+     "trackCount": 20,
+     "totalTrackCount": 20,
+     "sizeOnDisk": 933708305,
+     "percentOfTracks": 100
+    },
+    "id": 35543
+   }
+  },
+  {
+   "seq": 29,
+   "at": "2026-10-27T22:56:41.496Z",
+   "method": "GET",
+   "path": "/api/v1/tag",
+   "request": null,
+   "status": 200,
+   "response": [
+    {
+     "label": "lidify-discovery",
+     "id": 24
+    }
+   ]
+  },
+  {
+   "seq": 30,
+   "at": "2026-10-27T22:56:41.496Z",
+   "method": "GET",
+   "path": "/api/v1/artist/1108",
+   "request": null,
+   "status": 200,
+   "response": {
+    "status": "continuing",
+    "ended": false,
+    "artistName": "Coldplay",
+    "foreignArtistId": "cc197bad-dc9c-440d-a5b5-d52ba2e14234",
+    "tadbId": 0,
+    "discogsId": 0,
+    "overview": "Coldplay are a British rock band formed in London in 1997. They consist of vocalist and pianist Chris Martin, guitarist Jonny Buckland, bassist Guy Berryman and drummer Will Champion; manager Phil Harvey is also credited as a full member. The group are known for their live performances and have had a significant impact on popular culture.",
+    "artistType": "Group",
+    "disambiguation": "",
+    "links": [
+     {
+      "url": "http://www.coldplay.com/",
+      "name": "coldplay"
+     },
+     {
+      "url": "https://musicmoz.org/Bands_and_Artists/C/Coldplay/",
+      "name": "musicmoz"
+     },
+     {
+      "url": "http://www.pleasureunit.com/coldplay/index.php",
+      "name": "pleasureunit"
+     },
+     {
+      "url": "https://www.discogs.com/artist/29735",
+      "name": "discogs"
+     },
+     {
+      "url": "https://myspace.com/coldplay",
+      "name": "myspace"
+     },
+     {
+      "url": "https://www.imdb.com/name/nm1095892/",
+      "name": "imdb"
+     },
+     {
+      "url": "https://twitter.com/coldplay",
+      "name": "twitter"
+     },
+     {
+      "url": "https://www.youtube.com/channel/UCfJOsk44wjzby9H64jDd4Nw",
+      "name": "youtube"
+     },
+     {
+      "url": "https://www.bbc.co.uk/music/artists/cc197bad-dc9c-440d-a5b5-d52ba2e14234",
+      "name": "bbc"
+     },
+     {
+      "url": "https://www.facebook.com/coldplay",
+      "name": "facebook"
+     },
+     {
+      "url": "https://www.youtube.com/channel/UCDPM_n1atn2ijUwHd0NNRQw",
+      "name": "youtube"
+     },
+     {
+      "url": "https://www.allmusic.com/artist/mn0000775877",
+      "name": "allmusic"
+     },
+     {
+      "url": "https://plus.google.com/+Coldplay",
+      "name": "google"
+     },
+     {
+      "url": "https://open.spotify.com/artist/4gzpq5DPGxSnKTe4SA8HAU",
+      "name": "spotify"
+     },
+     {
+      "url": "http://coldplay.tumblr.com/",
+      "name": "tumblr"
+     },
+     {
+      "url": "https://www.last.fm/music/Coldplay",
+      "name": "last"
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Q45188",
+      "name": "wikidata"
+     },
+     {
+      "url": "https://secondhandsongs.com/artist/10590",
+      "name": "secondhandsongs"
+     },
+     {
+      "url": "http://viaf.org/viaf/157712849",
+      "name": "viaf"
+     },
+     {
+      "url": "https://rateyourmusic.com/artist/coldplay",
+      "name": "rateyourmusic"
+     },
+     {
+      "url": "http://www.purevolume.com/coldplay",
+      "name": "purevolume"
+     },
+     {
+      "url": "https://www.musik-sammler.de/artist/3209/",
+      "name": "musik-sammler"
+     },
+     {
+      "url": "http://muzikum.eu/en/122-3547/coldplay/lyrics.html",
+      "name": "muzikum"
+     },
+     {
+      "url": "https://genius.com/artists/Coldplay",
+      "name": "genius"
+     },
+     {
+      "url": "https://imvdb.com/n/coldplay",
+      "name": "imvdb"
+     },
+     {
+      "url": "https://www.bandsintown.com/a/99",
+      "name": "bandsintown"
+     },
+     {
+      "url": "https://openlibrary.org/authors/OL2741867A/",
+      "name": "openlibrary"
+     },
+     {
+      "url": "https://www.whosampled.com/Coldplay/",
+      "name": "whosampled"
+     },
+     {
+      "url": "https://www.worldcat.org/identities/lccn-no99089189/",
+      "name": "worldcat"
+     },
+     {
+      "url": "https://play.google.com/store/music/artist?id=Aroavh4k5ypej6qdhyoo52q7bpm",
+      "name": "google"
+     },
+     {
+      "url": "https://www.setlist.fm/setlists/coldplay-3d6bde3.html",
+      "name": "setlist"
+     },
+     {
+      "url": "https://www.instagram.com/coldplay/",
+      "name": "instagram"
+     },
+     {
+      "url": "https://soundcloud.com/coldplay",
+      "name": "soundcloud"
+     },
+     {
+      "url": "https://d-nb.info/gnd/6501726-2",
+      "name": "d-nb"
+     },
+     {
+      "url": "http://id.loc.gov/authorities/names/no99089189",
+      "name": "loc"
+     },
+     {
+      "url": "https://catalogue.bnf.fr/ark:/12148/cb140349761",
+      "name": "bnf"
+     },
+     {
+      "url": "https://www.deezer.com/artist/892",
+      "name": "deezer"
+     },
+     {
+      "url": "https://www.songkick.com/artists/197928",
+      "name": "songkick"
+     },
+     {
+      "url": "http://coldplay.livejournal.com/",
+      "name": "livejournal"
+     },
+     {
+      "url": "https://vk.ru/coldplay",
+      "name": "vk"
+     },
+     {
+      "url": "https://tidal.com/artist/8812",
+      "name": "tidal"
+     },
+     {
+      "url": "https://us.napster.com/artist/coldplay",
+      "name": "napster"
+     },
+     {
+      "url": "https://uk.7digital.com/artist/coldplay",
+      "name": "7digital"
+     },
+     {
+      "url": "https://us.7digital.com/artist/coldplay",
+      "name": "7digital"
+     },
+     {
+      "url": "https://www.junodownload.com/artists/Coldplay/releases/",
+      "name": "junodownload"
+     },
+     {
+      "url": "https://www.beatport.com/artist/coldplay/162668",
+      "name": "beatport"
+     },
+     {
+      "url": "https://www.livefans.jp/artists/2236",
+      "name": "livefans"
+     },
+     {
+      "url": "https://www.musixmatch.com/artist/Coldplay",
+      "name": "musixmatch"
+     },
+     {
+      "url": "https://wmg.jp/coldplay/discography/",
+      "name": "wmg"
+     },
+     {
+      "url": "https://music.apple.com/gb/artist/471744",
+      "name": "apple"
+     },
+     {
+      "url": "https://music.apple.com/gb/artist/471744",
+      "name": "apple"
+     },
+     {
+      "url": "https://www.qobuz.com/gb-en/interpreter/coldplay/40226",
+      "name": "qobuz"
+     },
+     {
+      "url": "https://www.qobuz.com/gb-en/interpreter/coldplay/40226",
+      "name": "qobuz"
+     },
+     {
+      "url": "https://mora.jp/artist/254708/",
+      "name": "mora"
+     },
+     {
+      "url": "https://www.hdtracks.com/#/artist/Coldplay",
+      "name": "hdtracks"
+     },
+     {
+      "url": "https://www.tiktok.com/@coldplay",
+      "name": "tiktok"
+     },
+     {
+      "url": "https://www.livenation.co.uk/artist-8720",
+      "name": "livenation"
+     },
+     {
+      "url": "https://www.muziekweb.nl/Link/M00000124920/POPULAR/",
+      "name": "muziekweb"
+     },
+     {
+      "url": "https://music.youtube.com/channel/UCIaFw5VBEK8qaW6nRpx_qnw",
+      "name": "youtube"
+     },
+     {
+      "url": "https://www.ticketmaster.com/artist/806431",
+      "name": "ticketmaster"
+     },
+     {
+      "url": "https://music.amazon.co.uk/artists/B000QKGN8W",
+      "name": "amazon"
+     },
+     {
+      "url": "https://www.spirit-of-rock.com/en/band/Coldplay",
+      "name": "spirit-of-rock"
+     },
+     {
+      "url": "https://www.threads.com/@coldplay",
+      "name": "threads"
+     },
+     {
+      "url": "https://www.idref.fr/086228749",
+      "name": "idref"
+     },
+     {
+      "url": "https://jaxsta.com/profile/4e482690-dc02-4c85-9fbf-28907c20b928",
+      "name": "jaxsta"
+     },
+     {
+      "url": "https://www.weibo.com/7502254158",
+      "name": "weibo"
+     },
+     {
+      "url": "https://music.amazon.com/artists/B000QKGN8W",
+      "name": "amazon"
+     },
+     {
+      "url": "https://music.yandex.com/artist/671",
+      "name": "yandex"
+     },
+     {
+      "url": "https://mora.jp/artist/1473572/",
+      "name": "mora"
+     },
+     {
+      "url": "https://mora.jp/artist/503134/",
+      "name": "mora"
+     },
+     {
+      "url": "https://mora.jp/artist/1468413/",
+      "name": "mora"
+     },
+     {
+      "url": "https://mora.jp/artist/1992749/",
+      "name": "mora"
+     },
+     {
+      "url": "https://open.qobuz.com/artist/40226",
+      "name": "qobuz"
+     },
+     {
+      "url": "https://open.qobuz.com/artist/40226",
+      "name": "qobuz"
+     },
+     {
+      "url": "https://audiomack.com/coldplay",
+      "name": "audiomack"
+     },
+     {
+      "url": "https://www.deezer.com/artist/316813311",
+      "name": "deezer"
+     }
+    ],
+    "nextAlbum": null,
+    "lastAlbum": {
+     "title": "Moon Music",
+     "disambiguation": "",
+     "overview": "",
+     "artistId": 1108,
+     "foreignAlbumId": "3988c875-b35f-4c3e-b143-ccb484d45347",
+     "monitored": true,
+     "anyReleaseOk": true,
+     "profileId": 1,
+     "duration": 4739000,
+     "albumType": "Album",
+     "secondaryTypes": [],
+     "ratings": {
+      "votes": 7,
+      "value": 6.3
+     },
+     "releaseDate": "2024-10-03T00:00:00Z",
+     "releases": [
+      {
+       "id": 86055,
+       "albumId": 35543,
+       "foreignReleaseId": "4ffba374-fef9-4956-b8c5-6cf2ce868299",
+       "title": "Moon Music",
+       "status": "Official",
+       "duration": 2637000,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "Digital Media",
+       "monitored": false
+      },
+      {
+       "id": 86056,
+       "albumId": 35543,
+       "foreignReleaseId": "5c89a215-ebb7-49a2-bc0b-b592798aebbc",
+       "title": "Moon Music (Full Moon edition)",
+       "status": "Official",
+       "duration": 4743000,
+       "trackCount": 20,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "CD"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "United States"
+       ],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "CD",
+       "monitored": false
+      },
+      {
+       "id": 86057,
+       "albumId": 35543,
+       "foreignReleaseId": "1f67b59d-811c-4680-8e75-fa37f2a96f1a",
+       "title": "Moon Music",
+       "status": "Official",
+       "duration": 2637000,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "Digital Media",
+       "monitored": false
+      },
+      {
+       "id": 86058,
+       "albumId": 35543,
+       "foreignReleaseId": "8102c17f-c21a-49f6-bc53-a8e5780a2a46",
+       "title": "MOON MUSiC TOUR EDITION",
+       "status": "Official",
+       "duration": 5618000,
+       "trackCount": 20,
+       "mediumCount": 2,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        },
+        {
+         "mediumNumber": 2,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "2xDigital Media",
+       "monitored": false
+      },
+      {
+       "id": 86059,
+       "albumId": 35543,
+       "foreignReleaseId": "3269d4f4-e46b-4b89-8bf0-eed474ded5d2",
+       "title": "Moon Music",
+       "status": "Official",
+       "duration": 2636000,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "Digital Media",
+       "monitored": false
+      },
+      {
+       "id": 86060,
+       "albumId": 35543,
+       "foreignReleaseId": "663f60b0-b1d8-49a5-bc13-cc9808f6635c",
+       "title": "Moon Music (Full Moon edition)",
+       "status": "Official",
+       "duration": 4743000,
+       "trackCount": 20,
+       "mediumCount": 2,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        },
+        {
+         "mediumNumber": 2,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "2xDigital Media",
+       "monitored": false
+      },
+      {
+       "id": 86061,
+       "albumId": 35543,
+       "foreignReleaseId": "f8f56361-ae5b-468e-8858-9b5eefc243e0",
+       "title": "MOON MUSiC TOUR EDITION",
+       "status": "Official",
+       "duration": 2637000,
+       "trackCount": 20,
+       "mediumCount": 2,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "CD-R"
+        },
+        {
+         "mediumNumber": 2,
+         "mediumName": "",
+         "mediumFormat": "CD-R"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "United States"
+       ],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "2xCD-R",
+       "monitored": false
+      },
+      {
+       "id": 86062,
+       "albumId": 35543,
+       "foreignReleaseId": "942e9ffc-fbcd-4477-ae80-b8a281aff803",
+       "title": "Moon Music",
+       "status": "Official",
+       "duration": 3545354,
+       "trackCount": 20,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "CD"
+        }
+       ],
+       "disambiguation": "Notebook Edition",
+       "country": [
+        "Europe"
+       ],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "CD",
+       "monitored": false
+      },
+      {
+       "id": 86063,
+       "albumId": 35543,
+       "foreignReleaseId": "2f60e3da-6243-458f-b9d5-b3daeba92f44",
+       "title": "Moon Music",
+       "status": "Official",
+       "duration": 2637000,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "12\" Vinyl"
+        }
+       ],
+       "disambiguation": "First Edition LP - Green",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "12\" Vinyl",
+       "monitored": false
+      },
+      {
+       "id": 86064,
+       "albumId": 35543,
+       "foreignReleaseId": "c3b05210-a977-4bd3-a05f-78691c12a91c",
+       "title": "Moon Music",
+       "status": "Official",
+       "duration": 3546291,
+       "trackCount": 20,
+       "mediumCount": 2,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        },
+        {
+         "mediumNumber": 2,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "Notebook Edition",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "2xDigital Media",
+       "monitored": false
+      },
+      {
+       "id": 86065,
+       "albumId": 35543,
+       "foreignReleaseId": "562e52af-c538-41c3-b24d-a4d760d1557f",
+       "title": "Moon Music",
+       "status": "Official",
+       "duration": 2640300,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "Digital Media",
+       "monitored": false
+      },
+      {
+       "id": 86066,
+       "albumId": 35543,
+       "foreignReleaseId": "fad76017-ccd6-4317-af0e-4b9bdbedd551",
+       "title": "Moon Music (Christmas Moon edition)",
+       "status": "Official",
+       "duration": 2883000,
+       "trackCount": 11,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [],
+       "label": [],
+       "format": "Digital Media",
+       "monitored": false
+      },
+      {
+       "id": 86067,
+       "albumId": 35543,
+       "foreignReleaseId": "36d0d7cf-18b5-42fb-b11e-8f5b0ed1bb17",
+       "title": "MOON MUSiC",
+       "status": "Official",
+       "duration": 0,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "12\" Vinyl"
+        }
+       ],
+       "disambiguation": "red translucent vinyl",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "12\" Vinyl",
+       "monitored": false
+      },
+      {
+       "id": 86068,
+       "albumId": 35543,
+       "foreignReleaseId": "0c8d4808-a7db-4eec-88a3-c36db1ef9844",
+       "title": "Moon Music",
+       "status": "Official",
+       "duration": 2640344,
+       "trackCount": 10,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "CD"
+        }
+       ],
+       "disambiguation": "LiMiTED FiRST EDiTiON pressing",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "CD",
+       "monitored": false
+      },
+      {
+       "id": 86069,
+       "albumId": 35543,
+       "foreignReleaseId": "1830f41a-d5f2-4856-9bff-6c599d34b8f7",
+       "title": "Moon Music (Full Moon edition)",
+       "status": "Official",
+       "duration": 4739000,
+       "trackCount": 20,
+       "mediumCount": 2,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        },
+        {
+         "mediumNumber": 2,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "2xDigital Media",
+       "monitored": true
+      },
+      {
+       "id": 86070,
+       "albumId": 35543,
+       "foreignReleaseId": "bb9b4f2c-0fef-44d7-8446-87fc07004c78",
+       "title": "Moon Music (Full Moon edition)",
+       "status": "Official",
+       "duration": 4743000,
+       "trackCount": 20,
+       "mediumCount": 2,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        },
+        {
+         "mediumNumber": 2,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "2xDigital Media",
+       "monitored": false
+      },
+      {
+       "id": 86071,
+       "albumId": 35543,
+       "foreignReleaseId": "0e66da47-1a34-4f13-af0e-7bf53da77be5",
+       "title": "Moon Music (Full Moon edition)",
+       "status": "Official",
+       "duration": 4743000,
+       "trackCount": 20,
+       "mediumCount": 2,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        },
+        {
+         "mediumNumber": 2,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "",
+       "country": [
+        "[Worldwide]"
+       ],
+       "label": [
+        "Parlophone"
+       ],
+       "format": "2xDigital Media",
+       "monitored": false
+      },
+      {
+       "id": 86072,
+       "albumId": 35543,
+       "foreignReleaseId": "f0487367-a5b9-4248-8f9d-a7ef9c4b62d0",
+       "title": "Moon Music (Notebook edition)",
+       "status": "Official",
+       "duration": 4412855,
+       "trackCount": 21,
+       "mediumCount": 1,
+       "media": [
+        {
+         "mediumNumber": 1,
+         "mediumName": "",
+         "mediumFormat": "Digital Media"
+        }
+       ],
+       "disambiguation": "w/ bonus track",
+       "country": [],
+       "label": [],
+       "format": "Digital Media",
+       "monitored": false
+      }
+     ],
+     "genres": [
+      "Rock"
+     ],
+     "mediumCount": 2,
+     "media": [
+      {
+       "mediumNumber": 1,
+       "mediumName": "",
+       "mediumFormat": "Digital Media"
+      },
+      {
+       "mediumNumber": 2,
+       "mediumName": "",
+       "mediumFormat": "Digital Media"
+      }
+     ],
+     "artist": {
+      "status": "continuing",
+      "ended": false,
+      "artistName": "Coldplay",
+      "foreignArtistId": "cc197bad-dc9c-440d-a5b5-d52ba2e14234",
+      "tadbId": 0,
+      "discogsId": 0,
+      "overview": "Coldplay are a British rock band formed in London in 1997. They consist of vocalist and pianist Chris Martin, guitarist Jonny Buckland, bassist Guy Berryman and drummer Will Champion; manager Phil Harvey is also credited as a full member. The group are known for their live performances and have had a significant impact on popular culture.",
+      "artistType": "Group",
+      "disambiguation": "",
+      "links": [
+       {
+        "url": "http://www.coldplay.com/",
+        "name": "coldplay"
+       },
+       {
+        "url": "https://musicmoz.org/Bands_and_Artists/C/Coldplay/",
+        "name": "musicmoz"
+       },
+       {
+        "url": "http://www.pleasureunit.com/coldplay/index.php",
+        "name": "pleasureunit"
+       },
+       {
+        "url": "https://www.discogs.com/artist/29735",
+        "name": "discogs"
+       },
+       {
+        "url": "https://myspace.com/coldplay",
+        "name": "myspace"
+       },
+       {
+        "url": "https://www.imdb.com/name/nm1095892/",
+        "name": "imdb"
+       },
+       {
+        "url": "https://twitter.com/coldplay",
+        "name": "twitter"
+       },
+       {
+        "url": "https://www.youtube.com/channel/UCfJOsk44wjzby9H64jDd4Nw",
+        "name": "youtube"
+       },
+       {
+        "url": "https://www.bbc.co.uk/music/artists/cc197bad-dc9c-440d-a5b5-d52ba2e14234",
+        "name": "bbc"
+       },
+       {
+        "url": "https://www.facebook.com/coldplay",
+        "name": "facebook"
+       },
+       {
+        "url": "https://www.youtube.com/channel/UCDPM_n1atn2ijUwHd0NNRQw",
+        "name": "youtube"
+       },
+       {
+        "url": "https://www.allmusic.com/artist/mn0000775877",
+        "name": "allmusic"
+       },
+       {
+        "url": "https://plus.google.com/+Coldplay",
+        "name": "google"
+       },
+       {
+        "url": "https://open.spotify.com/artist/4gzpq5DPGxSnKTe4SA8HAU",
+        "name": "spotify"
+       },
+       {
+        "url": "http://coldplay.tumblr.com/",
+        "name": "tumblr"
+       },
+       {
+        "url": "https://www.last.fm/music/Coldplay",
+        "name": "last"
+       },
+       {
+        "url": "https://www.wikidata.org/wiki/Q45188",
+        "name": "wikidata"
+       },
+       {
+        "url": "https://secondhandsongs.com/artist/10590",
+        "name": "secondhandsongs"
+       },
+       {
+        "url": "http://viaf.org/viaf/157712849",
+        "name": "viaf"
+       },
+       {
+        "url": "https://rateyourmusic.com/artist/coldplay",
+        "name": "rateyourmusic"
+       },
+       {
+        "url": "http://www.purevolume.com/coldplay",
+        "name": "purevolume"
+       },
+       {
+        "url": "https://www.musik-sammler.de/artist/3209/",
+        "name": "musik-sammler"
+       },
+       {
+        "url": "http://muzikum.eu/en/122-3547/coldplay/lyrics.html",
+        "name": "muzikum"
+       },
+       {
+        "url": "https://genius.com/artists/Coldplay",
+        "name": "genius"
+       },
+       {
+        "url": "https://imvdb.com/n/coldplay",
+        "name": "imvdb"
+       },
+       {
+        "url": "https://www.bandsintown.com/a/99",
+        "name": "bandsintown"
+       },
+       {
+        "url": "https://openlibrary.org/authors/OL2741867A/",
+        "name": "openlibrary"
+       },
+       {
+        "url": "https://www.whosampled.com/Coldplay/",
+        "name": "whosampled"
+       },
+       {
+        "url": "https://www.worldcat.org/identities/lccn-no99089189/",
+        "name": "worldcat"
+       },
+       {
+        "url": "https://play.google.com/store/music/artist?id=Aroavh4k5ypej6qdhyoo52q7bpm",
+        "name": "google"
+       },
+       {
+        "url": "https://www.setlist.fm/setlists/coldplay-3d6bde3.html",
+        "name": "setlist"
+       },
+       {
+        "url": "https://www.instagram.com/coldplay/",
+        "name": "instagram"
+       },
+       {
+        "url": "https://soundcloud.com/coldplay",
+        "name": "soundcloud"
+       },
+       {
+        "url": "https://d-nb.info/gnd/6501726-2",
+        "name": "d-nb"
+       },
+       {
+        "url": "http://id.loc.gov/authorities/names/no99089189",
+        "name": "loc"
+       },
+       {
+        "url": "https://catalogue.bnf.fr/ark:/12148/cb140349761",
+        "name": "bnf"
+       },
+       {
+        "url": "https://www.deezer.com/artist/892",
+        "name": "deezer"
+       },
+       {
+        "url": "https://www.songkick.com/artists/197928",
+        "name": "songkick"
+       },
+       {
+        "url": "http://coldplay.livejournal.com/",
+        "name": "livejournal"
+       },
+       {
+        "url": "https://vk.ru/coldplay",
+        "name": "vk"
+       },
+       {
+        "url": "https://tidal.com/artist/8812",
+        "name": "tidal"
+       },
+       {
+        "url": "https://us.napster.com/artist/coldplay",
+        "name": "napster"
+       },
+       {
+        "url": "https://uk.7digital.com/artist/coldplay",
+        "name": "7digital"
+       },
+       {
+        "url": "https://us.7digital.com/artist/coldplay",
+        "name": "7digital"
+       },
+       {
+        "url": "https://www.junodownload.com/artists/Coldplay/releases/",
+        "name": "junodownload"
+       },
+       {
+        "url": "https://www.beatport.com/artist/coldplay/162668",
+        "name": "beatport"
+       },
+       {
+        "url": "https://www.livefans.jp/artists/2236",
+        "name": "livefans"
+       },
+       {
+        "url": "https://www.musixmatch.com/artist/Coldplay",
+        "name": "musixmatch"
+       },
+       {
+        "url": "https://wmg.jp/coldplay/discography/",
+        "name": "wmg"
+       },
+       {
+        "url": "https://music.apple.com/gb/artist/471744",
+        "name": "apple"
+       },
+       {
+        "url": "https://music.apple.com/gb/artist/471744",
+        "name": "apple"
+       },
+       {
+        "url": "https://www.qobuz.com/gb-en/interpreter/coldplay/40226",
+        "name": "qobuz"
+       },
+       {
+        "url": "https://www.qobuz.com/gb-en/interpreter/coldplay/40226",
+        "name": "qobuz"
+       },
+       {
+        "url": "https://mora.jp/artist/254708/",
+        "name": "mora"
+       },
+       {
+        "url": "https://www.hdtracks.com/#/artist/Coldplay",
+        "name": "hdtracks"
+       },
+       {
+        "url": "https://www.tiktok.com/@coldplay",
+        "name": "tiktok"
+       },
+       {
+        "url": "https://www.livenation.co.uk/artist-8720",
+        "name": "livenation"
+       },
+       {
+        "url": "https://www.muziekweb.nl/Link/M00000124920/POPULAR/",
+        "name": "muziekweb"
+       },
+       {
+        "url": "https://music.youtube.com/channel/UCIaFw5VBEK8qaW6nRpx_qnw",
+        "name": "youtube"
+       },
+       {
+        "url": "https://www.ticketmaster.com/artist/806431",
+        "name": "ticketmaster"
+       },
+       {
+        "url": "https://music.amazon.co.uk/artists/B000QKGN8W",
+        "name": "amazon"
+       },
+       {
+        "url": "https://www.spirit-of-rock.com/en/band/Coldplay",
+        "name": "spirit-of-rock"
+       },
+       {
+        "url": "https://www.threads.com/@coldplay",
+        "name": "threads"
+       },
+       {
+        "url": "https://www.idref.fr/086228749",
+        "name": "idref"
+       },
+       {
+        "url": "https://jaxsta.com/profile/4e482690-dc02-4c85-9fbf-28907c20b928",
+        "name": "jaxsta"
+       },
+       {
+        "url": "https://www.weibo.com/7502254158",
+        "name": "weibo"
+       },
+       {
+        "url": "https://music.amazon.com/artists/B000QKGN8W",
+        "name": "amazon"
+       },
+       {
+        "url": "https://music.yandex.com/artist/671",
+        "name": "yandex"
+       },
+       {
+        "url": "https://mora.jp/artist/1473572/",
+        "name": "mora"
+       },
+       {
+        "url": "https://mora.jp/artist/503134/",
+        "name": "mora"
+       },
+       {
+        "url": "https://mora.jp/artist/1468413/",
+        "name": "mora"
+       },
+       {
+        "url": "https://mora.jp/artist/1992749/",
+        "name": "mora"
+       },
+       {
+        "url": "https://open.qobuz.com/artist/40226",
+        "name": "qobuz"
+       },
+       {
+        "url": "https://open.qobuz.com/artist/40226",
+        "name": "qobuz"
+       },
+       {
+        "url": "https://audiomack.com/coldplay",
+        "name": "audiomack"
+       },
+       {
+        "url": "https://www.deezer.com/artist/316813311",
+        "name": "deezer"
+       }
+      ],
+      "nextAlbum": null,
+      "lastAlbum": null,
+      "images": [
+       {
+        "coverType": "banner",
+        "remoteUrl": "https://images.lidarr.audio/cache/https://assets.fanart.tv/fanart/coldplay-59156d0d047c0.jpg",
+        "extension": ".jpg"
+       },
+       {
+        "coverType": "fanart",
+        "remoteUrl": "https://images.lidarr.audio/cache/https://assets.fanart.tv/fanart/coldplay-4fc0c681d6f25.jpg",
+        "extension": ".jpg"
+       },
+       {
+        "coverType": "clearlogo",
+        "remoteUrl": "https://images.lidarr.audio/cache/https://assets.fanart.tv/fanart/coldplay-55a52c710b9d7.png",
+        "extension": ".png"
+       },
+       {
+        "coverType": "poster",
+        "remoteUrl": "https://images.lidarr.audio/cache/https://assets.fanart.tv/fanart/coldplay-4fbba04929c5c.jpg",
+        "extension": ".jpg"
+       }
+      ],
+      "path": "/music/Coldplay",
+      "qualityProfileId": 1,
+      "metadataProfileId": 1,
+      "monitored": true,
+      "monitorNewItems": "none",
+      "genres": [
+       "Alternative Rock",
+       "Pop",
+       "Pop Rock",
+       "Rock",
+       "Post-Britpop",
+       "Britpop",
+       "Piano Rock",
+       "Indie Rock",
+       "Dream Pop",
+       "Art Pop"
+      ],
+      "cleanName": "coldplay",
+      "sortName": "coldplay",
+      "tags": [
+       24
+      ],
+      "added": "2026-10-26T05:10:10Z",
+      "ratings": {
+       "votes": 50,
+       "value": 8.2
+      },
+      "id": 1108
+     },
+     "images": [
+      {
+       "coverType": "cover",
+       "remoteUrl": "https://images.lidarr.audio/cache/https://coverartarchive.org/release/0c8d4808-a7db-4eec-88a3-c36db1ef9844/40669565431-1200.jpg",
+       "extension": ".jpg"
+      },
+      {
+       "coverType": "disc",
+       "remoteUrl": "https://images.lidarr.audio/cache/https://coverartarchive.org/release/0c8d4808-a7db-4eec-88a3-c36db1ef9844/42852603723-1200.jpg",
+       "extension": ".jpg"
+      }
+     ],
+     "links": [
+      {
+       "url": "https://www.wikidata.org/wiki/Q126710155",
+       "name": "wikidata"
+      },
+      {
+       "url": "https://www.hs.fi/kulttuuri/art-2000010736718.html",
+       "name": "hs"
+      },
+      {
+       "url": "https://www.allmusic.com/album/mw0004311306",
+       "name": "allmusic"
+      },
+      {
+       "url": "https://rateyourmusic.com/release/album/coldplay/moon-music/",
+       "name": "rateyourmusic"
+      },
+      {
+       "url": "https://www.discogs.com/master/3614440",
+       "name": "discogs"
+      },
+      {
+       "url": "https://www.offiziellecharts.de/charts/album-details-541719",
+       "name": "offiziellecharts"
+      },
+      {
+       "url": "https://www.laut.de/Coldplay/Alben/Moon-Music-123881",
+       "name": "laut"
+      },
+      {
+       "url": "https://www.plattentests.de/rezi.php?show=20366",
+       "name": "plattentests"
+      },
+      {
+       "url": "https://pitchfork.com/reviews/albums/coldplay-moon-music/",
+       "name": "pitchfork"
+      },
+      {
+       "url": "https://www.last.fm/music/Coldplay/Moon+Music",
+       "name": "last"
+      }
+     ],
+     "lastSearchTime": "2026-10-26T05:10:53Z",
+     "id": 35543
+    },
+    "images": [
+     {
+      "coverType": "banner",
+      "url": "/MediaCover/1108/banner.jpg?lastWrite=639286370246830817",
+      "remoteUrl": "https://images.lidarr.audio/cache/https://assets.fanart.tv/fanart/coldplay-59156d0d047c0.jpg",
+      "extension": ".jpg"
+     },
+     {
+      "coverType": "fanart",
+      "url": "/MediaCover/1108/fanart.jpg?lastWrite=639286370248047647",
+      "remoteUrl": "https://images.lidarr.audio/cache/https://assets.fanart.tv/fanart/coldplay-4fc0c681d6f25.jpg",
+      "extension": ".jpg"
+     },
+     {
+      "coverType": "clearlogo",
+      "url": "/MediaCover/1108/clearlogo.png?lastWrite=639285882407789383",
+      "remoteUrl": "https://images.lidarr.audio/cache/https://assets.fanart.tv/fanart/coldplay-55a52c710b9d7.png",
+      "extension": ".png"
+     },
+     {
+      "coverType": "poster",
+      "url": "/MediaCover/1108/poster.jpg?lastWrite=639285882409727780",
+      "remoteUrl": "https://images.lidarr.audio/cache/https://assets.fanart.tv/fanart/coldplay-4fbba04929c5c.jpg",
+      "extension": ".jpg"
+     }
+    ],
+    "path": "/music/Coldplay",
+    "qualityProfileId": 1,
+    "metadataProfileId": 1,
+    "monitored": true,
+    "monitorNewItems": "none",
+    "rootFolderPath": "/music/",
+    "genres": [
+     "Alternative Rock",
+     "Pop",
+     "Pop Rock",
+     "Rock",
+     "Post-Britpop",
+     "Britpop",
+     "Piano Rock",
+     "Indie Rock",
+     "Dream Pop",
+     "Art Pop"
+    ],
+    "cleanName": "coldplay",
+    "sortName": "coldplay",
+    "tags": [
+     24
+    ],
+    "added": "2026-10-26T05:10:10Z",
+    "ratings": {
+     "votes": 50,
+     "value": 8.2
+    },
+    "statistics": {
+     "albumCount": 113,
+     "trackFileCount": 20,
+     "trackCount": 20,
+     "totalTrackCount": 692,
+     "sizeOnDisk": 933708305,
+     "percentOfTracks": 100
+    },
+    "id": 1108
+   }
+  },
+  {
+   "seq": 31,
+   "at": "2026-10-27T22:56:41.519Z",
+   "method": "DELETE",
+   "path": "/api/v1/album/35543?deleteFiles=true&addImportListExclusion=false",
+   "request": null,
+   "status": 200,
+   "response": null
+  }
+ ],
+ "webhooks": []
+}

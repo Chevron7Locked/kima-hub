@@ -74,6 +74,16 @@ export function artistSortName(name: string | null | undefined): string {
     return pgTrim(base.replace(PG_LEADING_ARTICLE, "")) || base;
 }
 
+/**
+ * The artists named `name`, found by the identity key the scanner stores (built in TypeScript, so it folds case and
+ * accents of every script the same on any database encoding). A name with no letters or digits has no key, so it is
+ * matched exactly.
+ */
+export function artistNamed(name: string): Prisma.ArtistWhereInput {
+    const identityKey = artistIdentityKey(name);
+    return identityKey ? { identityKey } : { name };
+}
+
 const MBID_FORMAT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** True for a value shaped like a MusicBrainz id; temp- and row ids fail. */

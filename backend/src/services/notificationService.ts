@@ -80,6 +80,17 @@ class NotificationService {
         }
     }
 
+    /** Delete one user's alert under a group key, leaving every other user's. */
+    async resolveFor(userId: string, groupKey: string) {
+        const row = await prisma.notification.findUnique({
+            where: { userId_groupKey: { userId, groupKey } },
+            select: { id: true },
+        });
+        if (!row) return;
+        await prisma.notification.deleteMany({ where: { id: row.id } });
+        eventBus.emit({ type: "notification:cleared", userId, payload: { id: row.id } });
+    }
+
     /**
      * Delete every user's alert under a group key, once its cause is gone
      */
