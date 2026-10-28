@@ -81,7 +81,7 @@ def test_the_runtime_stack_is_pinned_exactly_and_the_same_in_every_image():
         assert name in pinned, f"{name} is not pinned with == in requirements.txt"
     with open(os.path.join(SERVICE_DIR, "..", "..", "Dockerfile")) as f:
         image = _pins("\n".join(line.strip() for line in f))
-    for name in ("onnxruntime", "transformers", "librosa", "soundfile", "numpy", "bullmq"):
+    for name in ("onnxruntime", "transformers", "librosa", "soundfile", "numpy", "bullmq", "msgpack"):
         assert image.get(name) == pinned[name], f"the all-in-one image pins {name}=={image.get(name)}"
     with open(os.path.join(SERVICE_DIR, "..", "audio-analyzer", "requirements.txt")) as f:
         analysis = _pins(f.read())

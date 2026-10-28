@@ -85,7 +85,6 @@ jobs:
             - name: Scan the image (report only)
               if: always()
               run: |
-                  # ssl-cert-snakeoil.key is Debian's placeholder key, not a secret.
                   {
                     echo '### Image scan — HIGH/CRITICAL with a fix available'
                     echo ''
@@ -95,7 +94,6 @@ jobs:
                       --severity HIGH,CRITICAL \
                       --ignore-unfixed \
                       --ignorefile .trivyignore \
-                      --skip-files '/etc/ssl/private/ssl-cert-snakeoil.key' \
                       --exit-code 0 \
                       --format table \
                       kima:scan 2>&1

@@ -18,9 +18,10 @@ transformers==5.10.4
 redis>=4.5.0
 psycopg2-binary>=2.9.0
 pgvector>=0.2.0
-# 2.26.0 pins msgpack 1.2.1, the fixed release for GHSA-6v7p-g79w-8964.
-bullmq==2.26.0
-msgpack==1.2.1
+# 3.4.5 is the binding of the backend's bullmq 6; it pins msgpack 1.2.3, the
+# fixed release for GHSA-j586-36cw-2gc2.
+bullmq==3.4.5
+msgpack==1.2.3
 
 # Utilities
 # The all-in-one image's numpy, which the sound-vector parity was measured on.

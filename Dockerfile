@@ -90,7 +90,10 @@ RUN apt-get install -y --no-install-recommends \
     libfftw3-single3 \
     libsamplerate0 \
     libyaml-0-2 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    # ssl-cert generates a key pair at build time that every pull of the image
+    # would share; Kima's Postgres runs its own initdb cluster with SSL off.
+    && rm -f /etc/ssl/private/ssl-cert-snakeoil.key /etc/ssl/certs/ssl-cert-snakeoil.pem
 
 # Create directories
 RUN mkdir -p /app/backend /app/frontend /app/audio-analyzer /app/models \
@@ -108,12 +111,11 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     psycopg2-binary \
     'pgvector>=0.2.0' \
     'requests>=2.31.0' \
-    # 2.26.0 is the latest 2.x binding (Worker API the analyzer imports); its
-    # msgpack==1.2.1 pin is the GHSA-6v7p-g79w-8964 fixed release.
-    'bullmq==2.26.0' \
-    'yt-dlp>=2024.12.0' \
-    # Floor the transitive msgpack: <1.2.1 carries GHSA-6v7p-g79w-8964.
-    'msgpack>=1.2.1'
+    # 3.x is the binding of the backend's bullmq 6 (one upstream release); it
+    # pins msgpack 1.2.3, the fixed release for GHSA-j586-36cw-2gc2.
+    'bullmq==3.4.5' \
+    'msgpack==1.2.3' \
+    'yt-dlp>=2024.12.0'
 
 # ML dependencies -- ONNX Runtime for CLAP (audio + text) and MusiCNN.
 # Exact versions: the sound vectors and the MusiCNN parity were validated on these, and a
