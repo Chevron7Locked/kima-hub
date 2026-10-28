@@ -74,13 +74,12 @@ export default function SyncPage() {
     });
 
     // Derive display state from scanStatus (no setState in effects)
-    const { progress, message, completedSteps, syncing, error } = useMemo(() => {
+    const { progress, message, completedSteps, error } = useMemo(() => {
         if (initFailed) {
             return {
                 progress: 0,
                 message: "",
                 completedSteps: [] as string[],
-                syncing: false,
                 error: initError,
             };
         }
@@ -90,7 +89,6 @@ export default function SyncPage() {
                 progress: 0,
                 message: "",
                 completedSteps: [] as string[],
-                syncing: false,
                 error: "Scan failed. You can skip and try again later.",
             };
         }
@@ -100,7 +98,6 @@ export default function SyncPage() {
                 progress: 100,
                 message: "All set! Redirecting...",
                 completedSteps: ["tracks", "library", "albums", "indexes"],
-                syncing: true,
                 error: "",
             };
         }
@@ -111,7 +108,6 @@ export default function SyncPage() {
                 progress: deriveProgress(p),
                 message: deriveMessage(p),
                 completedSteps: deriveSteps(p),
-                syncing: true,
                 error: "",
             };
         }
@@ -120,7 +116,6 @@ export default function SyncPage() {
             progress: 0,
             message: "Scanning your music library...",
             completedSteps: [] as string[],
-            syncing: true,
             error: "",
         };
     }, [scanStatus, initFailed, initError]);
@@ -198,14 +193,16 @@ export default function SyncPage() {
                         <div className="p-6 md:p-8 space-y-6">
                             <div>
                                 <h2 className="text-2xl font-bold text-white mb-1">
-                                    {syncing ? "Setting Things Up" : "Ready to Go!"}
+                                    {error ? "Sync Didn't Finish" : "Setting Things Up"}
                                 </h2>
-                                <p className="text-[var(--text-secondary)]">
-                                    {error || message}
-                                </p>
+                                {!error && (
+                                    <p className="text-[var(--text-secondary)]">
+                                        {message}
+                                    </p>
+                                )}
                             </div>
 
-                            {syncing && !error && (
+                            {!error && (
                                 <div className="space-y-2">
                                     <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
                                         <div
