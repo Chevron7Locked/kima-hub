@@ -6,7 +6,6 @@ import { mayAcquire } from "../utils/acquirePermission";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { z } from "zod";
-import { writeEnvFile } from "../utils/envWriter";
 import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 import {
     decryptOrNull,
@@ -266,29 +265,6 @@ router.post("/", async (req, res) => {
         logger.error("Failed to clear audiobook data:", clearError);
         // Don't fail the request
       }
-    }
-
-    // Write only non-sensitive config to .env for Docker containers.
-    // Secrets (API keys, passwords, tokens) are stored encrypted in the
-    // database and must NOT be written in plaintext to the .env file.
-    try {
-      await writeEnvFile({
-        LIDARR_ENABLED: data.lidarrEnabled ? "true" : "false",
-        LIDARR_URL: data.lidarrUrl || null,
-        AUDIOBOOKSHELF_URL: data.audiobookshelfUrl || null,
-        SOULSEEK_USERNAME: data.soulseekUsername || null,
-        // The transcode cache cap is read from config (env) at startup, which is
-        // why the UI flags a restart. Persist it to .env so the saved slider
-        // value actually takes effect on the next boot.
-        TRANSCODE_CACHE_MAX_GB:
-          data.transcodeCacheMaxGb != null
-            ? String(data.transcodeCacheMaxGb)
-            : null,
-      });
-      logger.debug(".env file synchronized with database settings");
-    } catch (envError) {
-      logger.error("Failed to write .env file:", envError);
-      // Don't fail the request if .env write fails
     }
 
     if (data.lidarrEnabled && data.lidarrUrl && data.lidarrApiKey) {

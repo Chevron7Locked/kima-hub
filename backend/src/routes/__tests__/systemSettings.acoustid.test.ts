@@ -17,13 +17,6 @@ jest.mock("../../utils/logger", () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));
 
-// The settings route writes non-secret config to the repo-root .env
-// (path.resolve(cwd, "..", ".env")); unmocked, every run rewrites the
-// developer's real .env with this test's values.
-jest.mock("../../utils/envWriter", () => ({
-    writeEnvFile: jest.fn().mockResolvedValue(undefined),
-}));
-
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (req: any, _res: any, next: any) => {
         req.user = { id: "user-1", username: "tester", role: "admin" };

@@ -20,10 +20,6 @@ describe("openai is absent from the codebase", () => {
         expect(read("src/utils/encryptedFields.ts")).not.toMatch(/openai/i);
     });
 
-    it("the env writer has no openai category", () => {
-        expect(read("src/utils/envWriter.ts")).not.toMatch(/openai/i);
-    });
-
     it("the frontend api client has no openai method", () => {
         const api = fs.readFileSync(path.join(ROOT, "..", "frontend", "lib", "api.ts"), "utf8");
         expect(api).not.toMatch(/openai/i);

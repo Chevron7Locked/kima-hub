@@ -4,10 +4,8 @@ import { prisma } from "../utils/db";
 import bcrypt from "bcrypt";
 import { z } from "zod";
 import axios from "axios";
-import crypto from "crypto";
 import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { encryptField } from "../utils/encryption";
-import { writeEnvFile } from "../utils/envWriter";
 import { generateToken, requireAuth, requireAdmin } from "../middleware/auth";
 import { defaultUserSettingsFor } from "../utils/userSettingsDefaults";
 import { createLidarrClient } from "../services/lidarrClient";
@@ -40,44 +38,6 @@ const enrichmentConfigSchema = z.object({
 });
 
 /**
- * Generate a secure encryption key for settings encryption
- * This is called automatically during first user registration
- */
-async function ensureEncryptionKey(): Promise<void> {
-    // Check if encryption key already exists
-    if (
-        process.env.SETTINGS_ENCRYPTION_KEY &&
-        process.env.SETTINGS_ENCRYPTION_KEY !==
-            "default-encryption-key-change-me"
-    ) {
-        logger.debug("[ONBOARDING] Encryption key already exists");
-        return;
-    }
-
-    // Generate a secure 32-byte encryption key
-    const encryptionKey = crypto.randomBytes(32).toString("base64");
-
-    logger.debug(
-        "[ONBOARDING] Generating encryption key for settings security..."
-    );
-
-    try {
-        // Write to .env file
-        await writeEnvFile({
-            SETTINGS_ENCRYPTION_KEY: encryptionKey,
-        });
-
-        // Update the process environment so it's available immediately
-        process.env.SETTINGS_ENCRYPTION_KEY = encryptionKey;
-
-        logger.debug("[ONBOARDING] Encryption key generated and saved to .env");
-    } catch (error) {
-        logger.error("[ONBOARDING] Failed to save encryption key:", error);
-        throw new Error("Failed to generate encryption key");
-    }
-}
-
-/**
  * POST /onboarding/register
  * Step 1: Create user account - returns JWT token like regular login
  */
@@ -100,11 +60,6 @@ router.post("/register", async (req, res) => {
             if (!rows[0]?.registrationOpen) {
                 return res.status(403).json({ error: "Registration is closed" });
             }
-        }
-
-        // If this is the first user, ensure encryption key is generated
-        if (isFirstUser) {
-            await ensureEncryptionKey();
         }
 
         // Check if username is taken
