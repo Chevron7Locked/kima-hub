@@ -102,7 +102,7 @@ scanWorker.on("error", (err) => {
 discoverWorker.on("completed", (job, result) => {
     if (result.success) {
         logger.debug(
-            `Discover job ${job.id} completed: ${result.playlistName} (${result.songCount} songs)`
+            `Discover job ${job.id} completed: ${result.downloadsQueued} album downloads queued (batch ${result.batchId})`
         );
     } else {
         logger.debug(`Discover job ${job.id} failed: ${result.error}`);

@@ -409,12 +409,8 @@ class DiscoverWeeklyService {
                 `${downloadsStarted}/${recommended.length} downloads queued`
             );
 
-            return {
-                success: true,
-                playlistName: `Discover Weekly (Week of ${weekStart.toLocaleDateString()})`,
-                songCount: 0,
-                batchId: batch.id,
-            };
+            // The playlist is built once the downloads land and the scan finishes (checkBatchCompletion).
+            return { success: true, batchId: batch.id, downloadsQueued: downloadsStarted };
         } catch (error: any) {
             discoveryLogger.error(`Generation failed: ${error.message}`);
             discoveryLogger.end(false, error.message);

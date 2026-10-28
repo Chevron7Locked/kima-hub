@@ -1,7 +1,6 @@
 import type { Job } from "bullmq";
 import { logger } from "../../utils/logger";
 import { discoverWeeklyService } from "../../services/discoverWeekly";
-import { eventBus } from "../../services/eventBus";
 import { prisma } from "../../utils/db";
 import { ACQUIRE_REFUSED, mayAcquire } from "../../utils/acquirePermission";
 
@@ -11,8 +10,8 @@ export interface DiscoverJobData {
 
 export interface DiscoverJobResult {
     success: boolean;
-    playlistName: string;
-    songCount: number;
+    /** Album downloads started; the playlist is built once they land and the scan finishes. */
+    downloadsQueued: number;
     batchId?: string;
     error?: string;
 }
@@ -27,7 +26,7 @@ export async function processDiscoverWeekly(
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
     if (!user || !(await mayAcquire(user))) {
         logger.info(`[DiscoverJob ${job.id}] Skipped for ${userId}: ${user ? ACQUIRE_REFUSED : "no such user"}`);
-        return { success: false, playlistName: "", songCount: 0, error: user ? ACQUIRE_REFUSED : "No such user" };
+        return { success: false, downloadsQueued: 0, error: user ? ACQUIRE_REFUSED : "No such user" };
     }
 
     logger.debug(
@@ -45,20 +44,8 @@ export async function processDiscoverWeekly(
         );
         const result = await discoverWeeklyService.generatePlaylist(userId);
 
-        logger.debug(`[DiscoverJob ${job.id}] Result:`, {
-            success: result.success,
-            playlistName: result.playlistName,
-            songCount: result.songCount,
-            batchId: result.batchId,
-        });
-
-        if (result.batchId) {
-            eventBus.emit({
-                type: "discover:progress",
-                userId,
-                payload: { batchId: result.batchId, status: "downloading", completed: 0, failed: 0, total: result.songCount, progress: 0 },
-            });
-        }
+        // The batch's progress reaches the page from checkBatchCompletion, which generation runs before it returns.
+        logger.debug(`[DiscoverJob ${job.id}] Result:`, result);
 
         await job.updateProgress(100); // Complete
 
@@ -68,8 +55,7 @@ export async function processDiscoverWeekly(
 
         return {
             success: result.success,
-            playlistName: result.playlistName,
-            songCount: result.songCount,
+            downloadsQueued: result.downloadsQueued,
             batchId: result.batchId,
         };
     } catch (error: any) {

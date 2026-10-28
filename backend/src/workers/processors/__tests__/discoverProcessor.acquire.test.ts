@@ -8,6 +8,7 @@ import { prisma } from "../../../utils/db";
 import { invalidateSystemSettingsCache } from "../../../utils/systemSettings";
 import { discoverWeeklyService } from "../../../services/discoverWeekly";
 import { processDiscoverWeekly, type DiscoverJobData } from "../discoverProcessor";
+import { eventBus } from "../../../services/eventBus";
 
 const MEMBER = "u_disc_member";
 const ADMIN = "u_disc_admin";
@@ -32,7 +33,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-    generate = jest.spyOn(discoverWeeklyService, "generatePlaylist").mockResolvedValue({ success: true, playlistName: "Discover", songCount: 0 } as never);
+    generate = jest.spyOn(discoverWeeklyService, "generatePlaylist").mockResolvedValue({ success: true, batchId: "b1", downloadsQueued: 3 });
 });
 
 afterEach(() => generate.mockRestore());
@@ -56,4 +57,16 @@ it("builds a member's playlist once the operator allows member downloads, and an
     await setToggle(false);
     await processDiscoverWeekly(job(ADMIN));
     expect(generate.mock.calls.map((c) => c[0])).toEqual([MEMBER, ADMIN]);
+});
+
+it("reports the downloads queued and leaves the batch's progress to the batch check", async () => {
+    const emit = jest.spyOn(eventBus, "emit");
+    try {
+        const result = await processDiscoverWeekly(job(ADMIN));
+        expect(result).toEqual({ success: true, batchId: "b1", downloadsQueued: 3 });
+        // A "downloading, 0 of 0" sent after generation would overwrite the batch check's real progress.
+        expect(emit.mock.calls.filter(([e]) => e.type === "discover:progress")).toEqual([]);
+    } finally {
+        emit.mockRestore();
+    }
 });
