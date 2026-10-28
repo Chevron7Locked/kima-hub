@@ -2,6 +2,7 @@
 
 import { ComponentProps, lazy, Suspense } from "react";
 import type { MetadataEditor as Editor } from "@/components/MetadataEditor";
+import { useAuth } from "@/lib/auth-context";
 
 // The editor is a modal opened on demand, so it loads only when a page can show it.
 const MetadataEditor = lazy(() => import("@/components/MetadataEditor").then((mod) => ({ default: mod.MetadataEditor })));
@@ -11,8 +12,9 @@ type MetadataEditControlsProps = ComponentProps<typeof Editor> & {
     editable: boolean;
 };
 
-/** The "edited" mark and the edit button beside an album or artist title. */
+/** The "edited" mark and the edit button beside an album or artist title. Editing is admin-only on the server. */
 export function MetadataEditControls({ edited, editable, ...editor }: MetadataEditControlsProps) {
+    const { user } = useAuth();
     return (
         <>
             {edited && (
@@ -20,7 +22,7 @@ export function MetadataEditControls({ edited, editable, ...editor }: MetadataEd
                     Edited
                 </span>
             )}
-            {editable && (
+            {editable && user?.role === "admin" && (
                 <Suspense fallback={null}>
                     <MetadataEditor {...editor} />
                 </Suspense>

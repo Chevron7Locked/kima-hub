@@ -665,7 +665,7 @@ router.put("/tracks/:id/metadata", requireAuth, requireAdmin, async (req, res) =
  * POST /enrichment/artists/:id/reset
  * Reset artist metadata to canonical values (clear all user overrides)
  */
-router.post("/artists/:id/reset", requireAuth, async (req, res) => {
+router.post("/artists/:id/reset", requireAuth, requireAdmin, async (req, res) => {
   try {
     // Check if artist exists first
     const existingArtist = await prisma.artist.findUnique({
@@ -727,7 +727,7 @@ router.post("/artists/:id/reset", requireAuth, async (req, res) => {
  * POST /enrichment/albums/:id/reset
  * Reset album metadata to canonical values (clear all user overrides)
  */
-router.post("/albums/:id/reset", requireAuth, async (req, res) => {
+router.post("/albums/:id/reset", requireAuth, requireAdmin, async (req, res) => {
   try {
     // Check if album exists first
     const existingAlbum = await prisma.album.findUnique({
@@ -788,7 +788,7 @@ router.post("/albums/:id/reset", requireAuth, async (req, res) => {
  * POST /enrichment/tracks/:id/reset
  * Reset track metadata to canonical values (clear all user overrides)
  */
-router.post("/tracks/:id/reset", requireAuth, async (req, res) => {
+router.post("/tracks/:id/reset", requireAuth, requireAdmin, async (req, res) => {
   try {
     // Check if track exists first
     const existingTrack = await prisma.track.findUnique({
