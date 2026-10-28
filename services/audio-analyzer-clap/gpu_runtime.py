@@ -143,8 +143,8 @@ def busy():
     return thread is not None and thread.is_alive()
 
 
-def nvidia_lib_dirs():
-    base = os.path.join(SITE, 'nvidia')
+def nvidia_lib_dirs(site_dir):
+    base = os.path.join(site_dir, 'nvidia')
     dirs = []
     try:
         for pkg in sorted(os.listdir(base)):
@@ -296,7 +296,8 @@ def _verify_checksums(wheels_dir):
 
 
 def _smoke_test(site_dir):
-    libs = nvidia_lib_dirs()
+    # The new download's own CUDA libraries: the live SITE may be absent or an older pin.
+    libs = nvidia_lib_dirs(site_dir)
     env = dict(os.environ, PYTHONPATH=site_dir)
     if libs:
         env['LD_LIBRARY_PATH'] = ':'.join(libs)
