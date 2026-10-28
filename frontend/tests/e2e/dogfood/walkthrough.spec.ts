@@ -1957,8 +1957,15 @@ test.describe("Dogfood walkthrough", () => {
     test("6c. device pairing and Subsonic compatibility", async () => {
         session.setJourney("6c. Device + Subsonic");
 
+        await session.step("reach device pairing from Settings", async () => {
+            await page.goto("/settings#subsonic");
+            await settle(page, 2000);
+            await page.getByRole("link", { name: /link a device/i }).click();
+            await page.waitForURL(/\/device$/, { timeout: 10_000 });
+            return { linked: true };
+        });
+
         await session.step("generate the device pairing code", async () => {
-            await page.goto("/device");
             await settle(page, 2000);
             const generateBtn = page.getByText("Generate Code");
             await expect(generateBtn).toBeVisible({ timeout: 10_000 });

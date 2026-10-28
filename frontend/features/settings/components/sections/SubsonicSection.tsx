@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { SettingsSection, SettingsRow, SettingsInput } from "../ui";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
@@ -90,6 +91,14 @@ export function SubsonicSection() {
 
     return (
         <SettingsSection id="subsonic" title="Native Apps">
+            <SettingsRow
+                label="Kima app"
+                description="Sign the Kima phone app in with a QR code or a six-digit code, and see the devices already linked"
+            >
+                <Link href="/device" className="text-xs text-brand hover:text-brand-hover transition-colors">
+                    Link a device
+                </Link>
+            </SettingsRow>
             <SettingsRow
                 label="Server URL"
                 description="Enter this in your Subsonic-compatible client. Admins can set a persistent URL in Storage settings."
