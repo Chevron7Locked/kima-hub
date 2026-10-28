@@ -13,7 +13,7 @@ import { logger } from "../../utils/logger";
 import { stationPage, type StationPage, type StationRequest, type StationSong } from "./stationOrder";
 import { LIVE_MOODS, MOOD_HEADS, type Mood } from "../moods/heads";
 import { READING_SQL, loadMoodState, type MoodState, type MoodStats, type Reading } from "../moods/state";
-import { TRACK_LIMIT } from "./helpers";
+import { TRACK_LIMIT, seededOrder } from "./helpers";
 import { MIN_MIX_TRACKS, artistSql, capByArtist } from "./artistCap";
 
 export { MIN_MIX_TRACKS, artistSql, capByArtist, songArtistKey } from "./artistCap";
@@ -545,18 +545,7 @@ function pagePlays(members: number | null): members is number {
  * rises to 3, then lifts.
  */
 export function drawMembers(members: Member[], seed: string, limit: number): string[] {
-    return capByArtist(seededOrder(members, seed), limit);
-}
-
-/** Every member in the order `seed` fixes (a hash of the seed and its id), with no artist cap. */
-export function seededOrder<T extends Member>(members: T[], seed: string): T[] {
-    return members
-        .map((member) => ({
-            member,
-            key: crypto.createHash("sha256").update(`${seed}\0${member.id}`).digest("hex"),
-        }))
-        .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
-        .map(({ member }) => member);
+    return capByArtist(seededOrder(members, seed, (m) => m.id), limit);
 }
 
 export interface RecipeMix {

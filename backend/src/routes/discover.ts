@@ -32,6 +32,7 @@ import {
 } from '../utils/errors';
 import { distributedLock } from '../utils/distributedLock';
 import { withArtistArtwork } from "../services/artwork";
+import { parseLimit } from "./library/paging";
 
 const router = Router();
 
@@ -1104,7 +1105,7 @@ router.patch("/config", async (req, res) => {
 
 router.get("/popular-artists", async (req, res) => {
     try {
-        const limit = parseInt(req.query.limit as string) || 20;
+        const limit = parseLimit(req.query.limit, 20);
 
         const chart = await listenBrainzService.getTopChartArtists(limit);
         // ListenBrainz charts carry no pictures; the artwork door finds them.

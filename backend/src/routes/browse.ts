@@ -5,6 +5,7 @@ import { requireAuthOrToken } from "../middleware/auth";
 import { safeError } from "../utils/errors";
 import { spotifyService } from "../services/spotify";
 import { deezerService, DeezerPlaylistPreview } from "../services/deezer";
+import { parseLimit } from "./library/paging";
 
 const router = Router();
 
@@ -49,7 +50,7 @@ function deezerPlaylistToUnified(playlist: DeezerPlaylistPreview): PlaylistPrevi
  */
 router.get("/playlists/featured", async (req, res) => {
     try {
-        const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+        const limit = parseLimit(req.query.limit, 50, 200);
         logger.debug(`[Browse] Fetching featured playlists (limit: ${limit})...`);
 
         const playlists = await deezerService.getFeaturedPlaylists(limit);
@@ -76,7 +77,7 @@ router.get("/playlists/search", async (req, res) => {
             return res.status(400).json({ error: "Search query must be at least 2 characters" });
         }
 
-        const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+        const limit = parseLimit(req.query.limit, 50, 100);
         logger.debug(`[Browse] Searching playlists for "${query}"...`);
 
         const playlists = await deezerService.searchPlaylists(query, limit);
@@ -123,7 +124,7 @@ router.get("/playlists/:id", async (req, res) => {
 router.get("/genres/:id/playlists", async (req, res) => {
     try {
         const genreId = parseInt(req.params.id);
-        const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+        const limit = parseLimit(req.query.limit, 20, 50);
 
         // Get genre name first
         const genres = await deezerService.getGenres();

@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
 import { recordPlay } from "../services/playRecording";
+import { parseLimit } from "./library/paging";
 
 const router = Router();
 
@@ -52,7 +53,7 @@ router.get("/", async (req, res) => {
         const plays = await prisma.play.findMany({
             where: { userId },
             orderBy: { playedAt: "desc" },
-            take: Math.min(Math.max(parseInt(limit as string, 10) || 50, 1), 200),
+            take: parseLimit(limit, 50, 200),
             include: {
                 track: {
                     include: {

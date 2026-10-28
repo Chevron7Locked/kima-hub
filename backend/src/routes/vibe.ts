@@ -12,6 +12,7 @@ import { searchTracksByText } from "../services/textEmbeddingBridge";
 import { SELF_SCORE, blendSelfScore } from "../services/matching/formula";
 import { matchingContext, rankMatches, weightedTracks } from "../services/matching/rank";
 import { createHash } from "node:crypto";
+import { parseLimit } from "./library/paging";
 
 /** A requested result count: 1 to 100, 20 when missing or not a number. */
 function resultLimit(value: unknown): number {
@@ -190,10 +191,7 @@ router.post("/alchemy", requireAuth, async (req, res) => {
 router.get("/similar/:trackId", requireAuth, async (req, res) => {
     try {
         const { trackId } = req.params;
-        const limit = Math.min(
-            Math.max(1, parseInt(req.query.limit as string) || 20),
-            100
-        );
+        const limit = parseLimit(req.query.limit, 20, 100);
 
         const tracks = await findSimilarTracks(trackId, limit);
 

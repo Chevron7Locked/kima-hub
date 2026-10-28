@@ -235,23 +235,33 @@ export function drawIds(ids: string[], take: number, seed?: number): string[] {
 }
 
 /**
- * Up to `take` items drawn at random without replacement, each more likely the
- * larger its weight: every item gets the key -ln(U) / weight with U uniform in
- * (0, 1], and the smallest keys win (Efraimidis and Spirakis 2006, "Weighted
- * random sampling with a reservoir"). An item whose weight is zero, negative
- * or not a finite number is never drawn, so fewer than `take` come back when
- * fewer than `take` items have a positive weight.
+ * Every item with a positive, finite weight, in a random order where an item's chance of coming early grows with its
+ * weight: each gets the key ln(u) / weight, u in (0, 1), and the highest keys come first (Efraimidis and Spirakis 2006,
+ * "Weighted random sampling with a reservoir"); an item with twice the weight comes first about twice as often. With
+ * `seeded`, u is a hash of the seed and the item's id, so the order is fixed for the seed; without, u is drawn afresh.
  */
-export function drawWeighted<T>(items: T[], weightOf: (item: T) => number, take: number): T[] {
-    assertTake(take);
-    const keyed: { item: T; key: number }[] = [];
+export function weightedOrder<T>(
+    items: T[],
+    weightOf: (item: T) => number,
+    seeded?: { seed: string; idOf: (item: T) => string },
+): T[] {
+    const keyed: { item: T; id: string; key: number }[] = [];
     for (const item of items) {
         const weight = weightOf(item);
         if (!Number.isFinite(weight) || weight <= 0) continue;
-        keyed.push({ item, key: -Math.log(1 - Math.random()) / weight });
+        const id = seeded ? seeded.idOf(item) : "";
+        const u = seeded
+            ? (parseInt(crypto.createHash("sha256").update(`${seeded.seed}\0${id}`).digest("hex").slice(0, 13), 16) + 0.5) / 2 ** 52
+            : 1 - Math.random();
+        keyed.push({ item, id, key: Math.log(u) / weight });
     }
-    keyed.sort((a, b) => a.key - b.key);
-    return keyed.slice(0, take).map((k) => k.item);
+    return keyed.sort((a, b) => b.key - a.key || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((k) => k.item);
+}
+
+/** Up to `take` items of a fresh weightedOrder: a weighted draw without replacement. */
+export function drawWeighted<T>(items: T[], weightOf: (item: T) => number, take: number): T[] {
+    assertTake(take);
+    return weightedOrder(items, weightOf).slice(0, take);
 }
 
 /** The tracks with these ids, in the order of `ids`. */

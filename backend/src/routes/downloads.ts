@@ -12,6 +12,7 @@ import crypto from "crypto";
 import { safeError, UserFacingError } from "../utils/errors";
 import { failureCause } from "../utils/outcome";
 import { isMbid } from "../services/artistIdentity";
+import { parseLimit } from "./library/paging";
 
 const router = Router();
 
@@ -618,7 +619,7 @@ router.get("/", async (req, res) => {
         const jobs = await prisma.downloadJob.findMany({
             where,
             orderBy: { createdAt: "desc" },
-            take: Math.min(Math.max(1, parseInt(limit as string, 10) || 50), 500),
+            take: parseLimit(limit, 50, 500),
         });
 
         // Discover's automated downloads are hidden unless asked for.

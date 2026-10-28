@@ -4,7 +4,7 @@
  * 1, 2, 3 and 6 give 24 possible orders; 20,000 orders drawn from seeds "0" to "19999" must each come up as often as
  * its exact chance, within five standard deviations (the seeds are fixed, so the result is too).
  */
-import { weightedOrder } from "../nightPlays";
+import { weightedOrder } from "../helpers";
 
 const WEIGHTS: Record<string, number> = { a: 1, b: 2, c: 3, d: 6 };
 const songs = Object.keys(WEIGHTS).map((id) => ({ id }));
@@ -29,7 +29,7 @@ describe("weightedOrder", () => {
     const counts = new Map<string, number>();
     beforeAll(() => {
         for (let i = 0; i < DRAWS; i++) {
-            const key = weightedOrder(songs, (s) => WEIGHTS[s.id], String(i)).map((s) => s.id).join("");
+            const key = weightedOrder(songs, (s) => WEIGHTS[s.id], { seed: String(i), idOf: (s) => s.id }).map((s) => s.id).join("");
             counts.set(key, (counts.get(key) ?? 0) + 1);
         }
     });
@@ -56,9 +56,9 @@ describe("weightedOrder", () => {
     });
 
     it("is the same for the same seed, differs for another, and keeps every song once", () => {
-        const one = weightedOrder(songs, (s) => WEIGHTS[s.id], "seed");
-        expect(weightedOrder(songs, (s) => WEIGHTS[s.id], "seed")).toEqual(one);
+        const one = weightedOrder(songs, (s) => WEIGHTS[s.id], { seed: "seed", idOf: (s) => s.id });
+        expect(weightedOrder(songs, (s) => WEIGHTS[s.id], { seed: "seed", idOf: (s) => s.id })).toEqual(one);
         expect(one.map((s) => s.id).sort()).toEqual(["a", "b", "c", "d"]);
-        expect(Array.from({ length: 30 }, (_, i) => weightedOrder(songs, (s) => WEIGHTS[s.id], `s${i}`).map((s) => s.id).join("")).filter((x, i, xs) => xs.indexOf(x) === i).length).toBeGreaterThan(5);
+        expect(Array.from({ length: 30 }, (_, i) => weightedOrder(songs, (s) => WEIGHTS[s.id], { seed: `s${i}`, idOf: (s) => s.id }).map((s) => s.id).join("")).filter((x, i, xs) => xs.indexOf(x) === i).length).toBeGreaterThan(5);
     });
 });

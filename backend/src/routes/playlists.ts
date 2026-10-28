@@ -14,6 +14,7 @@ import * as playlistService from "../services/playlistService";
 import { announcePlaylistChange } from "../services/playlistEvents";
 import { proxyPreviewStream } from "../utils/previewProxy";
 import { soulseekConfigured } from "../utils/soulseekConfigured";
+import { parseLimit } from "./library/paging";
 
 const router = Router();
 
@@ -91,7 +92,7 @@ router.get("/", async (req, res) => {
         const userId = req.user.id;
 
         const page = parseInt(req.query.page as string) || 1;
-        const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+        const limit = parseLimit(req.query.limit, 50, 100);
 
         // Get user's hidden playlists
         const hiddenPlaylists = await prisma.hiddenPlaylist.findMany({

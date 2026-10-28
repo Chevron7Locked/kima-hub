@@ -26,8 +26,8 @@ import { pickNightStationPage } from "../../services/mixes/nightPlays";
 import { SEED_PATTERN, emptyPage } from "../../services/mixes/stationOrder";
 import { MOOD_STATIONS, moodStationList } from "../../services/mixes/stations";
 import { spreadByArtist } from "../../utils/artistSpread";
-import { LIBRARY_TRACK_WHERE, LIBRARY_LOCATION } from "../../services/libraryFilters";
-import { LIBRARY_PLAYABLE, PLAYABLE } from "../../utils/libraryEligibility";
+import { LIBRARY_LOCATION } from "../../services/libraryFilters";
+import { IN_LIBRARY, LIBRARY_PLAYABLE, PLAYABLE } from "../../utils/libraryEligibility";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
 import { resolveWithinMusicRoot } from "./trackPath";
 import { parseLimit, parseOffset } from "./paging";
@@ -284,7 +284,7 @@ router.get("/tracks", async (req, res) => {
       orderBy = TRACK_SORT_MAP[sortBy as string] ?? { title: "asc" as const };
     }
 
-    const where: any = { ...LIBRARY_TRACK_WHERE };
+    const where: any = { ...IN_LIBRARY };
     if (albumId) {
       where.albumId = albumId as string;
     }
@@ -332,7 +332,7 @@ router.get("/tracks/shuffle", async (req, res) => {
     const { limit: limitParam = "100" } = req.query;
     const limit = parseLimit(limitParam, 100);
 
-    const playable = { ...LIBRARY_TRACK_WHERE, ...PLAYABLE };
+    const playable = LIBRARY_PLAYABLE;
     const totalTracks = await prisma.track.count({ where: playable });
 
     if (totalTracks === 0) {

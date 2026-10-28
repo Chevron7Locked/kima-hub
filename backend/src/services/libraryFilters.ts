@@ -14,11 +14,6 @@ export const LIBRARY_ALBUM_WHERE: Prisma.AlbumWhereInput = {
     location: LIBRARY_LOCATION,
 };
 
-/** Spread into a `Track` where-clause (via the album relation) to scope it to owned-library tracks. */
-export const LIBRARY_TRACK_WHERE: Prisma.TrackWhereInput = {
-    album: { location: LIBRARY_LOCATION },
-};
-
 export type CollectionFilter = "owned" | "discovery" | "all";
 
 /** The collection's "show" choice from a query value: anything unknown is the library. */
