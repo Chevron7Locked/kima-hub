@@ -710,7 +710,7 @@ class AnalysisWorker:
         self.running = False
         self.executor = None
         self.pool_active = False
-        self.consecutive_empty = 0
+        self.consecutive_errors = 0
         self._restarting = False
         self.is_paused = False  # Enrichment control: pause state
         self.pubsub = None  # Redis pub/sub for control signals
@@ -808,6 +808,10 @@ class AnalysisWorker:
                             self._pending_resize = new_count
                             self._pending_resize_time = time.time()
                             logger.info(f"Worker resize queued: {NUM_WORKERS} -> {new_count} (applying in {RESIZE_DEBOUNCE_SECONDS}s)")
+                        elif self._pending_resize is not None:
+                            # Set back to the running count: the earlier, still-debouncing resize is withdrawn.
+                            self._pending_resize = None
+                            logger.info(f"Worker resize withdrawn: staying at {NUM_WORKERS}")
                         return
                 except (json.JSONDecodeError, ValueError):
                     pass  # Not JSON, try as plain string
@@ -995,11 +999,11 @@ class AnalysisWorker:
                     took = self._fill()
                     self._collect(timeout=1.0)
 
+                    # A pass that got this far raised nothing, so the run of errors is over.
+                    self.consecutive_errors = 0
                     if took or self._in_flight:
-                        self.consecutive_empty = 0
                         self._last_work_time = time.time()
                     else:
-                        self.consecutive_empty += 1
                         idle_seconds = time.time() - self._last_work_time
                         if self.pool_active and MODEL_IDLE_TIMEOUT > 0 and idle_seconds >= MODEL_IDLE_TIMEOUT:
                             self._shutdown_pool()
@@ -1014,9 +1018,9 @@ class AnalysisWorker:
                     continue
                 except Exception as e:
                     logger.exception(f"Worker error: {e}")
-                    self.consecutive_empty += 1
+                    self.consecutive_errors += 1
 
-                    if self.consecutive_empty >= 5:
+                    if self.consecutive_errors >= 5:
                         logger.info("Multiple consecutive errors, attempting recovery...")
                         try:
                             self.db.close()
@@ -1026,7 +1030,7 @@ class AnalysisWorker:
                                 self._drop_pool()
                         except Exception as reconnect_err:
                             logger.error(f"Recovery failed: {reconnect_err}")
-                        self.consecutive_empty = 0
+                        self.consecutive_errors = 0
 
                     time.sleep(BRPOP_TIMEOUT)
         finally:

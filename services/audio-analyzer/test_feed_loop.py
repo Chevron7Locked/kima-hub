@@ -224,7 +224,7 @@ def test_a_changed_gpu_switch_finishes_the_running_track_takes_nothing_new_and_s
     w.db.connect = w.db.close = lambda: None
     w._check_control_signals = w._apply_pending_resize = lambda: None
     w._is_gate_closed = lambda: False
-    w.is_paused, w.pubsub, w._restarting, w.consecutive_empty = False, None, False, 0
+    w.is_paused, w.pubsub, w._restarting, w.consecutive_errors = False, None, False, 0
     w._last_work_time = time.time()
     switched = [False]
     monkeypatch.setattr(analyzer.gpu_switch, "restart_needed", lambda switch: switched[0])
@@ -242,3 +242,78 @@ def test_a_changed_gpu_switch_finishes_the_running_track_takes_nothing_new_and_s
     assert not loop.is_alive(), "the worker kept running after the switch changed"
     assert [e["trackId"] for e in w.redis.published] == ["t0"]
     assert len(w.redis.queue) == 3, "it took new tracks after the switch changed"
+
+
+def test_setting_the_running_count_withdraws_a_queued_resize(monkeypatch):
+    class Bus:
+        def __init__(self, counts):
+            self.counts = list(counts)
+
+        def get_message(self, **_kw):
+            return {"type": "message", "data": json.dumps({"command": "set_workers", "count": self.counts.pop(0)})}
+
+    monkeypatch.setattr(analyzer, "NUM_WORKERS", 2)
+    monkeypatch.setattr(analyzer.os, "cpu_count", lambda: 12)
+    w = analyzer.AnalysisWorker.__new__(analyzer.AnalysisWorker)
+    w.pubsub = Bus([6, 2])
+    w._pending_resize = None
+    w._check_control_signals()
+    assert w._pending_resize == 6
+    w._check_control_signals()
+    assert w._pending_resize is None
+
+
+def test_idle_passes_do_not_count_toward_the_error_recovery(monkeypatch):
+    """Recovery (reconnecting the database) follows five errors in a row; idle passes between them do not count."""
+    class Db:
+        """Counts connects: one when the worker starts, one more for each recovery."""
+        connects = 0
+
+        def connect(self):
+            Db.connects += 1
+
+        def close(self):
+            pass
+
+    class Heartbeat:
+        def set(self, *_a):
+            pass
+
+    def passes(outcomes):
+        def fill():
+            outcome = outcomes.pop(0)
+            if outcome == "error":
+                raise RuntimeError("redis hiccup")
+            if not outcomes:
+                w.running = False
+            return outcome == "work"
+        return fill
+
+    monkeypatch.setattr(analyzer, "BRPOP_TIMEOUT", 0)
+    monkeypatch.setattr(analyzer.time, "sleep", lambda _s: None)  # the recovery path's real 2 s pause
+    monkeypatch.setattr(analyzer, "MODEL_IDLE_TIMEOUT", 0)
+    monkeypatch.setattr(analyzer.gpu_switch, "restart_needed", lambda _for: False)
+    w = analyzer.AnalysisWorker.__new__(analyzer.AnalysisWorker)
+    w.redis, w.db, w.pubsub = Heartbeat(), Db(), None
+    w._restarting, w.is_paused, w._in_flight, w.pool_active, w.consecutive_errors = False, False, {}, False, 0
+    w._last_work_time = time.time()
+    for name in ("_check_control_signals", "_apply_pending_resize", "_is_gate_closed", "_shutdown_pool"):
+        monkeypatch.setattr(w, name, lambda *a, **k: None)
+    monkeypatch.setattr(w, "_collect", lambda timeout=0: None)
+
+    # Six idle passes, then one error: no recovery.
+    monkeypatch.setattr(w, "_fill", passes(["idle"] * 6 + ["error", "idle"]))
+    w.start()
+    assert Db.connects == 1
+
+    # Errors separated by idle passes never add up: an idle pass ends a run of errors as much as work does.
+    Db.connects = 0
+    monkeypatch.setattr(w, "_fill", passes(["error", "idle"] * 5 + ["idle"]))
+    w.start()
+    assert Db.connects == 1
+
+    # Errors separated by good passes never add up either; five in a row do.
+    monkeypatch.setattr(w, "_fill", passes(["error", "work"] * 4 + ["error"] * 5 + ["idle"]))
+    Db.connects = 0
+    w.start()
+    assert Db.connects == 2
