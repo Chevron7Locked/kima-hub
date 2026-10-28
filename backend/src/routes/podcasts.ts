@@ -604,7 +604,7 @@ router.get("/:id", requireAuth, async (req, res) => {
             title: podcast.title,
             author: podcast.author,
             description: podcast.description,
-            coverUrl: podcast.imageUrl,
+            coverUrl: podcastCover(podcast),
             feedUrl: podcast.feedUrl,
             genres: categories.map((c) => c.name),
             categories,
