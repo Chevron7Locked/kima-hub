@@ -83,6 +83,13 @@ describe("the one door for artwork", () => {
 
     afterEach(() => fetchSpy.mockRestore());
 
+    /**
+     * A page that stops waiting leaves its lookup running, and that lookup then checks the candidate address with
+     * fetch. Asking for the same record joins the lookup still in flight, so the test ends only once it has finished
+     * against the spied fetch, never the real one after this file is done.
+     */
+    const outlivedLookup = () => findAlbumArtwork({ ...ALBUM, candidateUrl: GUESS });
+
     describe("album covers", () => {
         it("keeps asking after the first source comes up empty", async () => {
             // The whole point. dataCache, musicScanner, artistEnrichment and
@@ -454,6 +461,7 @@ describe("the one door for artwork", () => {
 
             expect(Date.now() - started).toBeLessThan(40);
             expect(result[0].coverUrl).toBeNull();
+            await outlivedLookup();
         });
 
         it("never falls back to the unchecked address when it runs out of time", async () => {
@@ -472,6 +480,7 @@ describe("the one door for artwork", () => {
 
             expect(result[0].coverUrl).not.toBe(GUESS);
             expect(JSON.stringify(result)).not.toContain("front-500");
+            await outlivedLookup();
         });
 
         it("does nothing at all for an empty list", async () => {

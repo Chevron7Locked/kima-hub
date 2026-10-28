@@ -67,6 +67,12 @@ jest.mock("../../../utils/redis", () => ({
     },
 }));
 
+// These tests are about the artist page, not Deezer: its popular-songs fallback answers "no top list" here rather
+// than reaching the real service.
+jest.mock("../../../services/deezer", () => ({
+    deezerService: { getArtistTopTracks: jest.fn().mockResolvedValue([]) },
+}));
+
 const mockGetSimilarArtists = jest.fn();
 // Similar artists come from the local-centroid / ListenBrainz engine.
 jest.mock("../../../services/artistSimilarity", () => ({

@@ -12,46 +12,9 @@ const realSetTimeout = globalThis.setTimeout;
 const realClearTimeout = globalThis.clearTimeout;
 const realSetImmediate = globalThis.setImmediate;
 
+// Clients register themselves at birth (ioredis.cjs, mapped in jest.config.js) on `net`, the one object every test
+// file's sandbox shares; the reaper closes whatever is still open when the file finishes.
 const registry = net.__testRedisClients || (net.__testRedisClients = new Map());
-let seq = net.__testRedisClientSeq || 0;
-
-function register(client) {
-    if (!client.__reapId) client.__reapId = ++seq;
-    // A client that makes a fresh connection attempt after a reap pass
-    // (duplicate(), late init) must be reapable again.
-    delete client.__reaped;
-    registry.set(client.__reapId, client);
-}
-
-try {
-    const ioredis = require('ioredis');
-    const Redis = ioredis.default || ioredis;
-    if (!Redis.__testReaperPatched) {
-        Redis.__testReaperPatched = true;
-
-        // The constructor calls connect() synchronously, so patching it registers
-        // every client at birth; status events arrive too late under fake timers.
-        const origConnect = Redis.prototype.connect;
-        Redis.prototype.connect = function (...args) {
-            register(this);
-            return origConnect.apply(this, args);
-        };
-
-        const origEmit = Redis.prototype.emit;
-        Redis.prototype.emit = function (event, ...args) {
-            if (event === 'connecting' || event === 'connect') {
-                // Covers connections started without a public connect() call
-                // (duplicates, internal retries) — belt for the patch above.
-                register(this);
-            } else if (event === 'end') {
-                registry.delete(this.__reapId);
-            }
-            return origEmit.apply(this, [event, ...args]);
-        };
-    }
-} catch (err) {
-    // ioredis is not resolvable from this context; nothing to reap.
-}
 
 async function reap(client) {
     if (client.__reaped) return;

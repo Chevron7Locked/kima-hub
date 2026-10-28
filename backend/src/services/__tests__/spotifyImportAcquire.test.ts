@@ -39,6 +39,8 @@ const service = spotifyImportService as unknown as Record<string, (...args: unkn
 /** The albums quick import hands to the import that follows it. */
 async function albumsQuickImportHandsOn(userId: string): Promise<string[]> {
     jest.spyOn(deezerService, "getPlaylist").mockResolvedValue({ id: "90210" } as never);
+    // quickImport asks Deezer for the playlist's name; this test is about who may download, so it gets none.
+    jest.spyOn(deezerService, "getPlaylistName").mockResolvedValue(null);
     jest.spyOn(spotifyImportService, "generatePreviewFromDeezer").mockResolvedValue(preview as never);
     jest.spyOn(spotifyImportService as never, "buildPendingTracks").mockReturnValue([] as never);
     const processImport = jest.spyOn(spotifyImportService as never, "processImport").mockResolvedValue(undefined as never);

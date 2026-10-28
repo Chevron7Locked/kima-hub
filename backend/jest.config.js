@@ -13,6 +13,8 @@ module.exports = {
     setupFilesAfterEnv: ['<rootDir>/src/__mocks__/clientReaper.cjs'],
     // Runs once, in its own process, before any worker starts.
     globalSetup: '<rootDir>/src/__mocks__/test-global-setup.cjs',
+    // Runs once after the last worker: releases the run's lock on the test database.
+    globalTeardown: '<rootDir>/src/__mocks__/test-global-teardown.cjs',
     // Each worker takes one of Redis's 16 databases (test-env.cjs), so at most 15.
     maxWorkers: Math.min(15, Math.max(1, require('os').availableParallelism() - 1)),
     roots: ['<rootDir>/src'],
@@ -42,5 +44,7 @@ module.exports = {
         '^music-metadata$': '<rootDir>/__mocks__/music-metadata.js',
         // One server per test app instead of one per request.
         '^supertest$': '<rootDir>/src/__mocks__/supertest.cjs',
+        // ioredis with every client registered for the reaper, in every module registry (clientReaper.cjs).
+        '^ioredis$': '<rootDir>/src/__mocks__/ioredis.cjs',
     },
 };

@@ -12,6 +12,8 @@ import { encryptField } from "../../utils/encryption";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { loadScenario, startLidarrReplay, type LidarrReplay } from "../../__tests__/helpers/lidarrReplay";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { closeQueue } from "../../__tests__/helpers/closeQueue";
+import { queues } from "../../workers/queues";
 import webhookRoutes from "../webhooks";
 
 const USER = "webhook_route_user";
@@ -64,6 +66,8 @@ afterAll(async () => {
     await lidarrEvents();
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
     await prisma.user.deleteMany({ where: { id: USER } });
+    // The webhook handlers load the scan, discover and import queues, which hold Redis sockets open.
+    await Promise.all(queues.map(closeQueue));
     await closeEngineConnections();
 });
 

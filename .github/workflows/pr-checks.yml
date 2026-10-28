@@ -64,9 +64,9 @@ jobs:
         name: Backend Unit Tests
         runs-on: ubuntu-latest
         # The tests need Postgres with pgvector, not stock postgres:
-        # track_embeddings.embedding is a vector column. DATABASE_URL below is the
-        # same test/test@localhost:5433/kima_v1_test that
-        # backend/src/__mocks__/test-env.cjs falls back to for local dev.
+        # track_embeddings.embedding is a vector column. DATABASE_URL below names
+        # kima_v1_test, the same database name backend/src/__mocks__/test-db-defaults.cjs
+        # falls back to locally; the test setup creates and migrates it itself.
         services:
             postgres:
                 image: pgvector/pgvector:0.8.6-pg16
@@ -106,10 +106,6 @@ jobs:
             - name: Install dependencies
               working-directory: backend
               run: npm ci
-
-            - name: Apply database migrations
-              working-directory: backend
-              run: npx prisma migrate deploy
 
             - name: Run Jest
               working-directory: backend
@@ -163,7 +159,7 @@ jobs:
               # the real model.
               run: >-
                   python -m pytest test_gpu_nobody_pays.py test_gpu_switch.py test_reports.py test_one_thread.py test_ship_blocker.py
-                  test_window_offsets.py test_window_sweep.py test_music_onnx_parity.py -v
+                  test_window_offsets.py test_window_sweep.py test_music_onnx_parity.py test_analyzer_inflight.py -v
                   --deselect test_ship_blocker.py::test_ensure_onnx_backend_eagerly_loads_model
 
     build-docker:

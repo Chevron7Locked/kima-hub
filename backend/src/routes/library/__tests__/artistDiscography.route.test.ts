@@ -10,6 +10,12 @@ jest.mock("../../../middleware/auth", () => ({
 jest.mock("../../../utils/redis", () => ({
     redisClient: { get: jest.fn().mockResolvedValue(null), setex: jest.fn(), del: jest.fn(), disconnect: jest.fn() },
 }));
+// These tests are about the artist page, not Deezer: its popular-songs fallback answers "no top list" here rather
+// than reaching the real service.
+jest.mock("../../../services/deezer", () => ({
+    deezerService: { getArtistTopTracks: jest.fn().mockResolvedValue([]) },
+}));
+
 const mockGetReleaseGroups = jest.fn();
 jest.mock("../../../services/musicbrainz", () => ({
     musicBrainzService: { getReleaseGroups: (...a: unknown[]) => mockGetReleaseGroups(...a) },

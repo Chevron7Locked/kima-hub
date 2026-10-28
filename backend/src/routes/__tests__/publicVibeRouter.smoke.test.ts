@@ -49,7 +49,7 @@ let server: http.Server;
 let port: number;
 
 beforeAll(async () => {
-    server = app.listen(0);
+    server = app.listen(0, "127.0.0.1");
     await new Promise<void>((r) => server.once("listening", () => r()));
     port = (server.address() as AddressInfo).port;
 });

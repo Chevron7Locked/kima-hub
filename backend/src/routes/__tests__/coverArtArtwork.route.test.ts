@@ -43,6 +43,14 @@ jest.mock("../../config", () => ({
     USER_AGENT: "Kima/test",
 }));
 
+// The route names an album the library lacks from MusicBrainz. These tests are about the route's own paths, not
+// about MusicBrainz, so that lookup answers "not there" here rather than reaching the real service.
+jest.mock("../../services/musicbrainz", () => ({
+    musicBrainzService: {
+        getReleaseGroup: jest.fn().mockResolvedValue({ kind: "absent" }),
+    },
+}));
+
 const mockFindAlbumArtwork = jest.fn();
 jest.mock("../../services/artwork", () => ({
     findAlbumArtwork: (...a: unknown[]) => mockFindAlbumArtwork(...a),

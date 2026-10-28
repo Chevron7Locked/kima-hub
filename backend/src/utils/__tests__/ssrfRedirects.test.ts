@@ -7,7 +7,17 @@ jest.mock("dns/promises", () => {
     // allowed.test and rebind.test stand for public hosts when checked; everything else resolves for real.
     const actual = jest.requireActual("dns/promises");
     const publicHost = (host: string) => host === "allowed.test" || host === "rebind.test";
-    return { ...actual, lookup: (host: string, ...rest: unknown[]) => (publicHost(host) ? Promise.resolve({ address: "93.184.216.34", family: 4 }) : actual.lookup(host, ...rest)) };
+    // A name under .invalid never resolves (RFC 6761), so it is answered "not found" here instead of asking a resolver.
+    const neverResolves = (host: string) => host.endsWith(".invalid");
+    return {
+        ...actual,
+        lookup: (host: string, ...rest: unknown[]) =>
+            publicHost(host)
+                ? Promise.resolve({ address: "93.184.216.34", family: 4 })
+                : neverResolves(host)
+                  ? Promise.reject(Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: "ENOTFOUND", hostname: host }))
+                  : actual.lookup(host, ...rest),
+    };
 });
 jest.mock("dns", () => {
     // ...but rebind.test answers this machine when the connection is made: a name that changes its answer.

@@ -19,7 +19,8 @@ beforeAll(async () => {
     await waitForRedisReady();
     const app = express();
     app.use("/api/events", eventsRoutes);
-    server = app.listen(0);
+    server = app.listen(0, "127.0.0.1");
+    await new Promise<void>((ready) => server.once("listening", () => ready()));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 

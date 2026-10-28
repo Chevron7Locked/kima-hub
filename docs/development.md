@@ -71,7 +71,7 @@ npm run typecheck
 npm test
 ```
 
-The backend tests need Postgres with pgvector and Redis. The test setup clones a database for each worker from a migrated template and falls back to `test:test@localhost:5433/kima_v1_test` unless `DATABASE_URL` is set; `backend/src/__mocks__/test-env.cjs` and `test-db-defaults.cjs` hold the details. CI uses the `pgvector/pgvector:0.8.6-pg16` image for it.
+The backend tests need Postgres with pgvector and Redis. The test setup creates its own database (SQL_ASCII, like real installs), applies the migrations to it, and clones one copy per worker. Without `DATABASE_URL` it uses the server in `backend/.env` with the database `kima_v1_test`, or `kima:kima@localhost:5455/kima_v1_test` without a `.env`. It refuses any database whose name does not end in `_test`, and a second run on the same database stops until the first is done. `backend/src/__mocks__/test-global-setup.cjs` and `test-db-defaults.cjs` hold the details. CI uses the `pgvector/pgvector:0.8.6-pg16` image for it.
 
 The Python analyzers have tests that need no model files, run with `python -m pytest` inside each service folder. The list CI runs is in `.github/workflows/pr-checks.yml`.
 
@@ -81,10 +81,14 @@ Playwright tests are in `frontend/tests/e2e/`. They run against a running Kima, 
 
 ```bash
 cd frontend
-KIMA_UI_BASE_URL=http://127.0.0.1:3030 \
+KIMA_UI_BASE_URL=http://127.0.0.1:3040 \
 KIMA_TEST_USERNAME=<user> KIMA_TEST_PASSWORD=<password> \
 npm run test:predeploy
 ```
+
+`KIMA_UI_BASE_URL` has no default, and an address on port 3030 is refused: that is the port a real Kima listens on, and these tests sign in, change settings and follow podcasts. Run the test server on another port; for a dev server, `npx next dev -p 3040`.
+
+The stats journey's destructive buttons (wiping play history and the like) also need a marked copy of an account: the target's `host:port` listed in `KIMA_STATS_ALLOWED_TARGETS` (comma-separated), `KIMA_STATS_DESTRUCTIVE_OK` set to that same `host:port`, and a playlist named `__kima-test-copy__` owned by the test user. Without all three that journey is recorded as not covered.
 
 `npm run test:predeploy` covers sign-in, integrations, the library and playback. `npm run test:dogfood` runs the longer walkthrough. In CI the shorter set runs on a built image when a pull request carries the `run-e2e` label, and the full suite runs nightly.
 
