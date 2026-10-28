@@ -6,6 +6,7 @@
 import { prisma } from "../../utils/db";
 import { relocateDiscoverAlbums } from "../discovery/discoverEvidence";
 import { runDataIntegrityCheck } from "../../workers/dataIntegrity";
+import { updateArtistCounts } from "../artistCountsService";
 
 jest.setTimeout(60_000);
 
@@ -35,6 +36,7 @@ const ALBUMS = [
 const location = async (key: string) => (await prisma.album.findUniqueOrThrow({ where: { id: `${P}alb_${key}` } })).location;
 
 async function cleanup() {
+    await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.ownedAlbum.deleteMany({ where: { rgMbid: { startsWith: P } } });
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
     await prisma.discoveryBatch.deleteMany({ where: { userId: USER } });
@@ -109,6 +111,25 @@ describe("moving library albums that came from Discover", () => {
         const moved = await relocateDiscoverAlbums({ dryRun: false });
         expect(moved.filter((m) => m.artist.startsWith("Rda"))).toEqual([{ artist: "Rda Discover Artist", title: "Rda Asked Album" }]);
         for (const [key, , , expected] of ALBUMS) expect([key, await location(key)]).toEqual([key, expected]);
+    });
+
+    it("the moved album's artist counts follow it to Discover", async () => {
+        const artistId = (await prisma.album.findUniqueOrThrow({ where: { id: `${P}alb_asked` } })).artistId;
+        for (const key of ["asked", "sameartist"]) {
+            await prisma.track.create({
+                data: { id: `${P}t_${key}`, albumId: `${P}alb_${key}`, title: key, trackNo: 1, duration: 200, filePath: `${P}${key}.flac`, fileModified: new Date(), fileSize: 1 },
+            });
+        }
+        await updateArtistCounts(artistId);
+        const counts = async () => {
+            const a = await prisma.artist.findUniqueOrThrow({ where: { id: artistId } });
+            return [a.libraryAlbumCount, a.discoveryAlbumCount, a.totalTrackCount];
+        };
+        expect(await counts()).toEqual([2, 0, 2]);
+
+        await relocateDiscoverAlbums({ dryRun: false });
+
+        expect(await counts()).toEqual([1, 1, 1]);
     });
 
     it("lists without moving on a dry run", async () => {

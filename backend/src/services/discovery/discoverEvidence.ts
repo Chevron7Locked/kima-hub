@@ -8,6 +8,7 @@
  */
 import { prisma } from "../../utils/db";
 import { parseCredit } from "../artistIdentity";
+import { updateArtistCounts } from "../artistCountsService";
 
 /**
  * A name as one name: no case, accents, or anything but letters and digits of any script. A name with none of them
@@ -142,6 +143,7 @@ export async function relocateDiscoverAlbums(options: { dryRun: boolean }): Prom
     });
 
     const moved: { artist: string; title: string }[] = [];
+    const movedArtists = new Set<string>();
     for (const album of albums) {
         const evidence = discoverEvidence({ artistName: album.artist.name, title: album.title, rgMbid: album.rgMbid }, records);
         if (!isDiscoverEvidence(evidence)) continue;
@@ -165,8 +167,11 @@ export async function relocateDiscoverAlbums(options: { dryRun: boolean }): Prom
             // Discover albums are no one's: any other ownership the album picked up goes with the move.
             await prisma.ownedAlbum.deleteMany({ where: { artistId: album.artistId, rgMbid: album.rgMbid } });
         }
+        if (!options.dryRun) movedArtists.add(album.artistId);
         moved.push({ artist: album.artist.name, title: album.title });
     }
+    // The artist's library and Discover counts, which listings filter on, follow the albums.
+    for (const artistId of movedArtists) await updateArtistCounts(artistId);
     return moved;
 }
 
