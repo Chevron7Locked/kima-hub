@@ -17,9 +17,9 @@ import {
     stopUnifiedEnrichmentWorker,
 } from "./unifiedEnrichment";
 import {
-    startMoodBucketWorker,
-    stopMoodBucketWorker,
-} from "./moodBucketWorker";
+    startMoodSnapshotWorker,
+    stopMoodSnapshotWorker,
+} from "./moodSnapshotWorker";
 import {
     startDiscoverWeeklyCron,
     stopDiscoverWeeklyCron,
@@ -73,10 +73,9 @@ startUnifiedEnrichmentWorker().catch((err) => {
     logger.error("Failed to start unified enrichment worker:", err);
 });
 
-// Start mood bucket worker
-// Assigns newly analyzed tracks to mood buckets for fast mood mix generation
-startMoodBucketWorker().catch((err) => {
-    logger.error("Failed to start mood bucket worker:", err);
+// Keeps the vibe map's and mood presets' song moods current
+startMoodSnapshotWorker().catch((err) => {
+    logger.error("Failed to start mood snapshot worker:", err);
 });
 
 // Event handlers for scan worker
@@ -244,8 +243,7 @@ export async function shutdownWorkers(): Promise<void> {
         logger.error("Failed to disconnect enrichment state service:", err);
     }
 
-    // Stop mood bucket worker
-    stopMoodBucketWorker();
+    stopMoodSnapshotWorker();
 
     // Stop discover weekly cron
     stopDiscoverWeeklyCron();

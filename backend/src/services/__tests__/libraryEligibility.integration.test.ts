@@ -9,7 +9,8 @@ import { prisma } from "../../utils/db";
 import { findSimilarTracks } from "../hybridSimilarity";
 import { generateSongPath } from "../songPath";
 import { getVibeMap } from "../vibeMap";
-import { syncMoodBuckets } from "../../workers/moodBucketWorker";
+import { syncMoodSnapshot } from "../../workers/moodSnapshotWorker";
+import { currentMoodSnapshot } from "../moodBucketService";
 import { MATCHING_MODEL, buildMatching } from "../matching/state";
 import { MOODS, MOOD_HEADS } from "../moods/heads";
 import { buildMoodState } from "../moods/state";
@@ -165,14 +166,14 @@ describe("library eligibility at the read side", () => {
         expect(similar.some((t) => t.id === DISCOVER)).toBe(false);
     });
 
-    it("keeps it out of the mood buckets", async () => {
-        await syncMoodBuckets();
-        const rows = await prisma.moodBucket.findMany({ where: { trackId: { in: [MISSING, DISCOVER] } } });
-        expect(rows).toHaveLength(0);
+    it("keeps it out of the mood snapshot", async () => {
+        await syncMoodSnapshot();
+        const { views } = await currentMoodSnapshot();
+        expect(views.has(MISSING)).toBe(false);
+        expect(views.has(DISCOVER)).toBe(false);
         // trk_elig_10 has the highest party score of the present tracks (10/11, at least 1.5 SD above their mean):
-        // the bucket the missing track, at 11/11, would have topped.
-        const kept = await prisma.moodBucket.findMany({ where: { trackId: "trk_elig_10" } });
-        expect(kept.length).toBeGreaterThan(0);
+        // the mood the missing track, at 11/11, would have topped.
+        expect(views.get("trk_elig_10")?.moods.length).toBeGreaterThan(0);
     });
 
     it("keeps it out of song paths between two present tracks", async () => {

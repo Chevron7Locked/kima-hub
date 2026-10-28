@@ -218,9 +218,7 @@ model DiscoveryAlbum {
   albumTitle    String
   lidarrAlbumId Int?
   downloadedAt  DateTime?
-  folderPath    String           @default("")
   weekStartDate DateTime
-  weekEndDate   DateTime         @default(now())
   status        DiscoverStatus   @default(ACTIVE)
   likedAt       DateTime?
   similarity    Float?
@@ -263,27 +261,12 @@ model DiscoveryTrack {
   trackId          String?
   fileName         String
   filePath         String
-  inPlaylistCount  Int            @default(0)
-  userKept         Boolean        @default(false)
   lastPlayedAt     DateTime?
   discoveryAlbum   DiscoveryAlbum @relation(fields: [discoveryAlbumId], references: [id], onDelete: Cascade)
 
   @@index([discoveryAlbumId])
   @@index([trackId])
   @@index([lastPlayedAt])
-  @@index([userKept])
-}
-
-model DislikedEntity {
-  id         String   @id @default(cuid())
-  userId     String
-  entityType String
-  entityId   String
-  dislikedAt DateTime @default(now())
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, entityType, entityId])
-  @@index([userId, entityType])
 }
 
 model DownloadJob {
@@ -373,20 +356,6 @@ model LikedTrack {
   @@index([userId])
 }
 
-model MoodBucket {
-  id        String   @id @default(cuid())
-  trackId   String
-  mood      String
-  score     Float
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  track     Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
-
-  @@unique([trackId, mood])
-  @@index([mood, score(sort: Desc)])
-  @@index([trackId])
-}
-
 model Notification {
   id        String   @id @default(cuid())
   userId    String
@@ -458,20 +427,19 @@ model PlaybackState {
 }
 
 model Playlist {
-  id                 String                 @id @default(cuid())
-  userId             String
-  mixId              String?
-  name               String
-  isPublic           Boolean                @default(false)
-  reverseOrder       Boolean                @default(false)
-  createdAt          DateTime               @default(now())
-  updatedAt          DateTime               @default(now()) @updatedAt
-  spotifyPlaylistId  String?
-  spotifyPlaylistUrl String?
-  hiddenByUsers      HiddenPlaylist[]
-  user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items              PlaylistItem[]
-  pendingTracks      PlaylistPendingTrack[]
+  id                String                 @id @default(cuid())
+  userId            String
+  mixId             String?
+  name              String
+  isPublic          Boolean                @default(false)
+  reverseOrder      Boolean                @default(false)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @default(now()) @updatedAt
+  spotifyPlaylistId String?
+  hiddenByUsers     HiddenPlaylist[]
+  user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items             PlaylistItem[]
+  pendingTracks     PlaylistPendingTrack[]
 
   @@unique([userId, mixId])
   @@index([isPublic])
@@ -532,8 +500,6 @@ model Podcast {
   explicit         Boolean                  @default(false)
   episodeCount     Int                      @default(0)
   lastRefreshed    DateTime                 @default(now())
-  refreshInterval  Int                      @default(3600)
-  autoRefresh      Boolean                  @default(true)
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
   searchVector     Unsupported("tsvector")?
@@ -655,70 +621,66 @@ model SpotifyImportJob {
 }
 
 model SystemSettings {
-  id                          String   @id @default("default")
-  lidarrEnabled               Boolean  @default(true)
+  id                          String    @id @default("default")
+  lidarrEnabled               Boolean   @default(true)
   /// Acquisition (Soulseek search-and-download, Lidarr requests, playlist
   /// retries) is operator-only by default. On, signed-in members can acquire
   /// too; deleting is never opened to them.
-  allowMemberAcquire          Boolean  @default(false)
-  lidarrUrl                   String?  @default("http://localhost:8686")
+  allowMemberAcquire          Boolean   @default(false)
+  lidarrUrl                   String?   @default("http://localhost:8686")
   lidarrApiKey                String?
   /// Kima removes junk downloads (no usable music, the wrong album) so Lidarr
   /// tries the next release; off leaves them to the user's own setup.
-  lidarrRemoveJunk            Boolean  @default(true)
-  fanartEnabled               Boolean  @default(false)
+  lidarrRemoveJunk            Boolean   @default(true)
+  fanartEnabled               Boolean   @default(false)
   fanartApiKey                String?
-  audiobookshelfEnabled       Boolean  @default(false)
-  audiobookshelfUrl           String?  @default("http://localhost:13378")
+  audiobookshelfEnabled       Boolean   @default(false)
+  audiobookshelfUrl           String?   @default("http://localhost:13378")
   audiobookshelfApiKey        String?
   soulseekUsername            String?
   soulseekPassword            String?
-  spotifyClientId             String?
-  spotifyClientSecret         String?
-  musicPath                   String?  @default("/music")
-  downloadPath                String?  @default("/downloads")
-  autoSync                    Boolean  @default(true)
-  autoEnrichMetadata          Boolean  @default(true)
-  maxConcurrentDownloads      Int      @default(3)
-  downloadRetryAttempts       Int      @default(3)
-  transcodeCacheMaxGb         Int      @default(10)
+  musicPath                   String?   @default("/music")
+  downloadPath                String?   @default("/downloads")
+  autoSync                    Boolean   @default(true)
+  maxConcurrentDownloads      Int       @default(3)
+  transcodeCacheMaxGb         Int       @default(10)
   /// How many tracks the play queue may hold, per user. The queue is stored as
   /// track references, so the cost is a JSON column and a POST body rather than
   /// anything on disk. Clamped 100..100000 on write so a typo cannot take the
   /// server down.
-  maxQueueLength              Int      @default(10000)
-  downloadSource              String   @default("soulseek")
-  primaryFailureFallback      String   @default("none")
-  updatedAt                   DateTime @updatedAt
-  createdAt                   DateTime @default(now())
-  enrichmentConcurrency       Int      @default(1)
+  maxQueueLength              Int       @default(10000)
+  downloadSource              String    @default("soulseek")
+  primaryFailureFallback      String    @default("none")
+  updatedAt                   DateTime  @updatedAt
+  createdAt                   DateTime  @default(now())
+  enrichmentConcurrency       Int       @default(1)
   lidarrWebhookSecret         String?
-  audioAnalyzerWorkers        Int      @default(2)
+  audioAnalyzerWorkers        Int       @default(2)
   acoustidApiKey              String?
-  soulseekConcurrentDownloads Int      @default(4)
-  clapWorkers                 Int      @default(2)
+  soulseekConcurrentDownloads Int       @default(4)
+  clapWorkers                 Int       @default(2)
   /// Audio analysis and sound vectors run side by side instead of one after the other. Off by default: both share
   /// the processor and the GPU for the whole run.
-  analysisAndVectorsTogether  Boolean  @default(false)
-  gpuOnnxEnabled              Boolean  @default(false)
+  analysisAndVectorsTogether  Boolean   @default(false)
+  gpuOnnxEnabled              Boolean   @default(false)
   /// Runs MusiCNN analysis on the shared GPU runtime; a switch of its own, separate from sound vectors.
-  gpuAnalysisEnabled          Boolean  @default(false)
+  gpuAnalysisEnabled          Boolean   @default(false)
   soulseekEnabled             Boolean?
   soulseekDownloadPath        String?
   publicUrl                   String?
-  registrationOpen            Boolean  @default(false)
+  registrationOpen            Boolean   @default(false)
   lidarrQualityProfileId      Int?
   lidarrMetadataProfileId     Int?
-  soulseekMode                String?  @default("p2p")
+  soulseekMode                String?   @default("p2p")
   slskdUrl                    String?
   slskdApiKey                 String?
   /// Daily anonymous check against GitHub releases so the UI can flag a newer
   /// server. Off suits air-gapped installs; nothing else changes.
-  updateChecksEnabled         Boolean  @default(true)
+  updateChecksEnabled         Boolean   @default(true)
   /// When the one-time sort of albums filed as Discover ran (services/discovery/sortDiscoverAlbums.ts); null until it has.
-  discoverAlbumsSortedAt      DateTime?       @default(now())
+  discoverAlbumsSortedAt      DateTime? @default(now())
   /// Country whose Apple podcast charts the podcasts page shows (ISO 3166 alpha-2, lowercase).
-  podcastChartCountry         String   @default("us")
+  podcastChartCountry         String    @default("us")
   lastUpdateCheck             DateTime?
   latestKnownVersion          String?
 }
@@ -797,7 +759,6 @@ model Track {
   discSubtitle      String?
   cachedBy          CachedTrack[]
   likedBy           LikedTrack[]
-  moodBuckets       MoodBucket[]
   plays             Play[]
   playlistItems     PlaylistItem[]
   album             Album              @relation(fields: [albumId], references: [id], onDelete: Cascade)
@@ -886,7 +847,6 @@ model User {
   passwordHash           String
   role                   String                   @default("user")
   onboardingComplete     Boolean                  @default(false)
-  enrichmentSettings     Json?
   twoFactorEnabled       Boolean                  @default(false)
   twoFactorSecret        String?
   twoFactorRecoveryCodes String?
@@ -899,7 +859,6 @@ model User {
   discoverExclusions     DiscoverExclusion[]
   discoveryAlbums        DiscoveryAlbum[]
   discoveryBatches       DiscoveryBatch[]
-  dislikedEntities       DislikedEntity[]
   downloadJobs           DownloadJob[]
   hiddenPlaylists        HiddenPlaylist[]
   likedTracks            LikedTrack[]
@@ -917,7 +876,6 @@ model User {
   settings               UserSettings?
   shareLinks             ShareLink[]
   subsonicBookmarks      SubsonicBookmark[]
-  subsonicPlayQueue      SubsonicPlayQueue?
   releaseAcks            ReleaseAcknowledgement[]
   releaseChoices         ReleaseChoice[]
   playAuditIgnores       PlayAuditIgnore[]
@@ -926,7 +884,7 @@ model User {
 model UserDiscoverConfig {
   id               String    @id @default(cuid())
   userId           String    @unique
-  playlistSize     Int       @default(40)
+  playlistSize     Int       @default(10)
   maxRetryAttempts Int       @default(3)
   exclusionMonths  Int       @default(6)
   downloadRatio    Float     @default(1.3)
@@ -1195,18 +1153,6 @@ model SubsonicBookmark {
 
   @@unique([userId, trackId])
   @@map("subsonic_bookmarks")
-}
-
-model SubsonicPlayQueue {
-  userId    String   @id
-  current   String?
-  position  Int      @default(0)
-  trackIds  Json     @default("[]")
-  changedBy String   @default("")
-  changed   DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("subsonic_play_queue")
 }
 
 enum AlbumLocation {

@@ -1,8 +1,8 @@
 /**
  * A track carries a mood when its learned mood score sits at least RECIPE_LINE standard deviations above the library's
- * mean, by the mood statistics the mood step keeps; library rank orders the bucket and picks the dominant label. The
- * old Essentia head columns play no part. Buckets and the mood snapshot fill once the mood step has scored a track,
- * rebuild when the statistics change (a rescore, a re-run, a changed library), and match the vibe map.
+ * mean, by the mood statistics the mood step keeps; library rank picks the dominant label. The
+ * old Essentia head columns play no part. The mood snapshot fills once the mood step has scored a track, rebuilds when
+ * the statistics change (a rescore, a re-run, a changed library), and matches the vibe map.
  */
 
 const store = new Map<string, string>();
@@ -37,7 +37,7 @@ import {
     NEUTRAL,
     UNANALYZED,
 } from "../moodBucketService";
-import { syncMoodBuckets } from "../../workers/moodBucketWorker";
+import { syncMoodSnapshot } from "../../workers/moodSnapshotWorker";
 import { getVibeMap } from "../vibeMap";
 import { MOODS as LEARNED_MOODS, MOOD_HEADS, type Mood } from "../moods/heads";
 import { buildMoodState, loadMoodState } from "../moods/state";
@@ -165,8 +165,8 @@ async function seed() {
     await prisma.$transaction((tx) => buildMoodState(tx));
 }
 
-/** The buckets the rule gives, from the stored scores and statistics: "mood:trackId" -> library rank. */
-async function expectedBuckets(): Promise<Map<string, number>> {
+/** The moods the rule gives, from the stored scores and statistics: "mood:trackId" -> library rank. */
+async function expectedMoods(): Promise<Map<string, number>> {
     const state = (await loadMoodState())!;
     // The tracks the statistics cover: current scores for the vector and weights, a present readable file, analysed.
     const eligible = await prisma.$queryRawUnsafe<Array<{ id: string } & Record<Mood, number>>>(
@@ -193,14 +193,21 @@ async function expectedBuckets(): Promise<Map<string, number>> {
     return out;
 }
 
-async function bucketsNow(): Promise<Map<string, number>> {
-    const rows = await prisma.moodBucket.findMany({ where: { trackId: { startsWith: "trk_mood_" } } });
-    return new Map(rows.map((b) => [`${b.mood}:${b.trackId}`, b.score]));
+/** The moods the snapshot gives this suite's tracks: "mood:trackId" -> library rank. */
+async function moodsNow(snapshotOf = currentMoodSnapshot): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    for (const [trackId, view] of (await snapshotOf()).views) {
+        if (!trackId.startsWith("trk_mood_")) continue;
+        for (const field of view.moods) {
+            out.set(`${MOODS.find((m) => m.field === field)!.id}:${trackId}`, view.ranks[field] as number);
+        }
+    }
+    return out;
 }
 
-async function expectBucketsToFollowTheRule() {
-    const want = await expectedBuckets();
-    const got = await bucketsNow();
+async function expectMoodsToFollowTheRule(snapshotOf = currentMoodSnapshot) {
+    const want = await expectedMoods();
+    const got = await moodsNow(snapshotOf);
     expect([...got.keys()].sort()).toEqual([...want.keys()].sort());
     for (const [key, rank] of want) expect(got.get(key)).toBeCloseTo(rank, 6);
 }
@@ -211,7 +218,7 @@ async function mapTracks() {
     return state.data.tracks;
 }
 
-describe("mood buckets and the mood snapshot (database)", () => {
+describe("the mood snapshot (database)", () => {
     beforeAll(async () => {
         await seed();
     });
@@ -225,17 +232,17 @@ describe("mood buckets and the mood snapshot (database)", () => {
         await prisma.$disconnect();
     });
 
-    it("fills every bucket from the learned moods on the first run, by the line on the library's statistics", async () => {
-        expect(await syncMoodBuckets()).toBe(true);
-        await expectBucketsToFollowTheRule();
-        const got = await bucketsNow();
+    it("gives every mood from the learned moods on the first run, by the line on the library's statistics", async () => {
+        expect(await syncMoodSnapshot()).toBe(true);
+        await expectMoodsToFollowTheRule();
+        const got = await moodsNow();
         for (const i of [0, 1, 2, 3]) expect(got.has(`party:${idOf(i)}`)).toBe(true);
         expect(got.has(`chill:${idOf(4)}`)).toBe(true);
         expect([...got.keys()].filter((k) => k.endsWith(idOf("flat")))).toEqual([]);
     });
 
     it("reads the learned moods, not the old head columns", async () => {
-        const got = await bucketsNow();
+        const got = await moodsNow();
         // Every track's old heads say happy, sad and aggressive yes, calm and party no.
         expect(got.has(`happy:${idOf(0)}`)).toBe(false);
         expect(got.has(`party:${idOf(0)}`)).toBe(true);
@@ -244,11 +251,11 @@ describe("mood buckets and the mood snapshot (database)", () => {
     });
 
     it("does not rebuild when nothing changed", async () => {
-        expect(await syncMoodBuckets()).toBe(false);
+        expect(await syncMoodSnapshot()).toBe(false);
     });
 
     it("counts the tracks waiting for mood scores: analysis running, or a sound vector the mood step has not scored", async () => {
-        await syncMoodBuckets();
+        await syncMoodSnapshot();
         const before = (await moodBucketService.getMoodPresets())[0].pendingTracks;
         expect(before).toBeGreaterThanOrEqual(1);
 
@@ -256,7 +263,7 @@ describe("mood buckets and the mood snapshot (database)", () => {
             `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at) VALUES ($1, $2::vector, $3, $4)`,
             idOf("unscored"), UNIT, MOOD_HEADS.model, ANALYZED_AT,
         );
-        expect(await syncMoodBuckets()).toBe(false);
+        expect(await syncMoodSnapshot()).toBe(false);
         const presets = await moodBucketService.getMoodPresets();
         expect(presets.map((p) => p.name)).toEqual(["Upbeat", "Melancholic", "Calm", "Intense", "Energetic"]);
         expect(presets[0].pendingTracks).toBe(before + 1);
@@ -264,7 +271,7 @@ describe("mood buckets and the mood snapshot (database)", () => {
         await prisma.trackMood.create({
             data: { track_id: idOf("unscored"), embedded_at: ANALYZED_AT, weights: MOOD_HEADS.version, ...learnedScores(5) },
         });
-        await syncMoodBuckets();
+        await syncMoodSnapshot();
         expect((await moodBucketService.getMoodPresets())[0].pendingTracks).toBe(before);
         // Each preset counts the songs its mood page plays: the page recipe's members, or none when they are too few
         // for the page to play, though a station would play them.
@@ -288,7 +295,7 @@ describe("mood buckets and the mood snapshot (database)", () => {
             `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at) VALUES ($1, $2::vector, $3, $4)`,
             idOf("zero"), `[0${",0".repeat(MOOD_HEADS.dims - 1)}]`, MOOD_HEADS.model, ANALYZED_AT,
         );
-        await syncMoodBuckets();
+        await syncMoodSnapshot();
         expect((await moodBucketService.getMoodPresets())[0].pendingTracks).toBe(before);
     });
 
@@ -302,7 +309,7 @@ describe("mood buckets and the mood snapshot (database)", () => {
         );
     });
 
-    it("rebuilds after a rescore: a re-run sound vector's new scores move the buckets", async () => {
+    it("rebuilds after a rescore: a re-run sound vector's new scores move the moods", async () => {
         const rerun = new Date(ANALYZED_AT.getTime() + 60_000);
         await prisma.$executeRawUnsafe(`UPDATE track_embeddings SET analyzed_at = $2 WHERE track_id = $1`, idOf("flat"), rerun);
         await prisma.$executeRawUnsafe(`UPDATE matching_map SET embedded_at = $2 WHERE track_id = $1`, idOf("flat"), rerun);
@@ -312,66 +319,66 @@ describe("mood buckets and the mood snapshot (database)", () => {
         });
         expect(await prisma.$transaction((tx) => buildMoodState(tx))).toBe(true);
 
-        expect(await syncMoodBuckets()).toBe(true);
-        await expectBucketsToFollowTheRule();
-        expect((await bucketsNow()).has(`party:${idOf("flat")}`)).toBe(true);
+        expect(await syncMoodSnapshot()).toBe(true);
+        await expectMoodsToFollowTheRule();
+        expect((await moodsNow()).has(`party:${idOf("flat")}`)).toBe(true);
         expect((await mapTracks()).find((t) => t.id === idOf("flat"))!.dominantMood).toBe("moodParty");
     });
 
-    it("while the statistics are cleared, buckets and snapshot keep their last contents; new ones rebuild them", async () => {
-        const before = await bucketsNow();
+    it("while the statistics are cleared, the snapshot keeps its last contents; new ones rebuild it", async () => {
+        const before = await moodsNow();
         const dominant = moodOutput((await currentMoodSnapshot()).views.get(idOf(4))).dominantMood;
         const state = await prisma.moodState.findUniqueOrThrow({ where: { id: "default" } });
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
 
-        expect(await syncMoodBuckets()).toBe(false);
-        expect(await bucketsNow()).toEqual(before);
+        expect(await syncMoodSnapshot()).toBe(false);
+        expect(await moodsNow()).toEqual(before);
         expect(moodOutput((await currentMoodSnapshot()).views.get(idOf(4))).dominantMood).toBe(dominant);
         expect((await mapTracks()).find((t) => t.id === idOf(4))!.dominantMood).toBe(dominant);
 
         // The same statistics back: nothing to rebuild.
         await prisma.$transaction((tx) => buildMoodState(tx));
         expect((await prisma.moodState.findUniqueOrThrow({ where: { id: "default" } })).fingerprint).toBe(state.fingerprint);
-        expect(await syncMoodBuckets()).toBe(false);
-        expect(await bucketsNow()).toEqual(before);
+        expect(await syncMoodSnapshot()).toBe(false);
+        expect(await moodsNow()).toEqual(before);
 
-        // Cleared again, and the library changes meanwhile: the new statistics rebuild the buckets.
+        // Cleared again, and the library changes meanwhile: the new statistics rebuild the snapshot.
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
         await prisma.trackMood.update({ where: { track_id: idOf(5) }, data: { calm: 7 } });
         await prisma.$executeRawUnsafe(`UPDATE track_embeddings SET analyzed_at = $2 WHERE track_id = $1`, idOf(5),
             new Date(ANALYZED_AT.getTime() + 120_000));
         await prisma.$executeRawUnsafe(`UPDATE track_moods SET embedded_at = $2 WHERE track_id = $1`, idOf(5),
             new Date(ANALYZED_AT.getTime() + 120_000));
-        expect(await syncMoodBuckets()).toBe(false);
-        expect(await bucketsNow()).toEqual(before);
+        expect(await syncMoodSnapshot()).toBe(false);
+        expect(await moodsNow()).toEqual(before);
         await prisma.$transaction((tx) => buildMoodState(tx));
-        expect(await syncMoodBuckets()).toBe(true);
-        await expectBucketsToFollowTheRule();
-        expect((await bucketsNow()).has(`chill:${idOf(5)}`)).toBe(true);
+        expect(await syncMoodSnapshot()).toBe(true);
+        await expectMoodsToFollowTheRule();
+        expect((await moodsNow()).has(`chill:${idOf(5)}`)).toBe(true);
     });
 
-    it("a process that starts with no statistics leaves the stored buckets alone until they exist", async () => {
-        const before = await bucketsNow();
-        expect(before.size).toBeGreaterThan(0);
+    it("a process that starts with no statistics gives no moods until they exist", async () => {
+        expect((await moodsNow()).size).toBeGreaterThan(0);
         const state = await prisma.moodState.findUniqueOrThrow({ where: { id: "default" } });
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
         await jest.isolateModulesAsync(async () => {
             // A fresh worker and service, as after a restart: no snapshot in memory, nothing built yet.
-            const fresh = await import("../../workers/moodBucketWorker");
-            expect(await fresh.syncMoodBuckets()).toBe(false);
-            expect(await bucketsNow()).toEqual(before);
+            const fresh = await import("../../workers/moodSnapshotWorker");
+            const freshService = await import("../moodBucketService");
+            expect(await fresh.syncMoodSnapshot()).toBe(false);
+            expect((await moodsNow(freshService.currentMoodSnapshot)).size).toBe(0);
             await prisma.moodState.create({ data: state });
-            expect(await fresh.syncMoodBuckets()).toBe(true);
+            expect(await fresh.syncMoodSnapshot()).toBe(true);
+            await expectMoodsToFollowTheRule(freshService.currentMoodSnapshot);
         });
-        await expectBucketsToFollowTheRule();
     });
 
-    it("a track whose scores are cleared is 'unanalyzed' and leaves every bucket once the statistics follow", async () => {
+    it("a track whose scores are cleared is 'unanalyzed' and loses every mood once the statistics follow", async () => {
         await prisma.trackMood.delete({ where: { track_id: idOf(0) } });
         await prisma.$transaction((tx) => buildMoodState(tx));
-        expect(await syncMoodBuckets()).toBe(true);
+        expect(await syncMoodSnapshot()).toBe(true);
         expect((await mapTracks()).find((t) => t.id === idOf(0))!.dominantMood).toBe(UNANALYZED);
-        expect(await prisma.moodBucket.count({ where: { trackId: idOf(0) } })).toBe(0);
-        await expectBucketsToFollowTheRule();
+        expect([...(await moodsNow()).keys()].filter((k) => k.endsWith(`:${idOf(0)}`))).toEqual([]);
+        await expectMoodsToFollowTheRule();
     });
 });

@@ -23,7 +23,7 @@ Enrichment is how Kima works out what is in your library. It runs in the backgro
 - **Wipe and re-run** (admin): clear what Kima worked out about your music (which recording each track is, audio analysis, vibe data, the vibe map, artist bios and similar artists) and work it out again. Your music, playlists, plays, likes and edits stay. It takes about as long as a first enrichment (roughly 1 minute per 100 songs with a GPU; see [How it is worked out](../README.md#how-it-is-worked-out)), and the vibe map comes back when it finishes. Use it after upgrading to 1.11 or later from 1.10 or earlier, which changes how everything is worked out; one run also covers 1.12's new analysis window.
 - **Pause**, **Resume** and **Stop** appear while enrichment is running.
 
-Two switches below them, **Auto sync library** and **Auto enrich metadata**, keep library changes and new content up to date automatically.
+The **Auto sync library** switch below them keeps library changes up to date automatically.
 
 ### Speed
 

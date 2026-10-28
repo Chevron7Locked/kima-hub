@@ -2,7 +2,7 @@
  * A track's moods from five of the learned moods: happy (Upbeat), sad (Melancholic), calm (Calm), aggressive (Intense),
  * party (Energetic). A track has a mood when its score sits at least RECIPE_LINE standard deviations above the
  * library's mean for that mood, by the statistics the mood step keeps (the same line the mixes use); its library rank
- * orders the bucket and picks the dominant label. Buckets rebuild when those statistics change. Each mood page's mix
+ * picks the dominant label. The snapshot of these decisions rebuilds when those statistics change. Each mood page's mix
  * draws from that mood's page recipe, and the page's preset counts that recipe's songs, the ones it plays.
  */
 
@@ -15,7 +15,7 @@ import { MOOD_HEADS, type Mood } from "./moods/heads";
 import { MOOD_STATE_VERSION, loadMoodState, type MoodStats } from "./moods/state";
 
 /**
- * `id` is the bucket's id and `field` the name the vibe map and the apps key the mood on: both kept from the old
+ * `id` is the mood's id and `field` the name the vibe map and the apps key the mood on: both kept from the old
  * Essentia heads so no client breaks. `learned` is the learned mood behind it, `recipe` the mood page's recipe.
  */
 export const MOODS = [
@@ -145,7 +145,7 @@ export function classifyMoods(row: MoodValues, dist: MoodDistribution): MoodView
 
 /**
  * The signature while the library has no current mood statistics (a rescore or a weights change before the next
- * mood pass finishes): nothing is judged then, and the last buckets and snapshot stand.
+ * mood pass finishes): nothing is judged then, and the last snapshot stands.
  */
 export const NO_STATISTICS = "none";
 
@@ -239,7 +239,7 @@ export async function refreshMoodSnapshot(): Promise<{ snapshot: MoodSnapshot; c
 }
 
 /**
- * The last built snapshot (the mood bucket worker refreshes it every cycle),
+ * The last built snapshot (the mood snapshot worker refreshes it every cycle),
  * or a fresh one if none exists yet. For read paths that must not query the
  * library on every request.
  */
@@ -273,32 +273,8 @@ async function pageSongCount(recipe: string): Promise<number> {
 
 class MoodBucketService {
     /**
-     * Rebuild every bucket from the snapshot: one row per mood the verdict gives
-     * a track, scored by its library rank (ordering only). One transaction, so
-     * readers never see a half-built table.
-     */
-    async rebuildBuckets(snap: MoodSnapshot): Promise<{ tracks: number; assignments: number }> {
-        const rows: { trackId: string; mood: MoodType; score: number }[] = [];
-        let tracks = 0;
-        for (const [trackId, view] of snap.views) {
-            if (view.moods.length === 0) continue;
-            tracks++;
-            for (const field of view.moods) {
-                const mood = MOODS.find((m) => m.field === field)!;
-                rows.push({ trackId, mood: mood.id, score: view.ranks[field] as number });
-            }
-        }
-        await prisma.$transaction([
-            prisma.moodBucket.deleteMany({}),
-            prisma.moodBucket.createMany({ data: rows }),
-        ]);
-        logger.debug(`[MoodBucket] Rebuilt buckets: ${rows.length} assignments over ${tracks} tracks`);
-        return { tracks, assignments: rows.length };
-    }
-
-    /**
      * Get mood presets with track counts for the UI. A preset's count is how many songs its mood page draws from: the
-     * page recipe's members at the line (none when the library cannot rank it), not the mood's bucket. `pendingTracks`
+     * page recipe's members at the line (none when the library cannot rank it), not every track with the mood. `pendingTracks`
      * is how many library tracks are still waiting for mood analysis, so the UI can say "not analysed yet" instead of
      * showing an empty mood as final.
      */
@@ -328,7 +304,6 @@ class MoodBucketService {
 
     /**
      * Get a mood mix for a specific mood
-     * Fast lookup from pre-computed MoodBucket table
      */
     async getMoodMix(
         mood: MoodType,

@@ -678,7 +678,6 @@ class ApiClient {
             username: string;
             role: string;
             onboardingComplete?: boolean;
-            enrichmentSettings?: { enabled: boolean; lastRun?: string };
             createdAt: string;
         }>("/auth/me");
     }

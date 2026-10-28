@@ -46,7 +46,7 @@ function mulberry32(seed: number) {
 
 async function main() {
     const { prisma } = await import("../src/utils/db");
-    const { GENRE_NAMES, MOOD_BUCKETS } = await import("../src/__tests__/fixtures/syntheticLibrary");
+    const { GENRE_NAMES } = await import("../src/__tests__/fixtures/syntheticLibrary");
     const { programmaticPlaylistService } = await import("../src/services/mixes");
     const express = (await import("express")).default;
     const request = (await import("supertest")).default;
@@ -168,14 +168,10 @@ async function main() {
         });
         await inChunks(tracks, (data) => prisma.track.createMany({ data }));
 
-        const buckets: { trackId: string; mood: string; score: number }[] = [];
         const trackGenres: { trackId: string; genreId: string }[] = [];
         for (const t of tracks) {
-            if (t.analysisStatus === "completed")
-                for (const mood of MOOD_BUCKETS) if (rng() < 0.3) buckets.push({ trackId: t.id, mood, score: r4(rng()) });
             for (const g of some(GENRE_NAMES, 1 + Math.floor(rng() * 3))) trackGenres.push({ trackId: t.id, genreId: genreIds.get(g)! });
         }
-        await inChunks(buckets, (data) => prisma.moodBucket.createMany({ data }));
         await inChunks(trackGenres, (data) => prisma.trackGenre.createMany({ data }));
 
         const plays: { userId: string; trackId: string }[] = [];

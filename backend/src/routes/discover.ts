@@ -1017,22 +1017,10 @@ router.get("/config", async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        let config = await prisma.userDiscoverConfig.findUnique({
-            where: { userId },
-        });
-
-        if (!config) {
-            config = await prisma.userDiscoverConfig.create({
-                data: {
-                    userId,
-                    playlistSize: 10,
-                    maxRetryAttempts: 3,
-                    exclusionMonths: 6,
-                    downloadRatio: 1.3,
-                    enabled: true,
-                },
-            });
-        }
+        // A listener with no settings yet gets the schema's defaults.
+        const config =
+            (await prisma.userDiscoverConfig.findUnique({ where: { userId } })) ??
+            (await prisma.userDiscoverConfig.create({ data: { userId } }));
 
         res.json(config);
     } catch (error) {
@@ -1044,13 +1032,14 @@ router.get("/config", async (req, res) => {
 router.patch("/config", async (req, res) => {
     try {
         const userId = req.user!.id;
-        const {
-            playlistSize,
-            maxRetryAttempts,
-            exclusionMonths,
-            downloadRatio,
-            enabled,
-        } = req.body;
+        const { playlistSize, maxRetryAttempts, exclusionMonths, downloadRatio, enabled } = req.body;
+        const changes: {
+            playlistSize?: number;
+            maxRetryAttempts?: number;
+            exclusionMonths?: number;
+            downloadRatio?: number;
+            enabled?: boolean;
+        } = {};
 
         if (playlistSize !== undefined) {
             const size = parseInt(playlistSize, 10);
@@ -1059,6 +1048,7 @@ router.patch("/config", async (req, res) => {
                     error: "Invalid playlist size. Must be between 5-50 in increments of 5.",
                 });
             }
+            changes.playlistSize = size;
         }
 
         if (maxRetryAttempts !== undefined) {
@@ -1068,6 +1058,7 @@ router.patch("/config", async (req, res) => {
                     error: "Invalid retry attempts. Must be between 1-10.",
                 });
             }
+            changes.maxRetryAttempts = retries;
         }
 
         if (exclusionMonths !== undefined) {
@@ -1077,6 +1068,7 @@ router.patch("/config", async (req, res) => {
                     error: "Invalid exclusion months. Must be between 0-12.",
                 });
             }
+            changes.exclusionMonths = months;
         }
 
         if (downloadRatio !== undefined) {
@@ -1086,33 +1078,21 @@ router.patch("/config", async (req, res) => {
                     error: "Invalid download ratio. Must be between 1.0-2.0.",
                 });
             }
+            changes.downloadRatio = ratio;
         }
 
+        if (enabled !== undefined) {
+            if (typeof enabled !== "boolean") {
+                return res.status(400).json({ error: "Invalid enabled value. Must be true or false." });
+            }
+            changes.enabled = enabled;
+        }
+
+        // A first save fills whatever it leaves out with the schema's defaults.
         const config = await prisma.userDiscoverConfig.upsert({
             where: { userId },
-            create: {
-                userId,
-                playlistSize: playlistSize ?? 10,
-                maxRetryAttempts: maxRetryAttempts ?? 3,
-                exclusionMonths: exclusionMonths ?? 6,
-                downloadRatio: downloadRatio ?? 1.3,
-                enabled: enabled ?? true,
-            },
-            update: {
-                ...(playlistSize !== undefined && {
-                    playlistSize: parseInt(playlistSize, 10),
-                }),
-                ...(maxRetryAttempts !== undefined && {
-                    maxRetryAttempts: parseInt(maxRetryAttempts, 10),
-                }),
-                ...(exclusionMonths !== undefined && {
-                    exclusionMonths: parseInt(exclusionMonths, 10),
-                }),
-                ...(downloadRatio !== undefined && {
-                    downloadRatio: parseFloat(downloadRatio),
-                }),
-                ...(enabled !== undefined && { enabled }),
-            },
+            create: { userId, ...changes },
+            update: changes,
         });
 
         res.json(config);

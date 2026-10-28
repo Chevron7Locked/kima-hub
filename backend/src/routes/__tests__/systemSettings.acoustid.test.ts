@@ -60,7 +60,6 @@ const baseRow: Record<string, unknown> = {
     musicPath: "/music",
     downloadPath: "/downloads",
     autoSync: true,
-    autoEnrichMetadata: true,
     transcodeCacheMaxGb: 10,
     maxQueueLength: 10000,
     soulseekConcurrentDownloads: 4,

@@ -78,7 +78,6 @@ const BASE_USER = {
     twoFactorEnabled: false,
     twoFactorSecret: null,
     onboardingComplete: true,
-    enrichmentSettings: null,
     createdAt: new Date(),
 };
 

@@ -148,7 +148,7 @@ jest.mock("../../services/mbidReassign", () => ({
 }));
 jest.mock("../../services/artistIdentity", () => ({ artistSortName: jest.fn() }));
 jest.mock("../../utils/systemSettings", () => ({
-    getSystemSettings: jest.fn().mockResolvedValue({ autoEnrichMetadata: true }),
+    getSystemSettings: jest.fn().mockResolvedValue({}),
     invalidateSystemSettingsCache: jest.fn(),
 }));
 jest.mock("../../services/rateLimiter", () => ({ rateLimiter: {} }));

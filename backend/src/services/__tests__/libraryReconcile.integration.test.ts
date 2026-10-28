@@ -165,8 +165,7 @@ describe("reconcileDeletedTracks", () => {
         const dt = await prisma.discoveryTrack.create({
             data: {
                 discoveryAlbumId: `${P}dalb`, trackId: `${P}disc`,
-                fileName: "x.flac", filePath: `/tmp/${P}-disc.flac`,
-                inPlaylistCount: 3, userKept: true,
+                fileName: "x.flac", filePath: `/tmp/${P}-disc.flac`, lastPlayedAt: new Date("2026-10-01T00:00:00Z"),
             },
         });
         await prisma.playbackState.create({
@@ -178,8 +177,7 @@ describe("reconcileDeletedTracks", () => {
         const kept = await prisma.discoveryTrack.findUnique({ where: { id: dt.id } });
         expect(kept).not.toBeNull();
         expect(kept!.trackId).toBeNull();
-        expect(kept!.userKept).toBe(true);
-        expect(kept!.inPlaylistCount).toBe(3);
+        expect(kept!.lastPlayedAt).toEqual(new Date("2026-10-01T00:00:00Z"));
         expect((await prisma.playbackState.findUnique({ where: { userId: `${P}user` } }))!.trackId).toBeNull();
     });
 

@@ -87,17 +87,12 @@ const systemSettingsSchema = z.object({
     .optional(),
   slskdApiKey: z.string().nullable().optional(),
 
-  // Spotify (for playlist import)
-  spotifyClientId: z.string().nullable().optional(),
-  spotifyClientSecret: z.string().nullable().optional(),
-
   // Storage Paths
   musicPath: z.string().optional(),
   downloadPath: z.string().optional(),
 
   // Feature Flags
   autoSync: z.boolean().optional(),
-  autoEnrichMetadata: z.boolean().optional(),
 
   // Advanced Settings
   transcodeCacheMaxGb: z.number().optional(),
@@ -135,7 +130,6 @@ router.get("/", async (_req, res) => {
           musicPath: "/music",
           downloadPath: "/downloads",
           autoSync: true,
-          autoEnrichMetadata: true,
           transcodeCacheMaxGb: 10,
           maxQueueLength: 10000,
           soulseekConcurrentDownloads: 4,

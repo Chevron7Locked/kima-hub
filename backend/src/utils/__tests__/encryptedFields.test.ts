@@ -43,14 +43,14 @@ describe("the encrypted settings map", () => {
         const submitted = {
             fanartApiKey: "fanart-key",
             slskdApiKey: "slskd-key",
-            spotifyClientSecret: "spotify-secret",
+            acoustidApiKey: "acoustid-key",
             musicPath: "/music", // not an encrypted field
         };
 
         const stored = encryptSettings(submitted);
 
         // Stored forms are ciphertext, not the submitted values.
-        for (const field of ["fanartApiKey", "slskdApiKey", "spotifyClientSecret"]) {
+        for (const field of ["fanartApiKey", "slskdApiKey", "acoustidApiKey"]) {
             expect(stored[field]).not.toBe(submitted[field as keyof typeof submitted]);
             expect(stored[field]).toMatch(/^xc1\./);
         }
@@ -60,15 +60,15 @@ describe("the encrypted settings map", () => {
         const resolved = await resolveEncryptedSettings(stored);
         expect(resolved.fanartApiKey).toBe("fanart-key");
         expect(resolved.slskdApiKey).toBe("slskd-key");
-        expect(resolved.spotifyClientSecret).toBe("spotify-secret");
+        expect(resolved.acoustidApiKey).toBe("acoustid-key");
         // Nothing broken here, so no re-seed writes.
         expect(mockUpdate).not.toHaveBeenCalled();
     });
 
     it("maps every encrypted settings field", () => {
         // Every encrypted SystemSettings field, read and write side alike.
-        expect(Object.keys(ENCRYPTED_FIELDS)).toHaveLength(8);
-        for (const field of ["fanartApiKey", "slskdApiKey", "spotifyClientSecret",
+        expect(Object.keys(ENCRYPTED_FIELDS)).toHaveLength(7);
+        for (const field of ["fanartApiKey", "slskdApiKey",
             "lidarrApiKey", "lidarrWebhookSecret", "acoustidApiKey",
             "audiobookshelfApiKey", "soulseekPassword"]) {
             expect(ENCRYPTED_FIELDS).toHaveProperty(field);
@@ -157,12 +157,12 @@ describe("readable stored values resolve", () => {
     });
 
     it("keeps unset and empty values null without re-seeding", async () => {
-        const settings = { lidarrWebhookSecret: "", spotifyClientSecret: null };
+        const settings = { lidarrWebhookSecret: "", slskdApiKey: null };
 
         const resolved = await resolveEncryptedSettings(settings);
 
         expect(resolved.lidarrWebhookSecret).toBeNull();
-        expect(resolved.spotifyClientSecret).toBeNull();
+        expect(resolved.slskdApiKey).toBeNull();
         expect(mockUpdate).not.toHaveBeenCalled();
     });
 });

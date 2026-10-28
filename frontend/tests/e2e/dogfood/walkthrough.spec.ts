@@ -1827,21 +1827,8 @@ test.describe("Dogfood walkthrough", () => {
     test("5h. imports: what this instance can actually import", async () => {
         session.setJourney("5h. Imports");
 
-        await session.step("check whether Spotify import is configured", async () => {
-            const res = await page.request.get("/api/system-settings", {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!res.ok()) {
-                session.noteNotCovered(`spotify import: settings endpoint returned ${res.status()} — check backend logs`);
-                return { probed: false };
-            }
-            const body = await res.json();
-            const spotify = Boolean(body?.spotifyClientId && body?.spotifyClientSecret);
-            if (!spotify) {
-                session.noteNotCovered("spotify import: not configured on this instance");
-                return { spotify: false };
-            }
-            // Configured: the import page must at least render its entry surface.
+        // Spotify import needs no keys (it reads public playlists), so every instance can show its page.
+        await session.step("open the Spotify import page", async () => {
             await page.goto("/import/playlist");
             await settle(page, 2500);
             const crashed = await page.locator("text=/application error|something went wrong/i").count();

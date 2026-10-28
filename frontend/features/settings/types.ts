@@ -36,9 +36,6 @@ export interface SystemSettings {
     soulseekMode: "p2p" | "slskd";
     slskdUrl: string | null;
     slskdApiKey: string | null;
-    // Spotify (for playlist import)
-    spotifyClientId: string;
-    spotifyClientSecret: string;
     // Storage
     musicPath: string;
     downloadPath: string;
@@ -48,7 +45,6 @@ export interface SystemSettings {
     maxQueueLength: number;
     maxCacheSizeMb: number;
     autoSync: boolean;
-    autoEnrichMetadata: boolean;
     soulseekConcurrentDownloads: number;
     // Download Preferences
     downloadSource: "soulseek" | "lidarr";

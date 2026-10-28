@@ -195,7 +195,6 @@ router.get("/me", requireAuth, async (req, res) => {
                 username: true,
                 role: true,
                 onboardingComplete: true,
-                enrichmentSettings: true,
                 createdAt: true,
             },
         });

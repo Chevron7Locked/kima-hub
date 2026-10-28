@@ -15,9 +15,6 @@
  *   - 3% have a file missing (missingSince set), 3% are corrupt, 4% are still
  *     analysisStatus "pending" (readings present, status not completed), and 2%
  *     are "completed" with every reading null.
- *   - mood buckets: each completed track is in each of chill/happy/sad/party/
- *     aggressive with probability 0.30 (missing-file tracks included, so a
- *     query that forgets to exclude them is caught).
  *   - 1-3 genres per track from a 56-name list (Genre/TrackGenre tables); each
  *     artist has 1-3 genres in Artist.genres (10% also userGenres); each album
  *     has 1-2 in Album.genres.
@@ -61,7 +58,6 @@ export const GENRE_NAMES = [
     ...new Set([...PARTY_GENRES, ...WORKOUT_GENRES, ...FOCUS_GENRES, ...OTHER_GENRES]),
 ].map((g) => CAPITALISED[g] ?? g);
 
-export const MOOD_BUCKETS = ["chill", "happy", "sad", "party", "aggressive"] as const;
 const MOOD_TAGS = [
     "energetic", "upbeat", "happy", "aggressive", "dark", "intense", "sad", "melancholic", "calm", "workout",
     "powerful", "moody", "atmospheric",
@@ -222,15 +218,10 @@ export async function seedSyntheticLibrary(prefix: string): Promise<LibraryHandl
     });
     await inChunks(trackRows, (data) => prisma.track.createMany({ data }));
 
-    const buckets: Prisma.MoodBucketCreateManyInput[] = [];
     const trackGenres: Prisma.TrackGenreCreateManyInput[] = [];
     for (const t of trackRows) {
-        if (t.analysisStatus === "completed")
-            for (const mood of MOOD_BUCKETS)
-                if (rng() < 0.3) buckets.push({ trackId: t.id, mood, score: r4(rng()) });
         for (const g of subset(GENRE_NAMES, 1, 3)) trackGenres.push({ trackId: t.id, genreId: genreIdByName.get(g)! });
     }
-    await inChunks(buckets, (data) => prisma.moodBucket.createMany({ data }));
     await inChunks(trackGenres, (data) => prisma.trackGenre.createMany({ data }));
 
     // Plays.
@@ -327,7 +318,6 @@ export interface Row {
     /** Names from the Genre/TrackGenre tables. */
     genreNames: string[];
     genreIds: string[];
-    buckets: string[];
     /** Plays by every user / by user1. */
     plays: number;
     playsUser1: number;
@@ -341,7 +331,6 @@ export async function loadRows(prefix: string, user1: string): Promise<Row[]> {
         include: {
             album: { include: { artist: true } },
             trackGenres: { include: { genre: true } },
-            moodBuckets: true,
             _count: { select: { plays: true } },
         },
     });
@@ -374,7 +363,6 @@ export async function loadRows(prefix: string, user1: string): Promise<Row[]> {
         },
         genreNames: t.trackGenres.map((g) => g.genre.name),
         genreIds: t.trackGenres.map((g) => g.genreId),
-        buckets: t.moodBuckets.map((b) => b.mood),
         plays: t._count.plays,
         playsUser1: u1.get(t.id) ?? 0,
     }));

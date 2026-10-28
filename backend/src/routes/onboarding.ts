@@ -33,10 +33,6 @@ const soulseekConfigSchema = z.object({
     enabled: z.boolean(),
 });
 
-const enrichmentConfigSchema = z.object({
-    enabled: z.boolean(),
-});
-
 /**
  * POST /onboarding/register
  * Step 1: Create user account - returns JWT token like regular login
@@ -350,37 +346,6 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
                 .json({ error: "Invalid request", details: err.issues });
         }
         logger.error("Soulseek config error:", err);
-        res.status(500).json({ error: "Failed to save configuration" });
-    }
-});
-
-/**
- * POST /onboarding/enrichment
- * Step 3: Configure metadata enrichment
- */
-router.post("/enrichment", requireAuth, requireAdmin, async (req, res) => {
-    try {
-        const config = enrichmentConfigSchema.parse(req.body);
-
-        // Update user settings
-        await prisma.user.update({
-            where: { id: req.user!.id },
-            data: {
-                enrichmentSettings: {
-                    enabled: config.enabled,
-                    lastRun: null,
-                },
-            },
-        });
-
-        res.json({ success: true });
-    } catch (err: any) {
-        if (err instanceof z.ZodError) {
-            return res
-                .status(400)
-                .json({ error: "Invalid request", details: err.issues });
-        }
-        logger.error("Enrichment config error:", err);
         res.status(500).json({ error: "Failed to save configuration" });
     }
 });

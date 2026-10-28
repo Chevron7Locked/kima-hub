@@ -1164,73 +1164,57 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                 </SettingsRow>
 
                 <SettingsRow
-                    label="Auto enrich metadata"
-                    description="Automatically enrich metadata for new content"
-                    htmlFor="auto-enrich"
+                    label="Metadata Fetch Speed"
+                    description="Parallel MusicBrainz/enrichment requests for artist bios and song identification"
                 >
-                    <SettingsToggle
-                        id="auto-enrich"
-                        checked={settings.autoEnrichMetadata}
-                        onChange={(checked) =>
-                            onUpdate({ autoEnrichMetadata: checked })
-                        }
-                    />
+                    <div className="flex items-center gap-3">
+                        <input
+                            type="range"
+                            min={1}
+                            max={5}
+                            aria-label="Metadata Fetch Speed"
+                            value={enrichmentSpeed}
+                            disabled={isConcurrencyLoading}
+                            onChange={(e) => {
+                                const newSpeed = parseInt(e.target.value);
+                                setConcurrencyMutation.mutate(newSpeed);
+                            }}
+                            className={`${sliderClass} disabled:opacity-50 disabled:cursor-not-allowed`}
+                        />
+                        <div className="flex flex-col items-end gap-0.5">
+                            {isConcurrencyLoading ? (
+                                <span className="text-xs text-[var(--text-muted)] w-24 text-right">
+                                    Loading...
+                                </span>
+                            ) : (
+                                <>
+                                    <span className="text-xs tabular-nums text-[var(--text-secondary)] w-24 text-right">
+                                        {enrichmentSpeed === 1
+                                            ? "Conservative"
+                                            : enrichmentSpeed === 2
+                                            ? "Moderate"
+                                            : enrichmentSpeed === 3
+                                            ? "Balanced"
+                                            : enrichmentSpeed === 4
+                                            ? "Fast"
+                                            : "Maximum"}
+                                    </span>
+                                    {concurrencyConfig && (
+                                        <span className="text-xs tabular-nums text-[var(--text-muted)] w-24 text-right">
+                                            ~
+                                            {
+                                                concurrencyConfig.artistsPerMin
+                                            }{" "}
+                                            artists/min
+                                        </span>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    </div>
                 </SettingsRow>
 
-                {settings.autoEnrichMetadata && (
-                    <SettingsRow
-                        label="Metadata Fetch Speed"
-                        description="Parallel MusicBrainz/enrichment requests for artist bios and song identification"
-                    >
-                        <div className="flex items-center gap-3">
-                            <input
-                                type="range"
-                                min={1}
-                                max={5}
-                                aria-label="Metadata Fetch Speed"
-                                value={enrichmentSpeed}
-                                disabled={isConcurrencyLoading}
-                                onChange={(e) => {
-                                    const newSpeed = parseInt(e.target.value);
-                                    setConcurrencyMutation.mutate(newSpeed);
-                                }}
-                                className={`${sliderClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-                            />
-                            <div className="flex flex-col items-end gap-0.5">
-                                {isConcurrencyLoading ? (
-                                    <span className="text-xs text-[var(--text-muted)] w-24 text-right">
-                                        Loading...
-                                    </span>
-                                ) : (
-                                    <>
-                                        <span className="text-xs tabular-nums text-[var(--text-secondary)] w-24 text-right">
-                                            {enrichmentSpeed === 1
-                                                ? "Conservative"
-                                                : enrichmentSpeed === 2
-                                                ? "Moderate"
-                                                : enrichmentSpeed === 3
-                                                ? "Balanced"
-                                                : enrichmentSpeed === 4
-                                                ? "Fast"
-                                                : "Maximum"}
-                                        </span>
-                                        {concurrencyConfig && (
-                                            <span className="text-xs tabular-nums text-[var(--text-muted)] w-24 text-right">
-                                                ~
-                                                {
-                                                    concurrencyConfig.artistsPerMin
-                                                }{" "}
-                                                artists/min
-                                            </span>
-                                        )}
-                                    </>
-                                )}
-                            </div>
-                        </div>
-                    </SettingsRow>
-                )}
-
-                {settings.autoEnrichMetadata && !featuresLoading && musicCNN && (
+                {!featuresLoading && musicCNN && (
                     <WorkerSliderRow
                         label="Audio Analysis Workers"
                         description="CPU workers for Essentia ML analysis"
@@ -1238,7 +1222,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                     />
                 )}
 
-                {settings.autoEnrichMetadata && !featuresLoading && vibeEmbeddings && (
+                {!featuresLoading && vibeEmbeddings && (
                     <WorkerSliderRow
                         label="Vibe Embedding Workers"
                         description="CPU workers for CLAP embeddings (vibe similarity)"
@@ -1246,7 +1230,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                     />
                 )}
 
-                {settings.autoEnrichMetadata && !featuresLoading && musicCNN && vibeEmbeddings && (
+                {!featuresLoading && musicCNN && vibeEmbeddings && (
                     <SettingsRow label={BOTH_AT_ONCE_LABEL} description={BOTH_AT_ONCE_DESCRIPTION} htmlFor="analysis-together">
                         <BothAtOnceSwitch id="analysis-together" />
                     </SettingsRow>
@@ -1255,7 +1239,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                 {/* Each GPU switch row shows only measured state; on hosts the
                     CUDA runtime cannot exist for (arm, macOS), the rows are
                     not offered at all. */}
-                {settings.autoEnrichMetadata && !featuresLoading && vibeEmbeddings && gpuStatus?.supported && (
+                {!featuresLoading && vibeEmbeddings && gpuStatus?.supported && (
                     <GpuSwitchRow
                         id="gpu-onnx-toggle"
                         label="NVIDIA GPU for vibe embeddings"
@@ -1268,7 +1252,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                         onChange={(checked) => setGpuMutation.mutate(checked)}
                     />
                 )}
-                {settings.autoEnrichMetadata && !featuresLoading && musicCNN && gpuStatus?.supported && (
+                {!featuresLoading && musicCNN && gpuStatus?.supported && (
                     <GpuSwitchRow
                         id="gpu-analysis-toggle"
                         label="NVIDIA GPU for audio analysis"

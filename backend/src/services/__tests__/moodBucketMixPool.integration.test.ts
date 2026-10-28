@@ -108,13 +108,10 @@ describe("getMoodMix draws from the mood page's recipe (database)", () => {
         expect(mix!.trackIds).toHaveLength(15);
     });
 
-    it("shows each preset's count as the songs its page plays, not the size of the mood's bucket", async () => {
+    it("shows each preset's count as the songs its page plays", async () => {
         const presets = await moodBucketService.getMoodPresets();
-        const buckets = await prisma.moodBucket.groupBy({ by: ["mood"], _count: { _all: true } });
         for (const preset of presets) {
             expect(preset.trackCount).toBe(members.get(preset.id as MoodType)!.size);
-            // The fixture's buckets are random rows, sized unlike any page recipe.
-            expect(preset.trackCount).not.toBe(buckets.find((b) => b.mood === preset.id)?._count._all ?? 0);
         }
 
         // A page recipe the library cannot rank plays nothing, and counts nothing.
