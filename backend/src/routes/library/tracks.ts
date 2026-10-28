@@ -45,9 +45,8 @@ const RETIRED_MOOD_STATIONS = new Set(["summer", "3am-thoughts", "friday-night"]
 
 router.get("/recently-listened", async (req, res) => {
   try {
-    const { limit = "10" } = req.query;
     const userId = req.user!.id;
-    const limitNum = Math.min(parseInt(limit as string, 10) || 10, 100);
+    const limitNum = Math.min(parseLimit(req.query.limit, 10), 100);
 
     const [recentPlays, inProgressAudiobooks, inProgressPodcasts] =
       await Promise.all([
@@ -218,36 +217,24 @@ router.get("/recently-listened", async (req, res) => {
 
 router.get("/recently-added", async (req, res) => {
   try {
-    const { limit = "10" } = req.query;
-    const limitNum = parseInt(limit as string, 10);
+    const limitNum = Math.min(parseLimit(req.query.limit, 10), 100);
 
-    const recentAlbums = await prisma.album.findMany({
-      where: {
-        location: LIBRARY_LOCATION,
-        tracks: { some: {} },
-      },
-      orderBy: { lastSynced: "desc" },
-      take: 20,
-      include: {
-        artist: {
-          select: {
-            id: true,
-            mbid: true,
-            name: true,
-            heroUrl: true,
-            userHeroUrl: true,
-          },
-        },
-      },
+    // Artists ordered by their newest library album with songs, one row each.
+    const newest = await prisma.album.groupBy({
+      by: ["artistId"],
+      where: { location: LIBRARY_LOCATION, tracks: { some: {} } },
+      _max: { lastSynced: true },
+      orderBy: { _max: { lastSynced: "desc" } },
+      take: limitNum,
     });
-
-    const artistsMap = new Map();
-    for (const album of recentAlbums) {
-      if (!artistsMap.has(album.artist.id)) {
-        artistsMap.set(album.artist.id, album.artist);
-      }
-      if (artistsMap.size >= limitNum) break;
-    }
+    const artistRows = await prisma.artist.findMany({
+      where: { id: { in: newest.map((n) => n.artistId) } },
+      select: { id: true, mbid: true, name: true, heroUrl: true, userHeroUrl: true },
+    });
+    const byId = new Map(artistRows.map((a) => [a.id, a]));
+    const artistsMap = new Map(
+      newest.flatMap((n) => (byId.has(n.artistId) ? [[n.artistId, byId.get(n.artistId)!] as const] : [])),
+    );
 
     const artistIds = Array.from(artistsMap.keys());
     const albumCounts = await prisma.album.groupBy({
