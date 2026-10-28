@@ -204,15 +204,14 @@ export default function AlbumPage({ params }: AlbumPageProps) {
             </AlbumHero>
 
             <div className="relative min-h-[50vh] flex-1 animate-rise">
-                <div
-                    className="absolute inset-0 pointer-events-none"
-                    style={{
-                        background: `linear-gradient(180deg,
-              ${(colors || {}).vibrant}15 0%,
-              ${(colors || {}).darkVibrant}08 50%,
-              transparent 100%)`,
-                    }}
-                />
+                {colors && (
+                    <div
+                        className="absolute inset-0 pointer-events-none"
+                        style={{
+                            background: `linear-gradient(180deg, ${colors.vibrant}15 0%, ${colors.darkVibrant}08 50%, transparent 100%)`,
+                        }}
+                    />
+                )}
 
                 <div className="relative page-shell py-6 space-y-8">
                     {combinedTracks.length > 0 && (
