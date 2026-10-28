@@ -310,7 +310,7 @@ export async function getImportJob(importJobId: string): Promise<ImportJob | nul
 
 function notifyImportFailed(job: ImportJob): void {
   notificationService
-    .notifyImportFailed(job.userId, job.playlistName, job.error ?? "Unknown error")
+    .notifyImportFailed(job.userId, job.id, job.playlistName, job.error ?? "Unknown error")
     .catch((e) => logger.error(`[Spotify Import] Job ${job.id}: failure notification failed:`, e));
 }
 

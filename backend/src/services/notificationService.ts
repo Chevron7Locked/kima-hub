@@ -283,16 +283,15 @@ class NotificationService {
         });
     }
 
-    /**
-     * Notify user that a Spotify import failed
-     */
-    async notifyImportFailed(userId: string, playlistName: string, error: string) {
+    /** A playlist import failed. One row per import: the import's own catch and the worker's failure handler both report it. */
+    async notifyImportFailed(userId: string, importJobId: string, playlistName: string, error: string) {
         return this.create({
             userId,
             type: "error",
             title: "Import failed",
             message: `"${playlistName}": ${error}`,
             metadata: { href: "/import/playlist" },
+            groupKey: `import-failed:${importJobId}`,
         });
     }
 }
