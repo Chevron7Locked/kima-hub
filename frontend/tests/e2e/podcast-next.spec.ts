@@ -14,13 +14,30 @@ const playingElement = (page: Page) =>
         timeout: 60_000,
     });
 
+
+/** Show used by these tests. Each test saves progress on it and unfollows it at the end. */
+const SHOW = "1450241676";
+
+/**
+ * Follows the show and returns its id, but skips the test when the user already follows it:
+ * the test would overwrite that show's progress and then unfollow it.
+ */
+async function followNew(page: Page, auth: Record<string, string>): Promise<string> {
+    const preview = await page.request.get(`/api/podcasts/preview/${SHOW}`, { headers: auth });
+    expect(preview.ok(), `previewing the show returned ${preview.status()}`).toBe(true);
+    if ((await preview.json()).isSubscribed) {
+        test.skip(true, "not covered: this user already follows the show, and the test would overwrite its progress and unfollow it");
+    }
+    const sub = await page.request.post("/api/podcasts/subscribe", { headers: auth, data: { itunesId: SHOW } });
+    expect(sub.ok()).toBe(true);
+    return (await sub.json()).podcast.id;
+}
+
 test("an episode that ends is finished, and the next one plays; the player's next button moves on too", async ({ page }) => {
     test.setTimeout(300_000);
     await loginAsTestUser(page);
     const auth = { Authorization: `Bearer ${await getAuthToken(page)}` };
-    const sub = await page.request.post("/api/podcasts/subscribe", { headers: auth, data: { itunesId: "1450241676" } });
-    expect(sub.ok()).toBe(true);
-    const podcastId: string = (await sub.json()).podcast.id;
+    const podcastId = await followNew(page, auth);
     try {
         const show = await (await page.request.get(`/api/podcasts/${podcastId}/episodes?order=newest&limit=10`, { headers: auth })).json();
         const [third, second, first, resumed]: Ep[] = show.episodes.slice(0, 4);
@@ -70,9 +87,7 @@ test("the show's newest episode ending stays finished: nothing next, and leaving
     test.setTimeout(300_000);
     await loginAsTestUser(page);
     const auth = { Authorization: `Bearer ${await getAuthToken(page)}` };
-    const sub = await page.request.post("/api/podcasts/subscribe", { headers: auth, data: { itunesId: "1450241676" } });
-    expect(sub.ok()).toBe(true);
-    const podcastId: string = (await sub.json()).podcast.id;
+    const podcastId = await followNew(page, auth);
     try {
         const show = await (await page.request.get(`/api/podcasts/${podcastId}/episodes?order=newest&limit=1`, { headers: auth })).json();
         const newest: Ep = show.episodes[0];
@@ -116,9 +131,7 @@ test("an episode played to 95% of its own length is finished; seeking back and s
     test.setTimeout(300_000);
     await loginAsTestUser(page);
     const auth = { Authorization: `Bearer ${await getAuthToken(page)}` };
-    const sub = await page.request.post("/api/podcasts/subscribe", { headers: auth, data: { itunesId: "1450241676" } });
-    expect(sub.ok()).toBe(true);
-    const podcastId: string = (await sub.json()).podcast.id;
+    const podcastId = await followNew(page, auth);
     let episodeId = "";
     const progressOf = async () => {
         const list = await (await page.request.get(`/api/podcasts/${podcastId}/episodes?order=newest&limit=1`, { headers: auth })).json();

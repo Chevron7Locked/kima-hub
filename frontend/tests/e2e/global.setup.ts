@@ -1,14 +1,15 @@
 /**
  * Runs once before all tests: checks KIMA_TEST_USERNAME / KIMA_TEST_PASSWORD
- * can log in at KIMA_UI_BASE_URL (default http://127.0.0.1:3030), and aborts
+ * can log in at KIMA_UI_BASE_URL (required; never port 3030), and aborts
  * with setup instructions if not.
  */
 import { chromium } from "@playwright/test";
+import { requireBaseUrl } from "./fixtures/target";
 
 async function globalSetup(): Promise<void> {
     const username = process.env.KIMA_TEST_USERNAME;
     const password = process.env.KIMA_TEST_PASSWORD;
-    const baseUrl = process.env.KIMA_UI_BASE_URL || "http://127.0.0.1:3030";
+    const baseUrl = requireBaseUrl();
 
     if (!username || !password) {
         throw new Error(

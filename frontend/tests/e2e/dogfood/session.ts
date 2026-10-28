@@ -431,27 +431,21 @@ export function playableRows(page: Page) {
 }
 
 /**
- * From the albums page, opens the first album with at least `min` songs the library has. One-song
- * albums are ordinary in a real library, so a journey that needs several rows has to choose one.
- * Only the page on screen is searched; an album that never shows a playable row counts as too short.
+ * Opens the album with this id (chosen from the server's own list) and waits for its playable rows.
+ * Clicks the album's card when it is on screen, so the session keeps its state; otherwise loads its page.
+ * A phone passes `tap` to use touch.
  */
-export async function openAlbumWithSongs(page: Page, min: number, timeoutMs = 12_000): Promise<void> {
-    const cards = page.locator('main a[href^="/album/"]');
-    await cards.first().waitFor({ state: "visible", timeout: timeoutMs });
-    const hrefs = [...new Set(await cards.evaluateAll((els) => els.map((el) => el.getAttribute("href") ?? "")))];
-    for (const href of hrefs) {
-        await page.locator(`main a[href="${href}"]`).first().click();
-        await page.waitForURL(/\/album\//, { timeout: 10_000 });
-        const rows = playableRows(page);
-        const shown = await rows.first().waitFor({ state: "visible", timeout: timeoutMs }).then(() => true, () => false);
-        if (shown) {
-            await settle(page, 1200);
-            if ((await rows.count()) >= min) return;
-        }
-        await page.goBack();
-        await cards.first().waitFor({ state: "visible", timeout: timeoutMs });
+export async function openAlbumById(page: Page, albumId: string, opts: { tap?: boolean; timeoutMs?: number } = {}): Promise<void> {
+    const timeoutMs = opts.timeoutMs ?? 15_000;
+    const card = page.locator(`main a[href="/album/${albumId}"]`).first();
+    if (await card.isVisible().catch(() => false)) {
+        await (opts.tap ? card.tap() : card.click());
+    } else {
+        await page.goto(`/album/${albumId}`);
     }
-    throw new Error(`no album on this albums page has ${min} or more songs the library can play`);
+    await page.waitForURL(new RegExp(`/album/${albumId}`), { timeout: timeoutMs });
+    await playableRows(page).first().waitFor({ state: "visible", timeout: timeoutMs });
+    await settle(page, 1200);
 }
 
 /**

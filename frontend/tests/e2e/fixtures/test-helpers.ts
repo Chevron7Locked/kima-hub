@@ -1,5 +1,6 @@
 import { Page, TestInfo, test } from "@playwright/test";
 import { PLAYER, readPlayer } from "./shared";
+import { LibraryPicker } from "./picker";
 
 function requireEnv(name: string): string {
     const value = process.env[name];
@@ -31,19 +32,19 @@ export function skipIfNoEnv(envVar: string, testInfo: TestInfo): void {
     }
 }
 
-/** Navigate to the first available album and start playing all tracks.
- *  Skips gracefully if the library has no music (e.g., bare CI container). */
+/** Open an album the server says has at least two playable songs and start playing all of it.
+ *  Skips, with the reason in the test report, only when the library has no such album. */
 export async function startPlayingFirstAlbum(page: Page): Promise<void> {
     await page.goto("/collection?tab=albums");
-    const firstAlbum = page.locator('a[href^="/album/"]').first();
-    try {
-        await firstAlbum.waitFor({ timeout: 10_000 });
-    } catch {
-        test.skip(true, "No music in library -- skipping (empty container)");
+    const token = await getAuthToken(page);
+    // The tests skip, queue and move between songs, so the album needs at least two.
+    const album = await new LibraryPicker(page.request, token).albumWithTracks(2);
+    if (!album) {
+        test.skip(true, "The library has no album with two or more playable songs");
         return;
     }
-    await firstAlbum.click();
-    await page.waitForURL(/\/album\//);
+    await page.goto(`/album/${album.id}`);
+    await page.locator("[data-track-row]").first().waitFor({ timeout: 10_000 });
     await page.getByLabel("Play all").click();
     await waitForPlaying(page); // waits for FullPlayer's title="pause"
 }

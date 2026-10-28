@@ -73,13 +73,12 @@ test.describe("Integrations", () => {
         await expect(testBtn).toBeVisible({ timeout: 3000 });
         await testBtn.click();
 
-        await page.waitForTimeout(3000);
-        const pageText = await page.textContent("body");
-        const hasResult = pageText?.includes("Connected") ||
-                         pageText?.includes("Failed") ||
-                         pageText?.includes("error") ||
-                         pageText?.includes("success");
-        expect(hasResult).toBeTruthy();
+        // The status beside the button reads "v<version>" or "Connected" on success and the error text
+        // (or "Failed") otherwise, so only the success wording passes.
+        await expect(
+            lidarrContainer,
+            "the Lidarr connection test did not report a successful connection",
+        ).toContainText(/(^|\s)(v\d+(\.\d+)+|Connected)(\s|$)/, { timeout: 20_000 });
     });
 
     test("Soulseek connection test", async ({ page }, testInfo) => {

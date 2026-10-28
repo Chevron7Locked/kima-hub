@@ -10,9 +10,10 @@
  */
 import { test, expect, request } from "@playwright/test";
 import { softwareWebGL } from "../fixtures/shared";
+import { requireBaseUrl } from "../fixtures/target";
 
 const ARCH = process.env.KIMA_CAMPAIGN_ARCH ?? "arm";
-const BASE = process.env.KIMA_UI_BASE_URL!;
+const BASE = requireBaseUrl();
 const USER = process.env.KIMA_TEST_USERNAME!;
 const PASS = process.env.KIMA_TEST_PASSWORD!;
 

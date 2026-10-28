@@ -1,6 +1,7 @@
 import { test, expect, Page, Response, ConsoleMessage } from "@playwright/test";
 import { skipIfEmptyLibrary, username, password } from "./fixtures/test-helpers";
 import { settle } from "./fixtures/shared";
+import { requireBaseUrl } from "./fixtures/target";
 
 /** The app shell scrolls inside #main-content, so the document alone never overflows. */
 const OVERFLOWS = () =>
@@ -8,7 +9,7 @@ const OVERFLOWS = () =>
         (el) => !!el && el.scrollWidth > el.clientWidth + 1,
     );
 
-const baseUrl = process.env.KIMA_UI_BASE_URL || "http://127.0.0.1:3030";
+const baseUrl = requireBaseUrl();
 
 async function login(page: Page): Promise<void> {
     await page.goto("/login");
@@ -80,7 +81,7 @@ test.describe("Auth Flow", () => {
     });
 
     test("protected routes redirect unauthenticated users", async ({ page }) => {
-        for (const route of ["/collection", "/settings", "/search", "/queue", "/vibe"]) {
+        for (const route of ["/collection", "/settings", "/search", "/vibe"]) {
             await page.goto(route);
             await expect(page).toHaveURL(/login/, { timeout: 10000 });
         }
@@ -101,7 +102,6 @@ test.describe("Route Health", () => {
             { path: "/collection?tab=artists", name: "Artists Tab" },
             { path: "/collection?tab=tracks", name: "Tracks Tab" },
             { path: "/search", name: "Search" },
-            { path: "/queue", name: "Queue" },
             { path: "/settings", name: "Settings" },
             { path: "/discover", name: "Discover" },
             { path: "/releases", name: "Releases" },
@@ -309,7 +309,7 @@ test.describe("Playback", () => {
         await firstAlbum.click();
         await settle(page, 3000);
 
-        const playBtn = page.locator('button:has-text("Play"), button[aria-label*="Play all" i], button[title*="Play" i]').first();
+        const playBtn = page.getByRole("button", { name: "play all", exact: true });
         await expect(playBtn).toBeVisible({ timeout: 5000 });
         await playBtn.click();
         await page.waitForTimeout(3000);
@@ -330,7 +330,7 @@ test.describe("Playback", () => {
         await firstAlbum.click();
         await settle(page, 3000);
 
-        const playBtn = page.locator('button:has-text("Play"), button[aria-label*="Play all" i], button[title*="Play" i]').first();
+        const playBtn = page.getByRole("button", { name: "play all", exact: true });
         await playBtn.click();
         await page.waitForTimeout(2000);
 
@@ -349,20 +349,12 @@ test.describe("Playback", () => {
         await firstAlbum.click();
         await settle(page, 3000);
 
-        const playBtn = page.locator('button:has-text("Play"), button[aria-label*="Play all" i], button[title*="Play" i]').first();
+        const playBtn = page.getByRole("button", { name: "play all", exact: true });
         await playBtn.click();
         await page.waitForTimeout(2000);
 
         await expect(page.getByRole("button", { name: "Next track" }).first()).toBeVisible({ timeout: 5000 });
         await expect(page.getByRole("button", { name: "Previous track" }).first()).toBeVisible({ timeout: 5000 });
-    });
-
-    test("queue page renders", async ({ page }) => {
-        await page.goto("/queue", { waitUntil: "domcontentloaded" });
-        await settle(page, 2000);
-        await expect(page).toHaveURL(/queue/);
-        const body = await page.locator("body").textContent();
-        expect(body!.length).toBeGreaterThan(20);
     });
 });
 
@@ -527,7 +519,7 @@ test.describe("Mobile Layout", () => {
 
     test("mobile: overflow audit across pages", async ({ page }) => {
         const overflowPages: string[] = [];
-        for (const route of ["/", "/collection", "/search", "/settings", "/vibe", "/queue"]) {
+        for (const route of ["/", "/collection", "/search", "/settings", "/vibe"]) {
             await page.goto(route, { waitUntil: "domcontentloaded" });
             await settle(page, 2000);
 
@@ -703,7 +695,7 @@ test.describe("Full Audit", () => {
     test("console error audit across all pages", async ({ page }) => {
         const routes = [
             "/", "/collection", "/collection?tab=albums", "/collection?tab=artists",
-            "/collection?tab=tracks", "/search", "/queue", "/settings",
+            "/collection?tab=tracks", "/search", "/settings",
             "/discover", "/releases", "/vibe", "/playlists",
             "/audiobooks", "/podcasts", "/radio",
         ];
@@ -742,7 +734,7 @@ test.describe("Full Audit", () => {
     test("API error audit across all pages", async ({ page }) => {
         const routes = [
             "/", "/collection", "/collection?tab=albums", "/collection?tab=artists",
-            "/collection?tab=tracks", "/search", "/queue", "/settings",
+            "/collection?tab=tracks", "/search", "/settings",
             "/discover", "/releases", "/vibe", "/playlists",
             "/audiobooks", "/podcasts", "/radio",
         ];

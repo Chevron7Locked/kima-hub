@@ -8,8 +8,9 @@ import { test, expect, type APIRequestContext, type Locator, type Page } from "@
 import { DogfoodSession } from "./session";
 import { outsideFailure } from "./podcastReplies";
 import { loginAsTestUser, getAuthToken } from "../fixtures/test-helpers";
+import { requireBaseUrl } from "../fixtures/target";
 
-const baseUrl = process.env.KIMA_UI_BASE_URL || "http://127.0.0.1:3030";
+const baseUrl = requireBaseUrl();
 // Dungeons and Daddies: a long-running show with plenty of episodes, used by the other podcast specs.
 const SEED_SHOW = "1450241676";
 // Two more long-running shows, so "latest episode" has several shows with different newest dates to order.
@@ -93,6 +94,8 @@ test("the podcasts page shows continue listening, for you, the top shows and a r
     test.setTimeout(240_000);
     session.setJourney("podcasts page");
     const podcastId = await follow(SEED_SHOW);
+    // Saving progress below would overwrite a followed show's real progress, so only a show followed here is used.
+    test.skip(!followedHere.includes(podcastId), "not covered: this user already follows the seed show");
     const episodes = (await get(`/${podcastId}/episodes?order=newest&limit=3`)).episodes as Array<{ id: string; title: string }>;
     const started = await api.post(`/api/podcasts/${podcastId}/episodes/${episodes[0].id}/progress`, {
         headers: auth,

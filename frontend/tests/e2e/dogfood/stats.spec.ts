@@ -6,10 +6,14 @@
 import { test, expect, Browser, Page, BrowserContext } from "@playwright/test";
 import { DogfoodSession } from "./session";
 import { PLAYER, settle } from "../fixtures/shared";
+import { requireBaseUrl, destructiveVerdict } from "../fixtures/target";
 
-const baseUrl = process.env.KIMA_UI_BASE_URL || "http://127.0.0.1:3030";
+const baseUrl = requireBaseUrl();
 const username = process.env.KIMA_TEST_USERNAME || "";
 const password = process.env.KIMA_TEST_PASSWORD || "";
+
+/** The fewest plays at which the stats page has anything to compare against the API. */
+const MIN_PLAYS = 50;
 
 /** One thread of interaction: the filter journeys mean nothing if the page never loaded. */
 test.describe.configure({ mode: "serial" });
@@ -27,6 +31,15 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
         forHalf: number | null;
         neverPlayed: number;
     } | null = null;
+    /** False when the signed-in user has too few plays for the history-dependent journeys. */
+    let hasHistory = true;
+
+    /** Records the skipped journey as not covered; true when the caller should stop. */
+    const lacksHistory = (journey: string): boolean => {
+        if (hasHistory) return false;
+        session.noteNotCovered(`stats ${journey}: the signed-in user has ${allTime?.plays ?? 0} plays (needs more than ${MIN_PLAYS}), so this journey did not run`);
+        return true;
+    };
 
     test.beforeAll(async ({ browser: launched }) => {
         browser = launched;
@@ -43,7 +56,7 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
 
     test.afterAll(async () => {
         if (session) {
-            const reportPath = session.writeReport("test-results");
+            const reportPath = session.writeReport("test-results/stats");
             console.log(`\n[stats-dogfood] report written to ${reportPath}`);
             console.log(
                 `[stats-dogfood] ${session.steps.length} steps, ${session.violations.length} violations`,
@@ -92,10 +105,13 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
                 forHalf: d.signature.concentration?.forHalf ?? null,
                 neverPlayed: d.shelf.neverPlayed,
             };
-            expect(
-                allTime.plays,
-                "this suite needs a real play history; a page of zeroes proves nothing",
-            ).toBeGreaterThan(50);
+            // A page of zeroes proves nothing, and plays are never invented to fill it.
+            hasHistory = allTime.plays > MIN_PLAYS;
+            if (!hasHistory) {
+                session.noteNotCovered(
+                    `stats: the signed-in user has ${allTime.plays} plays (needs more than ${MIN_PLAYS}); the figure, filter, playable-slice, play-count and audit-read journeys did not run`,
+                );
+            }
         });
 
         await session.step("dismiss the release window if it is up", async () => {
@@ -121,6 +137,7 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
 
     test("2. the ledger states the same numbers the API does", async () => {
         session.setJourney("2. Ledger");
+        if (lacksHistory("journey 2")) return;
 
         await session.step("the headline figures match the API exactly", async () => {
             const body = await page.locator("main").innerText();
@@ -154,6 +171,7 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
 
     test("3. the period filter actually narrows, and says which window it is showing", async () => {
         session.setJourney("3. Period filter");
+        if (lacksHistory("journey 3")) return;
 
         let thirtyDayPlays = 0;
 
@@ -217,6 +235,7 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
 
     test("4. every figure the page can play, plays", async () => {
         session.setJourney("4. Playable slices");
+        if (lacksHistory("journey 4")) return;
 
         await session.step("a key wedge returns tracks rather than silently nothing", async () => {
             // The wheel folds both spellings of a pitch into one wedge. When the
@@ -295,6 +314,7 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
 
     test("5. the player states how many times you have heard this track", async () => {
         session.setJourney("5. Player play count");
+        if (lacksHistory("journey 5")) return;
 
         await session.step("the count in the bar is the count the API gives", async () => {
             // The track id comes from the bar's audio element; the stored
@@ -425,6 +445,7 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
 
     test("7. the play-history audit reports honestly and deletes only what it proves", async () => {
         session.setJourney("7. Play history audit");
+        if (lacksHistory("journey 7")) return;
 
         let before: {
             totalListens: number;
@@ -505,6 +526,17 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
 
     test("7b. the audit's buttons: merge, ignore, restore, remove", async () => {
         session.setJourney("7b. Audit buttons");
+
+        // The merge and remove buttons permanently delete play rows, so they only run on a marked test copy.
+        const verdict = await destructiveVerdict(baseUrl, async () => {
+            const res = await page.request.get("/api/playlists?limit=100", { headers: { Authorization: `Bearer ${token}` } });
+            const lists = res.ok() ? ((await res.json()) as Array<{ name: string; isOwner: boolean }>) : [];
+            return lists.filter((l) => l.isOwner).map((l) => l.name);
+        });
+        if (!verdict.ok) {
+            session.noteNotCovered(`stats 7b (merge, ignore, restore, remove play history) did not run: ${verdict.reason}`);
+            return;
+        }
 
         /** The audit as the server currently sees it. */
         const audit = async () =>

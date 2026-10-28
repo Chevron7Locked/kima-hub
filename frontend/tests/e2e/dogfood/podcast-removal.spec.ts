@@ -4,9 +4,10 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 import { escapeRegExp } from "../fixtures/shared";
-import { outsideFailure } from "./podcastReplies";
+import { outsideFailure, pickUnfollowedShow } from "./podcastReplies";
+import { requireBaseUrl } from "../fixtures/target";
 
-const baseUrl = process.env.KIMA_UI_BASE_URL || "http://127.0.0.1:3030";
+const baseUrl = requireBaseUrl();
 const USERNAME = process.env.KIMA_TEST_USERNAME || "";
 const PASSWORD = process.env.KIMA_TEST_PASSWORD || "";
 
@@ -61,18 +62,18 @@ test.describe.serial("Podcast removal", () => {
     });
 
     test("R1. subscribe to a podcast", async () => {
-        // A show from the overall chart the podcasts page shows, followed by its Apple id as the page does.
-        const chart = await page.request.get("/api/podcasts/charts?limit=5", {
-            headers: { Authorization: `Bearer ${token}` },
-        });
-        expect(chart.status(), `chart returned ${chart.status()}`).toBe(200);
-        const list: Array<{ itunesId?: string; title?: string }> = await chart.json();
-        const pick = list.find((p) => p.itunesId);
-        expect(pick, "the chart returned no show").toBeTruthy();
-        podcastTitle = pick?.title ?? podcastTitle;
+        // Only a show the user did not follow before is used: R3 and R4 remove it, which would erase a
+        // followed show's progress and downloads. podcastId is set only for a show followed here.
+        const picked = await pickUnfollowedShow(page.request, token);
+        if ("none" in picked) {
+            test.skip(true, `not covered: ${picked.none}`);
+            return;
+        }
+        const pick = picked.show;
+        podcastTitle = pick.title;
 
         const res = await page.request.post("/api/podcasts/subscribe", {
-            data: { itunesId: pick?.itunesId },
+            data: { itunesId: pick.itunesId },
             headers: { Authorization: `Bearer ${token}` },
         });
         // Only a service outside Kima failing excuses the journey; any other failure is Kima's own.

@@ -6,10 +6,12 @@
  */
 
 import { test, expect, Browser, Page, BrowserContext, APIRequestContext, request } from "@playwright/test";
-import { DogfoodSession, navigateByClick, openAlbumsTab, firstAlbumCard } from "./session";
+import { DogfoodSession, navigateByClick, openAlbumById } from "./session";
+import { LibraryPicker } from "../fixtures/picker";
 import { readPlayer, settle } from "../fixtures/shared";
+import { requireBaseUrl } from "../fixtures/target";
 
-const baseUrl = process.env.KIMA_UI_BASE_URL || "http://127.0.0.1:3030";
+const baseUrl = requireBaseUrl();
 const username = process.env.KIMA_TEST_USERNAME || "";
 const password = process.env.KIMA_TEST_PASSWORD || "";
 const vibeToken = process.env.KIMA_PUBLIC_VIBE_TOKEN || "";
@@ -23,7 +25,11 @@ const GPU_INSTALL_MS = 25 * 60_000;
 const NEWEST = {
     version: "1.12.0",
     heading: "Kima 1.12",
-    items: ["podcasts.browse", "analysis.middle", "enrichment.rerun", "updates.pings", "fixes.12"],
+    // A fresh library: "sound.rebuild" is only for libraries upgraded from 1.11.
+    items: [
+        "moods.learned", "radio.stations", "mixes.recipes", "discover.only", "panel.redesign",
+        "podcasts.browse", "analysis.middle", "enrichment.rerun", "updates.pings", "fixes.12",
+    ],
     changelogText: /podcast browser/i,
 };
 
@@ -36,6 +42,9 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
     let session: DogfoodSession;
     let token = "";
     let publicApi: APIRequestContext;
+    // Settings that journeys 4 and 5 change; afterAll puts them back to what they were.
+    let shareBefore: boolean | null = null;
+    let gpuBefore: { enabled: boolean; analysis: boolean } | null = null;
 
     const auth = () => ({ Authorization: `Bearer ${token}` });
     const getJson = async <T>(path: string): Promise<T> => {
@@ -76,18 +85,31 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
 
     test.afterAll(async () => {
         if (session) {
-            const reportPath = session.writeReport("test-results");
+            const reportPath = session.writeReport("test-results/features");
             console.log(`\n[features-dogfood] report written to ${reportPath}`);
             console.log(
                 `[features-dogfood] ${session.steps.length} steps, ${session.violations.length} violations`,
             );
         }
         try {
-            // Anything that went wrong after a journey's own check, or in a journey that stopped before its own.
-            session?.assertNoneLeft();
+            if (token && shareBefore !== null) {
+                const res = await page.request.post("/api/settings", {
+                    headers: auth(), data: { shareLiveListening: shareBefore },
+                });
+                expect(res.status(), "restoring the live-sharing setting").toBe(200);
+            }
+            if (token && gpuBefore) {
+                const res = await page.request.post("/api/system-settings/gpu", { headers: auth(), data: gpuBefore });
+                expect(res.status(), "restoring the GPU switches").toBe(200);
+            }
         } finally {
-            await publicApi?.dispose();
-            await context?.close();
+            try {
+                // Anything that went wrong after a journey's own check, or in a journey that stopped before its own.
+                session?.assertNoneLeft();
+            } finally {
+                await publicApi?.dispose();
+                await context?.close();
+            }
         }
     });
 
@@ -156,16 +178,17 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
         });
 
         await session.step("the tray shows the same single row", async () => {
-            const toggle = page.getByRole("button", { name: "Toggle activity panel" });
-            const wasOpen = (await toggle.getAttribute("aria-expanded")) === "true";
-            if (!wasOpen) await toggle.click();
+            const handle = page.getByRole("button", { name: "open panel" });
+            const wasClosed = await handle.isVisible().catch(() => false);
+            if (wasClosed) await handle.click();
             const panel = page.locator("#activity-panel");
-            const tab = panel.getByRole("button", { name: /^Notifications/ });
-            if ((await tab.getAttribute("aria-pressed", { timeout: 10_000 })) !== "true") await tab.click();
-            const rows = panel.getByText("Library scan finished", { exact: true });
+            const tab = panel.getByRole("tab", { name: /^alerts/ });
+            await tab.click();
+            await expect(tab).toHaveAttribute("aria-selected", "true");
+            const rows = panel.getByText(/^library scan finished$/i);
             await expect(rows.first()).toBeVisible({ timeout: 10_000 });
             expect(await rows.count()).toBe(1);
-            if (!wasOpen) await toggle.click();
+            if (wasClosed) await panel.getByRole("button", { name: "hide panel" }).click();
             return { trayRows: 1 };
         });
 
@@ -177,14 +200,15 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
         const hasToken = async () =>
             (await getJson<{ hasListenbrainzToken: boolean }>("/settings")).hasListenbrainzToken;
 
+        // A token this user saved earlier cannot be put back once removed, so the journey leaves it alone.
+        if (await hasToken()) {
+            session.noteNotCovered("scrobbling: this user already has a ListenBrainz token, which the test would delete and cannot restore");
+            return;
+        }
+
         await session.step("open the scrobbling settings with no token", async () => {
             await navigateByClick(page, "/settings");
             await settle(page, 1500);
-            if (await hasToken()) {
-                await page.locator("#lb-token-clear").check();
-                await page.getByRole("button", { name: "Remove token" }).click();
-                await expect.poll(hasToken).toBe(false);
-            }
             await page.locator("#lb-token").scrollIntoViewIfNeeded();
             await expect(page.locator("#lb-token")).toHaveAttribute("placeholder", "Paste your LB user token");
         });
@@ -212,6 +236,7 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
     test("4. public feed: the export, the live trip, and the sharing switch", async () => {
         test.setTimeout(10 * 60_000);
         session.setJourney("4. Public feed");
+        shareBefore = (await getJson<{ shareLiveListening: boolean }>("/settings")).shareLiveListening;
 
         await session.step("the export refuses a missing token", async () => {
             const res = await publicApi.get("/api/public/vibe/library");
@@ -253,10 +278,9 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
 
         let trackId: string | null = null;
         await session.step("playing shows on the live feed", async () => {
-            await openAlbumsTab(page);
-            await firstAlbumCard(page).click();
-            await page.waitForURL(/\/album\//, { timeout: 15_000 });
-            await settle(page, 1000);
+            const album = await new LibraryPicker(page.request, token).albumWithTracks(1);
+            expect(album, "no library album has a playable song, so nothing can play on the feed").toBeTruthy();
+            await openAlbumById(page, album!.id);
             await page.getByLabel("Play all").click();
             await page.getByTitle("pause", { exact: true }).first().waitFor({ timeout: 15_000 });
             trackId = await playingTrackId();
@@ -309,6 +333,14 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
         const gpu = () => getJson<Gpu>("/system-settings/gpu");
         const vectorsStatus = () => page.getByTestId("gpu-onnx-toggle-status");
         const analysisStatus = () => page.getByTestId("gpu-analysis-toggle-status");
+
+        // The GPU runtime exists only for linux on x64; elsewhere the settings page offers no switches.
+        const gpuStart = await gpu();
+        if (!gpuStart.supported) {
+            session.noteNotCovered("GPU runtime: this host has no GPU switches (not linux on x64)");
+            return;
+        }
+        gpuBefore = { enabled: gpuStart.enabled, analysis: gpuStart.analysis };
 
         await session.step("vibe embeddings and audio analysis both run on the GPU", async () => {
             await navigateByClick(page, "/settings");

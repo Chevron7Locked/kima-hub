@@ -4,12 +4,22 @@
  * and audio position moves, and a bare instance fails instead of skipping.
  */
 import { test, expect, devices, Browser, Page, BrowserContext, Locator } from "@playwright/test";
-import { DogfoodSession, navigateByClick, firstAlbumCard, openAlbumWithSongs, openAlbumsTab, playableRows } from "./session";
-import { outsideFailure } from "./podcastReplies";
+import { DogfoodSession, navigateByClick, openAlbumById, playableRows } from "./session";
+import { outsideFailure, pickUnfollowedShow } from "./podcastReplies";
 import { readLibraryFacts, assertReady, coverageGaps, LibraryFacts } from "./preflight";
 import { PLAYER, escapeRegExp, readPlayer, settle, softwareWebGL } from "../fixtures/shared";
+import { requireBaseUrl } from "../fixtures/target";
+import { LibraryPicker, PickedAlbum } from "../fixtures/picker";
 
 // Read the queue from the server, where it lives.
+/** Opens the right-hand panel on its queue tab, without leaving the page: the queue lives in React state. */
+async function openQueuePanel(page: Page): Promise<void> {
+    const open = page.getByRole("button", { name: "open panel" });
+    if (await open.isVisible().catch(() => false)) await open.click();
+    await page.getByRole("tab", { name: "up next" }).click();
+    await page.locator("[data-queue-now], [data-queue-row]").first().waitFor({ timeout: 10_000 });
+}
+
 const queueLength = (page: Page) =>
     page.evaluate(async () => {
         try {
@@ -25,7 +35,7 @@ const queueLength = (page: Page) =>
         }
     });
 
-const baseUrl = process.env.KIMA_UI_BASE_URL || "http://127.0.0.1:3030";
+const baseUrl = requireBaseUrl();
 const username = process.env.KIMA_TEST_USERNAME || "";
 const password = process.env.KIMA_TEST_PASSWORD || "";
 
@@ -59,6 +69,15 @@ test.describe("Dogfood walkthrough", () => {
     let gaps: string[] = [];
     let token = "";
     const createdPlaylistIds: string[] = [];
+    let picker: LibraryPicker | null = null;
+
+    /** The server's choice of a library album with at least `min` playable songs; recorded as not covered when there is none. */
+    const pickAlbum = async (min: number, what: string): Promise<PickedAlbum | null> => {
+        picker ??= new LibraryPicker(page.request, token);
+        const album = await picker.albumWithTracks(min);
+        if (!album) session.noteNotCovered(`${what}: no library album has ${min} or more playable songs`);
+        return album;
+    };
 
     test.beforeAll(async ({ browser: launched }) => {
         browser = launched;
@@ -162,18 +181,12 @@ test.describe("Dogfood walkthrough", () => {
     test("2. listen: search for something and hear it play", async () => {
         session.setJourney("2. Listen");
 
-        // Search for an artist that is genuinely in this library, read from the API. A
-        // hardcoded query would test the search box against data that may not exist.
-        let artistName = "";
-        await session.step("pick a real artist to search for", async () => {
-            const res = await page.request.get("/api/library/artists?limit=1", {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            const body = await res.json();
-            artistName = body.artists?.[0]?.name ?? "";
-            expect(artistName, "could not read an artist name from the library").toBeTruthy();
-            return { artist: artistName };
-        });
+        // The server picks an album with two playable songs (journey 3 queues a second one); its
+        // artist is searched for, so the search runs against data that exists.
+        const album = await pickAlbum(2, "listen journey");
+        if (!album) return;
+        const artistName = album.artistName;
+        await session.step("pick a real artist to search for", async () => ({ artist: artistName, album: album.title }));
 
         await session.step("search for that artist", async () => {
             const box = page.getByLabel("Search");
@@ -194,44 +207,7 @@ test.describe("Dogfood walkthrough", () => {
         });
 
         await session.step("open an album", async () => {
-            // Journey 3 queues a second song, so the album needs two the library can play.
-            // Search results live in component state and are lost on back, so
-            // candidate hrefs are collected first and visited in turn.
-            const collect = async (): Promise<string[]> => {
-                const cards = page.locator('main a[href^="/album/"]');
-                await cards.first().waitFor({ state: "visible", timeout: 10_000 });
-                const seen = (await cards.evaluateAll((els) =>
-                    els
-                        .slice(0, 5)
-                        .map((e) => (e as HTMLAnchorElement).getAttribute("href")),
-                )) as (string | null)[];
-                return seen.filter((h): h is string => !!h);
-            };
-            const tryPool = async (pool: string[], clickFirst: boolean): Promise<boolean> => {
-                for (let i = 0; i < pool.length; i++) {
-                    if (i === 0 && clickFirst) {
-                        await page.locator('main a[href^="/album/"]').first().click();
-                    } else {
-                        await page.goto(new URL(pool[i], page.url()).toString(), {
-                            waitUntil: "domcontentloaded",
-                        });
-                    }
-                    await page.waitForURL(/\/album\//, { timeout: 10_000 });
-                    await settle(page, 800);
-                    if ((await playableRows(page).count()) >= 2) {
-                        return true;
-                    }
-                }
-                return false;
-            };
-
-            const onSearch = await firstAlbumCard(page).isVisible().catch(() => false);
-            if (!(onSearch && (await tryPool(await collect(), true)))) {
-                // The search results held no album with two songs; the collection's album grid has more.
-                await openAlbumsTab(page);
-                await openAlbumWithSongs(page, 2);
-            }
-            await settle(page, 1200);
+            await openAlbumById(page, album.id);
             return { album: new URL(page.url()).pathname };
         });
 
@@ -287,28 +263,21 @@ test.describe("Dogfood walkthrough", () => {
             return { queueBefore: before, queueAfter: await queueLength(page) };
         });
 
-        // Client-side navigation on purpose: the queue lives in React state, so reloading
-        // the page would destroy the very thing being checked.
-        await session.step("open the queue from the player", async () => {
-            await page.getByRole("link", { name: "Queue" }).click();
-            await page.waitForURL(/\/queue/, { timeout: 10_000 });
+        // The queue panel opens in place: the queue lives in React state, so reloading the page would destroy the
+        // very thing being checked.
+        await session.step("open the queue in the panel", async () => {
+            await openQueuePanel(page);
             await settle(page, 1000);
             return { url: new URL(page.url()).pathname, queueOnArrival: await queueLength(page) };
         });
 
         await session.step("the queue shows what is playing and what is next", async () => {
-            await expect(page.getByRole("heading", { name: "Now Playing" })).toBeVisible({
-                timeout: 10_000,
-            });
+            await expect(page.locator("[data-queue-now]")).toBeVisible({ timeout: 10_000 });
             const len = await queueLength(page);
-            const shown = await page
-                .locator("text=/\\d+ track/")
-                .first()
-                .textContent()
-                .catch(() => "?");
+            const shown = (await page.locator("[data-queue-count]").textContent().catch(() => "?")) ?? "?";
             await expect(
-                page.getByText(/Next Up/),
-                `queue holds ${len} item(s); the page reads "${shown?.trim()}"`,
+                page.locator("[data-queue-row]").first(),
+                `queue holds ${len} item(s); the panel reads "${shown.trim()}"`,
             ).toBeVisible({ timeout: 10_000 });
             return { nowPlaying: true, nextUp: true, queueLength: len };
         });
@@ -328,13 +297,11 @@ test.describe("Dogfood walkthrough", () => {
             const title: string = body.title ?? body.track?.title ?? "";
             expect(title, "the playing track has no title").toBeTruthy();
 
-            const heading = page.getByRole("heading", { name: "Now Playing" });
-            const section = heading.locator("xpath=..");
-            const text = ((await section.textContent()) ?? "").replace(/\s+/g, " ");
+            const text = ((await page.locator("[data-queue-now]").textContent()) ?? "").replace(/\s+/g, " ");
 
             expect(
                 text,
-                `the player is streaming "${title}" but the queue's Now Playing section ` +
+                `the player is streaming "${title}" but the queue's now-playing row ` +
                     `reads "${text.slice(0, 90)}"`,
             ).toContain(title);
 
@@ -349,11 +316,13 @@ test.describe("Dogfood walkthrough", () => {
         // The default 60s is too tight once hover-gated buttons and audio waits stack up.
         test.setTimeout(180_000);
         session.setJourney("3a. Queue editing");
+        const album3a = await pickAlbum(3, "queue editing journey");
+        if (!album3a) return;
 
         await session.step("start playing and queue two more tracks", async () => {
             await page.goto("/collection?tab=albums");
             await settle(page, 1500);
-            await openAlbumWithSongs(page, 3);
+            await openAlbumById(page, album3a.id);
 
             await page.getByLabel("Play all").click();
             await page.getByTitle("pause", { exact: true }).waitFor({ timeout: 15_000 });
@@ -377,23 +346,22 @@ test.describe("Dogfood walkthrough", () => {
             return { queueLength: len };
         });
 
-        await session.step("open the queue page", async () => {
-            await page.getByRole("link", { name: "Queue" }).click();
-            await page.waitForURL(/\/queue/, { timeout: 10_000 });
+        await session.step("open the queue in the panel", async () => {
+            await openQueuePanel(page);
             await settle(page, 1000);
             return { queueOnArrival: await queueLength(page) };
         });
 
-        // Every row action is hover-gated (opacity-0 group-hover:opacity-100), so each
-        // one hovers its row first. Selectors are the aria-labels the queue page emits.
+        // Every row action shows on hover or focus, so each one hovers its row first. Selectors are the aria-labels
+        // the queue panel emits.
         await session.step("remove one upcoming track", async () => {
             const before = await queueLength(page);
-            const rows = page.locator("main [data-track-index], main .group").filter({
-                has: page.locator('[aria-label^="Remove "]'),
+            const rows = page.locator("[data-queue-row]").filter({
+                has: page.locator('[aria-label^="remove "]'),
             });
             const target = rows.first();
             await target.hover();
-            await target.locator('[aria-label^="Remove "]').first().click();
+            await target.locator('[aria-label^="remove "]').first().click();
             // The client persists the queue to the server on a 1s debounce, so a
             // fixed short wait races the sync. Poll the API until it reflects the
             // removal (or time out — that's a real failure worth reporting).
@@ -412,8 +380,8 @@ test.describe("Dogfood walkthrough", () => {
 
         await session.step("move an upcoming track down and back up", async () => {
             const rows = page
-                .locator("main .group")
-                .filter({ has: page.locator('[aria-label^="Move "]') });
+                .locator("[data-queue-row]")
+                .filter({ has: page.locator('[aria-label^="move "]') });
             const first = rows.first();
             await first.hover();
             const down = first.locator('[aria-label$=" down"]').first();
@@ -441,18 +409,17 @@ test.describe("Dogfood walkthrough", () => {
 
         await session.step("play now jumps to a chosen track", async () => {
             const row = page
-                .locator("main .group")
-                .filter({ has: page.locator('[aria-label^="Play "]') })
+                .locator("[data-queue-row]")
+                .filter({ has: page.locator('[aria-label^="play "]') })
                 .first();
             await row.hover();
             const title = (await row.textContent())?.replace(/\s+/g, " ").trim().slice(0, 40);
-            await row.locator('[aria-label^="Play "]').first().click();
+            await row.locator('[aria-label^="play "]').first().click();
             await page.waitForTimeout(1500);
             // Play Now replaces the queue position; the audio source must have moved.
             const playing = (await readPlayer(page)).src;
             expect(playing, "no audio source after Play Now").toBeTruthy();
-            const heading = page.getByRole("heading", { name: "Now Playing" });
-            const nowPlaying = ((await heading.locator("xpath=..").textContent()) ?? "")
+            const nowPlaying = ((await page.locator("[data-queue-now]").textContent()) ?? "")
                 .replace(/\s+/g, " ")
                 .slice(0, 120);
             return { chose: title, nowPlaying: nowPlaying };
@@ -462,8 +429,8 @@ test.describe("Dogfood walkthrough", () => {
             const clear = page.getByRole("button", { name: /clear queue/i });
             await expect(clear).toBeVisible({ timeout: 8_000 });
             await clear.click();
-            const dialog = page.getByRole("dialog", { name: "Clear the queue?" });
-            await dialog.getByRole("button", { name: "Clear queue" }).click();
+            const dialog = page.getByRole("dialog", { name: "clear the queue?" });
+            await dialog.getByRole("button", { name: "clear queue" }).click();
             await expect(dialog).toBeHidden({ timeout: 5_000 });
             // Same 1s server-sync debounce as the remove step: poll instead of a
             // fixed wait, so the assertion checks the outcome, not the timing.
@@ -481,11 +448,13 @@ test.describe("Dogfood walkthrough", () => {
         // 15s idle + up to 25s auto-advance + a reload, in one journey.
         test.setTimeout(240_000);
         session.setJourney("3b. Session resilience");
+        const album3b = await pickAlbum(2, "session resilience journey");
+        if (!album3b) return;
 
         await session.step("start playing again", async () => {
             await page.goto("/collection?tab=albums");
             await settle(page, 1500);
-            await openAlbumWithSongs(page, 2);
+            await openAlbumById(page, album3b.id);
             await page.getByLabel("Play all").click();
             await page.getByTitle("pause", { exact: true }).waitFor({ timeout: 15_000 });
             return { playing: true };
@@ -575,7 +544,7 @@ test.describe("Dogfood walkthrough", () => {
         session.setJourney("3c. Pager");
 
         if (facts.albums < 40) {
-            session.gaps.push(`pager journey needs 40+ albums for a multi-page list; instance has ${facts.albums}`);
+            session.noteNotCovered(`pager journey needs 40+ albums for a multi-page list; instance has ${facts.albums}`);
             return;
         }
 
@@ -622,7 +591,7 @@ test.describe("Dogfood walkthrough", () => {
 
         await session.step("the tracks tab pages too, forward and back", async () => {
             if (facts.tracks < 40) {
-                session.gaps.push(`tracks pager leg needs 40+ tracks; instance has ${facts.tracks}`);
+                session.noteNotCovered(`tracks pager leg needs 40+ tracks; instance has ${facts.tracks}`);
                 return;
             }
             await page.goto("/collection?tab=tracks");
@@ -642,6 +611,8 @@ test.describe("Dogfood walkthrough", () => {
     // ----------------------------------------------------------------------------------
     test("4. curate: build a playlist and confirm it survives a reload", async () => {
         session.setJourney("4. Curate");
+        const album4 = await pickAlbum(1, "curate journey");
+        if (!album4) return;
 
         const name = `${RUN_TAG}-playlist`;
         let playlistId = "";
@@ -666,8 +637,7 @@ test.describe("Dogfood walkthrough", () => {
         });
 
         await session.step("add a track to it from an album", async () => {
-            await openAlbumsTab(page);
-            await openAlbumWithSongs(page, 1);
+            await openAlbumById(page, album4.id);
 
             const row = playableRows(page).first();
             await row.waitFor({ state: "visible", timeout: 10_000 });
@@ -717,6 +687,8 @@ test.describe("Dogfood walkthrough", () => {
     test("4b. curate, deeper: rename, remove, hide, and delete from the UI", async () => {
         test.setTimeout(180_000);
         session.setJourney("4b. Playlist editing");
+        const album4b = await pickAlbum(2, "playlist editing journey");
+        if (!album4b) return;
 
         const name = `${RUN_TAG}-edit`;
         const renamed = `${RUN_TAG}-renamed`;
@@ -735,8 +707,7 @@ test.describe("Dogfood walkthrough", () => {
             createdPlaylistIds.push(playlistId);
 
             for (const n of [0, 1]) {
-                await openAlbumsTab(page);
-                await openAlbumWithSongs(page, 2);
+                await openAlbumById(page, album4b.id);
                 const row = playableRows(page).nth(n);
                 await row.waitFor({ state: "visible", timeout: 10_000 });
                 await row.hover();
@@ -850,16 +821,10 @@ test.describe("Dogfood walkthrough", () => {
             expect(playlistId, "playlist creation returned no id").toBeTruthy();
             createdPlaylistIds.push(playlistId);
 
-            const tracksRes = await page.request.get("/api/library/tracks?limit=10", {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            expect(tracksRes.ok(), `track list returned ${tracksRes.status()}`).toBeTruthy();
-            const tracksBody = await tracksRes.json();
-            const tracks = Array.isArray(tracksBody)
-                ? tracksBody
-                : (tracksBody.tracks ?? tracksBody.items ?? []);
-            expect(tracks.length, "library has fewer than 3 tracks to add").toBeGreaterThanOrEqual(3);
-            trackIds = tracks.slice(0, 3).map((t: { id: string }) => t.id);
+            picker ??= new LibraryPicker(page.request, token);
+            const three = await picker.distinctTitleTracks(3);
+            expect(three.length, "the library has fewer than 3 playable songs with different titles").toBe(3);
+            trackIds = three.map((t) => t.id);
 
             for (const trackId of trackIds) {
                 const addRes = await page.request.post(
@@ -1074,20 +1039,14 @@ test.describe("Dogfood walkthrough", () => {
         });
 
         await session.step("the analyzer's numbers survived the rebuild", async () => {
-            const res = await page.request.get("/api/library/tracks?limit=50", {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            expect(res.ok(), `reading tracks returned ${res.status()}`).toBeTruthy();
-            const body = await res.json();
-            const withBpm = (body.tracks ?? []).filter(
-                (t: { audioFeatures?: { bpm?: number | null } | null }) =>
-                    t.audioFeatures?.bpm != null,
-            ).length;
+            // A fresh read: the songs cached earlier were read before the rebuild.
+            const songs = await new LibraryPicker(page.request, token).playableTracks();
+            const withBpm = songs.filter((t) => t.analysed).length;
             expect(
                 withBpm,
-                "no track in a 50-track sample carries a bpm, so audio analysis produced nothing",
+                "no playable song carries a bpm and energy, so audio analysis produced nothing",
             ).toBeGreaterThan(0);
-            return { sampled: (body.tracks ?? []).length, withBpm };
+            return { songs: songs.length, withBpm };
         });
 
         // The projection is a separate step built on top of the embeddings, and it has its
@@ -1140,29 +1099,16 @@ test.describe("Dogfood walkthrough", () => {
         let externalBlocker = "";
 
         try {
+            let chosenShow: { itunesId: string; title: string } | null = null;
             await session.step("browse the podcast directory", async () => {
-                const res = await page.request.get("/api/podcasts/charts?limit=5", {
-                    headers: { Authorization: `Bearer ${token}` },
-                });
-                const blocked = await outsideFailure(res, "the podcast chart");
-                if (blocked) {
-                    externalBlocker = blocked;
+                const picked = await pickUnfollowedShow(page.request, token);
+                if ("none" in picked) {
+                    externalBlocker = picked.none;
                     return { reachedDirectory: false };
                 }
-
-                const body = await res.json();
-                const list = Array.isArray(body) ? body : (body.podcasts ?? []);
-                const candidate = list.find(
-                    (p: { itunesId?: number | string; feedUrl?: string }) =>
-                        p.itunesId || p.feedUrl,
-                );
-                if (!candidate) {
-                    externalBlocker = "the podcast directory returned nothing to subscribe to";
-                    return { reachedDirectory: true, offered: list.length };
-                }
-
-                podcastTitle = candidate.title ?? "";
-                return { offered: list.length, picked: podcastTitle };
+                chosenShow = picked.show;
+                podcastTitle = picked.show.title;
+                return { picked: podcastTitle };
             });
 
             if (externalBlocker) {
@@ -1171,20 +1117,8 @@ test.describe("Dogfood walkthrough", () => {
             }
 
             await session.step("subscribe to it", async () => {
-                const listRes = await page.request.get("/api/podcasts/charts?limit=5", {
-                    headers: { Authorization: `Bearer ${token}` },
-                });
-                const body = await listRes.json();
-                const list = Array.isArray(body) ? body : (body.podcasts ?? []);
-                const candidate = list.find(
-                    (p: { itunesId?: number | string; feedUrl?: string }) =>
-                        p.itunesId || p.feedUrl,
-                );
-
                 const res = await page.request.post("/api/podcasts/subscribe", {
-                    data: candidate.itunesId
-                        ? { itunesId: candidate.itunesId }
-                        : { feedUrl: candidate.feedUrl },
+                    data: { itunesId: chosenShow!.itunesId },
                     headers: { Authorization: `Bearer ${token}` },
                 });
 
@@ -1340,28 +1274,14 @@ test.describe("Dogfood walkthrough", () => {
 
         try {
             await session.step("subscribe to a podcast from the directory", async () => {
-                const listRes = await page.request.get("/api/podcasts/charts?limit=5", {
-                    headers: { Authorization: `Bearer ${token}` },
-                });
-                const chartBlocked = await outsideFailure(listRes, "the podcast chart");
-                if (chartBlocked) {
-                    externalBlocker = chartBlocked;
+                const picked = await pickUnfollowedShow(page.request, token);
+                if ("none" in picked) {
+                    externalBlocker = picked.none;
                     return { subscribed: false };
                 }
-                const list = await listRes.json();
-                const offered = Array.isArray(list) ? list : (list.podcasts ?? []);
-                const candidate = offered.find(
-                    (p: { itunesId?: number | string; feedUrl?: string }) =>
-                        p.itunesId || p.feedUrl,
-                );
-                if (!candidate) {
-                    externalBlocker = "the podcast directory returned nothing to subscribe to";
-                    return { subscribed: false };
-                }
+                const candidate = picked.show;
                 const res = await page.request.post("/api/podcasts/subscribe", {
-                    data: candidate.itunesId
-                        ? { itunesId: candidate.itunesId }
-                        : { feedUrl: candidate.feedUrl },
+                    data: { itunesId: candidate.itunesId },
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 const followBlocked = await outsideFailure(res, "following the show");
@@ -1371,7 +1291,7 @@ test.describe("Dogfood walkthrough", () => {
                 }
                 const created = await res.json();
                 podcastId = created.id ?? created.podcast?.id ?? "";
-                podcastTitle = created.title ?? created.podcast?.title ?? candidate.title ?? "";
+                podcastTitle = created.title ?? created.podcast?.title ?? candidate.title;
                 expect(podcastId, "subscribing succeeded but returned no podcast id").toBeTruthy();
                 return { id: podcastId, title: podcastTitle };
             });
@@ -1707,17 +1627,17 @@ test.describe("Dogfood walkthrough", () => {
 
         await session.step("the path's queue plays", async () => {
             // The path UI may or may not auto-start playback; either way the queue
-            // must be playable from the queue page.
+            // must be playable from the queue panel.
             const pause = page.getByTitle("pause", { exact: true });
             if (!(await pause.isVisible({ timeout: 2_000 }).catch(() => false))) {
-                await page.goto("/queue");
+                await openQueuePanel(page);
                 await settle(page, 1500);
                 const row = page
-                    .locator("main .group")
-                    .filter({ has: page.locator('[aria-label^="Play "]') })
+                    .locator("[data-queue-row]")
+                    .filter({ has: page.locator('[aria-label^="play "]') })
                     .first();
                 await row.hover();
-                await row.locator('[aria-label^="Play "]').first().click();
+                await row.locator('[aria-label^="play "]').first().click();
             }
             await page.getByTitle("pause", { exact: true }).waitFor({ timeout: 20_000 });
 
@@ -1756,18 +1676,36 @@ test.describe("Dogfood walkthrough", () => {
         test.setTimeout(120_000);
         session.setJourney("5f. Radio");
 
+        // Stations are chosen from the server's answers: only ones that would start (enough songs)
+        // and whose card is on the page. Two are needed: one to start and one to switch to.
+        picker ??= new LibraryPicker(page.request, token);
+        const playable = await picker.playableStations([
+            { name: "Shuffle All", type: "all", minTracks: 10 },
+            { name: "Workout", type: "workout", minTracks: 1 },
+            { name: "Discovery", type: "discovery", minTracks: 20 },
+            { name: "Favorites", type: "favorites", minTracks: 10 },
+        ]);
+        const card = (name: string) =>
+            page.locator("main button").filter({ has: page.locator("h3", { hasText: new RegExp(`^${escapeRegExp(name)}$`) }) });
+        const onPage: string[] = [];
+
         await session.step("open the radio page", async () => {
             await navigateByClick(page, "/radio");
             await settle(page, 2000);
             const cards = page.locator("main button").filter({ has: page.locator("h3") });
             await expect(cards.first()).toBeVisible({ timeout: 15_000 });
-            return { stationCards: await cards.count() };
+            for (const s of playable) if (await card(s.name).first().isVisible().catch(() => false)) onPage.push(s.name);
+            return { stationCards: await cards.count(), startable: onPage.length };
         });
 
+        if (onPage.length < 2) {
+            session.noteNotCovered(`radio journey: ${onPage.length} station(s) on the page would start (needs 2: one to start, one to switch to)`);
+            return;
+        }
+
         await session.step("start the first station", async () => {
-            const station = page.locator("main button").filter({ has: page.locator("h3") }).first();
-            const name = (await station.locator("h3").textContent())?.trim();
-            await station.click();
+            const name = onPage[0];
+            await card(name).first().click();
             await page.getByTitle("pause", { exact: true }).waitFor({ timeout: 30_000 });
 
             // Radio shuffles; the active track may change during the wait. Verify that
@@ -1800,12 +1738,7 @@ test.describe("Dogfood walkthrough", () => {
                     return (playing[0] ?? els.find((a) => a.src))?.src ?? "";
                 });
             const srcBefore = await readActiveSrc();
-            const stations = page.locator("main button").filter({ has: page.locator("h3") });
-            const next = stations.nth(1);
-            if (!(await next.isVisible().catch(() => false))) {
-                return { switched: false, note: "only one station card visible" };
-            }
-            await next.click();
+            await card(onPage[1]).first().click();
             const pause = page.getByTitle("pause", { exact: true });
             await expect(pause).toBeVisible({ timeout: 30_000 });
             // Poll for the station switch to take effect — gapless swap can leave main
@@ -1830,12 +1763,9 @@ test.describe("Dogfood walkthrough", () => {
 
         let query = "";
         await session.step("pick a query from the library", async () => {
-            const res = await page.request.get("/api/library/artists?limit=1", {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            const body = await res.json();
-            query = body.artists?.[0]?.name ?? "";
-            expect(query, "could not read an artist name").toBeTruthy();
+            picker ??= new LibraryPicker(page.request, token);
+            query = (await picker.firstTrack())?.artistName ?? "";
+            expect(query, "the library has no playable song to take an artist name from").toBeTruthy();
             return { query };
         });
 
@@ -2149,11 +2079,9 @@ test.describe("Dogfood walkthrough", () => {
             await session.step("phone: play something", async () => {
                 await phone.goto("/collection?tab=albums");
                 await settle(phone, 1500);
-                const album = firstAlbumCard(phone);
-                await album.waitFor({ state: "visible", timeout: 12_000 });
-                await album.tap();
-                await phone.waitForURL(/\/album\//, { timeout: 10_000 });
-                await settle(phone, 1200);
+                const album = await pickAlbum(1, "phone journey");
+                if (!album) return { playing: false };
+                await openAlbumById(phone, album.id, { tap: true });
                 await phone.getByLabel("Play all").tap();
                 await phone.getByTitle("pause", { exact: true }).waitFor({ timeout: 15_000 });
                 return { playing: true };
@@ -2224,11 +2152,9 @@ test.describe("Dogfood walkthrough", () => {
             await session.step("start music on the first tab", async () => {
                 await page.goto("/collection?tab=albums");
                 await settle(page, 1500);
-                const album = firstAlbumCard(page);
-                await album.waitFor({ state: "visible", timeout: 12_000 });
-                await album.click();
-                await page.waitForURL(/\/album\//, { timeout: 10_000 });
-                await settle(page, 1200);
+                const album = await pickAlbum(1, "second device journey");
+                if (!album) return { playing: false };
+                await openAlbumById(page, album.id);
                 await page.getByLabel("Play all").click();
                 await page.getByTitle("pause", { exact: true }).waitFor({ timeout: 15_000 });
                 return { playing: true };

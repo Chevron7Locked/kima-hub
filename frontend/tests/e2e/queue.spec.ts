@@ -6,10 +6,11 @@ import {
     waitForSrcChange,
 } from "./fixtures/test-helpers";
 
-/** Opens the queue through the sidebar link: page.goto reloads the page and wipes the in-memory queue. */
+/** Opens the right-hand panel on its queue tab in place: page.goto reloads the page and wipes the in-memory queue. */
 async function openQueueByClick(page: Page): Promise<void> {
-    await page.getByRole("link", { name: "Queue" }).click();
-    await page.waitForURL(/\/queue/);
+    const open = page.getByRole("button", { name: "open panel" });
+    if (await open.isVisible().catch(() => false)) await open.click();
+    await page.getByRole("tab", { name: "up next" }).click();
 }
 
 test.describe("Queue", () => {
@@ -27,26 +28,25 @@ test.describe("Queue", () => {
 
         await openQueueByClick(page);
 
-        // "Next Up" section must appear since the album has multiple tracks ahead
-        await expect(page.getByText(/Next Up/)).toBeVisible({ timeout: 5_000 });
+        // Rows up next must appear since the album has multiple tracks ahead
+        await expect(page.locator("[data-queue-row]").first()).toBeVisible({ timeout: 5_000 });
     });
 
-    test("queue page loads with Now Playing section when track is active", async ({ page }) => {
+    test("queue panel shows the playing track when one is active", async ({ page }) => {
         await startPlayingFirstAlbum(page);
 
         await openQueueByClick(page);
 
-        await expect(page.getByRole("heading", { name: "Now Playing" })).toBeVisible({ timeout: 5_000 });
+        await expect(page.locator("[data-queue-now]")).toBeVisible({ timeout: 5_000 });
     });
 
-    test("queue page shows track count", async ({ page }) => {
+    test("queue panel shows track count", async ({ page }) => {
         await startPlayingFirstAlbum(page);
 
-        await page.goto("/queue");
-        await page.waitForLoadState("domcontentloaded");
+        await openQueueByClick(page);
 
-        // The queue header shows "{n} track(s) in queue"
-        await expect(page.locator("text=/\\d+ track/")).toBeVisible({ timeout: 5_000 });
+        // The queue header reads "{n} track(s) in the queue"
+        await expect(page.locator("[data-queue-count]")).toHaveText(/\d+ tracks? in the queue/, { timeout: 5_000 });
     });
 
     test("Play now jumps to selected queue item", async ({ page }) => {
@@ -55,8 +55,8 @@ test.describe("Queue", () => {
         const srcBefore = await getAudioSrc(page);
 
         await openQueueByClick(page);
-        // Each queued row has "Play <title>"; the player's own button is plain "Play"/"Pause".
-        const playNowButtons = page.getByRole("button", { name: /^Play .+/ });
+        // Each queued row has "play <title>"; the player's own button is plain "Play"/"Pause".
+        const playNowButtons = page.locator("[data-queue-row]").getByRole("button", { name: /^play .+/ });
         await expect(playNowButtons.first(), "a started album leaves tracks up next").toBeAttached({ timeout: 5_000 });
         await playNowButtons.first().click();
 
@@ -69,13 +69,15 @@ test.describe("Queue", () => {
 
         await openQueueByClick(page);
 
-        const removeButtons = page.getByRole("button", { name: /^Remove .+ from queue$/ });
-        await expect(removeButtons.first(), "a started album leaves tracks up next").toBeAttached({ timeout: 5_000 });
-        const initialCount = await removeButtons.count();
+        // A row's actions show on hover where there is a pointer, so the rows are found by their markup.
+        const upNext = page.locator("[data-queue-row]").filter({ has: page.locator('button[aria-label$=" from the queue"]') });
+        await expect(upNext.first(), "a started album leaves tracks up next").toBeAttached({ timeout: 5_000 });
+        const initialCount = await upNext.count();
 
-        await removeButtons.first().click();
+        await upNext.first().hover();
+        await upNext.first().getByRole("button", { name: /^remove .+ from the queue$/ }).click();
 
-        await expect(removeButtons).toHaveCount(initialCount - 1, { timeout: 3_000 });
+        await expect(upNext).toHaveCount(initialCount - 1, { timeout: 3_000 });
     });
 
     test("Move up reorders queue item", async ({ page }) => {
@@ -83,22 +85,17 @@ test.describe("Queue", () => {
 
         await openQueueByClick(page);
 
-        const moveUpButtons = page.getByRole("button", { name: /^Move .+ up$/, disabled: false });
-        await expect(moveUpButtons.first(), "the second track up next can move up").toBeAttached({ timeout: 5_000 });
+        // A row's actions show on hover where there is a pointer, so the rows are found by their markup. The first
+        // row up next cannot move up; the second one moves to the top.
+        const upNext = page.locator("[data-queue-row]").filter({ has: page.locator('button[aria-label$=" up"]') });
+        await expect(upNext.nth(1), "two tracks up next").toBeAttached({ timeout: 5_000 });
+        const titlesBefore = await upNext.locator("p.text-sm").allTextContents();
+        const targetTitle = titlesBefore[1];
 
-        // Grab the track titles from "Next Up" before the reorder.
-        // The first item's Move up button is always disabled, so the first
-        // ENABLED button belongs to index 1 -- that's the track we'll move.
-        const nextUpSection = page.locator("section").filter({
-            has: page.locator("h2", { hasText: "Next Up" }),
-        });
-        const titlesBefore = await nextUpSection.locator("h3").allTextContents();
-        expect(titlesBefore.length, "two tracks up next").toBeGreaterThanOrEqual(2);
-        const targetTitle = titlesBefore[1]; // the one that will move to index 0
+        await upNext.nth(1).hover();
+        await upNext.nth(1).getByRole("button", { name: /^move .+ up$/, disabled: false }).click();
 
-        await moveUpButtons.first().click();
-
-        await expect.poll(async () => (await nextUpSection.locator("h3").allTextContents())[0]).toBe(targetTitle);
+        await expect.poll(async () => (await upNext.locator("p.text-sm").allTextContents())[0]).toBe(targetTitle);
     });
 
     test("Clear queue empties the up-next list", async ({ page }) => {
@@ -107,11 +104,11 @@ test.describe("Queue", () => {
         await openQueueByClick(page);
 
         // Clear queue only appears when queue.length > 0, and asks before clearing
-        const clearBtn = page.getByRole("button", { name: "Clear queue" });
+        const clearBtn = page.getByRole("button", { name: "clear queue" });
         await expect(clearBtn).toBeVisible({ timeout: 5_000 });
         await clearBtn.click();
-        await page.getByRole("dialog", { name: "Clear the queue?" }).getByRole("button", { name: "Clear queue" }).click();
+        await page.getByRole("dialog", { name: "clear the queue?" }).getByRole("button", { name: "clear queue" }).click();
 
-        await expect(page.getByText("No tracks in queue")).toBeVisible({ timeout: 5_000 });
+        await expect(page.getByText("the queue is empty")).toBeVisible({ timeout: 5_000 });
     });
 });

@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { escapeRegExp, readPlayer, softwareWebGL } from "./fixtures/shared";
+import { requireBaseUrl } from "./fixtures/target";
 
 // ---------------------------------------------------------------------------
 // The phone layout of /vibe at 390x664, driven through the real page.
@@ -19,7 +20,7 @@ import { escapeRegExp, readPlayer, softwareWebGL } from "./fixtures/shared";
 // the only reason a journey fails.
 // ---------------------------------------------------------------------------
 
-const BASE_URL = process.env.KIMA_UI_BASE_URL || "http://127.0.0.1:3030";
+const BASE_URL = requireBaseUrl();
 const USERNAME = process.env.KIMA_TEST_USERNAME ?? "kima_agent";
 const PASSWORD = process.env.KIMA_TEST_PASSWORD ?? "kima-test";
 
@@ -32,10 +33,6 @@ const PHONE = {
 
 test.use({ ...PHONE, ...softwareWebGL });
 
-const SHEET = '[data-testid="vibe-sheet"]';
-const SCRIM = '[data-testid="vibe-sheet-scrim"]';
-const PEEK_PLAYER = '[data-testid="vibe-peek-player"]';
-const ACTIONS = '[data-testid="vibe-sheet-actions"]';
 const FIELD = '[data-testid="vibe-map-field"]';
 const SEARCH = '[aria-label="Search tracks or artists"]';
 const RESULTS = "#vibe-search-results";
@@ -537,7 +534,7 @@ test.describe("Vibe, phone layout", () => {
         const half = await readSheet(page);
         expect(half.snap, "a pick must open the sheet to half").toBe("half");
 
-        const queue = page.getByTestId("vibe-sheet").getByRole("button", { name: /^queue$/i }).first();
+        const queue = page.getByTestId("vibe-sheet").getByRole("tab", { name: /^queue$/i }).first();
         await expect(queue, "the sheet must carry a queue tab").toBeVisible({ timeout: 5_000 });
         const box = must(await queue.boundingBox(), "the queue tab");
         const sheetBottom = Math.min(bottomOf(half.sheet), bottomOf(half.main));
@@ -619,32 +616,17 @@ test.describe("Vibe, phone layout", () => {
         expect(geometry.intersectsButton, "the results must not cover an action button").toBe(false);
     });
 
-    // Contract 6: dragging the handle to the top makes the sheet full at three
-    // quarters of its host's height — not flush to the top, with the map still
-    // visible above it.
-    test("dragging the handle to the top makes the sheet full at three quarters of its host", async ({ page }) => {
+    // Contract 6: dragging the handle to the top makes the sheet full: the whole page content, top to bottom,
+    // so the queue and lyrics get the height.
+    test("dragging the handle to the top makes the sheet fill the page", async ({ page }) => {
         const full = await openFull(page);
         expect(full.snap, "the sheet must report full").toBe("full");
 
-        const expected = full.host.height * 0.75;
         expect(
-            Math.abs(full.sheet.height - expected),
-            `the full sheet must be 0.75 x its host (${expected.toFixed(1)} px), measured ${full.sheet.height.toFixed(1)}`,
+            Math.abs(full.sheet.height - full.host.height),
+            `the full sheet must be its host's height (${full.host.height.toFixed(1)} px), measured ${full.sheet.height.toFixed(1)}`,
         ).toBeLessThanOrEqual(2);
-
-        const gap = full.sheet.y - full.host.y;
-        expect(gap, "the full sheet must stop below the host's top").toBeGreaterThan(10);
-        expect(
-            Math.abs(gap - full.host.height * 0.25),
-            `the band above the full sheet must be a quarter of the host (${(full.host.height * 0.25).toFixed(1)} px), measured ${gap.toFixed(1)}`,
-        ).toBeLessThanOrEqual(2);
-
-        expect(full.field.y, "the map must start at the host's top").toBeLessThanOrEqual(full.host.y + 1);
-        expect(
-            full.field.y + full.field.height,
-            "the map must reach the sheet's top, so a band of it stays above the sheet",
-        ).toBeGreaterThanOrEqual(full.sheet.y - 1);
-        expect(gap, "a visible band of map must remain above the sheet").toBeGreaterThanOrEqual(full.host.height * 0.2);
+        expect(Math.abs(full.sheet.y - full.host.y), "the full sheet must reach the host's top").toBeLessThanOrEqual(1);
         expect(
             Math.abs(bottomOf(full.sheet) - bottomOf(full.host)),
             "the sheet must stay anchored to the host's bottom",

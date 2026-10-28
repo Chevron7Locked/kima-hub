@@ -5,7 +5,7 @@
  *
  *   KIMA_TEST_USERNAME=… KIMA_TEST_PASSWORD=… node ../scripts/take-screenshots.js [name ...]
  *
- * KIMA_UI_BASE_URL defaults to http://127.0.0.1:3030. With no names it takes everything;
+ * KIMA_UI_BASE_URL is required and must not be on port 3030 (production). With no names it takes everything;
  * with names (for example `vibe-map mobile-player social-card`) it takes only those.
  * The card is rendered last from scripts/social-card.html, using the screenshots already on disk.
  *
@@ -20,9 +20,37 @@ const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
+/** The test server's address from KIMA_UI_BASE_URL; there is no default, and port 3030 (production) is refused. */
+function requireBaseUrl() {
+    const value = process.env.KIMA_UI_BASE_URL;
+    if (!value) {
+        console.error(
+            "KIMA_UI_BASE_URL is not set. Set it to the address of the test server " +
+                "(for example http://127.0.0.1:3056). The tests never choose a server on their own.",
+        );
+        process.exit(1);
+    }
+    let url;
+    try {
+        url = new URL(value);
+    } catch {
+        console.error(`KIMA_UI_BASE_URL is not a web address: "${value}"`);
+        process.exit(1);
+    }
+    const port = url.port || (url.protocol === "https:" ? "443" : "80");
+    if (port === "3030") {
+        console.error(
+            "KIMA_UI_BASE_URL points at port 3030, which is the production Kima server. " +
+                "These tests never run against it. Point KIMA_UI_BASE_URL at a test server.",
+        );
+        process.exit(1);
+    }
+    return value;
+}
+
 const { chromium } = require(require.resolve("playwright", { paths: [process.cwd(), __dirname] }));
 
-const BASE_URL = process.env.KIMA_UI_BASE_URL || "http://127.0.0.1:3030";
+const BASE_URL = requireBaseUrl();
 const USERNAME = process.env.KIMA_TEST_USERNAME;
 const PASSWORD = process.env.KIMA_TEST_PASSWORD;
 const OUT_DIR = path.resolve(__dirname, "../assets/screenshots");

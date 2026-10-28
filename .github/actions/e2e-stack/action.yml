@@ -36,11 +36,11 @@ runs:
           run: |
               docker run -d \
                 --name ${{ inputs.container }} \
-                -p 3030:3030 \
+                -p 3080:3030 \
                 -p 3006:3006 \
                 -v ${{ inputs.volume }}:/data \
                 kima:${{ inputs.tag }}
-              timeout 90 bash -c 'until curl -sf http://localhost:3030/api/health; do sleep 3; done'
+              timeout 90 bash -c 'until curl -sf http://localhost:3080/api/health; do sleep 3; done'
 
         - name: Create test user
           shell: bash

@@ -8,62 +8,41 @@ import { loginAsTestUser, getAuthToken } from "./fixtures/test-helpers";
 const POLL_INTERVAL_MS = 10_000;
 const ENRICHMENT_TIMEOUT_MS = 45 * 60 * 1000;
 
-type EnrichmentStatus = {
-    status: string;
-    currentPhase: string | null;
-    completionNotificationSent: boolean;
-    tracks: { total: number; completed: number; failed: number };
-    artists: { total: number; completed: number; failed: number };
-    audio: { total: number; completed: number; failed: number; processing: number };
+type Step = { total: number; completed: number; failed?: number };
+type EnrichmentProgress = {
+    artists: Step;
+    trackTags: { total: number; enriched: number };
+    audioAnalysis: Step;
+    clapEmbeddings: Step;
+    moods: Step;
+    similarity: Step;
+    isFullyComplete: boolean;
 };
 
-/** Poll /api/enrichment/status until idle+complete or timeout.
- *  Returns the final status object. */
+/** Poll /api/enrichment/progress until every step, through moods and similarity, is complete again. */
 async function waitForEnrichment(
     page: Parameters<typeof loginAsTestUser>[0],
     token: string,
     timeoutMs: number,
-): Promise<EnrichmentStatus> {
-    const deadline = Date.now() + timeoutMs;
-    let last: EnrichmentStatus | null = null;
-
-    while (Date.now() < deadline) {
+): Promise<EnrichmentProgress> {
+    const started = Date.now();
+    let last: EnrichmentProgress | null = null;
+    while (Date.now() - started < timeoutMs) {
         await page.waitForTimeout(POLL_INTERVAL_MS);
-
-        try {
-            const res = await page.request.get("/api/enrichment/status", {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!res.ok()) continue;
-
-            const s = (await res.json()) as EnrichmentStatus;
-            last = s;
-
-            const elapsed = Math.round((Date.now() - (deadline - timeoutMs)) / 1000);
-            const pct =
-                s.tracks.total > 0
-                    ? Math.round((s.tracks.completed / s.tracks.total) * 100)
-                    : 0;
-            const phase = s.currentPhase ? ` phase=${s.currentPhase}` : "";
-            console.log(
-                `[${elapsed}s] status=${s.status}${phase} | ` +
-                `tracks=${s.tracks.completed}/${s.tracks.total} (${pct}%) | ` +
-                `artists=${s.artists.completed}/${s.artists.total} | ` +
-                `audio=${s.audio.completed}/${s.audio.total}`,
-            );
-
-            if (s.status === "idle" && s.completionNotificationSent) {
-                return s;
-            }
-        } catch {
-            // transient error -- keep polling
-        }
+        const res = await page.request.get("/api/enrichment/progress", {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok()) continue;
+        const p = (await res.json()) as EnrichmentProgress;
+        last = p;
+        console.log(
+            `[${Math.round((Date.now() - started) / 1000)}s] artists=${p.artists.completed}/${p.artists.total} ` +
+                `analysis=${p.audioAnalysis.completed}/${p.audioAnalysis.total} vectors=${p.clapEmbeddings.completed}/${p.clapEmbeddings.total} ` +
+                `moods=${p.moods.completed}/${p.moods.total} similarity=${p.similarity.completed}/${p.similarity.total}`,
+        );
+        if (p.isFullyComplete) return p;
     }
-
-    throw new Error(
-        `Enrichment did not complete within ${timeoutMs / 60_000} minutes. ` +
-        `Last status: ${JSON.stringify(last)}`,
-    );
+    throw new Error(`Enrichment did not complete within ${timeoutMs / 60_000} minutes. Last progress: ${JSON.stringify(last)}`);
 }
 
 test.describe("Enrichment Cycle", () => {
@@ -76,59 +55,33 @@ test.describe("Enrichment Cycle", () => {
 
         const token = await getAuthToken(page);
 
-        // Stop any currently running enrichment before wiping
-        await page.request.post("/api/enrichment/stop", {
+        const wipeRes = await page.request.post("/api/enrichment/wipe-and-rerun", {
             headers: { Authorization: `Bearer ${token}` },
         });
-        await page.waitForTimeout(2_000);
+        expect(wipeRes.ok()).toBe(true);
+        const wiped = (await wipeRes.json()) as { artists: number; tracks: number; vectors: number };
 
-        const resetRes = await page.request.post("/api/enrichment/reset-all", {
-            headers: { Authorization: `Bearer ${token}` },
-        });
-        expect(resetRes.ok()).toBe(true);
-        const resetData = (await resetRes.json()) as { tracksReset: number; artistsReset: number };
-
-        if (resetData.tracksReset < 10) {
-            test.skip(
-                true,
-                `Library too small (${resetData.tracksReset} tracks) -- skipping enrichment cycle (empty container)`,
-            );
+        if (wiped.tracks < 10) {
+            test.skip(true, `Library too small (${wiped.tracks} tracks) -- skipping enrichment cycle (empty container)`);
             return;
         }
+        console.log(`Wiped: ${wiped.tracks} tracks, ${wiped.artists} artists, ${wiped.vectors} sound vectors`);
 
-        console.log(
-            `Reset complete: ${resetData.tracksReset} tracks, ${resetData.artistsReset} artists cleared`,
-        );
-
-        // Confirm completionNotificationSent is now falsy (null or false after reset)
-        const statusAfterReset = await page.request.get("/api/enrichment/status", {
+        // The wipe sends every track back through the pipeline, so the progress is no longer complete.
+        const afterWipe = (await (await page.request.get("/api/enrichment/progress", {
             headers: { Authorization: `Bearer ${token}` },
-        });
-        const resetStatus = (await statusAfterReset.json()) as EnrichmentStatus;
-        expect(resetStatus.completionNotificationSent).toBeFalsy();
+        })).json()) as EnrichmentProgress;
+        expect(afterWipe.isFullyComplete).toBe(false);
 
-        const startRes = await page.request.post("/api/enrichment/full", {
-            headers: { Authorization: `Bearer ${token}` },
-        });
-        expect(startRes.ok()).toBe(true);
-        console.log("Full enrichment started");
-
-        const finalStatus = await waitForEnrichment(page, token, ENRICHMENT_TIMEOUT_MS);
-
-        console.log(
-            `Enrichment complete: tracks ${finalStatus.tracks.completed}/${finalStatus.tracks.total} | ` +
-            `audio ${finalStatus.audio.completed}/${finalStatus.audio.total} | ` +
-            `failures ${finalStatus.tracks.failed + finalStatus.artists.failed}`,
-        );
+        const finalProgress = await waitForEnrichment(page, token, ENRICHMENT_TIMEOUT_MS);
 
         // ---- Functional assertions after enrichment -------------------------
 
-        // 1. At least 80% of tracks should have completed enrichment
-        const trackSuccessRate =
-            finalStatus.tracks.total > 0
-                ? finalStatus.tracks.completed / finalStatus.tracks.total
-                : 0;
-        expect(trackSuccessRate).toBeGreaterThanOrEqual(0.8);
+        // 1. At least 80% of tracks made it through analysis and sound vectors
+        const analysed = finalProgress.audioAnalysis.completed / Math.max(1, finalProgress.audioAnalysis.total);
+        const embedded = finalProgress.clapEmbeddings.completed / Math.max(1, finalProgress.clapEmbeddings.total);
+        expect(analysed).toBeGreaterThanOrEqual(0.8);
+        expect(embedded).toBeGreaterThanOrEqual(0.8);
 
         // 2. Vibe map should return embedded tracks
         const vibeRes = await page.request.get("/api/vibe/map", {
@@ -161,7 +114,7 @@ test.describe("Enrichment Cycle", () => {
         if (failRes.ok()) {
             const fails = (await failRes.json()) as Record<string, number>;
             const totalFails = Object.values(fails).reduce((a, b) => a + b, 0);
-            const failRate = resetData.tracksReset > 0 ? totalFails / resetData.tracksReset : 0;
+            const failRate = totalFails / wiped.tracks;
             expect(failRate).toBeLessThan(0.2);
         }
     });

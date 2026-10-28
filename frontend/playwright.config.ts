@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
+import { requireBaseUrl } from "./tests/e2e/fixtures/target";
 
-const baseURL = process.env.KIMA_UI_BASE_URL || "http://127.0.0.1:3030";
+const baseURL = requireBaseUrl();
 
 export default defineConfig({
     testDir: "./tests/e2e",
@@ -17,7 +18,8 @@ export default defineConfig({
     reporter: [["list"], ["html", { open: "never" }]],
     webServer: process.env.KIMA_E2E_START_WEB
         ? {
-              command: "npm run dev",
+              // The dev server on the base URL's own port: `npm run dev` listens on 3030, which tests may not use.
+              command: `npx next dev -p ${new URL(baseURL).port || "80"}`,
               url: baseURL,
               reuseExistingServer: true,
               timeout: 120_000,

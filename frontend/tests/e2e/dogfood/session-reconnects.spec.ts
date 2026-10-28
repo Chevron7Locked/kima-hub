@@ -6,8 +6,9 @@
 import { test, expect } from "@playwright/test";
 import { DogfoodSession } from "./session";
 import { settle } from "../fixtures/shared";
+import { requireBaseUrl } from "../fixtures/target";
 
-const baseUrl = process.env.KIMA_UI_BASE_URL || "http://127.0.0.1:3030";
+const baseUrl = requireBaseUrl();
 const username = process.env.KIMA_TEST_USERNAME || "";
 const password = process.env.KIMA_TEST_PASSWORD || "";
 

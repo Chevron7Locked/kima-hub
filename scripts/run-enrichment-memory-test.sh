@@ -1,13 +1,30 @@
 #!/usr/bin/env bash
 # Runs the enrichment-cycle Playwright test and fails if host SUnreclaim grows
 # more than SUNRECLAIM_LIMIT_MB (default 1024). Usage: [container-name].
-# Env: KIMA_TEST_PASSWORD (required), KIMA_TEST_USERNAME, KIMA_UI_BASE_URL,
-# KIMA_CONTAINER (default kima-test).
+# Env: KIMA_TEST_PASSWORD and KIMA_UI_BASE_URL (both required; never port 3030,
+# the production server), KIMA_TEST_USERNAME, KIMA_CONTAINER (default kima-test).
 
 set -euo pipefail
 
 CONTAINER="${KIMA_CONTAINER:-kima-test}"
-BASE_URL="${KIMA_UI_BASE_URL:-http://127.0.0.1:3030}"
+
+# This run wipes and re-enriches the library, so the address must be given and must not be production.
+if [[ -z "${KIMA_UI_BASE_URL:-}" ]]; then
+    echo "[error] KIMA_UI_BASE_URL is not set. Set it to the address of the test server"
+    echo "        (for example http://127.0.0.1:3056). The tests never choose a server on their own."
+    exit 1
+fi
+BASE_URL="${KIMA_UI_BASE_URL}"
+if [[ ! "${BASE_URL}" =~ ^https?://[^/:]+(:([0-9]+))?(/.*)?$ ]]; then
+    echo "[error] KIMA_UI_BASE_URL is not a web address: \"${BASE_URL}\""
+    exit 1
+fi
+if [[ "${BASH_REMATCH[2]}" == "3030" ]]; then
+    echo "[error] KIMA_UI_BASE_URL points at port 3030, which is the production Kima server."
+    echo "        These tests never run against it. Point KIMA_UI_BASE_URL at a test server."
+    exit 1
+fi
+export KIMA_UI_BASE_URL
 SUNRECLAIM_LIMIT="${SUNRECLAIM_LIMIT_MB:-1024}"
 
 # ---------------------------------------------------------------------------

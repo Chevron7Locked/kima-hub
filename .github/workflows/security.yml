@@ -88,7 +88,7 @@ jobs:
               env:
                   KIMA_TEST_USERNAME: ${{ env.KIMA_TEST_USERNAME }}
                   KIMA_TEST_PASSWORD: ${{ env.KIMA_TEST_PASSWORD }}
-                  KIMA_UI_BASE_URL: http://127.0.0.1:3030
+                  KIMA_UI_BASE_URL: http://127.0.0.1:3080
 
             - name: Upload results on failure
               if: failure()
