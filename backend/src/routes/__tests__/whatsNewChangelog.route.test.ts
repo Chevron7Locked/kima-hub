@@ -74,6 +74,20 @@ it("lists every release newest first, and hides admin-only items from members", 
     expect(member.openCount).toBe(0);
 });
 
+it("tells an upgraded library, and only an upgraded one, that its sound features are rebuilt", async () => {
+    // This library holds analysis from before 1.12: an upgrade, so everyone is told, members too.
+    expect(releaseOf(await changelog("admin"), "1.12.0").items.some((i) => i.key === "sound.rebuild")).toBe(true);
+    expect(releaseOf(await changelog("user"), "1.12.0").items.some((i) => i.key === "sound.rebuild")).toBe(true);
+
+    // A library analysed only after the release is a fresh install: there was nothing to rebuild.
+    await prisma.track.update({ where: { id: `${P}-trk` }, data: { analyzedAt: new Date() } });
+    try {
+        expect(releaseOf(await changelog("admin"), "1.12.0").items.some((i) => i.key === "sound.rebuild")).toBe(false);
+    } finally {
+        await prisma.track.update({ where: { id: `${P}-trk` }, data: { analyzedAt: OLD_DATE } });
+    }
+});
+
 it("keeps a dismissed requirement open until the library verifiably passes through, then closes itself", async () => {
     expect((await request(app()).post("/whats-new/1.11.0/dismiss").set("Authorization", as(ADMIN, "admin")).send({})).status).toBe(200);
 
@@ -87,8 +101,11 @@ it("keeps a dismissed requirement open until the library verifiably passes throu
     const askedAboutLibrary = () => libraryAsked.mock.calls.filter((c) => String(c[0]).includes("track_embeddings")).length;
     const ledger = await request(app()).get("/whats-new/open").set("Authorization", as(ADMIN, "admin"));
     expect(ledger.status).toBe(200);
-    // One request asks about the library once for the release's date, however many of its items depend on it.
-    expect(askedAboutLibrary()).toBe(1);
+    // One request asks about the library once per release date, however many of that release's items depend on it.
+    const upgradeDates = new Set(
+        RELEASES.filter((r) => r.items.some((i) => (i.kind === "action" || i.kind === "note") && i.olderLibraryOnly)).map((r) => r.date),
+    );
+    expect(askedAboutLibrary()).toBe(upgradeDates.size);
     expect(ledger.body.items).toEqual([expect.objectContaining({ version: "1.11.0", key: "engine.wipe" })]);
 
     // The rerun stamps the track with today's date; the ledger then closes with no further ceremony.

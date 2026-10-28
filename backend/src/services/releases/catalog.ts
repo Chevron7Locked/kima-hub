@@ -23,7 +23,11 @@ interface ItemBase {
 }
 
 export type ReleaseItem =
-    | (ItemBase & { kind: "note" })
+    | (ItemBase & {
+          kind: "note";
+          /** Show only when the library holds enrichment from before this release's date (an upgrade, not a fresh install). */
+          olderLibraryOnly?: boolean;
+      })
     | (ItemBase & {
           kind: "action";
           /** The label on the button that runs it. */
@@ -105,9 +109,92 @@ export const RELEASES: Release[] = [
         version: "1.12.0",
         title: "Kima 1.12",
         summary:
-            "A real podcast browser, analysis that listens to the middle of each song, per-step enrichment reruns, update pings, and fixes.",
+            "Moods that come from listening, 14 mood stations and new daily mixes, Discover kept to Discover, a podcast browser, a new side panel, and security fixes.",
         date: "2026-10-14",
         items: [
+            {
+                kind: "note",
+                key: "sound.rebuild",
+                title: "Your sound features are rebuilt after this update",
+                summary:
+                    "Kima now uses the music-tuned sound model, so it builds your library's sound vectors again, on its own.",
+                body:
+                    "This update replaces the sound vectors your library got in 1.11 with ones from the music-tuned sound " +
+                    "model, and builds them again in the background. You don't need to start anything.\n\n" +
+                    "Until it finishes, similar tracks, the vibe map, search by sound, and the new mood stations and mixes " +
+                    "fill in as songs are done. Everything else stays as it is: your music, playlists, plays, likes, edits, " +
+                    "and what enrichment already worked out about each song.\n\n" +
+                    "How long it takes depends on your library and hardware: about half an hour for 9,000 songs with a GPU, " +
+                    "and roughly an hour or more per 10,000 songs without one. Settings, under Library Enrichment, shows the " +
+                    "progress.",
+                links: [{ label: "See progress in Settings", href: "/settings#cache" }],
+                olderLibraryOnly: true,
+            },
+            {
+                kind: "note",
+                key: "moods.learned",
+                title: "Moods that come from listening",
+                summary: "Every song is scored on 21 moods, learned from songs people have tagged, and judged against your own library.",
+                body:
+                    "Kima now reads moods from the sound itself. Each song is scored on 21 moods, from calm, dreamy and " +
+                    "nostalgic to energetic, aggressive, groovy and epic. Each mood was learned from thousands of songs " +
+                    "people have tagged with it, and is read from the same sound vectors that match your songs.\n\n" +
+                    "A song counts as a mood when it scores well above what is usual for your library, so \"calm\" means " +
+                    "calm for your music. Mood tags, mood mixes, mood stations and the vibe map's mood view all use the " +
+                    "same scores and the same line.\n\n" +
+                    "Moods are their own step in Library Enrichment, after sound vectors, and you can re-run them there.",
+                links: [{ label: "Open radio", href: "/radio" }],
+            },
+            {
+                kind: "note",
+                key: "radio.stations",
+                title: "14 mood stations",
+                summary: "Calm, Energy, Intense, Happy, Melancholy, two Focus stations, Late Night and more, each an endless shuffle of your own music.",
+                body:
+                    "The radio page has 14 mood stations: Calm, Energy, Intense, Happy, Melancholy, Focus: Calm, Focus: " +
+                    "Energy, Feel-good, Late Night, Romantic, Road Trip, Nostalgic, Epic and Wildcard. Each plays every " +
+                    "song in your library that fits, spread so one artist doesn't run together.\n\n" +
+                    "Late Night is yours alone: it starts from the songs you actually play between 10pm and 4am, then " +
+                    "songs like them. Wildcard plays the songs no mood claims. Genre stations now count each genre once, " +
+                    "however it is spelled, and play only your library.",
+                links: [{ label: "Open radio", href: "/radio" }],
+            },
+            {
+                kind: "note",
+                key: "mixes.recipes",
+                title: "New daily mixes",
+                summary: "Mixes are built from moods and how songs sound, 20 songs each, fresh every day, two songs per artist at most.",
+                body:
+                    "Daily mixes are now recipes: each one asks for a blend of moods and readings (tempo, energy, " +
+                    "instrumental or not) and draws 20 songs that fit, at most two by any one artist, fresh each day and " +
+                    "different for each person. Some lean toward songs like the ones you play most. Midnight Drive and " +
+                    "Late Night come from your own late-night listening.",
+            },
+            {
+                kind: "note",
+                key: "discover.only",
+                title: "Discover keeps to itself",
+                summary: "Weekly suggestions show and play only there now, and your own albums no longer get mixed in.",
+                body:
+                    "Albums from Discover Weekly are for trying out, so they now show and play only on that page: not in " +
+                    "your collection, radio, mixes, search or the vibe map. Like a song and its whole album joins your " +
+                    "library.\n\n" +
+                    "Kima also stopped mistaking albums you got yourself for suggestions.",
+                links: [{ label: "Open Discover", href: "/discover" }],
+            },
+            {
+                kind: "note",
+                key: "panel.redesign",
+                title: "A new side panel",
+                summary: "The right-hand panel shows what's playing and up next above, and everything Kima is doing below. The queue lives there now.",
+                body:
+                    "The right-hand panel is two halves. Listening shows the song that's playing, then what's up next, " +
+                    "its lyrics or its artist. Activity shows everything Kima is doing in one list, newest first, or just " +
+                    "alerts, downloads, imports or history. The queue page is gone: the panel's up next list moves, " +
+                    "removes and clears songs.\n\n" +
+                    "The sidebar's mixes show their covers, and the release radar, new and upcoming albums from artists " +
+                    "you follow, has a place in the sidebar.",
+            },
             {
                 kind: "note",
                 key: "podcasts.browse",
@@ -122,9 +209,15 @@ export const RELEASES: Release[] = [
                 kind: "note",
                 key: "analysis.middle",
                 title: "Analysis listens to the middle of each song",
-                summary: "Tempo, key and moods come from the middle 90 seconds instead of the last 90.",
+                summary: "Tempo, key, energy and feel come from the middle 90 seconds instead of the last 90.",
                 body:
-                    "Audio analysis used to read each song's last 90 seconds, so a fade-out or a silent tail could stand in for the whole song. It now reads the middle 90 seconds. Mood mixes, radio stations, and the tempo, key and mood tags you see come from this reading. Song matching and the vibe map don't change: they already sample the whole song.\n\nSongs analysed before 1.12 keep their old readings until they are analysed again. If your library hasn't had 1.11's wipe and re-run yet, that is the one to do: it re-runs everything, this analysis included. If it has, an admin can re-run from audio analysis in Library Enrichment.",
+                    "Audio analysis used to read each song's last 90 seconds, so a fade-out or a silent tail could stand in " +
+                    "for the whole song. It now reads the middle 90 seconds. Tempo, key, energy, danceability and part of " +
+                    "each song's feel come from this reading. Song matching and moods don't depend on it: they listen " +
+                    "across the whole song.\n\n" +
+                    "Songs analysed before 1.12 keep their old readings until they are analysed again. If your library " +
+                    "hasn't had 1.11's wipe and re-run yet, that is the one to do: it re-runs everything, this analysis " +
+                    "included. If it has, an admin can re-run from audio analysis in Library Enrichment.",
                 links: [
                     { label: "1.11's wipe and re-run", href: "/changelog#1.11.0" },
                     { label: "Open Library Enrichment settings", href: "/settings#cache" },
@@ -133,11 +226,12 @@ export const RELEASES: Release[] = [
             {
                 kind: "note",
                 key: "enrichment.rerun",
-                title: "Rerun from any step",
-                summary:
-                    "Pick which enrichment step to redo; a fresh vibe map comes with each rerun.",
+                title: "Re-run from any step",
+                summary: "Pick which enrichment step to redo; the vibe map is laid out fresh each time.",
                 body:
-                    "Settings now let you re-run enrichment from whichever step you choose — start over on audio analysis, or just re-build the vibe map without repeating identification or artists. Each rerun produces a fresh map layout.\n\nThe full wipe is still there too.",
+                    "Settings let you re-run enrichment from whichever step you choose: identification, artists, audio " +
+                    "analysis, sound vectors, moods, or similarity and the map. Each clears only itself and what depends on " +
+                    "it, and every re-run lays out a fresh vibe map. The full wipe is still there too.",
                 links: [{ label: "Open Library Enrichment settings", href: "/settings#cache" }],
             },
             {
@@ -152,11 +246,28 @@ export const RELEASES: Release[] = [
             {
                 kind: "note",
                 key: "fixes.12",
-                title: "Fixes and small improvements",
+                title: "Fixes, security and small improvements",
                 summary:
-                    "Operator-only downloads, reverse playlist order, touch-screen controls, preview streams everywhere, a right-sized play queue for iOS, and security fixes.",
+                    "Two critical Next.js fixes and Node's Brotli fix, operator-only downloads, reverse playlist order, previews that play again, and more.",
                 body:
-                    "- Only operators can start downloads unless they turn on Member Downloads in Settings → Download Preferences; deleting stays operator-only, and download buttons only show to people who can use them\n- Search only finds the shows you follow; it used to list shows other people follow\n- Feeds and links that redirect are checked at every step, so none can point Kima at your own network\n- Signing out clears what the app remembered, so the next person on that screen sees only their own\n- Playlists can play in reverse order: a toggle beside shuffle, remembered per playlist\n- Every release's note now stays on the changelog page, newest first; anything a release still needs from you stays listed there until it's done\n- Your library follows your disk: a song whose file two scans in a row can't find is removed, and logged first; if a whole drive drops out, nothing is removed (server setting RECONCILE_MODE=flag keeps them)\n- Touch screens (artist and album pages): reveal-on-hover controls now show on tap too\n- Preview streams play on every client (the range headers were missing)\n- The release window says \"What's new\" everywhere, not \"Kevin's note\" on wide screens\n- An ordered play queue for iOS that doesn't drag the full artist payload\n- The collection page hides delete buttons from non-admins\n- Podcast episodes from hosts that don't state a file size now download and stay cached\n- Following a show twice, or one whose feed moved, no longer fails, and a show you just followed appears in search right away\n- Moving a song in a playlist shows at once\n- A song whose file is back is no longer treated as missing\n- Leaving a page while it loads no longer reports connection errors\n- When a podcast episode ends, the show's next episode plays, and the next button works for podcasts\n- An episode you've listened to 95% of counts as finished\n- Audio analysis and sound vectors take turns, so each has your processor and graphics card to itself; an admin can run both at once in Settings, under Library Enrichment\n- Song previews play again (Deezer stopped answering the search Kima used)\n- Subsonic apps that search with search2 get results again\n- Lidarr's webhook check reports Kima's version instead of \"unknown\"\n- Three HIGH-severity CVEs closed in the CLAP stack (transformers model-loading path)\n- Empty Subsonic search3 queries return the library instead of nothing, so apps that sync this way see your whole library",
+                    "- Security: Next.js 16.4.1 closes two critical holes that let anyone, signed in or not, run code on the server (image optimisation and the cache); Node 24.22.1 closes the Brotli decompression flaw known as Node2Shell; DOMPurify, body-parser, multer, follow-redirects, undici and zod are updated; three high-severity flaws in the CLAP stack's model loading are closed\n" +
+                    "- Feeds and links that redirect are checked at every step, so none can point Kima at your own network\n" +
+                    "- Only operators can start downloads unless they turn on Member Downloads in Settings → Download Preferences; a member's playlist import no longer downloads either\n" +
+                    "- Signing out clears what the app remembered, so the next person on that screen sees only their own\n" +
+                    "- Search only finds the shows you follow; it used to list shows other people follow\n" +
+                    "- Playlists can play in reverse order: a toggle beside shuffle, remembered per playlist\n" +
+                    "- Playlists stay current on all your open devices, and quick edits no longer undo each other on screen\n" +
+                    "- Song previews play again, and artist photos and related artists come from the right artist\n" +
+                    "- Untagged albums are identified from their songs' audio fingerprints, so they get real covers and MusicBrainz ids\n" +
+                    "- Your library follows your disk: a song whose file two scans in a row can't find is removed, and logged first; if a whole drive drops out, nothing is removed\n" +
+                    "- Every release's note stays on the changelog page, newest first; anything a release still needs from you stays listed there until it's done\n" +
+                    "- When a podcast episode ends, the show's next episode plays; an episode you've heard 95% of counts as finished, and a finished one stays finished\n" +
+                    "- The collection's Refine panel fits the screen at every size\n" +
+                    "- Touch screens: controls that appear on hover now show on tap too\n" +
+                    "- TV mode: Back works on every page, including the Fire TV remote's Back button\n" +
+                    "- Audio analysis and sound vectors take turns by default; an admin can let them run at once in Settings, under Library Enrichment\n" +
+                    "- Subsonic apps that search with search2 or an empty search3 get results again\n" +
+                    "- An ordered play queue for iOS that doesn't drag the full artist payload",
             },
         ],
     },

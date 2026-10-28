@@ -13,6 +13,9 @@ Kima is a music server you run yourself. Point it at a folder of music and it gi
 **Web app:** any modern browser, and it installs to your home screen as an app.
 **iOS app:** coming soon to the App Store.
 
+> [!IMPORTANT]
+> **Upgrading from 1.11 to 1.12:** Kima now uses the music-tuned sound model, so the update replaces your library's sound vectors and builds them again in the background, on its own. Until it finishes, similar tracks, the vibe map, search by sound and the mood stations fill in as songs are done. Your music, playlists, plays, likes, edits and the rest of enrichment stay. It took about half an hour for 9,000 songs with a GPU; without one, plan on roughly an hour or more per 10,000 songs. See the [1.12 release notes](https://github.com/Chevron7Locked/kima-hub/releases).
+
 <p align="center">
   <img src="assets/screenshots/mobile-home.png" alt="The home page on a phone" width="22%">
   <img src="assets/screenshots/mobile-player.png" alt="The player on a phone" width="22%">

@@ -105,7 +105,7 @@ async function forUser(
     let roleChecked: boolean | undefined;
     const isAdmin = async () => (roleChecked ??= await isAdminUser(userId));
     const applies = async (item: ReleaseItem, release: Release): Promise<boolean> => {
-        if (item.kind === "action" && item.olderLibraryOnly && !(await enrichedBefore(release.date))) return false;
+        if ((item.kind === "action" || item.kind === "note") && item.olderLibraryOnly && !(await enrichedBefore(release.date))) return false;
         // The GPU choice is only asked where the CUDA runtime can exist; on
         // other hosts the answer would always be "unsupported_platform".
         if (item.kind === "choice" && item.key === GPU_CHOICE_KEY && !gpuSupported()) return false;
