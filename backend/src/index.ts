@@ -483,6 +483,15 @@ async function main() {
         }
     }
 
+    // Artist and album keys the July 2026 upgrade computed on a SQL_ASCII database (names outside English letters) are
+    // corrected before any worker can scan and look those rows up by name.
+    try {
+        const { repairIdentityKeys } = await import("./services/identityKeyRepair");
+        await repairIdentityKeys();
+    } catch (err) {
+        logger.error("[STARTUP] Correcting artist and album keys failed:", err);
+    }
+
     // Initialize BullMQ workers
     await import("./workers");
 
