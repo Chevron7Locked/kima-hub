@@ -308,7 +308,6 @@ const authStorage = (): Storage | null => {
 
 class ApiClient {
     private token: string | null = null;
-    private tokenInitialized: boolean = false;
     private refreshPromise: Promise<RefreshResult> | null = null;
     private ensurePromise: Promise<"fresh" | RefreshResult> | null = null;
 
@@ -316,37 +315,8 @@ class ApiClient {
         const storage = authStorage();
         if (storage) {
             this.token = storage.getItem(AUTH_TOKEN_KEY);
-            if (this.token) {
-                this.tokenInitialized = true;
-            }
             // Note: Refresh token is loaded on-demand via getRefreshToken()
         }
-    }
-
-    /**
-     * Initialize the auth token from storage
-     * Call this early in the app lifecycle to ensure the token is loaded
-     */
-    async initToken(): Promise<string | null> {
-        const storage = authStorage();
-        if (!storage) {
-            return null;
-        }
-
-        const storedToken = storage.getItem(AUTH_TOKEN_KEY);
-        if (storedToken) {
-            this.token = storedToken;
-        }
-
-        this.tokenInitialized = true;
-        return this.token;
-    }
-
-    /**
-     * Check if token has been initialized
-     */
-    isTokenInitialized(): boolean {
-        return this.tokenInitialized;
     }
 
     /**
@@ -881,7 +851,6 @@ class ApiClient {
             const storedToken = storage.getItem(AUTH_TOKEN_KEY);
             if (storedToken) {
                 this.token = storedToken;
-                this.tokenInitialized = true;
                 return storedToken;
             }
         }
@@ -940,18 +909,6 @@ class ApiClient {
     async getRecommendationsForYou(limit = 10) {
         return this.request<{ artists: ApiData[] }>(
             `/recommendations/for-you?limit=${limit}`
-        );
-    }
-
-    async getSimilarArtists(seedArtistId: string, limit = 20) {
-        return this.request<{ recommendations: ApiData[] }>(
-            `/recommendations?seedArtistId=${seedArtistId}&limit=${limit}`
-        );
-    }
-
-    async getSimilarAlbums(seedAlbumId: string, limit = 20) {
-        return this.request<{ recommendations: ApiData[] }>(
-            `/recommendations/albums?seedAlbumId=${seedAlbumId}&limit=${limit}`
         );
     }
 
@@ -1178,8 +1135,7 @@ class ApiClient {
     async downloadAlbum(
         artistName: string,
         albumTitle: string,
-        rgMbid?: string,
-        downloadType: "library" | "discovery" = "library"
+        rgMbid?: string
     ) {
         return this.request<ApiData>("/downloads", {
             method: "POST",
@@ -1189,15 +1145,13 @@ class ApiClient {
                 mbid: rgMbid,
                 artistName,
                 albumTitle,
-                downloadType,
             }),
         });
     }
 
     async downloadArtist(
         artistName: string,
-        mbid: string,
-        downloadType: "library" | "discovery" = "library"
+        mbid: string
     ) {
         return this.request<ApiData>("/downloads", {
             method: "POST",
@@ -1205,7 +1159,6 @@ class ApiClient {
                 type: "artist",
                 subject: artistName,
                 mbid,
-                downloadType,
             }),
         });
     }
@@ -2064,31 +2017,6 @@ class ApiClient {
         );
     }
 
-    // API Keys Management
-    async createApiKey(deviceName: string): Promise<{
-        apiKey: string;
-        name: string;
-        createdAt: string;
-        message: string;
-    }> {
-        return this.post("/api-keys", { deviceName });
-    }
-
-    async listApiKeys(): Promise<{
-        apiKeys: Array<{
-            id: string;
-            name: string;
-            createdAt: string;
-            lastUsed: string | null;
-        }>;
-    }> {
-        return this.get("/api-keys");
-    }
-
-    async revokeApiKey(id: string): Promise<{ message: string }> {
-        return this.delete(`/api-keys/${id}`);
-    }
-
     async getNotifications(): Promise<
         Array<{
             id: string;
@@ -2122,20 +2050,6 @@ class ApiClient {
         href?: string;
     }): Promise<{ id: string }> {
         return this.post("/notifications", body);
-    }
-
-    // Download Activity
-    async getActiveDownloads(): Promise<
-        Array<{
-            id: string;
-            subject: string;
-            type: string;
-            status: string;
-            createdAt: string;
-            error?: string;
-        }>
-    > {
-        return this.get("/notifications/downloads/active");
     }
 
     async getDownloadHistory(): Promise<
@@ -2197,41 +2111,6 @@ class ApiClient {
             method: "POST",
             body: JSON.stringify({ add, subtract, limit }),
         });
-    }
-
-    async getTrackAnalysis(trackId: string) {
-        return this.request<{
-            id: string;
-            title: string;
-            analysisStatus: string;
-            analysisError: string | null;
-            analyzedAt: string | null;
-            analysisVersion: string | null;
-            analysisMode: string | null;
-            bpm: number | null;
-            beatsCount: number | null;
-            key: string | null;
-            keyScale: string | null;
-            keyStrength: number | null;
-            energy: number | null;
-            loudness: number | null;
-            dynamicRange: number | null;
-            danceability: number | null;
-            valence: number | null;
-            arousal: number | null;
-            instrumentalness: number | null;
-            acousticness: number | null;
-            // MusiCNN mood predictions
-            moodHappy: number | null;
-            moodSad: number | null;
-            moodRelaxed: number | null;
-            moodAggressive: number | null;
-            moodParty: number | null;
-            moodAcoustic: number | null;
-            moodElectronic: number | null;
-            moodTags: string[] | null;
-            essentiaGenres: string[] | null;
-        }>(`/analysis/track/${trackId}`);
     }
 
     async retryFailedDownload(

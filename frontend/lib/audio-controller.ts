@@ -725,6 +725,9 @@ export class AudioController {
         const oldActive = this.audio;
         this.audio = this.audioNext;
         this.audioNext = oldActive;
+        // The role marker follows the pointers: "main" is always the element that is playing.
+        this.audio.setAttribute("data-kima-player", "main");
+        this.audioNext.setAttribute("data-kima-player", "next");
 
         const oldNode = this.mediaSourceNode;
         this.mediaSourceNode = this.mediaSourceNodeNext;

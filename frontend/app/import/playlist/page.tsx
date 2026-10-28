@@ -220,22 +220,32 @@ function ImportPlaylistPageContent() {
         refetchOnWindowFocus: false,
     });
 
-    // React to SSE-driven preview completion
-    useEffect(() => {
-        if (!ssePreviewStatus || step !== "previewing") return;
-        if (ssePreviewStatus.status === "completed" && ssePreviewStatus.preview) {
-            const result = ssePreviewStatus.preview;
-            setPreview(result);
-            setPlaylistName(result.playlist.name);
-            const downloadableAlbumIds = result.albumsToDownload.map((_a, i) => String(i));
-            setSelectedAlbums(new Set(downloadableAlbumIds));
-            setStep("preview");
-        } else if (ssePreviewStatus.status === "failed") {
-            notify.error("Failed to generate preview", { message: ssePreviewStatus.error ?? undefined });
-            setStep("input");
-            setPreviewJobId(null);
+    // React to SSE-driven preview completion (adjusted during render when the status changes)
+    const [lastPreviewStatus, setLastPreviewStatus] = useState(ssePreviewStatus);
+    const [failedPreview, setFailedPreview] = useState<PreviewStatus | null>(null);
+    if (ssePreviewStatus !== lastPreviewStatus) {
+        setLastPreviewStatus(ssePreviewStatus);
+        if (ssePreviewStatus && step === "previewing") {
+            if (ssePreviewStatus.status === "completed" && ssePreviewStatus.preview) {
+                const result = ssePreviewStatus.preview;
+                setPreview(result);
+                setPlaylistName(result.playlist.name);
+                const downloadableAlbumIds = result.albumsToDownload.map((_a, i) => String(i));
+                setSelectedAlbums(new Set(downloadableAlbumIds));
+                setStep("preview");
+            } else if (ssePreviewStatus.status === "failed") {
+                setFailedPreview(ssePreviewStatus);
+                setStep("input");
+                setPreviewJobId(null);
+            }
         }
-    }, [ssePreviewStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+    }
+
+    useEffect(() => {
+        if (failedPreview) {
+            notify.error("Failed to generate preview", { message: failedPreview.error ?? undefined });
+        }
+    }, [failedPreview]);
 
     // Import status: SSE populates cache, HTTP polls as fallback (mirrors preview-status pattern)
     const { data: sseImportStatus } = useQuery<(ImportJob & { jobId?: string }) | null>({
@@ -256,26 +266,28 @@ function ImportPlaylistPageContent() {
         refetchOnWindowFocus: false,
     });
 
-    // React to SSE-driven import status changes
-    useEffect(() => {
-        if (!sseImportStatus || !importJob) return;
+    // React to SSE-driven import status changes (adjusted during render when the status changes)
+    const [lastImportStatus, setLastImportStatus] = useState(sseImportStatus);
+    if (sseImportStatus !== lastImportStatus) {
+        setLastImportStatus(sseImportStatus);
+        if (sseImportStatus && importJob) {
+            const updated: ImportJob = {
+                ...importJob,
+                status: sseImportStatus.status,
+                progress: sseImportStatus.progress ?? importJob.progress,
+                albumsTotal: sseImportStatus.albumsTotal ?? importJob.albumsTotal,
+                albumsCompleted: sseImportStatus.albumsCompleted ?? importJob.albumsCompleted,
+                tracksMatched: sseImportStatus.tracksMatched ?? importJob.tracksMatched,
+                createdPlaylistId: sseImportStatus.createdPlaylistId ?? importJob.createdPlaylistId,
+                error: sseImportStatus.error ?? importJob.error,
+            };
+            setImportJob(updated);
 
-        const updated: ImportJob = {
-            ...importJob,
-            status: sseImportStatus.status,
-            progress: sseImportStatus.progress ?? importJob.progress,
-            albumsTotal: sseImportStatus.albumsTotal ?? importJob.albumsTotal,
-            albumsCompleted: sseImportStatus.albumsCompleted ?? importJob.albumsCompleted,
-            tracksMatched: sseImportStatus.tracksMatched ?? importJob.tracksMatched,
-            createdPlaylistId: sseImportStatus.createdPlaylistId ?? importJob.createdPlaylistId,
-            error: sseImportStatus.error ?? importJob.error,
-        };
-        setImportJob(updated);
-
-        if (TERMINAL_IMPORT_STATUSES.includes(updated.status)) {
-            setStep("complete");
+            if (TERMINAL_IMPORT_STATUSES.includes(updated.status)) {
+                setStep("complete");
+            }
         }
-    }, [sseImportStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+    }
 
     // Fetch preview (async — returns job ID, completion arrives via SSE)
     const handleFetchPreview = async () => {

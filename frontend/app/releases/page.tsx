@@ -43,20 +43,23 @@ export default function ReleasesPage() {
     const { canAcquire } = usePublicConfig();
     const [error, setError] = useState<string | null>(null);
 
-    const fetchReleases = async () => {
-        try {
-            setLoading(true);
-            const json = await api.get<ReleaseRadarData>("/releases/radar?daysBack=30&daysAhead=90");
-            setData(json);
-        } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : "Failed to fetch releases");
-        } finally {
-            setLoading(false);
-        }
+    const loadReleases = () => {
+        return api
+            .get<ReleaseRadarData>("/releases/radar?daysBack=30&daysAhead=90")
+            .then(setData)
+            .catch((err: unknown) => {
+                setError(err instanceof Error ? err.message : "couldn't load releases");
+            })
+            .finally(() => setLoading(false));
+    };
+
+    const fetchReleases = () => {
+        setLoading(true);
+        return loadReleases();
     };
 
     useEffect(() => {
-        fetchReleases();
+        loadReleases();
     }, []);
 
     const handleDownload = async (albumMbid: string, releaseId: string | number) => {
@@ -231,7 +234,7 @@ function ReleaseCard({
                     {isUpcoming ? formatDate(release.releaseDate) : hasIt ? "In Library" : "Available"}
                 </span>
             }
-            corner={hasIt && <CheckCircle2 className="w-5 h-5 text-success" aria-label="In library" />}
+            corner={hasIt && <CheckCircle2 className="w-5 h-5 text-success" aria-label="in library" />}
             action={
                 onDownload && release.canDownload && !hasIt
                     ? {

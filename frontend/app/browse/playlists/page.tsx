@@ -50,25 +50,30 @@ export default function BrowsePlaylistsPage() {
     const [selectedGenre, setSelectedGenre] = useState<Genre | null>(null);
     const [genrePlaylists, setGenrePlaylists] = useState<PlaylistPreview[]>([]);
 
-    const fetchAllContent = useCallback(async () => {
-        setIsLoading(true);
-        setLoadError(null);
-        try {
-            const response = await api.get<{
+    const fetchAllContent = useCallback(() => {
+        return api
+            .get<{
                 playlists: PlaylistPreview[];
                 genres: Genre[];
-            }>("/browse/all");
-            setPlaylists(response.playlists);
-            setGenres(response.genres);
-        } catch (error) {
-            console.error("Failed to fetch browse content:", error);
-            setLoadError(
-                "Couldn't load playlists. Check your connection and try again.",
-            );
-        } finally {
-            setIsLoading(false);
-        }
+            }>("/browse/all")
+            .then((response) => {
+                setPlaylists(response.playlists);
+                setGenres(response.genres);
+            })
+            .catch((error) => {
+                console.error("Failed to fetch browse content:", error);
+                setLoadError(
+                    "Couldn't load playlists. Check your connection and try again.",
+                );
+            })
+            .finally(() => setIsLoading(false));
     }, []);
+
+    const reloadContent = () => {
+        setIsLoading(true);
+        setLoadError(null);
+        fetchAllContent();
+    };
 
     useEffect(() => {
         fetchAllContent();
@@ -102,7 +107,7 @@ export default function BrowsePlaylistsPage() {
     const clearSearch = () => {
         setSearchQuery("");
         setHasSearched(false);
-        fetchAllContent();
+        reloadContent();
     };
 
     const handleUrlSubmit = async () => {
@@ -294,7 +299,7 @@ export default function BrowsePlaylistsPage() {
                             icon={<Music2 className="w-12 h-12" />}
                             title="Couldn't load content"
                             description={loadError}
-                            action={{ label: "Try again", onClick: fetchAllContent }}
+                            action={{ label: "Try again", onClick: reloadContent }}
                         />
                     )}
 

@@ -26,6 +26,8 @@ const HANDLE = 44;
 const SEARCH_ROW = 52;
 /** The now-playing row (an h-11 row plus its 8px foot), shown above the search while something plays. */
 const PLAYER_ROW = 52;
+/** How the sheet settles on a stop. */
+const SETTLE = "height 340ms cubic-bezier(0.32, 0.72, 0, 1)";
 
 function SheetAction({ icon: Icon, label, primary = false, ...props }: { icon: LucideIcon; label: string; primary?: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
     return (
@@ -67,7 +69,7 @@ interface VibePanelSheetProps {
 /**
  * The phone's one bottom surface: now-playing, search, actions and tabs, with
  * no floating mini player under it. Three stops from the page content: peek,
- * half, and full at three quarters up, so the blurred map stays in view.
+ * half, and full, which fills the page.
  */
 export function VibePanelSheet({
     selectedTrackId,
@@ -93,7 +95,6 @@ export function VibePanelSheet({
     const [hostHeight, setHostHeight] = useState(0);
     const [contentFloor, setContentFloor] = useState(0);
     const [snap, setSnap] = useState<SnapPoint>("peek");
-    const [dragHeight, setDragHeight] = useState<number | null>(null);
     const [activeTab, setActiveTab] = useState<VibeTab>("now-playing");
     const [expandedActivity, setExpandedActivity] = useState<ActivityType | null>(null);
 
@@ -167,7 +168,16 @@ export function VibePanelSheet({
         });
     }, [selectedTrackId]);
 
-    const height = dragHeight ?? stops[snap];
+    const height = stops[snap];
+
+    // The sheet animates between stops only once it has moved: on load its peek height settles (playback state
+    // arrives a moment later) without visibly growing.
+    const [shownSnap, setShownSnap] = useState(snap);
+    const [animate, setAnimate] = useState(false);
+    if (shownSnap !== snap) {
+        setShownSnap(snap);
+        setAnimate(true);
+    }
 
     const nearest = useCallback((value: number): SnapPoint => {
         const entries = Object.entries(stops) as [SnapPoint, number][];
@@ -192,11 +202,24 @@ export function VibePanelSheet({
 
     const drag = useRef<{ startY: number; startHeight: number; samples: { t: number; h: number }[] } | null>(null);
     const liveHeight = useRef(0);
+    const frame = useRef(0);
+    const scrimRef = useRef<HTMLDivElement>(null);
 
+    // A drag moves the sheet element directly, once per frame, without re-rendering the sheet; React takes over
+    // again at the stop it settles on.
     const onHandleDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         event.currentTarget.setPointerCapture(event.pointerId);
-        drag.current = { startY: event.clientY, startHeight: height, samples: [{ t: event.timeStamp, h: height }] };
-        liveHeight.current = height;
+        const el = sheetRef.current;
+        // From where the sheet is now, which is mid-way if it is still settling.
+        const start = el ? el.getBoundingClientRect().height : height;
+        drag.current = { startY: event.clientY, startHeight: start, samples: [{ t: event.timeStamp, h: start }] };
+        liveHeight.current = start;
+        if (el) {
+            el.style.transition = "none";
+            el.style.height = `${start}px`;
+        }
+        // The blur over the map is recomposited on every frame the sheet moves; it returns at the stop.
+        if (scrimRef.current) scrimRef.current.style.backdropFilter = "none";
     }, [height]);
 
     const onHandleMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -210,8 +233,14 @@ export function VibePanelSheet({
         liveHeight.current = next;
         drag.current.samples.push({ t: event.timeStamp, h: next });
         if (drag.current.samples.length > 10) drag.current.samples.shift();
-        setDragHeight(next);
+        if (frame.current) return;
+        frame.current = requestAnimationFrame(() => {
+            frame.current = 0;
+            if (sheetRef.current) sheetRef.current.style.height = `${liveHeight.current}px`;
+        });
     }, [stops]);
+
+    useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
     const onHandleUp = useCallback(() => {
         const state = drag.current;
@@ -237,8 +266,17 @@ export function VibePanelSheet({
             target = nearest(from);
         }
 
+        cancelAnimationFrame(frame.current);
+        frame.current = 0;
+        // Settle on the stop here: when it is the stop the drag began at, React has nothing new to write.
+        const el = sheetRef.current;
+        if (el) {
+            el.style.transition = SETTLE;
+            el.style.height = `${stops[target]}px`;
+        }
+        if (scrimRef.current) scrimRef.current.style.backdropFilter = "";
+        setAnimate(true);
         setSnap(target);
-        setDragHeight(null);
     }, [nearest, setSnap, stops]);
 
     const handleToggleActivity = (type: ActivityType) => {
@@ -256,6 +294,7 @@ export function VibePanelSheet({
         <div ref={hostRef} className="pointer-events-none absolute inset-0 z-(--z-sheet)">
             {snap !== "peek" && (
                 <div
+                    ref={scrimRef}
                     data-testid="vibe-sheet-scrim"
                     aria-hidden="true"
                     onClick={() => setSnap("peek")}
@@ -270,7 +309,7 @@ export function VibePanelSheet({
                 className="pointer-events-auto absolute inset-x-0 bottom-0 flex flex-col overflow-clip rounded-t-2xl border-t border-white/10 bg-[var(--bg-primary)] shadow-[0_-20px_48px_-16px_rgba(0,0,0,0.85)]"
                 style={{
                     height,
-                    transition: dragHeight === null ? "height 340ms cubic-bezier(0.32, 0.72, 0, 1)" : "none",
+                    transition: animate ? SETTLE : "none",
                 }}
             >
                 <div

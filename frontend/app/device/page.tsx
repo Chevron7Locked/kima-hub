@@ -56,16 +56,15 @@ export default function DeviceLinkPage() {
         }
     }, [isAuthenticated, authLoading, router]);
 
-    const loadDevices = useCallback(async () => {
-        try {
-            const response = await api.request<LinkedDevice[]>("/device-link/devices");
-            setDevices(response);
-        } catch (err) {
-            console.error("Failed to load devices:", err);
-            notify.error("Failed to load linked devices");
-        } finally {
-            setIsLoadingDevices(false);
-        }
+    const loadDevices = useCallback(() => {
+        return api
+            .request<LinkedDevice[]>("/device-link/devices")
+            .then(setDevices)
+            .catch((err) => {
+                console.error("Failed to load devices:", err);
+                notify.error("Failed to load linked devices");
+            })
+            .finally(() => setIsLoadingDevices(false));
     }, []);
 
     useEffect(() => {

@@ -5,7 +5,7 @@ export interface ReleaseLink {
     href: string;
 }
 
-export interface ItemBase {
+interface ItemBase {
     key: string;
     title: string;
     summary: string;

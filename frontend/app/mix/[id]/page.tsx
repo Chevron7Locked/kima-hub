@@ -43,10 +43,11 @@ export default function MixPage() {
     const { data: mix, isLoading, error, refetch } = useMixQuery(mixId);
     const [isSaving, setIsSaving] = useState(false);
 
+    const mixTracks = mix?.tracks;
     const totalDuration = useMemo(() => {
-        if (!mix?.tracks) return 0;
-        return mix.tracks.reduce((sum: number, track: MixTrack) => sum + (track.duration || 0), 0);
-    }, [mix?.tracks]);
+        if (!mixTracks) return 0;
+        return mixTracks.reduce((sum: number, track: MixTrack) => sum + (track.duration || 0), 0);
+    }, [mixTracks]);
 
     const formatTotalDuration = (seconds: number) => {
         const total = Math.max(1, Math.round(seconds / 60));

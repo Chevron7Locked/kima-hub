@@ -6,7 +6,7 @@
  * caption locally; click asks the server what was playing in that hour.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useReveal } from "../useReveal";
 import { hourLabel, whenLabel } from "../format";
@@ -30,9 +30,12 @@ export function ListeningClock({ listening, period }: { listening: ListeningStat
     const { clock, peak, plays } = listening;
     const [at, setAt] = useState<{ dow: number; hour: number } | null>(null);
     const [open, setOpen] = useState<{ dow: number; hour: number } | null>(null);
-    const [detail, setDetail] = useState<HourDetail | null>(null);
-    const [loading, setLoading] = useState(false);
-    const request = useRef(0);
+    // The answer carries the cell and window it was asked for, so a slow answer
+    // for a cell the pointer has already left never shows under a newer one.
+    const [result, setResult] = useState<{ key: string; detail: HourDetail | null } | null>(null);
+    const openKey = open ? `${open.dow}:${open.hour}:${period ?? ""}` : null;
+    const detail = result && result.key === openKey ? result.detail : null;
+    const loading = openKey !== null && result?.key !== openKey;
     const { ref, shown: revealed } = useReveal<HTMLElement>({ threshold: 0.2 });
     // One cell holds the tab stop and the arrows move between cells; with all 168 in the tab
     // order, passing the grid would take 168 presses.
@@ -42,30 +45,26 @@ export function ListeningClock({ listening, period }: { listening: ListeningStat
     const max = clock.reduce((m, row) => Math.max(m, ...row), 0);
     const full = fullInkAt(clock);
 
-    const load = useCallback(async (dow: number, hour: number) => {
-        // Every request carries a ticket. A slow answer for a cell the pointer
-        // has already left is dropped rather than painted over a newer one.
-        const ticket = ++request.current;
-        setLoading(true);
-        try {
-            const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-            const res = await api.get<HourDetail>(
-                `/stats/hour?dow=${dow}&hour=${hour}&tz=${encodeURIComponent(tz)}${period ? `&period=${period}` : ""}`,
-            );
-            if (request.current === ticket) setDetail(res);
-        } catch {
-            if (request.current === ticket) setDetail(null);
-        } finally {
-            if (request.current === ticket) setLoading(false);
-        }
-        // `period` belongs here: the request carries it, so a cached callback
-        // built under the old window would keep asking for the old window.
-    }, [period]);
-
+    const openDow = open?.dow;
+    const openHour = open?.hour;
     useEffect(() => {
-        if (!open) return;
-        void load(open.dow, open.hour);
-    }, [open, load]);
+        if (openDow === undefined || openHour === undefined) return;
+        let current = true;
+        const key = `${openDow}:${openHour}:${period ?? ""}`;
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        api.get<HourDetail>(
+            `/stats/hour?dow=${openDow}&hour=${openHour}&tz=${encodeURIComponent(tz)}${period ? `&period=${period}` : ""}`,
+        )
+            .then((res) => {
+                if (current) setResult({ key, detail: res });
+            })
+            .catch(() => {
+                if (current) setResult({ key, detail: null });
+            });
+        return () => {
+            current = false;
+        };
+    }, [openDow, openHour, period]);
 
     // Escape closes whatever is open, the same as clicking the cell again.
     useEffect(() => {
@@ -122,7 +121,7 @@ export function ListeningClock({ listening, period }: { listening: ListeningStat
     const toggle = (dow: number, hour: number) => {
         if (clock[dow][hour] === 0) return;
         setOpen((o) => (o && o.dow === dow && o.hour === hour ? null : { dow, hour }));
-        setDetail(null);
+        setResult(null);
     };
 
     return (

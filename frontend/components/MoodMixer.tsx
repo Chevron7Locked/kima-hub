@@ -80,22 +80,26 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
     const [presets, setPresets] = useState<PresetWithPending[]>([]);
     const [loading, setLoading] = useState(true);
     const [generating, setGenerating] = useState<BucketMood | null>(null);
-    const [isVisible, setIsVisible] = useState(false);
+    const [isVisible, setIsVisible] = useState(isOpen);
 
-    const loadPresets = useCallback(async () => {
-        try {
-            const data = await api.getMoodBucketPresets();
-            setPresets(data);
-        } catch {
-            notify.error("Failed to load mood presets");
-        } finally {
-            setLoading(false);
-        }
+    const loadPresets = useCallback(() => {
+        return api
+            .getMoodBucketPresets()
+            .then(setPresets)
+            .catch(() => {
+                notify.error("Failed to load mood presets");
+            })
+            .finally(() => setLoading(false));
     }, []);
+
+    const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+    if (isOpen !== prevIsOpen) {
+        setPrevIsOpen(isOpen);
+        if (isOpen) setIsVisible(true);
+    }
 
     useEffect(() => {
         if (isOpen) {
-            setIsVisible(true);
             loadPresets();
         } else {
             const timeout = setTimeout(() => setIsVisible(false), 200);

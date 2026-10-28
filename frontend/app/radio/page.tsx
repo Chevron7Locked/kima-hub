@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useFeatures } from "@/lib/features-context";
 import { useMoodStationsQuery } from "@/hooks/useQueries";
+import { useSoundRebuild, describeSoundRebuild } from "@/hooks/useSoundRebuild";
 
 function SectionSkeleton() {
     return (
@@ -68,9 +69,11 @@ interface StationSectionProps extends Omit<StationGridProps, "stations"> {
     isLoading: boolean;
     isError: boolean;
     onRetry: () => void;
+    /** A line under the heading, for a section whose stations are still filling in. */
+    note?: string;
 }
 
-function StationSection({ title, unit, noun, stations, isLoading, isError, onRetry, ...grid }: StationSectionProps) {
+function StationSection({ title, unit, noun, stations, isLoading, isError, onRetry, note, ...grid }: StationSectionProps) {
     if (!isLoading && !isError && stations.length === 0) return null;
 
     return (
@@ -80,6 +83,7 @@ function StationSection({ title, unit, noun, stations, isLoading, isError, onRet
                 title={title}
                 count={!isLoading && !isError ? `${stations.length} ${unit}` : undefined}
             />
+            {note && <p className="-mt-1 mb-3 text-xs text-[var(--text-muted)]">{note}</p>}
             {isLoading ? (
                 <SectionSkeleton />
             ) : isError ? (
@@ -101,6 +105,7 @@ function StationSection({ title, unit, noun, stations, isLoading, isError, onRet
 export default function RadioPage() {
     const { loadingStation, startRadio } = useRadioPlayer();
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
+    const rebuild = useSoundRebuild();
 
     const { data: genresData, isLoading: genresLoading, isError: genresError, refetch: refetchGenres } = useQuery({
         queryKey: ["library", "genres"],
@@ -163,6 +168,11 @@ export default function RadioPage() {
                             unit="stations"
                             noun="mood"
                             stations={moodStations}
+                            note={
+                                rebuild && rebuild.step !== "map"
+                                    ? `Mood stations fill in as your sound features are built. ${describeSoundRebuild(rebuild)}`
+                                    : undefined
+                            }
                             isLoading={featuresLoading || moodLoading}
                             isError={moodError}
                             onRetry={() => refetchMoods()}

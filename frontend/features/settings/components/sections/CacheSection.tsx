@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useSyncExternalStore } from "react";
 import { SettingsSection, SettingsRow, SettingsToggle } from "../ui";
 import { SystemSettings } from "../../types";
 import {
@@ -166,6 +166,8 @@ function EnrichmentStage({
         </div>
     );
 }
+
+const noopSubscribe = () => () => {};
 
 const sliderClass = `w-32 h-1.5 bg-white/5 rounded-lg appearance-none cursor-pointer
     [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5
@@ -491,15 +493,16 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         };
     } | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [showInlineFailures, setShowInlineFailures] = useState(false);
+    // The #enrichment-failures link opens the list; the user's own toggle wins after that.
+    const openedByHash = useSyncExternalStore(
+        noopSubscribe,
+        () => window.location.hash === "#enrichment-failures",
+        () => false,
+    );
+    const [failuresToggle, setFailuresToggle] = useState<boolean | null>(null);
+    const showInlineFailures = failuresToggle ?? openedByHash;
     const queryClient = useQueryClient();
     const syncStartTimeRef = useRef<number>(0);
-
-    useEffect(() => {
-        if (window.location.hash === "#enrichment-failures") {
-            setShowInlineFailures(true);
-        }
-    }, []);
 
     // This query is the one that answers "is enrichment doing anything", so it
     // is the only one that keeps a heartbeat while idle -- and at 30s rather
@@ -1028,7 +1031,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                         {totalFailures > 0 && (
                             <div className="mt-4 pt-3 border-t border-white/10">
                                 <button
-                                    onClick={() => setShowInlineFailures(!showInlineFailures)}
+                                    onClick={() => setFailuresToggle(!showInlineFailures)}
                                     className="flex items-center gap-2 text-xs tabular-nums text-danger-light/70 hover:brightness-125 transition-colors"
                                 >
                                     <AlertTriangle className="w-3 h-3" />

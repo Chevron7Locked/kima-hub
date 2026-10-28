@@ -30,18 +30,18 @@ export function SubsonicSection() {
     const config = usePublicConfig();
     const serverUrl = config.publicUrl || (config.settled && typeof window !== "undefined" ? window.location.origin : "");
 
+    const loadApiKeys = () => {
+        return api
+            .get<{ apiKeys: ApiKey[] }>("/api-keys")
+            .then((data) => setApiKeys(data.apiKeys))
+            .catch(() => {
+                // Non-fatal — keys list stays empty
+            });
+    };
+
     useEffect(() => {
         loadApiKeys();
     }, []);
-
-    const loadApiKeys = async () => {
-        try {
-            const data = await api.get<{ apiKeys: ApiKey[] }>("/api-keys");
-            setApiKeys(data.apiKeys);
-        } catch {
-            // Non-fatal — keys list stays empty
-        }
-    };
 
     const handleGenerate = async () => {
         const name = deviceName.trim() || "Subsonic";

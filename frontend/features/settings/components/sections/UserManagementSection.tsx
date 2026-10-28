@@ -30,21 +30,24 @@ export function UserManagementSection() {
     const [deleteStatus, setDeleteStatus] = useState<StatusType>("idle");
     const [deleteMessage, setDeleteMessage] = useState("");
 
-    useEffect(() => {
-        loadUsers();
-    }, []);
-
-    const loadUsers = async () => {
-        try {
-            setLoading(true);
-            const data = await api.get<User[]>("/auth/users");
-            setUsers(data);
-        } catch (error) {
-            console.error("Failed to load users:", error);
-        } finally {
-            setLoading(false);
-        }
+    const fetchUsers = () => {
+        return api
+            .get<User[]>("/auth/users")
+            .then(setUsers)
+            .catch((error) => {
+                console.error("Failed to load users:", error);
+            })
+            .finally(() => setLoading(false));
     };
+
+    const loadUsers = () => {
+        setLoading(true);
+        return fetchUsers();
+    };
+
+    useEffect(() => {
+        fetchUsers();
+    }, []);
 
     const handleCreate = async () => {
         if (!newUsername.trim() || newPassword.length < 6) {

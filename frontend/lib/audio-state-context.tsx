@@ -38,13 +38,6 @@ export interface Track {
         instrumentalness?: number | null;
         analysisMode?: string | null;
         // ML mood predictions
-        moodHappy?: number | null;
-        moodSad?: number | null;
-        moodRelaxed?: number | null;
-        moodAggressive?: number | null;
-        moodParty?: number | null;
-        moodAcoustic?: number | null;
-        moodElectronic?: number | null;
     } | null;
 }
 

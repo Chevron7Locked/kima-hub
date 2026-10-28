@@ -17,6 +17,7 @@ import { useAudioControls } from "@/lib/audio-controls-context";
 import { api } from "@/lib/api";
 import type { Track, VibeOperation } from "@/lib/audio-state-context";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
+import { useSoundRebuild, describeSoundRebuild } from "@/hooks/useSoundRebuild";
 import { notify } from "@/lib/notify";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/Button";
@@ -98,6 +99,7 @@ export default function VibePage() {
         mapData, isLoading, computing, error, refetch, trackMap, mode, selectedTrackId, highlightedIds,
         selectTrack, resetMode, setMode, setHighlightedIds,
     } = useVibeMap();
+    const rebuild = useSoundRebuild();
 
     const { currentTrack, queue, activeOperation } = useAudioState();
     const { playTrack, replaceOperation } = useAudioControls();
@@ -326,16 +328,7 @@ export default function VibePage() {
     }, [selectedTrackId, mapData, trackMap, selectTrack]);
 
     if (isLoading) return <CenteredNote title="Charting your library" spinner />;
-    if (computing) {
-        return (
-            <CenteredNote
-                title="Charting your library"
-                detail="Building the map. Large libraries take a few minutes."
-                spinner
-            />
-        );
-    }
-
+    // A map that failed to load says so, with its retry, even while the sound features are being rebuilt.
     if (error) {
         return (
             <CenteredNote
@@ -346,6 +339,25 @@ export default function VibePage() {
                         Try again
                     </Button>
                 }
+            />
+        );
+    }
+    // While the sound features are still being built, the map waits on them: say how far along they are.
+    if (rebuild && (computing || !mapData || mapData.tracks.length === 0)) {
+        return (
+            <CenteredNote
+                title="Getting your sound features ready"
+                detail={`${describeSoundRebuild(rebuild)} The map appears when they are done; playback and your library work as usual.`}
+                spinner
+            />
+        );
+    }
+    if (computing) {
+        return (
+            <CenteredNote
+                title="Charting your library"
+                detail="Building the map. Large libraries take a few minutes."
+                spinner
             />
         );
     }

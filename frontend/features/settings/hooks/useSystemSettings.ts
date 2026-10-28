@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ConnectionTestResult, SystemSettings } from "../types";
@@ -50,48 +50,68 @@ export function useSystemSettings() {
     const [loadError, setLoadError] = useState<string | null>(null);
 
     const isAdmin = user?.role === "admin";
+    // Loaded for the signed-in admin; a different person starts from the defaults.
+    const adminId = isAuthenticated && isAdmin ? (user?.id ?? null) : null;
+
+    // An answer that arrives after someone else signed in is dropped.
+    const currentAdminRef = useRef(adminId);
+    useLayoutEffect(() => {
+        currentAdminRef.current = adminId;
+    }, [adminId]);
+
+    const fetchSystemSettings = useCallback(() => {
+        const askedFor = adminId;
+        const current = () => currentAdminRef.current === askedFor;
+        return Promise.all([api.getSystemSettings(), api.getSettings()])
+            .then(([sysData, userData]) => {
+                // Null strings become empty strings for controlled inputs.
+                const sanitizeSettings = (settings: Record<string, unknown>): SystemSettings => {
+                    const sanitized: Record<string, unknown> = {};
+                    for (const key in settings) {
+                        const value = settings[key];
+                        if (value === null && typeof defaultSystemSettings[key as keyof SystemSettings] === 'string') {
+                            sanitized[key] = '';
+                        } else {
+                            sanitized[key] = value;
+                        }
+                    }
+                    return sanitized as unknown as SystemSettings;
+                };
+
+                const combinedSettings = {
+                    ...sanitizeSettings(sysData),
+                    maxCacheSizeMb: userData.maxCacheSizeMb,
+                };
+
+                if (current()) setSystemSettings(combinedSettings);
+            })
+            .catch((error) => {
+                if (current()) setLoadError(error instanceof Error ? error.message : "Failed to load settings");
+            })
+            .finally(() => {
+                if (current()) setIsLoading(false);
+            });
+    }, [adminId]);
+
+    const loadSystemSettings = () => {
+        setIsLoading(true);
+        setLoadError(null);
+        return fetchSystemSettings();
+    };
+
+    const [shownFor, setShownFor] = useState(adminId);
+    if (shownFor !== adminId) {
+        setShownFor(adminId);
+        setSystemSettings(defaultSystemSettings);
+        setIsLoading(true);
+        setLoadError(null);
+    }
 
     useEffect(() => {
-        if (isAuthenticated && isAdmin) {
-            loadSystemSettings();
+        if (adminId) {
+            fetchSystemSettings();
         }
-    }, [isAuthenticated, isAdmin]);
-
-    const loadSystemSettings = async () => {
-        try {
-            setIsLoading(true);
-            setLoadError(null);
-            const [sysData, userData] = await Promise.all([
-                api.getSystemSettings(),
-                api.getSettings(),
-            ]);
-
-            // Null strings become empty strings for controlled inputs.
-            const sanitizeSettings = (settings: Record<string, unknown>): SystemSettings => {
-                const sanitized: Record<string, unknown> = {};
-                for (const key in settings) {
-                    const value = settings[key];
-                    if (value === null && typeof defaultSystemSettings[key as keyof SystemSettings] === 'string') {
-                        sanitized[key] = '';
-                    } else {
-                        sanitized[key] = value;
-                    }
-                }
-                return sanitized as unknown as SystemSettings;
-            };
-
-            const combinedSettings = {
-                ...sanitizeSettings(sysData),
-                maxCacheSizeMb: userData.maxCacheSizeMb,
-            };
-
-            setSystemSettings(combinedSettings);
-        } catch (error) {
-            setLoadError(error instanceof Error ? error.message : "Failed to load settings");
-        } finally {
-            setIsLoading(false);
-        }
-    };
+    }, [adminId, fetchSystemSettings]);
 
     const saveSystemSettings = async (settingsToSave: SystemSettings) => {
         await api.updateSystemSettings(settingsToSave);

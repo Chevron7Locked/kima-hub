@@ -115,12 +115,12 @@ describe("a control closed by Escape marks the key as used", () => {
 
     it("the sidebar's new-playlist box", async () => {
         await show(<Sidebar />);
-        await act(async () => find<HTMLButtonElement>('button[aria-label="Create playlist"]')!.click());
-        const input = find<HTMLInputElement>('input[placeholder="Playlist name"]')!;
+        await act(async () => find<HTMLButtonElement>('button[aria-label="create playlist"]')!.click());
+        const input = find<HTMLInputElement>('input[placeholder="playlist name"]')!;
 
         const escape = await escapeAt(input);
 
-        expect(find('input[placeholder="Playlist name"]')).toBeNull();
+        expect(find('input[placeholder="playlist name"]')).toBeNull();
         expect(escape.defaultPrevented).toBe(true);
     });
 

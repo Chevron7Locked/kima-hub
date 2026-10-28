@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { BookOpen, Music, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
@@ -27,7 +27,6 @@ export default function OnboardingPage() {
     >({});
     const [initialLoading, setInitialLoading] = useState(true);
     const [error, setError] = useState("");
-    const hasCheckedSession = useRef(false);
     const showPasswordMismatch = error === "Passwords don't match";
     const showPasswordTooShort =
         error === "Password must be at least 6 characters";
@@ -37,19 +36,14 @@ export default function OnboardingPage() {
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
 
-    useEffect(() => {
-        if (authLoading) return;
-
-        // Only check once to prevent re-renders
-        if (hasCheckedSession.current) return;
-        hasCheckedSession.current = true;
-
+    // Only check the session once, as soon as auth has settled
+    if (!authLoading && initialLoading) {
+        setInitialLoading(false);
         // If user exists and hasn't completed onboarding, skip to step 2
         if (user && !user.onboardingComplete) {
             setStep(2);
         }
-        setInitialLoading(false);
-    }, [authLoading, user]);
+    }
 
     // Step 2: Integrations
     const [lidarr, setLidarr] = useState({
