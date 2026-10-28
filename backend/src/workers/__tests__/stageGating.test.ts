@@ -356,13 +356,18 @@ describe("per-track stage gating", () => {
                 analysisStatus: "completed",
                 recordingStatus: "done",
             });
+            // A track whose recording stage is owed, so the phase is seen to offer work at all. Both have their
+            // prerequisite (the fingerprint) settled: only the recording record tells them apart.
+            await seedTrack(id("owed"), { analysisStatus: "completed", recordingStatus: "pending" });
+            for (const t of ["answered", "owed"]) await putStage(id(t), "fingerprint", "done");
 
             await executeIdentificationPhase();
 
-            const trackJobs = mockQueueAdd.mock.calls
+            const offered = mockQueueAdd.mock.calls
                 .filter((c) => c[0] === "enrich")
-                .map((c) => c[2] as { jobId: string });
-            expect(trackJobs).not.toContain(`track-${id("answered")}`);
+                .map((c) => (c[2] as { jobId: string }).jobId);
+            expect(offered.some((j) => j.startsWith(`track-${id("owed")}-recording-`))).toBe(true);
+            expect(offered.filter((j) => j.startsWith(`track-${id("answered")}-`))).toEqual([]);
         });
     });
 
