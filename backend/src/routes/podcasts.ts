@@ -1,4 +1,4 @@
-import { Router, Response } from "express";
+import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
 import { forgetSearchesOf } from "../services/search";
@@ -41,12 +41,6 @@ const router = Router();
 // timeout. The preview then answers from Apple's data alone; the sample has nothing else to play, so a slow
 // feed there is a 502.
 const PREVIEW_RSS_TIMEOUT_MS = 8000;
-
-/** A show's or episode's cover: the cached copy when there is one, the feed's image otherwise. */
-const podcastCover = (p: { id: string; localCoverPath: string | null; imageUrl: string | null }) =>
-    p.localCoverPath ? `/podcasts/${p.id}/cover` : p.imageUrl;
-const episodeCover = (e: { id: string; localCoverPath: string | null; imageUrl: string | null }) =>
-    e.localCoverPath ? `/podcasts/episodes/${e.id}/cover` : e.imageUrl;
 
 /** How far a listener is through an episode, as every route reports it; the percent is capped at 100. */
 const progressOf = (p: { currentTime: number; duration: number; isFinished: boolean; lastPlayedAt: Date } | null | undefined) =>
@@ -142,7 +136,7 @@ router.get("/", requireAuth, async (req, res) => {
                 title: podcast.title,
                 author: podcast.author,
                 description: podcast.description,
-                coverUrl: podcastCover(podcast),
+                coverUrl: podcast.imageUrl,
                 episodeCount: podcast.episodeCount,
                 autoDownloadEpisodes: false,
                 // The episodes come newest first: the first one's date is when the show last published.
@@ -153,7 +147,7 @@ router.get("/", requireAuth, async (req, res) => {
                     description: ep.description,
                     duration: ep.duration,
                     publishedAt: ep.publishedAt,
-                    coverUrl: episodeCover(ep),
+                    coverUrl: ep.imageUrl,
                     progress: progressOf(ep.progress[0]),
                 })),
             };
@@ -277,14 +271,14 @@ router.get("/listening", requireAuth, async (req, res) => {
             ep: (typeof newEpisodes)[number],
             progress: { currentTime: number; duration: number; isFinished: boolean; lastPlayedAt: Date } | null,
         ) => ({
-            podcast: { id: ep.podcast.id, title: ep.podcast.title, coverUrl: podcastCover(ep.podcast) },
+            podcast: { id: ep.podcast.id, title: ep.podcast.title, coverUrl: ep.podcast.imageUrl },
             episode: {
                 id: ep.id,
                 title: ep.title,
                 description: ep.description,
                 duration: ep.duration,
                 publishedAt: ep.publishedAt,
-                coverUrl: episodeCover(ep),
+                coverUrl: ep.imageUrl,
                 progress: progressOf(progress),
             },
         });
@@ -604,7 +598,7 @@ router.get("/:id", requireAuth, async (req, res) => {
             title: podcast.title,
             author: podcast.author,
             description: podcast.description,
-            coverUrl: podcastCover(podcast),
+            coverUrl: podcast.imageUrl,
             feedUrl: podcast.feedUrl,
             genres: categories.map((c) => c.name),
             categories,
@@ -696,7 +690,7 @@ router.get("/:podcastId/episodes/:episodeId/next", requireAuth, async (req, res)
         const userId = req.user!.id;
         const current = await prisma.podcastEpisode.findFirst({
             where: { id: episodeId, podcastId },
-            select: { id: true, publishedAt: true, podcast: { select: { id: true, title: true, localCoverPath: true, imageUrl: true } } },
+            select: { id: true, publishedAt: true, podcast: { select: { id: true, title: true, imageUrl: true } } },
         });
         if (!current) return res.status(404).json({ error: "Episode not found" });
 
@@ -715,13 +709,13 @@ router.get("/:podcastId/episodes/:episodeId/next", requireAuth, async (req, res)
         if (!next) return res.json({ episode: null });
 
         res.json({
-            podcast: { id: current.podcast.id, title: current.podcast.title, coverUrl: podcastCover(current.podcast) },
+            podcast: { id: current.podcast.id, title: current.podcast.title, coverUrl: current.podcast.imageUrl },
             episode: {
                 id: next.id,
                 title: next.title,
                 duration: next.duration,
                 publishedAt: next.publishedAt,
-                coverUrl: episodeCover(next),
+                coverUrl: next.imageUrl,
                 progress: progressOf(next.progress[0]),
             },
         });
@@ -1287,124 +1281,6 @@ router.get("/:id/similar", async (req, res) => {
 });
 
 /**
- * OPTIONS /podcasts/:id/cover
- * Handle CORS preflight request for podcast cover images
- */
-router.options("/:id/cover", (req, res) => {
-    const origin = resolveCorsOrigin(req.headers.origin);
-    if (origin) {
-        res.setHeader("Access-Control-Allow-Origin", origin);
-        res.setHeader("Access-Control-Allow-Credentials", "true");
-    }
-    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours
-    res.status(204).end();
-});
-
-/**
- * GET /podcasts/:id/cover
- * Serve cached podcast cover from local disk
- */
-router.get("/:id/cover", async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const podcast = await prisma.podcast.findUnique({
-            where: { id },
-            select: { localCoverPath: true, imageUrl: true },
-        });
-
-        if (!podcast) {
-            return res.status(404).json({ error: "Podcast not found" });
-        }
-
-        // Serve from local disk if cached
-        if (podcast.localCoverPath) {
-            res.setHeader(
-                "Cache-Control",
-                "public, max-age=31536000, immutable"
-            );
-            const origin = resolveCorsOrigin(req.headers.origin);
-            if (origin) {
-                res.setHeader("Access-Control-Allow-Origin", origin);
-                res.setHeader("Access-Control-Allow-Credentials", "true");
-            }
-            res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-            return res.sendFile(podcast.localCoverPath);
-        }
-
-        // Fallback: redirect to original URL
-        if (podcast.imageUrl) {
-            return res.redirect(podcast.imageUrl);
-        }
-
-        res.status(404).json({ error: "Cover not found" });
-    } catch (error) {
-        safeError(res, "Error serving podcast cover", error);
-    }
-});
-
-/**
- * OPTIONS /podcasts/episodes/:episodeId/cover
- * Handle CORS preflight request for episode cover images
- */
-router.options("/episodes/:episodeId/cover", (req, res) => {
-    const origin = resolveCorsOrigin(req.headers.origin);
-    if (origin) {
-        res.setHeader("Access-Control-Allow-Origin", origin);
-        res.setHeader("Access-Control-Allow-Credentials", "true");
-    }
-    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours
-    res.status(204).end();
-});
-
-/**
- * GET /podcasts/episodes/:episodeId/cover
- * Serve cached episode cover from local disk
- */
-router.get("/episodes/:episodeId/cover", async (req, res) => {
-    try {
-        const { episodeId } = req.params;
-
-        const episode = await prisma.podcastEpisode.findUnique({
-            where: { id: episodeId },
-            select: { localCoverPath: true, imageUrl: true },
-        });
-
-        if (!episode) {
-            return res.status(404).json({ error: "Episode not found" });
-        }
-
-        // Serve from local disk if cached
-        if (episode.localCoverPath) {
-            res.setHeader(
-                "Cache-Control",
-                "public, max-age=31536000, immutable"
-            );
-            const origin = resolveCorsOrigin(req.headers.origin);
-            if (origin) {
-                res.setHeader("Access-Control-Allow-Origin", origin);
-                res.setHeader("Access-Control-Allow-Credentials", "true");
-            }
-            res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-            return res.sendFile(episode.localCoverPath);
-        }
-
-        // Fallback: redirect to original URL
-        if (episode.imageUrl) {
-            return res.redirect(episode.imageUrl);
-        }
-
-        res.status(404).json({ error: "Cover not found" });
-    } catch (error) {
-        safeError(res, "Error serving episode cover", error);
-    }
-});
-
-/**
  * Fetch a stored show's feed again and store its new episodes; null when the show is not stored. Shared by the
  * refresh route, the Subsonic refresh and the podcast worker.
  */
@@ -1485,5 +1361,36 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
 
     return { newEpisodesCount, totalEpisodes: result.episodes.length };
 }
+
+/**
+ * GET /podcasts/:id/cover and /podcasts/episodes/:episodeId/cover: links handed out before 1.12, when Kima served a
+ * cached copy, can still be saved in a player's state. They now go to the feed's own image through Kima's image proxy,
+ * the way current cover links load, so the page's image policy and colour sampling hold; a `token` comes along.
+ */
+function redirectToCoverProxy(req: Request, res: Response, imageUrl: string) {
+    const params = new URLSearchParams({ url: imageUrl });
+    if (typeof req.query.token === "string") params.set("token", req.query.token);
+    res.redirect(`${req.baseUrl.replace(/\/podcasts$/, "")}/library/cover-art?${params}`);
+}
+
+router.get("/:id/cover", async (req, res) => {
+    try {
+        const podcast = await prisma.podcast.findUnique({ where: { id: req.params.id }, select: { imageUrl: true } });
+        if (!podcast?.imageUrl) return res.status(404).json({ error: "Cover not found" });
+        redirectToCoverProxy(req, res, podcast.imageUrl);
+    } catch (error) {
+        safeError(res, "Error serving podcast cover", error);
+    }
+});
+
+router.get("/episodes/:episodeId/cover", async (req, res) => {
+    try {
+        const episode = await prisma.podcastEpisode.findUnique({ where: { id: req.params.episodeId }, select: { imageUrl: true } });
+        if (!episode?.imageUrl) return res.status(404).json({ error: "Cover not found" });
+        redirectToCoverProxy(req, res, episode.imageUrl);
+    } catch (error) {
+        safeError(res, "Error serving episode cover", error);
+    }
+});
 
 export default router;

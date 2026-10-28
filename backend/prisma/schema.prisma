@@ -492,7 +492,6 @@ model Podcast {
   author           String?
   description      String?
   imageUrl         String?
-  localCoverPath   String?
   itunesId         String?                  @unique
   /// Apple podcast category ids (podcasts.apple.com genre ids), most specific first.
   categoryIds      Int[]                    @default([])
@@ -530,25 +529,24 @@ model PodcastDownload {
 }
 
 model PodcastEpisode {
-  id             String                   @id @default(cuid())
-  podcastId      String
-  guid           String
-  title          String
-  description    String?
-  audioUrl       String
-  duration       Int                      @default(0)
-  publishedAt    DateTime
-  episodeNumber  Int?
-  season         Int?
-  imageUrl       String?
-  localCoverPath String?
-  fileSize       Int?
-  mimeType       String?                  @default("audio/mpeg")
-  createdAt      DateTime                 @default(now())
-  searchVector   Unsupported("tsvector")?
-  downloads      PodcastDownload[]
-  podcast        Podcast                  @relation(fields: [podcastId], references: [id], onDelete: Cascade)
-  progress       PodcastProgress[]
+  id            String                   @id @default(cuid())
+  podcastId     String
+  guid          String
+  title         String
+  description   String?
+  audioUrl      String
+  duration      Int                      @default(0)
+  publishedAt   DateTime
+  episodeNumber Int?
+  season        Int?
+  imageUrl      String?
+  fileSize      Int?
+  mimeType      String?                  @default("audio/mpeg")
+  createdAt     DateTime                 @default(now())
+  searchVector  Unsupported("tsvector")?
+  downloads     PodcastDownload[]
+  podcast       Podcast                  @relation(fields: [podcastId], references: [id], onDelete: Cascade)
+  progress      PodcastProgress[]
 
   @@unique([podcastId, guid])
   @@index([podcastId, publishedAt])
